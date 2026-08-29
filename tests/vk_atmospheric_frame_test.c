@@ -42,7 +42,7 @@ static void BuildAllocation( int index ) {
 	request.ownerGeneration = 3u + (uint64_t)index;
 	facts.backendType = RAL_BACKEND_VULKAN;
 	facts.placement = RAL_ALLOCATION_PLACEMENT_DEDICATED;
-	facts.committedSize = 256u;
+	facts.committedSize = VK_ATMOSPHERIC_FRAME_BYTE_SIZE;
 	facts.actualAlignment = 16u;
 	facts.allocationGeneration = 11u + (uint64_t)index;
 	facts.hostVisible = qtrue;
@@ -171,7 +171,8 @@ int main( void ) {
 		&badResources ) );
 
 	// A never-submitted first slot needs no fence. The compute owner publishes
-	// only bytes 96..195; a final receipt is unavailable until render publishes
+	// only the declared compute range; a final receipt is unavailable until
+	// render publishes
 	// the complete shadow.
 	CHECK( VK_AtmosphericFrameBeginSlot( &owner, 0u, qfalse, qfalse ) );
 	CHECK( VK_AtmosphericFrameGetShadow( &owner, 0u, &shadowOut ) );
@@ -187,7 +188,11 @@ int main( void ) {
 		&& writeSizes[0] == VK_ATMOSPHERIC_FRAME_COMPUTE_SIZE );
 	CHECK( VK_AtmosphericFrameGetShadow( &owner, 0u, &shadowOut ) );
 	memset( shadow, 0x31, VK_ATMOSPHERIC_FRAME_COMPUTE_OFFSET );
-	memset( shadow + 196u, 0x32, 12u );
+	memset( shadow + VK_ATMOSPHERIC_FRAME_COMPUTE_OFFSET
+		+ VK_ATMOSPHERIC_FRAME_COMPUTE_SIZE, 0x32,
+		VK_ATMOSPHERIC_FRAME_BYTE_SIZE
+		- VK_ATMOSPHERIC_FRAME_COMPUTE_OFFSET
+		- VK_ATMOSPHERIC_FRAME_COMPUTE_SIZE );
 	CHECK( VK_AtmosphericFramePublishFinal( &owner, 0u, &receipt ) );
 	CHECK( writeOffsets[1] == 0u
 		&& writeSizes[1] == VK_ATMOSPHERIC_FRAME_BYTE_SIZE
@@ -198,9 +203,11 @@ int main( void ) {
 		&& receipt.fenceRequired == qfalse
 		&& receipt.fenceCompleted == qfalse
 		&& receipt.partialWrite.transfer.request.byteOffset == 96u
-		&& receipt.partialWrite.transfer.request.byteSize == 100u
+		&& receipt.partialWrite.transfer.request.byteSize
+			== VK_ATMOSPHERIC_FRAME_COMPUTE_SIZE
 		&& receipt.finalWrite.transfer.request.byteOffset == 0u
-		&& receipt.finalWrite.transfer.request.byteSize == 208u );
+		&& receipt.finalWrite.transfer.request.byteSize
+			== VK_ATMOSPHERIC_FRAME_BYTE_SIZE );
 	CHECK( VK_AtmosphericFrameGetShadow( &owner, 0u, &shadowOut ) );
 	shadow[1] ^= 1u;
 	CHECK( VK_AtmosphericFramePublishFinal( &owner, 0u, &receipt2 )
@@ -228,7 +235,8 @@ int main( void ) {
 	// after its publication prevents render from finalizing stale mixed bytes.
 	CHECK( VK_AtmosphericFrameGetShadow( &owner, 1u, &shadowOut ) );
 	shadow = (unsigned char *)shadowOut;
-	memset( shadow + 96u, 0x77, 100u );
+	memset( shadow + VK_ATMOSPHERIC_FRAME_COMPUTE_OFFSET, 0x77,
+		VK_ATMOSPHERIC_FRAME_COMPUTE_SIZE );
 	failWrite = writes + 1u;
 	before = owner;
 	CHECK( !VK_AtmosphericFramePublishCompute( &owner, 1u )

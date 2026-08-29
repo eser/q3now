@@ -23,7 +23,7 @@ menuDef {
 		itemDef {
 			name "team_root"
 			type container
-			rect 0 0 0.3 0.5
+			width FIXED 0.3 height FIXED 0.5
 			direction column
 			padding $popup_padding
 			gap $spacing_md
@@ -39,7 +39,7 @@ menuDef {
 			itemDef {
 				name "form_content"
 				type container
-				rect 0 0 1 0.3
+				width FIXED 1 height FIXED 0.3
 				direction column
 				gap $spacing_sm
 				grow 1

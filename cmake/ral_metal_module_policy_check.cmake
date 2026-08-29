@@ -25,10 +25,10 @@ file(READ "${P}" PUBLIC_ABI)
 file(READ "${I}" IMAGE_SOURCE)
 file(READ "${M}" MODEL_HEADER)
 file(READ "${MS}" MODEL_SOURCE)
-string(REGEX MATCH "#[ \t]*define[ \t]+REF_API_VERSION[ \t]+22([^0-9]|$)"
-	ref_api_22 "${PUBLIC_ABI}")
-if(NOT ref_api_22)
-	message(FATAL_ERROR "Metal renderer module no longer targets REF_API_VERSION 22")
+string(REGEX MATCH "#[ \t]*define[ \t]+REF_API_VERSION[ \t]+28([^0-9]|$)"
+	ref_api_28 "${PUBLIC_ABI}")
+if(NOT ref_api_28)
+	message(FATAL_ERROR "Metal renderer module no longer targets REF_API_VERSION 28")
 endif()
 
 foreach(forbidden IN ITEMS "CAMetalLayer" "MTLDevice" "SDL_Window" "SDL_MetalView"
@@ -50,7 +50,13 @@ foreach(needle IN ITEMS
 	"RenderSubmission_LoadWorld" "RenderSubmission_AddEntity"
 	"RenderSubmission_AddPoly" "RenderSubmission_RenderScene"
 	"RenderSubmission_AddUiQuad" "RenderSubmission_EndFrame"
-	"RenderImage_DecodeRgba8" "RenderSubmission_RegisterMaterialImage"
+	"Cvar_Get( \"r_brightness\", \"1\""
+	"Cvar_CheckRange( s_module.brightness, \"0\", \"32\", CV_FLOAT )"
+	"Ral_DisplayVisibilityPlanBuild" "RalMetal_PresentSetDisplayVisibility"
+"RenderImage_DecodeRgba8" "RenderSubmission_RegisterMaterialImage"
+"RenderSubmission_SetMaterialNoDraw"
+"zero-pass default shader" "placeholder cannot occlude valid geometry"
+	"s_module.imports.MetaRemap_Lookup" "REMAP_KIND_SHADER"
 	"PrepareWorldMaterials" "RenderSubmission_LightmapMaterialName"
 	"RenderSubmission_RegisterModelData" "RenderSubmission_RegisterInlineModel"
 	"RenderSubmission_SetModelBatchMaterial" "RenderSubmission_ModelSnapshot"
@@ -81,8 +87,9 @@ foreach(forbidden IN ITEMS "<Metal/" "CAMetalLayer" "MTLBuffer" "VkBuffer"
 		message(FATAL_ERROR "neutral model/entity payload leaked backend/legacy ownership: ${forbidden}")
 	endif()
 endforeach()
-foreach(needle IN ITEMS "CGImageSourceCreateWithData" "CGBitmapContextCreate"
-	"ri.FS_ReadFile" "ri.FS_FreeFile" "RENDER_SUBMISSION_MAX_MATERIAL_BYTES")
+foreach(needle IN ITEMS "R_LoadPNG" "R_LoadJPG" "R_LoadTGA" "R_LoadBMP"
+	"straight RGBA8" "fully-zero legacy alpha plane"
+	"RENDER_SUBMISSION_MAX_MATERIAL_BYTES")
 	string(FIND "${IMAGE_SOURCE}" "${needle}" pos)
 	if(pos EQUAL -1)
 		message(FATAL_ERROR "Metal VFS image adapter lost decode/bound seam: ${needle}")
@@ -122,7 +129,10 @@ foreach(needle IN ITEMS
 	"code/render/ral/backends/metal/ral_metal_image_decode.mm"
 	"code/render/frontend/render_submission.c"
 	"code/render/frontend/render_submission_model.c"
-	"WIRED_IMAGEIO_FRAMEWORK"
+	"code/render/frontend/tr_image_png.c"
+	"code/render/frontend/tr_image_jpg.c"
+	"code/render/frontend/tr_image_tga.c"
+	"code/render/frontend/tr_image_bmp.c"
 	"PROPERTIES LANGUAGE C" "PREFIX \"\""
 	"ADD_EXECUTABLE(ral_metal_module_test tests/ral_metal_module_test.mm)"
 	"ral_sdl_presentation_host"

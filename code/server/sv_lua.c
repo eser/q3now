@@ -3,6 +3,7 @@
 
 #include "server.h"
 #include "sv_lua.h"
+#include "sv_entity_events.h"
 #include "../qcommon/wired/core/scripting/user_vm.h"
 
 #include "../game/chars.h"
@@ -913,6 +914,7 @@ void SV_Lua_Init( void ) {
 	lua_setfield( L, -2, "print" );
 	lua_pushcfunction( L, SV_Lua_WiredTime );
 	lua_setfield( L, -2, "time" );
+	SV_EntityEvents_LuaRegister( L );
 
 	// inject wired.characteristics: name -> CHARACTERISTIC_* index
 	// single source of truth — derived from chars.h #defines, zero drift
@@ -945,6 +947,7 @@ void SV_Lua_Init( void ) {
 
 void SV_Lua_Shutdown( void ) {
 	/* User VM owns the lua_State; do not call lua_close here. */
+	SV_EntityEvents_Shutdown();
 	SV_Lua_ResetState();
 }
 

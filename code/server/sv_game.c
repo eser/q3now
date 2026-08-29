@@ -4,6 +4,7 @@
 // sv_game.c -- interface to the game dll
 
 #include "server.h"
+#include "sv_entity_events.h"
 #include "../qcommon/q_feats.h"
 
 #include "../qcommon/wired/net/wn_public.h"
@@ -492,6 +493,9 @@ static const vmSyscallDesc_t sv_desc_G_FS_GETFILELIST = {
 // it calls the engine FS_Rename directly (like FS_GetFileList), not an FS_VM_* form.
 static const vmSyscallDesc_t sv_desc_G_FS_RENAME = {
 	G_FS_RENAME, "G_FS_RENAME", 2, { VARG_VMPTR, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_G_ENTITY_EVENT_ENQUEUE = {
+	G_ENTITY_EVENT_ENQUEUE, "G_ENTITY_EVENT_ENQUEUE", 1, { VARG_VMPTR }
 };
 
 // ── collision / spatial-query subsystem ──────────────────────────────────────
@@ -1102,6 +1106,14 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 		SV_TYPED_PARITY( G_FS_RENAME, args, t );
 		FS_Rename( t[0].p, t[1].p );
 		return 0;
+	}
+	case G_ENTITY_EVENT_ENQUEUE: {
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		wiredEntityEvent_t event;
+		SV_UnmarshalGame( &sv_desc_G_ENTITY_EVENT_ENQUEUE, args, t );
+		VM_CHECKBOUNDS3( gvm, args[1], 1u, sizeof( wiredEntityEvent_t ) );
+		memcpy( &event, t[0].p, sizeof( event ) );
+		return SV_EntityEvents_Enqueue( &event );
 	}
 
 	case G_LOCATE_GAME_DATA:

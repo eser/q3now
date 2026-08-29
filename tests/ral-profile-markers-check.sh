@@ -158,10 +158,54 @@ with open(sys.argv[1],"w") as out:
   data=open(path,"rb").read();out.write(json.dumps({"kind":"provenance","role":role,"path":os.path.abspath(path),"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()},sort_keys=True)+"\n")
 PYEOF
 QCONSOLE="$HOME_DIR/qconsole.jsonl";STDOUT="$ROOT/stdout.log"
-python3 "$TIMEOUT_RUNNER" --timeout 90 --kill-after 15 --cwd "$RUN" --stdout "$STDOUT" -- "$RUN/wired" +set fs_basepath "$HOME_DIR" +set fs_homepath "$HOME_DIR" +set fs_game base +set sv_pure 0 +set com_automated 1 +set com_noHardReboot 1 +set s_initsound 0 +set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set r_vkValidate 1 +set r_profileMarkers 0 +set r_bloom 0 +set r_ssao 0 +set r_smaa 0 +set r_forwardPlus 0 +set r_drawSunRays 0 +set r_shadows 0 +set log_severity DEBUG +set log_file_severity DEBUG +set log_file_mode overwrite_synced +exec ral-profile-markers.cfg
+RUN_ENV=()
+CAPTURE_PID=""
+if [ "${WIRED_METAL_CAPTURE:-0}" = 1 ];then
+	[ "$(uname -s)" = Darwin ] || { echo "SKIP: Metal capture requires macOS";exit 77; }
+	CAPTURE="$ROOT/wired-profile.gputrace"
+	TRIGGER="$ROOT/metal-capture-trigger.json"
+	RUN_ENV=(/usr/bin/env MVK_CONFIG_AUTO_GPU_CAPTURE_SCOPE=3
+		"MVK_CONFIG_AUTO_GPU_CAPTURE_OUTPUT_FILE=$CAPTURE"
+		MTL_CAPTURE_ENABLED=1 METAL_CAPTURE_ENABLED=1)
+	python3 - "$QCONSOLE" "$CAPTURE" "$TRIGGER" <<'PYEOF' &
+import errno,json,os,stat,sys,time
+qconsole,capture,receipt=sys.argv[1:]
+deadline=time.monotonic()+60.0
+pipe=""
+requested=False
+while time.monotonic()<deadline:
+ try:
+  requested="Q0_RAL_PROFILE_MARKERS_REQUESTED" in open(qconsole,encoding="utf-8",errors="ignore").read()
+ except FileNotFoundError:pass
+ for candidate in sorted((p for p in os.listdir("/tmp") if p.startswith("MoltenVKCapturePipe-")),reverse=True):
+  path=os.path.join("/tmp",candidate)
+  try:
+   if stat.S_ISFIFO(os.stat(path).st_mode):pipe=path;break
+  except FileNotFoundError:pass
+ if requested and pipe:
+  try:
+   fd=os.open(pipe,os.O_WRONLY|os.O_NONBLOCK)
+   try:os.write(fd,b"1")
+   finally:os.close(fd)
+   break
+  except OSError as exc:
+   if exc.errno not in (errno.ENXIO,errno.ENOENT):raise
+ time.sleep(0.02)
+else:raise SystemExit("FAIL Metal capture trigger timeout")
+while time.monotonic()<deadline:
+ if os.path.isdir(capture) and os.path.isfile(os.path.join(capture,"capture")):
+  with open(receipt,"w") as out:json.dump({"pipe":pipe,"requested":requested,"capture":capture},out,sort_keys=True)
+  raise SystemExit(0)
+ time.sleep(0.05)
+raise SystemExit("FAIL Metal capture output timeout")
+PYEOF
+	CAPTURE_PID=$!
+fi
+python3 "$TIMEOUT_RUNNER" --timeout 90 --kill-after 15 --cwd "$RUN" --stdout "$STDOUT" -- "${RUN_ENV[@]}" "$RUN/wired" +set fs_basepath "$HOME_DIR" +set fs_homepath "$HOME_DIR" +set fs_game base +set sv_pure 0 +set com_automated 1 +set com_noHardReboot 1 +set s_initsound 0 +set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set r_vkValidate 1 +set r_profileMarkers 0 +set r_bloom 0 +set r_ssao 0 +set r_smaa 0 +set r_forwardPlus 0 +set r_drawSunRays 0 +set r_shadows 0 +set log_severity DEBUG +set log_file_severity DEBUG +set log_file_mode overwrite_synced +exec ral-profile-markers.cfg
 RC=$?;TIMEOUT=false;[ "$RC" -eq 124 ] && TIMEOUT=true;python3 - "$MANIFEST" "$$" "$RC" "$TIMEOUT" "$FORCED" <<'PYEOF'
 import json,sys
 with open(sys.argv[1],"a") as out:out.write(json.dumps({"kind":"result","controller_pid":int(sys.argv[2]),"rc":int(sys.argv[3]),"timeout":sys.argv[4]=="true","forced":sys.argv[5]=="1"},sort_keys=True)+"\n")
 PYEOF
+[ -z "$CAPTURE_PID" ] || wait "$CAPTURE_PID" || { echo "FAIL retained root: $ROOT";exit 1; }
 [ -f "$QCONSOLE" ] || { echo "FAIL missing qconsole: $ROOT";exit 1; };analyze_contract "$QCONSOLE" "$MANIFEST" || { echo "FAIL retained root: $ROOT";exit 1; }
 echo "PASS retained root: $ROOT"

@@ -5,7 +5,9 @@
 
 // g_public.h -- game module information visible to server
 
-#define	GAME_API_VERSION	9
+#define	GAME_API_VERSION	10
+
+#include "wired/entity/event.h"
 
 // entity->svFlags
 // the server does not know how to interpret most of the values
@@ -492,8 +494,13 @@ typedef enum {
 	// existing FS_Rename( from, to ) (homepath-scoped). Two string args, marshalled
 	// exactly like G_CVAR_SET (2x VARG_VMPTR); called directly like FS_GetFileList
 	// (path-based, no VM handle scoping).
-	G_FS_RENAME = 1200
+	G_FS_RENAME = 1200,
 	// ( const char *from, const char *to ) -> void
+
+	// Fixed-size typed entity event record; appended in GAME_API_VERSION 10.
+	// The server validates the VM extent and event schema before bounded enqueue.
+	G_ENTITY_EVENT_ENQUEUE = 1201
+	// ( const wiredEntityEvent_t *event ) -> qboolean
 
 } gameImport_t;
 

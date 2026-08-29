@@ -120,6 +120,12 @@ void CG_ModernHUDElementMsgQueueRoutine( void *context ) {
 		float charW = element->config.fontsize.isSet ? element->config.fontsize.value[0] : 10.0f;
 		float charH = element->config.fontsize.isSet ? element->config.fontsize.value[1] : 14.0f;
 		vec4_t color;
+		if ( element->config.rect.isSet && element->config.alignH.isSet ) {
+			if ( element->config.alignH.value == MODERNHUD_ALIGNH_CENTER )
+				x += element->config.rect.value[2] * 0.5f;
+			else if ( element->config.alignH.value == MODERNHUD_ALIGNH_RIGHT )
+				x += element->config.rect.value[2];
+		}
 
 		Vector4Set( color, 1, 1, 1, alpha );
 

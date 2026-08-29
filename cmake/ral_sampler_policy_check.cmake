@@ -58,8 +58,8 @@ if(NOT CREATE_COUNT EQUAL 8)
 endif()
 string(REGEX MATCHALL "Ral_DestroySampler[(]" DESTROY_CALLS "${PRODUCT}")
 list(LENGTH DESTROY_CALLS DESTROY_COUNT)
-if(NOT DESTROY_COUNT EQUAL 17)
-	message(FATAL_ERROR "renderer RAL sampler destroy inventory drifted: expected 17 owned/rollback sites, got ${DESTROY_COUNT}")
+if(NOT DESTROY_COUNT EQUAL 18)
+	message(FATAL_ERROR "renderer RAL sampler destroy inventory drifted: expected 18 owned/rollback sites, got ${DESTROY_COUNT}")
 endif()
 
 foreach(REQUIRED IN ITEMS
@@ -71,6 +71,7 @@ foreach(REQUIRED IN ITEMS
 	"vk.dlightShadow.ral_sampler"
 	"vk.sceneDepth.ral_sampler"
 	"vk.blueNoise.ral_sampler"
+	"vk_atmosphere_full.sampler"
 	"candidateSampler = Ral_CreateSampler( backend, &samplerInfo );")
 	string(FIND "${PRODUCT}" "${REQUIRED}" POSITION)
 	if(POSITION EQUAL -1)

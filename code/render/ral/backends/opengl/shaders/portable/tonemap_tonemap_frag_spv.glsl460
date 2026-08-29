@@ -33,6 +33,8 @@ layout(binding = 0, std140) uniform ExposureBlock
     float sunScreenY;
     float sunrayIntensity;
     float sunrayDecay;
+    float shadowExponent;
+    float shadowPivot;
 } eb;
 
 layout(binding = 0) uniform sampler2D texture0;
@@ -219,9 +221,26 @@ void main()
     }
     vec3 base = _518;
     base *= eb.exposure_bias;
+    float shadowLuma = dot(max(base, vec3(0.0)), vec3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    bool _555 = (eb.shadowExponent != 1.0) && (shadowLuma > 0.0);
+    bool _563;
+    if (_555)
+    {
+        _563 = shadowLuma < eb.shadowPivot;
+    }
+    else
+    {
+        _563 = _555;
+    }
+    if (_563)
+    {
+        float normalized = shadowLuma / eb.shadowPivot;
+        float curved = pow(normalized, eb.shadowExponent) * eb.shadowPivot;
+        base *= (curved / shadowLuma);
+    }
     vec3 param_1 = base;
-    vec3 _543 = applyTonemap(param_1);
-    base = _543;
+    vec3 _586 = applyTonemap(param_1);
+    base = _586;
     if (saturation != 1.0)
     {
         vec3 luma = vec3(dot(base, vec3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875)));

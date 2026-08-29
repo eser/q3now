@@ -28,6 +28,9 @@ together with the modality + loading-screen migration.
 
 #include "../../client.h"
 #include "cl_wired_compositor.h"
+#ifdef WIRED_WEB_UI_NATIVE
+#include "../../../web/web_authored_content.h"
+#endif
 #include "cl_wired_ui.h"
 #include "policy/wui_bg_preset.h"
 #include "cl_wired_widget_core.h"   /* 5-state resolver, focus-ring, state colours */
@@ -78,6 +81,9 @@ typedef struct {
 	float       rect[ 4 ];           /* x, y, w, h pixels */
 	vec4_t      color;
 	int         ownerdrawFlag;
+	int         familyIndex;
+	const wiredItemDef_t *item;      /* stable parsed item; stateful lazy-create input */
+	const wiredItemDef_t *perspectiveOwner; /* lexical flex ancestor owning paint transform */
 	void       *context;             /* item->customDrawContext (may be NULL) */
 } wuiCustomDrawCommand_t;
 #include "../../../qcommon/wired/core/scripting/user_vm.h"
@@ -106,6 +112,25 @@ LOG_DECLARE_CHANNEL( ch_ui, "ui" );
  * at top of every EmitFrame. 1 MB is the spec-mandated size. */
 #define WIRED_CLAY_SCRATCH_BYTES        ( 1u * 1024u * 1024u )
 static arena_t       *wui_clay_scratch_arena = NULL;
+
+/* CUSTOM carriers live in a reused per-frame arena. Arena_Alloc deliberately
+ * does not clear recycled bytes, so every carrier must start from a fully
+ * initialized record. This matters whenever the record grows: perspectiveOwner
+ * was added after the viewport/scene/console emitters were written, and their
+ * recycled bytes were then interpreted as an item pointer during map-loading
+ * composition. Centralizing zero-init makes that class of ABI-within-a-struct
+ * lifetime bug impossible for future fields as well. */
+static wuiCustomDrawCommand_t *wui_clay_alloc_custom_command( void )
+{
+	wuiCustomDrawCommand_t *cmd;
+
+	if ( !wui_clay_scratch_arena ) return NULL;
+	cmd = (wuiCustomDrawCommand_t *) Arena_Alloc(
+		wui_clay_scratch_arena, sizeof( *cmd ), sizeof( void * ) );
+	if ( !cmd ) return NULL;
+	memset( cmd, 0, sizeof( *cmd ) );
+	return cmd;
+}
 
 /* D3 fix helper: copy a transient (stack) string into the per-frame scratch
  * arena so the pointer survives until Clay's deferred render-command walk
@@ -477,17 +502,12 @@ void WiredUI_ClayFrame( int widthPx, int heightPx )
 /* ───────────────────────────────────────────────────────────────────
  * tree-to-Clay converter + backend dispatch
  *
- * Strategy: the converter runs IN PARALLEL with SCR_DrawScreenField, so it
- * pins each item to its already-resolved pixel rect via Clay
- * floating (.attachTo = ATTACH_TO_ROOT, .offset = (x,y), .sizing fixed
- * to w/h). This preserves visual parity with the existing layout engine
- * (WUI_LayoutMenu, cl_wired_layout.h) while the backend dispatch through
- * re.* / MSDF gets validated end-to-end. Later work migrates from "floating
- * by resolved rect" to "true Clay layout" as separate work, then deletes
- * SCR_DrawScreenField.
+ * Strategy: Clay is the sole tree-layout and render-command authority. Static
+ * items participate in native Clay flow; explicitly positioned items map to
+ * Clay floating declarations. The resolvedRect fields are only a synchronized
+ * compatibility snapshot for input/provider code that cannot query Clay yet.
  *
- * Attribute mapping coverage (first-pass; the remaining attributes carry
- * forward along with the flex-to-Clay layout migration):
+ * Attribute mapping coverage:
  *
  *   wiredItemDef field            Clay slot                            status
  *   ────────────────────────      ─────────────────────────────        ────────
@@ -506,19 +526,10 @@ void WiredUI_ClayFrame( int widthPx, int heightPx )
  *   storeBind / storeBindColor    resolve via WiredStore (text/color)  ✓ (no Lua yet)
  *   showBind / hideBind           resolve via WiredStore, prune        ✓
  *   decoration                    pointerCaptureMode = passthrough     ✓ (foundation for hit-test)
- *   childCount + children[]       recursive emit (still floating)      ✓
- *
- *   layout (row/col)/gap/padding  Clay flex layout                     deferred
- *   align/justify/grow/shrink     Clay sizing/alignment                deferred
- *   basis/aspect/minMax           sizing.minMax + aspectRatio          deferred
- *   anchor                        attachPoints                         deferred
- *   transition                    rect interpolation                   relies on resolvedRect
- *   breakpoint                    rect override                        relies on resolvedRect
- *   scroll                        Clay clip + scroll                   deferred
- *
- * The deferred items still drive the existing resolvedRect via WUI_LayoutMenu,
- * so visual parity is preserved while both paths run. They become first-class
- * Clay declarations later when SCR_DrawScreenField retires.
+ *   childCount + children[]       recursive native-flow emit           ✓
+ *   layout/gap/padding/grow       Clay sizing/alignment                 ✓
+ *   breakpoint                    effective authored rect selection     ✓
+ *   scroll                        Clay clip + compositor scroll state   ✓
  */
 
 /* ── module state ─────────────────────────────────────────────────── */
@@ -696,7 +707,7 @@ static int                   wui_visible_panel_count = 0;
 static qboolean wui_layer_active( wuiLayer_t layer )
 {
 	/* per-layer policy predicates live in
-	 * code/client/wired/ui/policy/*.c. Each module owns its rule
+	 * code/client/wired/ui/policy modules. Each module owns its rule
 	 * (CA_ACTIVE gate, KEYCATCH_*, viewport provider count, etc) so the
 	 * dispatcher stays a thin route table. The dev force-override mask
 	 * still gates here so the production rule and the dev override share
@@ -841,17 +852,6 @@ static Clay_Color wui_clay_color_of( const vec4_t v, float alphaMul )
 	return c;
 }
 
-/* sRGB → linear transfer (IEC 61966-2-1 piecewise). The .wui authors panel fills
- * in perceptual sRGB (e.g. rgba(40,36,32,0.18)), but the in-game UI 2D pass blends
- * into the LINEAR HDR scene buffer (img265, RGBA16F) — so a translucent fill fed
- * straight through reads far heavier than its alpha implies (a 0.18 charcoal looked
- * opaque). Linearising the FILL rgb before the blend makes `src*a + dst*(1-a)` land
- * in the linear buffer at the value that, after the present-time gamma encode,
- * matches the perceptual sRGB blend the author intended — so the panel reads as a
- * true 18% tint and the lit world shows through. Applied ONLY to RECTANGLE fills
- * (panel/carousel backgrounds): text/border/image stay verbatim (they are opaque
- * or thin, and re-tinting them would shift authored colours). Alpha is the lerp
- * factor itself (not a colour) so it is always left untouched. */
 /* Bit flags packed into a Clay element's .userData and forwarded verbatim onto
    the render command's rc->userData (clay.h propagates it through layout). The
    dispatch reads these back to vary how the command is drawn. TEXT commands use
@@ -859,6 +859,27 @@ static Clay_Color wui_clay_color_of( const vec4_t v, float alphaMul )
    the same command type, but distinct bits keep a future combined use safe. */
 #define WUI_TEXT_TAG_SHADOW   ((uintptr_t)0x1)
 #define WUI_RECT_TAG_OVERLAY  ((uintptr_t)0x2)
+#define WUI_COMMAND_TAG_MASK  ( WUI_TEXT_TAG_SHADOW | WUI_RECT_TAG_OVERLAY )
+
+/* Clay may detach CUSTOM carriers into floating roots and hashes TEXT ids away
+ * from their source item. Preserve lexical paint ancestry explicitly in the
+ * command userData instead of trying to reconstruct it from command order. */
+static void *wui_clay_command_tag( const wiredItemDef_t *perspectiveOwner,
+		uintptr_t flags ) {
+	uintptr_t owner = (uintptr_t)perspectiveOwner;
+	if ( owner & WUI_COMMAND_TAG_MASK ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_ui),
+			"WiredUI/Clay perspective owner alignment rejected\n" );
+		owner = 0u;
+	}
+	return (void *)( owner | ( flags & WUI_COMMAND_TAG_MASK ) );
+}
+
+static const wiredItemDef_t *wui_clay_command_perspective_owner(
+		const void *userData ) {
+	return (const wiredItemDef_t *)( (uintptr_t)userData
+		& ~(uintptr_t)WUI_COMMAND_TAG_MASK );
+}
 
 /* Resolve a fill's effective compositing mode and return the .userData tag for
    its emitted rectangle. An item that left its mode INHERIT takes the panel's;
@@ -886,13 +907,6 @@ static void *wui_clay_composite_tag_item_bg( wuiCompositeMode_t itemMode )
 	if ( itemMode == WUI_COMPOSITE_OVERLAY )
 		return (void *)WUI_RECT_TAG_OVERLAY;
 	return NULL;
-}
-
-static float wui_srgb_to_linear( float c )
-{
-	if ( c <= 0.04045f )
-		return c * ( 1.0f / 12.92f );
-	return powf( ( c + 0.055f ) * ( 1.0f / 1.055f ), 2.4f );
 }
 
 /* Inverse — Clay's 0..255 colors back to engine 0..1 vec4 (verbatim, perceptual). */
@@ -1062,7 +1076,7 @@ static qboolean wui_clay_store_truthy( const char *key )
  * stay on Clay native flex (useFloating=qfalse). Previously they hit the
  * `!isFlexContainer → useFloating=qtrue` branch and rendered as
  * CLAY_FLOATING pinned to root, which dropped them onto the
- * WUI_LayoutMenu pre-computed resolvedRect — competing with Clay's own
+ * stale compatibility resolvedRect — competing with Clay's own
  * flex resolution and producing the LEFT-region "Single Player overlap
  * with subtitle" anomaly the multimodal review flagged.
  *
@@ -1076,12 +1090,14 @@ static qboolean wui_clay_store_truthy( const char *key )
 static void wui_clay_emit_item( const wiredMenuDef_t *panel,
                                  const wiredItemDef_t *item,
                                  qboolean parentIsContainer,
-                                 wuiLayoutDir_t parentDirection );
+                                 wuiLayoutDir_t parentDirection,
+								 const wiredItemDef_t *perspectiveOwner );
 
 /* forward-declare the repeat-block expansion so
  * wui_clay_emit_item can call it before doing its own per-item emit. */
 static void wui_clay_emit_repeat_block( const wiredMenuDef_t *panel,
-                                         const wiredItemDef_t *containerItem );
+                                         const wiredItemDef_t *containerItem,
+										 const wiredItemDef_t *perspectiveOwner );
 
 /* per-panel Path A/B mode set by wui_clay_emit_panel before
  * recursing items. Static so emit_item + emit_repeat_row + emit_repeat_block
@@ -1130,6 +1146,133 @@ static float wui_resolve_unit( wuiValue_t v, float parentSize )
 	case UNIT_NORM:  return v.value * parentSize;
 	case UNIT_AUTO:  /* fall through */
 	default:         return 0.0f;   /* AUTO → let Clay's FIT compute it */
+	}
+}
+
+/* Resolve only the panel's viewport-relative root box. This is deliberately
+ * not a second item-tree layout pass: Clay remains the sole authority for all
+ * descendant flex geometry. The retained work here is equivalent to CSS's
+ * containing-block selection (viewport + fullscreen/anchor), which Clay needs
+ * before the panel root declaration can be opened. */
+static void wui_clay_resolve_panel_root( wiredMenuDef_t *menu )
+{
+	wuiPixelRect_t viewport = {
+		0.0f, 0.0f,
+		(float) wui_clay_lastWidth,
+		(float) wui_clay_lastHeight
+	};
+	float mw, mh;
+
+	if ( !menu ) return;
+	menu->resolvedRect = WUI_ResolveRect( &menu->wuiRect, &viewport,
+		viewport.w, viewport.h );
+
+	if ( menu->fullscreen ) {
+		menu->resolvedRect = viewport;
+		return;
+	}
+
+	/* An omitted root dimension is a viewport-filling canvas. Content-sized
+	 * boxes belong inside that canvas and are measured by Clay FIT. */
+	if ( menu->resolvedRect.w <= 0.0f ) menu->resolvedRect.w = viewport.w;
+	if ( menu->resolvedRect.h <= 0.0f ) menu->resolvedRect.h = viewport.h;
+	mw = menu->resolvedRect.w;
+	mh = menu->resolvedRect.h;
+
+	switch ( menu->anchor ) {
+	case ANCHOR_TOP_CENTER:
+		menu->resolvedRect.x = ( viewport.w - mw ) * 0.5f;
+		menu->resolvedRect.y = 0.0f;
+		break;
+	case ANCHOR_TOP_RIGHT:
+		menu->resolvedRect.x = viewport.w - mw;
+		menu->resolvedRect.y = 0.0f;
+		break;
+	case ANCHOR_CENTER_LEFT:
+		menu->resolvedRect.x = 0.0f;
+		menu->resolvedRect.y = ( viewport.h - mh ) * 0.5f;
+		break;
+	case ANCHOR_CENTER:
+		menu->resolvedRect.x = ( viewport.w - mw ) * 0.5f;
+		menu->resolvedRect.y = ( viewport.h - mh ) * 0.5f;
+		break;
+	case ANCHOR_CENTER_RIGHT:
+		menu->resolvedRect.x = viewport.w - mw;
+		menu->resolvedRect.y = ( viewport.h - mh ) * 0.5f;
+		break;
+	case ANCHOR_BOTTOM_LEFT:
+		menu->resolvedRect.x = 0.0f;
+		menu->resolvedRect.y = viewport.h - mh;
+		break;
+	case ANCHOR_BOTTOM_CENTER:
+		menu->resolvedRect.x = ( viewport.w - mw ) * 0.5f;
+		menu->resolvedRect.y = viewport.h - mh;
+		break;
+	case ANCHOR_BOTTOM_RIGHT:
+		menu->resolvedRect.x = viewport.w - mw;
+		menu->resolvedRect.y = viewport.h - mh;
+		break;
+	case ANCHOR_NONE:
+	case ANCHOR_TOP_LEFT:
+	default:
+		break;
+	}
+}
+
+/* Copy the just-computed Clay boxes back into the compatibility snapshot.
+ * Input, popup anchoring and layoutdump already query Clay directly when they
+ * can; keeping resolvedRect synchronized removes their first-frame fallback
+ * divergence without reviving a second layout engine. */
+static void wui_clay_sync_panel_rects( const wiredMenuDef_t *panel )
+{
+	int i;
+	for ( i = 0; i < wui_id_map_count; i++ ) {
+		Clay_ElementId   id;
+		Clay_ElementData data;
+		wiredItemDef_t  *item;
+
+		if ( wui_id_map[ i ].panel != panel || !wui_id_map[ i ].item ) continue;
+		id.id = wui_id_map[ i ].clayId;
+		data = Clay_GetElementData( id );
+		if ( !data.found ) continue;
+		item = (wiredItemDef_t *) wui_id_map[ i ].item;
+		item->resolvedRect.x = data.boundingBox.x;
+		item->resolvedRect.y = data.boundingBox.y;
+		item->resolvedRect.w = data.boundingBox.width;
+		item->resolvedRect.h = data.boundingBox.height;
+	}
+}
+
+/* Preserve the stable .wui breakpoint contract after retirement of the legacy
+ * tree pre-pass. The selected rectangle feeds Clay's sizing/floating mapping;
+ * no second layout pass is involved. */
+static const wuiRect_t *wui_clay_effective_item_rect( const wiredItemDef_t *item )
+{
+	const wuiRect_t *breakpointRect;
+	if ( !item || item->breakpointCount <= 0 ) return item ? &item->wuiRect : NULL;
+	breakpointRect = WUI_FindBreakpointRect( item->breakpoints,
+		item->breakpointCount, wui_clay_lastWidth );
+	return breakpointRect ? breakpointRect : &item->wuiRect;
+}
+
+/* A static top-level container with an omitted axis is the panel canvas, not a
+ * content-hugging box. Seed only that containing block before Clay emission;
+ * descendants still use their authored FIT/GROW/PERCENT rules and Clay remains
+ * their sole layout authority. Re-seeding every frame is intentional because
+ * the post-layout snapshot below replaces resolvedRect with measured boxes. */
+static void wui_clay_seed_panel_child( const wiredMenuDef_t *panel,
+                                       wiredItemDef_t *item )
+{
+	const wuiRect_t *layoutRect;
+	if ( !panel || !item || !item->isFlexContainer
+	  || item->position != POSITION_STATIC ) return;
+	layoutRect = wui_clay_effective_item_rect( item );
+
+	if ( layoutRect->w.unit == UNIT_NORM && layoutRect->w.value <= 0.0f ) {
+		item->resolvedRect.w = panel->resolvedRect.w;
+	}
+	if ( layoutRect->h.unit == UNIT_NORM && layoutRect->h.value <= 0.0f ) {
+		item->resolvedRect.h = panel->resolvedRect.h;
 	}
 }
 
@@ -1224,45 +1367,25 @@ static qboolean wui_textstyle_has_dropshadow( int textstyle )
  * wuiCustomDrawCommand_t allocated from the scratch arena. Caller must be
  * inside an open Clay parent (the item's own block).
  *
- * Lazy create: stateful entries get their per-item context allocated on
- * first emit and cached in item->customDrawContext. Subsequent emits
- * reuse. Const-cast on item is consistent with existing in-emit writes
- * (e.g. item->bindWarned in cl_wired_ui.c). */
+ * Stateful create is intentionally deferred to CUSTOM command consumption:
+ * only then does Clay expose the final bounding box for a native flex child.
+ * The command carries the stable parsed-item pointer needed by the create
+ * adapter; the resulting context is cached back on that item. */
 static void wui_clay_emit_customdraw_for_item( const wiredItemDef_t *item,
                                                 float x, float y, float w, float h,
-                                                const vec4_t color )
+                                                const vec4_t color,
+												const wiredItemDef_t *perspectiveOwner )
 {
 	const wuiCustomDrawDef_t *def;
 	wuiCustomDrawCommand_t   *cmd;
 	int                       familyIdx = -1;
-	const char               *colon;
 
 	if ( !item->customDrawName[ 0 ] ) return;
 
 	def = WiredUI_FindCustomDraw( item->customDrawName, &familyIdx );
 	if ( !def ) return;
 
-	/* Lazy stateful create — happens once per item per process. */
-	if ( def->isStateful && !item->customDrawContext && def->create ) {
-		wuiCustomDrawConfig_t cfg;
-		memset( &cfg, 0, sizeof( cfg ) );
-		cfg.rect[ 0 ]      = x;
-		cfg.rect[ 1 ]      = y;
-		cfg.rect[ 2 ]      = w;
-		cfg.rect[ 3 ]      = h;
-		Vector4Copy( color, cfg.forecolor );
-		cfg.ownerdrawFlag  = item->ownerdrawFlag;
-		cfg.textstyle      = item->textstyle;
-		cfg.familyIndex    = familyIdx;
-		colon              = strchr( item->customDrawName, ':' );
-		cfg.unprefixedName = colon ? colon + 1 : item->customDrawName;
-		cfg.item           = item;
-		( (wiredItemDef_t *) item )->customDrawContext = def->create( &cfg );
-	}
-
-	if ( !wui_clay_scratch_arena ) return;
-	cmd = (wuiCustomDrawCommand_t *) Arena_Alloc(
-		wui_clay_scratch_arena, sizeof( *cmd ), sizeof( void * ) );
+	cmd = wui_clay_alloc_custom_command();
 	if ( !cmd ) return;
 	Q_strncpyz( cmd->name, item->customDrawName, sizeof( cmd->name ) );
 	cmd->rect[ 0 ]      = x;
@@ -1271,12 +1394,63 @@ static void wui_clay_emit_customdraw_for_item( const wiredItemDef_t *item,
 	cmd->rect[ 3 ]      = h;
 	Vector4Copy( color, cmd->color );
 	cmd->ownerdrawFlag  = item->ownerdrawFlag;
+	cmd->familyIndex    = familyIdx;
+	cmd->item           = item;
+	cmd->perspectiveOwner = perspectiveOwner;
 	cmd->context        = item->customDrawContext;
 
-	CLAY({
-		.layout = { .sizing = { CLAY_SIZING_GROW( 0 ), CLAY_SIZING_GROW( 0 ) } },
-		.custom = { .customData = cmd }
-	}) {}
+	/* Anchor-only routines (crosshair and the zero-rect HUD text family) own
+	 * their geometry. A tiny native-flex child is valid authoring, but Clay
+	 * culls its nested CUSTOM carrier while resolving the panel tree. Emit that
+	 * carrier as a root-attached, input-transparent command at the already
+	 * resolved pixel anchor. This is not authored absolute layout: the item
+	 * itself remains in flex flow and supplies x/y. Content-sized custom items
+	 * retain the normal in-tree GROW carrier, including parent clipping. */
+	{
+		float carrierMax = WiredUI_GetDpiScale();
+		if ( carrierMax < 1.0f ) carrierMax = 1.0f;
+		if ( w <= carrierMax && h <= carrierMax ) {
+			CLAY({
+				.layout = { .sizing = {
+					CLAY_SIZING_FIXED( w > 0.0f ? w : carrierMax ),
+					CLAY_SIZING_FIXED( h > 0.0f ? h : carrierMax )
+				} },
+				.floating = {
+					.attachTo = CLAY_ATTACH_TO_ROOT,
+					.offset = { x, y },
+					.attachPoints = {
+						CLAY_ATTACH_POINT_LEFT_TOP,
+						CLAY_ATTACH_POINT_LEFT_TOP
+					},
+					.pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH
+				},
+				.custom = { .customData = cmd }
+			}) {}
+		} else {
+			/* A custom command paints the item's box; it is not an additional
+			 * layout child. Keeping this carrier in normal flow made a custom on
+			 * a container compete with the container's authored children for GROW
+			 * space (the loading backdrop consumed the first 36% of the column and
+			 * pushed its top bar halfway down the screen). A parent-attached
+			 * floating carrier fills the resolved item without affecting its child
+			 * layout. Leaf custom items retain the same final bounding box. */
+			CLAY({
+				.layout = { .sizing = {
+					CLAY_SIZING_GROW( 0 ), CLAY_SIZING_GROW( 0 )
+				} },
+				.floating = {
+					.attachTo = CLAY_ATTACH_TO_PARENT,
+					.attachPoints = {
+						CLAY_ATTACH_POINT_LEFT_TOP,
+						CLAY_ATTACH_POINT_LEFT_TOP
+					},
+					.pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH,
+					.clipTo = CLAY_CLIP_TO_ATTACHED_PARENT
+				},
+				.custom = { .customData = cmd }
+			}) {}
+		}
+	}
 }
 
 /* Emit a CLAY CUSTOM child for an ITEM_TYPE_VIEWPORT itemDef. Same
@@ -1294,9 +1468,7 @@ static void wui_clay_emit_viewport_for_item( const wiredItemDef_t *item,
 	// the world's projection. Keep it a bare full-grow custom element.
 	wuiCustomDrawCommand_t *cmd;
 
-	if ( !wui_clay_scratch_arena ) return;
-	cmd = (wuiCustomDrawCommand_t *) Arena_Alloc(
-		wui_clay_scratch_arena, sizeof( *cmd ), sizeof( void * ) );
+	cmd = wui_clay_alloc_custom_command();
 	if ( !cmd ) return;
 	Com_sprintf( cmd->name, sizeof( cmd->name ), "viewport:%s", item->viewportId );
 	cmd->rect[ 0 ]     = x;
@@ -1324,9 +1496,7 @@ void WUI_EmitSceneBackdrop( float x, float y, float w, float h ) {
 	wuiCustomDrawCommand_t *cmd;
 
 	if ( w <= 0.0f || h <= 0.0f ) return;
-	if ( !wui_clay_scratch_arena ) return;
-	cmd = (wuiCustomDrawCommand_t *) Arena_Alloc(
-		wui_clay_scratch_arena, sizeof( *cmd ), sizeof( void * ) );
+	cmd = wui_clay_alloc_custom_command();
 	if ( !cmd ) return;
 	Q_strncpyz( cmd->name, "menubg:", sizeof( cmd->name ) );
 	cmd->rect[ 0 ]     = x;
@@ -1363,9 +1533,7 @@ static void wui_clay_emit_console_view_for_item( const wiredItemDef_t *item,
 	wuiCustomDrawCommand_t *cmd;
 	(void) item;
 
-	if ( !wui_clay_scratch_arena ) return;
-	cmd = (wuiCustomDrawCommand_t *) Arena_Alloc(
-		wui_clay_scratch_arena, sizeof( *cmd ), sizeof( void * ) );
+	cmd = wui_clay_alloc_custom_command();
 	if ( !cmd ) return;
 	Q_strncpyz( cmd->name, "console:", sizeof( cmd->name ) );
 	cmd->rect[ 0 ]     = x;
@@ -1391,9 +1559,7 @@ static void wui_clay_emit_scorelist_widget_for_item( const wiredItemDef_t *item,
 	wuiCustomDrawCommand_t *cmd;
 	const char             *subtype;
 
-	if ( !wui_clay_scratch_arena ) return;
-	cmd = (wuiCustomDrawCommand_t *) Arena_Alloc(
-		wui_clay_scratch_arena, sizeof( *cmd ), sizeof( void * ) );
+	cmd = wui_clay_alloc_custom_command();
 	if ( !cmd ) return;
 	subtype = item->group[ 0 ] ? item->group : "";
 	Com_sprintf( cmd->name, sizeof( cmd->name ), "scorelist:%s", subtype );
@@ -1430,8 +1596,8 @@ static void wui_clay_emit_scorelist_widget_for_item( const wiredItemDef_t *item,
  * The row splits into a left label region and a right segment band; the band is
  * divided equally across the segment count. The RENDERER uses Clay relative
  * sizing (label = PERCENT(1-frac), band = PERCENT(frac), segments = GROW) so the
- * split follows the ACTUAL Clay-resolved row width — the WUI_LayoutMenu
- * resolvedRect width is stale/zero for flex GROW rows (a documented invariant),
+ * split follows the ACTUAL Clay-resolved row width — the compatibility
+ * resolvedRect may be stale/zero for flex GROW rows,
  * so a pixel split off it would drift. The click HIT-TEST reproduces the SAME
  * fraction split on the item's ACTUAL rendered rect (WiredUI_ClayItemRenderedRect),
  * so draw-rect and hit-rect agree without either trusting resolvedRect. */
@@ -2279,6 +2445,7 @@ static void wui_clay_emit_listbox( const wiredItemDef_t *item,
                                     uint16_t borderW,
                                     qboolean parentIsContainer )
 {
+	const wuiRect_t *layoutRect = wui_clay_effective_item_rect( item );
 	int          feederID    = (int) item->feeder;
 	int          totalItems  = WiredUI_FeederCount( feederID );
 	float        charSize    = item->fontPointSize > 0.0f ? item->fontPointSize : WUI_DEFAULT_FONT_SIZE;
@@ -2325,21 +2492,33 @@ static void wui_clay_emit_listbox( const wiredItemDef_t *item,
 	Clay_FloatingAttachToElement attachMode = parentIsContainer
 	                                        ? CLAY_ATTACH_TO_NONE
 	                                        : CLAY_ATTACH_TO_ROOT;
-	/* GROW with an upper bound of the width layout already resolved for this
-	 * item, not an unbounded GROW(0). The box is FLOATING (see the
-	 * floating-cell rationale above), so Clay does not constrain it against
-	 * its parent the way an in-flow child is constrained: an unbounded grow
-	 * let the character and skin lists widen past the panel that contains
-	 * them and paint over the panel beside it. `w` is the parent-resolved
-	 * width, so bounding by it keeps the list inside its own panel while
-	 * still letting it fill that panel. Height keeps the unbounded grow —
-	 * only the visible slice is emitted, so it cannot overflow downward. */
-	Clay_SizingAxis              sizeW      = parentIsContainer
-	                                        ? CLAY_SIZING_GROW( 0, w )
-	                                        : CLAY_SIZING_FIXED( w );
-	Clay_SizingAxis              sizeH      = parentIsContainer
-	                                        ? CLAY_SIZING_GROW( 0 )
-	                                        : CLAY_SIZING_FIXED( h );
+	/* Native-flow listboxes must preserve the same authored sizing contract as
+	 * generic items. Bounding GROW by the previous frame's resolvedRect made a
+	 * width:PERCENT(1) picker permanently inherit a stale, narrower maximum
+	 * after its parent changed size. Let Clay resolve percentages against the
+	 * current parent; AUTO/GROW remains native flex growth. */
+	Clay_SizingAxis sizeW;
+	Clay_SizingAxis sizeH;
+	if ( !parentIsContainer ) {
+		sizeW = CLAY_SIZING_FIXED( w );
+		sizeH = CLAY_SIZING_FIXED( h );
+	} else {
+		if ( layoutRect->w.unit == UNIT_NORM && layoutRect->w.value > 0.0f ) {
+			sizeW = CLAY_SIZING_PERCENT( layoutRect->w.value );
+		} else if ( layoutRect->w.unit == UNIT_PX ) {
+			sizeW = CLAY_SIZING_FIXED( layoutRect->w.value * dpi );
+		} else {
+			sizeW = CLAY_SIZING_GROW( 0 );
+		}
+
+		if ( layoutRect->h.unit == UNIT_NORM && layoutRect->h.value > 0.0f ) {
+			sizeH = CLAY_SIZING_PERCENT( layoutRect->h.value );
+		} else if ( layoutRect->h.unit == UNIT_PX ) {
+			sizeH = CLAY_SIZING_FIXED( layoutRect->h.value * dpi );
+		} else {
+			sizeH = CLAY_SIZING_GROW( 0 );
+		}
+	}
 	CLAY({
 		/* Tag the outer listbox block with the item's stable Clay id so the
 		 * row hit-test (cl_wired_ui.c click path) can query Clay_GetElementData
@@ -2364,9 +2543,12 @@ static void wui_clay_emit_listbox( const wiredItemDef_t *item,
 		.backgroundColor = bg,
 		.border = { .color = borderColor, .width = { borderW, borderW, borderW, borderW, 0 } }
 	}) {
-		if ( totalItems <= 0 ) {
-			return;
-		}
+		/* Never return from inside a CLAY scope: the macro's loop epilogue
+		 * closes the layout element.  Call-vote can legitimately expose three
+		 * empty feeders (players, teams and maps); returning here leaked one
+		 * open element per empty list and corrupted Clay's layout stack.  Keep
+		 * the authored empty listbox frame, and only omit its row contents. */
+		if ( totalItems > 0 ) {
 
 		/* Hoisted per-item constants — item->fontName + item->forecolor
 		 * are stable across the row/cell loop. wui_clay_font_slot_for_face
@@ -2520,10 +2702,9 @@ static void wui_clay_emit_listbox( const wiredItemDef_t *item,
 			float contentW    = w;
 			int   firstVis, lastVis;
 
-			/* The emit `w` is item->resolvedRect.w, which is STALE/narrow for a
-			 * flex-GROW listbox (a documented invariant): WUI_LayoutMenu's
-			 * pre-pass resolves it to the pre-flow value while Clay's own layout
-			 * grows the element to fill its parent. The columns / header band /
+			/* The emit `w` can be the previous frame's compatibility snapshot
+			 * while Clay's current layout grows the element to fill its parent.
+			 * The columns / header band /
 			 * selected-row highlight / scrollbar all derive their span from
 			 * contentW, so trusting the stale `w` makes them hug the left edge
 			 * and leave dead space on the right. Source the TRUE inner width from
@@ -2824,6 +3005,7 @@ static void wui_clay_emit_listbox( const wiredItemDef_t *item,
 				}
 			}
 		}
+		}
 	}
 }
 
@@ -2976,15 +3158,9 @@ static void wui_clay_emit_multidropdown( void )
 	}
 }
 
-/* Absolute-positioning classification — the SINGLE predicate shared between the
- * layout resolver and the emit pass. WUI_LayoutItem's flex-partition loop
- * (cl_wired_layout.c) pulls a child OUT of flex flow and resolves it at its
- * authored rect iff this returns qtrue; the emit useFloating test below MUST
- * agree, or an item the resolver placed absolutely (resolvedRect at its authored
- * x/y) would take the native-flex emit path where Clay re-lays it in flow and
- * ignores the authored position (loading-screen customs landed off-screen / were
- * dropped exactly this way). Kept in lockstep by construction: same fields, same
- * conditions as the resolver's inline copy.
+/* Absolute-positioning classification used by the sole Clay emit path. It
+ * decides whether an authored item leaves native flex flow and maps to a Clay
+ * floating declaration.
  *
  * "Absolute" = explicit non-static position, OR a `decoration` leaf that authored
  * a concrete non-AUTO size (w,h>0) at a concrete non-zero position (x||y!=0) and
@@ -2993,18 +3169,20 @@ static void wui_clay_emit_multidropdown( void )
  * on the flex path. */
 static qboolean wui_clay_item_is_absolute( const wiredItemDef_t *item )
 {
+	const wuiRect_t *layoutRect = wui_clay_effective_item_rect( item );
 	return item->position != POSITION_STATIC
 	    || ( item->decoration
 	         && item->flexChild.grow == 0.0f
-	         && item->wuiRect.w.unit != UNIT_AUTO && item->wuiRect.w.value > 0.0f
-	         && item->wuiRect.h.unit != UNIT_AUTO && item->wuiRect.h.value > 0.0f
-	         && ( item->wuiRect.x.value != 0.0f || item->wuiRect.y.value != 0.0f ) );
+	         && layoutRect->w.unit != UNIT_AUTO && layoutRect->w.value > 0.0f
+	         && layoutRect->h.unit != UNIT_AUTO && layoutRect->h.value > 0.0f
+	         && ( layoutRect->x.value != 0.0f || layoutRect->y.value != 0.0f ) );
 }
 
 static void wui_clay_emit_item( const wiredMenuDef_t *panel,
                                  const wiredItemDef_t *item,
                                  qboolean parentIsContainer,
-                                 wuiLayoutDir_t parentDirection )
+                                 wuiLayoutDir_t parentDirection,
+								 const wiredItemDef_t *perspectiveOwner )
 {
 	float                  x, y, w, h;
 	Clay_Color             bg, borderColor;
@@ -3018,10 +3196,15 @@ static void wui_clay_emit_item( const wiredMenuDef_t *panel,
 	const char            *fontName    = item->fontName[0] ? item->fontName : NULL;
 	char                   boundText[ 256 ];
 	vec4_t                 effectiveFg;
+	const wuiRect_t       *layoutRect;
 	uint32_t               clayId;
 	int                    i;
 
 	if ( !item->visible ) return;
+	if ( item->isFlexContainer && fabsf( item->perspective ) >= 0.001f ) {
+		perspectiveOwner = item;
+	}
+	layoutRect = wui_clay_effective_item_rect( item );
 
 	/* source-attribution: surface this item for Clay error
 	 * blame. Not stack-restored across nested children — leakage to
@@ -3034,7 +3217,7 @@ static void wui_clay_emit_item( const wiredMenuDef_t *panel,
 	 * with N row emissions of the template. The container itself is
 	 * an organisational concept; nothing is drawn at the container's rect. */
 	if ( item->repeatBlock ) {
-		wui_clay_emit_repeat_block( panel, item );
+		wui_clay_emit_repeat_block( panel, item, perspectiveOwner );
 		return;
 	}
 
@@ -3061,7 +3244,8 @@ static void wui_clay_emit_item( const wiredMenuDef_t *panel,
 
 		for ( ci = 0; ci < ib->childCount; ci++ ) {
 			if ( ib->children[ ci ] ) {
-				wui_clay_emit_item( panel, ib->children[ ci ], parentIsContainer, parentDirection );
+				wui_clay_emit_item( panel, ib->children[ ci ], parentIsContainer,
+					parentDirection, perspectiveOwner );
 			}
 		}
 		return;
@@ -3093,6 +3277,22 @@ static void wui_clay_emit_item( const wiredMenuDef_t *panel,
 	y = item->resolvedRect.y;
 	w = item->resolvedRect.w;
 	h = item->resolvedRect.h;
+	/* The old tree pre-pass used to seed these values before Clay ran. On the
+	 * first frame (or immediately after a viewport change) derive a bounded
+	 * authored fallback from the panel containing block. Native-flow items are
+	 * still positioned and finally sized by Clay; this only supplies fixed-size
+	 * custom/listbox helpers until their authoritative box is synchronized at
+	 * EndLayout below. */
+	if ( w <= 0.0f || h <= 0.0f ) {
+		wuiPixelRect_t authored = WUI_ResolveRect( layoutRect,
+			&panel->resolvedRect,
+			(float) wui_clay_lastWidth,
+			(float) wui_clay_lastHeight );
+		if ( w <= 0.0f ) w = authored.w;
+		if ( h <= 0.0f ) h = authored.h;
+		if ( x == 0.0f ) x = authored.x;
+		if ( y == 0.0f ) y = authored.y;
+	}
 
 	/* CSS-style per-side offset support. When the item's
 	 * wuiOffset carries any declared side, override the resolvedRect
@@ -3423,6 +3623,17 @@ static void wui_clay_emit_item( const wiredMenuDef_t *panel,
 		cornerR.topRight    = item->cornerRadius4[ 1 ];   /* TR */
 		cornerR.bottomLeft  = item->cornerRadius4[ 3 ];   /* BL */
 		cornerR.bottomRight = item->cornerRadius4[ 2 ];   /* BR */
+	}
+
+	/* TEXT items may source their complete caption from a cvar/Store-state key
+	 * (for example password.wui's ui_password_server_name).  The generic
+	 * label-and-value branch deliberately excludes ITEM_TYPE_TEXT, so resolve
+	 * that binding into the single-text path here.  Arena-copy it for the same
+	 * deferred Clay render lifetime required by storeBind and Lua output below.
+	 * storeBind and Lua remain the explicit higher-precedence overrides. */
+	if ( item->type == ITEM_TYPE_TEXT && item->cvar[0] ) {
+		WiredUI_BoundValueText( item, boundText, sizeof( boundText ) );
+		displayText = wui_clay_arena_strdup( boundText );
 	}
 
 	/* storeBind: text override from WiredStore (literal key lookup).
@@ -3940,16 +4151,7 @@ static void wui_clay_emit_item( const wiredMenuDef_t *panel,
 
 				/* Readout text from the clamped cvar value. %g prints integer
 				 * ranges cleanly (50, not 50.000000) and trims float noise. */
-				Com_sprintf( valStr, sizeof( valStr ), "%g", curVal );
-				{
-					char rawbuf[64];
-					WiredUI_StateGetString( item->cvar, rawbuf, sizeof( rawbuf ) );
-					Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
-						"[SPINDIAG] emit '%s' cvar='%s' raw='%s' curVal=%g min=%g max=%g step=%g valStr='%s'\n",
-						item->name, item->cvar, rawbuf, curVal,
-						item->sliderData.minVal, item->sliderData.maxVal,
-						item->sliderData.step, valStr );
-				}
+				Com_sprintf( valStr, 32, "%g", curVal );
 
 				/* Glyph / outline colour: row fg, overridden by authored state
 				 * colours for the current interaction state. */
@@ -4093,14 +4295,8 @@ static void wui_clay_emit_item( const wiredMenuDef_t *panel,
 	 * .layout config (layoutDirection, childGap, padding, childAlignment)
 	 * so their children flow correctly. */
 	{
-		/* non-flex items pin via floating
-		 * with offset = item->resolvedRect.{x,y}. Path A's "Clay-native
-		 * flex flow positions me" assumption only holds when the item is
-		 * itself a flex container (then its children are flex-positioned
-		 * inside it) — non-flex items must use the WUI_LayoutMenu-computed
-		 * pixel coords directly, mirroring legacy SCR semantics. Without
-		 * this, simple text-only items render at Clay's root flex flow
-		 * (top-left of viewport) instead of their authored rect.
+		/* Non-flex top-level items pin via floating with offset from their
+		 * authored/last-Clay snapshot. Native descendants stay in parent flow.
 		 *
 		 * Flex containers stay on Clay flex (useFloating=false unless they
 		 * have explicit POSITION or pathBKind), so their internal layout
@@ -4109,8 +4305,8 @@ static void wui_clay_emit_item( const wiredMenuDef_t *panel,
 		 * parent stay on Clay native flex even when they themselves are
 		 * not flex containers. The previous `!isFlexContainer →
 		 * useFloating=qtrue` rule dropped them onto ATTACH_TO_ROOT
-		 * floating, where the resolvedRect from WUI_LayoutMenu's flex
-		 * pass competed with Clay's own re-resolution and produced the
+		 * floating, where a stale resolvedRect competed with Clay's own
+		 * resolution and produced the
 		 * LEFT-region vertical-stack overlap the multimodal review
 		 * flagged. With parentIsContainer threaded through the recursive
 		 * emit walk, leaf children of a container now flow naturally
@@ -4149,10 +4345,10 @@ static void wui_clay_emit_item( const wiredMenuDef_t *panel,
 		float effectiveBoxH = h;
 		{
 			float parentVHc = wui_clay_lastHeight > 0 ? (float) wui_clay_lastHeight : (float) cls.glconfig.vidHeight;
-			if ( item->wuiRect.h.unit == UNIT_PX ) {
-				effectiveBoxH = item->wuiRect.h.value * WiredUI_GetDpiScale();
-			} else if ( item->wuiRect.h.unit == UNIT_NORM && item->wuiRect.h.value > 0 ) {
-				effectiveBoxH = item->wuiRect.h.value * parentVHc;
+			if ( layoutRect->h.unit == UNIT_PX ) {
+				effectiveBoxH = layoutRect->h.value * WiredUI_GetDpiScale();
+			} else if ( layoutRect->h.unit == UNIT_NORM && layoutRect->h.value > 0 ) {
+				effectiveBoxH = layoutRect->h.value * parentVHc;
 			}
 		}
 		qboolean textAutoVCenter = ( item->textaligny == 0.0f
@@ -4220,8 +4416,8 @@ static void wui_clay_emit_item( const wiredMenuDef_t *panel,
 			qboolean growW = qfalse;
 			qboolean growH = qfalse;
 			if ( item->flexChild.grow > 0.0f ) {
-				qboolean explicitW = ( item->wuiRect.w.unit == UNIT_AUTO );
-				qboolean explicitH = ( item->wuiRect.h.unit == UNIT_AUTO );
+				qboolean explicitW = ( layoutRect->w.unit == UNIT_AUTO );
+				qboolean explicitH = ( layoutRect->h.unit == UNIT_AUTO );
 				if ( explicitW || explicitH ) {
 					growW = explicitW;
 					growH = explicitH;
@@ -4235,19 +4431,25 @@ static void wui_clay_emit_item( const wiredMenuDef_t *panel,
 				layoutCfg.sizing.width = ( maxW > 0.0f )
 					? CLAY_SIZING_GROW( minW, maxW )
 					: CLAY_SIZING_GROW( minW );
-			} else if ( item->wuiRect.w.unit == UNIT_PX ) {
+			} else if ( layoutRect->w.unit == UNIT_PX ) {
 				/* Scale authored px by dpiScale to match WUI_Resolve (UNIT_PX)
 				 * and the font path — otherwise a flex container authored in
 				 * logical px stays 1× while its rows (routed through resolvedRect)
 				 * scale 2×, so the box is short and its contents overflow. */
-				layoutCfg.sizing.width = CLAY_SIZING_FIXED( item->wuiRect.w.value * WiredUI_GetDpiScale() );
-			} else if ( item->wuiRect.w.unit == UNIT_NORM && item->wuiRect.w.value > 0 ) {
-				layoutCfg.sizing.width = CLAY_SIZING_PERCENT( item->wuiRect.w.value );
-			} else if ( item->wuiRect.w.unit == UNIT_AUTO ) {
-				/* when the layout-pass already pre-resolved
-				 * the AUTO size (see WUI_LayoutItem in cl_wired_layout.c),
-				 * use the resolvedRect.w directly. FIT is reserved for the
-				 * truly unmeasured case (resolvedRect.w == 0). */
+				layoutCfg.sizing.width = CLAY_SIZING_FIXED( layoutRect->w.value * WiredUI_GetDpiScale() );
+			} else if ( layoutRect->w.unit == UNIT_VW
+			         || layoutRect->w.unit == UNIT_VH
+			         || layoutRect->w.unit == UNIT_REM ) {
+				/* Viewport/rem units are concrete lengths, not percentages of
+				 * the immediate Clay parent. Resolve them against the current
+				 * presentation extent. */
+				layoutCfg.sizing.width = CLAY_SIZING_FIXED(
+					wui_resolve_unit( layoutRect->w, parentVW ) );
+			} else if ( layoutRect->w.unit == UNIT_NORM && layoutRect->w.value > 0 ) {
+				layoutCfg.sizing.width = CLAY_SIZING_PERCENT( layoutRect->w.value );
+			} else if ( layoutRect->w.unit == UNIT_AUTO ) {
+				/* Reuse the preceding Clay frame when available; FIT handles the
+				 * first/unmeasured frame. */
 				if ( item->resolvedRect.w > 0 ) {
 					layoutCfg.sizing.width = CLAY_SIZING_FIXED( item->resolvedRect.w );
 				} else {
@@ -4256,34 +4458,50 @@ static void wui_clay_emit_item( const wiredMenuDef_t *panel,
 						: CLAY_SIZING_FIT( minW );
 				}
 			} else {
-				layoutCfg.sizing.width = CLAY_SIZING_FIXED( w );
+				/* An omitted width is the flex cross-axis default, not a literal
+				 * zero-width box.  The legacy resolver necessarily leaves `w` at
+				 * zero for this case; pinning Clay to FIXED(0) collapsed column
+				 * children such as the in-game menu's form and two-column rows.
+				 * Their percent-width descendants then inherited zero, leaving only
+				 * border slivers while MSDF labels overflowed outside the panel.
+				 * Match flexbox stretch on a column parent's cross axis.  Row
+				 * children keep their measured/resolved width (or FIT when there is
+				 * no measurement) because width is their main axis. */
+				if ( w > 0.0f ) {
+					layoutCfg.sizing.width = CLAY_SIZING_FIXED( w );
+				} else if ( parentDirection == WUI_LAYOUT_COLUMN ) {
+					layoutCfg.sizing.width = ( maxW > 0.0f )
+						? CLAY_SIZING_GROW( minW, maxW )
+						: CLAY_SIZING_GROW( minW );
+				} else {
+					layoutCfg.sizing.width = ( maxW > 0.0f )
+						? CLAY_SIZING_FIT( minW, maxW )
+						: CLAY_SIZING_FIT( minW );
+				}
 			}
 
 			if ( growH ) {
 				layoutCfg.sizing.height = ( maxH > 0.0f )
 					? CLAY_SIZING_GROW( minH, maxH )
 					: CLAY_SIZING_GROW( minH );
-			} else if ( item->wuiRect.h.unit == UNIT_PX ) {
+			} else if ( layoutRect->h.unit == UNIT_PX ) {
 				/* Scale authored px by dpiScale — see the width branch above.
 				 * This keeps a FIXED-px flex box in the same 2× space as its
 				 * dpi-scaled rows so it holds them without overflow. */
-				layoutCfg.sizing.height = CLAY_SIZING_FIXED( item->wuiRect.h.value * WiredUI_GetDpiScale() );
-			} else if ( item->wuiRect.h.unit == UNIT_NORM && item->wuiRect.h.value > 0 ) {
-				layoutCfg.sizing.height = CLAY_SIZING_PERCENT( item->wuiRect.h.value );
-			} else if ( item->wuiRect.h.unit == UNIT_AUTO ) {
-				/* `height FIT` on a flex container with children: let Clay
+				layoutCfg.sizing.height = CLAY_SIZING_FIXED( layoutRect->h.value * WiredUI_GetDpiScale() );
+			} else if ( layoutRect->h.unit == UNIT_VW
+			         || layoutRect->h.unit == UNIT_VH
+			         || layoutRect->h.unit == UNIT_REM ) {
+				layoutCfg.sizing.height = CLAY_SIZING_FIXED(
+					wui_resolve_unit( layoutRect->h, parentVH ) );
+			} else if ( layoutRect->h.unit == UNIT_NORM && layoutRect->h.value > 0 ) {
+				layoutCfg.sizing.height = CLAY_SIZING_PERCENT( layoutRect->h.value );
+			} else if ( layoutRect->h.unit == UNIT_AUTO ) {
+				/* `height FIT` on a flex container with children lets Clay
 				 * measure the true content height so the box hugs its rows.
-				 * The WUI_LayoutMenu pre-pass fills an AUTO-height flex
-				 * container to its parent's height (cl_wired_layout.c:429-432
-				 * "no-size flex container → fill parent"), so trusting
-				 * resolvedRect.h here would STRETCH the box to the row/parent
-				 * height instead of hugging content — MOVEMENT rendered as tall
-				 * as its whole grid row rather than its 5 rows. Clay's own FIT
-				 * pass sizes to children correctly (proven by the scroll
-				 * viewport content measurement).
 				 *
 				 * For AUTO-height LEAVES / text (no children Clay can measure),
-				 * keep the pre-resolved resolvedRect.h — FIT would collapse
+				 * keep the preceding Clay snapshot — FIT would collapse
 				 * them to 0. The `childCount` gate preserves the deeply-nested
 				 * emit fix (resolvedRect fallback for unmeasurable items). */
 				if ( item->childCount > 0 ) {
@@ -4320,7 +4538,7 @@ static void wui_clay_emit_item( const wiredMenuDef_t *panel,
 				item->flexContainer.align,
 				item->flexContainer.justify );
 		}
-		else if ( displayText[0] ) {
+		else if ( !item->hudElement[0] && displayText[0] ) {
 			/* text-bearing non-flex
 			 * items carry their alignment + offset padding on the parent
 			 * CLAY block. Horizontal alignment via childAlignment.x is
@@ -4433,7 +4651,8 @@ static void wui_clay_emit_item( const wiredMenuDef_t *panel,
 				},
 				.image = { .imageData = rowImageData },
 				.backgroundColor = rowBg,
-				.userData = wui_clay_composite_tag_item_bg( item->compositeMode ),
+				.userData = wui_clay_command_tag( perspectiveOwner,
+					(uintptr_t)wui_clay_composite_tag_item_bg( item->compositeMode ) ),
 				.cornerRadius = cornerR,
 				.border = {
 					.color = borderColor,
@@ -4446,6 +4665,7 @@ static void wui_clay_emit_item( const wiredMenuDef_t *panel,
 						CLAY({
 							.layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) } },
 							.image  = { .imageData = (void*)(uintptr_t) hShader },
+							.userData = wui_clay_command_tag( perspectiveOwner, 0u ),
 							.backgroundColor = { 255, 255, 255, 255.0f * wui_compositor_panel_alpha }
 						}) {}
 					}
@@ -4458,7 +4678,8 @@ static void wui_clay_emit_item( const wiredMenuDef_t *panel,
 				 * panel) and BEFORE displayText (so text labels overlay the
 				 * custom-draw output — playersettings.wmenu's effectfield
 				 * has both `text "Effect:"` and `ownerdraw "effects"`). */
-				wui_clay_emit_customdraw_for_item( item, x, y, w, h, effectiveFg );
+				wui_clay_emit_customdraw_for_item( item, x, y, w, h, effectiveFg,
+					perspectiveOwner );
 				/* viewport itemDef — provider-driven world/preview
 				 * render dispatched alongside the custom-draw channel. */
 				if ( item->type == ITEM_TYPE_VIEWPORT ) {
@@ -4474,7 +4695,7 @@ static void wui_clay_emit_item( const wiredMenuDef_t *panel,
 				else if ( item->type == ITEM_TYPE_CONSOLE_VIEW ) {
 					wui_clay_emit_console_view_for_item( item, x, y, w, h, effectiveFg );
 				}
-				if ( displayText[0] ) {
+				if ( !item->hudElement[0] && displayText[0] ) {
 					uint16_t    fontSlot = wui_clay_font_slot_for_face( fontName );
 					Clay_String s;
 					Clay_Color  fg = wui_clay_color_of( effectiveFg, wui_compositor_panel_alpha );
@@ -4488,7 +4709,8 @@ static void wui_clay_emit_item( const wiredMenuDef_t *panel,
 						 * we care about — full textstyle isn't needed
 						 * downstream and a plain qboolean is cheaper to
 						 * round-trip through void*. */
-						.userData      = textHasShadow ? (void*)(uintptr_t)1 : NULL,
+						.userData      = wui_clay_command_tag( perspectiveOwner,
+							textHasShadow ? WUI_TEXT_TAG_SHADOW : 0u ),
 						.fontId        = fontSlot,
 						.fontSize      = (uint16_t) effectiveFontPointSize,
 						.letterSpacing = (uint16_t) item->letterSpacing,
@@ -4507,7 +4729,8 @@ static void wui_clay_emit_item( const wiredMenuDef_t *panel,
 						 * so children's `grow N` shorthand lands on the
 						 * correct main axis. */
 						wui_clay_emit_item( panel, item->children[ i ], item->isFlexContainer,
-						                    item->isFlexContainer ? item->flexContainer.direction : parentDirection );
+						                    item->isFlexContainer ? item->flexContainer.direction : parentDirection,
+											perspectiveOwner );
 					}
 				}
 			}
@@ -4521,7 +4744,8 @@ static void wui_clay_emit_item( const wiredMenuDef_t *panel,
 				.layout = layoutCfg,
 				.image = { .imageData = rowImageData },
 				.backgroundColor = rowBg,
-				.userData = wui_clay_composite_tag_item_bg( item->compositeMode ),
+				.userData = wui_clay_command_tag( perspectiveOwner,
+					(uintptr_t)wui_clay_composite_tag_item_bg( item->compositeMode ) ),
 				.cornerRadius = cornerR,
 				/* A `scroll` flex container becomes a vertical scroll viewport:
 				 * Clay clips children to this box and childOffset (driven by the
@@ -4547,6 +4771,7 @@ static void wui_clay_emit_item( const wiredMenuDef_t *panel,
 						CLAY({
 							.layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) } },
 							.image  = { .imageData = (void*)(uintptr_t) hShader },
+							.userData = wui_clay_command_tag( perspectiveOwner, 0u ),
 							.backgroundColor = { 255, 255, 255, 255.0f * wui_compositor_panel_alpha }
 						}) {}
 					}
@@ -4559,7 +4784,8 @@ static void wui_clay_emit_item( const wiredMenuDef_t *panel,
 				 * panel) and BEFORE displayText (so text labels overlay the
 				 * custom-draw output — playersettings.wmenu's effectfield
 				 * has both `text "Effect:"` and `ownerdraw "effects"`). */
-				wui_clay_emit_customdraw_for_item( item, x, y, w, h, effectiveFg );
+				wui_clay_emit_customdraw_for_item( item, x, y, w, h, effectiveFg,
+					perspectiveOwner );
 				/* viewport itemDef — provider-driven world/preview
 				 * render dispatched alongside the custom-draw channel. */
 				if ( item->type == ITEM_TYPE_VIEWPORT ) {
@@ -4575,7 +4801,7 @@ static void wui_clay_emit_item( const wiredMenuDef_t *panel,
 				else if ( item->type == ITEM_TYPE_CONSOLE_VIEW ) {
 					wui_clay_emit_console_view_for_item( item, x, y, w, h, effectiveFg );
 				}
-				if ( displayText[0] ) {
+				if ( !item->hudElement[0] && displayText[0] ) {
 					uint16_t    fontSlot = wui_clay_font_slot_for_face( fontName );
 					Clay_String s;
 					Clay_Color  fg = wui_clay_color_of( effectiveFg, wui_compositor_panel_alpha );
@@ -4589,7 +4815,8 @@ static void wui_clay_emit_item( const wiredMenuDef_t *panel,
 						 * we care about — full textstyle isn't needed
 						 * downstream and a plain qboolean is cheaper to
 						 * round-trip through void*. */
-						.userData      = textHasShadow ? (void*)(uintptr_t)1 : NULL,
+						.userData      = wui_clay_command_tag( perspectiveOwner,
+							textHasShadow ? WUI_TEXT_TAG_SHADOW : 0u ),
 						.fontId        = fontSlot,
 						.fontSize      = (uint16_t) effectiveFontPointSize,
 						.letterSpacing = (uint16_t) item->letterSpacing,
@@ -4606,7 +4833,8 @@ static void wui_clay_emit_item( const wiredMenuDef_t *panel,
 						 * floating.
 						 * pass this container's direction. */
 						wui_clay_emit_item( panel, item->children[ i ], item->isFlexContainer,
-						                    item->isFlexContainer ? item->flexContainer.direction : parentDirection );
+						                    item->isFlexContainer ? item->flexContainer.direction : parentDirection,
+											perspectiveOwner );
 					}
 				}
 				/* macOS-style scrollbar for a `scroll` flex container, emitted
@@ -4820,7 +5048,8 @@ static wiredItemDef_t *wui_clay_clone_template( const wiredItemDef_t *templ,
 static void wui_clay_emit_repeat_row( const wiredMenuDef_t *panel,
                                        const wiredItemDef_t *templ,
                                        int rowIdx,
-                                       const wui_row_ctx_t *ctx )
+                                       const wui_row_ctx_t *ctx,
+									   const wiredItemDef_t *perspectiveOwner )
 {
 	float       x, y, w, h;
 	Clay_Color  bg, borderColor;
@@ -4856,7 +5085,8 @@ static void wui_clay_emit_repeat_row( const wiredMenuDef_t *panel,
 			clone->resolvedRect.y = y;
 			clone->resolvedRect.w = w;
 			clone->resolvedRect.h = h;
-			wui_clay_emit_item( panel, clone, qfalse, WUI_LAYOUT_ROW );
+			wui_clay_emit_item( panel, clone, qfalse, WUI_LAYOUT_ROW,
+				perspectiveOwner );
 		}
 		return;
 	}
@@ -4896,6 +5126,7 @@ static void wui_clay_emit_repeat_row( const wiredMenuDef_t *panel,
 			.attachPoints = { CLAY_ATTACH_POINT_LEFT_TOP, CLAY_ATTACH_POINT_LEFT_TOP }
 		},
 		.backgroundColor = bg,
+		.userData = wui_clay_command_tag( perspectiveOwner, 0u ),
 		.border = {
 			.color = borderColor,
 			.width = { borderW, borderW, borderW, borderW, 0 }
@@ -4911,6 +5142,7 @@ static void wui_clay_emit_repeat_row( const wiredMenuDef_t *panel,
 			s.chars                 = rowText;
 
 			CLAY_TEXT( s, CLAY_TEXT_CONFIG({
+				.userData      = wui_clay_command_tag( perspectiveOwner, 0u ),
 				.fontId        = fontSlot,
 				.fontSize      = (uint16_t)( templ->fontPointSize > 0 ? templ->fontPointSize : 16 ),
 				.letterSpacing = (uint16_t) templ->letterSpacing,
@@ -4922,7 +5154,8 @@ static void wui_clay_emit_repeat_row( const wiredMenuDef_t *panel,
 }
 
 static void wui_clay_emit_repeat_block( const wiredMenuDef_t *panel,
-                                         const wiredItemDef_t *containerItem )
+                                         const wiredItemDef_t *containerItem,
+										 const wiredItemDef_t *perspectiveOwner )
 {
 	const wiredRepeatBlock_t *rb = containerItem->repeatBlock;
 	wiredRepeatBlock_t       *rbMut;   /* for once-only warn flag mutation */
@@ -4964,7 +5197,8 @@ static void wui_clay_emit_repeat_block( const wiredMenuDef_t *panel,
 			ctx.rowScalar   = rowScalar;
 			ctx.storePrefix = NULL;
 
-			wui_clay_emit_repeat_row( panel, rb->templateItem, i, &ctx );
+			wui_clay_emit_repeat_row( panel, rb->templateItem, i, &ctx,
+				perspectiveOwner );
 		}
 
 		wui_clay_chunk_array_release( vm );
@@ -4996,7 +5230,8 @@ static void wui_clay_emit_repeat_block( const wiredMenuDef_t *panel,
 			ctx.rowScalar   = NULL;
 			ctx.storePrefix = rowPrefix;
 
-			wui_clay_emit_repeat_row( panel, rb->templateItem, i, &ctx );
+			wui_clay_emit_repeat_row( panel, rb->templateItem, i, &ctx,
+				perspectiveOwner );
 		}
 	}
 }
@@ -5008,17 +5243,9 @@ static void wui_clay_emit_panel( const wiredMenuDef_t *menu )
 {
 	int i;
 
-	/* Layout-resolution pass against the current viewport size BEFORE
-	 * reading menu->resolvedRect (which backcolor / background / item
-	 * emits below all depend on). This is the SOLE layout
-	 * pass per visible panel per frame — legacy WiredUI_Refresh /
-	 * WiredUI_RenderMenuOverlay (which previously laid out the active
-	 * menu in parallel) retired. The const cast follows the layout
-	 * helper's convention (it mutates resolvedRect; menus throughout
-	 * the compositor are otherwise treated as read-only). */
-	WUI_LayoutMenu( (wiredMenuDef_t *) menu,
-	                (float) wui_clay_lastWidth,
-	                (float) wui_clay_lastHeight );
+	/* Resolve only the viewport-relative panel containing block. Clay owns the
+	 * complete descendant tree; there is no hand-written flex pre-pass. */
+	wui_clay_resolve_panel_root( (wiredMenuDef_t *) menu );
 
 	/* select Path A (native Clay flex) vs Path B (CLAY_FLOATING +
 	 * resolvedRect pinning) for this panel's items. Set ONCE per panel
@@ -5121,7 +5348,9 @@ static void wui_clay_emit_panel( const wiredMenuDef_t *menu )
 			if ( menu->items[ i ] ) {
 				/* parentIsContainer=qtrue: static top-level items flow as flex
 				 * children of the screen root; floating items ignore it. */
-				wui_clay_emit_item( menu, menu->items[ i ], qtrue, WUI_LAYOUT_COLUMN );
+				wui_clay_seed_panel_child( menu, menu->items[ i ] );
+				wui_clay_emit_item( menu, menu->items[ i ], qtrue,
+					WUI_LAYOUT_COLUMN, NULL );
 			}
 		}
 	}
@@ -5320,11 +5549,64 @@ static void wui_clay_dump_render_commands( Clay_RenderCommandArray *cmds, const 
 }
 #endif
 
+/* CSS-like paint transform for a Clay flex subtree. Layout and hit testing stay
+ * axis aligned, while every renderer primitive emitted between the container's
+ * background and border inherits one projective transform. This includes text
+ * glyphs, images, bars, nested containers and custom HUD draws. amount is
+ * normalized and signed: <0 recedes left, >0 recedes right. */
+typedef struct {
+	Clay_BoundingBox bounds;
+	float            amount;
+} wui_perspective_paint_t;
+
+static const wiredItemDef_t *wui_applied_perspective_owner;
+
+static void wui_clay_apply_perspective_paint( const wui_perspective_paint_t *paint ) {
+	refUiTransform_t transform;
+	if ( !wui_compositor_emit_to_swapchain || !re.SetUiTransform ) return;
+	if ( !paint || fabsf( paint->amount ) < 0.001f ) {
+		re.SetUiTransform( NULL );
+		return;
+	}
+	memset( &transform, 0, sizeof( transform ) );
+	transform.schemaVersion = REF_UI_TRANSFORM_SCHEMA_VERSION;
+	transform.x = paint->bounds.x;
+	transform.y = paint->bounds.y;
+	transform.width = paint->bounds.width;
+	transform.height = paint->bounds.height;
+	transform.perspective = paint->amount;
+	re.SetUiTransform( &transform );
+}
+
+static void wui_clay_apply_perspective_owner( const wiredItemDef_t *owner ) {
+	wui_perspective_paint_t paint;
+	if ( owner == wui_applied_perspective_owner ) return;
+	wui_applied_perspective_owner = owner;
+	if ( !owner || fabsf( owner->perspective ) < 0.001f ) {
+		wui_clay_apply_perspective_paint( NULL );
+		return;
+	}
+	paint.bounds.x = owner->resolvedRect.x;
+	paint.bounds.y = owner->resolvedRect.y;
+	paint.bounds.width = owner->resolvedRect.w;
+	paint.bounds.height = owner->resolvedRect.h;
+	paint.amount = owner->perspective;
+	wui_clay_apply_perspective_paint( &paint );
+}
+
 /* Dispatch a single Clay render command. */
 static void wui_clay_dispatch_command( Clay_RenderCommand *rc )
 {
 	Clay_BoundingBox *bb = &rc->boundingBox;
 	vec4_t            color;
+	const wiredItemDef_t *perspectiveOwner =
+		wui_clay_command_perspective_owner( rc->userData );
+	if ( rc->commandType == CLAY_RENDER_COMMAND_TYPE_CUSTOM ) {
+		const wuiCustomDrawCommand_t *custom =
+			(const wuiCustomDrawCommand_t *)rc->renderData.custom.customData;
+		if ( custom ) perspectiveOwner = custom->perspectiveOwner;
+	}
+	wui_clay_apply_perspective_owner( perspectiveOwner );
 
 	switch ( rc->commandType ) {
 	case CLAY_RENDER_COMMAND_TYPE_RECTANGLE: {
@@ -5344,12 +5626,8 @@ static void wui_clay_dispatch_command( Clay_RenderCommand *rc )
 			re.SetColor( NULL );
 			break;
 		}
-		/* Diegetic fill: linearise the rgb so a translucent panel composites
-		   correctly in the linear HDR UI buffer (see wui_srgb_to_linear). Only
-		   RECTANGLE fills — text/border/image dispatch keep perceptual rgb. */
-		color[0] = wui_srgb_to_linear( color[0] );
-		color[1] = wui_srgb_to_linear( color[1] );
-		color[2] = wui_srgb_to_linear( color[2] );
+		/* The renderer contract receives authored sRGB vertex colour. Each
+		 * backend decodes it exactly once before blending in its linear target. */
 		re.SetColor( color );
 		re.DrawStretchPic( bb->x, bb->y, bb->width, bb->height,
 		                   0.0f, 0.0f, 0.0f, 0.0f, cls.whiteShader );
@@ -5440,12 +5718,9 @@ static void wui_clay_dispatch_command( Clay_RenderCommand *rc )
 		float left   = bd->width.left;
 
 		wui_compositor_border_emitted++;
-
 		wui_clay_color_to_vec4( &bd->color, color, wui_compositor_panel_alpha );
-		if ( color[3] <= 0.0f ) break;
-		if ( !wui_compositor_emit_to_swapchain ) break;
-
-		re.SetColor( color );
+		if ( color[3] > 0.0f && wui_compositor_emit_to_swapchain ) {
+			re.SetColor( color );
 		/* Up to 4 strip draws — one per non-zero edge. */
 		if ( top > 0.0f ) {
 			re.DrawStretchPic( bb->x, bb->y, bb->width, top,
@@ -5463,7 +5738,8 @@ static void wui_clay_dispatch_command( Clay_RenderCommand *rc )
 			re.DrawStretchPic( bb->x + bb->width - right, bb->y, right, bb->height,
 			                   0,0,0,0, cls.whiteShader );
 		}
-		re.SetColor( NULL );
+			re.SetColor( NULL );
+		}
 		break;
 	}
 
@@ -5577,7 +5853,10 @@ static void wui_clay_dispatch_command( Clay_RenderCommand *rc )
 		if ( cmd->ownerdrawFlag != 0 && !WiredUI_OwnerDrawVisible( cmd->ownerdrawFlag ) ) {
 			break;
 		}
-		/* cinematic director: hide EVERY game-HUD element (hud:<name>) while a
+		/* cg_draw2D is the master game-HUD visibility switch. Hide every
+		   hud:<name> custom draw, including subtitles, while it is disabled.
+
+		   Cinematic director: hide EVERY game-HUD element (hud:<name>) while a
 		   scene is playing with its HUD flag off — including always-visible ones
 		   (defaultVisibility == 0) that skip the SE predicate below, e.g. the
 		   scoreboard bar. Only HUD custom-draws are gated; console / viewport /
@@ -5587,16 +5866,41 @@ static void wui_clay_dispatch_command( Clay_RenderCommand *rc )
 		   cinematic caption), so it is NOT hidden by the HUD-off flag — a cutscene
 		   hides the HUD but the subtitle stays visible. It gates itself on the
 		   active-caption state instead. */
-		if ( wiredHud && wiredHud_state_valid && wiredHud->sceneHudHidden
-		  && cmd->name[0] == 'h' && cmd->name[1] == 'u' && cmd->name[2] == 'd' && cmd->name[3] == ':'
-		  && Q_stricmp( cmd->name, "hud:subtitle" ) != 0 ) {
-			break;
+		if ( wiredHud && wiredHud_state_valid
+		  && cmd->name[0] == 'h' && cmd->name[1] == 'u' && cmd->name[2] == 'd' && cmd->name[3] == ':' ) {
+			if ( wiredHud->hud2DHidden ) {
+				break;
+			}
+			if ( wiredHud->sceneHudHidden
+			  && Q_stricmp( cmd->name, "hud:subtitle" ) != 0 ) {
+				break;
+			}
 		}
 		if ( def->defaultVisibility != 0 && !WiredHud_SE_Visible( def->defaultVisibility ) ) {
 			break;
 		}
 
 		if ( def->isStateful ) {
+			/* First resolved dispatch owns stateful creation.  Emit-time x/y/w/h
+			 * are pre-layout estimates for native flex children; rc->boundingBox
+			 * is Clay's authoritative physical-pixel box. */
+			if ( !cmd->context && def->create && cmd->item ) {
+				wuiCustomDrawConfig_t cfg;
+				const char *colon = strchr( cmd->name, ':' );
+				memset( &cfg, 0, sizeof( cfg ) );
+				cfg.rect[ 0 ]      = bb->x;
+				cfg.rect[ 1 ]      = bb->y;
+				cfg.rect[ 2 ]      = bb->width;
+				cfg.rect[ 3 ]      = bb->height;
+				Vector4Copy( cmd->color, cfg.forecolor );
+				cfg.ownerdrawFlag  = cmd->ownerdrawFlag;
+				cfg.textstyle      = cmd->item->textstyle;
+				cfg.familyIndex    = cmd->familyIndex;
+				cfg.unprefixedName = colon ? colon + 1 : cmd->name;
+				cfg.item           = cmd->item;
+				cmd->context = def->create( &cfg );
+				( (wiredItemDef_t *) cmd->item )->customDrawContext = cmd->context;
+			}
 			if ( def->routine.stateful && cmd->context ) {
 				def->routine.stateful( cmd->context,
 				                       bb->x, bb->y, bb->width, bb->height,
@@ -5624,8 +5928,7 @@ static void wui_clay_dispatch_command( Clay_RenderCommand *rc )
  * vignette — those already dim the backdrop, so re-scrimming them would double-
  * darken. The small `fullScreen 0` popups (popup_message) have no backdrop of
  * their own; this gives them the same dimmed backing so every modal reads with a
- * consistent scrim. Drawn with the same linearised white-shader fill the
- * RECTANGLE dispatch uses (correct compositing in the linear HDR UI buffer). */
+ * consistent scrim. The backend performs the shared sRGB-to-linear decode. */
 static void wui_clay_emit_modal_scrim( const wiredMenuDef_t *menu )
 {
 	vec4_t col;
@@ -5633,9 +5936,9 @@ static void wui_clay_emit_modal_scrim( const wiredMenuDef_t *menu )
 	if ( !wui_compositor_emit_to_swapchain ) return;
 	/* ~55% black — enough to separate the dialog from the surface behind it
 	 * without hiding it, matching the vignette weight the fullscreen dialogs use. */
-	col[0] = wui_srgb_to_linear( 0.0f );
-	col[1] = wui_srgb_to_linear( 0.0f );
-	col[2] = wui_srgb_to_linear( 0.0f );
+	col[0] = 0.0f;
+	col[1] = 0.0f;
+	col[2] = 0.0f;
 	col[3] = 0.55f;
 	re.SetColor( col );
 	re.DrawStretchPic( 0.0f, 0.0f,
@@ -5680,7 +5983,12 @@ static void wui_clay_resolve_layer_states( void )
 	 * including the implicit-root case where main is active without ever
 	 * having been pushed. That path is precisely what the old slot model
 	 * could not see. */
-	isLoading = ( clientActiveApp && clientActiveApp->state == CA_LOADING ) ? qtrue : qfalse;
+	/* The loading layer owns the whole connection lifecycle, including the
+	 * CA_PRIMED hold used for the last loading frame. Keying only on CA_LOADING
+	 * let the attract reel reappear above the world during CA_PRIMED while the
+	 * loading panel was still active. Resolve the backdrop from the same policy
+	 * as the layer itself so those two answers cannot diverge. */
+	isLoading = loading_policy_isActive();
 
 	WUI_BgPresetEval( top ? top->bgPreset : WUI_BG_PRESET_ANIMATED,
 	                  top ? qtrue : qfalse, isLoading, &bg );
@@ -5752,6 +6060,9 @@ void WiredUI_CompositorEmitFrame( void )
 	const wiredMenuDef_t     *menu;
 
 	if ( !wui_clay_initialized ) return;
+	wui_applied_perspective_owner = NULL;
+	if ( wui_compositor_emit_to_swapchain && re.SetUiTransform )
+		re.SetUiTransform( NULL );
 
 	/* Resolve every layer's visible/paused state for this frame before any
 	 * emit reads it. The background family answers to the stack-top menu's
@@ -6130,8 +6441,10 @@ void WiredUI_CompositorEmitFrame( void )
 		/* (3b) Emit panel + record (id, item, panel) tuples. */
 		Clay_BeginLayout();
 
-		wui_clay_emit_panel( menu );
-		cmds = Clay_EndLayout();
+			wui_clay_emit_panel( menu );
+			cmds = Clay_EndLayout();
+		wui_clay_sync_panel_rects( menu );
+		WUI_DumpLayout( menu );
 
 		/* (3b') Snapshot scroll-container extents now that EndLayout computed
 		 * contentSize; next frame's scrollbar emit + wheel handler read this. */
@@ -6222,6 +6535,11 @@ void WiredUI_CompositorEmitFrame( void )
 			re.SetClipRegion( NULL );
 			wui_scissor_depth = 0;
 		}
+		/* A malformed/no-border authored perspective container must not leak
+		 * its paint transform into the next independently laid-out panel. */
+		if ( wui_compositor_emit_to_swapchain && re.SetUiTransform )
+			re.SetUiTransform( NULL );
+		wui_applied_perspective_owner = NULL;
 	}
 
 	/* (4) OVERLAY layer sub-pass split.
@@ -6252,6 +6570,9 @@ void WiredUI_CompositorEmitFrame( void )
 		wui_clay_dropdown_drawn = qtrue;
 		wui_clay_dispatch_multidropdown();
 	}
+#ifdef WIRED_WEB_UI_NATIVE
+	if ( wui_visible_panel_count > 0 ) WiredWebAuthored_MarkMenuRendered();
+#endif
 }
 
 /* ── public hit-test entry points (called from WiredUI_*Event hooks) ── */
@@ -6527,8 +6848,8 @@ uint32_t WiredUI_CompositorGetFocusedId( void )
 /* Fetch the ACTUAL Clay-rendered rect of an item from the previous frame's
  * layout (Clay's persistent element hashmap). Settings rows inside flexbox
  * panels are positioned by Clay's flex flow (ATTACH_TO_NONE), so their true
- * on-screen rect is NOT the WUI_LayoutMenu legacy resolvedRect — it is what
- * Clay actually laid out. Returns qtrue and fills *out (physical px) when the
+ * on-screen rect is what Clay actually laid out, not the compatibility
+ * resolvedRect snapshot. Returns qtrue and fills *out (physical px) when the
  * element was found in the last layout, qfalse otherwise. Same 1-frame-lag
  * pattern as the focus-highlight bbox lookup — harmless for a popup that only
  * opens after the row has already rendered at least once. */

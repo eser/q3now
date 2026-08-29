@@ -1,0 +1,136 @@
+#version 460
+layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
+
+layout(binding = 0, std140) uniform Params
+{
+    mat4 invViewProjection;
+    vec4 eyeNear;
+    vec4 farTimeCoverageShadow;
+    vec4 windDensity;
+    vec4 layerErosion;
+    vec4 sunDirectionIntensity;
+    vec4 sunColorLightning;
+    vec4 ambientColor;
+    uvec4 grid;
+} p;
+
+layout(binding = 0, std430) readonly buffer LitMedia
+{
+    vec4 sourceRadianceExtinction[];
+} _192;
+
+layout(binding = 1, std430) writeonly buffer CloudMedia
+{
+    vec4 cloudRadianceExtinction[];
+} _211;
+
+float hash13(inout vec3 q)
+{
+    q = fract(q * 0.103100001811981201171875);
+    q += vec3(dot(q, q.yzx + vec3(33.3300018310546875)));
+    return fract((q.x + q.y) * q.z);
+}
+
+float valueNoise(vec3 x)
+{
+    vec3 cell = floor(x);
+    vec3 f = fract(x);
+    f = (f * f) * (vec3(3.0) - (f * 2.0));
+    vec3 param = cell + vec3(0.0);
+    float _68 = hash13(param);
+    float n000 = _68;
+    vec3 param_1 = cell + vec3(1.0, 0.0, 0.0);
+    float _75 = hash13(param_1);
+    float n100 = _75;
+    vec3 param_2 = cell + vec3(0.0, 1.0, 0.0);
+    float _81 = hash13(param_2);
+    float n010 = _81;
+    vec3 param_3 = cell + vec3(1.0, 1.0, 0.0);
+    float _87 = hash13(param_3);
+    float n110 = _87;
+    vec3 param_4 = cell + vec3(0.0, 0.0, 1.0);
+    float _93 = hash13(param_4);
+    float n001 = _93;
+    vec3 param_5 = cell + vec3(1.0, 0.0, 1.0);
+    float _99 = hash13(param_5);
+    float n101 = _99;
+    vec3 param_6 = cell + vec3(0.0, 1.0, 1.0);
+    float _105 = hash13(param_6);
+    float n011 = _105;
+    vec3 param_7 = cell + vec3(1.0);
+    float _111 = hash13(param_7);
+    float n111 = _111;
+    return mix(mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y), mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y), f.z);
+}
+
+void main()
+{
+    uvec3 c = gl_GlobalInvocationID;
+    uvec3 dims = p.grid.xyz;
+    if (any(greaterThanEqual(c, dims)))
+    {
+        return;
+    }
+    uint index = (((c.z * dims.y) + c.y) * dims.x) + c.x;
+    vec4 source = _192.sourceRadianceExtinction[index];
+    float cover = clamp(p.farTimeCoverageShadow.z, 0.0, 1.0);
+    if (cover <= 0.0)
+    {
+        _211.cloudRadianceExtinction[index] = source;
+        return;
+    }
+    vec2 uv = (vec2(c.xy) + vec2(0.5)) / vec2(dims.xy);
+    float slice = (float(c.z) + 0.5) / float(dims.z);
+    float nearZ = max(p.eyeNear.w, 0.00999999977648258209228515625);
+    float farZ = max(p.farTimeCoverageShadow.x, nearZ + 0.00999999977648258209228515625);
+    float distanceZ = nearZ * pow(farZ / nearZ, slice);
+    vec4 worldH = p.invViewProjection * vec4((uv * 2.0) - vec2(1.0), 1.0 - (nearZ / distanceZ), 1.0);
+    vec3 world = worldH.xyz / vec3(max(abs(worldH.w), 9.9999999747524270787835121154785e-07));
+    float base = p.layerErosion.x;
+    float top = max(p.layerErosion.y, base + 1.0);
+    float edge = max((top - base) * clamp(p.layerErosion.z, 0.0199999995529651641845703125, 0.449999988079071044921875), 1.0);
+    float envelope = smoothstep(base, base + edge, world.z) * (1.0 - smoothstep(top - edge, top, world.z));
+    if (envelope <= 0.0)
+    {
+        _211.cloudRadianceExtinction[index] = source;
+        return;
+    }
+    vec3 advected = world + (p.windDensity.xyz * p.farTimeCoverageShadow.y);
+    float scale = max((top - base) * 0.319999992847442626953125, 48.0);
+    vec3 param = advected / vec3(scale);
+    float shape = valueNoise(param);
+    float threshold = mix(0.819999992847442626953125, 0.300000011920928955078125, cover);
+    float density = smoothstep(threshold, min(threshold + max(p.layerErosion.w, 0.07999999821186065673828125), 1.0), shape) * envelope;
+    float extinction = density * max(p.windDensity.w, 0.0);
+    vec3 viewVector = world - p.eyeNear.xyz;
+    float viewLength = length(viewVector);
+    vec3 _394;
+    if (viewLength > 9.9999997473787516355514526367188e-06)
+    {
+        _394 = viewVector / vec3(viewLength);
+    }
+    else
+    {
+        _394 = vec3(0.0, 0.0, 1.0);
+    }
+    vec3 viewDir = _394;
+    vec3 sunVector = p.sunDirectionIntensity.xyz;
+    float sunLength = length(sunVector);
+    vec3 _414;
+    if (sunLength > 9.9999997473787516355514526367188e-06)
+    {
+        _414 = sunVector / vec3(sunLength);
+    }
+    else
+    {
+        _414 = vec3(0.0, 0.0, 1.0);
+    }
+    vec3 sunDir = _414;
+    float forward = pow(max(dot(viewDir, sunDir), 0.0), 4.0);
+    float selfShadow = exp(((-extinction) * (top - base)) * 0.180000007152557373046875);
+    vec3 illumination = p.ambientColor.xyz + ((((p.sunColorLightning.xyz * p.sunDirectionIntensity.w) * selfShadow) * mix(0.3499999940395355224609375, 1.0, forward)) * (1.0 - clamp(p.farTimeCoverageShadow.w, 0.0, 1.0)));
+    illumination += p.sunColorLightning.www;
+    vec3 cloudRadiance = (vec3(0.920000016689300537109375, 0.949999988079071044921875, 1.0) * extinction) * illumination;
+    _211.cloudRadianceExtinction[index] = source + vec4(cloudRadiance, extinction);
+}
+

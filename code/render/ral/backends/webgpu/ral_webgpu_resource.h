@@ -44,6 +44,7 @@ typedef struct {
 	uint32_t width;
 	uint32_t height;
 	uint32_t depth;
+	ralFormat_t format;
 	uint32_t bytesPerTexel;
 } ralWebGpuTextureDesc_t;
 

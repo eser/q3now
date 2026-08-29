@@ -4,6 +4,7 @@
 // cl_cgame.c  -- client system interaction with client game
 
 #include "client.h"
+#include "cl_wired_fx.h"
 #include "wired/ui/cl_wired_ui.h"          /* WiredUI_SetLoadingMenu (state→named-UI) */
 #include "wired/ui/cl_wired_ui_hud_state.h"
 #include "wired/ui/cl_wired_text.h"
@@ -319,6 +320,21 @@ static void CL_SetUserCmdValue( int userCmdValue, float sensitivityScale, int fr
 	app->cl.cgameFreezeMove = freezeMove;
 }
 
+static void CL_SetUserCmdAim( int mode, int pitchShort, int yawShort ) {
+	clientApp_t *app = CL_AppForActiveCgame();
+
+	if ( mode != UCMD_AIM_THIRD_PERSON_CENTER ) {
+		app->cl.cgameAimMode = UCMD_AIM_NONE;
+		app->cl.cgameAimAngles[PITCH] = 0;
+		app->cl.cgameAimAngles[YAW] = 0;
+		return;
+	}
+
+	app->cl.cgameAimMode = mode;
+	app->cl.cgameAimAngles[PITCH] = pitchShort & 0xffff;
+	app->cl.cgameAimAngles[YAW] = yawShort & 0xffff;
+}
+
 
 /*
 =====================
@@ -558,6 +574,11 @@ void CL_ShutdownCGame( clientApp_t *app ) {
 		Key_SetCatcher( Key_GetCatcher( ) & ~KEYCATCH_CGAME );
 	}
 	app->cgameStarted = qfalse;
+	/* The aim channel is owned by the live cgame frame. Never let a staged
+	 * third-person direction survive disconnect, map teardown, or VM restart. */
+	app->cl.cgameAimMode = UCMD_AIM_NONE;
+	app->cl.cgameAimAngles[PITCH] = 0;
+	app->cl.cgameAimAngles[YAW] = 0;
 
 	if ( !app->cgvm ) {
 		return;
@@ -1029,6 +1050,28 @@ static const vmSyscallDesc_t cl_desc_CG_R_SETATMOSPHERE = {
 static const vmSyscallDesc_t cl_desc_CG_R_SETATMOSPHEREHEIGHTGRID = {
 	CG_R_SETATMOSPHEREHEIGHTGRID, "CG_R_SETATMOSPHEREHEIGHTGRID", 2, { VARG_VMPTR_COUNTED, VARG_INT },
 	{ [0] = { sizeof( float ), 2 } }   // grid: count = args[2] (float count)
+};
+static const vmSyscallDesc_t cl_desc_CG_R_ADDATMOSPHEREEMITTER = {
+	CG_R_ADDATMOSPHEREEMITTER, "CG_R_ADDATMOSPHEREEMITTER", 1, { VARG_VMPTR }
+};
+static const vmSyscallDesc_t cl_desc_CG_R_REGISTERATMOSPHEREEFFECTPROFILE = {
+	CG_R_REGISTERATMOSPHEREEFFECTPROFILE,
+	"CG_R_REGISTERATMOSPHEREEFFECTPROFILE", 2, { VARG_INT, VARG_VMPTR }
+};
+static const vmSyscallDesc_t cl_desc_CG_R_ADDATMOSPHERESURFACEEVENT = {
+	CG_R_ADDATMOSPHERESURFACEEVENT,
+	"CG_R_ADDATMOSPHERESURFACEEVENT", 1, { VARG_VMPTR }
+};
+static const vmSyscallDesc_t cl_desc_CG_R_ADDATMOSPHEREMEDIAVOLUME = {
+	CG_R_ADDATMOSPHEREMEDIAVOLUME,
+	"CG_R_ADDATMOSPHEREMEDIAVOLUME", 1, { VARG_VMPTR }
+};
+static const vmSyscallDesc_t cl_desc_CG_WIRED_FX_EMIT_EVENT = {
+	CG_WIRED_FX_EMIT_EVENT, "CG_WIRED_FX_EMIT_EVENT", 1, { VARG_VMPTR }
+};
+static const vmSyscallDesc_t cl_desc_CG_R_REGISTERPARTICLECLASSNAMED = {
+	CG_R_REGISTERPARTICLECLASSNAMED, "CG_R_REGISTERPARTICLECLASSNAMED", 3,
+	{ VARG_INT, VARG_VMPTR, VARG_VMPTR }
 };
 static const vmSyscallDesc_t cl_desc_CG_R_RENDERSCENE = {   // refdef_t* (write-back: clip applied in place)
 	CG_R_RENDERSCENE, "CG_R_RENDERSCENE", 1, { VARG_VMPTR }
@@ -1779,6 +1822,13 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 			re.RegisterParticleClass( (int)t[0].i, t[1].p );
 		}
 		return 0;
+	case CG_R_REGISTERPARTICLECLASSNAMED: {
+		VM_CHECKBOUNDS( VM_ActiveNativeVM(), args[2], sizeof( particleClass_t ) );
+		CL_RSND( &cl_desc_CG_R_REGISTERPARTICLECLASSNAMED, 3 );
+		CL_WiredFx_RegisterParticleClass( (particleClassHandle_t)t[0].i,
+			t[1].p, t[2].p );
+		return 0;
+	}
 	case CG_R_SETATMOSPHERE:
 		if ( re.SetAtmosphere ) {
 			CL_RSND( &cl_desc_CG_R_SETATMOSPHERE, 1 );
@@ -1792,9 +1842,40 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 			re.SetAtmosphereHeightgrid( t[0].p, (int)t[1].i );
 		}
 		return 0;
+	case CG_R_ADDATMOSPHEREEMITTER:
+		if ( re.AddAtmosphereEmitter ) {
+			CL_RSND( &cl_desc_CG_R_ADDATMOSPHEREEMITTER, 1 );
+			re.AddAtmosphereEmitter( t[0].p );
+		}
+		return 0;
+	case CG_R_REGISTERATMOSPHEREEFFECTPROFILE:
+		if ( re.RegisterAtmosphereEffectProfile ) {
+			CL_RSND( &cl_desc_CG_R_REGISTERATMOSPHEREEFFECTPROFILE, 2 );
+			re.RegisterAtmosphereEffectProfile( (uint32_t)t[0].i, t[1].p );
+		}
+		return 0;
+	case CG_R_ADDATMOSPHERESURFACEEVENT:
+		if ( re.AddAtmosphereSurfaceEvent ) {
+			CL_RSND( &cl_desc_CG_R_ADDATMOSPHERESURFACEEVENT, 1 );
+			re.AddAtmosphereSurfaceEvent( t[0].p );
+		}
+		return 0;
+	case CG_R_ADDATMOSPHEREMEDIAVOLUME:
+		if ( re.AddAtmosphereMediaVolume ) {
+			CL_RSND( &cl_desc_CG_R_ADDATMOSPHEREMEDIAVOLUME, 1 );
+			re.AddAtmosphereMediaVolume( t[0].p );
+		}
+		return 0;
+	case CG_WIRED_FX_EMIT_EVENT: {
+		VM_CHECKBOUNDS( VM_ActiveNativeVM(), args[1], sizeof( wiredFxEvent_t ) );
+		CL_RSND( &cl_desc_CG_WIRED_FX_EMIT_EVENT, 1 );
+		CL_WiredFx_SubmitEvent( t[0].p );
+		return 0;
+	}
 	case CG_R_RENDERSCENE: {
 		CL_RSND( &cl_desc_CG_R_RENDERSCENE, 1 );
 		refdef_t *fd = t[0].p;
+		if ( fd ) CL_WiredFx_ServiceScene( fd );
 		/* Clip the world scene to the viewport's on-screen rect. The cgame
 		 * builds a fullscreen refdef; intersecting it with the current viewport
 		 * rect makes a non-full-screen viewport render only inside its panel.
@@ -1877,6 +1958,9 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		return CL_GetUserCmd( args[1], VMA(2) );
 	case CG_SETUSERCMDVALUE:
 		CL_SetUserCmdValue( args[1], VMF(2), args[3] );
+		return 0;
+	case CG_SETUSERCMDAIM:
+		CL_SetUserCmdAim( args[1], args[2], args[3] );
 		return 0;
 	case CG_MEMORY_REMAINING:
 		return Hunk_MemoryRemaining();
@@ -2201,17 +2285,28 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 #endif
 
 #if !FEAT_WIRED_UI && defined(WASM_MODULE)
-	/* W0 browser builds intentionally omit the compositor while retaining the
-	 * production cgame ABI. These optional UI publications are advisory at that
-	 * boundary; accept and discard them instead of turning a feature-off host
-	 * into an ABI-fatal client. The browser screen path below still renders the
-	 * cgame directly through CG_DRAW_ACTIVE_FRAME. */
+	/* The browser AOT UI consumes the same cgame-owned HUD/store publications as
+	 * native WiredUI. Unsupported viewport/event surfaces remain advisory until
+	 * their canonical browser consumers land. */
 	case CG_WIREDUI_PUSH_HUD_STATE:
+		VM_CHECKBOUNDS( VM_ActiveNativeVM(), args[1], sizeof( wiredHudState_t ) );
+		WiredWebUi_ReceiveHudState( VMA(1) );
+		return 0;
+	case CG_WUI_STORE_PUSH_BATCH:
+		{
+			int count = args[2];
+			if ( count < 0 ) count = 0;
+			if ( count > 256 ) count = 256;
+			if ( count > 0 )
+				VM_CHECKBOUNDS3( VM_ActiveNativeVM(), args[1], (unsigned)count,
+					sizeof( wuiStagedEntry_t ) );
+			WiredWebUi_ReceiveStoreBatch( VMA(1), count );
+		}
+		return 0;
 	case CG_WIREDUI_PUSH_EVENT:
 	case CG_REGISTER_VIEWPORT_PROVIDER:
 	case CG_UNREGISTER_VIEWPORT_PROVIDER:
 	case CG_R_DRAWTEXTNORM:
-	case CG_WUI_STORE_PUSH_BATCH:
 	case CG_WUI_STORE_PUSH_MARKERLIST:
 	case CG_WUI_STORE_DELETE:
 	case CG_WUI_STORE_CLEAR:
@@ -2305,6 +2400,10 @@ void CL_InitCGame( clientApp_t *app ) {
 	// idempotent for the second prime.
 	qboolean			isFocused = ( app == clientActiveApp );
 
+	app->cl.cgameAimMode = UCMD_AIM_NONE;
+	app->cl.cgameAimAngles[PITCH] = 0;
+	app->cl.cgameAimAngles[YAW] = 0;
+
 	Cbuf_NestedReset();
 
 	int t1 = Sys_Milliseconds();
@@ -2379,7 +2478,9 @@ void CL_InitCGame( clientApp_t *app ) {
 	// init for this gamestate
 	// use the lastExecutedServerCommand instead of the serverCommandSequence
 	// otherwise server commands sent just before a gamestate are dropped
+	CL_WiredFx_BeginRegistration();
 	VM_Call( app->cgvm, 3, CG_INIT, app->clc.serverMessageSequence, app->clc.lastExecutedServerCommand, app->clc.clientNum );
+	CL_WiredFx_LoadProfiles();
 
 	// we will send a usercmd this frame, which
 	// will cause the server to send us the first snapshot

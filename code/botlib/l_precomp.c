@@ -294,7 +294,16 @@ static int PC_ReadSourceToken(source_t *source, token_t *token)
 	while(!source->tokens)
 	{
 		//if there's a token to read from the script
-		if (PS_ReadToken(source->scriptstack, token)) return qtrue;
+		if (source->noStringConcat)
+		{
+			int oldFlags = source->scriptstack->flags;
+			int result;
+			source->scriptstack->flags |= SCFL_NOSTRINGWHITESPACES;
+			result = PS_ReadToken(source->scriptstack, token);
+			source->scriptstack->flags = oldFlags;
+			if (result) return qtrue;
+		}
+		else if (PS_ReadToken(source->scriptstack, token)) return qtrue;
 		//if at the end of the script
 		if (EndOfScript(source->scriptstack))
 		{
@@ -2723,7 +2732,7 @@ static int QuakeCMacro(source_t *source)
 // Returns:					-
 // Changes Globals:		-
 //============================================================================
-int PC_ReadToken(source_t *source, token_t *token)
+static int PC_ReadTokenInternal(source_t *source, token_t *token, qboolean concatenateStrings)
 {
 	define_t *define;
 
@@ -2754,10 +2763,10 @@ int PC_ReadToken(source_t *source, token_t *token)
 			} //end if
 		} //end if
 		// recursively concatenate strings that are behind each other still resolving defines
-		if (token->type == TT_STRING)
+		if (concatenateStrings && !source->noStringConcat && token->type == TT_STRING)
 		{
 			token_t newtoken;
-			if (PC_ReadToken(source, &newtoken))
+			if (PC_ReadTokenInternal(source, &newtoken, concatenateStrings))
 			{
 				if (newtoken.type == TT_STRING)
 				{
@@ -2800,6 +2809,31 @@ int PC_ReadToken(source_t *source, token_t *token)
 		return qtrue;
 	} //end while
 } //end of the function PC_ReadToken
+
+int PC_ReadToken(source_t *source, token_t *token)
+{
+	return PC_ReadTokenInternal(source, token, qtrue);
+}
+
+int PC_ReadTokenNoConcat(source_t *source, token_t *token)
+{
+	int previousMode;
+	int result;
+
+	if (!source) return qfalse;
+
+	/* Some preprocessor paths invoked while reading one token call the public
+	 * PC_ReadToken entry point internally.  Passing qfalse only to the outer
+	 * call therefore did not fully disable C-style adjacent-string folding:
+	 * `"key" "value"` could still emerge as one `keyvalue` token.  Scope the
+	 * mode on the source so every nested read observes the same lexical policy,
+	 * while ordinary bot/config parsing keeps concatenation enabled. */
+	previousMode = source->noStringConcat;
+	source->noStringConcat = qtrue;
+	result = PC_ReadTokenInternal(source, token, qfalse);
+	source->noStringConcat = previousMode;
+	return result;
+}
 //============================================================================
 //
 // Parameter:				-
@@ -3207,6 +3241,27 @@ int PC_ReadTokenHandle(int handle, pc_token_t *pc_token)
 		StripDoubleQuotes(pc_token->string);
 	return ret;
 } //end of the function PC_ReadTokenHandle
+
+int PC_ReadTokenHandleNoConcat(int handle, pc_token_t *pc_token)
+{
+	token_t token;
+	int ret;
+
+	if (handle < 1 || handle >= MAX_SOURCEFILES)
+		return 0;
+	if (!sourceFiles[handle])
+		return 0;
+
+	ret = PC_ReadTokenNoConcat(sourceFiles[handle], &token);
+	strcpy(pc_token->string, token.string);
+	pc_token->type = token.type;
+	pc_token->subtype = token.subtype;
+	pc_token->intvalue = token.intvalue;
+	pc_token->floatvalue = token.floatvalue;
+	if (pc_token->type == TT_STRING)
+		StripDoubleQuotes(pc_token->string);
+	return ret;
+}
 //============================================================================
 //
 // Parameter:			-

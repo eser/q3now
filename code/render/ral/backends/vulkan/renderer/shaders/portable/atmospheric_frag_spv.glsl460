@@ -18,10 +18,25 @@ layout(binding = 0, std140) uniform AtmFrame
     uint gridSize;
     uint atmType;
     float _distance;
-    float invResX;
-    float invResY;
-    float depthValid;
-} _59;
+    float computePad0;
+    float computePad1;
+    float computePad2;
+    vec4 windGust;
+    vec4 precipitation;
+    float dustAsh;
+    float indoorExposure;
+    uint climateSeed;
+    uint climatePad;
+    vec4 climate;
+    vec4 surfaceClimate;
+    vec4 sun;
+    vec4 moon;
+    vec4 ambientCloud;
+    vec4 cloudMedia;
+    vec4 effectMeta;
+    vec4 effectWorkloads[48];
+    vec4 renderParams;
+} _67;
 
 layout(binding = 0) uniform sampler2D sceneDepthTex;
 
@@ -31,11 +46,11 @@ layout(location = 0) out vec4 outColor;
 
 float softParticleFade()
 {
-    if (_59.depthValid < 0.5)
+    if (_67.renderParams.z < 0.5)
     {
         return 1.0;
     }
-    vec2 screenUV = gl_FragCoord.xy * vec2(_59.invResX, _59.invResY);
+    vec2 screenUV = gl_FragCoord.xy * _67.renderParams.xy;
     float sceneDepth = texture(sceneDepthTex, screenUV).x;
     if (sceneDepth <= 0.0)
     {
@@ -54,13 +69,45 @@ vec3 sRGBToLinear(inout vec3 c)
     return mix(hi, lo, vec3(cutoff));
 }
 
+vec3 displayVisibility(vec3 sceneColor)
+{
+    vec3 exposed = max(sceneColor, vec3(0.0)) * _67.viewLeft.w;
+    float luminance = dot(exposed, vec3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    bool _84 = luminance > 0.0;
+    bool _92;
+    if (_84)
+    {
+        _92 = luminance < _67.eyeWorld.w;
+    }
+    else
+    {
+        _92 = _84;
+    }
+    bool _99;
+    if (_92)
+    {
+        _99 = _67.viewUp.w != 1.0;
+    }
+    else
+    {
+        _99 = _92;
+    }
+    if (_99)
+    {
+        float curved = pow(luminance / _67.eyeWorld.w, _67.viewUp.w) * _67.eyeWorld.w;
+        exposed *= (curved / luminance);
+    }
+    return exposed;
+}
+
 void main()
 {
     float edge = 1.0 - smoothstep(0.0, 0.5, abs(fragUV.x - 0.5));
     float alpha = (fragColor.w * edge) * softParticleFade();
     vec3 param = fragColor.xyz;
-    vec3 _134 = sRGBToLinear(param);
-    vec3 rgb = _134;
+    vec3 _188 = sRGBToLinear(param);
+    vec3 param_1 = _188;
+    vec3 rgb = displayVisibility(param_1);
     outColor = vec4(rgb, alpha);
 }
 

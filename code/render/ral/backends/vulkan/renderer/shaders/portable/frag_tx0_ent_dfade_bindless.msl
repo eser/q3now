@@ -35,6 +35,7 @@ struct UBO
     float4 worldLightParams;
     float4 advancedFogColorDensity;
     float4 advancedFogTypeFarEnabled;
+    float4 emissionRadiance;
 };
 
 constant int tex_domain_tmp [[function_constant(4)]];
@@ -48,10 +49,11 @@ constant float alpha_test_value_tmp [[function_constant(1)]];
 constant float alpha_test_value = is_function_constant_defined(alpha_test_value_tmp) ? alpha_test_value_tmp : 0.0;
 constant bool _271 = (alpha_test_func == 2);
 constant bool _281 = (alpha_test_func == 3);
+constant bool _291 = (lightmap_slot != 0);
 constant int discard_mode_tmp [[function_constant(7)]];
 constant int discard_mode = is_function_constant_defined(discard_mode_tmp) ? discard_mode_tmp : 0;
-constant bool _311 = (discard_mode == 1);
-constant bool _321 = (discard_mode == 2);
+constant bool _379 = (discard_mode == 1);
+constant bool _389 = (discard_mode == 2);
 constant float depth_fade_scale_tmp [[function_constant(11)]];
 constant float depth_fade_scale = is_function_constant_defined(depth_fade_scale_tmp) ? depth_fade_scale_tmp : 2.0;
 constant int alpha_to_coverage_tmp [[function_constant(3)]];
@@ -184,16 +186,37 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
         }
     }
     base = color0;
+    if (_291)
+    {
+        float wetness = fast::clamp((*spvDescriptorSet0.m_77).worldLightParams.y, 0.0, 1.0);
+        float frost = fast::clamp((*spvDescriptorSet0.m_77).worldLightParams.z, 0.0, 1.0);
+        float luminance = dot(base.xyz, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+        float4 _313 = base;
+        float3 _315 = _313.xyz * mix(1.0, 0.819999992847442626953125, wetness);
+        base.x = _315.x;
+        base.y = _315.y;
+        base.z = _315.z;
+        float4 _322 = base;
+        float3 _336 = mix(_322.xyz, float3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), float3(frost * 0.550000011920928955078125));
+        base.x = _336.x;
+        base.y = _336.y;
+        base.z = _336.z;
+    }
+    float4 _350 = base;
+    float3 _352 = _350.xyz + (color0.xyz * (*spvDescriptorSet0.m_77).emissionRadiance.xyz);
+    base.x = _352.x;
+    base.y = _352.y;
+    base.z = _352.z;
     if (wired_advanced_fog_enabled((*spvDescriptorSet0.m_77)))
     {
         float fogAmount = wired_advanced_fog_amount((*spvDescriptorSet0.m_77), gl_FragCoord);
-        float4 _296 = base;
-        float3 _303 = mix(_296.xyz, (*spvDescriptorSet0.m_77).advancedFogColorDensity.xyz, float3(fogAmount));
-        base.x = _303.x;
-        base.y = _303.y;
-        base.z = _303.z;
+        float4 _364 = base;
+        float3 _371 = mix(_364.xyz, (*spvDescriptorSet0.m_77).advancedFogColorDensity.xyz, float3(fogAmount));
+        base.x = _371.x;
+        base.y = _371.y;
+        base.z = _371.z;
     }
-    if (_311)
+    if (_379)
     {
         if (base.w == 0.0)
         {
@@ -202,7 +225,7 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
     }
     else
     {
-        if (_321)
+        if (_389)
         {
             if (dot(base.xyz, base.xyz) == 0.0)
             {
@@ -210,21 +233,21 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
             }
         }
     }
-    uint _339 = (*spvDescriptorSet0.m_77).packed_indices[1].x & 4095u;
-    uint _346 = ((*spvDescriptorSet0.m_77).packed_indices[1].x >> uint(12)) & 255u;
-    float2 screenUV = gl_FragCoord.xy / float2(int2(wired_bindless_images[_339].get_width(), wired_bindless_images[_339].get_height()));
-    uint _359 = (*spvDescriptorSet0.m_77).packed_indices[1].x & 4095u;
-    uint _366 = ((*spvDescriptorSet0.m_77).packed_indices[1].x >> uint(12)) & 255u;
-    float sceneDepth = wired_bindless_images[_359].sample(wired_bindless_samplers[_366], screenUV).x;
+    uint _407 = (*spvDescriptorSet0.m_77).packed_indices[1].x & 4095u;
+    uint _414 = ((*spvDescriptorSet0.m_77).packed_indices[1].x >> uint(12)) & 255u;
+    float2 screenUV = gl_FragCoord.xy / float2(int2(wired_bindless_images[_407].get_width(), wired_bindless_images[_407].get_height()));
+    uint _427 = (*spvDescriptorSet0.m_77).packed_indices[1].x & 4095u;
+    uint _434 = ((*spvDescriptorSet0.m_77).packed_indices[1].x >> uint(12)) & 255u;
+    float sceneDepth = wired_bindless_images[_427].sample(wired_bindless_samplers[_434], screenUV).x;
     float fragDepth = gl_FragCoord.z;
     float depthDiff = fragDepth - sceneDepth;
     float fadeFactor = smoothstep(0.0, depth_fade_scale * 0.0005000000237487256526947021484375, depthDiff);
     base.w *= fadeFactor;
-    float4 _392 = base;
-    float3 _394 = _392.xyz * fadeFactor;
-    base.x = _394.x;
-    base.y = _394.y;
-    base.z = _394.z;
+    float4 _460 = base;
+    float3 _462 = _460.xyz * fadeFactor;
+    base.x = _462.x;
+    base.y = _462.y;
+    base.z = _462.z;
     out.out_color = base;
     return out;
 }

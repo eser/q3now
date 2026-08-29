@@ -1,5 +1,10 @@
 #version 460
 
+layout(binding = 0, std430) readonly buffer AtmosphereFroxels
+{
+    vec4 values[];
+} atmosphereFroxels;
+
 layout(std140, binding = 0) uniform ProductDraw
 {
     vec4 viewOriginDrawSpace;
@@ -8,44 +13,180 @@ layout(std140, binding = 0) uniform ProductDraw
     vec4 viewUp;
     vec4 projectionLightmap;
     vec4 viewportAlpha;
+    vec4 atmosphereEyeDensity;
+    vec4 atmosphereColorVisibility;
+    vec4 atmosphereHeightCloud;
+    uvec4 atmosphereFroxelGrid;
+    vec4 localSh[4];
+    uvec4 staticLighting;
+    vec4 emissiveRadiance;
 } productDraw;
 
 layout(binding = 0) uniform sampler2D baseTexture;
+layout(binding = 2) uniform sampler2DArray staticRadianceTexture;
+layout(binding = 3) uniform sampler2DArray staticDirectionTexture;
+layout(binding = 4) uniform sampler2DArray staticVisibilityTexture;
 layout(binding = 1) uniform sampler2D lightmapTexture;
 
 layout(location = 0) in vec2 texCoord;
+layout(location = 4) in vec3 worldNormal;
 layout(location = 1) in vec2 lightmapCoord;
-layout(location = 0) out vec4 outColor;
 layout(location = 2) in vec4 color;
+layout(location = 3) in vec3 worldPosition;
+layout(location = 0) out vec4 outColor;
+
+vec3 wired_lighting_decode_oct(vec2 encoded)
+{
+    vec2 f = (encoded * 2.0) - vec2(1.0);
+    vec3 n = vec3(f, (1.0 - abs(f.x)) - abs(f.y));
+    if (n.z < 0.0)
+    {
+        vec2 folded = (vec2(1.0) - abs(n.yx)) * sign(n.xy);
+        n.x = folded.x;
+        n.y = folded.y;
+    }
+    return normalize(n);
+}
+
+vec3 wired_lighting_directional_static_indirect(vec3 radiance, vec2 encodedDirection, vec3 materialNormal)
+{
+    vec2 param = encodedDirection;
+    vec3 dominantDirection = wired_lighting_decode_oct(param);
+    return max(radiance, vec3(0.0)) * max(dot(normalize(materialNormal), dominantDirection), 0.0);
+}
+
+vec3 wired_display_visibility(vec3 sceneColor)
+{
+    vec3 exposed = max(sceneColor, vec3(0.0)) * productDraw.viewForward.w;
+    float luminance = dot(exposed, vec3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    bool _116 = luminance > 0.0;
+    bool _124;
+    if (_116)
+    {
+        _124 = luminance < productDraw.viewUp.w;
+    }
+    else
+    {
+        _124 = _116;
+    }
+    bool _131;
+    if (_124)
+    {
+        _131 = productDraw.viewLeft.w != 1.0;
+    }
+    else
+    {
+        _131 = _124;
+    }
+    if (_131)
+    {
+        float curved = pow(luminance / productDraw.viewUp.w, productDraw.viewLeft.w) * productDraw.viewUp.w;
+        exposed *= (curved / luminance);
+    }
+    return exposed;
+}
 
 void main()
 {
     vec4 base = texture(baseTexture, texCoord);
     int alphaMode = int(productDraw.viewportAlpha.z + 0.5);
-    bool _43 = alphaMode == 1;
-    bool _53;
-    if (_43)
+    bool _178 = alphaMode == 1;
+    bool _186;
+    if (_178)
     {
-        _53 = base.w < productDraw.viewportAlpha.w;
+        _186 = base.w < productDraw.viewportAlpha.w;
     }
     else
     {
-        _53 = _43;
+        _186 = _178;
     }
-    if (_53)
+    if (_186)
     {
         discard;
     }
-    vec3 _64;
-    if (productDraw.projectionLightmap.w >= 0.5)
+    vec3 localSh = max(((productDraw.localSh[0].xyz + (productDraw.localSh[1].xyz * worldNormal.x)) + (productDraw.localSh[2].xyz * worldNormal.y)) + (productDraw.localSh[3].xyz * worldNormal.z), vec3(0.0));
+    vec3 lighting;
+    if (productDraw.staticLighting.x == 2u)
     {
-        _64 = min(texture(lightmapTexture, lightmapCoord).xyz * 2.0, vec3(1.0));
+        vec3 address = vec3(lightmapCoord, float(productDraw.staticLighting.y));
+        vec3 radiance = texture(staticRadianceTexture, address).xyz;
+        vec2 encodedDirection = texture(staticDirectionTexture, address).xy;
+        if (productDraw.staticLighting.z == 2u)
+        {
+            encodedDirection = (encodedDirection * 0.5) + vec2(0.5);
+        }
+        vec3 param = radiance;
+        vec2 param_1 = encodedDirection;
+        vec3 param_2 = worldNormal;
+        lighting = wired_lighting_directional_static_indirect(param, param_1, param_2);
+        if (productDraw.staticLighting.w != 0u)
+        {
+            lighting *= texture(staticVisibilityTexture, address).x;
+        }
     }
     else
     {
-        _64 = vec3(1.0);
+        bool _294 = productDraw.staticLighting.x == 1u;
+        bool _302;
+        if (!_294)
+        {
+            _302 = productDraw.projectionLightmap.w >= 0.5;
+        }
+        else
+        {
+            _302 = _294;
+        }
+        if (_302)
+        {
+            lighting = min(texture(lightmapTexture, lightmapCoord).xyz * 2.0, vec3(1.0));
+        }
+        else
+        {
+            lighting = mix(vec3(1.0), localSh, bvec3(productDraw.localSh[0].w >= 0.5));
+        }
     }
-    vec3 lighting = _64;
-    outColor = vec4((base.xyz * lighting) * color.xyz, base.w * color.w);
+    vec3 lit = ((base.xyz * lighting) * color.xyz) + (base.xyz * productDraw.emissiveRadiance.xyz);
+    bool _344 = productDraw.viewOriginDrawSpace.w < 0.5;
+    bool _351;
+    if (_344)
+    {
+        _351 = productDraw.atmosphereFroxelGrid.z > 0u;
+    }
+    else
+    {
+        _351 = _344;
+    }
+    if (_351)
+    {
+        uvec3 grid = productDraw.atmosphereFroxelGrid.xyz;
+        uint x = min((uint(gl_FragCoord.x) / 16u), (grid.x - 1u));
+        uint y = min((uint(gl_FragCoord.y) / 16u), (grid.y - 1u));
+        float farDistance = max(productDraw.atmosphereColorVisibility.w, 4.0100002288818359375);
+        float viewDistance = length(worldPosition - productDraw.atmosphereEyeDensity.xyz);
+        float slice = clamp(log(max(viewDistance, 4.0) / 4.0) / log(farDistance / 4.0), 0.0, 0.99989998340606689453125);
+        uint z = min(uint(slice * float(grid.z)), (grid.z - 1u));
+        vec4 media = atmosphereFroxels.values[(productDraw.atmosphereFroxelGrid.w + (((z * grid.y) + y) * grid.x)) + x];
+        vec3 param_3 = (lit * media.w) + media.xyz;
+        outColor = vec4(wired_display_visibility(param_3), base.w * color.w);
+        return;
+    }
+    float density = productDraw.atmosphereEyeDensity.w;
+    if (productDraw.atmosphereColorVisibility.w > 0.0)
+    {
+        density = max(density, 3.912023067474365234375 / productDraw.atmosphereColorVisibility.w);
+    }
+    if ((productDraw.viewOriginDrawSpace.w < 0.5) && (density > 0.0))
+    {
+        float distanceToEye = length(worldPosition - productDraw.atmosphereEyeDensity.xyz);
+        float heightWeight = exp((-productDraw.atmosphereHeightCloud.y) * max(worldPosition.z - productDraw.atmosphereHeightCloud.x, 0.0));
+        float transmittance = exp(((-density) * heightWeight) * distanceToEye);
+        lit = mix(productDraw.atmosphereColorVisibility.xyz, lit, vec3(clamp(transmittance, 0.0, 1.0)));
+    }
+    if (productDraw.viewOriginDrawSpace.w < 0.5)
+    {
+        vec3 param_4 = lit;
+        lit = wired_display_visibility(param_4);
+    }
+    outColor = vec4(lit, base.w * color.w);
 }
 

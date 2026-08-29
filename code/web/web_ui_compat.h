@@ -11,18 +11,27 @@
  * header does not accidentally enable any implementation block.
  */
 #include "../qcommon/q_feats.h"
+#ifndef WIRED_WEB_UI_NATIVE
 #undef FEAT_WIRED_UI
 #define FEAT_WIRED_UI 1
+#endif
 #include "../client/client.h"
 #include "../client/wired/ui/cl_wired_ui.h"
 #include "../client/wired/ui/cl_wired_compositor.h"
 #include "../client/wired/ui/cl_wired_customdraw.h"
 #include "../client/wired/ui/cl_wired_attract.h"
 #include "../client/wired/ui/cl_wired_text.h"
+#include "../client/wired/ui/cl_wired_msdf.h"
+#include "../client/wired/ui/cl_wired_fonts.h"
 #include "../client/wired/ui/cl_wired_viewport.h"
 #include "../client/wired/l10n/cl_wired_l10n.h"
 #include "../client/wired/store/cl_wired_store.h"
+#ifndef WIRED_WEB_UI_NATIVE
 #undef FEAT_WIRED_UI
 #define FEAT_WIRED_UI 0
+#endif
+
+void WiredWebUi_ReceiveHudState( const wiredHudState_t *state );
+void WiredWebUi_ReceiveStoreBatch( const wuiStagedEntry_t *entries, int count );
 
 #endif

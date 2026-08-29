@@ -70,10 +70,10 @@ foreach(needle IN ITEMS "Ral_PresentationExtentValid( 1280u, 720u )"
 		message(FATAL_ERROR "presentation-host host test lost mutation/WebGPU coverage: ${needle}")
 	endif()
 endforeach()
-string(REGEX MATCH "#[ \t]*define[ \t]+REF_API_VERSION[ \t]+22([^0-9]|$)" api22 "${ABI}")
-if(NOT api22 OR NOT ABI MATCHES "ralPresentationHostImports_t PresentationHost"
+string(REGEX MATCH "#[ \t]*define[ \t]+REF_API_VERSION[ \t]+28([^0-9]|$)" api28 "${ABI}")
+if(NOT api28 OR NOT ABI MATCHES "ralPresentationHostImports_t PresentationHost"
 		OR NOT ABI MATCHES "PresentationChanged")
-	message(FATAL_ERROR "renderer ABI did not advance to generation-bound presentation API 22")
+	message(FATAL_ERROR "renderer ABI lost generation-bound presentation API at generation 28")
 endif()
 foreach(needle IN ITEMS
 	"rimp.PresentationHost.schemaVersion = RAL_PRESENTATION_HOST_SCHEMA_VERSION"

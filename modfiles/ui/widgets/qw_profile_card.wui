@@ -11,7 +11,7 @@
 itemDef {
 	name "card_profile"
 	type container
-	rect 0 0 1 15vh
+	width FIXED 1 height FIXED 15vh
 	height FIT
 	direction column
 	padding $spacing_card_padding_v $spacing_card_padding_h
@@ -23,65 +23,65 @@ itemDef {
 	itemDef {
 		name "card_profile_header_row"
 		type container
-		rect 0 0 1 2vh
+		width FIXED 1 height FIXED 2vh
 		height FIT
 		direction row
 		alignY center
 		gap 0.006
-		itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
-		itemDef { type 0 rect 0 0 10vw 2vh height FIT width PERCENT 10vw text "PROFILE" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 }
+		itemDef { type 0 width FIXED 1.2vw height FIXED 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
+		itemDef { type 0 width FIXED 10vw height FIXED 2vh height FIT width PERCENT 10vw text "PROFILE" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 }
 	}
 
 	// Identity row: helmet + name+role column + level column
 	itemDef {
 		name "card_profile_row"
 		type container
-		rect 0 0 1 6vh
+		width FIXED 1 height FIXED 6vh
 		height FIT
 		direction row
 		alignY center
 		gap $spacing_sm
 
-		itemDef { type 0 rect 0 0 4vw 6vh height FIT width PERCENT 4vw iconText "helmet" textalign 1 font $font_icon 42 forecolor $bone decoration visible 1 grow 0 }
+		itemDef { type 0 width FIXED 4vw height FIXED 6vh height FIT width PERCENT 4vw iconText "helmet" textalign 1 font $font_icon 42 forecolor $bone decoration visible 1 grow 0 }
 
 		itemDef {
 			name "card_profile_text"
 			type container
-			rect 0 0 16vw 6vh
+			width FIXED 16vw height FIXED 6vh
 			height FIT
 			direction column
 			gap 0.002
 			grow 1
 
-			itemDef { type 0vh height FIT width PERCENT 1.0 text "LAROUX.POS" textalign 0 font $font_mono 13 forecolor $bone cvar "name" decoration visible 1 grow 0 }
+			itemDef { type 0 height FIT width PERCENT 1.0 text "LAROUX.POS" textalign 0 font $font_mono 13 forecolor $bone cvar "name" decoration visible 1 grow 0 }
 			itemDef {
 				name "card_profile_role_row"
 				type container
-				rect 0 0 1 1.8vh
+				width FIXED 1 height FIXED 1.8vh
 				height FIT
 				direction row
 				alignY center
 				gap 0.004
-				itemDef { type 0 rect 0 0 1.2vw 1.8vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
-				itemDef { type 0 rect 0 0 10vw 1.8vh height FIT width PERCENT 10vw text "VISOR" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 }
+				itemDef { type 0 width FIXED 1.2vw height FIXED 1.8vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
+				itemDef { type 0 width FIXED 10vw height FIXED 1.8vh height FIT width PERCENT 10vw text "VISOR" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 }
 			}
 		}
 
 		itemDef {
 			name "card_profile_level_col"
 			type container
-			rect 0 0 4vw 6vh
+			width FIXED 4vw height FIXED 6vh
 			height FIT
 			direction column
 			alignX end
 			gap 0.001
 			grow 0
 
-			itemDef { type 0 rect 0 0 4vw 1.8vh height FIT width PERCENT 4vw text "level" textalign 2 font $font_mono 8 forecolor $boneDim decoration visible 1 grow 0 }
-			itemDef { type 0 rect 0 0 4vw 2.8vh height FIT width PERCENT 4vw text "14" textalign 2 font $font_sans 22 forecolor $accent decoration visible 1 grow 0 }
+			itemDef { type 0 width FIXED 4vw height FIXED 1.8vh height FIT width PERCENT 4vw text "level" textalign 2 font $font_mono 8 forecolor $boneDim decoration visible 1 grow 0 }
+			itemDef { type 0 width FIXED 4vw height FIXED 2.8vh height FIT width PERCENT 4vw text "14" textalign 2 font $font_sans 22 forecolor $accent decoration visible 1 grow 0 }
 		}
 	}
 
 	// Experience footer
-	itemDef { type 0vh height FIT width PERCENT 1 text "experience                              1,248 / 2,000" textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+	itemDef { type 0 height FIT width PERCENT 1 text "experience                              1,248 / 2,000" textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
 }

@@ -20,6 +20,6 @@ itemDef {
 	decoration
 	visible 1
 
-	itemDef { hudElement "markerlist" bind "markers.plums"  anchor TOP_LEFT rect 0 0 1 1 decoration visible 1 }
-	itemDef { hudElement "markerlist" bind "markers.botdir" anchor TOP_LEFT rect 0 0 1 1 decoration visible 1 }
+	itemDef { hudElement "markerlist" bind "markers.plums"  anchor TOP_LEFT width FIXED 1 height FIXED 1 decoration visible 1 }
+	itemDef { hudElement "markerlist" bind "markers.botdir" anchor TOP_LEFT width FIXED 1 height FIXED 1 decoration visible 1 }
 }

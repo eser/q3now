@@ -40,7 +40,7 @@ menuDef {
 		itemDef {
 			name "settings_content"
 			type container
-			rect 0 0 1 0.83
+			width FIXED 1 height FIXED 0.83
 			direction row
 			padding $content_padding_y $content_padding_x
 			gap $spacing_lg
@@ -51,14 +51,14 @@ menuDef {
 			itemDef {
 				name "settings_nav"
 				type container
-				rect 0 0 0.30 1
+				width FIXED 0.30 height FIXED 1
 				direction column
 				gap $spacing_sm
 
 				itemDef {
 					name "nav_label"
 					type 0
-					rect 0 0 1 0.025
+					width FIXED 1 height FIXED 0.025
 					height FIT
 					text "CATEGORIES"
 					textalign 0
@@ -88,7 +88,7 @@ menuDef {
 			itemDef {
 				name "settings_panel"
 				type container
-				rect 0 0 0.70 1
+				width FIXED 0.70 height FIXED 1
 				direction column
 				padding $card_padding
 				gap $card_gap_internal
@@ -98,7 +98,7 @@ menuDef {
 				itemDef {
 					name "panel_header"
 					type 0
-					rect 0 0 1 0.05
+					width FIXED 1 height FIXED 0.05
 					height FIT
 					text "Sound"
 					textalign 0
@@ -112,7 +112,7 @@ menuDef {
 				itemDef {
 					name "panel_subheader"
 					type 0
-					rect 0 0 1 0.025
+					width FIXED 1 height FIXED 0.025
 					height FIT
 					text "Master volume, music, sample rate, output device"
 					textalign 0
@@ -127,7 +127,7 @@ menuDef {
 				itemDef {
 					name "panel_content"
 					type container
-					rect 0 0 1 0.7
+					width FIXED 1 height FIXED 0.7
 					direction column
 					gap $spacing_md
 					grow 1
@@ -163,15 +163,14 @@ menuDef {
 						radius $radius_md
 						alignY start
 
-						itemDef { name "group_levels_hdr" type containervh height FIT direction row alignY center gap 0.006
-							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
-							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "LEVELS" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
+						itemDef { name "group_levels_hdr" type container height FIT direction row alignY center gap 0.006
+							itemDef { type 0 width FIXED 1.2vw height FIXED 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
+							itemDef { type 0 width FIXED 20vw height FIXED 2vh height FIT width PERCENT 20vw text "LEVELS" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
 
 						// Master volume slider row
 						itemDef {
 							name "row_master"
 							type 10
-							rect 0.005 0.005 0.98 0.045
 							height FIXED 38px
 							width PERCENT 1
 							text "Master Volume"
@@ -187,7 +186,6 @@ menuDef {
 						itemDef {
 							name "row_music"
 							type 10
-							rect 0.005 0.055 0.98 0.045
 							height FIXED 38px
 							width PERCENT 1
 							text "Music Volume"
@@ -215,15 +213,14 @@ menuDef {
 						radius $radius_md
 						alignY start
 
-						itemDef { name "group_output_hdr" type containervh height FIT direction row alignY center gap 0.006
-							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
-							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "OUTPUT" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
+						itemDef { name "group_output_hdr" type container height FIT direction row alignY center gap 0.006
+							itemDef { type 0 width FIXED 1.2vw height FIXED 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
+							itemDef { type 0 width FIXED 20vw height FIXED 2vh height FIT width PERCENT 20vw text "OUTPUT" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
 
 						// Sample rate segmented row
 						itemDef {
 							name "row_samplerate"
 							type segmented
-							rect 0.005 0.105 0.98 0.045
 							height FIXED 38px
 							width PERCENT 1
 							text "Sample Rate"
@@ -240,7 +237,6 @@ menuDef {
 						itemDef {
 							name "row_latency"
 							type 10
-							rect 0.005 0.155 0.98 0.045
 							height FIXED 38px
 							width PERCENT 1
 							text "Latency (ms)"
@@ -256,7 +252,6 @@ menuDef {
 						itemDef {
 							name "row_device"
 							type 12
-							rect 0.005 0.205 0.98 0.045
 							height FIXED 38px
 							width PERCENT 1
 							text "Output Device"
@@ -276,7 +271,7 @@ menuDef {
 				itemDef {
 					name "panel_footer"
 					type container
-					rect 0 0 1 0.05
+					width FIXED 1 height FIXED 0.05
 					direction row
 					gap $spacing_md
 					alignY center

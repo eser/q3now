@@ -82,7 +82,7 @@ menuDef {
 		itemDef {
 			name "ingame_root"
 			type container
-			rect 0 0 0.32 0
+			width FIXED 0.32 height FIXED 0
 			direction column
 			padding 0.022 0.02
 			gap $spacing_md

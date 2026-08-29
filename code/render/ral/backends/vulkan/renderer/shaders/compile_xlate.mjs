@@ -83,7 +83,7 @@ function parseArgs(argv) {
 		const arg = argv[i];
 		if (arg === '--require-wgsl') options.requireWgsl = true;
 		else if (arg === '--check') options.check = true;
-		else if (['--translator', '--shader-data', '--catalog', '--portable-manifest', '--output-dir', '--symbol', '--targets'].includes(arg)) {
+else if (['--translator', '--shader-data', '--catalog', '--portable-manifest', '--reflection', '--output-dir', '--symbol', '--targets'].includes(arg)) {
 			if (++i >= argv.length) throw new Error(`missing value for ${arg}`);
 			const key = arg === '--output-dir' ? 'outputDir' : arg.slice(2).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
 			if (arg === '--symbol') options.symbols.push(argv[i]);
@@ -183,18 +183,24 @@ export function lowerGlsl460(bytes, portableEntry) {
 		source = lowered;
 	}
 	if (portableEntry.symbol === 'ral_opengl_product_frag_spv') {
-		for (const [texture, sampler, binding] of [
-			['baseTexture', 'baseSampler', 0],
-			['lightmapTexture', 'lightmapSampler', 1],
+		for (const [texture, sampler, binding, textureType, samplerType] of [
+			['baseTexture', 'baseSampler', 0, 'texture2D', 'sampler2D'],
+			['lightmapTexture', 'lightmapSampler', 1, 'texture2D', 'sampler2D'],
+			['staticRadianceTexture', 'staticRadianceSampler', 2,
+				'texture2DArray', 'sampler2DArray'],
+			['staticDirectionTexture', 'staticDirectionSampler', 3,
+				'texture2DArray', 'sampler2DArray'],
+			['staticVisibilityTexture', 'staticVisibilitySampler', 4,
+				'texture2DArray', 'sampler2DArray'],
 		]) {
-			const textureDecl = `layout(binding = ${binding}) uniform texture2D ${texture};`;
+			const textureDecl = `layout(binding = ${binding}) uniform ${textureType} ${texture};`;
 			const samplerDecl = `layout(binding = ${binding}) uniform sampler ${sampler};`;
-			const constructor = `sampler2D(${texture}, ${sampler})`;
+			const constructor = `${samplerType}(${texture}, ${sampler})`;
 			if (!source.includes(textureDecl) || !source.includes(samplerDecl)
 					|| !source.includes(constructor))
 				throw new Error(`GLSL product combined-sampler lowering failed: ${texture}`);
 			source = source.replace(textureDecl,
-				`layout(binding = ${binding}) uniform sampler2D ${texture};`)
+				`layout(binding = ${binding}) uniform ${samplerType} ${texture};`)
 				.replace(`${samplerDecl}\n`, '')
 				.replaceAll(constructor, texture);
 		}
@@ -280,6 +286,13 @@ export function runCorpus(options) {
 	const portable = validatePortableManifest(readFileSync(
 		options.portableManifest ?? DEFAULT_PORTABLE_MANIFEST, 'utf8'), items,
 		options.check);
+	let bootstrapReflection = null;
+	if (!options.check && options.reflection) {
+		bootstrapReflection = JSON.parse(readFileSync(options.reflection, 'utf8'));
+		if (bootstrapReflection.schemaVersion !== 1
+				|| bootstrapReflection.entries.length !== items.length)
+			throw new Error('invalid bootstrap reflection corpus');
+	}
 	if (options.symbols.length) {
 		const wanted = new Set(options.symbols);
 		items = items.filter((item) => wanted.delete(item.symbol));
@@ -288,11 +301,39 @@ export function runCorpus(options) {
 	const workDir = mkdtempSync(join(tmpdir(), 'wired-shader-xlate-'));
 	try {
 		const identity = translatorIdentity(options.translator);
-		const translated = items.map((item) => ({
+		const translated = items.map((item) => {
+			let portableEntry = portable.manifest.entries[item.ordinal];
+			if (bootstrapReflection
+					&& (portableEntry.spirv.byteCount !== item.byteCount
+						|| portableEntry.spirv.digest.lane0 !== item.artifactDigest.lane0
+						|| portableEntry.spirv.digest.lane1 !== item.artifactDigest.lane1)) {
+				const fresh = bootstrapReflection.entries[item.ordinal];
+				if (!fresh || fresh.symbol !== item.symbol
+						|| fresh.spirv.byteCount !== item.byteCount
+						|| fresh.spirv.digest.lane0 !== item.artifactDigest.lane0
+						|| fresh.spirv.digest.lane1 !== item.artifactDigest.lane1)
+					throw new Error(`bootstrap reflection identity mismatch: ${item.symbol}`);
+				// Preserve the already-ratified portability lowering (combined-sampler
+				// splits, runtime-array counts, sampler kinds and dynamic offsets) while
+				// refreshing numeric buffer sizes from the new reflection. Replacing the
+				// resolved row with raw reflection here reintroduced *_UNRESOLVED classes
+				// and made the documented write-mode bootstrap impossible.
+				const reflection = structuredClone(portableEntry.reflection);
+				for (const binding of reflection.bindings) {
+					const updated = fresh.reflection.bindings.find((item) =>
+						item.set === binding.set && item.binding === binding.binding);
+					if (updated && updated.minBufferBindingSize > 0)
+						binding.minBufferBindingSize = updated.minBufferBindingSize;
+				}
+				reflection.inlineData.byteSize = fresh.reflection.inlineData.byteSize;
+				reflection.inlineData.stageFlags = fresh.reflection.inlineData.stageFlags;
+				portableEntry = { ...fresh, reflection };
+			}
+			return {
 			...item, artifacts: runTranslator(options.translator, item,
-				portable.manifest.entries[item.ordinal], workDir,
+				portableEntry, workDir,
 				options.targets, options.requireWgsl),
-		}));
+		}; });
 		const catalogText = renderTranslationCatalog(translated, options.targets, identity, portable);
 		compareOrWrite(resolve(options.outputDir), translated, catalogText, options.check);
 		return translated.length;

@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "fixture": "lava-sanctum-v1",
+  "extent": [1280, 720],
+  "camera": { "origin": [650, -500, -250], "yaw": 225, "pitch": 10 },
+  "vulkan": {
+    "images": {
+      "atmosphere-only": { "sha256": "a418b0dc96236d0ea760125a283f9248cb3c21baea9cc762d3936f04d6d13082" },
+      "direct-only": { "sha256": "430bd7362f696000e673320c6ca2307caa5bfd711921ae9c8a6ea5fd06699d7e" },
+      "emissive-only": { "sha256": "6ad8e9e7f5f269ea59e41bf1f0ea272e5d175640ed4d0b4a393f4df148ad6a6f" },
+      "final": { "sha256": "e6b39a28008095d2aefad1ef96cf0ec3e13c6496890494a37a84f75627b43f88" },
+      "indirect-only": { "sha256": "2a2c37aaefcc0e097c882d4a3f23e2a2323ca01222eca2b06689eeb0d220c2da" },
+      "probe-only": { "sha256": "e985b1cb180f4451d775f0a13b82839bce140f8d9ad75b61cd9c4fe277a846ae" },
+      "shadow-contact": { "sha256": "09cd1f344797d055fc7fb4702bee9162401b3660a1c94b220add0e6badbe2f59" }
+    },
+    "metrics": {
+      "lavaClippedChannelRatio": 0.0,
+      "shadowSideMean": 20.29142977258168,
+      "probeEntityMean": 19.112666666666666,
+      "animatedExposureMeanDelta": 0.0211328125
+    }
+  },
+  "releasePerformance": {
+    "runs": 3,
+    "fps": [457.20974039630937, 739.6996819291367, 777.6956876774119],
+    "medianFps": 739.6996819291367,
+    "gpuFrameMilliseconds": [1.23, 1.828, 2.598],
+    "perPassGpuMilliseconds": [
+      { "atmosphere_compute": 0.003, "particle_compute": 0.028, "dlight_shadow_start": 0.113, "dlight_shadow": 0.112, "present_prep": 0.974, "total": 1.23 },
+      { "atmosphere_compute": 0.003, "particle_compute": 0.030, "dlight_shadow_start": 0.155, "dlight_shadow": 0.161, "present_prep": 1.480, "total": 1.828 },
+      { "atmosphere_compute": 0.004, "particle_compute": 0.041, "dlight_shadow_start": 0.198, "dlight_shadow": 0.227, "present_prep": 2.128, "total": 2.598 }
+    ]
+  }
+}

@@ -13,6 +13,8 @@ struct ExposureBlock {
     sunScreenY: f32,
     sunrayIntensity: f32,
     sunrayDecay: f32,
+    shadowExponent: f32,
+    shadowPivot: f32,
 }
 
 @id(24) override chromatic_strength: f32 = 0f;
@@ -38,13 +40,16 @@ fn main_1() {
     var base: vec3<f32>;
     var local: vec3<f32>;
     var param: vec2<f32>;
+    var shadowLuma: f32;
+    var normalized: f32;
+    var curved: f32;
     var luma: vec3<f32>;
 
-    let _e29 = frag_tex_coord_1;
-    let _e30 = textureSample(aoMap, aoMap_sampler, _e29);
-    ao = clamp(_e30.x, 0f, 1f);
-    let _e33 = ao;
-    out_color = vec4<f32>(_e33, _e33, _e33, 1f);
+    let _e35 = frag_tex_coord_1;
+    let _e36 = textureSample(aoMap, aoMap_sampler, _e35);
+    ao = clamp(_e36.x, 0f, 1f);
+    let _e39 = ao;
+    out_color = vec4<f32>(_e39, _e39, _e39, 1f);
     return;
 }
 
@@ -56,28 +61,28 @@ fn sampleChromatic_u0028_vf2_u003b(uv: ptr<function, vec2<f32>>) -> vec3<f32> {
     var g: f32;
     var b: f32;
 
-    let _e31 = (*uv);
-    dir = (_e31 - vec2<f32>(0.5f, 0.5f));
-    let _e33 = dir;
-    radial = length(_e33);
-    let _e35 = dir;
-    let _e36 = radial;
-    offset = (_e35 * ((chromatic_strength * _e36) * 0.015f));
-    let _e40 = (*uv);
-    let _e41 = offset;
-    let _e46 = textureSample(texture0_, texture0_sampler, clamp((_e40 + _e41), vec2(0f), vec2(1f)));
-    r = _e46.x;
-    let _e48 = (*uv);
-    let _e49 = textureSample(texture0_, texture0_sampler, _e48);
-    g = _e49.y;
+    let _e34 = (*uv);
+    dir = (_e34 - vec2<f32>(0.5f, 0.5f));
+    let _e36 = dir;
+    radial = length(_e36);
+    let _e38 = dir;
+    let _e39 = radial;
+    offset = (_e38 * ((chromatic_strength * _e39) * 0.015f));
+    let _e43 = (*uv);
+    let _e44 = offset;
+    let _e49 = textureSample(texture0_, texture0_sampler, clamp((_e43 + _e44), vec2(0f), vec2(1f)));
+    r = _e49.x;
     let _e51 = (*uv);
-    let _e52 = offset;
-    let _e57 = textureSample(texture0_, texture0_sampler, clamp((_e51 - _e52), vec2(0f), vec2(1f)));
-    b = _e57.z;
-    let _e59 = r;
-    let _e60 = g;
-    let _e61 = b;
-    return vec3<f32>(_e59, _e60, _e61);
+    let _e52 = textureSample(texture0_, texture0_sampler, _e51);
+    g = _e52.y;
+    let _e54 = (*uv);
+    let _e55 = offset;
+    let _e60 = textureSample(texture0_, texture0_sampler, clamp((_e54 - _e55), vec2(0f), vec2(1f)));
+    b = _e60.z;
+    let _e62 = r;
+    let _e63 = g;
+    let _e64 = b;
+    return vec3<f32>(_e62, _e63, _e64);
 }
 
 @fragment

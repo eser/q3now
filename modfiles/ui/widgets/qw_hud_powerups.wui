@@ -1,18 +1,28 @@
 // qw_hud_powerups — V2_HUD_Active powerup-timer stack (quad / haste / regen / etc.)
-// HUD redesign (Eser): powerup countdown icons + timers stacked down the RIGHT
-// edge at mid-height (the classic Q3 CENTER_RIGHT position) — peripheral status
-// that doesn't fight the crosshair. Each powerup = an icon + a seconds-left
-// number below it; the engine (cl_wired_hud_elem_powerupN_*) fills icon/time
-// per active powerup and hides the slot when none. Ported from default.wui:521-524.
-// hudElement rects are FULL-VIEWPORT. Two slots stacked (slot 2 above slot 1).
+// HUD redesign (Eser): powerup countdown icons + timers live in the RIGHT
+// mid-column — peripheral status that doesn't fight the crosshair. Each
+// powerup is a native Clay column: icon, then seconds-left. The engine
+// (cl_wired_hud_elem_powerupN_*) fills icon/time and hides inactive slots.
+// Slot 2 remains above slot 1, matching the former CENTER_RIGHT ordering,
+// without any viewport coordinates or compatibility-layout rects.
 itemDef {
 	name "hud_active_powerups"
 	type container
+	direction column
+	width 4vw
+	height FIT
+	gap 0.8vh
+	alignX end
+	grow 0
 	decoration
 	visible 1
 
-	itemDef { hudElement "powerup1_icon"  anchor CENTER_RIGHT  rect 0.953 0.563 0.028 0.050  forecolor 1 1 1 1 decoration visible 1 }
-	itemDef { hudElement "powerup1_time"  anchor CENTER_RIGHT  rect 0.947 0.573 0 0  font $font_sans  fontsize 12 16  textalign 2  forecolor $accent decoration visible 1 }
-	itemDef { hudElement "powerup2_icon"  anchor CENTER_RIGHT  rect 0.953 0.479 0.028 0.050  forecolor 1 1 1 1 decoration visible 1 }
-	itemDef { hudElement "powerup2_time"  anchor CENTER_RIGHT  rect 0.947 0.490 0 0  font $font_sans  fontsize 12 16  textalign 2  forecolor $accent decoration visible 1 }
+	itemDef { name "hud_powerup_slot_2" type container direction column width PERCENT 1 height FIT alignX end grow 0
+		itemDef { hudElement "powerup2_icon" width 2.8vw height 5vh grow 0 forecolor 1 1 1 1 decoration visible 1 }
+		itemDef { hudElement "powerup2_time" width PERCENT 1 height 2.2vh grow 0 font $font_sans fontsize 12 16 textalign 2 forecolor $accent decoration visible 1 }
+	}
+	itemDef { name "hud_powerup_slot_1" type container direction column width PERCENT 1 height FIT alignX end grow 0
+		itemDef { hudElement "powerup1_icon" width 2.8vw height 5vh grow 0 forecolor 1 1 1 1 decoration visible 1 }
+		itemDef { hudElement "powerup1_time" width PERCENT 1 height 2.2vh grow 0 font $font_sans fontsize 12 16 textalign 2 forecolor $accent decoration visible 1 }
+	}
 }

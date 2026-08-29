@@ -70,7 +70,7 @@ require_text(PAYLOAD_C "if ( owner->frames[i].bindGroup )" "all groups destroyed
 # The ordinary product ABI/layout remains byte-for-byte authoritative. This
 # owner is callable in production only through the bounded A2a runtime seam;
 # it still has no draw, bind, pass, or payload-recording authority there.
-require_text(VKH "vec4_t advancedFogColorDensity;                   // offset 608, 16 B\n\tvec4_t advancedFogTypeFarEnabled;                 // offset 624, 16 B\n} vkUniform_t;" "intentional 640-byte vkUniform fog tail")
+require_text(VKH "vec4_t advancedFogColorDensity;                   // offset 608, 16 B\n\tvec4_t advancedFogTypeFarEnabled;                 // offset 624, 16 B\n\tvec4_t emissionRadiance;                          // offset 640, 16 B\n} vkUniform_t;" "intentional 656-byte vkUniform lighting tail")
 forbid_text(VKH "temporalMotionPayload" "payload owner in ordinary renderer state")
 require_text(VKC "vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,\n\t\tVK_SHADER_STAGE_VERTEX_BIT, &vk.ral_bgl_entmat,\n\t\t&vk.set_layout_entmat, \"wired-set-layout-entmat\" );" "ordinary portable set3 entity layout with adopted native layout")
 require_text(VKC "set_layouts[WIRED_ENTITY_MAT_SET] = vk.set_layout_entmat;" "ordinary pipeline set3")

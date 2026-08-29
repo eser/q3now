@@ -62,3 +62,10 @@ void trap_R_RegisterParticleClass( particleClassHandle_t handle, const particleC
 // `atmosphericDesc_t` is flat (no pointer field), so it crosses as a struct.
 void trap_R_SetAtmosphere( const atmosphericDesc_t *desc );
 void trap_R_SetAtmosphereHeightgrid( const float *grid, int count );
+void trap_R_AddAtmosphereEmitter( const atmosphereEmitter_t *emitter );
+void trap_R_RegisterAtmosphereEffectProfile( uint32_t handle,
+	const atmosphereEffectProfile_t *profile );
+void trap_R_AddAtmosphereSurfaceEvent(
+	const atmosphereSurfaceEvent_t *event );
+void trap_R_AddAtmosphereMediaVolume(
+	const atmosphereMediaVolume_t *volume );

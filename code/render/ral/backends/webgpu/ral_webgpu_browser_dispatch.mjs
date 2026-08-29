@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
-export const RAL_WEBGPU_BROWSER_ABI_SCHEMA_VERSION = 1;
+export const RAL_WEBGPU_BROWSER_ABI_SCHEMA_VERSION = 3;
 
 export const RalWebGpuBrowserOpcode = Object.freeze({
   BEGIN_ADAPTER: 1, POLL_ADAPTER: 2, BEGIN_DEVICE: 3, POLL_DEVICE: 4,
@@ -15,19 +15,22 @@ export const RalWebGpuBrowserOpcode = Object.freeze({
   CREATE_PIPELINE: 24, DESTROY_PIPELINE_OBJECT: 25, BEGIN_ENCODER: 26,
   BEGIN_PASS: 27, RECORD_INDEXED_DRAW: 28, END_PASS: 29,
   FINISH_ENCODER: 30, SUBMIT: 31, POLL_SUBMISSION: 32,
-  RELEASE_COMMAND_OBJECT: 33
+  RELEASE_COMMAND_OBJECT: 33, CREATE_BIND_GROUP: 34,
+  RELEASE_BIND_GROUP: 35, RECORD_COMPUTE_DISPATCH: 36
 });
 
 const SIZE = Object.freeze({
   1: 24, 2: 24, 3: 32, 4: 24, 5: 32, 6: 24, 7: 24,
-  8: 56, 9: 24, 10: 32, 11: 48, 12: 40, 13: 40, 14: 40,
+  8: 56, 9: 24, 10: 32, 11: 48, 12: 40, 13: 48, 14: 40,
   15: 32, 16: 56, 17: 56, 18: 72, 19: 48, 20: 24, 21: 120,
   22: 40, 23: 40, 24: 1352, 25: 32, 26: 24, 27: 40,
-  28: 104, 29: 24, 30: 24, 31: 40, 32: 32, 33: 32
+  28: 172, 29: 24, 30: 24, 31: 40, 32: 32, 33: 32,
+  34: 48, 35: 24, 36: 120
 });
 const RESPONSE_SIZE = Object.freeze({ 2: 376, 4: 40, 7: 224, 10: 32,
   12: 32, 13: 32, 14: 32, 18: 32, 19: 32, 21: 32, 22: 32,
-  23: 32, 24: 32, 26: 32, 27: 32, 30: 32, 31: 32, 32: 32 });
+  23: 32, 24: 32, 26: 32, 27: 32, 30: 32, 31: 32, 32: 32,
+  34: 32 });
 const encoder = new TextEncoder(), decoder = new TextDecoder("utf-8", { fatal: true });
 const u64 = (view, offset) => {
   const value = view.getBigUint64(offset, true);
@@ -47,7 +50,9 @@ const FORMATS = { 1: "r8unorm", 2: "rg8unorm", 3: "rgba8unorm", 4: "rgba8unorm-s
   29: "bc1-rgba-unorm-srgb", 30: "bc3-rgba-unorm", 31: "bc3-rgba-unorm-srgb",
   32: "bc4-r-unorm", 33: "bc5-rg-unorm", 34: "bc6h-rgb-ufloat",
   35: "bc7-rgba-unorm", 36: "bc7-rgba-unorm-srgb", 37: "astc-4x4-unorm",
-  38: "astc-4x4-unorm-srgb", 39: "etc2-rgba8unorm", 40: "etc2-rgba8unorm-srgb" };
+  38: "astc-4x4-unorm-srgb", 39: "etc2-rgba8unorm", 40: "etc2-rgba8unorm-srgb",
+  51: "rgb9e5ufloat", 52: "rg16snorm" };
+const FORMAT_BYTES = { 1: 1, 2: 2, 3: 4, 4: 4, 14: 8, 51: 4, 52: 4 };
 const VERTEX_FORMATS = { 1: "unorm8", 2: "unorm8x2", 3: "unorm8x4", 12: "float16",
   13: "float16x2", 14: "float16x4", 17: "float32", 18: "float32x2",
   19: "float32x3", 20: "float32x4", 21: "uint8x4" };
@@ -88,7 +93,8 @@ export function createRalWebGpuBrowserDispatch({ host, memory, canvasIdentity = 
   const exact = (actual, expected, name) => { if (actual !== expected) throw new RangeError(`stale ${name}`); };
   const response = (opcode, size) => {
     const data = new ArrayBuffer(size), view = new DataView(data);
-    view.setUint32(0, 1, true); view.setUint32(4, opcode, true);
+    view.setUint32(0, RAL_WEBGPU_BROWSER_ABI_SCHEMA_VERSION, true);
+	view.setUint32(4, opcode, true);
     view.setUint32(8, size, true); return { data: new Uint8Array(data), view };
   };
   const status = (opcode, accepted = true) => { const out = response(opcode, 24); out.view.setUint32(16, accepted ? 1 : 0, true); return out; };
@@ -111,7 +117,7 @@ export function createRalWebGpuBrowserDispatch({ host, memory, canvasIdentity = 
     const count = view.getUint32(offset + 8, true), visibility = view.getUint32(offset + 12, true);
     if (!count || !visibility || (visibility & ~7)) throw new RangeError("binding domain");
     const entry = { binding, visibility }; if (count > 1) entry.count = count;
-    const minBindingSize = u64(view, offset + 16), dynamic = bool(view.getUint32(offset + 40, true));
+    const minBindingSize = u64(view, offset + 16), dynamic = bool(view.getUint32(offset + 36, true));
     if (kind <= 3) entry.buffer = { type: [null, "uniform", "read-only-storage", "storage"][kind],
       hasDynamicOffset: dynamic, minBindingSize };
     else if (kind === 4) entry.texture = { viewDimension: oneOf(view.getUint32(offset + 24, true), VIEW, "view dimension"),
@@ -197,18 +203,18 @@ export function createRalWebGpuBrowserDispatch({ host, memory, canvasIdentity = 
     11(view) { exact(u64(view, 16), canvasIdentity, "canvas"); const texture = u64(view, 24); exact(u64(view, 32), frames.get(texture), "frame");
       if (!submissions.has(u64(view, 40))) throw new RangeError("unknown submission generation"); host.presentCanvas(init.generation, texture); frames.delete(texture); return status(11); },
     12(view) { validateDevice(view); return identity(12, host.createBuffer(init.generation, { size: u64(view, 24), usage: bufferUsageValue(view.getUint32(32, true)) })); },
-    13(view) { validateDevice(view); const width = view.getUint32(24, true), height = view.getUint32(28, true), depth = view.getUint32(32, true);
-      if (!width || !height || !depth || view.getUint32(36, true) !== 4) throw new RangeError("texture extent"); return identity(13, host.createTexture(init.generation,
-        { size: { width, height, depthOrArrayLayers: depth }, format: "rgba8unorm", usage: textureFlags.COPY_SRC | textureFlags.COPY_DST | textureFlags.TEXTURE_BINDING })); },
+    13(view) { validateDevice(view); const width = view.getUint32(24, true), height = view.getUint32(28, true), depth = view.getUint32(32, true), bytes = view.getUint32(36, true), formatId = view.getUint32(40, true);
+      if (!width || !height || !depth || FORMAT_BYTES[formatId] !== bytes || view.getUint32(44, true) !== 0) throw new RangeError("texture extent/format"); return identity(13, host.createTexture(init.generation,
+        { size: { width, height, depthOrArrayLayers: depth }, format: format(formatId), usage: textureFlags.COPY_SRC | textureFlags.COPY_DST | textureFlags.TEXTURE_BINDING })); },
     14(view) { validateDevice(view); return identity(14, host.createSampler(init.generation, { minFilter: bool(view.getUint32(24, true)) ? "linear" : "nearest",
       magFilter: bool(view.getUint32(28, true)) ? "linear" : "nearest", addressModeU: bool(view.getUint32(32, true)) ? "clamp-to-edge" : "repeat",
       addressModeV: bool(view.getUint32(32, true)) ? "clamp-to-edge" : "repeat" })); },
     15(view) { const kind = view.getUint32(16, true); if (kind < 1 || kind > 3) throw new RangeError("resource kind"); host.release(init.generation, u64(view, 24)); return status(15); },
     16(view) { validateQueue(view); host.writeBuffer(init.generation, u64(view, 24), u64(view, 32), bytesAt(u64(view, 40), u64(view, 48)).slice()); return status(16); },
     17(view) { validateQueue(view); const size = u64(view, 40), rows = view.getUint32(52, true), bpr = view.getUint32(48, true);
-      if (!size || !rows || !bpr || bpr % 256 || size !== bpr * rows) throw new RangeError("texture write layout");
+      if (!size || !rows || !bpr || bpr % 256 || size % (bpr * rows)) throw new RangeError("texture write layout");
       host.writeTexture(init.generation, u64(view, 24), bytesAt(u64(view, 32), size).slice(), { bytesPerRow: bpr, rowsPerImage: rows },
-        { width: bpr / 4, height: rows, depthOrArrayLayers: 1 }); return status(17); },
+        { width: bpr, height: rows, depthOrArrayLayers: size / (bpr * rows) }); return status(17); },
     18(view) { validateDevice(view); validateQueue(view, 24); const generation = u64(view, 64), id = nextOperation++;
       const operation = { generation, status: 1, data: null }; operations.set(id, operation);
       Promise.resolve(host.roundTrip(init.generation, u64(view, 32), u64(view, 40), bytesAt(u64(view, 48), u64(view, 56)).slice())).then(
@@ -222,7 +228,7 @@ export function createRalWebGpuBrowserDispatch({ host, memory, canvasIdentity = 
       if (![1,2,4].includes(view.getUint32(48, true)) || entryPoint !== "main") throw new RangeError("shader module domain");
       return identity(21, host.createShaderModule(init.generation, { code, label: entryPoint })); },
     22(view) { validateDevice(view); const count = view.getUint32(36, true); if (count > 64) throw new RangeError("binding count");
-      const offset = u64(view, 24), entries = Array.from({ length: count }, (_, i) => bindingEntry(region(offset + i * 44, 44), 0));
+      const offset = u64(view, 24), entries = Array.from({ length: count }, (_, i) => bindingEntry(region(offset + i * 40, 40), 0));
       return identity(22, host.createBindGroupLayout(init.generation, { entries })); },
     23(view) { validateDevice(view); const count = view.getUint32(32, true); if (count > 8) throw new RangeError("layout count");
       const offset = u64(view, 24), layouts = Array.from({ length: count }, (_, i) => u64(region(offset + i * 8, 8), 0));
@@ -237,10 +243,14 @@ export function createRalWebGpuBrowserDispatch({ host, memory, canvasIdentity = 
       if (kind === 2) return identity(27, host.beginComputePass(init.generation, encoderHandle)); throw new RangeError("pass kind"); },
     28(view) { const textured = bool(view.getUint32(84, true)), drawKind = view.getUint32(80, true);
       const contentDigest = view.getBigUint64(72, true);
-      if (drawKind < 1 || drawKind > 4 || contentDigest === 0n) throw new RangeError("draw domain"); host.recordIndexedDraw(init.generation, u64(view, 16), {
+      const bindGroupCount = view.getUint32(104, true);
+      if (drawKind < 1 || drawKind > 4 || contentDigest === 0n || bindGroupCount > 8) throw new RangeError("draw domain"); host.recordIndexedDraw(init.generation, u64(view, 16), {
       pipelineHandle: u64(view, 24), vertexBufferHandle: u64(view, 32), indexBufferHandle: u64(view, 40),
       textureHandle: textured ? u64(view, 48) : 0, secondaryTextureHandle: u64(view, 56), samplerHandle: textured ? u64(view, 64) : 0,
-      firstIndex: view.getUint32(88, true), indexCount: view.getUint32(92, true), instanceCount: view.getUint32(96, true), indexFormat: "uint32" }); return status(28); },
+      kind: drawKind,
+      firstIndex: view.getUint32(88, true), indexCount: view.getUint32(92, true), instanceCount: view.getUint32(96, true),
+      firstInstance: view.getUint32(100, true), indexFormat: "uint32",
+      bindGroups: Array.from({ length: bindGroupCount }, (_, i) => ({ index: i, handle: u64(view, 108 + i * 8) })) }); return status(28); },
     29(view) { const id = u64(view, 16); try { host.endRenderPass(init.generation, id); } catch { host.endComputePass(init.generation, id); } return status(29); },
     30(view) { return identity(30, host.finishEncoder(init.generation, u64(view, 16))); },
     31(view) { validateQueue(view); const generation = u64(view, 32), id = host.submit(init.generation, u64(view, 24)); submissions.set(generation, id); return identity(31, id); },
@@ -248,7 +258,24 @@ export function createRalWebGpuBrowserDispatch({ host, memory, canvasIdentity = 
       const state = host.pollSubmission(init.generation, id);
       if (state.status === "failed" && state.error) lastFailure = state.error;
       const out = response(32, 32); out.view.setUint32(16, state.status === "pending" ? 1 : state.status === "ready" ? 2 : 3, true); return out; },
-    33(view) { const kind = view.getUint32(16, true); if (kind < 1 || kind > 4) throw new RangeError("command object kind"); host.release(init.generation, u64(view, 24)); return status(33); }
+    33(view) { const kind = view.getUint32(16, true); if (kind < 1 || kind > 4) throw new RangeError("command object kind"); host.release(init.generation, u64(view, 24)); return status(33); },
+    34(view) { validateDevice(view); const count = view.getUint32(40, true);
+      if (!count || count > 64) throw new RangeError("bind resource count");
+      const offset = u64(view, 32), entries = Array.from({ length: count }, (_, i) => {
+        const entry = region(offset + i * 32, 32), kind = entry.getUint32(4, true);
+        if (kind < 1 || kind > 3) throw new RangeError("bind resource kind");
+        return { binding: entry.getUint32(0, true), kind, handle: u64(entry, 8),
+          offset: u64(entry, 16), size: u64(entry, 24) };
+      });
+      return identity(34, host.createBindGroupFromHandles(init.generation, u64(view, 24), entries)); },
+    35(view) { host.release(init.generation, u64(view, 16)); return status(35); },
+    36(view) { const count = view.getUint32(116, true), digest = view.getBigUint64(96, true);
+      if (count > 8 || digest === 0n) throw new RangeError("compute dispatch domain");
+      host.recordComputeDispatch(init.generation, u64(view, 16), {
+        pipelineHandle: u64(view, 24),
+        bindGroups: Array.from({length:count}, (_, i) => ({index:i, handle:u64(view, 32 + i * 8)})),
+        groupCountX: view.getUint32(104, true), groupCountY: view.getUint32(108, true),
+        groupCountZ: view.getUint32(112, true) }); return status(36); }
   };
 
   return Object.freeze({
@@ -259,13 +286,14 @@ export function createRalWebGpuBrowserDispatch({ host, memory, canvasIdentity = 
         if (!Number.isInteger(opcode) || !handlers[opcode] || requestBytes !== SIZE[opcode]) return 0;
         const expectedResponse = RESPONSE_SIZE[opcode] ?? 24; if (responseBytes !== expectedResponse) return 0;
         const request = region(requestOffset, requestBytes);
-        if (request.getUint32(0, true) !== 1 || request.getUint32(4, true) !== opcode
+        if (request.getUint32(0, true) !== RAL_WEBGPU_BROWSER_ABI_SCHEMA_VERSION
+			|| request.getUint32(4, true) !== opcode
             || request.getUint32(8, true) !== requestBytes || request.getUint32(12, true) !== 0) return 0;
         region(responseOffset, responseBytes);
         const out = handlers[opcode](request);
         if (out.data.byteLength !== responseBytes) return 0;
         bytesAt(responseOffset, responseBytes).set(out.data); lastError = ""; return 1;
-      } catch (error) { lastError = String(error?.message ?? error);
+      } catch (error) { lastError = `opcode ${opcode}: ${String(error?.message ?? error)}`;
         lastFailure = lastError; return 0; }
     }
   });

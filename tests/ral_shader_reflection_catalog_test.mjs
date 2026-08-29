@@ -26,7 +26,7 @@ const committedProvenance = parseProvenanceCatalog(readFileSync(join(root,
 	'code/render/ral/backends/vulkan/renderer/shaders/spirv/ral_shader_artifact_catalog.inc'), 'utf8'));
 assert.equal(committed.schemaVersion, 1);
 assert.match(committed.toolchainIdentity, /naga\/30\.0\.0\+wired-portable-v1$/);
-assert.equal(committed.sourceCount, 294);
+assert.equal(committed.sourceCount, 299);
 assert.equal(committed.entries.length, committedProvenance.length);
 for (let i = 0; i < committed.entries.length; ++i) {
 	const entry = committed.entries[i]; const provenanceRow = committedProvenance[i];

@@ -4,6 +4,8 @@
 # WASM game-VM recreation and server-owned bot identity across map_restart.
 
 set -uo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/lib/wired_paths.sh"
 
 analyze_contract() {
 python3 - "$1" "$2" "$3" <<'PYEOF'
@@ -82,7 +84,7 @@ for number,line in enumerate(open(manifest_path,encoding="utf-8",errors="strict"
  if not isinstance(item,dict):raise SystemExit("FAIL wasm-restart manifest schema")
  manifest.append(item)
 if not manifest or manifest[0]!={"kind":"scenario","schema":1,"name":"wasm-map-restart","map":"arena7","restarts":2}:raise SystemExit("FAIL wasm-restart scenario")
-if [item.get("role") for item in manifest[1:-1]] != ["headless","pax21","base","aot-sentinel","harness"]:raise SystemExit("FAIL wasm-restart provenance roles")
+if [item.get("role") for item in manifest[1:-1]] != ["headless","current-archive","content-archive","aot-sentinel","harness"]:raise SystemExit("FAIL wasm-restart provenance roles")
 for item in manifest[1:-1]:
  if set(item)!={"kind","role","path","bytes","sha256"} or item.get("kind")!="provenance" or not isinstance(item.get("bytes"),int) or item["bytes"]<=0 or re.fullmatch(r"[0-9a-f]{64}",str(item.get("sha256",""))) is None:raise SystemExit("FAIL wasm-restart provenance schema")
  try:data=open(item["path"],"rb").read()
@@ -157,7 +159,7 @@ elif mode=="crash":rows.append({"sev":"INFO","cat":"server","msg":"----- Server 
 with open(log,"w") as out:
  for row in rows:out.write(json.dumps(row)+"\n")
 items=[{"kind":"scenario","schema":1,"name":"wasm-map-restart","map":"arena7","restarts":2}]
-for role in ("headless","pax21","base","aot-sentinel","harness"):
+for role in ("headless","current-archive","content-archive","aot-sentinel","harness"):
  path=manifest+"."+role;data=("fixture-"+role).encode();open(path,"wb").write(data);items.append({"kind":"provenance","role":role,"path":os.path.abspath(path),"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()})
 items.append({"kind":"result","pid":4242,"rc":0,"timeout":False,"forced":False})
 if mode=="manifest":items[-1]["rc"]=1
@@ -185,21 +187,24 @@ fi
 
 HEADLESS="${1:-}"; [ -n "$HEADLESS" ] && [ -x "$HEADLESS" ] || { echo "usage: $0 /absolute/path/to/wired-headless"; exit 64; }
 HEADLESS="$(cd "$(dirname "$HEADLESS")" && pwd)/$(basename "$HEADLESS")"; WD="$(dirname "$HEADLESS")"
-PACK=""; for candidate in "$WD" "$WD/../Resources"; do [ -f "$candidate/base/pax21.sw3z" ] && PACK="$candidate" && break; done
-[ -n "$PACK" ] || { echo "SKIP: current pax21 unavailable"; exit 77; }
-CONTENT="${WIRED_CONTENT_ROOT:-$PACK}"; if [ -f "$CONTENT/base/pax01.sw3z" ]; then BASE="$CONTENT/base/pax01.sw3z"; elif [ -f "$CONTENT/base/pak0.pk3" ]; then BASE="$CONTENT/base/pak0.pk3"; else echo "SKIP: set WIRED_CONTENT_ROOT"; exit 77; fi
+PACK="$(wired_find_archive_root "$WD" "$WD/../Resources" 2>/dev/null || true)"
+[ -n "$PACK" ] || { echo "SKIP: current VFS archives unavailable"; exit 77; }
+CONTENT="$(wired_find_archive_root "${WIRED_CONTENT_ROOT:-}" "$WIRED_HOME" "$PACK" 2>/dev/null || true)"
+[ -n "$CONTENT" ] || { echo "SKIP: set WIRED_CONTENT_ROOT"; exit 77; }
+CURRENT_ARCHIVE="$(wired_first_archive "$PACK/base")" || exit 77
+CONTENT_ARCHIVE="$(wired_first_archive "$CONTENT/base")" || exit 77
 ROOT="$(mktemp -d -t wasm-map-restart-XXXXXX 2>/dev/null || mktemp -d)"; HOME_DIR="$ROOT/home/q3now-preview"; FIFO="$ROOT/control"; PID=""; OPEN=0; CONTROLLER="$ROOT/controller.jsonl"; CONTROLLER_SEQ=0; WAIT_LINE=0; AOT_SENTINEL="$ROOT/gamesv.aot"
 cleanup(){ local status=$?; trap - EXIT INT TERM; [ "$OPEN" -eq 1 ] && exec 8>&- || true; [ -n "$PID" ] && kill -TERM "$PID" 2>/dev/null || true; [ -n "$PID" ] && wait "$PID" 2>/dev/null || true; [ "${WIRED_KEEP_ARTIFACTS:-0}" = 1 ] || rm -rf "$ROOT"; exit "$status"; }
 trap cleanup EXIT; trap 'exit 130' INT; trap 'exit 143' TERM
-mkdir -p "$HOME_DIR/base/vm"; cp "$PACK/base/pax21.sw3z" "$HOME_DIR/base/" || exit 1; cp "$BASE" "$HOME_DIR/base/" || exit 1
+mkdir -p "$HOME_DIR/base/vm"; wired_link_content_into_home "$HOME_DIR" "$CONTENT/base" "$PACK/base" || exit 1
 printf 'WIRED_INVALID_AOT_SENTINEL_BYTECODE_MUST_NOT_OPEN\n' >"$AOT_SENTINEL" || exit 1
 cp "$AOT_SENTINEL" "$HOME_DIR/base/vm/gamesv.aot" || exit 1
 MANIFEST="$ROOT/manifest.jsonl"
-python3 - "$MANIFEST" "$HEADLESS" "$PACK/base/pax21.sw3z" "$BASE" "$AOT_SENTINEL" "$0" <<'PYEOF'
+python3 - "$MANIFEST" "$HEADLESS" "$CURRENT_ARCHIVE" "$CONTENT_ARCHIVE" "$AOT_SENTINEL" "$0" <<'PYEOF'
 import hashlib,json,os,sys
 with open(sys.argv[1],"w") as out:
  out.write(json.dumps({"kind":"scenario","schema":1,"name":"wasm-map-restart","map":"arena7","restarts":2},sort_keys=True)+"\n")
- for role,path in zip(("headless","pax21","base","aot-sentinel","harness"),sys.argv[2:]):
+ for role,path in zip(("headless","current-archive","content-archive","aot-sentinel","harness"),sys.argv[2:]):
   digest=hashlib.sha256()
   with open(path,"rb") as source:
    for chunk in iter(lambda:source.read(1024*1024),b""):digest.update(chunk)

@@ -421,6 +421,13 @@ void SV_SpawnServer_Tick( void ) {
 		const char *mapname = svs.spawn.mapname;
 
 		SV_ShutdownGameProgs();
+#if FEAT_RECAST_NAVMESH
+		/* The bake worker traces against the current collision world. Join it
+		 * before Hunk_ClearLevel/CM_ClearMap invalidate that world; waiting until
+		 * Nav_LoadMap is too late and lets the previous map's worker race the
+		 * teardown while the next map begins loading. */
+		Nav_UnloadMap();
+#endif
 
 		Com_Log( SEV_INFO, LOG_CH(ch_server), "------ Server Initialization ------\n" );
 		Com_Log( SEV_INFO, LOG_CH(ch_server), "Server: %s\n", mapname );

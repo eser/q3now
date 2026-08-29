@@ -32,10 +32,18 @@ they never cross the trap boundary, and the renderer never sees them.
 #define CG_PARTICLE_NAME_MAX 64
 
 static particleClass_t cg_particleClasses[MAX_PARTICLE_CLASSES];
-static char            cg_particleClassNames[MAX_PARTICLE_CLASSES][CG_PARTICLE_NAME_MAX];
-static int             cg_numParticleClasses;
+static char			   cg_particleClassNames[MAX_PARTICLE_CLASSES][CG_PARTICLE_NAME_MAX];
+static int			   cg_numParticleClasses;
 
-particleClassHandle_t CG_RegisterParticleClass( const char *name, const particleClass_t *cls ) {
+void CG_ResetParticleClassRegistry( void )
+{
+	memset( cg_particleClasses, 0, sizeof( cg_particleClasses ) );
+	memset( cg_particleClassNames, 0, sizeof( cg_particleClassNames ) );
+	cg_numParticleClasses = 0;
+}
+
+particleClassHandle_t CG_RegisterParticleClass( const char *name, const particleClass_t *cls )
+{
 	int slot;
 
 	if ( name == NULL || cls == NULL )
@@ -63,13 +71,14 @@ particleClassHandle_t CG_RegisterParticleClass( const char *name, const particle
 		// Mirror to renderer's shadow registry. The renderer keeps a
 		// host-side copy for its compute shader; this trap is the
 		// only path by which it learns about a class.
-		trap_R_RegisterParticleClass( handle, &cg_particleClasses[slot] );
+		trap_R_RegisterParticleClassNamed( handle, &cg_particleClasses[slot], name );
 
 		return handle;
 	}
 }
 
-particleClassHandle_t CG_FindParticleClass( const char *name ) {
+particleClassHandle_t CG_FindParticleClass( const char *name )
+{
 	int i;
 
 	if ( name == NULL || name[0] == '\0' )
@@ -82,7 +91,8 @@ particleClassHandle_t CG_FindParticleClass( const char *name ) {
 	return INVALID_PARTICLE_CLASS;
 }
 
-const particleClass_t *CG_GetParticleClass( particleClassHandle_t handle ) {
+const particleClass_t *CG_GetParticleClass( particleClassHandle_t handle )
+{
 	if ( handle <= 0 || handle > cg_numParticleClasses )
 		return NULL;
 	return &cg_particleClasses[handle - 1];
@@ -102,7 +112,8 @@ time) and CG_AddRailTrails (per-frame). Each value below is annotated
 against the CPU source it derives from.
 ==========================
 */
-void CG_RegisterRailParticleClasses( void ) {
+void CG_RegisterRailParticleClasses( void )
+{
 	particleClass_t cls;
 
 	// ── rail_debris ────────────────────────────────────────────────
@@ -136,17 +147,17 @@ void CG_RegisterRailParticleClasses( void ) {
 	//     parity, not a regression.
 	//   drag = 0.0: CPU velocities are constant.
 	memset( &cls, 0, sizeof( cls ) );
-	cls.shader             = cgs.media.railRingsShader;
-	cls.renderFlags        = PRIM_FLAG_ADDITIVE;
-	cls.emitMode           = EMIT_PATH;
-	cls.scatterShape       = SCATTER_CUBE;
-	cls.scatterMagnitude   = 3.0f;
-	cls.velocityShape      = VEL_PURE_CUBE;
-	cls.axialSpeed         = 0.0f;
-	cls.cubeJitter         = 3.0f;
-	cls.coneHalfAngle      = 0.0f;
-	cls.lifetimeMean       = 1.5f;
-	cls.lifetimeJitter     = 0.0f;
+	cls.shader			 = cgs.media.railRingsShader;
+	cls.renderFlags		 = PRIM_FLAG_ADDITIVE;
+	cls.emitMode		 = EMIT_PATH;
+	cls.scatterShape	 = SCATTER_CUBE;
+	cls.scatterMagnitude = 3.0f;
+	cls.velocityShape	 = VEL_PURE_CUBE;
+	cls.axialSpeed		 = 0.0f;
+	cls.cubeJitter		 = 3.0f;
+	cls.coneHalfAngle	 = 0.0f;
+	cls.lifetimeMean	 = 1.5f;
+	cls.lifetimeJitter	 = 0.0f;
 	// 16-step grey ramp matching CPU's per-particle
 	// randomness. CPU original: 255 - (rand() & 15) * 8 →
 	// [255, 247, 239, ..., 143, 135] (16 distinct values).
@@ -156,23 +167,22 @@ void CG_RegisterRailParticleClasses( void ) {
 	// colorPalette[paletteIndex] per particle.
 	cls.paletteCount = 16;
 	for ( int i = 0; i < 16; i++ ) {
-		float grey = ( 255.0f - i * 8.0f ) / 255.0f;
+		float grey			   = ( 255.0f - i * 8.0f ) / 255.0f;
 		cls.colorPalette[i][0] = grey;
 		cls.colorPalette[i][1] = grey;
 		cls.colorPalette[i][2] = grey;
 		cls.colorPalette[i][3] = 1.0f;
 	}
-	cls.colorEndMult[0]    = 1.0f;
-	cls.colorEndMult[1]    = 1.0f;
-	cls.colorEndMult[2]    = 1.0f;
-	cls.colorEndMult[3]    = 0.0f;
-	cls.sizeStart          = 0.5f;
-	cls.sizeEnd            = 0.5f;
-	cls.gravityScale       = 0.0f;
-	cls.drag               = 0.0f;
+	cls.colorEndMult[0] = 1.0f;
+	cls.colorEndMult[1] = 1.0f;
+	cls.colorEndMult[2] = 1.0f;
+	cls.colorEndMult[3] = 0.0f;
+	cls.sizeStart		= 0.5f;
+	cls.sizeEnd			= 0.5f;
+	cls.gravityScale	= 0.0f;
+	cls.drag			= 0.0f;
 
-	cgs.media.railDebrisClass =
-		(qhandle_t)CG_RegisterParticleClass( "rail_debris", &cls );
+	cgs.media.railDebrisClass = (qhandle_t)CG_RegisterParticleClass( "rail_debris", &cls );
 
 	// ── rail_sparks ────────────────────────────────────────────────
 	// Warm-white embers from the impact point. Mirrors the CPU sparks
@@ -194,33 +204,32 @@ void CG_RegisterRailParticleClasses( void ) {
 	//     (g = 400 units/s²); compute shader's WORLD_GRAVITY = 800
 	//     (q3 cg_gravity default), so 400/800 = 0.5.
 	memset( &cls, 0, sizeof( cls ) );
-	cls.shader             = cgs.media.whiteShader;
-	cls.renderFlags        = 0;
-	cls.emitMode           = EMIT_POINT;
-	cls.scatterShape       = SCATTER_NONE;
+	cls.shader			   = cgs.media.whiteShader;
+	cls.renderFlags		   = 0;
+	cls.emitMode		   = EMIT_POINT;
+	cls.scatterShape	   = SCATTER_NONE;
 	cls.scatterMagnitude   = 0.0f;
-	cls.velocityShape      = VEL_AXIAL_PLUS_CUBE;
-	cls.axialSpeed         = 80.0f;
-	cls.cubeJitter         = 40.0f;
-	cls.coneHalfAngle      = 0.0f;
-	cls.lifetimeMean       = 0.3f;
-	cls.lifetimeJitter     = 0.0f;
-	cls.paletteCount       = 1;
+	cls.velocityShape	   = VEL_AXIAL_PLUS_CUBE;
+	cls.axialSpeed		   = 80.0f;
+	cls.cubeJitter		   = 40.0f;
+	cls.coneHalfAngle	   = 0.0f;
+	cls.lifetimeMean	   = 0.3f;
+	cls.lifetimeJitter	   = 0.0f;
+	cls.paletteCount	   = 1;
 	cls.colorPalette[0][0] = 1.0f;
 	cls.colorPalette[0][1] = 1.0f;
 	cls.colorPalette[0][2] = 220.0f / 255.0f;
 	cls.colorPalette[0][3] = 1.0f;
-	cls.colorEndMult[0]    = 1.0f;
-	cls.colorEndMult[1]    = 1.0f;
-	cls.colorEndMult[2]    = 1.0f;
-	cls.colorEndMult[3]    = 0.0f;
-	cls.sizeStart          = 0.3f;
-	cls.sizeEnd            = 0.3f;
-	cls.gravityScale       = 0.5f;
-	cls.drag               = 0.0f;
+	cls.colorEndMult[0]	   = 1.0f;
+	cls.colorEndMult[1]	   = 1.0f;
+	cls.colorEndMult[2]	   = 1.0f;
+	cls.colorEndMult[3]	   = 0.0f;
+	cls.sizeStart		   = 0.3f;
+	cls.sizeEnd			   = 0.3f;
+	cls.gravityScale	   = 0.5f;
+	cls.drag			   = 0.0f;
 
-	cgs.media.railSparksClass =
-		(qhandle_t)CG_RegisterParticleClass( "rail_sparks", &cls );
+	cgs.media.railSparksClass = (qhandle_t)CG_RegisterParticleClass( "rail_sparks", &cls );
 }
 
 /*
@@ -247,7 +256,8 @@ cannot express:
                             "1.5 + random()*1.5").
 ==========================
 */
-void CG_RegisterLightningParticleClasses( void ) {
+void CG_RegisterLightningParticleClasses( void )
+{
 	particleClass_t cls;
 
 	// ── lg_sparks ────────────────────────────────────────────────
@@ -257,15 +267,15 @@ void CG_RegisterLightningParticleClasses( void ) {
 	// path mirrors this via emitter.count = 3 at the call site.
 	memset( &cls, 0, sizeof( cls ) );
 
-	cls.shader               = cgs.media.lightningSparkShader;
+	cls.shader = cgs.media.lightningSparkShader;
 	// Informational per phase 5; renderer derives blend from the
 	// shader's stages[0]→stateBits at registration time.
-	cls.renderFlags          = PRIM_FLAG_ADDITIVE;
+	cls.renderFlags = PRIM_FLAG_ADDITIVE;
 
 	// Emit at impact origin, no spawn-position scatter.
-	cls.emitMode             = EMIT_POINT;
-	cls.scatterShape         = SCATTER_NONE;
-	cls.scatterMagnitude     = 0.0f;
+	cls.emitMode		 = EMIT_POINT;
+	cls.scatterShape	 = SCATTER_NONE;
+	cls.scatterMagnitude = 0.0f;
 
 	// Velocity. CPU formula (cg_effects.c:920-925):
 	//   v = surfaceNormal + crand()*0.7  per axis  (pre-normalize)
@@ -284,14 +294,14 @@ void CG_RegisterLightningParticleClasses( void ) {
 	//   - velocityBias[2] = 50, velocityBiasJitter[2] = 50 yields
 	//     vel.z += 50 + crand()*50 = uniform [0, 100], matching
 	//     CPU's "vel.z += random()*100".
-	cls.velocityShape        = VEL_CONE;
-	cls.axialSpeed           = 200.0f;
-	cls.speedJitter          = 100.0f;
-	cls.coneHalfAngle        = 0.611f;
-	cls.cubeJitter           = 0.0f;
-	cls.velocityBias[0]      = 0.0f;
-	cls.velocityBias[1]      = 0.0f;
-	cls.velocityBias[2]      = 50.0f;
+	cls.velocityShape		  = VEL_CONE;
+	cls.axialSpeed			  = 200.0f;
+	cls.speedJitter			  = 100.0f;
+	cls.coneHalfAngle		  = 0.611f;
+	cls.cubeJitter			  = 0.0f;
+	cls.velocityBias[0]		  = 0.0f;
+	cls.velocityBias[1]		  = 0.0f;
+	cls.velocityBias[2]		  = 50.0f;
 	cls.velocityBiasJitter[0] = 0.0f;
 	cls.velocityBiasJitter[1] = 0.0f;
 	cls.velocityBiasJitter[2] = 50.0f;
@@ -300,43 +310,42 @@ void CG_RegisterLightningParticleClasses( void ) {
 	// [200, 455] ms. Renderer's mean ± jitter produces uniform
 	// [mean - jitter, mean + jitter]. Match: mean = 327.5 ms,
 	// jitter = 127.5 ms (in seconds).
-	cls.lifetimeMean         = 0.3275f;
-	cls.lifetimeJitter       = 0.1275f;
+	cls.lifetimeMean   = 0.3275f;
+	cls.lifetimeJitter = 0.1275f;
 
 	// Color. CPU shaderRGBA = (0x55, 0x99, 0xff, 0xff)
 	//                      = (85/255, 153/255, 255/255, 1.0).
 	// 0x99/255 written as 153.0f/255.0f to keep the integer source
 	// visible at code-review time.
-	cls.paletteCount         = 1;
-	cls.colorPalette[0][0]   = 85.0f  / 255.0f;
-	cls.colorPalette[0][1]   = 153.0f / 255.0f;
-	cls.colorPalette[0][2]   = 1.0f;
-	cls.colorPalette[0][3]   = 1.0f;
+	cls.paletteCount	   = 1;
+	cls.colorPalette[0][0] = 85.0f / 255.0f;
+	cls.colorPalette[0][1] = 153.0f / 255.0f;
+	cls.colorPalette[0][2] = 1.0f;
+	cls.colorPalette[0][3] = 1.0f;
 
 	// Alpha → 0 over lifetime. CPU LE_MOVE_SCALE_FADE fades both
 	// the size and the alpha to 0; size handling is below.
-	cls.colorEndMult[0]      = 1.0f;
-	cls.colorEndMult[1]      = 1.0f;
-	cls.colorEndMult[2]      = 1.0f;
-	cls.colorEndMult[3]      = 0.0f;
+	cls.colorEndMult[0] = 1.0f;
+	cls.colorEndMult[1] = 1.0f;
+	cls.colorEndMult[2] = 1.0f;
+	cls.colorEndMult[3] = 0.0f;
 
 	// Size. CPU: re->radius = 1.5 + random()*1.5 = uniform
 	// [1.5, 3.0]. Symmetric crand() jitter expresses this as
 	// midpoint 2.25 ± halfwidth 0.75. sizeEnd = 0 reproduces
 	// LE_MOVE_SCALE_FADE's shrink-to-zero behavior.
-	cls.sizeStart            = 2.25f;
-	cls.sizeJitter           = 0.75f;
-	cls.sizeEnd              = 0.0f;
+	cls.sizeStart  = 2.25f;
+	cls.sizeJitter = 0.75f;
+	cls.sizeEnd	   = 0.0f;
 
 	// Gravity. CPU TR_GRAVITY uses q3 default 800 u/s²; compute
 	// shader's WORLD_GRAVITY also = 800, so gravityScale = 1.0
 	// reproduces CPU fall behavior. drag = 0 because CPU has no
 	// velocity damping.
-	cls.gravityScale         = 1.0f;
-	cls.drag                 = 0.0f;
+	cls.gravityScale = 1.0f;
+	cls.drag		 = 0.0f;
 
-	cgs.media.lgSparksClass =
-		(qhandle_t)CG_RegisterParticleClass( "lg_sparks", &cls );
+	cgs.media.lgSparksClass = (qhandle_t)CG_RegisterParticleClass( "lg_sparks", &cls );
 }
 
 
@@ -362,7 +371,8 @@ tweaks (velocity-scaled emit count, alpha ceiling) live in the
 def table and at the render-side call sites, not in the class.
 ==========================
 */
-void CG_RegisterPushParticleClasses( void ) {
+void CG_RegisterPushParticleClasses( void )
+{
 	particleClass_t cls;
 
 	// ── push_stream ────────────────────────────────────────────────
@@ -371,38 +381,37 @@ void CG_RegisterPushParticleClasses( void ) {
 	// toward the player. No gravity (axial flow only); short lifetime
 	// so the stream stays tightly clustered around the beam.
 	memset( &cls, 0, sizeof( cls ) );
-	cls.shader             = cgs.media.lightningSparkShader; // same soft sparkle texture
-	                                                          // the LG impact shower uses;
-	                                                          // tint at emit time covers
-	                                                          // the color difference.
-	cls.renderFlags        = PRIM_FLAG_ADDITIVE;
-	cls.emitMode           = EMIT_PATH;
-	cls.scatterShape       = SCATTER_CUBE;
-	cls.scatterMagnitude   = 6.0f;       // perpendicular jitter around beam axis
-	cls.velocityShape      = VEL_AXIAL_PLUS_CUBE;
-	cls.axialSpeed         = 384.0f;     // flow speed trigger→player
-	cls.cubeJitter         = 32.0f;      // small lateral drift
-	cls.coneHalfAngle      = 0.0f;
-	cls.lifetimeMean       = 0.4f;       // 400 ms
-	cls.lifetimeJitter     = 0.1f;
+	cls.shader = cgs.media.lightningSparkShader; // same soft sparkle texture
+												 // the LG impact shower uses;
+												 // tint at emit time covers
+												 // the color difference.
+	cls.renderFlags		 = PRIM_FLAG_ADDITIVE;
+	cls.emitMode		 = EMIT_PATH;
+	cls.scatterShape	 = SCATTER_CUBE;
+	cls.scatterMagnitude = 6.0f; // perpendicular jitter around beam axis
+	cls.velocityShape	 = VEL_AXIAL_PLUS_CUBE;
+	cls.axialSpeed		 = 384.0f; // flow speed trigger→player
+	cls.cubeJitter		 = 32.0f;  // small lateral drift
+	cls.coneHalfAngle	 = 0.0f;
+	cls.lifetimeMean	 = 0.4f; // 400 ms
+	cls.lifetimeJitter	 = 0.1f;
 	// Neutral white palette; per-emission colorTint applies the
 	// hook-color multiplier.
-	cls.paletteCount       = 1;
+	cls.paletteCount	   = 1;
 	cls.colorPalette[0][0] = 1.0f;
 	cls.colorPalette[0][1] = 1.0f;
 	cls.colorPalette[0][2] = 1.0f;
 	cls.colorPalette[0][3] = 1.0f;
-	cls.colorEndMult[0]    = 1.0f;
-	cls.colorEndMult[1]    = 1.0f;
-	cls.colorEndMult[2]    = 1.0f;
-	cls.colorEndMult[3]    = 0.0f;       // fade alpha to 0 over lifetime
-	cls.sizeStart          = 3.0f;
-	cls.sizeEnd            = 0.0f;
-	cls.gravityScale       = 0.0f;       // axial flow only, no fall
-	cls.drag               = 0.0f;
+	cls.colorEndMult[0]	   = 1.0f;
+	cls.colorEndMult[1]	   = 1.0f;
+	cls.colorEndMult[2]	   = 1.0f;
+	cls.colorEndMult[3]	   = 0.0f; // fade alpha to 0 over lifetime
+	cls.sizeStart		   = 3.0f;
+	cls.sizeEnd			   = 0.0f;
+	cls.gravityScale	   = 0.0f; // axial flow only, no fall
+	cls.drag			   = 0.0f;
 
-	cgs.media.pushStreamClass =
-		(qhandle_t)CG_RegisterParticleClass( "push_stream", &cls );
+	cgs.media.pushStreamClass = (qhandle_t)CG_RegisterParticleClass( "push_stream", &cls );
 }
 
 
@@ -410,85 +419,156 @@ void CG_RegisterPushParticleClasses( void ) {
 ==========================
 CG_RegisterRocketTrailParticleClass
 
-Rocket smoke-trail as a GPU-ring EMIT_PATH stream (MIG-trail-1), the A/B
-replacement for CG_RocketTrail's LE_ smoke-puff for-loop (cg_weapons.c). Params
-mirror the CPU CG_AddScaleFade smoke-puff EXACTLY for zero-feature-loss:
-  - ALPHA blend (renderFlags 0 — NOT additive; smokePuffShader is an alpha sprite).
-  - zero velocity (VEL_PURE_CUBE, cubeJitter 0) → hangs in place like vel={0,0,0}.
-  - no gravity / drag.
-  - lifetime 1.8 s (= wiTrailTime 1800).
-  - size 8 → 56 linear (CPU radius*(1-c)+8 with radius 48: c=1→8, c=0→56).
-  - alpha 0.33 → 0 linear (CPU shaderRGBA[3]=0xff*c*0.33; base 0.33, fade to 0).
-  - single sprite (frameCount 0 — no flipbook).
+The rocket follows Quake 4's projectile-bound, composited fx_fly idea rather
+than treating the trail as one enlarged smoke puff. Three independent bounded
+GPU classes form the effect: a compact hot exhaust core, a dark expanding smoke
+wake and sparse micro-embers. The grenade remains its unrelated classic point
+trail. All four recipes share only the trajectory/liquid scheduler and the
+GPU emit-and-forget lifecycle.
 ==========================
 */
-void CG_RegisterRocketTrailParticleClass( void ) {
+void CG_RegisterRocketTrailParticleClass( void )
+{
 	particleClass_t cls;
+	qhandle_t       exhaustShader;
+	static const float easeOut[PARTICLE_CURVE_SAMPLES] = {
+		0.00f, 0.45f, 0.70f, 0.84f, 0.92f, 0.96f, 0.99f, 1.00f
+	};
+	static const float lateFade[PARTICLE_CURVE_SAMPLES] = {
+		1.00f, 1.00f, 0.97f, 0.90f, 0.76f, 0.55f, 0.28f, 0.00f
+	};
 
+	CG_RegisterParticleCurve( "ease-out", easeOut );
+	CG_RegisterParticleCurve( "late-fade", lateFade );
+	exhaustShader = trap_R_RegisterShader( "rocketExhaustGlow" );
+
+	// Short additive core: always touches the nozzle, then contracts and cools
+	// within a fraction of a second. Negative axial speed moves spawned energy
+	// back along the flight axis while the projectile continues forward.
 	memset( &cls, 0, sizeof( cls ) );
-	cls.shader             = cgs.media.smokePuffShader;  // same sprite as the LE_ path
-	cls.renderFlags        = 0;                          // ALPHA blend (not PRIM_FLAG_ADDITIVE)
-	cls.emitMode           = EMIT_PATH;                  // uniform along the travelled segment
-	cls.scatterShape       = SCATTER_NONE;
-	cls.scatterMagnitude   = 0.0f;
-	cls.velocityShape      = VEL_PURE_CUBE;             // zero velocity → hang in place
-	cls.axialSpeed         = 0.0f;
-	cls.cubeJitter         = 0.0f;
-	cls.coneHalfAngle      = 0.0f;
-	cls.lifetimeMean       = 1.8f;                      // 1800 ms (wiTrailTime)
-	cls.lifetimeJitter     = 0.0f;
-	cls.paletteCount       = 1;
-	cls.colorPalette[0][0] = 1.0f;
-	cls.colorPalette[0][1] = 1.0f;
-	cls.colorPalette[0][2] = 1.0f;
-	cls.colorPalette[0][3] = 0.33f;                     // base alpha 0.33
-	cls.colorEndMult[0]    = 1.0f;
-	cls.colorEndMult[1]    = 1.0f;
-	cls.colorEndMult[2]    = 1.0f;
-	cls.colorEndMult[3]    = 0.0f;                      // alpha → 0 over lifetime
-	cls.sizeStart          = 8.0f;                      // radius*(1-c)+8 at c=1
-	cls.sizeEnd            = 56.0f;                     // radius(48)+8 at c=0
-	cls.gravityScale       = 0.0f;                      // no fall
-	cls.drag               = 0.0f;
+	cls.shader             = exhaustShader;
+	cls.renderFlags        = PRIM_FLAG_ADDITIVE;
+	cls.emitMode           = EMIT_PATH;
+	cls.scatterShape       = SCATTER_PERP_DISC;
+	cls.scatterMagnitude   = 0.8f;
+	cls.velocityShape      = VEL_AXIAL_PLUS_CUBE;
+	cls.axialSpeed         = -24.0f;
+	cls.cubeJitter         = 3.5f;
+	cls.lifetimeMean       = 0.18f;
+	cls.lifetimeJitter     = 0.04f;
+	cls.paletteCount       = 3;
+	Vector4Set( cls.colorPalette[0], 1.00f, 0.78f, 0.32f, 0.95f );
+	Vector4Set( cls.colorPalette[1], 1.00f, 0.46f, 0.10f, 0.90f );
+	Vector4Set( cls.colorPalette[2], 0.90f, 0.22f, 0.04f, 0.82f );
+	Vector4Set( cls.colorEndMult, 0.80f, 0.12f, 0.02f, 0.0f );
+	cls.sizeStart          = 4.5f;
+	cls.sizeEnd            = 0.8f;
+	cls.sizeJitter         = 0.45f;
+	cls.gravityScale       = 0.0f;
+	cls.drag               = 3.0f;
+	cgs.media.rocketExhaustClass =
+		(qhandle_t)CG_RegisterParticleClass( "rocket_exhaust_core", &cls );
 
-	// Curve-authored growth. The linear 8→56 above is what a Start/End pair
-	// can express, and it is wrong for smoke: real smoke expands fast as it
-	// leaves the nozzle and then slows as it dissipates. That shape is an
-	// ease-out, and before curves existed there was no way to say it.
-	//
-	// sizeStart/sizeEnd stay set. They are the fallback for any build where
-	// the curve failed to register, and they document what the effect looked
-	// like before — so this reads as a change with a baseline, not a rewrite.
-	{
-		// Ease-out over the normalised lifetime: most of the growth happens
-		// in the first third. Values are the curve's SHAPE in 0..1; val0/val1
-		// below place it in world units.
-		static const float easeOut[PARTICLE_CURVE_SAMPLES] = {
-			0.00f, 0.45f, 0.70f, 0.84f, 0.92f, 0.96f, 0.99f, 1.00f
-		};
-		// Smoke should hold its opacity while it is still dense and fade late,
-		// rather than starting to disappear immediately. Linear alpha is why
-		// the old trail looked thin near the rocket.
-		static const float lateFade[PARTICLE_CURVE_SAMPLES] = {
-			1.00f, 1.00f, 0.97f, 0.90f, 0.76f, 0.55f, 0.28f, 0.00f
-		};
-
-		CG_RegisterParticleCurve( "ease-out", easeOut );
-		CG_RegisterParticleCurve( "late-fade", lateFade );
-
-		cls.sizeParm.calc = PARM_CURVE;
-		cls.sizeParm.val0 = 8.0f;    // same endpoints as the linear version,
-		cls.sizeParm.val1 = 56.0f;   //   so only the SHAPE between them changed
-		CG_ResolveParticleParmCurve( &cls.sizeParm, "ease-out" );
-
-		cls.alphaParm.calc = PARM_CURVE;
-		cls.alphaParm.val0 = 0.0f;
-		cls.alphaParm.val1 = 1.0f;
-		CG_ResolveParticleParmCurve( &cls.alphaParm, "late-fade" );
-	}
-
+	// Dark warm-grey wake. It expands quickly, then hangs and fades late like
+	// Q4's persistent projectile smoke instead of the former 8→56 white plume.
+	memset( &cls, 0, sizeof( cls ) );
+	cls.shader             = cgs.media.smokePuffShader;
+	cls.renderFlags        = 0;
+	cls.emitMode           = EMIT_PATH;
+	cls.scatterShape       = SCATTER_PERP_DISC;
+	cls.scatterMagnitude   = 1.1f;
+	cls.velocityShape      = VEL_AXIAL_PLUS_CUBE;
+	cls.axialSpeed         = -10.0f;
+	cls.cubeJitter         = 4.0f;
+	cls.lifetimeMean       = 1.10f;
+	cls.lifetimeJitter     = 0.18f;
+	cls.paletteCount       = 4;
+	Vector4Set( cls.colorPalette[0], 0.52f, 0.46f, 0.40f, 1.0f );
+	Vector4Set( cls.colorPalette[1], 0.45f, 0.41f, 0.37f, 1.0f );
+	Vector4Set( cls.colorPalette[2], 0.38f, 0.36f, 0.34f, 1.0f );
+	Vector4Set( cls.colorPalette[3], 0.31f, 0.31f, 0.31f, 1.0f );
+	Vector4Set( cls.colorEndMult, 0.35f, 0.35f, 0.35f, 0.0f );
+	cls.sizeStart          = 3.5f;
+	cls.sizeEnd            = 24.0f;
+	cls.sizeJitter         = 0.9f;
+	cls.gravityScale       = -0.015f;
+	cls.drag               = 0.7f;
+	cls.sizeParm.calc      = PARM_CURVE;
+	cls.sizeParm.val0      = 3.5f;
+	cls.sizeParm.val1      = 24.0f;
+	CG_ResolveParticleParmCurve( &cls.sizeParm, "ease-out" );
+	cls.alphaParm.calc     = PARM_CURVE;
+	cls.alphaParm.val0     = 0.0f;
+	cls.alphaParm.val1     = 0.62f;
+	CG_ResolveParticleParmCurve( &cls.alphaParm, "late-fade" );
 	cgs.media.rocketSmokeClass =
-		(qhandle_t)CG_RegisterParticleClass( "rocket_smoke", &cls );
+		(qhandle_t)CG_RegisterParticleClass( "rocket_smoke_wake", &cls );
+
+	// Sparse sparks punctuate the exhaust without becoming a second solid
+	// ribbon. Their scheduler runs at half the smoke rate and the GPU owns the
+	// complete ballistic/fade lifetime after the one-shot emit.
+	memset( &cls, 0, sizeof( cls ) );
+	cls.shader             = exhaustShader;
+	cls.renderFlags        = PRIM_FLAG_ADDITIVE;
+	cls.emitMode           = EMIT_PATH;
+	cls.scatterShape       = SCATTER_PERP_DISC;
+	cls.scatterMagnitude   = 2.0f;
+	cls.velocityShape      = VEL_AXIAL_PLUS_CUBE;
+	cls.axialSpeed         = -28.0f;
+	cls.cubeJitter         = 9.0f;
+	cls.lifetimeMean       = 0.42f;
+	cls.lifetimeJitter     = 0.12f;
+	cls.paletteCount       = 3;
+	Vector4Set( cls.colorPalette[0], 1.00f, 0.72f, 0.22f, 0.92f );
+	Vector4Set( cls.colorPalette[1], 1.00f, 0.36f, 0.06f, 0.88f );
+	Vector4Set( cls.colorPalette[2], 0.78f, 0.12f, 0.02f, 0.80f );
+	Vector4Set( cls.colorEndMult, 0.85f, 0.10f, 0.01f, 0.0f );
+	cls.sizeStart          = 0.75f;
+	cls.sizeEnd            = 0.12f;
+	cls.sizeJitter         = 0.18f;
+	cls.gravityScale       = 0.06f;
+	cls.drag               = 1.2f;
+	cgs.media.rocketEmberClass =
+		(qhandle_t)CG_RegisterParticleClass( "rocket_hot_embers", &cls );
+
+	// Grenade-only classic trail.  The original Quake grenade recipe uses the
+	// dark half of its fire ramp, a roughly 3-unit path cadence, small spawn
+	// jitter and a short upward-drifting lifetime.  Quake II's diminishing
+	// grenade trail similarly uses dark palette particles with positional and
+	// velocity jitter.  Represent that character with small solid particles,
+	// not smokePuff billboards; the shared emitter uses a pragmatic 4-unit
+	// cadence so the GPU path stays bounded while preserving the dotted chain.
+	memset( &cls, 0, sizeof( cls ) );
+	cls.shader             = cgs.media.whiteShader;
+	cls.renderFlags        = 0;
+	cls.emitMode           = EMIT_PATH;
+	cls.scatterShape       = SCATTER_CUBE;
+	cls.scatterMagnitude   = 3.0f;
+	cls.velocityShape      = VEL_PURE_CUBE;
+	cls.cubeJitter         = 6.0f;
+	cls.lifetimeMean       = 0.72f;
+	cls.lifetimeJitter     = 0.16f;
+	cls.paletteCount       = 8;
+	for ( int i = 0; i < cls.paletteCount; ++i ) {
+		const float grey = 0.12f + 0.02f * (float)i;
+		cls.colorPalette[i][0] = grey;
+		cls.colorPalette[i][1] = grey * 0.96f;
+		cls.colorPalette[i][2] = grey * 0.88f;
+		cls.colorPalette[i][3] = 0.85f;
+	}
+	cls.colorEndMult[0] = 0.25f;
+	cls.colorEndMult[1] = 0.25f;
+	cls.colorEndMult[2] = 0.25f;
+	cls.colorEndMult[3] = 0.0f;
+	cls.sizeStart        = 0.65f;
+	cls.sizeEnd          = 0.35f;
+	cls.sizeJitter       = 0.15f;
+	// Quake's pt_fire rises and Quake II applies a small +Z acceleration.
+	// Negative gravityScale means a gentle up-drift in Wired's z-up solver.
+	cls.gravityScale     = -0.03f;
+	cls.drag             = 0.0f;
+	cgs.media.grenadeTrailClass =
+		(qhandle_t)CG_RegisterParticleClass( "grenade_classic_trail", &cls );
 }
 
 
@@ -513,38 +593,38 @@ Look match (vs CG_AddFallScaleFade, radius 20, lifetime 2000 ms):
   - single sprite (frameCount 0 — no flipbook).
 ==========================
 */
-void CG_RegisterGibTrailParticleClass( void ) {
+void CG_RegisterGibTrailParticleClass( void )
+{
 	particleClass_t cls;
 
 	memset( &cls, 0, sizeof( cls ) );
-	cls.shader             = cgs.media.bloodTrailShader; // same sprite as the LE_ path
-	cls.renderFlags        = 0;                          // ALPHA blend (not PRIM_FLAG_ADDITIVE)
-	cls.emitMode           = EMIT_PATH;                  // uniform along the travelled segment
-	cls.scatterShape       = SCATTER_NONE;
+	cls.shader			   = cgs.media.bloodTrailShader; // same sprite as the LE_ path
+	cls.renderFlags		   = 0;							 // ALPHA blend (not PRIM_FLAG_ADDITIVE)
+	cls.emitMode		   = EMIT_PATH;					 // uniform along the travelled segment
+	cls.scatterShape	   = SCATTER_NONE;
 	cls.scatterMagnitude   = 0.0f;
-	cls.velocityShape      = VEL_PURE_CUBE;             // no scatter; bias supplies drift
-	cls.axialSpeed         = 0.0f;
-	cls.cubeJitter         = 0.0f;
-	cls.coneHalfAngle      = 0.0f;
-	cls.lifetimeMean       = 2.0f;                      // 2000 ms
-	cls.lifetimeJitter     = 0.0f;
-	cls.paletteCount       = 1;
+	cls.velocityShape	   = VEL_PURE_CUBE; // no scatter; bias supplies drift
+	cls.axialSpeed		   = 0.0f;
+	cls.cubeJitter		   = 0.0f;
+	cls.coneHalfAngle	   = 0.0f;
+	cls.lifetimeMean	   = 2.0f; // 2000 ms
+	cls.lifetimeJitter	   = 0.0f;
+	cls.paletteCount	   = 1;
 	cls.colorPalette[0][0] = 1.0f;
 	cls.colorPalette[0][1] = 1.0f;
 	cls.colorPalette[0][2] = 1.0f;
-	cls.colorPalette[0][3] = 1.0f;                      // base alpha 1.0
-	cls.colorEndMult[0]    = 1.0f;
-	cls.colorEndMult[1]    = 1.0f;
-	cls.colorEndMult[2]    = 1.0f;
-	cls.colorEndMult[3]    = 0.0f;                      // alpha → 0 over lifetime
-	cls.sizeStart          = 16.0f;                     // radius(20)*(1-c)+16 at c=1 = 16
-	cls.sizeEnd            = 36.0f;                     // radius(20)*(1-c)+16 at c=0 = 36
-	cls.gravityScale       = 0.0f;                      // drift is LINEAR (velocityBias), no accel
-	cls.drag               = 0.0f;
-	cls.velocityBias[2]    = -20.0f;                    // -Z drift 40 u over 2 s lifetime
+	cls.colorPalette[0][3] = 1.0f; // base alpha 1.0
+	cls.colorEndMult[0]	   = 1.0f;
+	cls.colorEndMult[1]	   = 1.0f;
+	cls.colorEndMult[2]	   = 1.0f;
+	cls.colorEndMult[3]	   = 0.0f;	// alpha → 0 over lifetime
+	cls.sizeStart		   = 16.0f; // radius(20)*(1-c)+16 at c=1 = 16
+	cls.sizeEnd			   = 36.0f; // radius(20)*(1-c)+16 at c=0 = 36
+	cls.gravityScale	   = 0.0f;	// drift is LINEAR (velocityBias), no accel
+	cls.drag			   = 0.0f;
+	cls.velocityBias[2]	   = -20.0f; // -Z drift 40 u over 2 s lifetime
 
-	cgs.media.gibTrailClass =
-		(qhandle_t)CG_RegisterParticleClass( "blood_trail", &cls );
+	cgs.media.gibTrailClass = (qhandle_t)CG_RegisterParticleClass( "blood_trail", &cls );
 }
 
 
@@ -561,9 +641,10 @@ motion. Emitted unconditionally from the PROJ_ROCKET impact (GPU single path,
 W-51 — the legacy LE_ sprite explosion is retired for rockets).
 ==========================
 */
-void CG_RegisterExplosionParticleClasses( void ) {
+void CG_RegisterExplosionParticleClasses( void )
+{
 	particleClass_t cls;
-	int i;
+	int				i;
 
 	memset( &cls, 0, sizeof( cls ) );
 
@@ -572,24 +653,23 @@ void CG_RegisterExplosionParticleClasses( void ) {
 	// e.g. cg_main.c "models/weaphits/kamikred"). frame 0 doubles as
 	// the static fallback for the frameCount<=1 ring path.
 	for ( i = 0; i < 8; i++ ) {
-		cls.frameShaders[i] =
-			trap_R_RegisterShader( va( "models/weaphits/rlboom/rlboom_%i", i + 1 ) );
+		cls.frameShaders[i] = trap_R_RegisterShader( va( "models/weaphits/rlboom/rlboom_%i", i + 1 ) );
 	}
-	cls.shader        = cls.frameShaders[0];
-	cls.frameCount    = 8;
-	cls.frameBlend    = 1;                 // silky sub-frame interpolation
-	cls.renderFlags   = PRIM_FLAG_ADDITIVE; // rlboom is additive (the renderer
-	                                        // re-derives blend from the frame-0
-	                                        // shader's stateBits regardless)
+	cls.shader		= cls.frameShaders[0];
+	cls.frameCount	= 8;
+	cls.frameBlend	= 1;				  // silky sub-frame interpolation
+	cls.renderFlags = PRIM_FLAG_ADDITIVE; // rlboom is additive (the renderer
+										  // re-derives blend from the frame-0
+										  // shader's stateBits regardless)
 
 	// One BURST particle at the impact point; the flipbook IS the
 	// explosion, so the core stays put (no scatter, no velocity).
-	cls.emitMode      = EMIT_POINT;
-	cls.scatterShape  = SCATTER_NONE;
+	cls.emitMode		 = EMIT_POINT;
+	cls.scatterShape	 = SCATTER_NONE;
 	cls.scatterMagnitude = 0.0f;
-	cls.velocityShape = VEL_AXIAL;
-	cls.axialSpeed    = 0.0f;
-	cls.cubeJitter    = 0.0f;
+	cls.velocityShape	 = VEL_AXIAL;
+	cls.axialSpeed		 = 0.0f;
+	cls.cubeJitter		 = 0.0f;
 
 	// Lifetime 1.0 s = the rocketExplosion duration (1000 ms). The ring
 	// advances frame = floor(age * 8) over [0,1] age, so the eight
@@ -600,23 +680,314 @@ void CG_RegisterExplosionParticleClasses( void ) {
 	// Solid white palette — the additive rlboom texture carries its own
 	// fire colour; no per-particle tint (colorEndMult 1 = no fade-mult,
 	// the flipbook frames fade themselves).
-	cls.paletteCount     = 1;
+	cls.paletteCount	   = 1;
 	cls.colorPalette[0][0] = 1.0f;
 	cls.colorPalette[0][1] = 1.0f;
 	cls.colorPalette[0][2] = 1.0f;
 	cls.colorPalette[0][3] = 1.0f;
-	cls.colorEndMult[0]  = 1.0f;
-	cls.colorEndMult[1]  = 1.0f;
-	cls.colorEndMult[2]  = 1.0f;
-	cls.colorEndMult[3]  = 1.0f;
+	cls.colorEndMult[0]	   = 1.0f;
+	cls.colorEndMult[1]	   = 1.0f;
+	cls.colorEndMult[2]	   = 1.0f;
+	cls.colorEndMult[3]	   = 1.0f;
 
 	// Size matches the legacy LE_ sprite scale (CG_AddSpriteExplosion radius
 	// ~30..42; the ring billboard half-extent is the radius, so ~36).
-	cls.sizeStart = 36.0f;
-	cls.sizeEnd   = 36.0f;     // constant — the frames do the growth
-	cls.gravityScale  = 0.0f;
-	cls.drag          = 0.0f;
+	cls.sizeStart	 = 36.0f;
+	cls.sizeEnd		 = 36.0f; // constant — the frames do the growth
+	cls.gravityScale = 0.0f;
+	cls.drag		 = 0.0f;
 
-	cgs.media.explosionFireClass =
-		(qhandle_t)CG_RegisterParticleClass( "explosion_fire", &cls );
+	cgs.media.explosionFireClass = (qhandle_t)CG_RegisterParticleClass( "explosion_fire", &cls );
+
+	/* Q4's impact/detonate recipes carry a short-lived expanding fire sphere in
+	 * addition to the animated core. Keep the design beat, not the proprietary
+	 * media or 40-sprite CPU implementation: one low-alpha additive particle
+	 * expands on the existing bounded GPU lifecycle. */
+	memset( &cls, 0, sizeof( cls ) );
+	cls.shader             = trap_R_RegisterShader( "rocketExhaustGlow" );
+	cls.renderFlags        = PRIM_FLAG_ADDITIVE;
+	cls.emitMode           = EMIT_POINT;
+	cls.scatterShape       = SCATTER_NONE;
+	cls.velocityShape      = VEL_AXIAL;
+	cls.lifetimeMean       = 0.38f;
+	cls.lifetimeJitter     = 0.02f;
+	cls.paletteCount       = 3;
+	Vector4Set( cls.colorPalette[0], 1.00f, 0.74f, 0.22f, 0.42f );
+	Vector4Set( cls.colorPalette[1], 1.00f, 0.40f, 0.06f, 0.34f );
+	Vector4Set( cls.colorPalette[2], 0.72f, 0.14f, 0.02f, 0.26f );
+	Vector4Set( cls.colorEndMult, 0.42f, 0.05f, 0.01f, 0.0f );
+	cls.sizeStart          = 20.0f;
+	cls.sizeEnd            = 70.0f;
+	cls.gravityScale       = 0.0f;
+	cls.drag               = 0.0f;
+	(void)CG_RegisterParticleClass( "explosion_fire_shell", &cls );
+
+	// Secondary impact beat shared by rockets and grenades. The old cgame
+	// implementation spawned 128/64 broad CPU sprites, each with its own light.
+	// A small, fast cone reads as hot casing/shrapnel instead, while using the
+	// same warm palette and soft additive material as the rocket exhaust core.
+	memset( &cls, 0, sizeof( cls ) );
+	cls.shader             = trap_R_RegisterShader( "rocketExhaustGlow" );
+	cls.renderFlags        = PRIM_FLAG_ADDITIVE;
+	cls.emitMode           = EMIT_POINT;
+	cls.scatterShape       = SCATTER_NONE;
+	cls.scatterMagnitude   = 0.0f;
+	cls.velocityShape      = VEL_CONE;
+	cls.axialSpeed         = 360.0f;
+	cls.speedJitter        = 120.0f;
+	cls.coneHalfAngle      = 0.95f;
+	cls.lifetimeMean       = 0.48f;
+	cls.lifetimeJitter     = 0.12f;
+	cls.paletteCount       = 4;
+	Vector4Set( cls.colorPalette[0], 1.00f, 0.78f, 0.32f, 0.96f );
+	Vector4Set( cls.colorPalette[1], 1.00f, 0.46f, 0.10f, 0.92f );
+	Vector4Set( cls.colorPalette[2], 0.90f, 0.22f, 0.04f, 0.86f );
+	Vector4Set( cls.colorPalette[3], 0.62f, 0.10f, 0.02f, 0.76f );
+	Vector4Set( cls.colorEndMult, 0.50f, 0.04f, 0.01f, 0.0f );
+	cls.sizeStart          = 1.35f;
+	cls.sizeEnd            = 0.18f;
+	cls.sizeJitter         = 0.30f;
+	cls.gravityScale       = 0.45f;
+	cls.drag               = 0.65f;
+	cgs.media.explosionShrapnelClass =
+		(qhandle_t)CG_RegisterParticleClass( "explosion_hot_shrapnel", &cls );
+
+	// Quake 4's authored impact effects open with a very short additive flash,
+	// followed by directional streaks plus surface-specific smoke/debris. Keep
+	// the flash a separate GPU layer so cgame can select the SP or MP count
+	// without turning the whole hit into one oversized smoke billboard.
+	memset( &cls, 0, sizeof( cls ) );
+	cls.shader             = trap_R_RegisterShader( "rocketExhaustGlow" );
+	cls.renderFlags        = PRIM_FLAG_ADDITIVE;
+	cls.emitMode           = EMIT_POINT;
+	cls.scatterShape       = SCATTER_SPHERE;
+	cls.scatterMagnitude   = 1.25f;
+	cls.velocityShape      = VEL_AXIAL;
+	cls.axialSpeed         = 4.0f;
+	cls.speedJitter        = 2.0f;
+	cls.lifetimeMean       = 0.10f;
+	cls.lifetimeJitter     = 0.015f;
+	cls.paletteCount       = 3;
+	Vector4Set( cls.colorPalette[0], 1.00f, 0.96f, 0.76f, 0.92f );
+	Vector4Set( cls.colorPalette[1], 1.00f, 0.70f, 0.24f, 0.86f );
+	Vector4Set( cls.colorPalette[2], 0.86f, 0.42f, 0.08f, 0.78f );
+	Vector4Set( cls.colorEndMult, 0.45f, 0.12f, 0.02f, 0.0f );
+	cls.sizeStart          = 4.0f;
+	cls.sizeEnd            = 0.20f;
+	cls.sizeJitter         = 1.0f;
+	cls.gravityScale       = 0.0f;
+	cls.drag               = 0.0f;
+	cgs.media.hitscanFlashClass =
+		(qhandle_t)CG_RegisterParticleClass( "hitscan_impact_flash", &cls );
+
+	// The remaining classes are generic GPU building blocks. Weapon/material
+	// recipe counts live at the composition point in cg_weapons.c and mirror
+	// the concrete/default/electronics families in q4base pak001.pk4.
+	memset( &cls, 0, sizeof( cls ) );
+	cls.shader             = trap_R_RegisterShader( "rocketExhaustGlow" );
+	cls.renderFlags        = PRIM_FLAG_ADDITIVE;
+	cls.emitMode           = EMIT_POINT;
+	cls.scatterShape       = SCATTER_NONE;
+	cls.velocityShape      = VEL_CONE;
+	cls.axialSpeed         = 260.0f;
+	cls.speedJitter        = 90.0f;
+	cls.coneHalfAngle      = 0.70f;
+	cls.lifetimeMean       = 0.42f;
+	cls.lifetimeJitter     = 0.08f;
+	cls.paletteCount       = 3;
+	Vector4Set( cls.colorPalette[0], 1.00f, 0.95f, 0.74f, 1.00f );
+	Vector4Set( cls.colorPalette[1], 1.00f, 0.68f, 0.20f, 0.96f );
+	Vector4Set( cls.colorPalette[2], 0.92f, 0.34f, 0.05f, 0.88f );
+	Vector4Set( cls.colorEndMult, 0.65f, 0.08f, 0.01f, 0.0f );
+	cls.sizeStart          = 0.52f;
+	cls.sizeEnd            = 0.08f;
+	cls.sizeJitter         = 0.18f;
+	cls.gravityScale       = 0.40f;
+	cls.drag               = 0.45f;
+	cgs.media.hitscanMetalSparkClass =
+		(qhandle_t)CG_RegisterParticleClass( "hitscan_metal_sparks", &cls );
+
+	memset( &cls, 0, sizeof( cls ) );
+	cls.shader             = cgs.media.whiteShader;
+	cls.renderFlags        = 0;
+	cls.emitMode           = EMIT_POINT;
+	cls.scatterShape       = SCATTER_NONE;
+	cls.velocityShape      = VEL_CONE;
+	cls.axialSpeed         = 125.0f;
+	cls.speedJitter        = 55.0f;
+	cls.coneHalfAngle      = 1.05f;
+	cls.lifetimeMean       = 0.34f;
+	cls.lifetimeJitter     = 0.10f;
+	cls.paletteCount       = 3;
+	Vector4Set( cls.colorPalette[0], 0.46f, 0.43f, 0.38f, 0.88f );
+	Vector4Set( cls.colorPalette[1], 0.30f, 0.28f, 0.25f, 0.82f );
+	Vector4Set( cls.colorPalette[2], 0.18f, 0.17f, 0.16f, 0.76f );
+	Vector4Set( cls.colorEndMult, 0.45f, 0.42f, 0.38f, 0.0f );
+	cls.sizeStart          = 0.48f;
+	cls.sizeEnd            = 0.16f;
+	cls.sizeJitter         = 0.12f;
+	cls.gravityScale       = 0.85f;
+	cls.drag               = 0.18f;
+	cgs.media.hitscanChipClass =
+		(qhandle_t)CG_RegisterParticleClass( "hitscan_surface_chips", &cls );
+
+	memset( &cls, 0, sizeof( cls ) );
+	cls.shader             = cgs.media.smokePuffShader;
+	cls.renderFlags        = 0;
+	cls.emitMode           = EMIT_POINT;
+	cls.scatterShape       = SCATTER_NONE;
+	cls.velocityShape      = VEL_CONE;
+	cls.axialSpeed         = 24.0f;
+	cls.speedJitter        = 12.0f;
+	cls.coneHalfAngle      = 1.15f;
+	cls.lifetimeMean       = 1.10f;
+	cls.lifetimeJitter     = 0.20f;
+	cls.paletteCount       = 3;
+	Vector4Set( cls.colorPalette[0], 0.52f, 0.47f, 0.39f, 0.20f );
+	Vector4Set( cls.colorPalette[1], 0.40f, 0.37f, 0.32f, 0.17f );
+	Vector4Set( cls.colorPalette[2], 0.30f, 0.29f, 0.27f, 0.14f );
+	Vector4Set( cls.colorEndMult, 0.78f, 0.76f, 0.72f, 0.0f );
+	cls.sizeStart          = 1.10f;
+	cls.sizeEnd            = 7.50f;
+	cls.sizeJitter         = 0.35f;
+	cls.gravityScale       = 0.0f;
+	cls.drag               = 0.80f;
+	cls.velocityBias[2]    = 10.0f;
+	cgs.media.hitscanDustClass =
+		(qhandle_t)CG_RegisterParticleClass( "hitscan_dust_puff", &cls );
+
+	/* Underwater rocket detonation owns a distinct rising-bubble family.  It is
+	 * registered by name for WiredFX and intentionally needs no cgame handle:
+	 * the semantic recipe emits it once and the renderer owns its lifecycle. */
+	memset( &cls, 0, sizeof( cls ) );
+	cls.shader             = cgs.media.waterBubbleShader;
+	cls.emitMode           = EMIT_POINT;
+	cls.scatterShape       = SCATTER_SPHERE;
+	cls.scatterMagnitude   = 20.0f;
+	cls.velocityShape      = VEL_AXIAL_PLUS_CUBE;
+	cls.axialSpeed         = 42.0f;
+	cls.cubeJitter         = 16.0f;
+	cls.velocityBias[2]    = 18.0f;
+	cls.velocityBiasJitter[2] = 10.0f;
+	cls.lifetimeMean       = 1.0f;
+	cls.lifetimeJitter     = 0.35f;
+	cls.paletteCount       = 2;
+	Vector4Set( cls.colorPalette[0], 0.72f, 0.86f, 1.0f, 0.62f );
+	Vector4Set( cls.colorPalette[1], 0.48f, 0.70f, 0.88f, 0.48f );
+	Vector4Set( cls.colorEndMult, 0.9f, 0.95f, 1.0f, 0.0f );
+	cls.sizeStart          = 0.8f;
+	cls.sizeEnd            = 2.8f;
+	cls.sizeJitter         = 0.6f;
+	cls.gravityScale       = -0.08f;
+	cls.drag               = 0.5f;
+	(void)CG_RegisterParticleClass( "explosion_water_bubbles", &cls );
+}
+
+/*
+==========================
+CG_RegisterAtmosphereParticleClasses
+
+Registers app-authored recipes for contextual atmosphere emitters.  The
+renderer receives only generic particle classes and bounded effect graphs;
+breath/mist/debris meaning remains on the cgame side of the public seam.
+==========================
+*/
+void CG_RegisterAtmosphereParticleClasses( void )
+{
+	particleClass_t			  cls;
+	atmosphereEffectProfile_t profile;
+
+	memset( &cls, 0, sizeof( cls ) );
+	cls.shader			 = cgs.media.smokePuffShader;
+	cls.emitMode		 = EMIT_POINT;
+	cls.scatterShape	 = SCATTER_SPHERE;
+	cls.scatterMagnitude = 2.0f;
+	cls.velocityShape	 = VEL_AXIAL_PLUS_CUBE;
+	cls.axialSpeed		 = 12.0f;
+	cls.cubeJitter		 = 2.0f;
+	cls.velocityBias[2]	 = 2.0f;
+	cls.lifetimeMean	 = 1.2f;
+	cls.lifetimeJitter	 = 0.2f;
+	cls.paletteCount	 = 1;
+	Vector4Set( cls.colorPalette[0], 0.82f, 0.90f, 1.0f, 0.38f );
+	Vector4Set( cls.colorEndMult, 1.0f, 1.0f, 1.0f, 0.0f );
+	cls.sizeStart					= 1.5f;
+	cls.sizeEnd						= 10.0f;
+	cls.drag						= 0.8f;
+	cls.alphaParm.calc				= PARM_LINEAR;
+	cls.alphaParm.val0				= 1.0f;
+	cls.alphaParm.val1				= 0.0f;
+	cgs.media.atmosphereBreathClass = (qhandle_t)CG_RegisterParticleClass( "atmosphere_breath", &cls );
+
+	memset( &cls, 0, sizeof( cls ) );
+	cls.shader			 = cgs.media.smokePuffShader;
+	cls.emitMode		 = EMIT_POINT;
+	cls.scatterShape	 = SCATTER_SPHERE;
+	cls.scatterMagnitude = 18.0f;
+	cls.velocityShape	 = VEL_PURE_CUBE;
+	cls.cubeJitter		 = 2.0f;
+	cls.velocityBias[2]	 = 1.5f;
+	cls.lifetimeMean	 = 3.0f;
+	cls.lifetimeJitter	 = 0.6f;
+	cls.paletteCount	 = 1;
+	Vector4Set( cls.colorPalette[0], 0.72f, 0.80f, 0.86f, 0.20f );
+	Vector4Set( cls.colorEndMult, 1.0f, 1.0f, 1.0f, 0.0f );
+	cls.sizeStart				  = 8.0f;
+	cls.sizeEnd					  = 30.0f;
+	cls.drag					  = 1.4f;
+	cls.alphaParm.calc			  = PARM_LINEAR;
+	cls.alphaParm.val0			  = 1.0f;
+	cls.alphaParm.val1			  = 0.0f;
+	cgs.media.atmosphereMistClass = (qhandle_t)CG_RegisterParticleClass( "atmosphere_mist", &cls );
+
+	memset( &cls, 0, sizeof( cls ) );
+	cls.shader			 = cgs.media.whiteShader;
+	cls.renderFlags		 = PRIM_FLAG_ADDITIVE;
+	cls.emitMode		 = EMIT_POINT;
+	cls.scatterShape	 = SCATTER_SPHERE;
+	cls.scatterMagnitude = 48.0f;
+	cls.velocityShape	 = VEL_AXIAL_PLUS_CUBE;
+	cls.axialSpeed		 = 38.0f;
+	cls.cubeJitter		 = 18.0f;
+	cls.lifetimeMean	 = 1.5f;
+	cls.lifetimeJitter	 = 0.4f;
+	cls.paletteCount	 = 1;
+	Vector4Set( cls.colorPalette[0], 0.55f, 0.46f, 0.34f, 0.45f );
+	Vector4Set( cls.colorEndMult, 1.0f, 1.0f, 1.0f, 0.0f );
+	cls.sizeStart					= 1.0f;
+	cls.sizeEnd						= 2.5f;
+	cls.gravityScale				= 0.15f;
+	cls.drag						= 0.3f;
+	cgs.media.atmosphereDebrisClass = (qhandle_t)CG_RegisterParticleClass( "atmosphere_debris", &cls );
+
+#define REGISTER_ATMOSPHERE_PROFILE( handle, classHandle, rate, maxCount, life, farLod, radius ) \
+	do {                                                                                         \
+		memset( &profile, 0, sizeof( profile ) );                                                \
+		profile.schemaVersion			 = WIRED_ATMOSPHERE_EFFECT_PROFILE_SCHEMA_VERSION;       \
+		profile.stageCount				 = 1u;                                                   \
+		profile.maxParticles			 = ( maxCount );                                         \
+		profile.seed					 = ( handle ) * 2654435761u;                             \
+		profile.lodFar					 = ( farLod );                                           \
+		profile.boundsRadius			 = ( radius );                                           \
+		profile.stages[0].trigger		 = ATMOSPHERE_STAGE_CONTINUOUS;                          \
+		profile.stages[0].particleClass	 = (uint32_t)( classHandle );                            \
+		profile.stages[0].parentStage	 = UINT32_MAX;                                           \
+		profile.stages[0].maxParticles	 = ( maxCount );                                         \
+		profile.stages[0].spawnRate		 = ( rate );                                             \
+		profile.stages[0].duration		 = ( life );                                             \
+		profile.stages[0].lodFar		 = ( farLod );                                           \
+		profile.stages[0].boundsRadius	 = ( radius );                                           \
+		profile.stages[0].intensityScale = 1.0f;                                                 \
+		if ( ( classHandle ) > 0 )                                                               \
+			trap_R_RegisterAtmosphereEffectProfile( ( handle ), &profile );                      \
+	} while ( 0 )
+
+	REGISTER_ATMOSPHERE_PROFILE( CG_ATMOSPHERE_PROFILE_BREATH, cgs.media.atmosphereBreathClass, 7.0f, 64u, 1.6f, 768.0f,
+								 40.0f );
+	REGISTER_ATMOSPHERE_PROFILE( CG_ATMOSPHERE_PROFILE_MIST, cgs.media.atmosphereMistClass, 18.0f, 256u, 3.6f, 1400.0f,
+								 180.0f );
+	REGISTER_ATMOSPHERE_PROFILE( CG_ATMOSPHERE_PROFILE_DEBRIS, cgs.media.atmosphereDebrisClass, 28.0f, 256u, 2.0f,
+								 1800.0f, 220.0f );
+
+#undef REGISTER_ATMOSPHERE_PROFILE
 }

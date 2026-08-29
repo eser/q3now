@@ -37,7 +37,7 @@
 #define MENU_BACKGROUND(MENUNAME) \
 	name MENUNAME \
 	fullScreen 1 \
-	rect 0 0 MENU_W MENU_H \
+	width FIXED MENU_W height FIXED MENU_H \
 	style 1 \
 	backcolor COLOR_BG \
 	focuscolor COLOR_FOCUS
@@ -48,7 +48,7 @@
 	itemDef { \
 		type 0 \
 		text TEXT \
-		rect X Y W H \
+		width FIXED W height FIXED H marginLeft X marginTop Y \
 		textalign ALIGN \
 		textscale SCALE \
 		forecolor COLOR_WHITE \
@@ -60,7 +60,7 @@
 	itemDef { \
 		type 0 \
 		text TEXT \
-		rect X Y W H \
+		width FIXED W height FIXED H marginLeft X marginTop Y \
 		textalign ALIGN \
 		textscale SCALE \
 		forecolor R G B A \
@@ -74,7 +74,7 @@
 	itemDef { \
 		type 1 \
 		text TEXT \
-		rect X Y W H \
+		width FIXED W height FIXED H marginLeft X marginTop Y \
 		textalign 1 \
 		textscale SCALE \
 		forecolor COLOR_AMBER \
@@ -86,7 +86,7 @@
 	itemDef { \
 		type 1 \
 		text TEXT \
-		rect X Y W H \
+		width FIXED W height FIXED H marginLeft X marginTop Y \
 		textalign 1 \
 		textscale SCALE \
 		forecolor COLOR_AMBER \
@@ -102,7 +102,7 @@
 		name NAME \
 		type 1 \
 		text TEXT \
-		rect X Y W H \
+		width FIXED W height FIXED H marginLeft X marginTop Y \
 		textalign 1 \
 		textscale SCALE \
 		forecolor COLOR_AMBER \
@@ -115,7 +115,7 @@
 #define SEPARATOR(X, Y, W) \
 	itemDef { \
 		type 0 \
-		rect X Y W 1 \
+		width FIXED W height FIXED 1 marginLeft X marginTop Y \
 		style 1 \
 		backcolor 0.3 0.3 0.3 0.5 \
 		decoration \
@@ -129,7 +129,7 @@
 	itemDef { \
 		type 11 \
 		text LABEL \
-		rect X Y W H \
+		width FIXED W height FIXED H marginLeft X marginTop Y \
 		textscale SCALE \
 		forecolor COLOR_WHITE \
 		cvar CVAR \
@@ -141,7 +141,7 @@
 	itemDef { \
 		type 10 \
 		text LABEL \
-		rect X Y W H \
+		width FIXED W height FIXED H marginLeft X marginTop Y \
 		textscale SCALE \
 		forecolor COLOR_WHITE \
 		cvar CVAR \
@@ -153,7 +153,7 @@
 	itemDef { \
 		type 12 \
 		text LABEL \
-		rect X Y W H \
+		width FIXED W height FIXED H marginLeft X marginTop Y \
 		textscale SCALE \
 		forecolor COLOR_WHITE \
 		cvar CVAR \
@@ -166,7 +166,7 @@
 	itemDef { \
 		type 13 \
 		text LABEL \
-		rect X Y W H \
+		width FIXED W height FIXED H marginLeft X marginTop Y \
 		textscale SCALE \
 		forecolor COLOR_WHITE \
 		cvar COMMAND \
@@ -178,7 +178,7 @@
 	itemDef { \
 		type 4 \
 		text LABEL \
-		rect X Y W H \
+		width FIXED W height FIXED H marginLeft X marginTop Y \
 		textscale SCALE \
 		forecolor COLOR_WHITE \
 		cvar CVAR \
@@ -192,7 +192,7 @@
 	itemDef { \
 		type 0 \
 		text TEXT \
-		rect X Y W 16 \
+		width FIXED W height FIXED 16 marginLeft X marginTop Y \
 		textalign 0 \
 		textscale 0.35 \
 		forecolor COLOR_WHITE \
@@ -222,7 +222,7 @@
 	itemDef { \
 		type 1 \
 		text TEXT \
-		rect X Y W H \
+		width FIXED W height FIXED H marginLeft X marginTop Y \
 		textalign 1 \
 		textscale SCALE \
 		forecolor TA_COLOR_BUTTON_FG \
@@ -238,7 +238,7 @@
 	itemDef { \
 		type 1 \
 		text TEXT \
-		rect X Y W H \
+		width FIXED W height FIXED H marginLeft X marginTop Y \
 		textalign 1 \
 		textscale SCALE \
 		forecolor COLOR_WHITE \
@@ -253,7 +253,7 @@
 #define TA_PANEL_BG(X, Y, W, H) \
 	itemDef { \
 		type 0 \
-		rect X Y W H \
+		width FIXED W height FIXED H marginLeft X marginTop Y \
 		style 1 \
 		backcolor TA_COLOR_PANEL_BG \
 		decoration \
@@ -266,7 +266,7 @@
 	itemDef { \
 		type 0 \
 		text TEXT \
-		rect X Y W 18 \
+		width FIXED W height FIXED 18 marginLeft X marginTop Y \
 		textalign 0 \
 		textscale 0.4 \
 		forecolor TA_COLOR_BUTTON_FG \
@@ -281,7 +281,7 @@
 #define TA_SEPARATOR(X, Y, W) \
 	itemDef { \
 		type 0 \
-		rect X Y W 2 \
+		width FIXED W height FIXED 2 marginLeft X marginTop Y \
 		style 3 \
 		background "ui/assets/gradientbar2" \
 		backcolor 0.5 0.5 0.5 0.3 \
@@ -294,7 +294,7 @@
 #define TA_MENU_BACKGROUND(MENUNAME) \
 	name MENUNAME \
 	fullScreen 1 \
-	rect 0 0 MENU_W MENU_H \
+	width FIXED MENU_W height FIXED MENU_H \
 	style 3 \
 	background "ui/assets/menuback_a" \
 	focuscolor TA_COLOR_FOCUS
@@ -304,7 +304,7 @@
 #define TA_PANEL_BACKGROUND(MENUNAME, X, Y, W, H) \
 	name MENUNAME \
 	fullScreen 0 \
-	rect X Y W H \
+	width FIXED W height FIXED H marginLeft X marginTop Y \
 	style 1 \
 	backcolor TA_COLOR_PANEL_BG \
 	focuscolor TA_COLOR_FOCUS
@@ -314,7 +314,7 @@
 #define TA_NAV_LEFT(X, Y, SIZE, ACTION) \
 	itemDef { \
 		type 1 \
-		rect X Y SIZE SIZE \
+		width FIXED SIZE height FIXED SIZE marginLeft X marginTop Y \
 		style 3 \
 		background "ui/assets/backarrow" \
 		visible 1 \
@@ -324,7 +324,7 @@
 #define TA_NAV_RIGHT(X, Y, SIZE, ACTION) \
 	itemDef { \
 		type 1 \
-		rect X Y SIZE SIZE \
+		width FIXED SIZE height FIXED SIZE marginLeft X marginTop Y \
 		style 3 \
 		background "ui/assets/forwardarrow" \
 		visible 1 \
@@ -337,7 +337,7 @@
 	itemDef { \
 		type 0 \
 		text TEXT \
-		rect X Y W 18 \
+		width FIXED W height FIXED 18 marginLeft X marginTop Y \
 		textalign 0 \
 		textscale 0.35 \
 		forecolor TA_COLOR_BUTTON_FG \

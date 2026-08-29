@@ -42,7 +42,7 @@ menuDef {
 				name "duelboard"
 				type scorelist_widget
 				group "duel"
-				rect 0 0 1 0.92
+				width FIXED 1 height FIXED 0.92
 				width PERCENT 1.0
 				height GROW
 				forecolor $bone

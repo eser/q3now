@@ -22,9 +22,9 @@ Lifecycle:
   - Registry storage: static arrays, process-lifetime, populated at
     WiredUI_Init by the permanent registration bootstrap helpers
     (WiredOwnerDraw_RegisterAll, WiredHud_RegisterElements).
-  - Per-item stateful context: created at item bind time, lives in the
-    s_hudArena (cl_wired_ui_hud_register.c). Reclaimed via Arena_Reset on
-    menu teardown.
+  - Per-item stateful context: created on its first resolved Clay CUSTOM
+    dispatch, lives in the s_hudArena (cl_wired_ui_hud_register.c), and is
+    reclaimed via Arena_Reset on menu teardown.
 
 Transitional shape: legacy dispatch sites (cl_wired_ui.c:2189
 ownerdraw, cl_wired_hud_registry.c WiredHud_RenderElements) STAY for the

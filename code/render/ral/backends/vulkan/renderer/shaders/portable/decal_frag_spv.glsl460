@@ -1,12 +1,24 @@
 #version 460
 
+struct SurfaceClimateTile
+{
+    ivec2 key;
+    uvec2 meta;
+    vec4 climate;
+};
+
 layout(binding = 0, std140) uniform DecalFrame
 {
     mat4 mvp;
     vec4 timeCount;
     mat4 invMvp;
     vec4 reconParams;
-} _60;
+} _73;
+
+layout(binding = 0, std430) readonly buffer SurfaceClimateTable
+{
+    SurfaceClimateTile surfaceClimateTiles[256];
+} _113;
 
 layout(binding = 1) uniform sampler2D sceneDepthTex;
 layout(binding = 0) uniform sampler2D decalTextures[64];
@@ -22,6 +34,67 @@ layout(location = 2) flat in uint fragTextureIndex;
 layout(location = 1) in vec4 fragColor;
 layout(location = 0) out vec4 outColor;
 
+vec4 surfaceClimateAt(vec2 worldXY)
+{
+    ivec2 wanted = ivec2(floor(worldXY / vec2(128.0)));
+    uint count = min(uint(_73.reconParams.w), 256u);
+    uint low = 0u;
+    uint high = count;
+    for (uint _step = 0u; _step < 8u; _step++)
+    {
+        if (low >= high)
+        {
+            break;
+        }
+        uint middle = (low + high) >> 1u;
+        ivec2 key = _113.surfaceClimateTiles[middle].key;
+        bool _126 = key.x < wanted.x;
+        bool _143;
+        if (!_126)
+        {
+            bool _134 = key.x == wanted.x;
+            bool _142;
+            if (_134)
+            {
+                _142 = key.y < wanted.y;
+            }
+            else
+            {
+                _142 = _134;
+            }
+            _143 = _142;
+        }
+        else
+        {
+            _143 = _126;
+        }
+        bool less = _143;
+        if (less)
+        {
+            low = middle + 1u;
+        }
+        else
+        {
+            high = middle;
+        }
+    }
+    bool _156 = low < count;
+    bool _166;
+    if (_156)
+    {
+        _166 = all(equal(_113.surfaceClimateTiles[low].key, wanted));
+    }
+    else
+    {
+        _166 = _156;
+    }
+    if (_166)
+    {
+        return _113.surfaceClimateTiles[low].climate;
+    }
+    return vec4(0.0);
+}
+
 vec3 sRGBToLinear(inout vec3 c)
 {
     c = max(c, vec3(0.0));
@@ -34,74 +107,84 @@ vec3 sRGBToLinear(inout vec3 c)
 void main()
 {
     vec2 decalUV = fragUV;
-    bool _69 = _60.reconParams.z > 0.5;
-    bool _77;
-    if (_69)
+    vec4 localSurfaceClimate = vec4(0.0);
+    bool _188 = _73.reconParams.z > 0.5;
+    bool _195;
+    if (_188)
     {
-        _77 = fragNoProject == 0u;
+        _195 = fragNoProject == 0u;
     }
     else
     {
-        _77 = _69;
+        _195 = _188;
     }
-    if (_77)
+    if (_195)
     {
-        vec2 screenUV = gl_FragCoord.xy * _60.reconParams.xy;
+        vec2 screenUV = gl_FragCoord.xy * _73.reconParams.xy;
         float sceneDepth = texture(sceneDepthTex, screenUV).x;
         if (sceneDepth <= 0.0)
         {
             discard;
         }
         vec3 ndc = vec3((screenUV * 2.0) - vec2(1.0), sceneDepth);
-        vec4 worldH = _60.invMvp * vec4(ndc, 1.0);
+        vec4 worldH = _73.invMvp * vec4(ndc, 1.0);
         vec3 worldPos = worldH.xyz / vec3(worldH.w);
+        vec2 param = worldPos.xy;
+        localSurfaceClimate = surfaceClimateAt(param);
         vec3 local = worldPos - fragDecalOrigin;
-        float _146;
+        float _264;
         if (fragDecalRadius > 0.0)
         {
-            _146 = 1.0 / fragDecalRadius;
+            _264 = 1.0 / fragDecalRadius;
         }
         else
         {
-            _146 = 0.0;
+            _264 = 0.0;
         }
-        float invR = _146;
+        float invR = _264;
         float u = dot(local, fragDecalTangent) * invR;
         float v = dot(local, fragDecalBitangent) * invR;
         float w = dot(local, fragDecalNormal);
         float halfThickness = fragDecalRadius * 0.5;
-        bool _177 = abs(u) > 1.0;
-        bool _184;
-        if (!_177)
+        bool _295 = abs(u) > 1.0;
+        bool _302;
+        if (!_295)
         {
-            _184 = abs(v) > 1.0;
+            _302 = abs(v) > 1.0;
         }
         else
         {
-            _184 = _177;
+            _302 = _295;
         }
-        bool _192;
-        if (!_184)
+        bool _310;
+        if (!_302)
         {
-            _192 = abs(w) > halfThickness;
+            _310 = abs(w) > halfThickness;
         }
         else
         {
-            _192 = _184;
+            _310 = _302;
         }
-        if (_192)
+        if (_310)
         {
             discard;
         }
         decalUV = (vec2(u, v) * 0.5) + vec2(0.5);
     }
     vec4 texel = texture(decalTextures[fragTextureIndex], decalUV);
-    vec3 param = texel.xyz;
-    vec3 _217 = sRGBToLinear(param);
-    vec3 param_1 = fragColor.xyz;
-    vec3 _222 = sRGBToLinear(param_1);
-    vec3 rgb = _217 * _222;
+    vec3 param_1 = texel.xyz;
+    vec3 _335 = sRGBToLinear(param_1);
+    vec3 param_2 = fragColor.xyz;
+    vec3 _340 = sRGBToLinear(param_2);
+    vec3 rgb = _335 * _340;
     float alpha = texel.w * fragColor.w;
+    float localWetness = clamp(localSurfaceClimate.x + (0.5 * localSurfaceClimate.w), 0.0, 1.0);
+    float localFrost = clamp(localSurfaceClimate.y, 0.0, 1.0);
+    float localSnow = clamp(localSurfaceClimate.z, 0.0, 1.0);
+    float luminance = dot(rgb, vec3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    rgb *= mix(1.0, 0.86000001430511474609375, localWetness);
+    rgb = mix(rgb, vec3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), vec3(localFrost * 0.449999988079071044921875));
+    alpha *= mix(1.0, 0.64999997615814208984375, localSnow);
     outColor = vec4(rgb, alpha);
 }
 

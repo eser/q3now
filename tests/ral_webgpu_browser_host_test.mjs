@@ -20,7 +20,10 @@ class FakePass {
   setVertexBuffer(slot, value) { assert.equal(slot, 0); assert.ok(value); }
   setIndexBuffer(value, format) { assert.ok(value); assert.equal(format, "uint32"); }
   setBindGroup(index, value) { assert.equal(index, 0); assert.ok(value); }
-  drawIndexed(count, instances) { assert.equal(count, 3); assert.equal(instances, 1); this.host.draws++; }
+  drawIndexed(count, instances, firstIndex, baseVertex, firstInstance) {
+    assert.equal(count, 3); assert.equal(instances, 1); assert.equal(firstIndex, 0);
+    assert.equal(baseVertex, 0); assert.equal(firstInstance, 7); this.host.draws++;
+  }
   end() { this.ended = true; }
 }
 
@@ -109,7 +112,7 @@ const encoder = webgpu.createCommandEncoder(7);
 const pass = webgpu.beginRenderPass(7, encoder, frame.viewHandle);
 assert.equal(webgpu.recordIndexedDraw(7, pass, {
   pipelineHandle: pipeline, vertexBufferHandle: vertex, indexBufferHandle: index,
-  bindGroups: [{ index: 0, handle: bindGroup }], indexCount: 3
+  bindGroups: [{ index: 0, handle: bindGroup }], indexCount: 3, firstInstance: 7
 }), true);
 assert.equal(webgpu.endRenderPass(7, pass), true);
 const commandBuffer = webgpu.finishEncoder(7, encoder);

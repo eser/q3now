@@ -354,12 +354,40 @@ void	trap_R_RegisterParticleClass( particleClassHandle_t handle,
 	syscall( CG_R_REGISTERPARTICLECLASS, handle, cls );
 }
 
+void trap_R_RegisterParticleClassNamed( particleClassHandle_t handle,
+		const particleClass_t *cls, const char *name ) {
+	syscall( CG_R_REGISTERPARTICLECLASSNAMED, handle, cls, name );
+}
+
+void trap_WiredFx_EmitEvent( const wiredFxEvent_t *event ) {
+	syscall( CG_WIRED_FX_EMIT_EVENT, event );
+}
+
 void	trap_R_SetAtmosphere( const atmosphericDesc_t *desc ) {
 	syscall( CG_R_SETATMOSPHERE, desc );
 }
 
 void	trap_R_SetAtmosphereHeightgrid( const float *grid, int count ) {
 	syscall( CG_R_SETATMOSPHEREHEIGHTGRID, grid, count );
+}
+
+void	trap_R_AddAtmosphereEmitter( const atmosphereEmitter_t *emitter ) {
+	syscall( CG_R_ADDATMOSPHEREEMITTER, emitter );
+}
+
+void	trap_R_RegisterAtmosphereEffectProfile( uint32_t handle,
+		const atmosphereEffectProfile_t *profile ) {
+	syscall( CG_R_REGISTERATMOSPHEREEFFECTPROFILE, handle, profile );
+}
+
+void trap_R_AddAtmosphereSurfaceEvent(
+		const atmosphereSurfaceEvent_t *event ) {
+	syscall( CG_R_ADDATMOSPHERESURFACEEVENT, event );
+}
+
+void trap_R_AddAtmosphereMediaVolume(
+		const atmosphereMediaVolume_t *volume ) {
+	syscall( CG_R_ADDATMOSPHEREMEDIAVOLUME, volume );
 }
 
 void	trap_R_RenderScene( const refdef_t *fd ) {
@@ -426,6 +454,10 @@ qboolean	trap_GetUserCmd( int cmdNumber, usercmd_t *ucmd ) {
 
 void		trap_SetUserCmdValue( int stateValue, float sensitivityScale, int freezeMove ) {
 	syscall( CG_SETUSERCMDVALUE, stateValue, PASSFLOAT(sensitivityScale), freezeMove );
+}
+
+void trap_SetUserCmdAim( int mode, int pitchShort, int yawShort ) {
+	syscall( CG_SETUSERCMDAIM, mode, pitchShort, yawShort );
 }
 
 void		testPrintInt( char *string, int i ) {

@@ -4,6 +4,7 @@
 //
 
 #include "g_local.h"
+#include "g_entity_metadata.h"
 LOG_DECLARE_CHANNEL( ch_game, "game" );
 LOG_DECLARE_CHANNEL( ch_botai, "botlib.ai" );   /* shared bot-nav telemetry stream */
 
@@ -53,53 +54,6 @@ qboolean	G_SpawnVector( const char *key, const char *defaultString, float *out )
 	return present;
 }
 
-
-
-//
-// fields are needed for spawning from the entity string
-//
-typedef enum {
-	F_INT,
-	F_FLOAT,
-	F_STRING,
-	F_VECTOR,
-	F_ANGLEHACK
-} fieldtype_t;
-
-typedef struct
-{
-	char	*name;
-	size_t	ofs;
-	fieldtype_t	type;
-} field_t;
-
-field_t fields[] = {
-	{"classname", FOFS(classname), F_STRING},
-	{"origin", FOFS(s.origin), F_VECTOR},
-	{"model", FOFS(model), F_STRING},
-	{"model2", FOFS(model2), F_STRING},
-	{"spawnflags", FOFS(spawnflags), F_INT},
-	{"speed", FOFS(speed), F_FLOAT},
-	{"target", FOFS(target), F_STRING},
-	{"target2", FOFS(target2), F_STRING},
-	{"targetname", FOFS(targetname), F_STRING},
-	{"message", FOFS(message), F_STRING},
-	{"team", FOFS(team), F_STRING},
-	{"wait", FOFS(wait), F_FLOAT},
-	{"random", FOFS(random), F_FLOAT},
-	{"count", FOFS(count), F_INT},
-	{"health", FOFS(health), F_INT},
-	{"armor", FOFS(armor), F_INT},
-	{"dmg", FOFS(damage), F_INT},
-	{"angles", FOFS(s.angles), F_VECTOR},
-	{"angle", FOFS(s.angles), F_ANGLEHACK},
-	{"targetShaderName", FOFS(targetShaderName), F_STRING},
-	{"targetShaderNewName", FOFS(targetShaderNewName), F_STRING},
-	{"key", FOFS(key), F_STRING},		// target_modify: field to edit
-	{"value", FOFS(value), F_STRING},	// target_modify: new value
-
-	{NULL}
-};
 
 
 typedef struct {
@@ -500,42 +454,10 @@ in a gentity
 ===============
 */
 void G_ParseField( const char *key, const char *value, gentity_t *ent ) {
-	field_t	*f;
-	byte	*b;
-	float	v;
-	vec3_t	vec;
-
-	for ( f=fields ; f->name ; f++ ) {
-		if ( !Q_stricmp(f->name, key) ) {
-			// found it
-			b = (byte *)ent;
-
-			switch( f->type ) {
-			case F_STRING:
-				*(char **)(b+f->ofs) = G_NewString (value);
-				break;
-			case F_VECTOR:
-				sscanf (value, "%f %f %f", &vec[0], &vec[1], &vec[2]);
-				((float *)(b+f->ofs))[0] = vec[0];
-				((float *)(b+f->ofs))[1] = vec[1];
-				((float *)(b+f->ofs))[2] = vec[2];
-				break;
-			case F_INT:
-				*(int *)(b+f->ofs) = atoi(value);
-				break;
-			case F_FLOAT:
-				*(float *)(b+f->ofs) = atof(value);
-				break;
-			case F_ANGLEHACK:
-				v = atof(value);
-				((float *)(b+f->ofs))[0] = 0;
-				((float *)(b+f->ofs))[1] = v;
-				((float *)(b+f->ofs))[2] = 0;
-				break;
-			}
-			return;
-		}
-	}
+	const wiredMetadataRegistry_t *registry = G_EntityMetadataRegistry();
+	const wiredMetadataField_t *field = registry ? WiredMetadata_Find( registry, key ) : NULL;
+	if ( field )
+		(void)WiredMetadata_Parse( field, ent, value, G_NewString );
 }
 
 #define ADJUST_AREAPORTAL() \

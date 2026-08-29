@@ -72,7 +72,9 @@ int main( void ) {
 	CHECK( exports && !exports->initFailed && exports->Shutdown
 		&& exports->BeginRegistration && exports->BeginFrame && exports->EndFrame
 		&& exports->RegisterModel && exports->RegisterShader
-		&& exports->RenderScene && exports->DrawStretchPic );
+		&& exports->RenderScene && exports->DrawStretchPic
+		&& exports->CookLightingProject
+		&& !exports->CookLightingProject( "/tmp" ) );
 	CHECK( getRefApi( REF_API_VERSION, &imports ) == NULL );
 	memset( &receipt, 0x5a, sizeof( receipt ) );
 	before = receipt;

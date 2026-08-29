@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "ral_metal_present.h"
+#include "ral_lighting_product.h"
 #include "ral_presentation_policy.h"
 #include "render_submission.h"
 #include "maps/map_format_registry.h"
@@ -11,6 +12,33 @@
 #include <string.h>
 
 #define CHECK(x) do { if (!(x)) { fprintf(stderr,"FAIL %s:%d: %s\n",__FILE__,__LINE__,#x); return 1; } } while (0)
+
+static ralIrradianceEntitySampleReceipt_t LocalIrradiance(
+		uint64_t generation, uint64_t entityId ) {
+	ralIrradianceEntitySampleReceipt_t receipt;
+	memset( &receipt, 0, sizeof( receipt ) );
+	receipt.schemaVersion = RAL_IRRADIANCE_ENTITY_RECEIPT_SCHEMA_VERSION;
+	receipt.queryGeneration = generation;
+	receipt.entityId = entityId;
+	receipt.volumeId = 7u;
+	receipt.layoutHash = 8u;
+	receipt.probes.schemaVersion = RAL_IRRADIANCE_RECEIPT_SCHEMA_VERSION;
+	receipt.probes.queryGeneration = generation;
+	receipt.probes.productGeneration = 9u;
+	receipt.probes.fallback = RAL_IRRADIANCE_FALLBACK_LIGHTGRID;
+	receipt.probes.usedFallback = qtrue;
+	receipt.probes.ready = qtrue;
+	receipt.contributorHash = 10u;
+	for ( uint32_t channel = 0u; channel < 3u; ++channel ) {
+		receipt.blendedCoefficientsQ16[0][channel] = RAL_LIGHT_Q16_ONE;
+		receipt.diffuseIrradianceQ16[channel] = RAL_LIGHT_Q16_ONE;
+	}
+	receipt.coefficientHash = Ral_IrradianceCoefficientHash(
+		receipt.blendedCoefficientsQ16 );
+	receipt.usedFallback = qtrue;
+	receipt.ready = qtrue;
+	return receipt;
+}
 
 int main( void ) {
 	ralMetalCoreCreateInfo_t coreInfo = { 71u };
@@ -28,11 +56,22 @@ int main( void ) {
 	ralSwapchainCreateInfo_t createInfo;
 	ralMetalPresent_t *present = (ralMetalPresent_t *)(uintptr_t)0x1234u;
 	ralMetalPresentLayerReceipt_t layerReceipt, layerBefore, exactLayer;
-	ralMetalDrawableReceipt_t drawableReceipt, drawableBefore, exactDrawable;
-	ralMetalPresentReceipt_t presentReceipt, presentBefore, exactPresent;
+	ralMetalDrawableReceipt_t drawableReceipt, drawableBefore, exactDrawable,
+		persistentDrawable;
+	ralMetalPresentReceipt_t presentReceipt, presentBefore, exactPresent,
+		persistentReceipt;
+	renderSubmissionReceipt_t submissionReceipt;
+	ralMetalLighting_t *directionalLighting = NULL;
+	ralMetalLightingReceipt_t directionalLightingReceipt;
+	ralLightingProductRequest_t lightingRequest;
+	ralLightingArtifactReceipt_t lightingArtifact;
+	ralLightingRuntimePlan_t lightingPlan;
+	ralStaticLightingCapabilities_t lightingCapabilities = {
+		qtrue, qtrue, qtrue, qtrue };
 	ralMemoryFailureEvent_t lossEvent;
 	ralMemoryFailureReceipt_t lossReceipt;
 	renderSubmissionState_t frontend;
+	atmosphereFrameState_t atmosphere;
 	mapFile_t world;
 	dsurface_t worldSurface;
 	drawVert_t worldVertices[3];
@@ -40,6 +79,12 @@ int main( void ) {
 	dshader_t worldShader;
 	refdef_t worldView;
 	refEntity_t modelEntity, spriteEntity, beamEntity;
+	spriteDesc_t effectSprite;
+	emitterDesc_t effectEmitter;
+	decalDesc_t effectDecal;
+	ribbonDesc_t effectRibbon;
+	ribbonPoint_t effectRibbonPoints[2];
+	particleClass_t effectParticleClass;
 	refEntityMotion_t spriteMotion = { sizeof( spriteMotion ),
 		REF_ENTITY_MOTION_VERSION, 17u, 3u,
 		REF_ENTITY_MOTION_ROLE_GENERAL, 0u };
@@ -54,6 +99,13 @@ int main( void ) {
 	float hdrClear[4] = { 2.0f, 1.25f, 0.5f, 1.0f };
 	const byte *captureRgb;
 	uint32_t captureWidth, captureHeight;
+	const ralLightVec3Q16_t indirectRadiance = {
+		RAL_LIGHT_Q16_ONE, RAL_LIGHT_Q16_ONE, RAL_LIGHT_Q16_ONE };
+	const ralLightVec3Q16_t dominantDirection = {
+		0, 0, RAL_LIGHT_Q16_ONE };
+	const uint8_t stationaryVisibility = 255u;
+	uint8_t lightingRadianceBytes[8], lightingDirectionBytes[4];
+	uint8_t lightingArtifactBytes[512];
 	{
 		ralSurfaceFormat_t preferences[2] = { unsupportedFormat, hdrFormat };
 		ralSurfaceFormatSelectionInfo_t query;
@@ -115,6 +167,23 @@ int main( void ) {
 	CHECK( RenderSubmission_LoadWorld( &frontend, &world, 0 ) );
 	inlineModel = RenderSubmission_RegisterInlineModel( &frontend, "*1", 0u, 1u );
 	CHECK( inlineModel > 0 );
+	memset( &atmosphere, 0, sizeof( atmosphere ) );
+	atmosphere.schemaVersion = WIRED_ATMOSPHERE_SCHEMA_VERSION;
+	atmosphere.flags = ATMOSPHERE_FLAG_ENABLED
+		| ATMOSPHERE_FLAG_VOLUMETRIC_MEDIA | ATMOSPHERE_FLAG_SKY_LIGHTING;
+	atmosphere.qualityTier = ATMOSPHERE_QUALITY_ANALYTIC;
+	atmosphere.seed = 216u;
+	atmosphere.bounds[0] = atmosphere.bounds[1] = atmosphere.bounds[2] = -64.0f;
+	atmosphere.bounds[3] = atmosphere.bounds[4] = atmosphere.bounds[5] = 64.0f;
+	atmosphere.temperatureC = -8.0f;
+	atmosphere.humidity = 0.9f;
+	atmosphere.indoorExposure = 1.0f;
+	atmosphere.ambientColor[0] = 0.12f;
+	atmosphere.ambientColor[1] = 0.16f;
+	atmosphere.ambientColor[2] = 0.22f;
+	atmosphere.mediaDensity = 0.1f;
+	atmosphere.mediaHeightFalloff = 0.01f;
+	CHECK( RenderSubmission_SetAtmosphere( &frontend, &atmosphere ) );
 	CHECK( RenderSubmission_BeginFrame( &frontend, 75u ) );
 	memset( &worldView, 0, sizeof( worldView ) );
 	worldView.width = 16; worldView.height = 16;
@@ -127,6 +196,10 @@ int main( void ) {
 	modelEntity.axis[0][0] = modelEntity.axis[1][1] = modelEntity.axis[2][2] = 1.0f;
 	memset( modelEntity.shader.rgba, 255, sizeof( modelEntity.shader.rgba ) );
 	CHECK( RenderSubmission_AddEntity( &frontend, &modelEntity, NULL ) );
+	{
+		ralIrradianceEntitySampleReceipt_t local = LocalIrradiance( 75u, 1u );
+		CHECK( RenderSubmission_AttachEntityIrradiance( &frontend, 0u, &local ) );
+	}
 	memset( &spriteEntity, 0, sizeof( spriteEntity ) );
 	spriteEntity.reType = RT_SPRITE; spriteEntity.origin[0] = 8.0f;
 	spriteEntity.rotation = 45.0f;
@@ -139,6 +212,58 @@ int main( void ) {
 	beamEntity.oldorigin[1] = 1.0f; beamEntity.customShader = uiMaterial;
 	memset( beamEntity.shader.rgba, 255, sizeof( beamEntity.shader.rgba ) );
 	CHECK( RenderSubmission_AddEntity( &frontend, &beamEntity, NULL ) );
+	memset( &effectParticleClass, 0, sizeof( effectParticleClass ) );
+	effectParticleClass.shader = uiMaterial;
+	effectParticleClass.emitMode = EMIT_POINT;
+	effectParticleClass.scatterShape = SCATTER_SPHERE;
+	effectParticleClass.scatterMagnitude = 1.0f;
+	effectParticleClass.velocityShape = VEL_AXIAL_PLUS_CUBE;
+	effectParticleClass.axialSpeed = 8.0f;
+	effectParticleClass.cubeJitter = 2.0f;
+	effectParticleClass.lifetimeMean = 0.5f;
+	effectParticleClass.colorPalette[0][0] = 1.0f;
+	effectParticleClass.colorPalette[0][1] = 0.5f;
+	effectParticleClass.colorPalette[0][3] = 1.0f;
+	effectParticleClass.paletteCount = 1;
+	effectParticleClass.colorEndMult[0] = 1.0f;
+	effectParticleClass.colorEndMult[1] = 1.0f;
+	effectParticleClass.colorEndMult[2] = 1.0f;
+	effectParticleClass.sizeStart = 0.25f;
+	effectParticleClass.sizeEnd = 0.5f;
+	CHECK( RenderSubmission_RegisterParticleClass( &frontend, 1,
+		&effectParticleClass ) );
+	memset( &effectSprite, 0, sizeof( effectSprite ) );
+	effectSprite.origin[0] = 8.0f; effectSprite.radius = 0.5f;
+	effectSprite.rgba[0] = effectSprite.rgba[1] = effectSprite.rgba[2]
+		= effectSprite.rgba[3] = 1.0f;
+	effectSprite.shader = uiMaterial;
+	CHECK( RenderSubmission_AddEffectSprite( &frontend, &effectSprite ) );
+	memset( &effectEmitter, 0, sizeof( effectEmitter ) );
+	effectEmitter.cls = 1; effectEmitter.count = 8;
+	effectEmitter.origin[0] = 8.0f; effectEmitter.axis[2] = 1.0f;
+	effectEmitter.colorTint[0] = effectEmitter.colorTint[1]
+		= effectEmitter.colorTint[2] = effectEmitter.colorTint[3] = 1.0f;
+	CHECK( RenderSubmission_AddEffectEmitter( &frontend, &effectEmitter ) );
+	memset( &effectDecal, 0, sizeof( effectDecal ) );
+	effectDecal.origin[0] = 9.0f; effectDecal.normal[0] = -1.0f;
+	effectDecal.radius = 0.5f; effectDecal.shader = uiMaterial;
+	effectDecal.rgba[0] = effectDecal.rgba[1] = effectDecal.rgba[2]
+		= effectDecal.rgba[3] = 1.0f;
+	effectDecal.lifetime = 1.0f;
+	CHECK( RenderSubmission_AddEffectDecal( &frontend, &effectDecal ) );
+	memset( effectRibbonPoints, 0, sizeof( effectRibbonPoints ) );
+	for ( uint32_t point = 0u; point < 2u; ++point ) {
+		effectRibbonPoints[point].pos[0] = 8.0f;
+		effectRibbonPoints[point].pos[1] = point ? 1.0f : -1.0f;
+		effectRibbonPoints[point].width = 0.25f;
+		effectRibbonPoints[point].rgba[0] = 1.0f;
+		effectRibbonPoints[point].rgba[3] = 1.0f;
+	}
+	memset( &effectRibbon, 0, sizeof( effectRibbon ) );
+	effectRibbon.points = effectRibbonPoints;
+	effectRibbon.numPoints = 2;
+	effectRibbon.shader = uiMaterial;
+	CHECK( RenderSubmission_AddEffectRibbon( &frontend, &effectRibbon ) );
 	{
 		const float white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 		CHECK( RenderSubmission_SetColor( &frontend, white ) );
@@ -247,12 +372,20 @@ int main( void ) {
 		&& presentReceipt.maskedWorldBatchCount == 0u
 		&& presentReceipt.blendedWorldBatchCount == 1u
 		&& presentReceipt.depthWriteWorldBatchCount == 0u
-		&& presentReceipt.loweredEntityIndexCount == 45u
-		&& presentReceipt.loweredEntityBatchCount == 3u
+		&& presentReceipt.loweredEntityIndexCount == 63u
+		&& presentReceipt.loweredEntityBatchCount == 6u
 		&& presentReceipt.modelEntityCount == 1u
 		&& presentReceipt.primitiveEntityCount == 2u
 		&& presentReceipt.temporalEntityCount == 1u
+		&& presentReceipt.localIrradianceEntityCount == 1u
+		&& presentReceipt.localIrradianceDrawCount == 1u
 		&& presentReceipt.unresolvedEntityCount == 0u
+		&& presentReceipt.loweredEffectSpriteCount == 1u
+		&& presentReceipt.loweredEffectDecalCount == 1u
+		&& presentReceipt.loweredEffectRibbonCount == 1u
+		&& presentReceipt.effectEmitterDispatchCount == 1u
+		&& presentReceipt.effectParticleDrawCount == 8u
+		&& presentReceipt.effectPrimitiveDroppedCount == 0u
 		&& presentReceipt.loweredUiPrimitiveCount == 1u
 		&& presentReceipt.texturedUiPrimitiveCount == 1u
 		&& presentReceipt.readbackX == 8u && presentReceipt.readbackY == 8u
@@ -268,8 +401,63 @@ int main( void ) {
 		&& presentReceipt.readbackBytes[1] == 255u
 		&& presentReceipt.readbackBytes[2] == 0u
 		&& presentReceipt.readbackBytes[3] == 255u );
+	CHECK( RenderSubmission_EndFrame( &frontend, 75u, &submissionReceipt ) );
+	CHECK( RenderSubmission_BeginFrame( &frontend, 76u ) );
+	worldView.time = 250;
+	CHECK( RenderSubmission_RenderScene( &frontend, &worldView, 0 ) );
+	CHECK( RalMetal_PresentAcquire( present, &coreReceipt, &layerReceipt, 76u,
+		&persistentDrawable ) );
+	CHECK( RalMetal_PresentClearAndSubmit( present, &coreReceipt, &layerReceipt,
+		&persistentDrawable, &frontend, sdrClear, 77u, &persistentReceipt ) );
+	CHECK( persistentReceipt.loweredEntityIndexCount == 6u
+		&& persistentReceipt.loweredEntityBatchCount == 1u
+		&& persistentReceipt.loweredEffectSpriteCount == 0u
+		&& persistentReceipt.loweredEffectDecalCount == 1u
+		&& persistentReceipt.loweredEffectRibbonCount == 0u
+		&& persistentReceipt.effectEmitterDispatchCount == 0u
+		&& persistentReceipt.effectParticleDrawCount == 8u
+		&& persistentReceipt.effectPrimitiveDroppedCount == 0u );
+	memset( &lightingRequest, 0, sizeof( lightingRequest ) );
+	lightingRequest.schemaVersion = RAL_LIGHTING_PRODUCT_SCHEMA_VERSION;
+	lightingRequest.artifactGeneration = 76u;
+	lightingRequest.bake.schemaVersion = RAL_LIGHTING_BAKE_RECEIPT_SCHEMA_VERSION;
+	lightingRequest.bake.bakeGeneration = 1u;
+	lightingRequest.bake.staticIndirectKey = 2u;
+	lightingRequest.bake.producerVersion = 3u;
+	lightingRequest.bake.radianceHash = 4u;
+	lightingRequest.bake.directionHash = 5u;
+	lightingRequest.bake.patchCount = 1u;
+	lightingRequest.bake.linkCount = 1u;
+	lightingRequest.bake.completedBounces = 4u;
+	lightingRequest.bake.ready = qtrue;
+	lightingRequest.encoding = RAL_STATIC_LIGHTING_ENCODING_RGB9E5_OCT8;
+	lightingRequest.pageWidth = lightingRequest.pageHeight = 1u;
+	lightingRequest.pageCount = lightingRequest.texelCount = 1u;
+	lightingRequest.indirectRadiance = &indirectRadiance;
+	lightingRequest.dominantDirection = &dominantDirection;
+	lightingRequest.stationaryVisibility = &stationaryVisibility;
+	lightingRequest.stationaryVisibilityCount = 1u;
+	CHECK( Ral_LightingProductWrite( &lightingRequest, lightingRadianceBytes,
+		sizeof( lightingRadianceBytes ), lightingDirectionBytes,
+		sizeof( lightingDirectionBytes ), lightingArtifactBytes,
+		sizeof( lightingArtifactBytes ), &lightingArtifact ) );
+	CHECK( Ral_LightingRuntimePlanBuild( RAL_BACKEND_METAL, 76u,
+		lightingArtifactBytes, lightingArtifact.byteLength, &lightingArtifact,
+		&lightingCapabilities, &lightingPlan ) );
+	CHECK( RalMetal_LightingUpload( core, &coreReceipt, lightingArtifactBytes,
+		lightingArtifact.byteLength, &lightingPlan, &directionalLighting,
+		&directionalLightingReceipt ) );
+	CHECK( RalMetal_PresentSetDirectionalLighting( present,
+		&directionalLightingReceipt ) );
+	CHECK( RalMetal_PresentAcquire( present, &coreReceipt, &layerReceipt, 78u,
+		&drawableReceipt ) );
+	CHECK( RalMetal_PresentClearAndSubmit( present, &coreReceipt, &layerReceipt,
+		&drawableReceipt, &frontend, sdrClear, 79u, &presentReceipt ) );
+	CHECK( presentReceipt.directionalStaticDrawCount == 1u
+		&& presentReceipt.legacyLightmapDrawCount == 0u
+		&& presentReceipt.surfaceLightingBindingDigest != 0u );
 	CHECK( !RalMetal_PresentClearAndSubmit( present, &coreReceipt, &layerReceipt,
-		&drawableReceipt, NULL, sdrClear, 76u, &presentBefore ) );
+		&drawableReceipt, NULL, sdrClear, 80u, &presentBefore ) );
 	CHECK( !RalMetal_PresentAcquire( present, &coreReceipt, &layerReceipt, 73u,
 		&drawableBefore ) );
 	exactPresent = presentReceipt;
@@ -283,6 +471,9 @@ int main( void ) {
 	MUTATE_PRESENT( loweredWorldBatchCount );
 	MUTATE_PRESENT( texturedWorldBatchCount );
 	MUTATE_PRESENT( lightmappedWorldBatchCount );
+	MUTATE_PRESENT( legacyLightmapDrawCount );
+	MUTATE_PRESENT( directionalStaticDrawCount );
+	MUTATE_PRESENT( surfaceLightingBindingDigest );
 	MUTATE_PRESENT( patchWorldBatchCount );
 	MUTATE_PRESENT( maskedWorldBatchCount );
 	MUTATE_PRESENT( blendedWorldBatchCount );
@@ -292,7 +483,15 @@ int main( void ) {
 	MUTATE_PRESENT( modelEntityCount );
 	MUTATE_PRESENT( primitiveEntityCount );
 	MUTATE_PRESENT( temporalEntityCount );
+	MUTATE_PRESENT( localIrradianceEntityCount );
+	MUTATE_PRESENT( localIrradianceDrawCount );
 	MUTATE_PRESENT( unresolvedEntityCount );
+	MUTATE_PRESENT( loweredEffectSpriteCount );
+	MUTATE_PRESENT( loweredEffectDecalCount );
+	MUTATE_PRESENT( loweredEffectRibbonCount );
+	MUTATE_PRESENT( effectEmitterDispatchCount );
+	MUTATE_PRESENT( effectParticleDrawCount );
+	MUTATE_PRESENT( effectPrimitiveDroppedCount );
 	MUTATE_PRESENT( texturedUiPrimitiveCount );
 	MUTATE_PRESENT( msdfUiPrimitiveCount );
 #undef MUTATE_PRESENT
@@ -331,6 +530,10 @@ int main( void ) {
 		&drawableReceipt ) );
 	CHECK( !RalMetal_PresentClearAndSubmit( present, &coreReceipt, &layerReceipt,
 		&drawableReceipt, NULL, hdrClear, 82u, &presentBefore ) );
+	CHECK( RalMetal_PresentSetDirectionalLighting( present, NULL ) );
+	CHECK( RalMetal_LightingDestroy( core, &coreReceipt, directionalLighting,
+		&directionalLightingReceipt ) );
+	directionalLighting = NULL;
 	memset( &lossEvent, 0, sizeof( lossEvent ) );
 	lossEvent.backendType = RAL_BACKEND_METAL;
 	lossEvent.cause = RAL_MEMORY_FAILURE_DEVICE_LOST;

@@ -75,7 +75,8 @@ load_menu("ui/world_main.wui")
 load_menu("ui/console_panel.wui")
 
 -- ── HUD and scoreboards ───────────────────────────────────────────────
--- HUD file is loaded by WiredUI_Init via the 'hud' cvar (e.g. \hud hud_default)
+-- HUD file is loaded by WiredUI_Init via the 'hud' cvar (`hud classic`; legacy
+-- `hud default` and `hud hud_default` values are compatibility aliases).
 
 load_menu("ui/ingame_scoreboard_ffa.wui")
 load_menu("ui/ingame_scoreboard_duel.wui")

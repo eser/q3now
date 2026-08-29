@@ -6,20 +6,17 @@
 //   cl_crosshair* render at the leaf's screen-center rect (mirrors
 //   default.wui hud_crosshair_root). Engine 0 LoC.
 //
-// D1 fix (2026-06-30): the crosshair was INVISIBLE because the leaf was wrapped
-// in a plain `type container direction column` parent. A zero-rect (`rect X Y 0 0`)
-// customDraw leaf that is a NATIVE-FLEX child (parentIsContainer, not floating)
-// collapses to 0 area in clay's flex pass and emits NO custom-draw command → its
-// routine is never dispatched (runtime-pinned: Create ran, Routine never fired).
-// The working zero-rect HUD elements (carousel, statusbar_*) are FLOATING items;
-// `position absolute` takes the zero-rect-customDraw exemption (cl_wired_clay.c:1952).
-// So the crosshair leaf is now a direct floating menuDef itemDef with
-// `position absolute`, matching the carousel pattern that renders correctly.
+// The procedural routine owns viewport-centre placement. Keep only its 1px
+// custom-draw carrier here: the compositor floats custom carriers, so it emits
+// without consuming the middle row. A former full-width wrapper consumed 100%
+// of that row between two growing columns and pushed the right HUD column past
+// the presentation edge after HiDPI/backend restart.
 itemDef {
 	name "hud_active_crosshair"
 	hudElement "crosshair"
-	anchor CENTER
-	rect 0.5 0.5 0 0
+	width FIXED 1px
+	height FIXED 1px
+	grow 0
 	decoration
 	visible 1
 }

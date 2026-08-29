@@ -21,6 +21,8 @@ static qboolean MetalPixelFormat( ralFormat_t format, MTLPixelFormat *out,
 	case RAL_FORMAT_B8G8R8A8_UNORM: *out = MTLPixelFormatBGRA8Unorm; *outDepth = qfalse; return qtrue;
 	case RAL_FORMAT_B8G8R8A8_SRGB: *out = MTLPixelFormatBGRA8Unorm_sRGB; *outDepth = qfalse; return qtrue;
 	case RAL_FORMAT_R16G16_SFLOAT: *out = MTLPixelFormatRG16Float; *outDepth = qfalse; return qtrue;
+	case RAL_FORMAT_R16G16_SNORM: *out = MTLPixelFormatRG16Snorm; *outDepth = qfalse; return qtrue;
+	case RAL_FORMAT_E5B9G9R9_UFLOAT: *out = MTLPixelFormatRGB9E5Float; *outDepth = qfalse; return qtrue;
 	case RAL_FORMAT_R16G16B16A16_SFLOAT: *out = MTLPixelFormatRGBA16Float; *outDepth = qfalse; return qtrue;
 	case RAL_FORMAT_R32_SFLOAT: *out = MTLPixelFormatR32Float; *outDepth = qfalse; return qtrue;
 	case RAL_FORMAT_D16_UNORM: *out = MTLPixelFormatDepth16Unorm; *outDepth = qtrue; return qtrue;

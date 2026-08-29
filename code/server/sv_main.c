@@ -7,6 +7,7 @@
 
 #include "../qcommon/wired/net/wn_public.h"
 #include "../qcommon/nav/nav_public.h"   /* Nav_Frame — background bake pump */
+#include "sv_entity_events.h"
 LOG_DECLARE_CHANNEL( ch_server, "server" );
 
 serverStatic_t	svs;				// persistant server info
@@ -1335,6 +1336,7 @@ void SV_Frame( int msec ) {
 		}
 	}
 
+	SV_EntityEvents_Drain();
 	WiredCoreEvents_DispatchSimple( WCE_FRAME_END, -1 );
 
 	// send a heartbeat to the master if needed

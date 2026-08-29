@@ -21,6 +21,7 @@
 
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/lib/wired_paths.sh"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 TIMEOUT_RUNNER="$SCRIPT_DIR/run-with-timeout.py"
 LIFECYCLE_CFG_SOURCE="$SCRIPT_DIR/fixtures/wiredui-error-lifecycle.cfg"
@@ -102,43 +103,21 @@ if [ ! -f "$TIMEOUT_RUNNER" ] ||
     exit 77
 fi
 
-PACK_ROOT=""
-for candidate in "$WIRED_DIR" "$WIRED_DIR/../Resources" "$WIRED_DIR/../../.."; do
-    if [ -f "$candidate/base/pax21.sw3z" ]; then
-        PACK_ROOT="$(cd "$candidate" && pwd)"
-        break
-    fi
-done
+PACK_ROOT="$(wired_find_archive_root "$WIRED_DIR" "$WIRED_DIR/../Resources" "$WIRED_DIR/../../.." 2>/dev/null || true)"
 if [ -z "$PACK_ROOT" ]; then
-    echo "SKIP: no current base/pax21.sw3z found beside bundle/install for $WIRED"
+    echo "SKIP: no current VFS archives found beside bundle/install for $WIRED"
     exit 77
 fi
 
-CONTENT_ROOT=""
-BASE_ARCHIVE=""
-for candidate in "${WIRED_CONTENT_ROOT:-}" "$PACK_ROOT"; do
-    [ -n "$candidate" ] || continue
-    if [ -f "$candidate/base/pax01.sw3z" ]; then
-        CONTENT_ROOT="$(cd "$candidate" && pwd)"
-        BASE_ARCHIVE="$CONTENT_ROOT/base/pax01.sw3z"
-        break
-    fi
-    if [ -f "$candidate/base/pak0.pk3" ]; then
-        CONTENT_ROOT="$(cd "$candidate" && pwd)"
-        BASE_ARCHIVE="$CONTENT_ROOT/base/pak0.pk3"
-        break
-    fi
-done
-if [ -z "$BASE_ARCHIVE" ]; then
-    echo "SKIP: canonical base content missing; set WIRED_CONTENT_ROOT to a root containing base/pax01.sw3z or base/pak0.pk3"
+CONTENT_ROOT="$(wired_find_archive_root "${WIRED_CONTENT_ROOT:-}" "$WIRED_HOME" "$PACK_ROOT" 2>/dev/null || true)"
+if [ -z "$CONTENT_ROOT" ]; then
+    echo "SKIP: canonical base content missing; set WIRED_CONTENT_ROOT to a root containing base VFS archives"
     exit 77
 fi
 
 stage_exact_content() {
     local target_home="$1"
-    mkdir -p "$target_home/base"
-    cp "$BASE_ARCHIVE" "$target_home/base/$(basename "$BASE_ARCHIVE")" &&
-        cp "$PACK_ROOT/base/pax21.sw3z" "$target_home/base/pax21.sw3z"
+    wired_link_content_into_home "$target_home" "$CONTENT_ROOT/base" "$PACK_ROOT/base"
 }
 
 # Run the showerror test once at a given com_automated value; echo the logged
@@ -254,8 +233,8 @@ CASEPY
 }
 
 echo "==> WiredUI error-dialog check: $WIRED"
-echo "    current pack: $PACK_ROOT/base/pax21.sw3z"
-echo "    base archive: $BASE_ARCHIVE (read-only source)"
+echo "    current VFS: $PACK_ROOT/base (read-only links)"
+echo "    base content: $CONTENT_ROOT/base (read-only links)"
 
 LINE_AUTO="$(run_case 1)"; RC_AUTO=$?
 LINE_INTERACTIVE="$(run_case 0)"; RC_INTERACTIVE=$?
@@ -278,7 +257,7 @@ VERBOSE=1 assert_contract "$LINE_AUTO" "$LINE_INTERACTIVE" || fail=1
 #        FATAL/Z_Free lines (popup → re-map does not crash)
 #   #7b  the FINAL dump frame carries no error_popup
 # Maps need game data: the same explicit canonical base archive + exact current
-# pax21 allowlist used above is copied into this lifecycle's isolated home.
+# The product archive set resolved above is linked into this lifecycle's home.
 lifecycle_case() {
     local home_parent home_dir home_native jsonl dump stdout rc
     home_parent="$(mktemp -d -t wired-errlc-XXXXXX 2>/dev/null || mktemp -d)"

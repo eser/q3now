@@ -3,7 +3,7 @@
 //
 //   itemDef {
 //       type container
-//       rect 0 0 1 1
+//       width FIXED 1 height FIXED 1
 //       background "layered"
 //       effects "plasma+grid+vignette+scanlines+animated"
 //   }
@@ -20,7 +20,7 @@ menuDef {
 	name "qw_plasma_bg"
 	layer "menu"
 	fullScreen 1
-	rect 0 0 1 1
+	width FIXED 1 height FIXED 1
 	visible 0
 	style 1
 	backcolor $ink
@@ -28,7 +28,7 @@ menuDef {
 	itemDef {
 		name "qw_plasma_bg_root"
 		type container
-		rect 0 0 1 1
+		width FIXED 1 height FIXED 1
 		background "layered"
 		effects "plasma+grid+vignette+scanlines+animated"
 		visible 1

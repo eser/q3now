@@ -16,6 +16,7 @@ typedef struct {
 	uint32_t elementSize;
 	uint32_t elementCount;
 	const char *debugName;
+	ralBufferUsage_t extraUsage;
 } vkRalShadowStorageConfig_t;
 
 typedef struct {
@@ -70,6 +71,7 @@ typedef struct {
 	uint32_t bufferCount;
 	uint32_t elementSize;
 	uint32_t elementCount;
+	ralBufferUsage_t extraUsage;
 	qboolean ready;
 } vkRalShadowStorageOwner_t;
 

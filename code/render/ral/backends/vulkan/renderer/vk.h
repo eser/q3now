@@ -11,6 +11,7 @@
 #include "../../../core/ral_types.h"   // ralFormat_t (renderer attachment-format helpers)
 #include "../../../core/ral_presentation_policy.h"
 #include "../../../core/ral_color_output.h"
+#include "../../../core/ral_atmosphere.h"
 
 // Vulkan validation layer toggle. Gates both the renderer's request bit
 // (vk_ral_textures.c: bci.enableValidation) and any in-file #ifdef in
@@ -556,22 +557,24 @@ typedef struct vkUniform_s {
 	// 8..11 are RESERVED capacity (8 = pbrMap for the base-pass IBL term — do NOT
 	// repurpose). 48 B at offset 544 (shadow) / 208 (no-shadow), 16-aligned.
 	uint32_t packed_indices[12];                     // offset 544 (shadow) / 208 (no-shadow), 48 B
-	// World-lighting parameters, set once per frame (same value in every ring item).
+	// World/material parameters, set once per frame (same value in every ring item).
 	// .x = r_lightmapBoost (the base-pass linear-domain overbright multiplier the
-	// lightmap modulate branches apply). Appended at the very END so every field
+	// lightmap modulate branches apply); .yzw = global wetness/frost/snow response.
+	// Melt is folded into wetness host-side. Appended at the very END so every field
 	// above keeps its offset; gen_frag declares it at the matching trailing offset.
 	// gen_frag pads packed_indices to 544 in BOTH its shadow/no-shadow UBO variants,
 	// so this lands at 592 there; with FEAT_SHADOW_MAPPING (always 1) the host layout
-	// agrees. .yzw reserved for future world-lighting globals. 16 B, 16-aligned.
+	// agrees. 16 B, 16-aligned.
 	float    worldLightParams[4];                    // offset 592, 16 B
-	// Enhanced fog state, always present so FEAT_FOG_SYSTEM changes behavior but
-	// never the pipeline-layout or descriptor ABI. Two vec4s keep the tail std140-
+	// Enhanced fog state is a permanent part of the pipeline-layout and descriptor
+	// ABI. Two vec4s keep the tail std140-
 	// native on Vulkan/Metal/WebGPU: rgb+density, then type+farClip+enabled+pad.
 	vec4_t advancedFogColorDensity;                   // offset 608, 16 B
 	vec4_t advancedFogTypeFarEnabled;                 // offset 624, 16 B
+	vec4_t emissionRadiance;                          // offset 640, 16 B
 } vkUniform_t;
-_Static_assert( sizeof( vkUniform_t ) == 640,
-	"ordinary draw UBO ABI must remain 640 bytes" );
+_Static_assert( sizeof( vkUniform_t ) == 656,
+	"ordinary draw UBO ABI must remain 656 bytes" );
 
 #define TESS_XYZ   (1)
 #define TESS_RGBA0 (2)
@@ -843,15 +846,21 @@ qboolean vk_bloom( void );
 //                       gameplay branch, between vk_tonemap() and
 //                       vk_open_ui_pass(qfalse).
 void vk_tonemap( void );
+qboolean vk_atmosphere_full_execute( void );
+void vk_atmosphere_fixture_smoke_receipt( void );
+void vk_atmosphere_full_init( struct ralBackend_s *backend );
+void vk_atmosphere_full_shutdown( void );
+void RE_SetAtmosphereMediaVolumes( const atmosphereMediaVolume_t *volumes,
+	uint32_t count, uint64_t digest );
+void RE_SetAtmosphereSurfaceTiles( const ralAtmosphereSurfaceTile_t *tiles,
+	uint32_t count, uint64_t generation );
 void vk_open_ui_pass( qboolean clear );
 
 qboolean vk_alloc_vbo( const byte *vbo_data, int vbo_size );
 void vk_update_mvp( const float *m );
-#if FEAT_FOG_SYSTEM
 // Stash enhanced-fog state for the set-0 per-draw UBO. VK_PushUniform stamps
 // this 32-byte portable tail into every bounded ring item.
 void vk_update_fog_uniform( const vec4_t color, int fogType, float density, float farClip, qboolean enabled );
-#endif
 // Set a 2D scissor rect on the current command buffer. Pass NULL to restore
 // the fullscreen scissor (equivalent to "no clip region").
 void vk_set_2d_scissor( const int *rect );
@@ -1214,7 +1223,22 @@ _Static_assert( sizeof( VkPrimitiveStageGPU ) == VK_PRIMITIVE_STAGE_BYTES,
 // any drift between this C layout and the std430 stride.
 #define PARTICLES_PER_POOL          16384u
 #define PARTICLE_BYTES                 64u  // sizeof(GPU Particle), std430
+#define PARTICLE_SPAWN_REQUEST_MAX   1024u
+#define PARTICLE_SPAWN_REQUEST_BYTES   96u
 #define PARTICLE_CLASS_GPU_BYTES      736u  // sizeof(ParticleClassGPU), std430
+#define PARTICLE_ATMOSPHERE_PROFILE_BYTES 592u
+#define PARTICLE_CHILD_EVENT_MAX      1024u
+#define PARTICLE_CHILD_EVENT_BYTES      64u
+#define PARTICLE_CHILD_SPAWN_MAX        64u
+#define PARTICLE_CHILD_PARTICLE_MAX    4096u
+#define PARTICLE_CHILD_STAGE_COUNTERS \
+	( ATMOSPHERE_EFFECT_MAX_PROFILES * ATMOSPHERE_EFFECT_MAX_STAGES )
+#define PARTICLE_CHILD_PROFILE_COUNTERS ATMOSPHERE_EFFECT_MAX_PROFILES
+#define PARTICLE_CHILD_COUNTER_BYTES \
+	( ( PARTICLE_CHILD_STAGE_COUNTERS + PARTICLE_CHILD_PROFILE_COUNTERS ) \
+		* sizeof( uint32_t ) )
+#define PARTICLE_CHILD_COUNTER_ELEMENTS \
+	( PARTICLE_CHILD_COUNTER_BYTES / PARTICLE_CHILD_EVENT_BYTES )
 
 // Host-side mirror of GLSL std430 ParticleClassGPU. Field order +
 // trailing pads MUST exactly match particle_integrate.comp /
@@ -1348,7 +1372,57 @@ typedef struct {
 	uint32_t pad5;           // 60..63  total stride 64 B
 } particleGPU_t;
 
-// ── GPU-resident atmospheric weather (rain / snow) ─────────────────────
+// One CPU-authored emitter request expanded by the compute shader. Request
+// count is bounded independently from particle count, so submission cost is
+// O(emitters/stages), never O(particles). The target slot range is reserved by
+// the host's monotonic ring cursor; deterministic hashes derive all variation.
+typedef struct {
+	vec4_t origin;           // xyz emission origin, w unused
+	vec4_t axis;             // xyz direction, w unused
+	vec4_t end;              // xyz path end, w unused
+	vec4_t colorTint;        // linear RGBA multiplier
+	uint32_t classHandle;
+	uint32_t count;
+	uint32_t firstSlot;
+	uint32_t seed;
+	uint32_t profileHandle;  // 0 for generic particles
+	uint32_t stageIndex;     // valid when profileHandle != 0
+	uint32_t stageFlags;     // ATMOSPHERE_STAGE_INHERIT_*
+	uint32_t reserved;
+} particleSpawnGPU_t;
+
+// Header occupies event-storage element zero. GPU atomics update the first
+// four lanes; the host rewrites the complete header before the current
+// frame-slot dispatch. Events begin at byte 64, preserving a simple std430
+// array and keeping every range bounded/WebGPU-portable.
+typedef struct {
+	uint32_t dispatchX;       // VkDispatchIndirectCommand-compatible prefix
+	uint32_t dispatchY;
+	uint32_t dispatchZ;
+	uint32_t dispatchPad;
+	uint32_t eventCount;
+	uint32_t particleCursor;
+	uint32_t droppedEvents;
+	uint32_t droppedParticles;
+	uint32_t eventBaseSlot;
+	uint32_t particleBudget;
+	uint32_t eventCapacity;
+	uint32_t collisionEnabled;
+	float worldMins[2];
+	float worldMaxs[2];
+} particleChildEventHeaderGPU_t;
+
+typedef struct {
+	vec4_t origin;
+	vec4_t velocity;
+	vec4_t colorTint;
+	uint32_t profileHandle;
+	uint32_t stageIndex;
+	uint32_t count;
+	uint32_t seed;
+} particleChildEventGPU_t;
+
+// ── GPU-resident atmospheric precipitation ─────────────────────────────
 //
 // A dedicated GPU pool, separate from the 64-class particle path. The
 // cgame emits one weather descriptor on weather change; the compute shader
@@ -1377,13 +1451,13 @@ typedef struct {
 	float    flags;          // 28..31  0 = inactive (respawn), 1 = falling
 } atmParticleGPU_t;
 
-// Host-side mirror of GLSL std140 AtmFrame. 208 B (= 13 * vec4). Two
+// Host-side mirror of GLSL std140 AtmFrame. 1152 B (= 72 * vec4). Two
 // disjoint write owners, like particleFrame_t:
 //   render region  (bytes   0..95): mvp, viewLeft, viewUp. Filled in
 //                                   RB_DrawAtmospheric (backEnd.viewParms valid).
-//   compute region (bytes 96..207): eyeWorld, dt, time, poolSize, pingPongRead,
-//                                    boundsMin/Max, worldMins/Maxs, invGridStep,
-//                                    gridSize, type, distance. Filled in
+//   compute region (bytes 96..351): eyeWorld, simulation/weather fields and
+//                                    the complete climate/surface/sky/media
+//                                    snapshot. Filled in
 //                                    RB_RunAtmosphericCompute (vk_begin_frame,
 //                                    before the main render pass). eyeWorld is
 //                                    compute-owned (distance-cull) but also read
@@ -1409,12 +1483,25 @@ typedef struct {
 	uint32_t gridSize;       // 184..187  heightgrid edge (256)
 	uint32_t type;           // 188..191  0 = none, 1 = rain, 2 = snow
 	float    distance;       // 192..195  eye-relative cull radius
-	// Soft-particle depth-fade params. Repurposed from the trailing pad lanes;
-	// the compute owner never wrote these, so RB_DrawAtmospheric (the render
-	// owner) fills them alongside mvp without racing the compute region.
-	float    invResX;        // 196..199  1/renderWidth  (screen UV from gl_FragCoord)
-	float    invResY;        // 200..203  1/renderHeight
-	float    depthValid;     // 204..207  1.0 when vk.sceneDepth is fresh this frame, else 0.0  (total stride 208 B = 13 * vec4)
+	float    computePad[3];  // 196..207  std140 alignment for the climate vectors
+	float    windGust[4];    // 208..223  xyz wind, w gust strength
+	float    precipitation[4];//224..239 rain, snow, sleet, hail weights
+	float    dustAsh;        // 240..243 dust / ash precipitation weight
+	float    indoorExposure; // 244..247 world-space precipitation exposure multiplier
+	uint32_t seed;           // 248..251 full-width deterministic climate seed
+	uint32_t climatePad;     // 252..255 reserved
+	float    climate[4];     // 256..271 temperature, humidity, visibility, transition
+	float    surfaceClimate[4];//272..287 wetness, frost, snow, melt
+	float    sun[4];         // 288..303 direction.xyz, intensity
+	float    moon[4];        // 304..319 direction.xyz, intensity
+	float    ambientCloud[4];// 320..335 ambient.rgb, cloud cover
+	float    cloudMedia[4];  // 336..351 cloud shadow, lightning, media density/falloff
+	float    effectMeta[4]; // precipitation count, semantic workload count
+	float    effectWorkloads[48][4]; // Vulkan weather keeps these zero; its
+	                                // generic effect graph owns semantic FX.
+	// Render-only soft-particle depth-fade params. Final publication fills the
+	// last 16 bytes after the contiguous compute-owned region.
+	float    renderParams[4];
 } atmFrame_t;
 
 // GPU decal ring. DECALS_PER_POOL is the fixed pool capacity: marks are
@@ -1540,7 +1627,8 @@ typedef struct {
 // packed; 9 floats + 1 int = 40 bytes, the block is rounded to a vec4 multiple
 // (48 bytes) by the buffer allocation. exposure_bias stays first so its offset
 // never moves. Field order/offsets mirror the ExposureBlock in tonemap.frag and
-// the storage-block mirror in exposure.comp.
+// the storage-block mirror in exposure.comp. The final two fields carry the
+// backend-neutral low-luminance visibility curve; 16 scalars close at 64 bytes.
 typedef struct {
 	float exposure_bias;
 	float key;
@@ -1560,9 +1648,10 @@ typedef struct {
 	float sunScreenY;   // sun screen UV y (from the tr.sunDirection projection)
 	float sunrayIntensity;
 	float sunrayDecay;
+	float shadowExponent; // chroma-preserving toe exponent; 1.0 is exact identity
+	float shadowPivot;    // scene-linear luminance pivot; values above are unchanged
 	// (SSAO ssaoZNear/ssaoZFar removed: the legacy per-pixel tonemap SSAO path is
-	// fully retired — GTAO is the sole AO path. The block ends at the sunray fields,
-	// offsets 40..55, so std140 keeps it at 56 bytes / 14 scalars.)
+	// fully retired — GTAO is the sole AO path.)
 } vk_exposure_block_t;
 
 // Host-side mirror of menubg.frag's set-2 MenuBgBlock UBO (std140). 8 floats = 32 B.
@@ -1976,7 +2065,7 @@ typedef struct {
 	// inside a struct.
 	struct {
 		// pipeline state
-		VkDescriptorSetLayout	compute_set_layout;  // 4 bindings: UBO + 3 SSBOs
+		VkDescriptorSetLayout	compute_set_layout;  // 8 bindings: UBO + pools/classes + spawn/profile/event/heightgrid
 		struct ralBindGroupLayout_s *ral_bgl_compute;
 		VkDescriptorSetLayout	render_set_layout;   // 3 bindings: UBO + 2 SSBOs
 		struct ralBindGroupLayout_s *ral_bgl_render;
@@ -1986,6 +2075,9 @@ typedef struct {
 		struct ralPipelineLayout_s *ral_compute_pipeline_layout;
 		struct ralPipelineLayout_s *ral_render_pipeline_layout;
 		struct ralPipeline_s	*ral_compute_pipeline;
+		struct ralPipeline_s	*ral_spawn_pipeline;
+		struct ralPipeline_s	*ral_child_spawn_pipeline;
+		struct ralPipeline_s	*ral_child_finalize_pipeline;
 		struct ralPipeline_s	*ral_render_pipeline_alpha;     // dynamic-rendering pipeline (alpha)
 		struct ralPipeline_s	*ral_render_pipeline_additive;  // dynamic-rendering pipeline (additive)
 
@@ -1997,6 +2089,15 @@ typedef struct {
 		// Class SSBO ownership also lives in vk_ral_shadow_storage;
 		// registration updates one exact element in its CPU shadow.
 		uint32_t				numClasses;          // current registry count
+		uint32_t				spawnRequestCount;   // frame-local bounded GPU expansion queue
+		uint32_t				spawnMaxGroups;      // max ceil(request.count / 64)
+		uint32_t				spawnParticleCount;  // frame-local reserved slots; never exceeds pool
+		uint32_t				spawnSeed;           // deterministic monotonic request seed
+		qboolean				atmosphereGraphSmokePending;
+		uint32_t				atmosphereGraphSmokeRequests;
+		uint32_t				atmosphereGraphSmokeParticles;
+		struct ralBuffer_s		*childTelemetryReadback[NUM_COMMAND_BUFFERS];
+		qboolean				childTelemetryReady[NUM_COMMAND_BUFFERS];
 
 		// Texturing: per-class image cache + shared sampler.
 		// At RE_RegisterParticleClass time the resolved image_t
@@ -2022,31 +2123,31 @@ typedef struct {
 		VkSampler				sampler;
 		struct ralSampler_s *ral_sampler;          // borrowed from the renderer sampler pool
 		uint64_t              textureGeneration;    // registry generation, never zero while initialized
-		uint64_t              renderGroupTextureGeneration[NUM_COMMAND_BUFFERS];
+		uint64_t              renderGroupTextureGeneration[NUM_COMMAND_BUFFERS][2];
 
 		// Per-frame uniform ownership is backend-neutral and lives in the
 		// shared vk_ral_frame_uniform owner. These descriptor sets borrow only
 		// the exact per-slot buffer identities published by its receipt.
 
-		// Descriptor groups. Both cohorts are allocated/written directly through
-		// the current RAL arena; the VkDescriptorSet arrays are borrowed native
-		// compatibility mirrors. compute_descriptor[i] binds read=pool[i],
-		// write=pool[1-i]; render_descriptor[i] binds read=pool[1-i]
-		// (the pool the compute pass just wrote). Frame N selects
-		// index pingPongRead.
-		VkDescriptorSet			compute_descriptor[NUM_COMMAND_BUFFERS];
-		VkDescriptorSet			render_descriptor [NUM_COMMAND_BUFFERS];
-		struct ralBindGroup_s *ral_compute_descriptor[NUM_COMMAND_BUFFERS];
-		struct ralBindGroup_s *ral_render_descriptor[NUM_COMMAND_BUFFERS];
+		// Descriptor groups. Command-buffer frame ownership and particle pool
+		// ping-pong ownership are independent axes. The first index always selects
+		// the current frame UBO slot; the second selects the pool. Compute groups
+		// bind pool[pool] for read and pool[1-pool] for write. Render groups bind
+		// pool[pool] directly. Keeping the axes separate prevents a particle draw
+		// from projecting world positions through another frame's camera matrix.
+		VkDescriptorSet			compute_descriptor[NUM_COMMAND_BUFFERS][2];
+		VkDescriptorSet			render_descriptor [NUM_COMMAND_BUFFERS][2];
+		struct ralBindGroup_s *ral_compute_descriptor[NUM_COMMAND_BUFFERS][2];
+		struct ralBindGroup_s *ral_render_descriptor[NUM_COMMAND_BUFFERS][2];
+		struct ralTextureView_s *ral_collision_heightgrid_view;
 
 		// frame-to-frame state
 		uint32_t				pingPongRead;        // 0 or 1, flipped each frame
 		float					prevSceneTime;       // backEnd.refdef.floatTime at last
 		                                             // RB_RunParticleCompute call
 
-		// emit-time state (host-side cursor for RE_EmitParticles).
-		// Round-robin allocation index into the host-coherent pool;
-		// wrap-around overwrites the oldest slot.
+		// Request-time ring reservation. CPU advances once per bounded emitter;
+		// the specialized GPU spawn pass expands individual particle slots.
 		uint32_t				nextSlot;
 
 		qboolean				available;           // false if init failed
@@ -2067,7 +2168,7 @@ typedef struct {
 		uint32_t				nextSlot;            // round-robin emit cursor; wrap overwrites oldest
 
 		// render pipeline state
-		VkDescriptorSetLayout	render_set_layout;   // 4 bindings: UBO + pool SSBO + texture array + scene depth
+		VkDescriptorSetLayout	render_set_layout;   // 5 bindings: UBO + pool + textures + depth + climate tiles
 		struct ralBindGroupLayout_s *ral_bgl_render;
 		VkPipelineLayout		render_pipeline_layout;
 		struct ralPipelineLayout_s *ral_render_pipeline_layout;
@@ -2101,10 +2202,19 @@ typedef struct {
 		uint64_t				textureGeneration;     // registry generation, never zero while initialized
 		uint64_t				renderGroupTextureGeneration[NUM_COMMAND_BUFFERS];
 
+		// Sorted backend-neutral surface-climate table, one retained storage
+		// buffer per command slot. The fragment shader performs at most eight
+		// comparisons; no material/decal pixel scans the 256-entry source list.
+		struct ralBuffer_s		*surfaceClimateBuffer[NUM_COMMAND_BUFFERS];
+		ralAtmosphereSurfaceTile_t surfaceClimateTable[RAL_ATMOSPHERE_MAX_SURFACE_TILES];
+		uint64_t				surfaceClimateGeneration;
+		uint64_t				surfaceClimatePublished[NUM_COMMAND_BUFFERS];
+		uint32_t				surfaceClimateCount;
+
 		qboolean				available;           // false if init failed
 	} decal;
 
-	// ── GPU-resident atmospheric weather (rain / snow) ────────────────
+	// ── GPU-resident atmospheric precipitation ────────────────────────
 	// Dedicated compute + draw pipeline, separate from the particle path.
 	// Mirrors vk.particle: RAL-owned device-local ping-pong pool SSBOs, a per-frame
 	// UBO ring, a compute pipeline that self-spawns / integrates / collides
@@ -2157,6 +2267,19 @@ typedef struct {
 		vec2_t					worldMins;           // heightgrid xy bounds
 		vec2_t					worldMaxs;
 		int						gridSize;            // heightgrid edge (256)
+		uint32_t				flags;
+		uint32_t				qualityTier;
+		uint32_t				seed;
+		vec3_t					wind;
+		float					gustStrength;
+		float					precipitation[5];
+		float					indoorExposure;
+		float					timelineSeconds;       // app-authored deterministic effect clock
+		atmosphereFrameState_t state;                 // complete normalized climate authority
+		float					surfaceTargets[4];     // derived wetness/frost/snow/melt targets
+		ralAtmosphereRuntimeState_t runtimeState;      // backend-neutral lifecycle authority
+		ralAtmosphereRuntimeReceipt_t runtimeReceipt;  // latest exact lifecycle telemetry
+		uint64_t				runtimeFrameGeneration;
 
 		qboolean				available;           // false if init failed
 	} atm;
@@ -2289,6 +2412,20 @@ typedef struct {
 	struct ralTextureView_s *ral_tonemapped_view;
 	struct ralBindGroup_s *ral_tonemapped_descriptor;
 	struct ralTexture_s *ral_tonemapped_image;
+
+	// Native-presentation UI composite. The scene remains in
+	// ral_tonemapped_image at the independently selected render extent; it is
+	// upscaled once into this image before HUD/menu/console draws. Gamma and
+	// capture sample this image so 2D never inherits the scene render scale.
+	VkDescriptorSet ui_descriptor;
+	struct ralTextureView_s *ral_ui_view;
+	struct ralBindGroup_s *ral_ui_descriptor;
+	struct ralTexture_s *ral_ui_image;
+	/* Presentation-resolution depth for painter-ordered worldless UI
+	 * subviews. Scene depth follows the independently scaled 3D extent and
+	 * cannot legally back the native-resolution UI pass. */
+	struct ralTexture_s *ral_ui_depth_image;
+	qboolean ral_ui_image_initialized;
 
 	struct ralTexture_s *ral_color_image;
 	struct ralTextureView_s *ral_color_view;    // portable sampling view

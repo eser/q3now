@@ -1,0 +1,77 @@
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct Params
+{
+    uint4 gridHistory;
+    float4 depthRangeTemporal;
+};
+
+struct LitMedia
+{
+    float4 source[1];
+};
+
+struct History
+{
+    float4 previous[1];
+};
+
+struct Integrated
+{
+    float4 integrated[1];
+};
+
+struct NextHistory
+{
+    float4 nextHistory[1];
+};
+
+constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(8u, 8u, 1u);
+
+struct spvDescriptorSetBuffer0
+{
+    constant Params* p [[id(0)]];
+    device LitMedia* m_117 [[id(1)]];
+    device History* m_175 [[id(2)]];
+    device Integrated* m_185 [[id(3)]];
+    device NextHistory* m_192 [[id(4)]];
+};
+
+kernel void main0(device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+{
+    uint2 c = gl_GlobalInvocationID.xy;
+    if (any(c >= (*spvDescriptorSet0.p).gridHistory.xy))
+    {
+        return;
+    }
+    uint sliceStride = (*spvDescriptorSet0.p).gridHistory.x * (*spvDescriptorSet0.p).gridHistory.y;
+    float transmittance = 1.0;
+    float3 radiance = float3(0.0);
+    float nearZ = fast::max((*spvDescriptorSet0.p).depthRangeTemporal.x, 0.00999999977648258209228515625);
+    float farZ = fast::max((*spvDescriptorSet0.p).depthRangeTemporal.y, nearZ + 0.00999999977648258209228515625);
+    float previousZ = nearZ;
+    for (uint z = 0u; z < (*spvDescriptorSet0.p).gridHistory.z; z++)
+    {
+        uint index = ((z * sliceStride) + (c.y * (*spvDescriptorSet0.p).gridHistory.x)) + c.x;
+        float slice = (float(z) + 1.0) / float((*spvDescriptorSet0.p).gridHistory.z);
+        float currentZ = nearZ * powr(farZ / nearZ, slice);
+        float stepLength = currentZ - previousZ;
+        float4 m = (*spvDescriptorSet0.m_117).source[index];
+        float stepT = exp((-fast::max(m.w, 0.0)) * stepLength);
+        radiance += (((m.xyz * transmittance) * (1.0 - stepT)) / float3(fast::max(m.w, 9.9999997473787516355514526367188e-06)));
+        transmittance *= stepT;
+        float4 current = float4(radiance, transmittance);
+        if ((*spvDescriptorSet0.p).gridHistory.w != 0u)
+        {
+            float weight = fast::clamp((*spvDescriptorSet0.p).depthRangeTemporal.z, 0.0, 0.980000019073486328125) * (1.0 - fast::clamp((*spvDescriptorSet0.p).depthRangeTemporal.w, 0.0, 1.0));
+            current = mix(current, (*spvDescriptorSet0.m_175).previous[index], float4(weight));
+        }
+        (*spvDescriptorSet0.m_185).integrated[index] = current;
+        (*spvDescriptorSet0.m_192).nextHistory[index] = current;
+        previousZ = currentZ;
+    }
+}
+

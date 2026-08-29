@@ -87,12 +87,16 @@ typedef struct source_s
 	define_t **definehash;					//hash chain with defines
 	indent_t *indentstack;					//stack with indents
 	int skip;								// > 0 if skipping conditional code
+	int noStringConcat;						// scoped lexical mode for WiredUI script parsing
 	token_t token;							//last read token
 } source_t;
 
 
 //read a token from the source
 int PC_ReadToken(source_t *source, token_t *token);
+// Reads one lexical token without C-style adjacent string concatenation.
+// WiredUI scripts use adjacent quoted strings as distinct command arguments.
+int PC_ReadTokenNoConcat(source_t *source, token_t *token);
 //expect a certain token
 int PC_ExpectTokenString(source_t *source, char *string);
 //expect a certain token type
@@ -158,5 +162,6 @@ typedef struct pc_token_s
 int PC_LoadSourceHandle(const char *filename);
 int PC_FreeSourceHandle(int handle);
 int PC_ReadTokenHandle(int handle, pc_token_t *pc_token);
+int PC_ReadTokenHandleNoConcat(int handle, pc_token_t *pc_token);
 int PC_SourceFileAndLine(int handle, char *filename, int *line);
 void PC_CheckOpenSourceHandles(void);

@@ -11,7 +11,7 @@ import { openMetalShaderCatalog } from '../code/render/ral/backends/metal/ral_me
 const root = fileURLToPath(new URL('..', import.meta.url));
 const source = join(root, 'code/render/ral/backends/vulkan/renderer/shaders/portable');
 const catalog = openMetalShaderCatalog(source);
-assert.equal(catalog.moduleCount, 294);
+assert.equal(catalog.moduleCount, 299);
 assert.match(catalog.toolchainIdentity, /^wired-shader-xlate\/2 spirv-cross\//);
 const color = catalog.get('color_vert_spv');
 assert.equal(color.stage, 'RAL_STAGE_VERTEX');

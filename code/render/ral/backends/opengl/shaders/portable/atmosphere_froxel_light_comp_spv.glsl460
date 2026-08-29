@@ -1,0 +1,87 @@
+#version 460
+layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
+
+struct ForwardLight
+{
+    vec4 positionRadius;
+    vec4 colorInvRadius2;
+    vec4 endpointLinear;
+};
+
+layout(binding = 0, std140) uniform Params
+{
+    mat4 invViewProjection;
+    vec4 eyeNear;
+    vec4 farPad;
+    uvec4 gridLightCount;
+    vec4 sunDirectionIntensity;
+    vec4 sunColorCloudShadow;
+    vec4 moonDirectionIntensity;
+    vec4 moonColorLightning;
+    vec4 ambientCloud;
+} p;
+
+layout(binding = 0, std430) readonly buffer Media
+{
+    vec4 scatteringExtinction[];
+} _60;
+
+layout(binding = 1, std430) readonly buffer TileLights
+{
+    uint tileLight[];
+} _194;
+
+layout(binding = 2, std430) readonly buffer Lights
+{
+    ForwardLight light[];
+} _234;
+
+layout(binding = 3, std430) writeonly buffer LitMedia
+{
+    vec4 radianceExtinction[];
+} _279;
+
+void main()
+{
+    uvec3 c = gl_GlobalInvocationID;
+    uvec3 dims = p.gridLightCount.xyz;
+    if (any(greaterThanEqual(c, dims)))
+    {
+        return;
+    }
+    uint index = (((c.z * dims.y) + c.y) * dims.x) + c.x;
+    vec4 medium = _60.scatteringExtinction[index];
+    vec2 uv = (vec2(c.xy) + vec2(0.5)) / vec2(dims.xy);
+    float slice = (float(c.z) + 0.5) / float(dims.z);
+    float nearZ = max(p.eyeNear.w, 0.00999999977648258209228515625);
+    float farZ = max(p.farPad.x, nearZ + 0.00999999977648258209228515625);
+    float distanceZ = nearZ * pow(farZ / nearZ, slice);
+    vec4 worldH = p.invViewProjection * vec4((uv * 2.0) - vec2(1.0), 1.0 - (nearZ / distanceZ), 1.0);
+    vec3 world = worldH.xyz / vec3(max(abs(worldH.w), 9.9999999747524270787835121154785e-07));
+    vec3 illumination = p.ambientCloud.xyz;
+    illumination += ((p.sunColorCloudShadow.xyz * p.sunDirectionIntensity.w) * (1.0 - p.sunColorCloudShadow.w));
+    illumination += (p.moonColorLightning.xyz * p.moonDirectionIntensity.w);
+    illumination += p.moonColorLightning.www;
+    uint tile = (c.y * dims.x) + c.x;
+    uint base = tile * 33u;
+    uint count = min(min(_194.tileLight[base], 32u), p.gridLightCount.w);
+    ForwardLight l;
+    for (uint i = 0u; i < count; i++)
+    {
+        uint lightIndex = _194.tileLight[(base + 1u) + i];
+        if (lightIndex >= p.gridLightCount.w)
+        {
+            continue;
+        }
+        l.positionRadius = _234.light[lightIndex].positionRadius;
+        l.colorInvRadius2 = _234.light[lightIndex].colorInvRadius2;
+        l.endpointLinear = _234.light[lightIndex].endpointLinear;
+        vec3 delta = l.positionRadius.xyz - world;
+        float radius = max(l.positionRadius.w, 0.001000000047497451305389404296875);
+        float attenuation = max(1.0 - (length(delta) / radius), 0.0);
+        attenuation *= attenuation;
+        illumination += (l.colorInvRadius2.xyz * attenuation);
+    }
+    _279.radianceExtinction[index] = vec4(medium.xyz * illumination, medium.w);
+}
+

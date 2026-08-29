@@ -1919,13 +1919,17 @@ void vk_ral_refresh_internal_texture_dependents( void )
 	// pipeline tracks the color/depth formats). Inert unless r_forwardPlus is set.
 	vk_forwardplus_lit_init( s_ral_backend );
 
-	// The engine-resources set's IBL bindings (set 2, bindings 1/2/3 — the BRDF LUT
-	// + probe cubes) are written by vk_update_attachment_descriptors, which gates
-	// each write on its view existing. That function ran earlier in vk_init_descriptors
-	// — BEFORE this sweep created the views — so re-run it now that the IBL images,
-	// views, and sampler exist, otherwise the bindings stay unwritten until a later
-	// descriptor refresh and the base-pass IBL term reads zero on a fresh boot.
+	// Re-mint the shared attachment sampling views before any later consumer
+	// borrows them. The dependency sweep above retired sceneDepth.ral_view;
+	// atmosphere bind groups must never capture that stale/null child and the
+	// refresh must not run again after those bind groups have been created.
+	// This also publishes the IBL views created earlier in this sweep.
 	vk_update_attachment_descriptors();
+
+	// Full atmosphere consumes the adopted scene HDR/depth resources and borrows
+	// the shipping Forward+ tile/light buffers, so it is the final compute cohort
+	// in this dependency-ordered sweep.
+	vk_atmosphere_full_init( s_ral_backend );
 	// H2a scene identity is usable only after the raw color attachment, adopted
 	// texture, postprocess group and histogram group belong to this same sweep.
 	// Publishing earlier would let pointer reuse satisfy a stale target receipt.
@@ -1966,8 +1970,9 @@ void vk_ral_release_internal_texture_dependents( void )
 
 	// Forward+ tile-classification compute resources are RAL-owned; free them with
 	// the other device-lifetime compute siblings (re-created on the next bring-up).
-	vk_forwardplus_shutdown();
+	vk_atmosphere_full_shutdown();
 	vk_forwardplus_lit_shutdown();
+	vk_forwardplus_shutdown();
 
 }
 

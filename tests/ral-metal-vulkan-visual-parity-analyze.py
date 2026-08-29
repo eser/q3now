@@ -137,8 +137,9 @@ def analyze(root: Path, config: Mapping[str, object], decoder: Path) -> None:
     if not marker.is_file():
         raise EvidenceError("run freshness marker missing")
     marker_time = marker.stat().st_mtime_ns
-    width = int(config["width"])
-    height = int(config["height"])
+    logical_width = int(config["width"])
+    logical_height = int(config["height"])
+    width = height = 0
     scenes = config["scenes"]
     if not isinstance(scenes, Mapping) or not scenes:
         raise EvidenceError("no parity scenes configured")
@@ -156,13 +157,36 @@ def analyze(root: Path, config: Mapping[str, object], decoder: Path) -> None:
                     raise EvidenceError(f"missing/empty artifact: {artifact}")
                 if artifact.stat().st_mtime_ns < marker_time:
                     raise EvidenceError(f"stale artifact: {artifact}")
-            if png_dimensions(png) != (width, height):
-                raise EvidenceError(f"{backend}/{scene}: screenshot must be {width}x{height}")
+            frame_width, frame_height = png_dimensions(png)
+            if frame_width % logical_width or frame_height % logical_height:
+                raise EvidenceError(
+                    f"{backend}/{scene}: screenshot {frame_width}x{frame_height} is not an "
+                    f"integer-DPI multiple of {logical_width}x{logical_height}"
+                )
+            scale_x = frame_width // logical_width
+            scale_y = frame_height // logical_height
+            if scale_x != scale_y or scale_x < 1 or scale_x > 4:
+                raise EvidenceError(
+                    f"{backend}/{scene}: invalid presentation scale {scale_x}x{scale_y}"
+                )
+            if width == 0:
+                width, height = frame_width, frame_height
+            elif (frame_width, frame_height) != (width, height):
+                raise EvidenceError(
+                    f"{backend}/{scene}: screenshot extent differs from the matrix "
+                    f"{width}x{height}"
+                )
             log = log_path.read_text(encoding="utf-8", errors="replace")
             require_receipt(log, backend)
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
             if meta.get("backend") != backend or meta.get("map") != scene:
                 raise EvidenceError(f"{backend}/{scene}: metadata backend/map mismatch")
+            if (meta.get("width"), meta.get("height")) != (frame_width, frame_height):
+                raise EvidenceError(f"{backend}/{scene}: metadata screenshot extent mismatch")
+            if (meta.get("logical_width"), meta.get("logical_height")) not in (
+                (None, None), (logical_width, logical_height)
+            ):
+                raise EvidenceError(f"{backend}/{scene}: metadata logical extent mismatch")
             metadata.append(meta)
             raw = decode_rgb(png, decoder)
             if len(raw) != width * height * 3:

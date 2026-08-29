@@ -15,8 +15,16 @@ _Static_assert( sizeof( ralWebGpuBrowserAdapterResponse_t ) == 376u,
 	"browser ABI adapter response layout drift" );
 _Static_assert( sizeof( ralWebGpuBrowserCanvasConfigureRequest_t ) == 56u,
 	"browser ABI canvas configure layout drift" );
-_Static_assert( sizeof( ralWebGpuBrowserIndexedDrawRequest_t ) == 104u,
+_Static_assert( sizeof( ralWebGpuBrowserIndexedDrawRequest_t ) == 172u,
 	"browser ABI indexed draw request layout drift" );
+_Static_assert( sizeof( ralWebGpuBrowserBindResourceAbi_t ) == 32u,
+	"browser ABI bind resource layout drift" );
+_Static_assert( sizeof( ralWebGpuBrowserBindEntryAbi_t ) == 40u,
+	"browser ABI bind layout entry drift" );
+_Static_assert( sizeof( ralWebGpuBrowserBindGroupRequest_t ) == 48u,
+	"browser ABI bind group request layout drift" );
+_Static_assert( sizeof( ralWebGpuBrowserComputeDispatchRequest_t ) == 120u,
+	"browser ABI compute dispatch request layout drift" );
 
 struct ralWebGpuBrowserBridge_s {
 	uint64_t generation;
@@ -305,6 +313,7 @@ static qboolean CreateTexture( void *userData, uintptr_t device,
 		sizeof( request ) ); request.deviceIdentity = device;
 	request.width = desc->width; request.height = desc->height;
 	request.depth = desc->depth; request.bytesPerTexel = desc->bytesPerTexel;
+	request.format = (uint32_t)desc->format;
 	return IdentityCall( bridge, RAL_WEBGPU_BROWSER_OP_CREATE_TEXTURE,
 		&request, sizeof( request ), outIdentity );
 }
@@ -495,6 +504,49 @@ static qboolean CreatePipelineLayout( void *userData, uintptr_t device,
 		&request, sizeof( request ), outIdentity );
 }
 
+qboolean RalWebGpu_BrowserBridgeCreateBindGroup(
+		ralWebGpuBrowserBridge_t *bridge, uintptr_t layoutIdentity,
+		const ralWebGpuBrowserBindResource_t *entries, uint32_t entryCount,
+		uintptr_t *outIdentity ) {
+	ralWebGpuBrowserBindGroupRequest_t request;
+	ralWebGpuBrowserBindResourceAbi_t converted[RAL_SHADER_ABI_MAX_BINDINGS_PER_GROUP];
+	if ( !bridge || !bridge->deviceIdentity || !layoutIdentity || !outIdentity
+			|| !entryCount || entryCount > RAL_SHADER_ABI_MAX_BINDINGS_PER_GROUP
+			|| !entries ) return qfalse;
+	memset( converted, 0, sizeof( converted ) );
+	for ( uint32_t i = 0u; i < entryCount; ++i ) {
+		if ( entries[i].kind < RAL_WEBGPU_BROWSER_BIND_RESOURCE_BUFFER
+				|| entries[i].kind > RAL_WEBGPU_BROWSER_BIND_RESOURCE_SAMPLER
+				|| !entries[i].resourceIdentity ) return qfalse;
+		converted[i].binding = entries[i].binding;
+		converted[i].kind = (uint32_t)entries[i].kind;
+		converted[i].resourceIdentity = entries[i].resourceIdentity;
+		converted[i].offset = entries[i].offset;
+		converted[i].byteSize = entries[i].byteSize;
+	}
+	memset( &request, 0, sizeof( request ) );
+	Header( &request.header, RAL_WEBGPU_BROWSER_OP_CREATE_BIND_GROUP,
+		sizeof( request ) );
+	request.deviceIdentity = bridge->deviceIdentity;
+	request.layoutIdentity = layoutIdentity;
+	request.entriesOffset = (uint64_t)(uintptr_t)converted;
+	request.entryCount = entryCount;
+	return IdentityCall( bridge, RAL_WEBGPU_BROWSER_OP_CREATE_BIND_GROUP,
+		&request, sizeof( request ), outIdentity );
+}
+
+void RalWebGpu_BrowserBridgeDestroyBindGroup(
+		ralWebGpuBrowserBridge_t *bridge, uintptr_t identity ) {
+	ralWebGpuBrowserIdentityRequest_t request;
+	if ( !bridge || !identity ) return;
+	memset( &request, 0, sizeof( request ) );
+	Header( &request.header, RAL_WEBGPU_BROWSER_OP_RELEASE_BIND_GROUP,
+		sizeof( request ) );
+	request.identity = identity;
+	(void)StatusCall( bridge, RAL_WEBGPU_BROWSER_OP_RELEASE_BIND_GROUP,
+		&request, sizeof( request ) );
+}
+
 static void CopyStencil( ralWebGpuBrowserStencilAbi_t *out,
 		const ralStencilOpState_t *source ) {
 	out->failOp = source->failOp; out->passOp = source->passOp;
@@ -622,8 +674,10 @@ static qboolean BeginPass( void *userData, uintptr_t encoder,
 		ralWebGpuPassKind_t kind, uintptr_t target, uintptr_t *outPass ) {
 	ralWebGpuBrowserBridge_t *bridge = userData;
 	ralWebGpuBrowserBeginPassRequest_t request;
-	if ( !bridge || !encoder || !target || kind < RAL_WEBGPU_PASS_RENDER
-			|| kind > RAL_WEBGPU_PASS_COMPUTE ) return qfalse;
+	if ( !bridge || !encoder || kind < RAL_WEBGPU_PASS_RENDER
+			|| kind > RAL_WEBGPU_PASS_COMPUTE
+			|| ( kind == RAL_WEBGPU_PASS_RENDER && !target )
+			|| ( kind == RAL_WEBGPU_PASS_COMPUTE && target ) ) return qfalse;
 	memset( &request, 0, sizeof( request ) );
 	Header( &request.header, RAL_WEBGPU_BROWSER_OP_BEGIN_PASS,
 		sizeof( request ) ); request.encoderIdentity = encoder;
@@ -652,7 +706,40 @@ static qboolean RecordIndexedDraw( void *userData, uintptr_t pass,
 	request.contentDigest = draw->contentDigest; request.drawKind = draw->kind;
 	request.textured = draw->textured; request.firstIndex = draw->firstIndex;
 	request.indexCount = draw->indexCount; request.instanceCount = draw->instanceCount;
+	request.firstInstance = draw->firstInstance;
+	if ( draw->bindGroupCount > RAL_SHADER_ABI_MAX_BIND_GROUPS ) return qfalse;
+	request.bindGroupCount = draw->bindGroupCount;
+	for ( uint32_t i = 0u; i < draw->bindGroupCount; ++i ) {
+		if ( !draw->bindGroupIdentities[i] ) return qfalse;
+		request.bindGroupIdentities[i] = draw->bindGroupIdentities[i];
+	}
 	return StatusCall( bridge, RAL_WEBGPU_BROWSER_OP_RECORD_INDEXED_DRAW,
+		&request, sizeof( request ) );
+}
+
+static qboolean RecordComputeDispatch( void *userData, uintptr_t pass,
+		const ralWebGpuComputeDispatch_t *dispatch ) {
+	ralWebGpuBrowserBridge_t *bridge = userData;
+	ralWebGpuBrowserComputeDispatchRequest_t request;
+	if ( !bridge || !pass || !dispatch || !dispatch->pipelineIdentity
+			|| !dispatch->groupCountX || !dispatch->groupCountY
+			|| !dispatch->groupCountZ || !dispatch->contentDigest
+			|| dispatch->bindGroupCount > RAL_SHADER_ABI_MAX_BIND_GROUPS )
+		return qfalse;
+	memset( &request, 0, sizeof( request ) );
+	Header( &request.header, RAL_WEBGPU_BROWSER_OP_RECORD_COMPUTE_DISPATCH,
+		sizeof( request ) ); request.passIdentity = pass;
+	request.pipelineIdentity = dispatch->pipelineIdentity;
+	request.contentDigest = dispatch->contentDigest;
+	request.groupCountX = dispatch->groupCountX;
+	request.groupCountY = dispatch->groupCountY;
+	request.groupCountZ = dispatch->groupCountZ;
+	request.bindGroupCount = dispatch->bindGroupCount;
+	for ( uint32_t i = 0u; i < dispatch->bindGroupCount; ++i ) {
+		if ( !dispatch->bindGroupIdentities[i] ) return qfalse;
+		request.bindGroupIdentities[i] = dispatch->bindGroupIdentities[i];
+	}
+	return StatusCall( bridge, RAL_WEBGPU_BROWSER_OP_RECORD_COMPUTE_DISPATCH,
 		&request, sizeof( request ) );
 }
 
@@ -791,6 +878,7 @@ qboolean RalWebGpu_BrowserBridgeBuildCommandInfo(
 	memset( outInfo, 0, sizeof( *outInfo ) ); outInfo->userData = bridge;
 	outInfo->host.beginEncoder = BeginEncoder; outInfo->host.beginPass = BeginPass;
 	outInfo->host.recordIndexedDraw = RecordIndexedDraw;
+	outInfo->host.recordComputeDispatch = RecordComputeDispatch;
 	outInfo->host.endPass = EndPass; outInfo->host.finishEncoder = FinishEncoder;
 	outInfo->host.submit = Submit; outInfo->host.pollSubmission = PollSubmission;
 	outInfo->host.releaseObject = ReleaseCommandObject; return qtrue;

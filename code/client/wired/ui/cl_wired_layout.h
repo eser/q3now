@@ -143,25 +143,11 @@ typedef struct {
 // Convert any wuiValue_t to real pixels
 float WUI_Resolve( wuiValue_t val, float parentSizePx, float vpWidth, float vpHeight );
 
-// -- Layout engine functions -----------------------------------------------
+// -- Authored coordinate helpers ------------------------------------------
 
 // Resolve a wuiRect_t to pixel coordinates
 wuiPixelRect_t WUI_ResolveRect( const wuiRect_t *rect, const wuiPixelRect_t *parent,
                                  float vpWidth, float vpHeight );
-
-// Apply aspect ratio constraint to a resolved rect
-void WUI_ApplyAspect( wuiPixelRect_t *rect, const wuiAspect_t *aspect );
-
-// Clamp a resolved rect to min/max constraints
-void WUI_ApplyMinMax( wuiPixelRect_t *rect, const wuiFlexChild_t *child,
-                      float vpWidth, float vpHeight );
-
-// Flexbox layout for a container's children
-void WUI_LayoutFlex(
-    const wuiRect_t *items, wuiPixelRect_t *resolved, int count,
-    const wuiPixelRect_t *container, const wuiFlexContainer_t *flex,
-    const wuiFlexChild_t *childProps, const wuiAspect_t *aspects,
-    float vpWidth, float vpHeight );
 
 // -- Transition animation functions (Layer 5) -----------------------------
 
@@ -173,24 +159,23 @@ wuiRect_t WUI_TransitionEval( const wuiTransition_t *tr, int currentTime );
 // Find matching breakpoint for current viewport width (last match wins)
 const wuiRect_t *WUI_FindBreakpointRect( const wuiBreakpoint_t *bps, int count, int vpWidth );
 
-// -- Layout tree resolution -----------------------------------------------
-// Forward-declare menu/item types (defined in cl_wired_ui.h)
+// -- Clay layout snapshot instrumentation ---------------------------------
+// Forward-declare menu type (defined in cl_wired_ui.h)
 struct wiredMenuDef_s;
-struct wiredItemDef_s;
-
-// Resolve all items in a menu to pixel rects. Call once per frame.
-// Populates resolvedRect on the menu and every item.
-void WUI_LayoutMenu( struct wiredMenuDef_s *menu, float vpWidth, float vpHeight );
 
 // Visual-regression instrumentation: dump every named item's resolved
 // pixel rect + authored colours to layoutdump.jsonl when the r_layoutDump
-// cvar is non-zero. No-op (a single cvar lookup) when disabled. Invoked at
-// the tail of WUI_LayoutMenu. Defined in cl_wired_layout_dump.c.
+// cvar is non-zero. No-op (a single cvar lookup) when disabled. Invoked after
+// Clay_EndLayout, so every available item rect is Clay-authored. Defined in
+// cl_wired_layout_dump.c.
 void WUI_DumpLayout( const struct wiredMenuDef_s *menu );
 
-// Resolve a single item and its children recursively.
-void WUI_LayoutItem( struct wiredItemDef_s *item, const wuiPixelRect_t *parent,
-                     float vpWidth, float vpHeight );
+/* Read-only native inspector protocol. `wui_inspect <menu> [item|*]` selects
+ * an authored tree; each completed Clay layout appends schema-versioned tree,
+ * computed-layout, style, binding-provenance and focus/hit-test records to
+ * wiredui-inspector.jsonl. It never owns or mutates UI/store/layout state. */
+void WUI_InspectorInit( void );
+void WUI_InspectorShutdown( void );
 
 // Convenience: make a wuiValue_t
 static ID_INLINE wuiValue_t WUI_Val( float v, wuiUnit_t u ) {

@@ -13,6 +13,8 @@ struct ExposureBlock {
     sunScreenY: f32,
     sunrayIntensity: f32,
     sunrayDecay: f32,
+    shadowExponent: f32,
+    shadowPivot: f32,
 }
 
 @id(27) override sunrays_density: f32 = 1f;
@@ -51,80 +53,80 @@ fn computeSunRays_u0028_() -> vec3<f32> {
     var phi_82_: bool;
     var phi_89_: bool;
 
-    let _e44 = frag_tex_coord_1;
-    let _e46 = eb.sunScreenX;
-    let _e48 = eb.sunScreenY;
-    deltaUV = (((_e44 - vec2<f32>(_e46, _e48)) * sunrays_density) / vec2(f32(sunrays_samples)));
-    let _e55 = frag_tex_coord_1;
-    uv = _e55;
+    let _e46 = frag_tex_coord_1;
+    let _e48 = eb.sunScreenX;
+    let _e50 = eb.sunScreenY;
+    deltaUV = (((_e46 - vec2<f32>(_e48, _e50)) * sunrays_density) / vec2(f32(sunrays_samples)));
+    let _e57 = frag_tex_coord_1;
+    uv = _e57;
     illumination = vec3<f32>(0f, 0f, 0f);
     weight = 1f;
     i = 0i;
     loop {
-        let _e56 = i;
-        if (_e56 < sunrays_samples) {
-            let _e58 = deltaUV;
-            let _e59 = uv;
-            uv = (_e59 - _e58);
-            let _e62 = uv[0u];
-            let _e63 = (_e62 < 0f);
-            phi_74_ = _e63;
-            if !(_e63) {
-                let _e66 = uv[0u];
-                phi_74_ = (_e66 > 1f);
+        let _e58 = i;
+        if (_e58 < sunrays_samples) {
+            let _e60 = deltaUV;
+            let _e61 = uv;
+            uv = (_e61 - _e60);
+            let _e64 = uv[0u];
+            let _e65 = (_e64 < 0f);
+            phi_74_ = _e65;
+            if !(_e65) {
+                let _e68 = uv[0u];
+                phi_74_ = (_e68 > 1f);
             }
-            let _e69 = phi_74_;
-            phi_82_ = _e69;
-            if !(_e69) {
-                let _e72 = uv[1u];
-                phi_82_ = (_e72 < 0f);
+            let _e71 = phi_74_;
+            phi_82_ = _e71;
+            if !(_e71) {
+                let _e74 = uv[1u];
+                phi_82_ = (_e74 < 0f);
             }
-            let _e75 = phi_82_;
-            phi_89_ = _e75;
-            if !(_e75) {
-                let _e78 = uv[1u];
-                phi_89_ = (_e78 > 1f);
+            let _e77 = phi_82_;
+            phi_89_ = _e77;
+            if !(_e77) {
+                let _e80 = uv[1u];
+                phi_89_ = (_e80 > 1f);
             }
-            let _e81 = phi_89_;
-            if _e81 {
+            let _e83 = phi_89_;
+            if _e83 {
                 break;
             }
-            let _e82 = uv;
-            let _e83 = textureSample(depthMap, depthMap_sampler, _e82);
-            depth = _e83.x;
-            let _e85 = depth;
-            isSky = step(_e85, 0.001f);
-            let _e87 = uv;
-            let _e88 = textureSample(texture0_, texture0_sampler, _e87);
-            sceneColor = _e88.xyz;
+            let _e84 = uv;
+            let _e85 = textureSample(depthMap, depthMap_sampler, _e84);
+            depth = _e85.x;
+            let _e87 = depth;
+            isSky = step(_e87, 0.001f);
+            let _e89 = uv;
+            let _e90 = textureSample(texture0_, texture0_sampler, _e89);
+            sceneColor = _e90.xyz;
             threshold[0u] = sunrays_threshold;
             threshold[1u] = sunrays_threshold;
             threshold[2u] = sunrays_threshold;
-            let _e93 = sceneColor;
-            let _e94 = threshold;
-            bright = max((_e93 - _e94), vec3<f32>(0f, 0f, 0f));
-            let _e97 = bright;
-            let _e98 = isSky;
-            let _e100 = weight;
-            let _e102 = illumination;
-            illumination = (_e102 + ((_e97 * _e98) * _e100));
-            let _e105 = eb.sunrayDecay;
-            let _e106 = weight;
-            weight = (_e106 * _e105);
+            let _e95 = sceneColor;
+            let _e96 = threshold;
+            bright = max((_e95 - _e96), vec3<f32>(0f, 0f, 0f));
+            let _e99 = bright;
+            let _e100 = isSky;
+            let _e102 = weight;
+            let _e104 = illumination;
+            illumination = (_e104 + ((_e99 * _e100) * _e102));
+            let _e107 = eb.sunrayDecay;
+            let _e108 = weight;
+            weight = (_e108 * _e107);
             continue;
         } else {
             break;
         }
         continuing {
-            let _e108 = i;
-            i = (_e108 + 1i);
+            let _e110 = i;
+            i = (_e110 + 1i);
         }
     }
-    let _e111 = illumination;
-    illumination = (_e111 / vec3(f32(sunrays_samples)));
-    let _e114 = illumination;
-    let _e116 = eb.sunrayIntensity;
-    return (_e114 * _e116);
+    let _e113 = illumination;
+    illumination = (_e113 / vec3(f32(sunrays_samples)));
+    let _e116 = illumination;
+    let _e118 = eb.sunrayIntensity;
+    return (_e116 * _e118);
 }
 
 fn sampleChromatic_u0028_vf2_u003b(uv_1: ptr<function, vec2<f32>>) -> vec3<f32> {
@@ -135,63 +137,92 @@ fn sampleChromatic_u0028_vf2_u003b(uv_1: ptr<function, vec2<f32>>) -> vec3<f32> 
     var g: f32;
     var b: f32;
 
-    let _e41 = (*uv_1);
-    dir = (_e41 - vec2<f32>(0.5f, 0.5f));
-    let _e43 = dir;
-    radial = length(_e43);
+    let _e43 = (*uv_1);
+    dir = (_e43 - vec2<f32>(0.5f, 0.5f));
     let _e45 = dir;
-    let _e46 = radial;
-    offset = (_e45 * ((chromatic_strength * _e46) * 0.015f));
-    let _e50 = (*uv_1);
-    let _e51 = offset;
-    let _e56 = textureSample(texture0_, texture0_sampler, clamp((_e50 + _e51), vec2(0f), vec2(1f)));
-    r = _e56.x;
-    let _e58 = (*uv_1);
-    let _e59 = textureSample(texture0_, texture0_sampler, _e58);
-    g = _e59.y;
-    let _e61 = (*uv_1);
-    let _e62 = offset;
-    let _e67 = textureSample(texture0_, texture0_sampler, clamp((_e61 - _e62), vec2(0f), vec2(1f)));
-    b = _e67.z;
-    let _e69 = r;
-    let _e70 = g;
-    let _e71 = b;
-    return vec3<f32>(_e69, _e70, _e71);
+    radial = length(_e45);
+    let _e47 = dir;
+    let _e48 = radial;
+    offset = (_e47 * ((chromatic_strength * _e48) * 0.015f));
+    let _e52 = (*uv_1);
+    let _e53 = offset;
+    let _e58 = textureSample(texture0_, texture0_sampler, clamp((_e52 + _e53), vec2(0f), vec2(1f)));
+    r = _e58.x;
+    let _e60 = (*uv_1);
+    let _e61 = textureSample(texture0_, texture0_sampler, _e60);
+    g = _e61.y;
+    let _e63 = (*uv_1);
+    let _e64 = offset;
+    let _e69 = textureSample(texture0_, texture0_sampler, clamp((_e63 - _e64), vec2(0f), vec2(1f)));
+    b = _e69.z;
+    let _e71 = r;
+    let _e72 = g;
+    let _e73 = b;
+    return vec3<f32>(_e71, _e72, _e73);
 }
 
 fn main_1() {
     var base: vec3<f32>;
     var local: vec3<f32>;
     var param: vec2<f32>;
+    var shadowLuma: f32;
+    var normalized: f32;
+    var curved: f32;
     var luma: vec3<f32>;
+    var phi_237_: bool;
 
     if (chromatic_strength > 0f) {
-        let _e39 = frag_tex_coord_1;
-        param = _e39;
-        let _e40 = sampleChromatic_u0028_vf2_u003b((&param));
-        local = _e40;
+        let _e44 = frag_tex_coord_1;
+        param = _e44;
+        let _e45 = sampleChromatic_u0028_vf2_u003b((&param));
+        local = _e45;
     } else {
-        let _e41 = frag_tex_coord_1;
-        let _e42 = textureSample(texture0_, texture0_sampler, _e41);
-        local = _e42.xyz;
+        let _e46 = frag_tex_coord_1;
+        let _e47 = textureSample(texture0_, texture0_sampler, _e46);
+        local = _e47.xyz;
     }
-    let _e44 = local;
-    base = _e44;
-    let _e46 = eb.exposure_bias;
-    let _e47 = base;
-    base = (_e47 * _e46);
-    let _e49 = computeSunRays_u0028_();
-    let _e50 = base;
-    base = (_e50 + _e49);
+    let _e49 = local;
+    base = _e49;
+    let _e51 = eb.exposure_bias;
+    let _e52 = base;
+    base = (_e52 * _e51);
+    let _e54 = base;
+    shadowLuma = dot(max(_e54, vec3<f32>(0f, 0f, 0f)), vec3<f32>(0.2126f, 0.7152f, 0.0722f));
+    let _e58 = eb.shadowExponent;
+    let _e60 = shadowLuma;
+    let _e62 = ((_e58 != 1f) && (_e60 > 0f));
+    phi_237_ = _e62;
+    if _e62 {
+        let _e63 = shadowLuma;
+        let _e65 = eb.shadowPivot;
+        phi_237_ = (_e63 < _e65);
+    }
+    let _e68 = phi_237_;
+    if _e68 {
+        let _e69 = shadowLuma;
+        let _e71 = eb.shadowPivot;
+        normalized = (_e69 / _e71);
+        let _e73 = normalized;
+        let _e75 = eb.shadowExponent;
+        let _e78 = eb.shadowPivot;
+        curved = (pow(_e73, _e75) * _e78);
+        let _e80 = curved;
+        let _e81 = shadowLuma;
+        let _e83 = base;
+        base = (_e83 * (_e80 / _e81));
+    }
+    let _e85 = computeSunRays_u0028_();
+    let _e86 = base;
+    base = (_e86 + _e85);
     if (saturation != 1f) {
-        let _e53 = base;
-        luma = vec3(dot(_e53, vec3<f32>(0.2126f, 0.7152f, 0.0722f)));
-        let _e56 = luma;
-        let _e57 = base;
-        base = mix(_e56, _e57, vec3(saturation));
+        let _e89 = base;
+        luma = vec3(dot(_e89, vec3<f32>(0.2126f, 0.7152f, 0.0722f)));
+        let _e92 = luma;
+        let _e93 = base;
+        base = mix(_e92, _e93, vec3(saturation));
     }
-    let _e60 = base;
-    out_color = vec4<f32>(_e60.x, _e60.y, _e60.z, 1f);
+    let _e96 = base;
+    out_color = vec4<f32>(_e96.x, _e96.y, _e96.z, 1f);
     return;
 }
 

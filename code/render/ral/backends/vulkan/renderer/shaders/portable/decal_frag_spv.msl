@@ -13,13 +13,26 @@ struct DecalFrame
     float4 reconParams;
 };
 
+struct SurfaceClimateTile
+{
+    int2 key;
+    uint2 meta;
+    float4 climate;
+};
+
+struct SurfaceClimateTable
+{
+    SurfaceClimateTile surfaceClimateTiles[256];
+};
+
 struct spvDescriptorSetBuffer0
 {
-    constant DecalFrame* m_60 [[id(0)]];
-    texture2d<float> sceneDepthTex [[id(1)]];
-    sampler sceneDepthTexSmplr [[id(2)]];
-    array<texture2d<float>, 64> decalTextures [[id(3)]];
-    array<sampler, 64> decalTexturesSmplr [[id(67)]];
+    constant DecalFrame* m_73 [[id(0)]];
+    const device SurfaceClimateTable* m_113 [[id(1)]];
+    texture2d<float> sceneDepthTex [[id(2)]];
+    sampler sceneDepthTexSmplr [[id(3)]];
+    array<texture2d<float>, 64> decalTextures [[id(4)]];
+    array<sampler, 64> decalTexturesSmplr [[id(68)]];
 };
 
 struct main0_out
@@ -41,6 +54,68 @@ struct main0_in
 };
 
 static inline __attribute__((always_inline))
+float4 surfaceClimateAt(thread const float2& worldXY, constant DecalFrame& _73, const device SurfaceClimateTable& _113)
+{
+    int2 wanted = int2(floor(worldXY / float2(128.0)));
+    uint count = min(uint(_73.reconParams.w), 256u);
+    uint low = 0u;
+    uint high = count;
+    for (uint _step = 0u; _step < 8u; _step++)
+    {
+        if (low >= high)
+        {
+            break;
+        }
+        uint middle = (low + high) >> 1u;
+        int2 key = _113.surfaceClimateTiles[middle].key;
+        bool _126 = key.x < wanted.x;
+        bool _143;
+        if (!_126)
+        {
+            bool _134 = key.x == wanted.x;
+            bool _142;
+            if (_134)
+            {
+                _142 = key.y < wanted.y;
+            }
+            else
+            {
+                _142 = _134;
+            }
+            _143 = _142;
+        }
+        else
+        {
+            _143 = _126;
+        }
+        bool less = _143;
+        if (less)
+        {
+            low = middle + 1u;
+        }
+        else
+        {
+            high = middle;
+        }
+    }
+    bool _156 = low < count;
+    bool _166;
+    if (_156)
+    {
+        _166 = all(_113.surfaceClimateTiles[low].key == wanted);
+    }
+    else
+    {
+        _166 = _156;
+    }
+    if (_166)
+    {
+        return _113.surfaceClimateTiles[low].climate;
+    }
+    return float4(0.0);
+}
+
+static inline __attribute__((always_inline))
 float3 sRGBToLinear(thread float3& c)
 {
     c = fast::max(c, float3(0.0));
@@ -54,74 +129,84 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
 {
     main0_out out = {};
     float2 decalUV = in.fragUV;
-    bool _69 = (*spvDescriptorSet0.m_60).reconParams.z > 0.5;
-    bool _77;
-    if (_69)
+    float4 localSurfaceClimate = float4(0.0);
+    bool _188 = (*spvDescriptorSet0.m_73).reconParams.z > 0.5;
+    bool _195;
+    if (_188)
     {
-        _77 = in.fragNoProject == 0u;
+        _195 = in.fragNoProject == 0u;
     }
     else
     {
-        _77 = _69;
+        _195 = _188;
     }
-    if (_77)
+    if (_195)
     {
-        float2 screenUV = gl_FragCoord.xy * (*spvDescriptorSet0.m_60).reconParams.xy;
+        float2 screenUV = gl_FragCoord.xy * (*spvDescriptorSet0.m_73).reconParams.xy;
         float sceneDepth = spvDescriptorSet0.sceneDepthTex.sample(spvDescriptorSet0.sceneDepthTexSmplr, screenUV).x;
         if (sceneDepth <= 0.0)
         {
             discard_fragment();
         }
         float3 ndc = float3((screenUV * 2.0) - float2(1.0), sceneDepth);
-        float4 worldH = (*spvDescriptorSet0.m_60).invMvp * float4(ndc, 1.0);
+        float4 worldH = (*spvDescriptorSet0.m_73).invMvp * float4(ndc, 1.0);
         float3 worldPos = worldH.xyz / float3(worldH.w);
+        float2 param = worldPos.xy;
+        localSurfaceClimate = surfaceClimateAt(param, (*spvDescriptorSet0.m_73), (*spvDescriptorSet0.m_113));
         float3 local = worldPos - in.fragDecalOrigin;
-        float _146;
+        float _264;
         if (in.fragDecalRadius > 0.0)
         {
-            _146 = 1.0 / in.fragDecalRadius;
+            _264 = 1.0 / in.fragDecalRadius;
         }
         else
         {
-            _146 = 0.0;
+            _264 = 0.0;
         }
-        float invR = _146;
+        float invR = _264;
         float u = dot(local, in.fragDecalTangent) * invR;
         float v = dot(local, in.fragDecalBitangent) * invR;
         float w = dot(local, in.fragDecalNormal);
         float halfThickness = in.fragDecalRadius * 0.5;
-        bool _177 = abs(u) > 1.0;
-        bool _184;
-        if (!_177)
+        bool _295 = abs(u) > 1.0;
+        bool _302;
+        if (!_295)
         {
-            _184 = abs(v) > 1.0;
+            _302 = abs(v) > 1.0;
         }
         else
         {
-            _184 = _177;
+            _302 = _295;
         }
-        bool _192;
-        if (!_184)
+        bool _310;
+        if (!_302)
         {
-            _192 = abs(w) > halfThickness;
+            _310 = abs(w) > halfThickness;
         }
         else
         {
-            _192 = _184;
+            _310 = _302;
         }
-        if (_192)
+        if (_310)
         {
             discard_fragment();
         }
         decalUV = (float2(u, v) * 0.5) + float2(0.5);
     }
     float4 texel = spvDescriptorSet0.decalTextures[in.fragTextureIndex].sample(spvDescriptorSet0.decalTexturesSmplr[in.fragTextureIndex], decalUV);
-    float3 param = texel.xyz;
-    float3 _217 = sRGBToLinear(param);
-    float3 param_1 = in.fragColor.xyz;
-    float3 _222 = sRGBToLinear(param_1);
-    float3 rgb = _217 * _222;
+    float3 param_1 = texel.xyz;
+    float3 _335 = sRGBToLinear(param_1);
+    float3 param_2 = in.fragColor.xyz;
+    float3 _340 = sRGBToLinear(param_2);
+    float3 rgb = _335 * _340;
     float alpha = texel.w * in.fragColor.w;
+    float localWetness = fast::clamp(localSurfaceClimate.x + (0.5 * localSurfaceClimate.w), 0.0, 1.0);
+    float localFrost = fast::clamp(localSurfaceClimate.y, 0.0, 1.0);
+    float localSnow = fast::clamp(localSurfaceClimate.z, 0.0, 1.0);
+    float luminance = dot(rgb, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    rgb *= mix(1.0, 0.86000001430511474609375, localWetness);
+    rgb = mix(rgb, float3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), float3(localFrost * 0.449999988079071044921875));
+    alpha *= mix(1.0, 0.64999997615814208984375, localSnow);
     out.outColor = float4(rgb, alpha);
     return out;
 }

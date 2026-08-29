@@ -6,13 +6,13 @@
 // hidden by the normal sceneHudHidden gate during a cutscene (NOT scene-exempt,
 // unlike hud:subtitle). The draw routine self-anchors to the viewport top-left
 // and gates on there being active objectives, so the rect here is only a walk
-// anchor (decoration); `position absolute` matches the subtitle/crosshair pattern
+// anchor (decoration); its floating carrier matches the subtitle/crosshair pattern
 // so the zero-rect floating leaf emits correctly.
 itemDef {
 	name "hud_active_objectives"
 	hudElement "objectives"
-	anchor TOP_LEFT
-	rect 0.03 0.20 0 0
+	width FIXED 1px
+	height FIXED 1px
 	decoration
 	visible 1
 }

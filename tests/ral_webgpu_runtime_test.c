@@ -94,6 +94,8 @@ static qboolean BeginEncoder( void *u, uintptr_t d, uintptr_t *o ) { (void)u; (v
 static qboolean BeginPass( void *u, uintptr_t e, ralWebGpuPassKind_t k, uintptr_t t, uintptr_t *o ) { (void)u; (void)e; (void)k; (void)t; (void)o; return qfalse; }
 static qboolean RecordDraw( void *u, uintptr_t p,
 		const ralWebGpuIndexedDraw_t *d ) { (void)u; (void)p; (void)d; return qfalse; }
+static qboolean RecordDispatch( void *u, uintptr_t p,
+		const ralWebGpuComputeDispatch_t *d ) { (void)u; (void)p; (void)d; return qfalse; }
 static qboolean EndPass( void *u, uintptr_t p ) { (void)u; (void)p; return qfalse; }
 static qboolean FinishEncoder( void *u, uintptr_t e, uintptr_t *o ) { (void)u; (void)e; (void)o; return qfalse; }
 static qboolean Submit( void *u, uintptr_t q, uintptr_t b, uint64_t g, uintptr_t *o ) { (void)u; (void)q; (void)b; (void)g; (void)o; return qfalse; }
@@ -142,6 +144,7 @@ static ralWebGpuRuntimeCreateInfo_t RuntimeInfo( fakeHost_t *host,
 	info.resources.host.releaseOperation = ReleaseOperation;
 	info.command.userData = host; info.command.host.beginEncoder = BeginEncoder;
 	info.command.host.beginPass = BeginPass; info.command.host.recordIndexedDraw = RecordDraw;
+	info.command.host.recordComputeDispatch = RecordDispatch;
 	info.command.host.endPass = EndPass;
 	info.command.host.finishEncoder = FinishEncoder; info.command.host.submit = Submit;
 	info.command.host.pollSubmission = PollSubmission; info.command.host.releaseObject = ReleaseCommand;

@@ -68,7 +68,7 @@ foreach(old IN ITEMS
 	endif()
 endforeach()
 foreach(needle IN ITEMS
-	"family=(cull|forward-plus|hdr-histogram)"
+	"family=(cull|forward-plus|hdr-histogram|particle-child-budgets)"
 	"+set r_customwidth 1280 +set r_customheight 720")
 	require_text("${SMOKE}" "${needle}" "native 1280x720 receipt authority")
 endforeach()

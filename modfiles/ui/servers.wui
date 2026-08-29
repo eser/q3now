@@ -50,7 +50,7 @@ menuDef {
 		itemDef {
 			name "browser_content"
 			type container
-			rect 0 0 1 0.83
+			width FIXED 1 height FIXED 0.83
 			direction column
 			padding $content_padding_y $content_padding_x
 			gap $spacing_md
@@ -61,7 +61,7 @@ menuDef {
 			itemDef {
 				name "browser_filters"
 				type container
-				rect 0 0 1 0.05
+				width FIXED 1 height FIXED 0.05
 				direction row
 				gap $spacing_md
 				height FIT
@@ -104,7 +104,7 @@ menuDef {
 				itemDef {
 					name "btn_refresh"
 					type 1
-					rect 0 0 0.14 0.04
+					width FIXED 0.14 height FIXED 0.04
 					height FIT
 					text "Refresh"
 					textalign 1
@@ -119,7 +119,7 @@ menuDef {
 				itemDef {
 					name "btn_filter"
 					type 1
-					rect 0 0 0.10 0.04
+					width FIXED 0.10 height FIXED 0.04
 					height FIT
 					text "Apply Filter"
 					textalign 1
@@ -142,7 +142,7 @@ menuDef {
 			itemDef {
 				name "browser_filters2"
 				type container
-				rect 0 0 1 0.05
+				width FIXED 1 height FIXED 0.05
 				direction row
 				gap $spacing_md
 				height FIT
@@ -198,7 +198,7 @@ menuDef {
 				itemDef {
 					name "refresh_label"
 					type 0
-					rect 0 0 0.16 0.04
+					width FIXED 0.16 height FIXED 0.04
 					height FIT
 					text "Last refreshed"
 					textalign 2
@@ -211,7 +211,7 @@ menuDef {
 				itemDef {
 					name "refresh_time"
 					type 0
-					rect 0 0 0.10 0.04
+					width FIXED 0.10 height FIXED 0.04
 					height FIT
 					textalign 0
 					font $font_mono 10
@@ -269,7 +269,7 @@ menuDef {
 			itemDef {
 				name "browser_footer"
 				type container
-				rect 0 0 1 0.05
+				width FIXED 1 height FIXED 0.05
 				direction row
 				gap $spacing_md
 				alignY center

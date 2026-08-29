@@ -1978,7 +1978,6 @@ static qboolean ParseShader( ComParser *parser, const char **text )
 			}
 			shader.fogParms.depthForOpaque = Q_atof( token );
 
-#if FEAT_FOG_SYSTEM
 			// Optional Spearmint fog type: linear / exp / exp2 [density] [farClip]
 			token = COM_ParseExt( parser, text, qfalse );
 			if ( token[0] && !isdigit( (unsigned char)token[0] ) ) {
@@ -2000,7 +1999,6 @@ static qboolean ParseShader( ComParser *parser, const char **text )
 					}
 				}
 			}
-#endif
 
 			// skip any old gradient directions
 			SkipRestOfLine( parser, text );

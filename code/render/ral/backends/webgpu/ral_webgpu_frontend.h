@@ -31,6 +31,7 @@ typedef struct {
 	uint32_t modelEntityCount;
 	uint32_t primitiveEntityCount;
 	uint32_t temporalEntityCount;
+	uint32_t localIrradianceEntityCount;
 	uint32_t entityIndexCount;
 	uint32_t entityBatchCount;
 	uint32_t polygonCount;

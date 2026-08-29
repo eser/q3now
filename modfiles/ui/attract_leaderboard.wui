@@ -1,18 +1,18 @@
 // attract_leaderboard.wui — attract-mode Top-Times splash (Brutalist Poster)
 //
-// REBUILT 2026-07-03. The old version authored every row as `rect 0 0 1.0 X`
+// REBUILT 2026-07-03. The old version authored every row as `width FIXED 1.0 height FIXED X`
 // inside nested flex containers with no width/height sizing, so Clay collapsed
 // the whole list to a (0,0) top-left pile (Eser: "ekranlar boktan"). That rebuild
-// used the shipped hero idiom — position absolute + explicit vw/vh + text leaves
-// with `height FIT` + a real width — so nothing collapses.
+// used explicit resolved sizes and text leaves with `height FIT` + a real width,
+// so nothing collapses.
 //
 // The rows returned to flex on 2026-08-21, and the earlier collapse is worth
 // stating precisely, because it was NOT "flex does not work here": the rows sat
-// in containers with no resolved size, and WUI_LayoutFlex places children inside
-// item->resolvedRect. Give them one band that HAS a resolved size (lb_rows:
+// in containers with no containing-block extent. Give them one band that HAS a
+// resolved size (lb_rows:
 // container + column + grow 1 + padding) and they lay out fine. Verified
-// frame-against-frame: every text band within 1px of the absolute version, header
-// untouched. Spine and stamp stay absolute — edge furniture, not flow.
+// frame-against-frame: every text band within 1px of the earlier version. Spine,
+// header, stamp, and rows now share one resolved flex tree.
 //
 // Design: the top-times list read as a fight card. Shared red spine on the left,
 // a huge TOP / TIMES header (bone + red), then rows where each rank is an
@@ -23,38 +23,27 @@
 menuDef {
 	name "attract_leaderboard"
 	layer "bg_attract"
-	rect 0 0 1.0 1.0
+	width FIXED 1.0 height FIXED 1.0
 	fullScreen 1
 	visible 0
 	backcolor $ink   // $ink
+	itemDef {
+		name "lb_root"
+		type container
+		direction row
+		width PERCENT 1
+		height PERCENT 1
+		grow 1
 
 	// ── red spine (shared signature) ─────────────────────────────────
 	itemDef {
 		name "lb_spine"
 		type 0
-		position absolute
-		left 0
-		top 0
 		width 0.9vw
-		height 100vh
+		height PERCENT 1
+		grow 0
 		style 1
 		backcolor $poster_red
-		decoration
-		visible 1
-	}
-
-	itemDef {
-		name "lb_stamp"
-		type 0
-		position absolute
-		right 5vw
-		top 10vh
-		width 30vw
-		height 4vh
-		text "RAILYARD · ARENA RECORDS"
-		textalign 2
-		font $font_mono 15
-		forecolor $attract_ink_lo
 		decoration
 		visible 1
 	}
@@ -63,28 +52,51 @@ menuDef {
 	// One resolved-size column band replaces six absolutes. It carries what the
 	// coordinates used to: 8vh down, 6vw in, header 22vh, a 6vh gap, then rows
 	// contiguous at 11vh each. A top border rule on each row gives the poster
-	// grid. Spine and stamp stay absolute above — edge furniture, not flow.
+	// grid. Spine and stamp participate in the same flow.
 	itemDef {
 		name "lb_rows"
 		type container
 		direction column
+		height PERCENT 1
 		grow 1
-		padding 8vh 6vw 0 6vw
+		padding 8vh 5vw 0 5.1vw
 
 		// ── header: TOP / TIMES (offset-stacked) + map stamp ─────────────
+		itemDef {
+			name "lb_header_band"
+			type container
+			direction row
+			width PERCENT 1
+			height FIXED 22vh
+			grow 0
 		itemDef {
 			name "lb_header"
 			stateTest "ui_menuUp"
 			hideState { 1 }
 			type container
-			height FIXED 22vh
+			height PERCENT 1
 			width PERCENT 0.568
 			direction column
 			gap 0.2vh
 			grow 0
 
-			itemDef { name "lb_top"  type 0vh height FIT width PERCENT 1 text "TOP"   textalign 0 font $font_sans_bold 92 forecolor $bone       decoration visible 1 grow 0 }
-			itemDef { name "lb_time" type 0vh height FIT width PERCENT 1 text "TIMES" textalign 0 font $font_sans_bold 92 forecolor $poster_red decoration visible 1 grow 0 }
+			itemDef { name "lb_top"  type 0 height FIT width PERCENT 1 text "TOP"   textalign 0 font $font_sans_bold 92 forecolor $bone       decoration visible 1 grow 0 }
+			itemDef { name "lb_time" type 0 height FIT width PERCENT 1 text "TIMES" textalign 0 font $font_sans_bold 92 forecolor $poster_red decoration visible 1 grow 0 }
+		}
+		itemDef { name "lb_header_spacer" type container grow 1 decoration visible 1 }
+		itemDef {
+			name "lb_stamp"
+			type 0
+			width 30vw
+			height 4vh
+			text "RAILYARD · ARENA RECORDS"
+			textalign 2
+			font $font_mono 15
+			forecolor $attract_ink_lo
+			decoration
+			visible 1
+			grow 0
+		}
 		}
 		itemDef { name "gap_lb_rows" type container height FIXED 6vh grow 0 }
 
@@ -99,9 +111,9 @@ menuDef {
 			alignY center
 			borderTop 1px $line
 			grow 0
-			itemDef { type 0vh height FIT width 8vw  text "01"     textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
-			itemDef { type 0vh height FIT width 46vw text "RANGER" textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
-			itemDef { type 0vh height FIT width 24vw text "12:34.5" textalign 2 font $font_mono 26     forecolor $attract_ink_hi decoration visible 1 grow 0 }
+			itemDef { type 0 height FIT width 8vw  text "01"     textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
+			itemDef { type 0 height FIT width 46vw text "RANGER" textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
+			itemDef { type 0 height FIT width 24vw text "12:34.5" textalign 2 font $font_mono 26     forecolor $attract_ink_hi decoration visible 1 grow 0 }
 		}
 		itemDef {
 			name "lb_row2"
@@ -114,9 +126,9 @@ menuDef {
 			alignY center
 			borderTop 1px $line
 			grow 0
-			itemDef { type 0vh height FIT width 8vw  text "02"    textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
-			itemDef { type 0vh height FIT width 46vw text "KEEL"  textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
-			itemDef { type 0vh height FIT width 24vw text "13:01.2" textalign 2 font $font_mono 26   forecolor $attract_ink_hi decoration visible 1 grow 0 }
+			itemDef { type 0 height FIT width 8vw  text "02"    textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
+			itemDef { type 0 height FIT width 46vw text "KEEL"  textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
+			itemDef { type 0 height FIT width 24vw text "13:01.2" textalign 2 font $font_mono 26   forecolor $attract_ink_hi decoration visible 1 grow 0 }
 		}
 		itemDef {
 			name "lb_row3"
@@ -129,9 +141,9 @@ menuDef {
 			alignY center
 			borderTop 1px $line
 			grow 0
-			itemDef { type 0vh height FIT width 8vw  text "03"    textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
-			itemDef { type 0vh height FIT width 46vw text "SLASH" textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
-			itemDef { type 0vh height FIT width 24vw text "13:48.8" textalign 2 font $font_mono 26   forecolor $attract_ink_hi decoration visible 1 grow 0 }
+			itemDef { type 0 height FIT width 8vw  text "03"    textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
+			itemDef { type 0 height FIT width 46vw text "SLASH" textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
+			itemDef { type 0 height FIT width 24vw text "13:48.8" textalign 2 font $font_mono 26   forecolor $attract_ink_hi decoration visible 1 grow 0 }
 		}
 		itemDef {
 			name "lb_row4"
@@ -144,9 +156,9 @@ menuDef {
 			alignY center
 			borderTop 1px $line
 			grow 0
-			itemDef { type 0vh height FIT width 8vw  text "04"     textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
-			itemDef { type 0vh height FIT width 46vw text "ANARKI" textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
-			itemDef { type 0vh height FIT width 24vw text "14:12.1" textalign 2 font $font_mono 26   forecolor $attract_ink_hi decoration visible 1 grow 0 }
+			itemDef { type 0 height FIT width 8vw  text "04"     textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
+			itemDef { type 0 height FIT width 46vw text "ANARKI" textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
+			itemDef { type 0 height FIT width 24vw text "14:12.1" textalign 2 font $font_mono 26   forecolor $attract_ink_hi decoration visible 1 grow 0 }
 		}
 		itemDef {
 			name "lb_row5"
@@ -159,9 +171,10 @@ menuDef {
 			alignY center
 			borderTop 1px $line
 			grow 0
-			itemDef { type 0vh height FIT width 8vw  text "05"     textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
-			itemDef { type 0vh height FIT width 46vw text "SORLAG" textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
-			itemDef { type 0vh height FIT width 24vw text "14:59.3" textalign 2 font $font_mono 26   forecolor $attract_ink_hi decoration visible 1 grow 0 }
+			itemDef { type 0 height FIT width 8vw  text "05"     textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
+			itemDef { type 0 height FIT width 46vw text "SORLAG" textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
+			itemDef { type 0 height FIT width 24vw text "14:59.3" textalign 2 font $font_mono 26   forecolor $attract_ink_hi decoration visible 1 grow 0 }
 		}
+	}
 	}
 }

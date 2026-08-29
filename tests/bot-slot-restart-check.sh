@@ -6,6 +6,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/lib/wired_paths.sh"
 
 analyze_contract() {
 python3 - "$1" "$2" "$3" <<'PYEOF'
@@ -98,7 +99,7 @@ if set(result)!={"kind","pid","rc","timeout","forced"} or result.get("kind")!="r
   or result.get("timeout") is not False or result.get("forced") is not False:
  raise SystemExit("FAIL bot-restart manifest result")
 provenance=manifest[1:-1]
-if [item.get("role") for item in provenance] != ["headless","pax21","base","harness"]:
+if [item.get("role") for item in provenance] != ["headless","current-archive","content-archive","harness"]:
  raise SystemExit("FAIL bot-restart manifest roles")
 for item in provenance:
  if set(item)!={"kind","role","path","bytes","sha256"} or item.get("kind")!="provenance" \
@@ -211,7 +212,7 @@ elif mode=="begin-before-entered":
 with open(path,"w") as out:
  for row in rows:out.write(json.dumps(row)+"\n")
 manifest=[{"kind":"scenario","schema":1,"name":"bot-slot-restart","map":"arena7"}]
-for role in ("headless","pax21","base","harness"):
+for role in ("headless","current-archive","content-archive","harness"):
  fixture=manifest_path+"."+role
  data=("fixture-"+role).encode();open(fixture,"wb").write(data)
  manifest.append({"kind":"provenance","role":role,"path":os.path.abspath(fixture),"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()})
@@ -260,9 +261,12 @@ fi
 
 HEADLESS="${1:-}"; [ -n "$HEADLESS" ] && [ -x "$HEADLESS" ] || { echo "usage: $0 /absolute/path/to/wired-headless"; exit 64; }
 HEADLESS="$(cd "$(dirname "$HEADLESS")" && pwd)/$(basename "$HEADLESS")"; WD="$(dirname "$HEADLESS")"
-PACK=""; for candidate in "$WD" "$WD/../Resources"; do [ -f "$candidate/base/pax21.sw3z" ] && PACK="$candidate" && break; done
-[ -n "$PACK" ] || { echo "SKIP: current pax21 unavailable"; exit 77; }
-CONTENT="${WIRED_CONTENT_ROOT:-$PACK}"; if [ -f "$CONTENT/base/pax01.sw3z" ]; then BASE="$CONTENT/base/pax01.sw3z"; elif [ -f "$CONTENT/base/pak0.pk3" ]; then BASE="$CONTENT/base/pak0.pk3"; else echo "SKIP: set WIRED_CONTENT_ROOT"; exit 77; fi
+PACK="$(wired_find_archive_root "$WD" "$WD/../Resources" 2>/dev/null || true)"
+[ -n "$PACK" ] || { echo "SKIP: current VFS archives unavailable"; exit 77; }
+CONTENT="$(wired_find_archive_root "${WIRED_CONTENT_ROOT:-}" "$WIRED_HOME" "$PACK" 2>/dev/null || true)"
+[ -n "$CONTENT" ] || { echo "SKIP: set WIRED_CONTENT_ROOT"; exit 77; }
+CURRENT_ARCHIVE="$(wired_first_archive "$PACK/base")" || exit 77
+CONTENT_ARCHIVE="$(wired_first_archive "$CONTENT/base")" || exit 77
 ROOT="$(mktemp -d -t bot-slot-restart-XXXXXX 2>/dev/null || mktemp -d)"; HOME_DIR="$ROOT/home/q3now-preview"; FIFO="$ROOT/control"; PID=""; OPEN=0; CONTROLLER="$ROOT/controller.jsonl"; CONTROLLER_SEQ=0; WAIT_LINE=0
 cleanup(){
  local status=$?
@@ -276,11 +280,11 @@ cleanup(){
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-mkdir -p "$HOME_DIR/base"; cp "$PACK/base/pax21.sw3z" "$HOME_DIR/base/" || exit 1; cp "$BASE" "$HOME_DIR/base/" || exit 1
+mkdir -p "$HOME_DIR/base"; wired_link_content_into_home "$HOME_DIR" "$CONTENT/base" "$PACK/base" || exit 1
 MANIFEST="$ROOT/manifest.jsonl"
-python3 - "$MANIFEST" "$HEADLESS" "$PACK/base/pax21.sw3z" "$BASE" "$0" <<'PYEOF'
+python3 - "$MANIFEST" "$HEADLESS" "$CURRENT_ARCHIVE" "$CONTENT_ARCHIVE" "$0" <<'PYEOF'
 import hashlib,json,os,sys
-out=sys.argv[1];roles=("headless","pax21","base","harness")
+out=sys.argv[1];roles=("headless","current-archive","content-archive","harness")
 with open(out,"w",encoding="utf-8") as stream:
  stream.write(json.dumps({"kind":"scenario","schema":1,"name":"bot-slot-restart","map":"arena7"},sort_keys=True)+"\n")
  for role,path in zip(roles,sys.argv[2:]):

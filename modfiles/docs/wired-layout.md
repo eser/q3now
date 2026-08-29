@@ -239,25 +239,103 @@ Two cvars control development aids. Both default to `0` (off).
 
 | Cvar | Effect |
 |------|--------|
-| `wired_hotreload 1` | Watches `.wmenu` / `.whud` files for changes and reloads them automatically. No restart required. |
+| `wired_hotreload 1` | Revalidates and transactionally reloads the selected UI manifest once per second. No restart required. |
+| `wired_ui_manifest <qpath>` | Selects a distinct loose developer manifest; defaults to packaged `scripts/menus.lua`. Use a distinct path because product archives intentionally outrank loose files with the same qpath. |
 | `wired_debug_layout 1` | Draws colored outlines around every flex container and child, showing padding and gap regions. |
 
 Enable them from the console:
 
 ```
 /wired_hotreload 1
+/wired_ui_manifest scripts/dev_menus.lua
 /wired_debug_layout 1
 ```
 
-Combine both for a live-editing workflow: edit a `.wmenu` file in your
-text editor, save, and see the updated layout with debug outlines
-immediately in the running game.
+For a live-editing workflow, make the developer manifest load distinct loose
+`.wui` qpaths, select it with `wired_ui_manifest`, then enable both aids. Saving
+the manifest, `.wui`, style or animation source updates the next transactional
+reload. A parse/load failure preserves the last-good tree and Lua programs.
 
 ---
 
-## 8. Examples
+## 8. Repeated content
 
-### 8.1 FFA Scoreboard Overlay
+`repeat` expands one template once per row during each compositor frame. A
+store-backed source uses `countbind` and keys shaped as
+`<source>.<zero-based-index>.<field>`:
+
+```
+itemDef {
+    name "chat_rows"
+    repeat {
+        source "hud.chat"
+        countbind "hud.chat.count"
+        as "row"
+        itemDef {
+            name "chat_row"
+            type 0
+            text "{{ row.text }}"
+            decoration
+        }
+    }
+}
+```
+
+`source "lua:<expression>"` instead evaluates the expression in the menu's VM
+and expects a dense Lua array (`1..N`). Scalar rows use `{{ row }}`; table rows
+use `{{ row.field }}`. The placeholder name is currently always `row`; `as` is
+accepted for format compatibility but does not rename it. Empty/missing store
+collections emit no children. A Lua nil, non-array, sparse, or empty result
+emits no children and logs one warning. Expansion is capped at 64 rows, and a
+template subtree may be cloned to depth 3. Nested `repeat` blocks inside the
+template are not a supported recursive data scope.
+
+## 9. Conditional content
+
+`if` removes its children from layout when its Lua test is false; it does not
+reserve a hidden rectangle:
+
+```
+itemDef {
+    if {
+        test "lua:return store.get('player.health') < 25"
+        itemDef { name "critical" type 0 text "CRITICAL" decoration }
+    }
+}
+```
+
+The expression is compiled once when the menu is parsed and evaluated every
+visible frame in that menu's VM. Lua `false` and `nil` are false; every other
+Lua value is true. Compile/runtime errors fail closed (children are removed)
+and are reported through the UI diagnostics. For one item rather than a child
+group, `visible "lua:<expression>"` has the same truth and layout-removal
+semantics.
+
+## 10. Computed Lua bindings
+
+`bind "lua:<expression>"` computes an item's display text every visible frame:
+
+```
+itemDef {
+    name "health_label"
+    type 0
+    bind "lua:return string.format('%d HP', store.get('player.health'))"
+    decoration
+}
+```
+
+The chunk is compiled in the System VM by default, or the User VM when the
+containing menu declares `vm "user"`. A string result is used directly; a
+number is converted to text. Nil, unsupported return types, or evaluation
+errors leave the normal store binding/static `text` fallback in place and log
+the error once. Keep bindings pure and inexpensive: they run once per emitted
+item per frame and must not mutate engine state.
+
+---
+
+## 11. Examples
+
+### 11.1 FFA Scoreboard Overlay
 
 A vertically stacked scoreboard displayed when TAB is held. Uses
 normalized coordinates throughout.

@@ -13,6 +13,73 @@ float	s_quadFactor;
 vec3_t	forward, right, up;
 vec3_t	muzzle;
 
+#define THIRD_PERSON_CENTER_AIM_MAX_DELTA 45.0f
+
+/*
+========================
+G_ResolveWeaponAimAngles
+
+Resolve the separately transported third-person weapon direction. Viewangles
+remain authoritative for camera and movement. A bounded angular delta prevents
+a modified client from looking one way while firing arbitrarily elsewhere.
+========================
+*/
+qboolean G_ResolveWeaponAimAngles( const gentity_t *ent, vec3_t aimAngles ) {
+	const usercmd_t *cmd;
+	float pitchDelta;
+	float yawDelta;
+
+	if ( !ent || !ent->client ) {
+		return qfalse;
+	}
+
+	cmd = &ent->client->pers.cmd;
+	if ( cmd->aimMode != UCMD_AIM_THIRD_PERSON_CENTER ) {
+		return qfalse;
+	}
+
+	aimAngles[PITCH] = SHORT2ANGLE( cmd->aimAngles[PITCH] );
+	aimAngles[YAW] = SHORT2ANGLE( cmd->aimAngles[YAW] );
+	aimAngles[ROLL] = 0.0f;
+	pitchDelta = fabsf( AngleDelta( aimAngles[PITCH], ent->client->ps.viewangles[PITCH] ) );
+	yawDelta = fabsf( AngleDelta( aimAngles[YAW], ent->client->ps.viewangles[YAW] ) );
+	if ( pitchDelta > THIRD_PERSON_CENTER_AIM_MAX_DELTA ||
+		 yawDelta > THIRD_PERSON_CENTER_AIM_MAX_DELTA ) {
+		return qfalse;
+	}
+
+	return qtrue;
+}
+
+void G_WeaponAimVectors( const gentity_t *ent, vec3_t aimForward,
+	vec3_t aimRight, vec3_t aimUp ) {
+	vec3_t aimAngles;
+
+	if ( !G_ResolveWeaponAimAngles( ent, aimAngles ) ) {
+		VectorCopy( ent->client->ps.viewangles, aimAngles );
+	}
+	AngleVectors( aimAngles, aimForward, aimRight, aimUp );
+}
+
+void G_ClampWeaponMuzzle( const gentity_t *ent, const vec3_t origin,
+	vec3_t muzzlePoint ) {
+	vec3_t aimAngles;
+	vec3_t eye;
+	trace_t tr;
+
+	if ( !G_ResolveWeaponAimAngles( ent, aimAngles ) ) {
+		return;
+	}
+
+	VectorCopy( origin, eye );
+	eye[2] += ent->client->ps.viewheight;
+	trap_Trace( &tr, eye, NULL, NULL, muzzlePoint, ent->s.number, MASK_SHOT );
+	if ( tr.fraction < 1.0f ) {
+		VectorCopy( tr.endpos, muzzlePoint );
+		SnapVectorTowards( muzzlePoint, eye );
+	}
+}
+
 // eser - damage falloff
 /*
 ============
@@ -172,7 +239,13 @@ set muzzle location relative to pivoting eye
 ===============
 */
 void CalcMuzzlePointOrigin ( gentity_t *ent, vec3_t origin, vec3_t localForward, vec3_t localRight, vec3_t localUp, vec3_t muzzlePoint ) {
-	VectorCopy( ent->s.pos.trBase, muzzlePoint );
+	// The caller supplies the lag-compensated/current firing origin. Using the
+	// entity trajectory base here silently discards that authority and can leave
+	// projectile spawn points laterally displaced from the rendered eye after
+	// prediction, teleport or mover correction. A straight projectile then only
+	// converges toward the crosshair with distance, while its historical trail
+	// remains visibly detached.
+	VectorCopy( origin, muzzlePoint );
 	muzzlePoint[2] += ent->client->ps.viewheight;
 	VectorMA( muzzlePoint, 14, localForward, muzzlePoint );
 	// snap to integer coordinates for more efficient network bandwidth usage
@@ -195,8 +268,9 @@ void FireWeapon( gentity_t *ent, int attackIndex ) {
 
 	if ( attackIndex > 0 ) {
 		// Alt-fire dispatch
-		AngleVectors(ent->client->ps.viewangles, forward, right, up);
+		G_WeaponAimVectors( ent, forward, right, up );
 		CalcMuzzlePointOrigin(ent, ent->client->oldOrigin, forward, right, up, muzzle);
+		G_ClampWeaponMuzzle( ent, ent->client->oldOrigin, muzzle );
 		G_DoTimeShiftFor(ent);
 
 		switch( ent->s.weapon ) {
@@ -237,9 +311,10 @@ void FireWeapon( gentity_t *ent, int attackIndex ) {
 	}
 
 	// set aiming directions
-	AngleVectors (ent->client->ps.viewangles, forward, right, up);
+	G_WeaponAimVectors( ent, forward, right, up );
 
 	CalcMuzzlePointOrigin ( ent, ent->client->oldOrigin, forward, right, up, muzzle );
+	G_ClampWeaponMuzzle( ent, ent->client->oldOrigin, muzzle );
 
 	// fire the specific weapon
 	// unlagged: rewind other clients for hitscan weapons

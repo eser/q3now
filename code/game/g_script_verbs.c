@@ -341,6 +341,21 @@ void Script_FireEvent( gentity_t *ent, const char *eventName, const char *param 
 
 	ev = Script_FindEvent( eventName );
 	if ( ev < 0 ) return;
+	{
+		wiredEntityEvent_t event;
+		memset( &event, 0, sizeof( event ) );
+		event.schemaVersion = WIRED_ENTITY_EVENT_SCHEMA_VERSION;
+		event.stableEventId = WiredEntityEvent_NameId( eventName );
+		event.gameTime = level.time;
+		event.entityNum = (int)( ent - g_entities );
+		event.sourceEntityNum = event.entityNum;
+		event.valueType = ( param && param[0] ) ? WIRED_ENTITY_EVENT_VALUE_STRING :
+			WIRED_ENTITY_EVENT_VALUE_NONE;
+		Q_strncpyz( event.name, eventName, sizeof( event.name ) );
+		if ( param && param[0] ) Q_strncpyz( event.textValue, param, sizeof( event.textValue ) );
+		event.ready = qtrue;
+		(void)trap_EntityEventEnqueue( &event );
+	}
 
 	for ( i = 0; i < sc->blockCount; i++ ) {
 		scriptEventBlock_t *blk = &sc->blocks[i];

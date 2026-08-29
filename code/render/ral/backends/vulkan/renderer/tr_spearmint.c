@@ -11,7 +11,7 @@ Adds:
   * Halo scene entries, rendered through the existing flare pipeline.
   * DrawRotatedPic / SetClipRegion 2D-rendering entry points.
 
-All functionality is gated on FEAT_FOG_SYSTEM / FEAT_HALO.
+Halo functionality remains gated on FEAT_HALO; enhanced fog is permanent.
 */
 
 #include "tr_local.h"
@@ -25,8 +25,6 @@ All functionality is gated on FEAT_FOG_SYSTEM / FEAT_HALO.
  * FOG SYSTEM
  * ===========================================================================
  */
-
-#if FEAT_FOG_SYSTEM
 
 static qboolean R_AdvancedFogRuntimeEnabled( void ) {
 	return (qboolean)( r_useGlFog && r_useGlFog->integer );
@@ -241,9 +239,6 @@ void RB_Fog( int fogNum ) {
 	(void)depthForOpaque;
 }
 
-#endif // FEAT_FOG_SYSTEM
-
-
 /* ===========================================================================
  * HALOS
  * ===========================================================================
@@ -353,11 +348,24 @@ void RE_SetClipRegion( const float *region ) {
 	}
 	cmd->commandId = RC_SET_CLIP_REGION;
 	if ( region ) {
+		float corners[4][2] = {
+			{ region[0], region[1] }, { region[0] + region[2], region[1] },
+			{ region[0] + region[2], region[1] + region[3] },
+			{ region[0], region[1] + region[3] }
+		};
+		float minX, minY, maxX, maxY;
+		for ( int corner = 0; corner < 4; corner++ )
+			RE_TransformUiPoint( &corners[corner][0], &corners[corner][1] );
+		minX = maxX = corners[0][0]; minY = maxY = corners[0][1];
+		for ( int corner = 1; corner < 4; corner++ ) {
+			if ( corners[corner][0] < minX ) minX = corners[corner][0];
+			if ( corners[corner][0] > maxX ) maxX = corners[corner][0];
+			if ( corners[corner][1] < minY ) minY = corners[corner][1];
+			if ( corners[corner][1] > maxY ) maxY = corners[corner][1];
+		}
 		cmd->hasRegion = qtrue;
-		cmd->x = region[0];
-		cmd->y = region[1];
-		cmd->w = region[2];
-		cmd->h = region[3];
+		cmd->x = minX; cmd->y = minY;
+		cmd->w = maxX - minX; cmd->h = maxY - minY;
 	} else {
 		cmd->hasRegion = qfalse;
 		cmd->x = cmd->y = cmd->w = cmd->h = 0.0f;
@@ -389,4 +397,20 @@ void RE_RotatedPic( float x, float y, float w, float h,
 	cmd->s2 = s2;
 	cmd->t2 = t2;
 	cmd->angle = angle;
+	{
+		float centerX = x + w * 0.5f, centerY = y + h * 0.5f;
+		float radians = angle * ( (float)M_PI / 180.0f );
+		float cosine = cosf( radians ), sine = sinf( radians );
+		static const float signs[4][2] = {
+			{ -1.0f, -1.0f }, { 1.0f, -1.0f },
+			{ 1.0f, 1.0f }, { -1.0f, 1.0f }
+		};
+		for ( int corner = 0; corner < 4; corner++ ) {
+			float localX = signs[corner][0] * w * 0.5f;
+			float localY = signs[corner][1] * h * 0.5f;
+			cmd->positions[corner][0] = centerX + localX * cosine - localY * sine;
+			cmd->positions[corner][1] = centerY + localX * sine + localY * cosine;
+			RE_TransformUiPoint( &cmd->positions[corner][0], &cmd->positions[corner][1] );
+		}
+	}
 }

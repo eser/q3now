@@ -44,7 +44,10 @@ qboolean WiredScript_TryEval( const char *text );
 void WiredScript_EnumerateGlobalsAndMembers(
 	void (*callback)( const char *name, int type, void *ctx ), void *ctx );
 
-/* Execute a .lua file from the game filesystem. */
+/* Execute a .lua file from the game filesystem. The checked form reports
+ * load/compile/runtime failure to transactional callers; the legacy void
+ * wrapper remains for fire-and-forget startup scripts. */
+qboolean WiredScript_TryExecFile( const char *filename );
 void WiredScript_ExecFile( const char *filename );
 
 /* ---- Binding registration -------------------------------------------- */

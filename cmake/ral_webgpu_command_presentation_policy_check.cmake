@@ -19,7 +19,7 @@ foreach(FILE IN ITEMS ral_webgpu_command.h ral_webgpu_command.c ral_webgpu_prese
 endforeach()
 file(READ "${BACKEND}/ral_webgpu_command.c" COMMAND_SOURCE)
 file(READ "${BACKEND}/ral_webgpu_presentation.c" PRESENT_SOURCE)
-foreach(NEEDLE IN ITEMS "beginEncoder" "beginPass" "recordIndexedDraw" "RalWebGpu_CommandRecordIndexedDraw" "finishEncoder" "pollSubmission" "Ral_SubmissionLifecyclePublish")
+foreach(NEEDLE IN ITEMS "beginEncoder" "beginPass" "recordIndexedDraw" "RalWebGpu_CommandRecordIndexedDraw" "draw->instanceCount" "finishEncoder" "pollSubmission" "Ral_SubmissionLifecyclePublish")
 	string(FIND "${COMMAND_SOURCE}" "${NEEDLE}" POSITION)
 	if(POSITION EQUAL -1)
 		message(FATAL_ERROR "WebGPU command layer is missing transaction authority: ${NEEDLE}")

@@ -192,6 +192,40 @@ int Behavior_LoadSlot( gentity_t *ent, const void *in, size_t slotBytes )
 /* bbInt[3] — level.time the enemy was last heard (hearing recency). */
 #define BB_LAST_HEARD  3
 
+/* g_skill=3 is exact authored identity.  Easier/harder levels change a small
+ * native attribute band, not the number of behavior ticks per server frame:
+ * perception, reaction cadence and attack cadence/damage.  The value is
+ * snapped at spawn into behaviorState_t, so this adds no cvar work to the hot
+ * loop and gives the later character-table bands a stable carrier. */
+static int Behavior_SkillIndex( const behaviorState_t *bs )
+{
+	return Com_Clamp( 1, 5, bs ? bs->difficultySkill : 3 ) - 1;
+}
+
+static int Behavior_ThinkInterval( const behaviorState_t *bs )
+{
+	static const int value[5] = { 220, 180, BEHAVIOR_THINK_MS, 125, 100 };
+	return value[Behavior_SkillIndex( bs )];
+}
+
+static int Behavior_AttackInterval( const behaviorState_t *bs )
+{
+	static const int value[5] = { 800, 700, BEHAVIOR_ATTACK_MS, 525, 450 };
+	return value[Behavior_SkillIndex( bs )];
+}
+
+static int Behavior_MeleeDamage( const behaviorState_t *bs )
+{
+	static const int value[5] = { 10, 12, BEHAVIOR_MELEE_DAMAGE, 18, 20 };
+	return value[Behavior_SkillIndex( bs )];
+}
+
+static float Behavior_HearRange( const behaviorState_t *bs )
+{
+	static const float scale[5] = { 0.75f, 0.875f, 1.0f, 1.125f, 1.25f };
+	return BEHAVIOR_HEAR_RANGE * scale[Behavior_SkillIndex( bs )];
+}
+
 /*
 =================
 Behavior_EnemyEnt — resolve the current enemy entity, or NULL
@@ -247,10 +281,11 @@ untouched. This is what lets a RELAXED monster escalate to QUERY on a noise
 before it ever gets a clean line of sight.
 =================
 */
-static qboolean Behavior_CanHearEnemy( gentity_t *ent, gentity_t *enemy )
+static qboolean Behavior_CanHearEnemy( gentity_t *ent, behaviorState_t *bs,
+		gentity_t *enemy )
 {
 	if ( !enemy ) return qfalse;
-	return Distance( ent->r.currentOrigin, enemy->r.currentOrigin ) <= BEHAVIOR_HEAR_RANGE;
+	return Distance( ent->r.currentOrigin, enemy->r.currentOrigin ) <= Behavior_HearRange( bs );
 }
 
 /*
@@ -270,7 +305,7 @@ static void Behavior_MeleeAttack( gentity_t *ent, behaviorState_t *bs, gentity_t
 	trace_t   tr;
 	gentity_t *hit;
 
-	if ( level.time - bs->bbInt[BB_LAST_ATTACK] < BEHAVIOR_ATTACK_MS ) {
+	if ( level.time - bs->bbInt[BB_LAST_ATTACK] < Behavior_AttackInterval( bs ) ) {
 		return;   /* still in the swing cooldown */
 	}
 
@@ -288,7 +323,7 @@ static void Behavior_MeleeAttack( gentity_t *ent, behaviorState_t *bs, gentity_t
 	hit = &g_entities[tr.entityNum];
 
 	if ( hit->takedamage ) {
-		G_Damage( hit, ent, ent, dir, tr.endpos, BEHAVIOR_MELEE_DAMAGE, 0, MOD_GAUNTLET );
+		G_Damage( hit, ent, ent, dir, tr.endpos, Behavior_MeleeDamage( bs ), 0, MOD_GAUNTLET );
 	}
 
 	bs->bbInt[BB_LAST_ATTACK] = level.time;
@@ -311,7 +346,7 @@ static void Behavior_RangedAttack( gentity_t *ent, behaviorState_t *bs, gentity_
 {
 	vec3_t dir, muzzle;
 
-	if ( level.time - bs->bbInt[BB_LAST_ATTACK] < BEHAVIOR_ATTACK_MS ) {
+	if ( level.time - bs->bbInt[BB_LAST_ATTACK] < Behavior_AttackInterval( bs ) ) {
 		return;   /* still in the throw cooldown */
 	}
 
@@ -719,7 +754,7 @@ static void Behavior_Decide( gentity_t *ent, behaviorState_t *bs )
 	}
 
 	canSee  = Behavior_CanSeeEnemy( ent, enemy );
-	canHear = Behavior_CanHearEnemy( ent, enemy );
+	canHear = Behavior_CanHearEnemy( ent, bs, enemy );
 	dist    = Distance( ent->r.currentOrigin, enemy->r.currentOrigin );
 
 	/* Seed last-known/sensed pos + stamp the recency timers. Sight seeds a clean
@@ -1035,7 +1070,7 @@ void G_RunBehavior( gentity_t *ent )
 	if ( bs->scripted ) {
 		G_RunScriptDispatcher( ent );
 	} else if ( level.time >= bs->nextThink ) {
-		bs->nextThink = level.time + BEHAVIOR_THINK_MS;
+		bs->nextThink = level.time + Behavior_ThinkInterval( bs );
 		Behavior_Decide( ent, bs );
 	}
 

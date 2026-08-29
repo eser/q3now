@@ -19,7 +19,18 @@ typedef struct mapFile_s mapFile_t;
  * (wired.x64). The renderer DLL only sees the opaque pointer. */
 typedef struct arena_s arena_t;
 
-#define	REF_API_VERSION		22	/* generation-bound presentation change receipt */
+#define	REF_API_VERSION		28	/* paint-time UI subtree transform */
+
+#define REF_UI_TRANSFORM_SCHEMA_VERSION 1u
+typedef struct {
+	uint32_t schemaVersion;
+	float x;
+	float y;
+	float width;
+	float height;
+	/* Signed normalized edge recession: negative = left, positive = right. */
+	float perspective;
+} refUiTransform_t;
 
 #define REF_PRESENTATION_CHANGE_SCHEMA_VERSION 1u
 enum {
@@ -166,6 +177,10 @@ typedef struct {
 		float glowWidth, const float *glowColor );
 	void	(*SetMSDFShadow)( float offsetX, float offsetY, const float *color );
 	void	(*SetClipRegion)( const float *region );	// NULL = clear clip region; non-NULL = {x,y,w,h}
+	/* Paint-only subtree transform. NULL restores identity. The client keeps
+	 * layout and hit testing axis-aligned; every subsequent 2D primitive is
+	 * projected until the transform is cleared/replaced. */
+	void	(*SetUiTransform)( const refUiTransform_t *transform );
 	void	(*DrawStretchPic) ( float x, float y, float w, float h,
 		float s1, float t1, float s2, float t2, qhandle_t hShader );	// 0 = white
 	// WiredUI SCENE procedural backdrop: draws a blended full-viewport constellation-
@@ -228,7 +243,6 @@ typedef struct {
 	void	(*VertexLighting)( qboolean allowed );
 	void	(*SyncRender)( void );
 
-#if FEAT_FOG_SYSTEM
 	// Query global fog parameters (fog volume 0 or explicit global fog).
 	// type receives REF_FT_NONE if no global fog is set.
 	void	(*GetGlobalFog)( refFogType_t *type, vec3_t color, float *depthForOpaque, float *density );
@@ -237,7 +251,6 @@ typedef struct {
 	// if the engine should use vertex color arrays for fog, qfalse for fixed-function fog.
 	void	(*GetViewFog)( const vec3_t origin, refFogType_t *type, vec3_t color,
 		float *depthForOpaque, float *density, qboolean *useColorArray );
-#endif
 
 #if FEAT_HALO
 	// Add a halo (lens-flare-style glow) to the current scene. Rendered with
@@ -288,6 +301,19 @@ typedef struct {
 
 	/* One callback represents one coalesced platform event burst. */
 	void (*PresentationChanged)( const refPresentationChange_t *change );
+
+	/* App-owned semantic atmosphere intent; particle instances remain GPU-owned. */
+	void (*AddAtmosphereEmitter)( const atmosphereEmitter_t *emitter );
+	/* Immutable bounded multi-stage graph; resolved once at registration. */
+	void (*RegisterAtmosphereEffectProfile)( uint32_t handle,
+		const atmosphereEffectProfile_t *profile );
+	/* Frame-local footprint/impact/traversal intent; tiles are renderer-owned. */
+	void (*AddAtmosphereSurfaceEvent)( const atmosphereSurfaceEvent_t *event );
+	/* Frame-local local-media intent; froxels/composition are renderer-owned. */
+	void (*AddAtmosphereMediaVolume)( const atmosphereMediaVolume_t *volume );
+
+	/* Explicit authoring cook. Writes derived .wlight/.wprobe sidecars only. */
+	qboolean (*CookLightingProject)( const char *derivedRoot );
 
 } refexport_t;
 

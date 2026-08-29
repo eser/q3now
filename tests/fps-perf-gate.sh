@@ -356,6 +356,10 @@ fi
 # One cfg avoids the engine command-line's finite '+' token budget. The marker
 # pair makes the parser consume only the pinned, steady measurement window.
 {
+    # g_envWeather is serverinfo-owned. Seed it before map startup so the
+    # cgame receives the authored rain preset during its initial
+    # CG_ParseServerinfo/CG_AtmosphericInit pass; changing only the client cvar
+    # after the map has loaded does not publish atmosphere work.
     printf '%s\n' \
         'set sv_cheats 1' \
         'set sv_pure 0' \
@@ -374,6 +378,7 @@ fi
         'set log_severity DEBUG' \
         'set log_file_severity DEBUG' \
         'set sv_floodProtect 0' \
+        'set g_envWeather rain' \
         "map $MAP" \
         'waitForMap' \
         'wait 100' \
@@ -458,9 +463,12 @@ fi
         'screenshot fps_particles_on png silent' \
         'set cg_debugevents 0' \
         'set g_envWeather rain' \
+        'wait 100' \
         'echo FPS_GATE_SCENE_BEGIN' \
         'print r_particles' \
         'print g_envWeather' \
+        'set r_speeds 7' \
+        'wait 20' \
         'set r_speeds 1' \
         'wait 10' \
         'set r_speeds 4' \

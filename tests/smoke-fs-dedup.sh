@@ -20,8 +20,11 @@
 
 set -euo pipefail
 
+# shellcheck source=tests/lib/wired_paths.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/wired_paths.sh"
+
 DED="${1:-wired-headless}"
-SW3Z_TOOL="${SW3Z_TOOL:-tools/sw3z-archiver/cmd/sw3z/sw3z}"
+SW3Z_TOOL="${SW3Z_TOOL:-$WIRED_SOURCE/tools/sw3z-archiver/cmd/sw3z/sw3z}"
 
 # ── locate binaries ─────────────────────────────────────────────────────────
 if [ ! -x "$DED" ] && ! command -v "$DED" >/dev/null 2>&1; then
@@ -49,8 +52,16 @@ BASEPATH="$FIXTURE_ROOT/basepath"
 HOMEPATH="$FIXTURE_ROOT/homepath"
 SEED="$FIXTURE_ROOT/seed"
 
+# fs_installpath is the application root. On macOS the VFS intentionally scans
+# its bundle resource root, not <install>/base; mirroring the real product
+# layout is required for the install-side duplicate to enter the search path.
+INSTALL_RESOURCE="$BASEPATH"
+case "$(uname -s)" in
+  Darwin) INSTALL_RESOURCE="$BASEPATH/Contents/Resources" ;;
+esac
+
 rm -rf "$FIXTURE_ROOT"
-mkdir -p "$BASEPATH/base" "$HOMEPATH/base" "$SEED"
+mkdir -p "$INSTALL_RESOURCE/base" "$HOMEPATH/base" "$SEED"
 
 # Minimal SW3Z content: needs default.cfg so FS_Restart's
 # `FS_ReadFile("default.cfg")` post-check passes; otherwise engine
@@ -59,8 +70,8 @@ mkdir -p "$BASEPATH/base" "$HOMEPATH/base" "$SEED"
 # fixture exercises the bug — but exit code wouldn't be 0.
 echo "// regression fixture marker — empty default.cfg" > "$SEED/default.cfg"
 echo "regression fixture for FS_DeduplicateArchives" > "$SEED/dummy.txt"
-"$SW3Z_TOOL" a "$BASEPATH/base/regression_dup.sw3z" "$SEED" >/dev/null
-cp "$BASEPATH/base/regression_dup.sw3z" "$HOMEPATH/base/regression_dup.sw3z"
+"$SW3Z_TOOL" a "$INSTALL_RESOURCE/base/regression_dup.sw3z" "$SEED" >/dev/null
+cp "$INSTALL_RESOURCE/base/regression_dup.sw3z" "$HOMEPATH/base/regression_dup.sw3z"
 
 # ── convert to engine-readable paths ────────────────────────────────────────
 # Engine on Windows expects Windows-native paths; on Unix accepts as-is.

@@ -23,6 +23,7 @@
 #include "g_save.h"
 #include "g_save_serialize.h"
 #include "g_save_file.h"
+#include "g_entity_metadata.h"
 
 LOG_DECLARE_CHANNEL( ch_game, "game" );
 
@@ -77,6 +78,9 @@ static size_t SG_WriteWorld( byte *payload, size_t cap ) {
 	sgRelocBases_t bases;
 	int            i;
 
+	if ( !G_EntityMetadataSaveAdapterValid() ) {
+		return (size_t)-1;
+	}
 	SG_StreamInitWrite( &s, payload, cap );
 	SG_FillBases( &bases );
 
@@ -147,6 +151,9 @@ static int SG_ReadWorld( const byte *payload, size_t len ) {
 	gclient_t      scratchClient;
 	level_locals_t scratchLevel;
 
+	if ( !G_EntityMetadataSaveAdapterValid() ) {
+		return 0;
+	}
 	SG_StreamInitRead( &s, payload, len );
 	SG_FillBases( &bases );
 
@@ -264,6 +271,9 @@ static int SG_LoadWorld( const byte *payload, size_t len ) {
 	size_t slotSz = Behavior_SlotSize();
 #endif
 
+	if ( !G_EntityMetadataSaveAdapterValid() ) {
+		return 0;
+	}
 	SG_StreamInitRead( &s, payload, len );
 	SG_FillBases( &bases );
 

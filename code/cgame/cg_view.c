@@ -188,6 +188,8 @@ CG_OffsetThirdPersonView
 ===============
 */
 #define	FOCUS_DISTANCE	512
+static qboolean CG_SceneActive( void );
+
 static void CG_OffsetThirdPersonView( void ) {
 	vec3_t		forward, right, up;
 	vec3_t		view;
@@ -314,6 +316,68 @@ static void CG_OffsetThirdPersonView( void ) {
 	}
 	cg.refdefViewAngles[PITCH] = -180 / M_PI * atan2( focusPoint[2], focusDist );
 	cg.refdefViewAngles[YAW] -= cg_thirdPersonAngle.value;
+}
+
+/*
+===============================
+CG_UpdateThirdPersonCenterAim
+
+The reticle is a screen-space invariant. Resolve the world target from the
+post-collision shoulder camera, then converge the player muzzle on that target.
+The resulting weapon direction is published separately from usercmd viewangles
+so movement and camera control remain unchanged.
+===============================
+*/
+static void CG_UpdateThirdPersonCenterAim( void ) {
+	vec3_t cameraEnd;
+	vec3_t eye;
+	vec3_t muzzle;
+	vec3_t aimDir;
+	trace_t cameraTrace;
+	trace_t muzzleTrace;
+
+	cg.thirdPersonCenterAimActive = qfalse;
+	VectorCopy( cg.predictedPlayerState.viewangles, cg.thirdPersonCenterAimAngles );
+	VectorClear( cg.thirdPersonCenterAimTarget );
+	trap_SetUserCmdAim( UCMD_AIM_NONE, 0, 0 );
+
+	if ( !cg.snap || !cg.renderingThirdPerson || cg_cameraMode.integer ||
+		 CG_SceneActive() || cg.predictedPlayerState.pm_type == PM_INTERMISSION ||
+		 cg.predictedPlayerState.stats[STAT_HEALTH] <= 0 ) {
+		return;
+	}
+
+	VectorMA( cg.refdef.vieworg, 131072.0f, cg.refdef.viewaxis[0], cameraEnd );
+	CG_Trace( &cameraTrace, cg.refdef.vieworg, NULL, NULL, cameraEnd,
+		cg.predictedPlayerState.clientNum, MASK_SHOT );
+	VectorCopy( cameraTrace.endpos, cg.thirdPersonCenterAimTarget );
+
+	VectorCopy( cg.predictedPlayerState.origin, eye );
+	eye[2] += cg.predictedPlayerState.viewheight;
+	VectorSubtract( cg.thirdPersonCenterAimTarget, eye, aimDir );
+	if ( VectorNormalize( aimDir ) <= 1.0f ) {
+		return;
+	}
+
+	/* Match the server muzzle contract. Its 14-unit forward offset depends on
+	 * the aim direction, so solve once from the eye and refine from the muzzle. */
+	VectorMA( eye, 14.0f, aimDir, muzzle );
+	CG_Trace( &muzzleTrace, eye, NULL, NULL, muzzle,
+		cg.predictedPlayerState.clientNum, MASK_SHOT );
+	if ( muzzleTrace.fraction < 1.0f ) {
+		VectorCopy( muzzleTrace.endpos, muzzle );
+	}
+	VectorSubtract( cg.thirdPersonCenterAimTarget, muzzle, aimDir );
+	if ( VectorNormalize( aimDir ) <= 1.0f ) {
+		return;
+	}
+
+	vectoangles( aimDir, cg.thirdPersonCenterAimAngles );
+	cg.thirdPersonCenterAimAngles[ROLL] = 0.0f;
+	cg.thirdPersonCenterAimActive = qtrue;
+	trap_SetUserCmdAim( UCMD_AIM_THIRD_PERSON_CENTER,
+		ANGLE2SHORT( cg.thirdPersonCenterAimAngles[PITCH] ),
+		ANGLE2SHORT( cg.thirdPersonCenterAimAngles[YAW] ) );
 }
 
 
@@ -1157,6 +1221,10 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 
 	// clear all the render lists
 	trap_R_ClearScene();
+	/* Never let a previous gameplay frame's center-aim mode leak through a
+	 * loading/inactive snapshot return. A valid third-person view re-arms it
+	 * after camera resolution below. */
+	trap_SetUserCmdAim( UCMD_AIM_NONE, 0, 0 );
 
 	// set up cg.snap and possibly cg.nextSnap
 	CG_ProcessSnapshots();
@@ -1243,6 +1311,7 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 
 	// build cg.refdef
 	inwater = CG_CalcViewValues();
+	CG_UpdateThirdPersonCenterAim();
 
 	// Dev/visual-gate only: pin cg.time (entity-animation time) for byte-stable
 	// captures. 0 = off (snapshot/wall-clock-driven, default, byte-identical). When

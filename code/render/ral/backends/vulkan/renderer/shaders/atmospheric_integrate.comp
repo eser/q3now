@@ -6,7 +6,7 @@
 /*
 atmospheric_integrate.comp — wired-render atmospheric weather compute shader
 
-Drives the GPU-resident rain/snow pool. Each thread owns one slot indexed
+Drives the GPU-resident precipitation pool. Each thread owns one slot indexed
 by gl_GlobalInvocationID.x; workgroup size 64, dispatch ceil(poolSize/64).
 The pool ping-pongs: this pass reads ReadPool, writes WritePool.
 
@@ -22,7 +22,7 @@ Per slot, every frame:
     DISTANCE-CULL: if the xy distance from the eye exceeds `distance`, mark
     inactive. Below-eye floor kill mirrors the legacy CPU path.
 
-Layout matches the host atmParticleGPU_t (32 B) / atmFrame_t (208 B std140)
+Layout matches the host atmParticleGPU_t (32 B) / atmFrame_t (1152 B std140)
 mirrors in vk.h.
 */
 
@@ -52,9 +52,24 @@ layout(set = 0, binding = 0) uniform AtmFrame {
 	uint  gridSize;     // 184..187
 	uint  atmType;      // 188..191  0 none, 1 rain, 2 snow
 	float distance;     // 192..195
-	float pad0;         // 196..199
-	float pad1;         // 200..203
-	float pad2;         // 204..207
+	float computePad0;  // 196..199
+	float computePad1;  // 200..203
+	float computePad2;  // 204..207
+	vec4  windGust;     // 208..223 xyz wind, w gust strength
+	vec4  precipitation;// 224..239 rain, snow, sleet, hail
+	float dustAsh;      // 240..243 dust / ash precipitation weight
+	float indoorExposure;//244..247 precipitation exposure multiplier
+	uint  climateSeed;  // 248..251 full-width deterministic seed
+	uint  climatePad;   // 252..255 reserved
+	vec4  climate;      // 256..271 temperature, humidity, visibility, transition
+	vec4  surfaceClimate;//272..287 wetness, frost, snow, melt
+	vec4  sun;          // 288..303 direction.xyz, intensity
+	vec4  moon;         // 304..319 direction.xyz, intensity
+	vec4  ambientCloud; // 320..335 ambient.rgb, cloud cover
+	vec4  cloudMedia;   // 336..351 cloud shadow, lightning, media density/falloff
+	vec4  effectMeta;   // precipitation count, semantic workload count, reserved
+	vec4  effectWorkloads[48]; // 8 profile/class-driven workloads, 6 vec4 each
+	vec4  renderParams; // render-owned, unused here
 };
 
 layout(std430, set = 0, binding = 1) readonly buffer ReadPool {
@@ -70,6 +85,9 @@ layout(set = 0, binding = 3) uniform sampler2D heightgrid;
 // Q3 DEFAULT_GRAVITY is 800; rain falls at 1.1× that, snow at 0.2×.
 const float RAIN_SPEED = 1.1 * 800.0;
 const float SNOW_SPEED = 0.2 * 800.0;
+const float SLEET_SPEED = 0.75 * 800.0;
+const float HAIL_SPEED = 0.9 * 800.0;
+const float DUST_ASH_SPEED = 0.04 * 800.0;
 const float FLOOR_KILL_BELOW_EYE = 500.0;
 
 // Cheap integer hash → [0,1). Derived from gl_GlobalInvocationID + a time
@@ -85,8 +103,37 @@ float hash11( uint x ) {
 }
 
 float rand01( uint idx, uint salt, float seed ) {
-	uint t = uint( time * 1000.0 ) + uint( seed * 4096.0 );
+	uint t = uint( time * 1000.0 ) + uint( seed * 4096.0 )
+		+ climateSeed * 2246822519u;
 	return hash11( idx * 747796405u + salt * 2891336453u + t );
+}
+
+uint chooseFamily( uint idx, float seed ) {
+	float total = precipitation.x + precipitation.y + precipitation.z
+		+ precipitation.w + dustAsh;
+	if ( total <= 0.0 ) return atmType;
+	float pick = rand01( idx, 67u, seed ) * total;
+	if ( pick <= precipitation.x ) return 1u;
+	pick -= precipitation.x;
+	if ( pick <= precipitation.y ) return 2u;
+	pick -= precipitation.y;
+	if ( pick <= precipitation.z ) return 3u;
+	pick -= precipitation.z;
+	if ( pick <= precipitation.w ) return 4u;
+	return 5u;
+}
+
+float precipitationCoverage( uint idx ) {
+	float authored = precipitation.x + precipitation.y + precipitation.z
+		+ precipitation.w + dustAsh;
+	// Legacy rain/snow descriptors carry only atmType and therefore retain full
+	// density. New authored mixtures use their summed intensity, while exposure
+	// deterministically thins stable pool slots instead of spawning particles
+	// indoors and paying simulation/draw cost for invisible weather.
+	float intensity = authored > 0.0 ? clamp( authored, 0.0, 1.0 ) : 1.0;
+	float coverage = intensity * clamp( indoorExposure, 0.0, 1.0 );
+	float slot = hash11( idx * 1597334677u + climateSeed * 3812015801u );
+	return slot <= coverage ? coverage : 0.0;
 }
 
 // Sample the R32F ground-height texture at a world xy. uv normalizes the
@@ -106,17 +153,75 @@ AtmParticle deadParticle() {
 	return p;
 }
 
+uint effectForIndex( uint idx ) {
+	uint count = min( uint( effectMeta.y ), 8u );
+	for ( uint effect = 0u; effect < count; ++effect ) {
+		uint base = effect * 6u;
+		if ( float( idx ) >= effectWorkloads[base + 4u].x
+				&& float( idx ) < effectWorkloads[base + 4u].y )
+			return effect;
+	}
+	return 0xffffffffu;
+}
+
 void main() {
 	uint idx = gl_GlobalInvocationID.x;
 	if ( idx >= poolSize ) return;
+	uint precipitationCount = uint( effectMeta.x );
+	bool semantic = idx >= precipitationCount;
+	uint effect = effectForIndex( idx );
+	if ( semantic && effect == 0xffffffffu ) {
+		writeParticles[idx] = deadParticle();
+		return;
+	}
 
 	// Weather off → keep the whole pool inactive (the draw is skipped too).
-	if ( atmType == 0u ) {
+	if ( !semantic && atmType == 0u ) {
+		writeParticles[idx] = deadParticle();
+		return;
+	}
+	if ( !semantic && precipitationCoverage( idx ) <= 0.0 ) {
 		writeParticles[idx] = deadParticle();
 		return;
 	}
 
 	AtmParticle p = readParticles[idx];
+	if ( semantic ) {
+		uint base = effect * 6u;
+		uint expectedFamily = 16u + effect;
+		bool stale = uint( p.flags + 0.5 ) != expectedFamily;
+		if ( p.flags < 0.5 || stale ) {
+			uint semanticSeed = uint( effectWorkloads[base + 5u].w )
+				+ idx * 13u;
+			float rx = hash11( semanticSeed );
+			float ry = hash11( semanticSeed + 1u );
+			float rz = hash11( semanticSeed + 2u );
+			float radius = max( effectWorkloads[base].w,
+				effectWorkloads[base + 5u].z );
+			p.pos = effectWorkloads[base].xyz
+				+ ( vec3( rx, ry, rz ) * 2.0 - 1.0 ) * radius;
+			p.seed = max( 0.05, effectWorkloads[base + 5u].x
+				+ ( hash11( semanticSeed + 3u ) * 2.0 - 1.0 )
+				* effectWorkloads[base + 5u].y );
+			vec3 authoredDirection = effectWorkloads[base + 1u].xyz;
+			vec3 direction = dot( authoredDirection, authoredDirection ) > 1e-8
+				? normalize( authoredDirection ) : vec3( 0.0, 0.0, 1.0 );
+			vec3 jitter = ( vec3( hash11( semanticSeed + 4u ),
+				hash11( semanticSeed + 5u ), hash11( semanticSeed + 6u ) )
+				* 2.0 - 1.0 ) * effectWorkloads[base + 3u].y;
+			p.vel = direction * effectWorkloads[base + 3u].x + jitter
+				+ windGust.xyz * 0.1;
+			p.flags = float( expectedFamily );
+		} else {
+			p.vel.z -= 800.0 * effectWorkloads[base + 3u].z * dt;
+			p.vel *= max( 0.0, 1.0 - effectWorkloads[base + 3u].w * dt );
+			p.pos += p.vel * dt;
+			p.seed -= dt;
+			if ( p.seed <= 0.0 ) p = deadParticle();
+		}
+		writeParticles[idx] = p;
+		return;
+	}
 
 	// ── RESPAWN inactive slots (continuous spawn) ────────────────────
 	if ( p.flags < 0.5 ) {
@@ -135,22 +240,44 @@ void main() {
 		p.pos.x = clamp( eyeWorld.x + ( rx * 2.0 - 1.0 ) * spread, boundsMin.x, boundsMax.x );
 		p.pos.y = clamp( eyeWorld.y + ( ry * 2.0 - 1.0 ) * spread, boundsMin.y, boundsMax.y );
 		p.pos.z = min( eyeWorld.z + rz * SPAWN_HEIGHT, boundsMax.z );
+		// The heightgrid stores the first weather-blocking surface for this xy.
+		// Reject below-roof spawns before they can become visible for one frame;
+		// above-roof particles are retired by the same collision test while falling.
+		if ( gridSize > 1u && p.pos.z <= groundHeightAt( p.pos.xy ) ) {
+			writeParticles[idx] = deadParticle();
+			return;
+		}
 
 		p.seed = rx + ry + rz;
 
-		if ( atmType == 1u ) {
+		uint family = chooseFamily( idx, p.seed );
+		float windScale = 1.0;
+		if ( family == 1u ) {
 			// rain: straight down, small xy jitter
 			p.vel.x = ( rand01( idx, 41u, p.seed ) * 2.0 - 1.0 ) * 30.0;
 			p.vel.y = ( rand01( idx, 53u, p.seed ) * 2.0 - 1.0 ) * 30.0;
 			p.vel.z = -RAIN_SPEED;
-		} else {
+			windScale = 0.25;
+		} else if ( family == 2u ) {
 			// snow: slow fall, gentle xy drift
 			p.vel.x = ( rand01( idx, 41u, p.seed ) * 2.0 - 1.0 ) * 20.0;
 			p.vel.y = ( rand01( idx, 53u, p.seed ) * 2.0 - 1.0 ) * 20.0;
 			p.vel.z = -SNOW_SPEED;
+		} else if ( family == 3u ) {
+			p.vel = vec3( 0.0, 0.0, -SLEET_SPEED );
+			windScale = 0.5;
+		} else if ( family == 4u ) {
+			p.vel = vec3( 0.0, 0.0, -HAIL_SPEED );
+			windScale = 0.15;
+		} else {
+			p.vel.x = ( rand01( idx, 41u, p.seed ) * 2.0 - 1.0 ) * 35.0;
+			p.vel.y = ( rand01( idx, 53u, p.seed ) * 2.0 - 1.0 ) * 35.0;
+			p.vel.z = -DUST_ASH_SPEED;
+			windScale = 1.5;
 		}
+		p.vel += windGust.xyz * windScale;
 
-		p.flags = 1.0;
+		p.flags = float( family );
 		writeParticles[idx] = p;
 		return;
 	}
@@ -158,14 +285,20 @@ void main() {
 	// ── FALLING — integrate ──────────────────────────────────────────
 	p.pos += p.vel * dt;
 
-	// snow: add a slight per-particle wind sway (matches the legacy CPU path)
-	if ( atmType == 2u ) {
+	uint family = uint( p.flags + 0.5 );
+	// Snow/dust keep a small stochastic sway; every family consumes the same
+	// authored wind field and deterministic gust phase.
+	if ( family == 2u || family == 5u ) {
 		p.pos.x += sin( time + float( idx ) ) * 0.5;
 		p.pos.y += cos( time * 1.3 + float( idx ) ) * 0.5;
 	}
+	float gustPhase = sin( time * 0.7 + float( idx % 97u ) * 0.37 );
+	float familyWind = family == 1u ? 0.25 : ( family == 3u ? 0.5
+		: ( family == 4u ? 0.15 : ( family == 5u ? 1.5 : 1.0 ) ) );
+	p.pos += windGust.xyz * ( windGust.w * gustPhase * familyWind * dt );
 
 	// COLLIDE against the heightgrid ground.
-	float ground = groundHeightAt( p.pos.xy );
+	float ground = gridSize > 1u ? groundHeightAt( p.pos.xy ) : boundsMin.z;
 	if ( p.pos.z < ground ) {
 		writeParticles[idx] = deadParticle();
 		return;

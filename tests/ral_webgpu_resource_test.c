@@ -2,6 +2,8 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "ral_webgpu_resource.h"
+#include "ral_webgpu_lighting.h"
+#include "ral_lighting_product.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -90,7 +92,15 @@ static qboolean CreateBuffer( void *user, uintptr_t device,
 static qboolean CreateTexture( void *user, uintptr_t device,
 		const ralWebGpuTextureDesc_t *desc, uintptr_t *out ) {
 	fakeHost_t *host = (fakeHost_t *)user;
-	if ( device != (uintptr_t)0x3000u || !desc || desc->bytesPerTexel != 4u )
+	uint32_t expected = desc && desc->format == RAL_FORMAT_R8_UNORM ? 1u
+		: desc && desc->format == RAL_FORMAT_R8G8_UNORM ? 2u
+		: desc && ( desc->format == RAL_FORMAT_R8G8B8A8_UNORM
+			|| desc->format == RAL_FORMAT_R8G8B8A8_SRGB
+			|| desc->format == RAL_FORMAT_E5B9G9R9_UFLOAT
+			|| desc->format == RAL_FORMAT_R16G16_SNORM ) ? 4u
+		: desc && desc->format == RAL_FORMAT_R16G16B16A16_SFLOAT ? 8u : 0u;
+	if ( device != (uintptr_t)0x3000u || !desc
+			|| !expected || desc->bytesPerTexel != expected )
 		return qfalse;
 	*out = ResourceIdentity( host, RAL_WEBGPU_RESOURCE_TEXTURE ); return qtrue;
 }
@@ -122,8 +132,9 @@ static qboolean WriteTexture( void *user, uintptr_t queue, uintptr_t texture,
 		const void *bytes, uint64_t byteSize, uint32_t bytesPerRow,
 		uint32_t rowsPerImage ) {
 	fakeHost_t *host = (fakeHost_t *)user;
-	if ( queue != (uintptr_t)0x4000u || !texture || !bytes
-			|| byteSize != 1024u || bytesPerRow != 256u || rowsPerImage != 4u )
+	if ( queue != (uintptr_t)0x4000u || !texture || !bytes || !byteSize
+			|| !bytesPerRow || ( bytesPerRow & 255u ) || !rowsPerImage
+			|| byteSize % ( (uint64_t)bytesPerRow * rowsPerImage ) )
 		return qfalse;
 	host->writeTextureCount++; return qtrue;
 }
@@ -222,6 +233,21 @@ int main( void ) {
 	ralWebGpuTextureDesc_t textureDesc;
 	ralWebGpuResourceReceipt_t bufferReceipt, textureReceipt, stale;
 	ralWebGpuWriteReceipt_t write, writeExact, unchangedWrite;
+	ralLightingProductRequest_t lightingRequest;
+	ralLightingArtifactReceipt_t lightingArtifact;
+	ralLightingRuntimePlan_t lightingPlan;
+	ralWebGpuLighting_t *lighting = NULL;
+	ralWebGpuLightingReceipt_t lightingReceipt;
+	ralStaticLightingCapabilities_t lightingCaps = { qtrue, qtrue, qtrue, qtrue };
+	ralLightVec3Q16_t lightingRadiance[2] = {
+		{ 4 * RAL_LIGHT_Q16_ONE, RAL_LIGHT_Q16_ONE, 0 },
+		{ RAL_LIGHT_Q16_ONE, 2 * RAL_LIGHT_Q16_ONE, 3 * RAL_LIGHT_Q16_ONE }
+	};
+	ralLightVec3Q16_t lightingDirection[2] = {
+		{ 0, 0, RAL_LIGHT_Q16_ONE }, { RAL_LIGHT_Q16_ONE, 0, RAL_LIGHT_Q16_ONE }
+	};
+	uint8_t lightingVisibility[2] = { 255u, 128u };
+	uint8_t lightingRadianceBytes[16], lightingDirectionBytes[8], lightingBytes[512];
 	unsigned char bufferBytes[16] = { 0u };
 	unsigned char textureBytes[1024] = { 0u };
 	ralBackendConformanceReceipt_t output, sentinel;
@@ -253,11 +279,43 @@ int main( void ) {
 	CHECK( !RalWebGpu_WriteBuffer( layer, buffer, &bufferReceipt, 4u,
 		bufferBytes, sizeof( bufferBytes ), &write ) );
 	memset( &textureDesc, 0, sizeof( textureDesc ) ); textureDesc.width = 64u;
-	textureDesc.height = 4u; textureDesc.depth = 1u; textureDesc.bytesPerTexel = 4u;
+	textureDesc.height = 4u; textureDesc.depth = 1u;
+	textureDesc.format = RAL_FORMAT_R8G8B8A8_UNORM; textureDesc.bytesPerTexel = 4u;
 	CHECK( RalWebGpu_CreateTexture( layer, &textureDesc, &texture, &textureReceipt ) );
 	CHECK( RalWebGpu_WriteTexture( layer, texture, &textureReceipt, textureBytes,
 		sizeof( textureBytes ), 256u, 4u, &write ) );
 	CHECK( write.kind == RAL_WEBGPU_WRITE_TEXTURE && host.writeBufferCount == 1u );
+	memset( &lightingRequest, 0, sizeof( lightingRequest ) );
+	lightingRequest.schemaVersion = RAL_LIGHTING_PRODUCT_SCHEMA_VERSION;
+	lightingRequest.artifactGeneration = 21u;
+	lightingRequest.bake.schemaVersion = RAL_LIGHTING_BAKE_RECEIPT_SCHEMA_VERSION;
+	lightingRequest.bake.bakeGeneration = 1u;
+	lightingRequest.bake.staticIndirectKey = 2u;
+	lightingRequest.bake.producerVersion = 3u;
+	lightingRequest.bake.radianceHash = 4u;
+	lightingRequest.bake.directionHash = 5u;
+	lightingRequest.bake.patchCount = 2u;
+	lightingRequest.bake.linkCount = 1u;
+	lightingRequest.bake.completedBounces = 4u;
+	lightingRequest.bake.ready = qtrue;
+	lightingRequest.encoding = RAL_STATIC_LIGHTING_ENCODING_RGB9E5_OCT8;
+	lightingRequest.pageWidth = 1u; lightingRequest.pageHeight = 1u;
+	lightingRequest.pageCount = 2u; lightingRequest.indirectRadiance = lightingRadiance;
+	lightingRequest.dominantDirection = lightingDirection;
+	lightingRequest.texelCount = 2u;
+	lightingRequest.stationaryVisibility = lightingVisibility;
+	lightingRequest.stationaryVisibilityCount = 2u;
+	CHECK( Ral_LightingProductWrite( &lightingRequest, lightingRadianceBytes,
+		sizeof( lightingRadianceBytes ), lightingDirectionBytes,
+		sizeof( lightingDirectionBytes ), lightingBytes, sizeof( lightingBytes ),
+		&lightingArtifact ) );
+	CHECK( Ral_LightingRuntimePlanBuild( RAL_BACKEND_WEBGPU, 22u, lightingBytes,
+		lightingArtifact.byteLength, &lightingArtifact, &lightingCaps, &lightingPlan ) );
+	CHECK( RalWebGpu_LightingUpload( layer, lightingBytes,
+		lightingArtifact.byteLength, &lightingPlan, &lighting, &lightingReceipt ) );
+	CHECK( RalWebGpu_LightingReceiptExact( &lightingReceipt, &lightingReceipt )
+		&& host.writeTextureCount == 4u );
+	CHECK( RalWebGpu_LightingDestroy( layer, lighting, &lightingReceipt ) );
 	CHECK( !RalWebGpu_DestroyResource( layer, buffer, &stale ) );
 	CHECK( RalWebGpu_DestroyResource( layer, buffer, &bufferReceipt ) );
 	bufferDesc.size = 15u;
@@ -274,7 +332,7 @@ int main( void ) {
 	CHECK( output.backendType == RAL_BACKEND_WEBGPU );
 	CHECK( output.transfer.outcome == RAL_TRANSFER_OUTCOME_NATIVE_ASYNC );
 	CHECK( output.copiedByteCount == 64u && output.copiedByteDigest != 0u );
-	CHECK( host.writeTextureCount == 2u && host.releaseOperationCount == 1u );
+	CHECK( host.writeTextureCount == 5u && host.releaseOperationCount == 1u );
 
 	CHECK( RalWebGpu_OffscreenConformanceBegin( layer, 64u ) );
 	event = DeviceLoss();

@@ -22,10 +22,19 @@ vertex UiVertexOut wired_ui_vertex(UiVertexIn in [[stage_in]]) {
     return out;
 }
 
+static float3 wired_srgb_to_linear(float3 value) {
+    value = max(value, float3(0.0));
+    bool3 cutoff = value <= float3(0.04045);
+    float3 low = value / 12.92;
+    float3 high = pow((value + 0.055) / 1.055, float3(2.4));
+    return select(high, low, cutoff);
+}
+
 fragment float4 wired_ui_fragment(UiVertexOut in [[stage_in]],
                                   texture2d<float> image [[texture(0)]],
                                   sampler imageSampler [[sampler(0)]]) {
-    return image.sample(imageSampler, in.uv) * in.color;
+    float4 tint = float4(wired_srgb_to_linear(in.color.rgb), in.color.a);
+    return image.sample(imageSampler, in.uv) * tint;
 }
 
 static float median3(float3 value) {
@@ -39,7 +48,234 @@ fragment float4 wired_ui_msdf_fragment(UiVertexOut in [[stage_in]],
     float signedDistance = median3(sampleValue) - 0.5;
     float screenWidth = max(fwidth(signedDistance), 1.0 / 1024.0);
     float coverage = saturate(signedDistance / screenWidth + 0.5);
-    return float4(in.color.rgb, in.color.a * coverage);
+    return float4(wired_srgb_to_linear(in.color.rgb), in.color.a * coverage);
+}
+
+struct ToneMapParams {
+	uint mode;
+	float exposure;
+	float lottesContrast;
+	float lottesShoulder;
+	float lottesMidIn;
+	float lottesMidOut;
+	float lottesHdrMax;
+	float pad;
+	float4 displayVisibility;
+};
+
+struct FullscreenVertexOut {
+	float4 position [[position]];
+	float2 uv;
+};
+
+static float3 wired_display_visibility_plan(float3 sceneColor, float3 plan);
+
+vertex FullscreenVertexOut wired_fullscreen_vertex(uint vertexId [[vertex_id]]) {
+	const float2 positions[3] = {
+		float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0)
+	};
+	FullscreenVertexOut out;
+	out.position = float4(positions[vertexId], 0.0, 1.0);
+	out.uv = positions[vertexId] * float2(0.5, -0.5) + 0.5;
+	return out;
+}
+
+static float3 wired_tonemap_pbr_neutral(float3 color) {
+	const float startCompression = 0.76;
+	const float desaturation = 0.15;
+	float x = min(color.r, min(color.g, color.b));
+	float offset = x < 0.08 ? x - 6.25 * x * x : 0.04;
+	color -= offset;
+	float peak = max(color.r, max(color.g, color.b));
+	if (peak < startCompression) return color;
+	const float d = 1.0 - startCompression;
+	float newPeak = 1.0 - d * d / (peak + d - startCompression);
+	color *= newPeak / peak;
+	float g = 1.0 - 1.0 / (desaturation * (peak - newPeak) + 1.0);
+	return mix(color, float3(newPeak), g);
+}
+
+static float3 wired_agx_sigmoid(float3 x) {
+	float3 x2 = x * x;
+	float3 x4 = x2 * x2;
+	return 15.5 * x4 * x2 - 40.14 * x4 * x + 31.96 * x4
+		- 6.868 * x2 * x + 0.4298 * x2 + 0.1191 * x - 0.00232;
+}
+
+static float3 wired_tonemap_agx(float3 color) {
+	/* Written component-wise so the GLSL column-major reference cannot be
+	 * accidentally transposed by a host-language matrix constructor. */
+	float3 inset;
+	inset.r = 0.856627153315983 * color.r
+		+ 0.137318972929847 * color.g + 0.11189821299995 * color.b;
+	inset.g = 0.0951212405381588 * color.r
+		+ 0.761241990602591 * color.g + 0.0767994186031903 * color.b;
+	inset.b = 0.0482516061458583 * color.r
+		+ 0.101439036467562 * color.g + 0.811302368396859 * color.b;
+	const float minEv = -12.47393;
+	const float maxEv = 4.026069;
+	float3 encoded = clamp((log2(max(inset, float3(1e-10))) - minEv)
+		/ (maxEv - minEv), 0.0, 1.0);
+	float3 sigmoid = wired_agx_sigmoid(encoded);
+	float3 outset;
+	outset.r = 1.1271005818144368 * sigmoid.r
+		- 0.1413297634984383 * sigmoid.g - 0.1413297634984383 * sigmoid.b;
+	outset.g = -0.11060664309660323 * sigmoid.r
+		+ 1.157823702216272 * sigmoid.g - 0.11060664309660324 * sigmoid.b;
+	outset.b = -0.016493938717834573 * sigmoid.r
+		- 0.016493938717834257 * sigmoid.g + 1.2519364065950405 * sigmoid.b;
+	return max(outset, float3(0.0));
+}
+
+static float3 wired_tonemap_lottes(float3 color,
+		constant ToneMapParams &params) {
+	float3 a = float3(params.lottesContrast);
+	float3 d = float3(params.lottesShoulder);
+	float3 hdrMax = float3(params.lottesHdrMax);
+	float3 midIn = float3(params.lottesMidIn);
+	float3 midOut = float3(params.lottesMidOut);
+	float3 b = (-pow(midIn, a) + pow(hdrMax, a) * midOut)
+		/ ((pow(hdrMax, a * d) - pow(midIn, a * d)) * midOut);
+	float3 c = (pow(hdrMax, a * d) * pow(midIn, a)
+		- pow(hdrMax, a) * pow(midIn, a * d) * midOut)
+		/ ((pow(hdrMax, a * d) - pow(midIn, a * d)) * midOut);
+	return pow(max(color, float3(0.0)), a)
+		/ (pow(max(color, float3(0.0)), a * d) * b + c);
+}
+
+fragment float4 wired_tonemap_fragment(FullscreenVertexOut in [[stage_in]],
+		texture2d<float> scene [[texture(0)]], sampler sceneSampler [[sampler(0)]],
+		constant ToneMapParams &params [[buffer(0)]]) {
+	float3 color = wired_display_visibility_plan(
+		max(scene.sample(sceneSampler, in.uv).rgb, float3(0.0)),
+		params.displayVisibility.xyz) * params.exposure;
+	if (params.mode == 1u) color = wired_tonemap_pbr_neutral(color);
+	else if (params.mode == 2u) color = wired_tonemap_agx(color);
+	else if (params.mode == 3u) color = wired_tonemap_lottes(color, params);
+	else if (params.mode == 4u) color = color / (1.0 + color);
+	return float4(color, 1.0);
+}
+
+struct MenuBgParams {
+    float time, mouseX, mouseY, transition;
+    float resX, resY, pad0, pad1;
+};
+
+static float menu_hash11(float n) {
+    return fract(sin(n) * 43758.5453123);
+}
+
+static float2 menu_hash22(float2 p) {
+    p = float2(dot(p, float2(127.1, 311.7)),
+               dot(p, float2(269.5, 183.3)));
+    return fract(sin(p) * 43758.5453123);
+}
+
+static float2 menu_cell_point(float2 cell, constant MenuBgParams& u) {
+    float2 h = menu_hash22(cell);
+    float speed = 0.20 + 0.35 * h.x;
+    float2 phase = h * 6.2831853;
+    return float2(0.5 + 0.34 * sin(u.time * speed + phase.x),
+                  0.5 + 0.34 * cos(u.time * speed * 0.87 + phase.y));
+}
+
+static float menu_segment_distance(float2 p, float2 a, float2 b) {
+    float2 pa = p - a, ba = b - a;
+    float t = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0);
+    return length(pa - ba * t);
+}
+
+static float menu_triangle_distance(float2 p, float radius) {
+    const float root3 = 1.7320508;
+    p.x = abs(p.x) - radius;
+    p.y += radius / root3;
+    if (p.x + root3 * p.y > 0.0)
+        p = float2(p.x - root3 * p.y, -root3 * p.x - p.y) * 0.5;
+    p.x -= clamp(p.x, -2.0 * radius, 0.0);
+    return -length(p) * sign(p.y);
+}
+
+fragment float4 wired_menu_bg_fragment(UiVertexOut in [[stage_in]],
+                                        constant MenuBgParams& u [[buffer(0)]]) {
+    const float3 skyTopS = float3(0.227, 0.094, 0.031);
+    const float3 skyLowS = float3(0.102, 0.035, 0.020);
+    const float3 floorS = float3(0.055, 0.026, 0.016);
+    const float3 emberS = float3(0.957, 0.627, 0.227);
+    const float3 starS = float3(0.784, 0.251, 0.188);
+    float3 skyTop = wired_srgb_to_linear(skyTopS);
+    float3 skyLow = wired_srgb_to_linear(skyLowS);
+    float3 floorColor = wired_srgb_to_linear(floorS);
+    float3 ember = wired_srgb_to_linear(emberS);
+    float3 star = wired_srgb_to_linear(starS);
+    float2 resolution = float2(u.resX, u.resY);
+    if (resolution.x < 1.0 || resolution.y < 1.0)
+        resolution = float2(1280.0, 720.0);
+    float aspect = resolution.x / resolution.y;
+    float2 uv = in.uv;
+    float2 aspectScale = float2(aspect, 1.0);
+    float2 parallax = float2(u.mouseX * 0.020 + u.transition * 0.030,
+                             u.mouseY * 0.014);
+
+    float skyY = uv.y + parallax.y * 0.10;
+    float3 color = mix(skyTop, skyLow, smoothstep(0.0, 0.62, skyY));
+    color = mix(color, floorColor, smoothstep(0.60, 1.0, skyY));
+
+    float2 glowUv = uv + parallax * 0.42;
+    float2 glowPoint = (glowUv - float2(0.5, 0.66)) * aspectScale;
+    float glow = exp(-dot(glowPoint, glowPoint) * 6.5);
+    float2 upperGlow = (glowUv - float2(0.5, 0.30)) * aspectScale;
+    glow += 0.35 * exp(-dot(upperGlow, upperGlow) * 9.0);
+    glow *= 0.85 + 0.15 * sin(u.time * 0.6);
+    color += ember * glow * 0.11;
+
+    float2 constellation = (uv + parallax) * aspectScale * 7.0;
+    float2 cell = floor(constellation);
+    float2 local = fract(constellation);
+    float lineCoverage = 0.0, pointCoverage = 0.0;
+    for (int oy = -1; oy <= 1; ++oy) {
+        for (int ox = -1; ox <= 1; ++ox) {
+            float2 neighborCell = cell + float2(float(ox), float(oy));
+            float2 neighbor = float2(float(ox), float(oy))
+                + menu_cell_point(neighborCell, u);
+            float2 delta = neighbor - local;
+            float distance = length(delta);
+            float2 identity = menu_hash22(neighborCell + 3.17);
+            float kind = floor(identity.x * 3.0);
+            float alpha = 0.35 + 0.45 * identity.y;
+            float aa = fwidth(distance) + 1e-4;
+            if (kind < 0.5) {
+                pointCoverage += alpha
+                    * (1.0 - smoothstep(0.045 - aa, 0.045 + aa, distance));
+            } else if (kind < 1.5) {
+                float triangle = abs(menu_triangle_distance(delta, 0.075)) - 0.006;
+                pointCoverage += alpha * (1.0 - smoothstep(-aa, aa, triangle));
+            } else {
+                float bar = min(max(abs(delta.x) - 0.010, abs(delta.y) - 0.060),
+                                max(abs(delta.y) - 0.010, abs(delta.x) - 0.060));
+                pointCoverage += alpha * (1.0 - smoothstep(-aa, aa, bar));
+            }
+            if (ox != 0 || oy != 0) {
+                float2 center = menu_cell_point(cell, u);
+                float separation = length(neighbor - center);
+                float fade = 1.0 - smoothstep(0.55, 1.15, separation);
+                if (fade > 0.001) {
+                    float lineDistance = menu_segment_distance(local, center, neighbor);
+                    float lineAa = fwidth(lineDistance) + 1e-4;
+                    lineCoverage += (1.0 - smoothstep(0.0, 0.006 + lineAa,
+                                                     lineDistance)) * fade * 0.5;
+                }
+            }
+        }
+    }
+    color += star * clamp(lineCoverage, 0.0, 1.0) * 0.22;
+    color += star * clamp(pointCoverage, 0.0, 1.0) * 0.55;
+
+    float2 vignettePoint = (uv - 0.5) * aspectScale;
+    float vignette = smoothstep(1.05, 0.35, length(vignettePoint));
+    color *= mix(0.55, 1.0, vignette);
+    float noise = menu_hash11(dot(in.position.xy, float2(12.9898, 78.233)));
+    color += (noise - 0.5) * (1.0 / 255.0);
+    return float4(max(color, float3(0.0)), 1.0);
 }
 
 struct WorldVertexIn {
@@ -47,6 +283,7 @@ struct WorldVertexIn {
     float4 color [[attribute(1)]];
     float2 texCoord [[attribute(2)]];
     float2 lightmapCoord [[attribute(3)]];
+    float4 normal [[attribute(4)]];
 };
 
 struct WorldViewParams {
@@ -59,9 +296,11 @@ struct WorldViewParams {
 
 struct WorldVertexOut {
     float4 position [[position]];
+    float3 worldPosition;
     float4 color;
     float2 texCoord;
     float2 lightmapCoord;
+    float3 normal;
 };
 
 vertex WorldVertexOut wired_world_vertex(WorldVertexIn in [[stage_in]],
@@ -75,30 +314,606 @@ vertex WorldVertexOut wired_world_vertex(WorldVertexIn in [[stage_in]],
                           up * view.projection.y,
                           forward - view.projection.z,
                           forward);
+    out.worldPosition = in.worldPosition.xyz;
     out.color = in.color;
     out.texCoord = in.texCoord;
     out.lightmapCoord = in.lightmapCoord;
+    out.normal = normalize(in.normal.xyz);
     return out;
 }
+
+struct MaterialStageParams {
+	uint4 meta;
+	float4 params;
+	float4 scaleScroll;
+	float4 turbulence;
+	float4 stretch;
+};
 
 struct WorldMaterialParams {
     uint hasLightmap;
     uint alphaMode;
     float alphaCutoff;
+    uint hasLocalIrradiance;
+    float4 localSh[4];
+    uint staticLightingMode;
+    uint staticLightingLayer;
+    uint staticLightingEncoding;
+    uint hasStaticVisibility;
+	float4 emissiveRadiance;
+	float4 skyScaleScroll;
+	float4 skySecondaryScaleScroll;
+	float skyTime;
+	uint skySecondaryAlphaMode;
+	float skyCloudHeight;
+	float lightmapBoost;
+	uint4 stageProgram;
+	MaterialStageParams stages[8];
 };
+
+struct WorldAtmosphereParams {
+    float4 eyeDensity;
+    float4 colorVisibility;
+    float4 heightCloud;
+    uint4 froxelGrid;
+	float4 displayVisibility;
+};
+
+static float3 wired_display_visibility_plan(float3 sceneColor, float3 plan) {
+	float3 exposed = max(sceneColor, float3(0.0)) * plan.x;
+	float luminance = dot(exposed, float3(0.2126, 0.7152, 0.0722));
+	if (luminance > 0.0 && luminance < plan.z && plan.y != 1.0) {
+		float curved = pow(luminance / plan.z, plan.y) * plan.z;
+		exposed *= curved / luminance;
+	}
+	return exposed;
+}
+
+struct AtmosphereComputeParams {
+    uint4 dimsStage;
+    uint4 bases0;
+    uint4 bases1;
+    float4 boundsMin;
+    float4 boundsMax;
+    float4 climate;
+    float4 lighting;
+    float4 weather;
+};
+
+struct AtmosphereVolume {
+    float4 originRadius;
+    float4 extentShape;
+    float4 albedoAnisotropy;
+    float4 emissiveIntensity;
+    float4 media;
+};
+
+static float atmosphere_hash3(float3 value) {
+    return fract(sin(dot(value, float3(12.9898, 78.233, 37.719))) * 43758.5453);
+}
+
+kernel void wired_atmosphere_compute(
+        constant AtmosphereComputeParams &params [[buffer(0)]],
+        device float4 *arena [[buffer(1)]],
+        device const AtmosphereVolume *volumes [[buffer(2)]],
+        uint3 coord [[thread_position_in_grid]]) {
+    uint3 dims = params.dimsStage.xyz;
+    if (any(coord >= dims)) return;
+    uint index = (coord.z * dims.y + coord.y) * dims.x + coord.x;
+    float3 uvw = (float3(coord) + 0.5) / float3(dims);
+    uint stage = params.dimsStage.w;
+    if (stage == 0u) {
+        float extinction = max(params.climate.x, 0.0)
+            * exp(-max(params.climate.y, 0.0) * uvw.z);
+        extinction += params.weather.x * params.weather.y * 0.00008;
+        float3 scatter = float3(0.62, 0.70, 0.78) * extinction;
+        float3 world = mix(params.boundsMin.xyz, params.boundsMax.xyz, uvw);
+        for (uint n = 0u; n < params.bases1.w; ++n) {
+            AtmosphereVolume volume = volumes[n];
+            float3 delta = world - volume.originRadius.xyz;
+            float weight = 1.0 - smoothstep(volume.originRadius.w * 0.8,
+                volume.originRadius.w, length(delta));
+            if (volume.extentShape.w > 1.5) {
+                float normalized = max(max(abs(delta.x) / volume.extentShape.x,
+                    abs(delta.y) / volume.extentShape.y),
+                    abs(delta.z) / volume.extentShape.z);
+                weight = 1.0 - smoothstep(0.8, 1.0, normalized);
+            }
+            weight = max(weight, 0.0);
+            float localExtinction = max(volume.media.x, 0.0) * weight;
+            extinction += localExtinction;
+            scatter += volume.albedoAnisotropy.xyz * localExtinction
+                + volume.emissiveIntensity.xyz * volume.emissiveIntensity.w * weight;
+        }
+        arena[params.bases0.x + index] = float4(scatter, extinction);
+        return;
+    }
+    if (stage == 1u) {
+        float4 media = arena[params.bases0.x + index];
+        float cloudShadow = 1.0 - params.climate.w * params.climate.z;
+        float light = max(params.lighting.x + params.lighting.y * cloudShadow
+            + params.lighting.z, 0.0);
+        arena[params.bases0.y + index] = float4(media.xyz * light, media.w);
+        return;
+    }
+    if (stage == 2u) {
+        float4 lit = arena[params.bases0.y + index];
+        float layer = exp(-pow((uvw.z - 0.72) / 0.18, 2.0));
+        float erosion = mix(0.55, 1.0,
+            atmosphere_hash3(float3(uvw.xy * 32.0 + params.weather.z, uvw.z * 8.0)));
+        float cloud = params.climate.z * layer * erosion;
+        arena[params.bases0.z + index] = float4(lit.xyz
+            + cloud * (params.lighting.x + params.lighting.z), lit.w + cloud * 0.002);
+        return;
+    }
+    uint source = params.climate.z > 0.0 ? params.bases0.z : params.bases0.y;
+    float4 media = arena[source + index];
+    float distance = mix(4.0, max(params.weather.w, 4.01), uvw.z);
+    float transmittance = exp(-media.w * distance);
+    float4 current = float4(media.xyz * (1.0 - transmittance)
+        / max(media.w, 0.000001), transmittance);
+    if (params.lighting.w > 0.0)
+        current = mix(current, arena[params.bases1.x + index], params.lighting.w);
+    arena[params.bases0.w + index] = current;
+    arena[params.bases1.y + index] = current;
+}
+
+struct WeatherFrame {
+    float4x4 mvp;
+    float4 viewLeft;
+    float4 viewUp;
+    float4 eyeWorld;
+    float4 dtTimePoolRead;
+    float4 boundsMin;
+    float4 boundsMax;
+    float4 windGust;
+    float4 precipitation;
+    float4 weather;
+    float4 sun;
+    float4 moon;
+    float4 ambientCloud;
+    float4 cloudMedia;
+    float4 effectMeta;
+    float4 effectWorkloads[48];
+};
+
+struct WeatherParticle {
+    float4 posSeed;
+    float4 velFamily;
+};
+
+static uint weather_hash(uint value) {
+    value ^= value >> 16u; value *= 0x7feb352du;
+    value ^= value >> 15u; value *= 0x846ca68bu;
+    return value ^ (value >> 16u);
+}
+
+static float weather_rand(uint index, uint salt, uint seed) {
+    return float(weather_hash(index * 747796405u + salt * 2891336453u + seed))
+        * (1.0 / 4294967296.0);
+}
+
+static uint weather_effect(constant WeatherFrame &frame, uint index) {
+    uint count = uint(frame.effectMeta.y);
+    for (uint effect = 0u; effect < min(count, 8u); ++effect) {
+        uint base = effect * 6u;
+        if (float(index) >= frame.effectWorkloads[base + 4u].x
+                && float(index) < frame.effectWorkloads[base + 4u].y)
+            return effect;
+    }
+    return 0xffffffffu;
+}
+
+kernel void wired_weather_compute(
+        constant WeatherFrame &frame [[buffer(0)]],
+        device const WeatherParticle *readPool [[buffer(1)]],
+        device WeatherParticle *writePool [[buffer(2)]],
+        uint index [[thread_position_in_grid]]) {
+    uint poolSize = uint(frame.dtTimePoolRead.z);
+    if (index >= poolSize) return;
+    WeatherParticle particle = readPool[index];
+    uint precipitationCount = uint(frame.effectMeta.x);
+    bool semantic = index >= precipitationCount;
+    uint effect = weather_effect(frame, index);
+    if (semantic && effect == 0xffffffffu) {
+        particle.velFamily.w = 0.0;
+        writePool[index] = particle;
+        return;
+    }
+    uint seed = uint(frame.weather.z) ^ uint(frame.dtTimePoolRead.y * 1000.0);
+    uint expectedFamily = semantic ? 16u + effect : 0u;
+    bool stale = semantic
+        ? uint(particle.velFamily.w + 0.5) != expectedFamily
+        : uint(particle.velFamily.w + 0.5) >= 16u;
+    if (particle.velFamily.w < 0.5 || stale) {
+        float rx = weather_rand(index, 11u, seed);
+        float ry = weather_rand(index, 23u, seed);
+        float rz = weather_rand(index, 31u, seed);
+        if (semantic) {
+            uint base = effect * 6u;
+            seed = uint(frame.effectWorkloads[base + 5u].w) + index * 13u;
+            float radius = max(frame.effectWorkloads[base].w,
+                frame.effectWorkloads[base + 5u].z);
+            particle.posSeed.xyz = frame.effectWorkloads[base].xyz
+                + (float3(rx, ry, rz) * 2.0 - 1.0) * radius;
+            particle.posSeed.w = max(0.05,
+                frame.effectWorkloads[base + 5u].x
+                + (weather_rand(index, 41u, seed) * 2.0 - 1.0)
+                * frame.effectWorkloads[base + 5u].y);
+            float3 direction = length(frame.effectWorkloads[base + 1u].xyz) > 0.0001
+                ? normalize(frame.effectWorkloads[base + 1u].xyz)
+                : float3(0.0, 0.0, 1.0);
+            float3 jitter = (float3(weather_rand(index, 43u, seed),
+                weather_rand(index, 47u, seed), weather_rand(index, 53u, seed))
+                * 2.0 - 1.0) * frame.effectWorkloads[base + 3u].y;
+            particle.velFamily = float4(direction
+                * frame.effectWorkloads[base + 3u].x + jitter
+                + frame.windGust.xyz * 0.1, float(expectedFamily));
+            writePool[index] = particle;
+            return;
+        }
+        float distance = max(frame.weather.x, 64.0);
+        particle.posSeed.xyz = float3(
+            clamp(frame.eyeWorld.x + (rx * 2.0 - 1.0) * distance,
+                frame.boundsMin.x, frame.boundsMax.x),
+            clamp(frame.eyeWorld.y + (ry * 2.0 - 1.0) * distance,
+                frame.boundsMin.y, frame.boundsMax.y),
+            min(frame.eyeWorld.z + rz * 800.0, frame.boundsMax.z));
+        particle.posSeed.w = rx + ry + rz;
+        float total = frame.precipitation.x + frame.precipitation.y
+            + frame.precipitation.z + frame.precipitation.w + frame.weather.y;
+        float pick = weather_rand(index, 67u, seed) * max(total, 0.0001);
+        uint family = 5u;
+        if (pick <= frame.precipitation.x) family = 1u;
+        else if ((pick -= frame.precipitation.x) <= frame.precipitation.y) family = 2u;
+        else if ((pick -= frame.precipitation.y) <= frame.precipitation.z) family = 3u;
+        else if ((pick -= frame.precipitation.z) <= frame.precipitation.w) family = 4u;
+        float speed = family == 1u ? 880.0 : (family == 2u ? 160.0
+            : (family == 3u ? 600.0 : (family == 4u ? 720.0 : 32.0)));
+        float windScale = family == 1u ? 0.25 : (family == 3u ? 0.5
+            : (family == 4u ? 0.15 : (family == 5u ? 1.5 : 1.0)));
+        particle.velFamily = float4(frame.windGust.xyz * windScale, float(family));
+        particle.velFamily.z -= speed;
+    } else {
+        float dt = clamp(frame.dtTimePoolRead.x, 0.0, 0.1);
+        if (semantic) {
+            uint base = effect * 6u;
+            particle.velFamily.z -= 800.0
+                * frame.effectWorkloads[base + 3u].z * dt;
+            particle.velFamily.xyz *= max(0.0, 1.0
+                - frame.effectWorkloads[base + 3u].w * dt);
+            particle.posSeed.xyz += particle.velFamily.xyz * dt;
+            particle.posSeed.w -= dt;
+            if (particle.posSeed.w <= 0.0) particle.velFamily.w = 0.0;
+            writePool[index] = particle;
+            return;
+        }
+        particle.posSeed.xyz += particle.velFamily.xyz * dt;
+        float phase = sin(frame.dtTimePoolRead.y * 0.7 + float(index % 97u) * 0.37);
+        particle.posSeed.xyz += frame.windGust.xyz * frame.windGust.w * phase * dt;
+        float2 delta = particle.posSeed.xy - frame.eyeWorld.xy;
+        if (particle.posSeed.z < frame.boundsMin.z
+                || dot(delta, delta) > frame.weather.x * frame.weather.x)
+            particle.velFamily.w = 0.0;
+    }
+    writePool[index] = particle;
+}
+
+struct WeatherVertexOut {
+    float4 position [[position]];
+    float2 uv;
+    float4 color;
+    uint family [[flat]];
+};
+
+vertex WeatherVertexOut wired_weather_vertex(
+        uint vertexId [[vertex_id]], uint instanceId [[instance_id]],
+        constant WeatherFrame &frame [[buffer(1)]],
+        device const WeatherParticle *particles [[buffer(2)]]) {
+    const float side[6] = {-1.0, -1.0, 1.0, 1.0, -1.0, 1.0};
+    const float up[6] = {1.0, -1.0, 1.0, 1.0, -1.0, -1.0};
+    WeatherVertexOut out;
+    WeatherParticle particle = particles[instanceId];
+    uint family = uint(particle.velFamily.w + 0.5);
+    if (family == 0u) {
+        out.position = float4(0.0, 0.0, 0.0, 1.0);
+        out.uv = 0.0; out.color = 0.0; out.family = 0u; return out;
+    }
+    float sx = side[vertexId % 6u], uy = up[vertexId % 6u];
+    float3 world;
+    if (family >= 16u) {
+        uint effect = family - 16u;
+        uint base = effect * 6u;
+        float lifetime = max(0.05, frame.effectWorkloads[base + 5u].x
+            + frame.effectWorkloads[base + 5u].y);
+        float age = 1.0 - clamp(particle.posSeed.w / lifetime, 0.0, 1.0);
+        float size = mix(frame.effectWorkloads[base + 4u].z,
+            frame.effectWorkloads[base + 4u].w, age);
+        world = particle.posSeed.xyz + frame.viewLeft.xyz * sx * size
+            + frame.viewUp.xyz * uy * size;
+        out.color = frame.effectWorkloads[base + 2u];
+        out.color.a *= frame.effectWorkloads[base + 1u].w;
+    } else if (family == 1u || family == 3u) {
+        float length = family == 1u ? 18.0 : 9.9;
+        world = particle.posSeed.xyz + frame.viewLeft.xyz * sx * 0.6
+            + float3(0.0, 0.0, (uy * 0.5 - 0.5) * length);
+        out.color = family == 1u ? float4(0.5, 0.5, 0.55, 0.5)
+            : float4(0.72, 0.76, 0.8, 0.65);
+    } else {
+        float size = family == 4u ? 0.8 : (family == 5u ? 1.2 : 1.5);
+        world = particle.posSeed.xyz + frame.viewLeft.xyz * sx * size
+            + frame.viewUp.xyz * uy * size;
+        out.color = family == 4u ? float4(0.82, 0.88, 0.92, 0.85)
+            : (family == 5u ? float4(0.48, 0.42, 0.34, 0.45)
+            : float4(1.0, 1.0, 1.0, 0.8));
+    }
+    float light = dot(frame.ambientCloud.xyz, float3(0.3333))
+        + frame.sun.w * (1.0 - frame.ambientCloud.w * frame.cloudMedia.x)
+        + frame.moon.w * 0.2 + frame.cloudMedia.y;
+    if (light > 0.0) out.color.rgb *= clamp(light, 0.04, 4.0);
+    out.position = frame.mvp * float4(world, 1.0);
+    out.uv = float2(sx * 0.5 + 0.5, uy * -0.5 + 0.5);
+    out.family = family;
+    return out;
+}
+
+fragment float4 wired_weather_fragment(WeatherVertexOut in [[stage_in]],
+        texture2d<float> particleTexture [[texture(0)]],
+        sampler particleSampler [[sampler(0)]]) {
+    if (in.family >= 16u) {
+        float4 texel = particleTexture.sample(particleSampler, in.uv);
+        return float4(in.color.rgb * texel.rgb, in.color.a * texel.a);
+    }
+    float edge = 1.0 - smoothstep(0.0, 0.5, abs(in.uv.x - 0.5));
+    return float4(in.color.rgb, in.color.a * edge);
+}
+
+static float4 wired_material_blend_factor(uint factor, float4 source,
+                                           float4 destination) {
+    if (factor == 0u) return float4(0.0);
+    if (factor == 1u) return float4(1.0);
+    if (factor == 2u) return source;
+    if (factor == 3u) return 1.0 - source;
+    if (factor == 4u) return destination;
+    if (factor == 5u) return 1.0 - destination;
+    if (factor == 6u) return float4(source.a);
+    if (factor == 7u) return float4(1.0 - source.a);
+    if (factor == 8u) return float4(destination.a);
+    if (factor == 9u) return float4(1.0 - destination.a);
+    return float4(min(source.a, 1.0 - destination.a));
+}
+
+static float2 wired_material_stage_uv(float2 authoredUv,
+                                       constant MaterialStageParams &stage,
+                                       float time) {
+    float2 uv = authoredUv * stage.scaleScroll.xy
+        + stage.scaleScroll.zw * time;
+    if (stage.params.w > 0.5) {
+        float wave = stage.stretch.x + stage.stretch.y
+            * sin((stage.stretch.z + time * stage.stretch.w) * 6.28318530718);
+        uv = (uv - 0.5) / max(abs(wave), 0.0001) + 0.5;
+    }
+    if (abs(stage.params.y) > 0.0001) {
+        float angle = stage.params.y * time * 0.01745329252;
+        float sine = sin(angle), cosine = cos(angle);
+        float2 centered = uv - 0.5;
+        uv = float2(centered.x * cosine - centered.y * sine,
+            centered.x * sine + centered.y * cosine) + 0.5;
+    }
+    if (stage.params.z > 0.5) {
+        float phase = stage.turbulence.z + time * stage.turbulence.w;
+        float offset = stage.turbulence.x + stage.turbulence.y
+            * sin((uv.x + uv.y + phase) * 6.28318530718);
+        uv += offset;
+    }
+    return uv;
+}
 
 fragment float4 wired_world_fragment(WorldVertexOut in [[stage_in]],
                                      texture2d<float> baseImage [[texture(0)]],
                                      texture2d<float> lightmapImage [[texture(1)]],
+                                     texture2d_array<float> staticRadiance [[texture(2)]],
+                                     texture2d_array<float> staticDirection [[texture(3)]],
+                                     texture2d_array<float> staticVisibility [[texture(4)]],
+					 texture2d<float> skySecondaryImage [[texture(5)]],
+					 texture2d<float> stageImage0 [[texture(6)]],
+					 texture2d<float> stageImage1 [[texture(7)]],
+					 texture2d<float> stageImage2 [[texture(8)]],
+					 texture2d<float> stageImage3 [[texture(9)]],
+					 texture2d<float> stageImage4 [[texture(10)]],
+					 texture2d<float> stageImage5 [[texture(11)]],
+					 texture2d<float> stageImage6 [[texture(12)]],
+					 texture2d<float> stageImage7 [[texture(13)]],
                                      sampler baseSampler [[sampler(0)]],
                                      sampler lightmapSampler [[sampler(1)]],
-                                     constant WorldMaterialParams &material [[buffer(0)]]) {
-    float4 base = baseImage.sample(baseSampler, in.texCoord);
+                                     sampler staticRadianceSampler [[sampler(2)]],
+                                     sampler staticDirectionSampler [[sampler(3)]],
+                                     sampler staticVisibilitySampler [[sampler(4)]],
+					 sampler skySecondarySampler [[sampler(5)]],
+					 sampler stageSampler0 [[sampler(6)]],
+					 sampler stageSampler1 [[sampler(7)]],
+					 sampler stageSampler2 [[sampler(8)]],
+					 sampler stageSampler3 [[sampler(9)]],
+					 sampler stageSampler4 [[sampler(10)]],
+					 sampler stageSampler5 [[sampler(11)]],
+					 sampler stageSampler6 [[sampler(12)]],
+					 sampler stageSampler7 [[sampler(13)]],
+                                     constant WorldMaterialParams &material [[buffer(0)]],
+                                     constant WorldAtmosphereParams &atmosphere [[buffer(1)]],
+                                     device const float4 *atmosphereArena [[buffer(2)]]) {
+    float2 projectedSkyUv = in.texCoord;
+    float2 baseUv = in.texCoord * material.skyScaleScroll.xy
+        + material.skyScaleScroll.zw;
+    if ((material.hasLightmap & 4u) != 0u) {
+        float3 direction = normalize(in.worldPosition - atmosphere.eyeDensity.xyz);
+		if ((material.hasLightmap & 16u) != 0u) {
+			float3 ad = abs(direction);
+			uint face;
+			float2 faceUv;
+			if (ad.x >= ad.y && ad.x >= ad.z) {
+				if (direction.x >= 0.0) {
+					face = 0u; faceUv = float2(-direction.y, -direction.z) / ad.x;
+				} else {
+					face = 2u; faceUv = float2(direction.y, -direction.z) / ad.x;
+				}
+			} else if (ad.y >= ad.z) {
+				if (direction.y >= 0.0) {
+					face = 1u; faceUv = float2(direction.x, -direction.z) / ad.y;
+				} else {
+					face = 3u; faceUv = float2(-direction.x, -direction.z) / ad.y;
+				}
+			} else if (direction.z >= 0.0) {
+				face = 4u; faceUv = float2(-direction.y, direction.x) / ad.z;
+			} else {
+				face = 5u; faceUv = float2(-direction.y, -direction.x) / ad.z;
+			}
+			faceUv = clamp(faceUv * 0.5 + 0.5, 0.001, 0.999);
+			projectedSkyUv = faceUv;
+			baseUv = (faceUv + float2(float(face % 3u), float(face / 3u)))
+				/ float2(3.0, 2.0);
+		} else {
+			/* Q3 cloud layers live on a sphere tangent to the world at the
+			 * viewer. Reproduce R_InitSkyTexCoords analytically so Metal and the
+			 * established renderer address the authored scrolling stages alike. */
+			const float radiusWorld = 4096.0;
+			const float cloudHeight = max(material.skyCloudHeight, 1.0);
+			const float rayDistance = -direction.z * radiusWorld
+				+ sqrt(direction.z * direction.z * radiusWorld * radiusWorld
+					+ 2.0 * radiusWorld * cloudHeight
+					+ cloudHeight * cloudHeight);
+			const float3 cloudDirection = normalize(direction * rayDistance
+				+ float3(0.0, 0.0, radiusWorld));
+			projectedSkyUv = acos(clamp(cloudDirection.xy, -1.0, 1.0));
+			baseUv = projectedSkyUv * material.skyScaleScroll.xy
+				+ material.skyScaleScroll.zw * material.skyTime;
+		}
+    }
+    float4 base = baseImage.sample(baseSampler, baseUv);
+	bool stageHasLightmap = false;
+	if ((material.hasLightmap & 8u) != 0u) {
+		float2 secondaryUv = projectedSkyUv * material.skySecondaryScaleScroll.xy
+			+ material.skySecondaryScaleScroll.zw * material.skyTime;
+		float4 secondary = skySecondaryImage.sample(skySecondarySampler, secondaryUv);
+		if (material.skySecondaryAlphaMode == 3u)
+			base.rgb += secondary.rgb;
+		else if (material.skySecondaryAlphaMode == 2u)
+			base = mix(base, secondary, secondary.a);
+		else
+			base = secondary;
+	}
+	if (material.stageProgram.x > 0u) {
+		float4 accumulated = float4(0.0);
+		for (uint stageIndex = 0u;
+				stageIndex < min(material.stageProgram.x, 8u); ++stageIndex) {
+			constant MaterialStageParams &stage =
+				material.stages[stageIndex];
+			uint imageSource = stage.meta.z & 0xffu;
+			uint tcGen = stage.meta.z >> 8u;
+			float2 authoredUv = (imageSource == 1u || tcGen == 1u)
+				? in.lightmapCoord : in.texCoord;
+			if (tcGen == 2u) {
+				float3 viewer = normalize(atmosphere.eyeDensity.xyz
+					- in.worldPosition);
+				float3 normal = normalize(in.normal);
+				float d = dot(normal, viewer);
+				float3 reflected = normal * (2.0 * d) - viewer;
+				authoredUv = float2(0.5 + reflected.y * 0.5,
+					0.5 - reflected.z * 0.5);
+			}
+			float2 stageUv = wired_material_stage_uv(authoredUv, stage,
+				material.skyTime);
+			float4 source;
+			switch (stageIndex) {
+				case 0u: source = stageImage0.sample(stageSampler0, stageUv); break;
+				case 1u: source = stageImage1.sample(stageSampler1, stageUv); break;
+				case 2u: source = stageImage2.sample(stageSampler2, stageUv); break;
+				case 3u: source = stageImage3.sample(stageSampler3, stageUv); break;
+				case 4u: source = stageImage4.sample(stageSampler4, stageUv); break;
+				case 5u: source = stageImage5.sample(stageSampler5, stageUv); break;
+				case 6u: source = stageImage6.sample(stageSampler6, stageUv); break;
+				default: source = stageImage7.sample(stageSampler7, stageUv); break;
+			}
+			if (imageSource == 1u) {
+				source.rgb *= material.lightmapBoost;
+				stageHasLightmap = true;
+			}
+			if (stage.meta.w != 0u && source.a < stage.params.x)
+				discard_fragment();
+			float4 sourceFactor = wired_material_blend_factor(
+				stage.meta.x, source, accumulated);
+			float4 destinationFactor = wired_material_blend_factor(
+				stage.meta.y, source, accumulated);
+			accumulated = source * sourceFactor
+				+ accumulated * destinationFactor;
+		}
+		base = accumulated;
+	}
     if (material.alphaMode == 1 && base.a < material.alphaCutoff) {
         discard_fragment();
     }
-    float3 lighting = material.hasLightmap != 0
-        ? min(lightmapImage.sample(lightmapSampler, in.lightmapCoord).rgb * 2.0, 1.0)
-        : float3(1.0);
-    return float4(base.rgb * lighting * in.color.rgb, base.a * in.color.a);
+    float3 localSh = max(material.localSh[0].rgb
+        + material.localSh[1].rgb * in.normal.x
+        + material.localSh[2].rgb * in.normal.y
+        + material.localSh[3].rgb * in.normal.z, float3(0.0));
+    float3 lighting;
+    if (material.staticLightingMode == 2u) {
+        float3 radiance = staticRadiance.sample(staticRadianceSampler,
+            in.lightmapCoord, material.staticLightingLayer).rgb;
+        float2 oct = staticDirection.sample(staticDirectionSampler,
+            in.lightmapCoord, material.staticLightingLayer).rg;
+        if (material.staticLightingEncoding == 2u) oct = oct * 2.0 - 1.0;
+        float3 direction = float3(oct, 1.0 - abs(oct.x) - abs(oct.y));
+        if (direction.z < 0.0) direction.xy = (1.0 - abs(direction.yx))
+            * select(float2(-1.0), float2(1.0), direction.xy >= 0.0);
+        direction = normalize(direction);
+        float response = max(dot(normalize(in.normal), direction), 0.0);
+        float visibility = material.hasStaticVisibility != 0u
+            ? staticVisibility.sample(staticVisibilitySampler,
+                in.lightmapCoord, material.staticLightingLayer).r : 1.0;
+        lighting = radiance * response * visibility;
+    } else if (stageHasLightmap) {
+		lighting = float3(1.0);
+	} else if (material.staticLightingMode == 1u
+            && (material.hasLightmap & 1u) != 0u) {
+        lighting = lightmapImage.sample(lightmapSampler,
+            in.lightmapCoord).rgb * material.lightmapBoost;
+    } else {
+        lighting = (material.hasLocalIrradiance & 1u) != 0u
+            ? localSh : float3(1.0);
+    }
+    if ((material.hasLocalIrradiance & 2u) != 0u)
+        lighting = max(lighting, float3(0.25));
+    float3 vertexColor = (material.hasLightmap & 2u) != 0u
+        ? in.color.rgb : float3(1.0);
+    float3 lit = base.rgb * lighting * vertexColor
+		+ base.rgb * material.emissiveRadiance.rgb;
+    if ((material.hasLightmap & 4u) != 0u) {
+        return float4(lit, base.a);
+    }
+    if (atmosphere.froxelGrid.z > 0u) {
+        uint x = min(uint(in.position.x) / 16u, atmosphere.froxelGrid.x - 1u);
+        uint y = min(uint(in.position.y) / 16u, atmosphere.froxelGrid.y - 1u);
+        float farDistance = max(atmosphere.colorVisibility.w, 4.01);
+        float viewDistance = length(in.worldPosition - atmosphere.eyeDensity.xyz);
+        float slice = clamp(log(max(viewDistance, 4.0) / 4.0)
+            / log(farDistance / 4.0), 0.0, 0.9999);
+        uint z = min(uint(slice * float(atmosphere.froxelGrid.z)),
+            atmosphere.froxelGrid.z - 1u);
+        float4 media = atmosphereArena[atmosphere.froxelGrid.w
+            + (z * atmosphere.froxelGrid.y + y) * atmosphere.froxelGrid.x + x];
+		return float4(lit * media.w + media.xyz, base.a * in.color.a);
+    }
+    float density = atmosphere.eyeDensity.w;
+    if (atmosphere.colorVisibility.w > 0.0) {
+        density = max(density, 3.912023 / atmosphere.colorVisibility.w);
+    }
+    if (density > 0.0) {
+        float distanceToEye = length(in.worldPosition - atmosphere.eyeDensity.xyz);
+        float heightWeight = exp(-atmosphere.heightCloud.y
+            * max(in.worldPosition.z - atmosphere.heightCloud.x, 0.0));
+        float transmittance = exp(-density * heightWeight * distanceToEye);
+        lit = mix(atmosphere.colorVisibility.rgb, lit, saturate(transmittance));
+    }
+	return float4(lit,
+		base.a * in.color.a);
 }

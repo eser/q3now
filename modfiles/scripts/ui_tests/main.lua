@@ -1,0 +1,18 @@
+-- SPDX-License-Identifier: GPL-3.0-or-later
+
+ui_test.open("main")
+ui_test.wait(8)
+ui_test.assert_focus("menu_campaign")
+ui_test.key(133)
+ui_test.wait(2)
+ui_test.assert_focus("menu_join")
+ui_test.key(133)
+ui_test.wait(2)
+ui_test.assert_focus("menu_host")
+ui_test.store("test.lua_harness", "main")
+ui_test.assert_store("test.lua_harness", "main")
+ui_test.assert_rect("main", "main_root")
+ui_test.key(13)
+ui_test.wait(8)
+ui_test.assert_rect("startserver", "settings_root")
+ui_test.key(27)

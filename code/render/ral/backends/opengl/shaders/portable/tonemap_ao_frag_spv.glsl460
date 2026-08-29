@@ -21,6 +21,8 @@ layout(binding = 0, std140) uniform ExposureBlock
     float sunScreenY;
     float sunrayIntensity;
     float sunrayDecay;
+    float shadowExponent;
+    float shadowPivot;
 } eb;
 
 layout(binding = 0) uniform sampler2D texture0;

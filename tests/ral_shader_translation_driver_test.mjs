@@ -18,17 +18,36 @@ layout(set = 1, binding = 0) uniform texture2D baseTexture;
 layout(set = 1, binding = 1) uniform sampler baseSampler;
 layout(set = 1, binding = 2) uniform texture2D lightmapTexture;
 layout(set = 1, binding = 3) uniform sampler lightmapSampler;
+layout(set = 1, binding = 4) uniform texture2DArray staticRadianceTexture;
+layout(set = 1, binding = 5) uniform sampler staticRadianceSampler;
+layout(set = 1, binding = 6) uniform texture2DArray staticDirectionTexture;
+layout(set = 1, binding = 7) uniform sampler staticDirectionSampler;
+layout(set = 1, binding = 8) uniform texture2DArray staticVisibilityTexture;
+layout(set = 1, binding = 9) uniform sampler staticVisibilitySampler;
 void main() { vec4 a = texture(sampler2D(baseTexture, baseSampler), vec2(0));
-vec4 b = texture(sampler2D(lightmapTexture, lightmapSampler), vec2(0)); }
+vec4 b = texture(sampler2D(lightmapTexture, lightmapSampler), vec2(0));
+vec4 c = texture(sampler2DArray(staticRadianceTexture, staticRadianceSampler), vec3(0));
+vec4 d = texture(sampler2DArray(staticDirectionTexture, staticDirectionSampler), vec3(0));
+vec4 e = texture(sampler2DArray(staticVisibilityTexture, staticVisibilitySampler), vec3(0)); }
 `), { symbol: 'ral_opengl_product_frag_spv', reflection: { bindings: [
 	{ set: 1, binding: 0, bindingClass: 'RAL_SHADER_BIND_SAMPLED_TEXTURE', arrayCount: 1 },
 	{ set: 1, binding: 1, bindingClass: 'RAL_SHADER_BIND_FILTERING_SAMPLER', arrayCount: 1 },
 	{ set: 1, binding: 2, bindingClass: 'RAL_SHADER_BIND_SAMPLED_TEXTURE', arrayCount: 1 },
 	{ set: 1, binding: 3, bindingClass: 'RAL_SHADER_BIND_FILTERING_SAMPLER', arrayCount: 1 },
+	{ set: 1, binding: 4, bindingClass: 'RAL_SHADER_BIND_SAMPLED_TEXTURE', arrayCount: 1 },
+	{ set: 1, binding: 5, bindingClass: 'RAL_SHADER_BIND_FILTERING_SAMPLER', arrayCount: 1 },
+	{ set: 1, binding: 6, bindingClass: 'RAL_SHADER_BIND_SAMPLED_TEXTURE', arrayCount: 1 },
+	{ set: 1, binding: 7, bindingClass: 'RAL_SHADER_BIND_FILTERING_SAMPLER', arrayCount: 1 },
+	{ set: 1, binding: 8, bindingClass: 'RAL_SHADER_BIND_SAMPLED_TEXTURE', arrayCount: 1 },
+	{ set: 1, binding: 9, bindingClass: 'RAL_SHADER_BIND_FILTERING_SAMPLER', arrayCount: 1 },
 ] } }).toString('utf8');
 assert.match(productFragment, /layout\(binding = 0\) uniform sampler2D baseTexture;/);
 assert.match(productFragment, /layout\(binding = 1\) uniform sampler2D lightmapTexture;/);
-assert.doesNotMatch(productFragment, /uniform texture2D|baseSampler|lightmapSampler/);
+assert.match(productFragment, /layout\(binding = 2\) uniform sampler2DArray staticRadianceTexture;/);
+assert.match(productFragment, /layout\(binding = 3\) uniform sampler2DArray staticDirectionTexture;/);
+assert.match(productFragment, /layout\(binding = 4\) uniform sampler2DArray staticVisibilityTexture;/);
+assert.doesNotMatch(productFragment,
+	/uniform texture2D|uniform texture2DArray|baseSampler|lightmapSampler|staticRadianceSampler|staticDirectionSampler|staticVisibilitySampler/);
 
 const root = mkdtempSync(join(tmpdir(), 'wired-xlate-host-'));
 const output = join(root, 'output'); const wgslOutput = join(root, 'wgsl-output');

@@ -31,9 +31,24 @@ struct AtmFrame
     uint gridSize;
     uint atmType;
     float _distance;
-    float pad0;
-    float pad1;
-    float pad2;
+    float computePad0;
+    float computePad1;
+    float computePad2;
+    float4 windGust;
+    float4 precipitation;
+    float dustAsh;
+    float indoorExposure;
+    uint climateSeed;
+    uint climatePad;
+    float4 climate;
+    float4 surfaceClimate;
+    float4 sun;
+    float4 moon;
+    float4 ambientCloud;
+    float4 cloudMedia;
+    float4 effectMeta;
+    float4 effectWorkloads[48];
+    float4 renderParams;
 };
 
 struct AtmParticle_1
@@ -58,12 +73,37 @@ constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(64u, 1u, 1u);
 
 struct spvDescriptorSetBuffer0
 {
-    constant AtmFrame* m_63 [[id(0)]];
+    constant AtmFrame* m_77 [[id(0)]];
     texture2d<float> heightgrid [[id(1)]];
     sampler heightgridSmplr [[id(2)]];
-    device WritePool* m_165 [[id(3)]];
-    device ReadPool* m_184 [[id(4)]];
+    device WritePool* m_378 [[id(3)]];
+    device ReadPool* m_442 [[id(4)]];
 };
+
+static inline __attribute__((always_inline))
+uint effectForIndex(thread const uint& idx, constant AtmFrame& _77)
+{
+    uint count = min(uint(_77.effectMeta.y), 8u);
+    for (uint effect = 0u; effect < count; effect++)
+    {
+        uint base = effect * 6u;
+        bool _320 = float(idx) >= _77.effectWorkloads[base + 4u].x;
+        bool _330;
+        if (_320)
+        {
+            _330 = float(idx) < _77.effectWorkloads[base + 4u].y;
+        }
+        else
+        {
+            _330 = _320;
+        }
+        if (_330)
+        {
+            return effect;
+        }
+    }
+    return 4294967295u;
+}
 
 static inline __attribute__((always_inline))
 AtmParticle deadParticle()
@@ -88,132 +128,388 @@ float hash11(thread uint& x)
 }
 
 static inline __attribute__((always_inline))
-float rand01(thread const uint& idx, thread const uint& salt, thread const float& seed, constant AtmFrame& _63)
+float precipitationCoverage(thread const uint& idx, constant AtmFrame& _77)
 {
-    uint t = uint(_63.time * 1000.0) + uint(seed * 4096.0);
-    uint param = ((idx * 747796405u) + (salt * 2891336453u)) + t;
-    float _86 = hash11(param);
-    return _86;
+    float authored = (((_77.precipitation.x + _77.precipitation.y) + _77.precipitation.z) + _77.precipitation.w) + _77.dustAsh;
+    float _213;
+    if (authored > 0.0)
+    {
+        _213 = fast::clamp(authored, 0.0, 1.0);
+    }
+    else
+    {
+        _213 = 1.0;
+    }
+    float intensity = _213;
+    float coverage = intensity * fast::clamp(_77.indoorExposure, 0.0, 1.0);
+    uint param = (idx * 1597334677u) + (_77.climateSeed * 3812015801u);
+    float _238 = hash11(param);
+    float slot = _238;
+    return (slot <= coverage) ? coverage : 0.0;
 }
 
 static inline __attribute__((always_inline))
-float groundHeightAt(thread const float2& worldXY, constant AtmFrame& _63, texture2d<float> heightgrid, sampler heightgridSmplr)
+float rand01(thread const uint& idx, thread const uint& salt, thread const float& seed, constant AtmFrame& _77)
 {
-    float2 cell = (worldXY - _63.worldMins) * _63.invGridStep;
-    float2 uv = (cell + float2(0.5)) / float2(float(_63.gridSize));
+    uint t = (uint(_77.time * 1000.0) + uint(seed * 4096.0)) + (_77.climateSeed * 2246822519u);
+    uint param = ((idx * 747796405u) + (salt * 2891336453u)) + t;
+    float _107 = hash11(param);
+    return _107;
+}
+
+static inline __attribute__((always_inline))
+float groundHeightAt(thread const float2& worldXY, constant AtmFrame& _77, texture2d<float> heightgrid, sampler heightgridSmplr)
+{
+    float2 cell = (worldXY - _77.worldMins) * _77.invGridStep;
+    float2 uv = (cell + float2(0.5)) / float2(float(_77.gridSize));
     return heightgrid.sample(heightgridSmplr, uv, level(0.0)).x;
+}
+
+static inline __attribute__((always_inline))
+uint chooseFamily(thread const uint& idx, thread const float& seed, constant AtmFrame& _77)
+{
+    float total = (((_77.precipitation.x + _77.precipitation.y) + _77.precipitation.z) + _77.precipitation.w) + _77.dustAsh;
+    if (total <= 0.0)
+    {
+        return _77.atmType;
+    }
+    uint param = idx;
+    uint param_1 = 67u;
+    float param_2 = seed;
+    float pick = rand01(param, param_1, param_2, _77) * total;
+    if (pick <= _77.precipitation.x)
+    {
+        return 1u;
+    }
+    pick -= _77.precipitation.x;
+    if (pick <= _77.precipitation.y)
+    {
+        return 2u;
+    }
+    pick -= _77.precipitation.y;
+    if (pick <= _77.precipitation.z)
+    {
+        return 3u;
+    }
+    pick -= _77.precipitation.z;
+    if (pick <= _77.precipitation.w)
+    {
+        return 4u;
+    }
+    return 5u;
 }
 
 kernel void main0(device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
 {
     uint idx = gl_GlobalInvocationID.x;
-    if (idx >= (*spvDescriptorSet0.m_63).poolSize)
+    if (idx >= (*spvDescriptorSet0.m_77).poolSize)
     {
         return;
     }
-    if ((*spvDescriptorSet0.m_63).atmType == 0u)
+    uint precipitationCount = uint((*spvDescriptorSet0.m_77).effectMeta.x);
+    bool semantic = idx >= precipitationCount;
+    uint param = idx;
+    uint effect = effectForIndex(param, (*spvDescriptorSet0.m_77));
+    if (semantic && (effect == 4294967295u))
     {
-        AtmParticle _167 = deadParticle();
-        (*spvDescriptorSet0.m_165).writeParticles[idx].pos = _167.pos;
-        (*spvDescriptorSet0.m_165).writeParticles[idx].seed = _167.seed;
-        (*spvDescriptorSet0.m_165).writeParticles[idx].vel = _167.vel;
-        (*spvDescriptorSet0.m_165).writeParticles[idx].flags = _167.flags;
+        AtmParticle _380 = deadParticle();
+        (*spvDescriptorSet0.m_378).writeParticles[idx].pos = _380.pos;
+        (*spvDescriptorSet0.m_378).writeParticles[idx].seed = _380.seed;
+        (*spvDescriptorSet0.m_378).writeParticles[idx].vel = _380.vel;
+        (*spvDescriptorSet0.m_378).writeParticles[idx].flags = _380.flags;
+        return;
+    }
+    bool _394 = !semantic;
+    bool _400;
+    if (_394)
+    {
+        _400 = (*spvDescriptorSet0.m_77).atmType == 0u;
+    }
+    else
+    {
+        _400 = _394;
+    }
+    if (_400)
+    {
+        AtmParticle _404 = deadParticle();
+        (*spvDescriptorSet0.m_378).writeParticles[idx].pos = _404.pos;
+        (*spvDescriptorSet0.m_378).writeParticles[idx].seed = _404.seed;
+        (*spvDescriptorSet0.m_378).writeParticles[idx].vel = _404.vel;
+        (*spvDescriptorSet0.m_378).writeParticles[idx].flags = _404.flags;
+        return;
+    }
+    bool _416 = !semantic;
+    bool _423;
+    if (_416)
+    {
+        uint param_1 = idx;
+        _423 = precipitationCoverage(param_1, (*spvDescriptorSet0.m_77)) <= 0.0;
+    }
+    else
+    {
+        _423 = _416;
+    }
+    if (_423)
+    {
+        AtmParticle _427 = deadParticle();
+        (*spvDescriptorSet0.m_378).writeParticles[idx].pos = _427.pos;
+        (*spvDescriptorSet0.m_378).writeParticles[idx].seed = _427.seed;
+        (*spvDescriptorSet0.m_378).writeParticles[idx].vel = _427.vel;
+        (*spvDescriptorSet0.m_378).writeParticles[idx].flags = _427.flags;
         return;
     }
     AtmParticle p;
-    p.pos = float3((*spvDescriptorSet0.m_184).readParticles[idx].pos);
-    p.seed = (*spvDescriptorSet0.m_184).readParticles[idx].seed;
-    p.vel = float3((*spvDescriptorSet0.m_184).readParticles[idx].vel);
-    p.flags = (*spvDescriptorSet0.m_184).readParticles[idx].flags;
-    if (p.flags < 0.5)
+    p.pos = float3((*spvDescriptorSet0.m_442).readParticles[idx].pos);
+    p.seed = (*spvDescriptorSet0.m_442).readParticles[idx].seed;
+    p.vel = float3((*spvDescriptorSet0.m_442).readParticles[idx].vel);
+    p.flags = (*spvDescriptorSet0.m_442).readParticles[idx].flags;
+    if (semantic)
     {
-        uint param = idx;
-        uint param_1 = 11u;
-        float param_2 = p.seed;
-        float rx = rand01(param, param_1, param_2, (*spvDescriptorSet0.m_63));
-        uint param_3 = idx;
-        uint param_4 = 23u;
-        float param_5 = p.seed;
-        float ry = rand01(param_3, param_4, param_5, (*spvDescriptorSet0.m_63));
-        uint param_6 = idx;
-        uint param_7 = 31u;
-        float param_8 = p.seed;
-        float rz = rand01(param_6, param_7, param_8, (*spvDescriptorSet0.m_63));
-        float spread = (*spvDescriptorSet0.m_63)._distance;
-        p.pos.x = fast::clamp((*spvDescriptorSet0.m_63).eyeWorld.x + (((rx * 2.0) - 1.0) * spread), (*spvDescriptorSet0.m_63).boundsMin.x, (*spvDescriptorSet0.m_63).boundsMax.x);
-        p.pos.y = fast::clamp((*spvDescriptorSet0.m_63).eyeWorld.y + (((ry * 2.0) - 1.0) * spread), (*spvDescriptorSet0.m_63).boundsMin.y, (*spvDescriptorSet0.m_63).boundsMax.y);
-        p.pos.z = fast::min((*spvDescriptorSet0.m_63).eyeWorld.z + (rz * 800.0), (*spvDescriptorSet0.m_63).boundsMax.z);
-        p.seed = (rx + ry) + rz;
-        if ((*spvDescriptorSet0.m_63).atmType == 1u)
+        uint base = effect * 6u;
+        uint expectedFamily = 16u + effect;
+        bool stale = uint(p.flags + 0.5) != expectedFamily;
+        if ((p.flags < 0.5) || stale)
         {
-            uint param_9 = idx;
-            uint param_10 = 41u;
-            float param_11 = p.seed;
-            p.vel.x = ((rand01(param_9, param_10, param_11, (*spvDescriptorSet0.m_63)) * 2.0) - 1.0) * 30.0;
-            uint param_12 = idx;
-            uint param_13 = 53u;
-            float param_14 = p.seed;
-            p.vel.y = ((rand01(param_12, param_13, param_14, (*spvDescriptorSet0.m_63)) * 2.0) - 1.0) * 30.0;
-            p.vel.z = -880.0;
+            uint semanticSeed = uint((*spvDescriptorSet0.m_77).effectWorkloads[base + 5u].w) + (idx * 13u);
+            uint param_2 = semanticSeed;
+            float _491 = hash11(param_2);
+            float rx = _491;
+            uint param_3 = semanticSeed + 1u;
+            float _496 = hash11(param_3);
+            float ry = _496;
+            uint param_4 = semanticSeed + 2u;
+            float _501 = hash11(param_4);
+            float rz = _501;
+            float radius = fast::max((*spvDescriptorSet0.m_77).effectWorkloads[base].w, (*spvDescriptorSet0.m_77).effectWorkloads[base + 5u].z);
+            p.pos = (*spvDescriptorSet0.m_77).effectWorkloads[base].xyz + (((float3(rx, ry, rz) * 2.0) - float3(1.0)) * radius);
+            uint param_5 = semanticSeed + 3u;
+            float _536 = hash11(param_5);
+            p.seed = fast::max(0.0500000007450580596923828125, (*spvDescriptorSet0.m_77).effectWorkloads[base + 5u].x + (((_536 * 2.0) - 1.0) * (*spvDescriptorSet0.m_77).effectWorkloads[base + 5u].y));
+            float3 authoredDirection = (*spvDescriptorSet0.m_77).effectWorkloads[base + 1u].xyz;
+            float3 _559;
+            if (dot(authoredDirection, authoredDirection) > 9.9999999392252902907785028219223e-09)
+            {
+                _559 = fast::normalize(authoredDirection);
+            }
+            else
+            {
+                _559 = float3(0.0, 0.0, 1.0);
+            }
+            float3 direction = _559;
+            uint param_6 = semanticSeed + 4u;
+            float _571 = hash11(param_6);
+            uint param_7 = semanticSeed + 5u;
+            float _575 = hash11(param_7);
+            uint param_8 = semanticSeed + 6u;
+            float _579 = hash11(param_8);
+            float3 jitter = ((float3(_571, _575, _579) * 2.0) - float3(1.0)) * (*spvDescriptorSet0.m_77).effectWorkloads[base + 3u].y;
+            p.vel = ((direction * (*spvDescriptorSet0.m_77).effectWorkloads[base + 3u].x) + jitter) + ((*spvDescriptorSet0.m_77).windGust.xyz * 0.100000001490116119384765625);
+            p.flags = float(expectedFamily);
         }
         else
         {
-            uint param_15 = idx;
-            uint param_16 = 41u;
-            float param_17 = p.seed;
-            p.vel.x = ((rand01(param_15, param_16, param_17, (*spvDescriptorSet0.m_63)) * 2.0) - 1.0) * 20.0;
-            uint param_18 = idx;
-            uint param_19 = 53u;
-            float param_20 = p.seed;
-            p.vel.y = ((rand01(param_18, param_19, param_20, (*spvDescriptorSet0.m_63)) * 2.0) - 1.0) * 20.0;
-            p.vel.z = -160.0;
+            p.vel.z -= ((800.0 * (*spvDescriptorSet0.m_77).effectWorkloads[base + 3u].z) * (*spvDescriptorSet0.m_77).dt);
+            p.vel *= fast::max(0.0, 1.0 - ((*spvDescriptorSet0.m_77).effectWorkloads[base + 3u].w * (*spvDescriptorSet0.m_77).dt));
+            p.pos += (p.vel * (*spvDescriptorSet0.m_77).dt);
+            p.seed -= (*spvDescriptorSet0.m_77).dt;
+            if (p.seed <= 0.0)
+            {
+                p = deadParticle();
+            }
         }
-        p.flags = 1.0;
-        (*spvDescriptorSet0.m_165).writeParticles[idx].pos = p.pos;
-        (*spvDescriptorSet0.m_165).writeParticles[idx].seed = p.seed;
-        (*spvDescriptorSet0.m_165).writeParticles[idx].vel = p.vel;
-        (*spvDescriptorSet0.m_165).writeParticles[idx].flags = p.flags;
+        (*spvDescriptorSet0.m_378).writeParticles[idx].pos = p.pos;
+        (*spvDescriptorSet0.m_378).writeParticles[idx].seed = p.seed;
+        (*spvDescriptorSet0.m_378).writeParticles[idx].vel = p.vel;
+        (*spvDescriptorSet0.m_378).writeParticles[idx].flags = p.flags;
         return;
     }
-    p.pos += (p.vel * (*spvDescriptorSet0.m_63).dt);
-    if ((*spvDescriptorSet0.m_63).atmType == 2u)
+    if (p.flags < 0.5)
     {
-        p.pos.x += (sin((*spvDescriptorSet0.m_63).time + float(idx)) * 0.5);
-        p.pos.y += (cos(((*spvDescriptorSet0.m_63).time * 1.2999999523162841796875) + float(idx)) * 0.5);
+        uint param_9 = idx;
+        uint param_10 = 11u;
+        float param_11 = p.seed;
+        float rx_1 = rand01(param_9, param_10, param_11, (*spvDescriptorSet0.m_77));
+        uint param_12 = idx;
+        uint param_13 = 23u;
+        float param_14 = p.seed;
+        float ry_1 = rand01(param_12, param_13, param_14, (*spvDescriptorSet0.m_77));
+        uint param_15 = idx;
+        uint param_16 = 31u;
+        float param_17 = p.seed;
+        float rz_1 = rand01(param_15, param_16, param_17, (*spvDescriptorSet0.m_77));
+        float spread = (*spvDescriptorSet0.m_77)._distance;
+        p.pos.x = fast::clamp((*spvDescriptorSet0.m_77).eyeWorld.x + (((rx_1 * 2.0) - 1.0) * spread), (*spvDescriptorSet0.m_77).boundsMin.x, (*spvDescriptorSet0.m_77).boundsMax.x);
+        p.pos.y = fast::clamp((*spvDescriptorSet0.m_77).eyeWorld.y + (((ry_1 * 2.0) - 1.0) * spread), (*spvDescriptorSet0.m_77).boundsMin.y, (*spvDescriptorSet0.m_77).boundsMax.y);
+        p.pos.z = fast::min((*spvDescriptorSet0.m_77).eyeWorld.z + (rz_1 * 800.0), (*spvDescriptorSet0.m_77).boundsMax.z);
+        bool _745 = (*spvDescriptorSet0.m_77).gridSize > 1u;
+        bool _756;
+        if (_745)
+        {
+            float2 param_18 = p.pos.xy;
+            _756 = p.pos.z <= groundHeightAt(param_18, (*spvDescriptorSet0.m_77), spvDescriptorSet0.heightgrid, spvDescriptorSet0.heightgridSmplr);
+        }
+        else
+        {
+            _756 = _745;
+        }
+        if (_756)
+        {
+            AtmParticle _760 = deadParticle();
+            (*spvDescriptorSet0.m_378).writeParticles[idx].pos = _760.pos;
+            (*spvDescriptorSet0.m_378).writeParticles[idx].seed = _760.seed;
+            (*spvDescriptorSet0.m_378).writeParticles[idx].vel = _760.vel;
+            (*spvDescriptorSet0.m_378).writeParticles[idx].flags = _760.flags;
+            return;
+        }
+        p.seed = (rx_1 + ry_1) + rz_1;
+        uint param_19 = idx;
+        float param_20 = p.seed;
+        uint family = chooseFamily(param_19, param_20, (*spvDescriptorSet0.m_77));
+        float windScale = 1.0;
+        if (family == 1u)
+        {
+            uint param_21 = idx;
+            uint param_22 = 41u;
+            float param_23 = p.seed;
+            p.vel.x = ((rand01(param_21, param_22, param_23, (*spvDescriptorSet0.m_77)) * 2.0) - 1.0) * 30.0;
+            uint param_24 = idx;
+            uint param_25 = 53u;
+            float param_26 = p.seed;
+            p.vel.y = ((rand01(param_24, param_25, param_26, (*spvDescriptorSet0.m_77)) * 2.0) - 1.0) * 30.0;
+            p.vel.z = -880.0;
+            windScale = 0.25;
+        }
+        else
+        {
+            if (family == 2u)
+            {
+                uint param_27 = idx;
+                uint param_28 = 41u;
+                float param_29 = p.seed;
+                p.vel.x = ((rand01(param_27, param_28, param_29, (*spvDescriptorSet0.m_77)) * 2.0) - 1.0) * 20.0;
+                uint param_30 = idx;
+                uint param_31 = 53u;
+                float param_32 = p.seed;
+                p.vel.y = ((rand01(param_30, param_31, param_32, (*spvDescriptorSet0.m_77)) * 2.0) - 1.0) * 20.0;
+                p.vel.z = -160.0;
+            }
+            else
+            {
+                if (family == 3u)
+                {
+                    p.vel = float3(0.0, 0.0, -600.0);
+                    windScale = 0.5;
+                }
+                else
+                {
+                    if (family == 4u)
+                    {
+                        p.vel = float3(0.0, 0.0, -720.0);
+                        windScale = 0.1500000059604644775390625;
+                    }
+                    else
+                    {
+                        uint param_33 = idx;
+                        uint param_34 = 41u;
+                        float param_35 = p.seed;
+                        p.vel.x = ((rand01(param_33, param_34, param_35, (*spvDescriptorSet0.m_77)) * 2.0) - 1.0) * 35.0;
+                        uint param_36 = idx;
+                        uint param_37 = 53u;
+                        float param_38 = p.seed;
+                        p.vel.y = ((rand01(param_36, param_37, param_38, (*spvDescriptorSet0.m_77)) * 2.0) - 1.0) * 35.0;
+                        p.vel.z = -32.0;
+                        windScale = 1.5;
+                    }
+                }
+            }
+        }
+        p.vel += ((*spvDescriptorSet0.m_77).windGust.xyz * windScale);
+        p.flags = float(family);
+        (*spvDescriptorSet0.m_378).writeParticles[idx].pos = p.pos;
+        (*spvDescriptorSet0.m_378).writeParticles[idx].seed = p.seed;
+        (*spvDescriptorSet0.m_378).writeParticles[idx].vel = p.vel;
+        (*spvDescriptorSet0.m_378).writeParticles[idx].flags = p.flags;
+        return;
     }
-    float2 param_21 = p.pos.xy;
-    float ground = groundHeightAt(param_21, (*spvDescriptorSet0.m_63), spvDescriptorSet0.heightgrid, spvDescriptorSet0.heightgridSmplr);
+    p.pos += (p.vel * (*spvDescriptorSet0.m_77).dt);
+    uint family_1 = uint(p.flags + 0.5);
+    if ((family_1 == 2u) || (family_1 == 5u))
+    {
+        p.pos.x += (sin((*spvDescriptorSet0.m_77).time + float(idx)) * 0.5);
+        p.pos.y += (cos(((*spvDescriptorSet0.m_77).time * 1.2999999523162841796875) + float(idx)) * 0.5);
+    }
+    float gustPhase = sin(((*spvDescriptorSet0.m_77).time * 0.699999988079071044921875) + (float(idx % 97u) * 0.37000000476837158203125));
+    float _976;
+    if (family_1 == 1u)
+    {
+        _976 = 0.25;
+    }
+    else
+    {
+        float _982;
+        if (family_1 == 3u)
+        {
+            _982 = 0.5;
+        }
+        else
+        {
+            float _988;
+            if (family_1 == 4u)
+            {
+                _988 = 0.1500000059604644775390625;
+            }
+            else
+            {
+                _988 = (family_1 == 5u) ? 1.5 : 1.0;
+            }
+            _982 = _988;
+        }
+        _976 = _982;
+    }
+    float familyWind = _976;
+    p.pos += ((*spvDescriptorSet0.m_77).windGust.xyz * ((((*spvDescriptorSet0.m_77).windGust.w * gustPhase) * familyWind) * (*spvDescriptorSet0.m_77).dt));
+    float _1019;
+    if ((*spvDescriptorSet0.m_77).gridSize > 1u)
+    {
+        float2 param_39 = p.pos.xy;
+        _1019 = groundHeightAt(param_39, (*spvDescriptorSet0.m_77), spvDescriptorSet0.heightgrid, spvDescriptorSet0.heightgridSmplr);
+    }
+    else
+    {
+        _1019 = (*spvDescriptorSet0.m_77).boundsMin.z;
+    }
+    float ground = _1019;
     if (p.pos.z < ground)
     {
-        AtmParticle _404 = deadParticle();
-        (*spvDescriptorSet0.m_165).writeParticles[idx].pos = _404.pos;
-        (*spvDescriptorSet0.m_165).writeParticles[idx].seed = _404.seed;
-        (*spvDescriptorSet0.m_165).writeParticles[idx].vel = _404.vel;
-        (*spvDescriptorSet0.m_165).writeParticles[idx].flags = _404.flags;
+        AtmParticle _1038 = deadParticle();
+        (*spvDescriptorSet0.m_378).writeParticles[idx].pos = _1038.pos;
+        (*spvDescriptorSet0.m_378).writeParticles[idx].seed = _1038.seed;
+        (*spvDescriptorSet0.m_378).writeParticles[idx].vel = _1038.vel;
+        (*spvDescriptorSet0.m_378).writeParticles[idx].flags = _1038.flags;
         return;
     }
-    float2 d = p.pos.xy - (*spvDescriptorSet0.m_63).eyeWorld.xy;
-    if (dot(d, d) > ((*spvDescriptorSet0.m_63)._distance * (*spvDescriptorSet0.m_63)._distance))
+    float2 d = p.pos.xy - (*spvDescriptorSet0.m_77).eyeWorld.xy;
+    if (dot(d, d) > ((*spvDescriptorSet0.m_77)._distance * (*spvDescriptorSet0.m_77)._distance))
     {
-        AtmParticle _436 = deadParticle();
-        (*spvDescriptorSet0.m_165).writeParticles[idx].pos = _436.pos;
-        (*spvDescriptorSet0.m_165).writeParticles[idx].seed = _436.seed;
-        (*spvDescriptorSet0.m_165).writeParticles[idx].vel = _436.vel;
-        (*spvDescriptorSet0.m_165).writeParticles[idx].flags = _436.flags;
+        AtmParticle _1069 = deadParticle();
+        (*spvDescriptorSet0.m_378).writeParticles[idx].pos = _1069.pos;
+        (*spvDescriptorSet0.m_378).writeParticles[idx].seed = _1069.seed;
+        (*spvDescriptorSet0.m_378).writeParticles[idx].vel = _1069.vel;
+        (*spvDescriptorSet0.m_378).writeParticles[idx].flags = _1069.flags;
         return;
     }
-    if (p.pos.z < ((*spvDescriptorSet0.m_63).eyeWorld.z - 500.0))
+    if (p.pos.z < ((*spvDescriptorSet0.m_77).eyeWorld.z - 500.0))
     {
-        AtmParticle _457 = deadParticle();
-        (*spvDescriptorSet0.m_165).writeParticles[idx].pos = _457.pos;
-        (*spvDescriptorSet0.m_165).writeParticles[idx].seed = _457.seed;
-        (*spvDescriptorSet0.m_165).writeParticles[idx].vel = _457.vel;
-        (*spvDescriptorSet0.m_165).writeParticles[idx].flags = _457.flags;
+        AtmParticle _1090 = deadParticle();
+        (*spvDescriptorSet0.m_378).writeParticles[idx].pos = _1090.pos;
+        (*spvDescriptorSet0.m_378).writeParticles[idx].seed = _1090.seed;
+        (*spvDescriptorSet0.m_378).writeParticles[idx].vel = _1090.vel;
+        (*spvDescriptorSet0.m_378).writeParticles[idx].flags = _1090.flags;
         return;
     }
-    (*spvDescriptorSet0.m_165).writeParticles[idx].pos = p.pos;
-    (*spvDescriptorSet0.m_165).writeParticles[idx].seed = p.seed;
-    (*spvDescriptorSet0.m_165).writeParticles[idx].vel = p.vel;
-    (*spvDescriptorSet0.m_165).writeParticles[idx].flags = p.flags;
+    (*spvDescriptorSet0.m_378).writeParticles[idx].pos = p.pos;
+    (*spvDescriptorSet0.m_378).writeParticles[idx].seed = p.seed;
+    (*spvDescriptorSet0.m_378).writeParticles[idx].vel = p.vel;
+    (*spvDescriptorSet0.m_378).writeParticles[idx].flags = p.flags;
 }
 

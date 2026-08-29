@@ -1212,6 +1212,20 @@ void Cmd_ExecuteString( const char *text ) {
 	}
 #endif
 
+	/* A server-game command can arrive from stdin/RCON/UI while the async map
+	 * state machine is between SS_LOADING and SS_GAME.  SV_GameCommand cannot
+	 * dispatch it yet; dropping it here loses operator intent and made an
+	 * addbot issued after InitGame disappear on a warm nav-cache load.  Put the
+	 * complete line back at the head and yield this command-buffer cycle. */
+	if ( com_sv_running && com_sv_running->integer && !SV_IsSpawnIdle() ) {
+		Cbuf_InsertText( text );
+		cmd_wait = 1;
+		Com_Log( SEV_DEBUG, LOG_CH(ch_system),
+			"deferred server-game command during map transition: %s\n",
+			Cmd_Argv( 0 ) );
+		return;
+	}
+
 	// check server game commands
 	if ( com_sv_running && com_sv_running->integer && SV_GameCommand() ) {
 		return;

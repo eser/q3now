@@ -924,6 +924,9 @@ void Q3_DropPortalDestination( gentity_t *ent );
 //
 void G_BounceProjectile( vec3_t start, vec3_t impact, vec3_t dir, vec3_t endout );
 qboolean LogAccuracyHit( gentity_t *target, gentity_t *attacker );
+qboolean G_ResolveWeaponAimAngles( const gentity_t *ent, vec3_t aimAngles );
+void G_WeaponAimVectors( const gentity_t *ent, vec3_t aimForward, vec3_t aimRight, vec3_t aimUp );
+void G_ClampWeaponMuzzle( const gentity_t *ent, const vec3_t origin, vec3_t muzzlePoint );
 void CalcMuzzlePoint ( gentity_t *ent, vec3_t forward, vec3_t right, vec3_t up, vec3_t muzzlePoint );
 void SnapVectorTowards( vec3_t v, vec3_t to );
 qboolean CheckGauntletAttack( gentity_t *ent );
@@ -1603,6 +1606,7 @@ void trap_WCE_EmitEvent( wce_event_type_t type,
                           const vec3_t origin,
                           int param1, int param2, float fparam,
                           const char *text );
+qboolean trap_EntityEventEnqueue( const wiredEntityEvent_t *event );
 
 // Poll server-side per-bot sound ring; returns count of new events written to out.
 int  trap_WCE_GetSoundEvents( int clientNum, bot_sound_event_t *out, int maxOut );

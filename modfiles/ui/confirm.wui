@@ -26,7 +26,7 @@ menuDef {
 		itemDef {
 			name "confirm_root"
 			type container
-			rect 0 0 0.3 0.2
+			width FIXED 0.3 height FIXED 0.2
 			direction column
 			padding $popup_padding
 			gap $spacing_md
@@ -42,7 +42,7 @@ menuDef {
 			itemDef {
 				name "popup_footer"
 				type container
-				rect 0 0 1 0.05
+				width FIXED 1 height FIXED 0.05
 				direction row
 				gap $spacing_md
 				alignX end

@@ -902,6 +902,13 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 		// push itself is unconditional.)
 		(void)pushUniform;
 		pushUniform = qfalse;
+		VectorClear( uniform.emissionRadiance );
+		// The typed material is stamped only onto retained world/BSP shaders.
+		// Consume it once for every 3D use of that material, including moving
+		// brush models, while keeping 2D/UI draws dark even when they reuse a
+		// world shader.
+		if ( stage == 0 && !backEnd.projection2D )
+			VectorCopy( tess.shader->emissionRadiance, uniform.emissionRadiance );
 		VK_PushUniform( &uniform );
 
 		GL_SelectTexture( 0 );
@@ -1371,11 +1378,12 @@ uint32_t VK_PushUniform( const vkUniform_t *uniform ) {
 		vk_world.advancedFogColorDensity, sizeof( vk_world.advancedFogColorDensity ) );
 	memcpy( ( (vkUniform_t *)( vk.cmd->vertex_buffer_ptr + offset ) )->advancedFogTypeFarEnabled,
 		vk_world.advancedFogTypeFarEnabled, sizeof( vk_world.advancedFogTypeFarEnabled ) );
-	// World-lighting globals are the same value in every ring item, so stamp them
+	// World/material globals are the same value in every ring item, so stamp them
 	// here at the single push choke point rather than threading them through every
-	// caller's local uniform. .x = r_lightmapBoost (the base-pass lightmap overbright
-	// the modulate branches read live from the set-0 UBO). Live: a cvar change shows
-	// next frame with no pipeline rebuild.
+	// caller's local uniform. .x = r_lightmapBoost; .yzw = wetness/frost/snow.
+	// Melt is folded into the wet response because thawed accumulation becomes
+	// water, while retaining the fixed 640-byte portable UBO ABI. Live climate
+	// changes show next frame with no pipeline rebuild or descriptor mutation.
 	// r_unbakeStaticLights dims the baked lightmap by the map's tuned factor to bound
 	// the additive double-count from the extracted static lights. When off (or no
 	// static lights), unbakeDim is exactly 1.0f → the UBO bytes are identical to today
@@ -1386,6 +1394,13 @@ uint32_t VK_PushUniform( const vkUniform_t *uniform ) {
 			unbakeDim = tr.world->staticLightDim;
 		( (vkUniform_t *)( vk.cmd->vertex_buffer_ptr + offset ) )->worldLightParams[0] =
 			( r_lightmapBoost ? r_lightmapBoost->value : 4.6f ) * unbakeDim;
+		( (vkUniform_t *)( vk.cmd->vertex_buffer_ptr + offset ) )->worldLightParams[1] =
+			Com_Clamp( 0.0f, 1.0f,
+				vk.atm.surfaceTargets[0] + 0.5f * vk.atm.surfaceTargets[3] );
+		( (vkUniform_t *)( vk.cmd->vertex_buffer_ptr + offset ) )->worldLightParams[2] =
+			Com_Clamp( 0.0f, 1.0f, vk.atm.surfaceTargets[1] );
+		( (vkUniform_t *)( vk.cmd->vertex_buffer_ptr + offset ) )->worldLightParams[3] =
+			Com_Clamp( 0.0f, 1.0f, vk.atm.surfaceTargets[2] );
 	}
 	// (The bindless packed_indices field is filled later by vk_push_bindless_indices
 	// in vk_draw_geometry — which runs AFTER this, at the actual draw, with this
@@ -1957,6 +1972,25 @@ void RB_EndSurface( void ) {
 		backEnd.pc.c_shaders++;
 		backEnd.pc.c_vertexes += tess.numVertexes;
 		backEnd.pc.c_indexes += tess.numIndexes;
+		if ( backEnd.projection2D ) {
+			int batchClass;
+			backEnd.pc.c_2dShaders++;
+			if ( tess.shader == tr.whiteShader ) {
+				backEnd.pc.c_2dWhiteShaders++;
+				batchClass = 1;
+			} else if ( tess.shader->msdf ) {
+				backEnd.pc.c_2dMsdfShaders++;
+				batchClass = 2;
+			} else {
+				backEnd.pc.c_2dOtherShaders++;
+				batchClass = 3;
+			}
+			if ( ( backEnd.pc.c_2dLastClass == 1 && batchClass == 2 )
+			  || ( backEnd.pc.c_2dLastClass == 2 && batchClass == 1 ) ) {
+				backEnd.pc.c_2dWhiteMsdfTransitions++;
+			}
+			backEnd.pc.c_2dLastClass = batchClass;
+		}
 	}
 	backEnd.pc.c_totalIndexes += tess.numIndexes * tess.numPasses;
 

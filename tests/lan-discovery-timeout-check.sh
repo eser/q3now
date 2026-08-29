@@ -4,6 +4,7 @@
 
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/lib/wired_paths.sh"
 FIXTURE="$SCRIPT_DIR/lan-discovery-timeout-fixture.py"
 TIMEOUT_RUNNER="$SCRIPT_DIR/run-with-timeout.py"
 
@@ -271,12 +272,11 @@ fi
 command -v python3 >/dev/null 2>&1 && [ -f "$FIXTURE" ] && [ -f "$TIMEOUT_RUNNER" ] || { echo "SKIP: Python unavailable"; exit 77; }
 WIRED="${1:-}"; [ -n "$WIRED" ] && [ -x "$WIRED" ] || { echo "SKIP: pass assembled Wired GUI binary"; exit 77; }
 WIRED="$(cd "$(dirname "$WIRED")" && pwd)/$(basename "$WIRED")"; WIRED_DIR="$(dirname "$WIRED")"
-PACK=""; for candidate in "$WIRED_DIR" "$WIRED_DIR/../Resources" "$WIRED_DIR/q3now-preview.arm64.app/Contents/Resources"; do [ -f "$candidate/base/pax21.sw3z" ] && PACK="$candidate" && break; done
-[ -n "$PACK" ] || { echo "SKIP: current pax21 unavailable"; exit 77; }
-CONTENT="${WIRED_CONTENT_ROOT:-$PACK}"; if [ -f "$CONTENT/base/pax01.sw3z" ]; then BASE="$CONTENT/base/pax01.sw3z"; elif [ -f "$CONTENT/base/pak0.pk3" ]; then BASE="$CONTENT/base/pak0.pk3"; else echo "SKIP: set WIRED_CONTENT_ROOT"; exit 77; fi
+PACK="$(wired_find_archive_root "$WIRED_DIR" "$WIRED_DIR/../Resources" "$WIRED_DIR/q3now-preview.arm64.app/Contents/Resources" 2>/dev/null || true)"
+[ -n "$PACK" ] || { echo "SKIP: current VFS archives unavailable"; exit 77; }
 ROOT="$(mktemp -d -t lan-discovery-XXXXXX 2>/dev/null || mktemp -d)"; EVENTS="$ROOT/fixture.jsonl"; HOME_DIR="$ROOT/q3now-preview"; PID=""
 cleanup(){ [ -n "$PID" ] && kill -TERM "$PID" 2>/dev/null || true; [ -n "$PID" ] && wait "$PID" 2>/dev/null || true; [ "${WIRED_KEEP_ARTIFACTS:-0}" = 1 ] || rm -rf "$ROOT"; }; trap cleanup EXIT INT TERM
-mkdir -p "$HOME_DIR/base"; cp "$PACK/base/pax21.sw3z" "$HOME_DIR/base/pax21.sw3z" || exit 1; cp "$BASE" "$HOME_DIR/base/" || exit 1
+wired_link_content_into_home "$HOME_DIR" "$PACK/base" || exit 1
 python3 "$FIXTURE" --events "$EVENTS" --timeout 30 & PID=$!; for _ in $(seq 1 100); do [ -s "$EVENTS" ] && break; sleep .05; done; [ -s "$EVENTS" ] || exit 1
 LAN_ADDRESS="$(python3 - "$EVENTS" <<'PYEOF'
 import json,sys

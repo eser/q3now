@@ -1,0 +1,107 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Wired Engine contributors
+#version 450
+
+// Bounded cloud enrichment for the shared atmosphere froxel grid. Clouds do
+// not open a second fullscreen composition path: this pass reads lit media,
+// adds a wind-advected height layer, then the existing temporal integration and
+// single HDR composite consume the result.
+layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
+
+layout(set=0,binding=0) uniform Params {
+	mat4 invViewProjection;
+	vec4 eyeNear;
+	vec4 farTimeCoverageShadow; // far, timeline, cover, authored cloud shadow
+	vec4 windDensity;           // xyz wind, w peak extinction
+	vec4 layerErosion;          // base, top, edge fraction, erosion
+	vec4 sunDirectionIntensity;
+	vec4 sunColorLightning;     // rgb sun colour, w lightning
+	vec4 ambientColor;
+	uvec4 grid;
+} p;
+layout(std430,set=0,binding=1) readonly buffer LitMedia {
+	vec4 sourceRadianceExtinction[];
+};
+layout(std430,set=0,binding=2) writeonly buffer CloudMedia {
+	vec4 cloudRadianceExtinction[];
+};
+
+float hash13(vec3 q) {
+	q = fract(q * 0.1031);
+	q += dot(q, q.yzx + 33.33);
+	return fract((q.x + q.y) * q.z);
+}
+
+// One trilinear value-noise octave: eight hashes per admitted cloud froxel.
+// The height envelope rejects non-cloud slices before this work, keeping the
+// pass bounded and cheaper than a separate full-resolution raymarch.
+float valueNoise(vec3 x) {
+	vec3 cell = floor(x);
+	vec3 f = fract(x);
+	f = f * f * (3.0 - 2.0 * f);
+	float n000 = hash13(cell + vec3(0.0, 0.0, 0.0));
+	float n100 = hash13(cell + vec3(1.0, 0.0, 0.0));
+	float n010 = hash13(cell + vec3(0.0, 1.0, 0.0));
+	float n110 = hash13(cell + vec3(1.0, 1.0, 0.0));
+	float n001 = hash13(cell + vec3(0.0, 0.0, 1.0));
+	float n101 = hash13(cell + vec3(1.0, 0.0, 1.0));
+	float n011 = hash13(cell + vec3(0.0, 1.0, 1.0));
+	float n111 = hash13(cell + vec3(1.0, 1.0, 1.0));
+	return mix(mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y),
+		mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y), f.z);
+}
+
+void main() {
+	uvec3 c = gl_GlobalInvocationID.xyz;
+	uvec3 dims = p.grid.xyz;
+	if (any(greaterThanEqual(c, dims))) return;
+	uint index = (c.z * dims.y + c.y) * dims.x + c.x;
+	vec4 source = sourceRadianceExtinction[index];
+	float cover = clamp(p.farTimeCoverageShadow.z, 0.0, 1.0);
+	if (cover <= 0.0) {
+		cloudRadianceExtinction[index] = source;
+		return;
+	}
+	vec2 uv = (vec2(c.xy) + 0.5) / vec2(dims.xy);
+	float slice = (float(c.z) + 0.5) / float(dims.z);
+	float nearZ = max(p.eyeNear.w, 0.01);
+	float farZ = max(p.farTimeCoverageShadow.x, nearZ + 0.01);
+	float distanceZ = nearZ * pow(farZ / nearZ, slice);
+	vec4 worldH = p.invViewProjection * vec4(uv * 2.0 - 1.0,
+		1.0 - nearZ / distanceZ, 1.0);
+	vec3 world = worldH.xyz / max(abs(worldH.w), 1e-6);
+	float base = p.layerErosion.x;
+	float top = max(p.layerErosion.y, base + 1.0);
+	float edge = max((top - base) * clamp(p.layerErosion.z, 0.02, 0.45), 1.0);
+	float envelope = smoothstep(base, base + edge, world.z)
+		* (1.0 - smoothstep(top - edge, top, world.z));
+	if (envelope <= 0.0) {
+		cloudRadianceExtinction[index] = source;
+		return;
+	}
+	vec3 advected = world + p.windDensity.xyz * p.farTimeCoverageShadow.y;
+	float scale = max((top - base) * 0.32, 48.0);
+	float shape = valueNoise(advected / scale);
+	float threshold = mix(0.82, 0.30, cover);
+	float density = smoothstep(threshold,
+		min(threshold + max(p.layerErosion.w, 0.08), 1.0), shape) * envelope;
+	float extinction = density * max(p.windDensity.w, 0.0);
+	vec3 viewVector = world - p.eyeNear.xyz;
+	float viewLength = length(viewVector);
+	vec3 viewDir = viewLength > 1e-5
+		? viewVector / viewLength : vec3(0.0, 0.0, 1.0);
+	vec3 sunVector = p.sunDirectionIntensity.xyz;
+	float sunLength = length(sunVector);
+	vec3 sunDir = sunLength > 1e-5
+		? sunVector / sunLength : vec3(0.0, 0.0, 1.0);
+	float forward = pow(max(dot(viewDir, sunDir), 0.0), 4.0);
+	float selfShadow = exp(-extinction * (top - base) * 0.18);
+	vec3 illumination = p.ambientColor.rgb
+		+ p.sunColorLightning.rgb * p.sunDirectionIntensity.w
+			* selfShadow * mix(0.35, 1.0, forward)
+			* (1.0 - clamp(p.farTimeCoverageShadow.w, 0.0, 1.0));
+	illumination += p.sunColorLightning.www;
+	vec3 cloudRadiance = vec3(0.92, 0.95, 1.0) * extinction * illumination;
+	cloudRadianceExtinction[index] = source
+		+ vec4(cloudRadiance, extinction);
+}

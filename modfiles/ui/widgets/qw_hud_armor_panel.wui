@@ -1,17 +1,6 @@
-// qw_hud_armor_panel — V2_HUD_Active bottom-left ARMOR panel (right of HEALTH)
-// Interface: #include once into the HUD composer menuDef body.
-//
-// HUD redesign (Eser, 2026-06-30): mirrors the health panel. Caption RESTORED
-// ("ARMOR") as a flex-flow text node at the panel top; value/icon/bar are
-// FULL-VIEWPORT leaves pulled UP to y0.88 so they sit right under the caption
-// (gap reduced, caption visible — the original ask was "shrink the gap + make it
-// visible", NOT remove it).
-// D2 fix (2026-06-30): the armor CONTAINER overlapped health (was left 10.56vw,
-// right 0.220, vs health right 0.134). Shifted right to left 11.6vw width 9.5vw
-// (x 0.116–0.211) so the chrome starts just past health's narrowed right edge
-// (0.114). Leaves RE-SYNCED to the moved container: value x0.120, icon x0.180,
-// bar x0.120 (all > health's bar end 0.106 → no leaf overlap either).
-// Tokens: $hud_panel_bg $accent $boneDim $font_mono $font_sans.
+// qw_hud_armor_panel — bottom-left ARMOR card, placed beside HEALTH.
+// Placement and dimensions remain authored by the classic HUD.  Chrome comes
+// from WHUD_CARD_CHROME; every child is local to this card's flex box.
 itemDef {
 	name "hud_active_armor_panel"
 	type container
@@ -19,15 +8,65 @@ itemDef {
 	height 11.56vh
 	direction column
 	padding 0.7vh 1.1vw
-	background $hud_panel_bg60
-	borderLeft 3px $accent
+	gap 0.3vh
+	WHUD_CARD_CHROME
 
-	itemDef { type 0 width FIT height FIT text "ARMOR" textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+	itemDef {
+		name "hud_armor_caption"
+		type 0 width PERCENT 1 height FIT
+		text "ARMOR" textalign 0
+		font $font_mono 9 forecolor $boneDim
+		decoration visible 1 grow 0
+	}
 
-	// HUD redesign (Eser, 2026-06-30): mirrors health — ICON on the LEFT, VALUE over BAR
-	// to its right. Icon natural color (no tint). All leaves inside the chrome
-	// (x 0.116–0.211): icon 0.124–0.142, value/bar left x0.148, bar right end 0.200.
-	itemDef { hudElement "statusbar_icon"  bind "armor" anchor BOTTOM_LEFT rect 0.124 0.892 0.018 0.030 decoration visible 1 }
-	itemDef { hudElement "statusbar_value" bind "armor" anchor BOTTOM_LEFT rect 0.148 0.885 0 0         font $font_sans fontsize 40 46 textalign 0 forecolor $accent decoration visible 1 }
-	itemDef { hudElement "statusbar_bar"   bind "armor" anchor BOTTOM_LEFT rect 0.148 0.925 0.052 0.004 direction R forecolor $accent decoration visible 1 }
+	itemDef {
+		name "hud_armor_content"
+		type container direction row
+		width PERCENT 1 height 5.1vh
+		alignX start alignY center gap 0.6vw grow 1
+
+		itemDef {
+			name "hud_armor_icon_slot"
+			type container direction column
+			width 2.6vh height PERCENT 1
+			padding 1.4vh 0 0 0 justify center grow 0
+
+			itemDef {
+				name "hud_armor_icon"
+				hudElement "statusbar_icon" bind "armor"
+				width 2.6vh height 2.6vh
+				decoration visible 1 grow 0
+			}
+		}
+		itemDef {
+			name "hud_armor_value_slot"
+			type container direction column
+			width 5.1vw height 5.1vh
+			padding 0 0 20px 0 grow 0
+
+			itemDef {
+				name "hud_armor_value"
+				hudElement "statusbar_value" bind "armor"
+				width PERCENT 1 grow 1
+				font $font_sans fontsize 38 44
+				textalign 2 forecolor $accent
+				decoration visible 1
+			}
+		}
+	}
+
+	itemDef {
+		name "hud_armor_bar_slot"
+		type container direction column
+		width PERCENT 1 height 1.9vh
+		padding 0 0 20px 0 grow 0
+
+		itemDef {
+			name "hud_armor_bar"
+			hudElement "statusbar_bar" bind "armor"
+			width PERCENT 1 height 0.5vh
+			direction R forecolor $accent
+			decoration visible 1 grow 0
+		}
+	}
 }

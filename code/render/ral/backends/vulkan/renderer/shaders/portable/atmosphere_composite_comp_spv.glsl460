@@ -1,0 +1,55 @@
+#version 460
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(binding = 0, std140) uniform Params
+{
+    uvec4 outputGrid;
+    vec4 depthRange;
+} p;
+
+layout(binding = 0, std430) readonly buffer Integrated
+{
+    vec4 media[];
+} _134;
+
+layout(binding = 1) uniform sampler2D sceneDepth;
+layout(binding = 0) uniform sampler2D sceneHdr;
+layout(binding = 0, rgba16f) uniform writeonly image2D composedHdr;
+
+void main()
+{
+    uvec2 pixel = gl_GlobalInvocationID.xy;
+    if (any(greaterThanEqual(pixel, p.outputGrid.xy)))
+    {
+        return;
+    }
+    vec2 uv = (vec2(pixel) + vec2(0.5)) / vec2(p.outputGrid.xy);
+    float _56;
+    if (p.depthRange.z > 0.5)
+    {
+        _56 = textureLod(sceneDepth, uv, 0.0).x;
+    }
+    else
+    {
+        _56 = 0.0;
+    }
+    float depth = _56;
+    float _74;
+    if (depth <= 0.0)
+    {
+        _74 = 1.0;
+    }
+    else
+    {
+        _74 = clamp(1.0 - depth, 0.0, 1.0);
+    }
+    float linearFraction = _74;
+    uvec2 froxelXY = min(uvec2(uv * vec2(p.outputGrid.zw)), (p.outputGrid.zw - uvec2(1u)));
+    uint slices = uint(max(p.depthRange.w, 1.0));
+    uint z = min(uint(linearFraction * float(slices)), (slices - 1u));
+    uint index = (((z * p.outputGrid.w) + froxelXY.y) * p.outputGrid.z) + froxelXY.x;
+    vec4 atmosphere = _134.media[index];
+    vec3 scene = textureLod(sceneHdr, uv, 0.0).xyz;
+    imageStore(composedHdr, ivec2(pixel), vec4((scene * atmosphere.w) + atmosphere.xyz, 1.0));
+}
+

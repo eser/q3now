@@ -9,6 +9,7 @@
 #include "cl_info_challenge.h"
 #include "cl_ping_queue.h"
 #include "cl_display_catalog.h"
+#include "cl_wired_fx.h"
 #include "wired/ui/cl_wired_ui.h"
 #include "wired/ui/cl_wired_viewport.h"
 #include "wired/ui/cl_wired_compositor.h"
@@ -49,6 +50,14 @@ cvar_t	*cl_forceavidemo;
 cvar_t	*cl_aviPipeFormat;
 
 cvar_t	*cl_activeAction;
+
+/* Renderer modules may keep glConfig.vidWidth/vidHeight in their private 3D
+ * render domain (for example r_renderWidth/r_renderHeight).  The client-side
+ * glconfig is consumed by WiredUI, the console, HUD and cgame screen-space
+ * projection, so it must instead expose the published native-output UI domain.
+ * Keep the last receipt generation here so live DPI/output changes are applied
+ * once at the client frame boundary as well as during vid_restart. */
+static uint64_t s_clientPresentationGeneration;
 
 cvar_t	*cl_motdString;
 
@@ -2810,8 +2819,16 @@ void CL_DownloadsComplete_Tick( void ) {
 	case DLC_P2_FLUSH_MEMORY:
 	case DLC_P3_INIT_CGAME:
 		CL_FlushMemory();
-		clientActiveApp->cgameStarted = qtrue;
-		CL_InitCGame( clientActiveApp );
+		/* CL_FlushMemory restarts hunk users.  While the app remains in
+		 * CA_LOADING, CL_StartHunkUsers owns cgame startup and may therefore
+		 * have completed CL_InitCGame already.  Do not run CG_INIT a second
+		 * time: renderer world ownership is single-load per level and correctly
+		 * rejects that duplicate.  The explicit path remains necessary for
+		 * callers whose hunk restart did not start a cgame. */
+		if ( !clientActiveApp->cgameStarted ) {
+			clientActiveApp->cgameStarted = qtrue;
+			CL_InitCGame( clientActiveApp );
+		}
 
 		clientActiveApp->dlcomplete.phase = DLC_P4_FINALIZE;
 		return;
@@ -3934,6 +3951,53 @@ static void CL_CheckConnectError( void )
 }
 
 /*
+============================
+CL_SyncPresentationResolution
+
+The renderer-facing glConfig can legitimately use the internal 3D render
+extent. Client presentation code cannot: it must remain in the receipt's
+native-output UI domain so render scaling never enlarges HUD/menu/console
+geometry. The vertical physical/logical ratio is also the console's DPI
+factor; WiredUI derives the same ratio in its compositor.
+============================
+*/
+static void CL_SyncPresentationResolution( qboolean force ) {
+	const wiredDisplayResolutionReceipt_t *receipt =
+		WiredDisplay_GetActiveResolutionReceipt();
+	const wiredDisplayExtentDomains_t *extents;
+	float consoleFactor;
+	qboolean changed;
+
+	if ( !receipt || receipt->surfaceGeneration == 0u ) return;
+	if ( !force && receipt->surfaceGeneration == s_clientPresentationGeneration ) return;
+	extents = &receipt->extents;
+	if ( extents->uiWidth == 0u || extents->uiHeight == 0u
+			|| extents->logicalWidth == 0u || extents->logicalHeight == 0u ) return;
+
+	changed = cls.glconfig.vidWidth != (int)extents->uiWidth
+		|| cls.glconfig.vidHeight != (int)extents->uiHeight
+		|| cls.glconfig.vidWidthLogical != (int)extents->logicalWidth
+		|| cls.glconfig.vidHeightLogical != (int)extents->logicalHeight;
+	cls.glconfig.vidWidth = (int)extents->uiWidth;
+	cls.glconfig.vidHeight = (int)extents->uiHeight;
+	cls.glconfig.vidWidthLogical = (int)extents->logicalWidth;
+	cls.glconfig.vidHeightLogical = (int)extents->logicalHeight;
+	cls.glconfig.windowAspect = (float)extents->uiWidth / (float)extents->uiHeight;
+	consoleFactor = (float)extents->uiHeight / (float)extents->logicalHeight;
+	cls.con_factor = consoleFactor > 0.0f ? consoleFactor : 1.0f;
+	s_clientPresentationGeneration = receipt->surfaceGeneration;
+
+	if ( changed || force ) {
+		cls.glconfigGeneration++;
+		Com_Log( SEV_INFO, LOG_CH(ch_client),
+			"client-ui-resolution generation=%llu logical=%ux%u ui=%ux%u dpi=%.3f\n",
+			(unsigned long long)receipt->surfaceGeneration,
+			extents->logicalWidth, extents->logicalHeight,
+			extents->uiWidth, extents->uiHeight, consoleFactor );
+	}
+}
+
+/*
 ==================
 CL_Frame
 ==================
@@ -3944,6 +4008,8 @@ void CL_Frame( int msec, int realMsec ) {
 	if ( !com_cl_running->integer ) {
 		return;
 	}
+
+	CL_SyncPresentationResolution( qfalse );
 
 #if FEAT_WIRED_UI
 	CL_PROF(store, WiredStore_BeginFrame());
@@ -4228,7 +4294,6 @@ static void CL_InitRenderer( void ) {
 
 	// this sets up the renderer and calls R_Init
 	re.BeginRegistration( &cls.glconfig );
-	cls.glconfigGeneration++;	// signal cgame that glconfig / screen dims may have changed
 
 #ifdef USE_RENDERER_DLOPEN
 	// Recoverable init-failure poll. The renderer mutates s_re_dll->initFailed
@@ -4243,6 +4308,11 @@ static void CL_InitRenderer( void ) {
 		return;
 	}
 #endif
+
+	/* BeginRegistration returns the renderer's private render-domain glConfig.
+	 * Rebind the client copy to the presentation receipt before any UI/font/HUD
+	 * resource or layout initialization consumes it. */
+	CL_SyncPresentationResolution( qtrue );
 
 	// Surface the renderer's GPU memory budget in /meminfo (qcommon owns the
 	// command but can't reach the renderer; this client hook bridges it).
@@ -5224,6 +5294,32 @@ static void CL_RalPipelineTest_f( void ) {
 #endif
 }
 
+static void CL_ProjectCookLighting_f( void ) {
+	char derivedRoot[MAX_OSPATH];
+	const char *path;
+	if ( !re.CookLightingProject ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_client),
+			"projectCookLighting: loaded renderer has no project-cook adapter\n" );
+		return;
+	}
+	path = FS_BuildOSPath( Cvar_VariableString( "fs_homepath" ),
+		FS_GetCurrentGameDir(), "maps" );
+	Q_strncpyz( derivedRoot, path, sizeof( derivedRoot ) );
+	if ( !Sys_Mkdir( derivedRoot ) ) {
+		Com_Log( SEV_ERROR, LOG_CH(ch_client),
+			"projectCookLighting: cannot create derived root %s\n", derivedRoot );
+		return;
+	}
+	if ( !re.CookLightingProject( derivedRoot ) ) {
+		Com_Log( SEV_ERROR, LOG_CH(ch_client),
+			"projectCookLighting: cook rejected; load an authored map with wired_probe_volume metadata\n" );
+		return;
+	}
+	Com_Log( SEV_INFO, LOG_CH(ch_client),
+		"projectCookLighting: published atomic .wlight/.wprobe sidecars under %s\n",
+		derivedRoot );
+}
+
 
 /*
 ====================
@@ -5410,7 +5506,9 @@ void CL_Init( void ) {
 	Cmd_AddCommand( "modelist", CL_ModeList_f );
 	Cmd_AddCommand( "ral_dump", CL_RalDump_f );          // dump renderer RAL backend probe / caps / memory budget
 	Cmd_AddCommand( "ral_pipeline_test", CL_RalPipelineTest_f ); // exact offscreen RAL pipeline exercise
+	Cmd_AddCommand( "projectCookLighting", CL_ProjectCookLighting_f ); // explicit editor/project lighting cook
 	Cmd_AddCommand( "waitForMap", CL_WaitForMap_f );     // yield Cbuf until map fully loaded
+	Cmd_AddCommand( "wiredFxStats", CL_WiredFx_Stats_f );
 	Cbuf_RegisterWaitForMapCheck( CL_WaitForMap_Ready );
 
 #ifndef NDEBUG
@@ -5501,6 +5599,8 @@ void CL_Shutdown( const char *finalmsg, qboolean quit ) {
 	Cmd_RemoveCommand ("serverinfo");
 	Cmd_RemoveCommand ("systeminfo");
 	Cmd_RemoveCommand ("modelist");
+	Cmd_RemoveCommand( "projectCookLighting" );
+	Cmd_RemoveCommand( "wiredFxStats" );
 
 #ifndef NDEBUG
 	Cmd_RemoveCommand( "wui_testerror" );

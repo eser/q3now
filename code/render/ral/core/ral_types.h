@@ -157,6 +157,12 @@ typedef enum {
 	RAL_FORMAT_B4G4R4A4_UNORM,
 	RAL_FORMAT_A1R5G5B5_UNORM,
 
+	// Directional static-lighting product formats. Appended to preserve every
+	// existing public enum value: RGB9E5 is the compact HDR radiance plane and
+	// RG16_SNORM is the high-precision octahedral-direction fallback plane.
+	RAL_FORMAT_E5B9G9R9_UFLOAT,
+	RAL_FORMAT_R16G16_SNORM,
+
 	RAL_FORMAT_COUNT
 } ralFormat_t;
 

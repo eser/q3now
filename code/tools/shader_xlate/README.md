@@ -74,7 +74,7 @@ node code/render/ral/backends/vulkan/renderer/shaders/compile_xlate.mjs \
   --output-dir build/translated_shaders \
   --symbol color_vert_spv
 
-# Reflect the canonical 294-artifact corpus into the native-free ABI catalog:
+# Reflect the canonical 299-artifact corpus into the native-free ABI catalog:
 node code/render/ral/backends/vulkan/renderer/shaders/compile_reflect.mjs \
   --translator build/shader_xlate \
   --output code/render/ral/backends/vulkan/renderer/shaders/spirv/ral_shader_reflection_catalog.json \

@@ -70,6 +70,7 @@ void Attack_Machinegun_Primary ( gentity_t *ent ) {
 		} else {
 			tent = G_TempEntity( tr.endpos, EV_BULLET_HIT_WALL );
 			tent->s.eventParm = DirToByte( tr.plane.normal );
+			tent->s.generic1 = BG_HitscanImpactMaterialForSurfaceFlags( tr.surfaceFlags );
 		}
 		tent->s.otherEntityNum = ent->s.number;
 
@@ -158,6 +159,7 @@ void Attack_Machinegun_Burst( gentity_t *ent ) {
 		} else {
 			tent = G_TempEntity( tr.endpos, EV_BULLET_HIT_WALL );
 			tent->s.eventParm = DirToByte( tr.plane.normal );
+			tent->s.generic1 = BG_HitscanImpactMaterialForSurfaceFlags( tr.surfaceFlags );
 		}
 		tent->s.otherEntityNum = ent->s.number;
 

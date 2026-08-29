@@ -24,9 +24,9 @@ itemDef {
 	alignX end
 	gap $spacing_xxs
 
-	itemDef { type 0vh height FIT width PERCENT 1 bind "hud.feed.0.text" text "" textalign 2 font $font_mono 10 forecolor $bone borderRight 2px $accent padding 0.2vh 0.6vw decoration visible 1 grow 0 }
-	itemDef { type 0vh height FIT width PERCENT 1 bind "hud.feed.1.text" text "" textalign 2 font $font_mono 10 forecolor $bone borderRight 2px $accent padding 0.2vh 0.6vw decoration visible 1 grow 0 }
-	itemDef { type 0vh height FIT width PERCENT 1 bind "hud.feed.2.text" text "" textalign 2 font $font_mono 10 forecolor $bone borderRight 2px $accent padding 0.2vh 0.6vw decoration visible 1 grow 0 }
-	itemDef { type 0vh height FIT width PERCENT 1 bind "hud.feed.3.text" text "" textalign 2 font $font_mono 10 forecolor $bone borderRight 2px $accent padding 0.2vh 0.6vw decoration visible 1 grow 0 }
-	itemDef { type 0vh height FIT width PERCENT 1 bind "hud.feed.4.text" text "" textalign 2 font $font_mono 10 forecolor $bone borderRight 2px $accent padding 0.2vh 0.6vw decoration visible 1 grow 0 }
+	itemDef { type 0 height FIT width PERCENT 1 bind "hud.feed.0.text" text "" textalign 2 font $font_mono 10 forecolor $bone borderRight 2px $accent padding 0.2vh 0.6vw decoration visible 1 grow 0 }
+	itemDef { type 0 height FIT width PERCENT 1 bind "hud.feed.1.text" text "" textalign 2 font $font_mono 10 forecolor $bone borderRight 2px $accent padding 0.2vh 0.6vw decoration visible 1 grow 0 }
+	itemDef { type 0 height FIT width PERCENT 1 bind "hud.feed.2.text" text "" textalign 2 font $font_mono 10 forecolor $bone borderRight 2px $accent padding 0.2vh 0.6vw decoration visible 1 grow 0 }
+	itemDef { type 0 height FIT width PERCENT 1 bind "hud.feed.3.text" text "" textalign 2 font $font_mono 10 forecolor $bone borderRight 2px $accent padding 0.2vh 0.6vw decoration visible 1 grow 0 }
+	itemDef { type 0 height FIT width PERCENT 1 bind "hud.feed.4.text" text "" textalign 2 font $font_mono 10 forecolor $bone borderRight 2px $accent padding 0.2vh 0.6vw decoration visible 1 grow 0 }
 }

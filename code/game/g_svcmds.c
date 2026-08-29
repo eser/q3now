@@ -6,6 +6,7 @@
 // this file holds commands that can be executed by the server console, but not remote clients
 
 #include "g_local.h"
+#include "g_entity_metadata.h"
 #include "wired/bots/g_wiredintel.h"
 LOG_DECLARE_CHANNEL( ch_game, "game" );
 
@@ -543,6 +544,21 @@ qboolean	ConsoleCommand( void ) {
 	if ( Q_stricmp (cmd, "entitylist") == 0 ) {
 		Svcmd_EntityList_f();
 		return qtrue;
+	}
+
+	if ( Q_stricmp( cmd, "entityinspect" ) == 0 ) {
+		char entityArg[MAX_TOKEN_CHARS];
+		char fieldArg[MAX_TOKEN_CHARS];
+		if ( trap_Argc() < 2 ) {
+			Com_Log( SEV_INFO, LOG_CH(ch_game),
+				"Usage: entityinspect <entitynum> [field]\n" );
+			return qtrue;
+		}
+		trap_Argv( 1, entityArg, sizeof( entityArg ) );
+		fieldArg[0] = '\0';
+		if ( trap_Argc() >= 3 )
+			trap_Argv( 2, fieldArg, sizeof( fieldArg ) );
+		return G_EntityMetadataInspect( atoi( entityArg ), fieldArg );
 	}
 
 	

@@ -14,6 +14,15 @@ qboolean RenderSubmission_WorldSnapshot( const renderSubmissionState_t *state,
 	return qtrue;
 }
 
+qboolean RenderSubmission_ViewSnapshot( const renderSubmissionState_t *state,
+		renderWorldSnapshot_t *outSnapshot ) {
+	if ( !state || !outSnapshot || !state->initialized
+			|| ( !state->frameOpen && !state->frameSealed )
+			|| !state->sceneRendered ) return qfalse;
+	*outSnapshot = state->worldSnapshot;
+	return qtrue;
+}
+
 qboolean RenderSubmission_LightmapMaterialName( char outName[MAX_QPATH],
 		uint32_t checksum, int lightmapIndex ) {
 	int written;

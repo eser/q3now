@@ -1,15 +1,22 @@
 // classic — the in-game HUD.
+
+#include "ui/wmenumacros.h"
 //
 // Loaded by the `hud` cvar (`hud classic`). This was briefly one of two
-// variants; the other ("modern") chased the V2 artboard and lost to it in play
+// variants; the retired one ("modern") chased the V2 artboard and lost to it in play
 // — it put the ammo readout under the weapon-select bar and dropped the ammo
 // gauge and icon because the artboard draws neither. Eser compared them live:
 // "hud modern sanki hud classic'in yanlis surumu gibi. direkt modern'i
-// silebiliriz. classic default'umuz olsun." So it did, and this is the only
-// HUD now.
+// silebiliriz. classic default'umuz olsun." So it did. Classic remains the
+// default; the newer `perspective` theme is an explicit alternative rather
+// than a replacement.
 menuDef {
 	name "classic"
-	rect 0 0 1 1
+	// The HUD composer is a real full-presentation flex canvas.  The former
+	// 1x1 carrier only worked while every leaf escaped to an authored absolute
+	// rect; native corner rows need the viewport-sized parent to distribute the
+	// top/bottom and left/right regions correctly.
+	width PERCENT 1 height PERCENT 1
 	fullScreen 0
 	visible 1
 	layer "hud"
@@ -31,35 +38,55 @@ menuDef {
 		name "hud_corner_grid"
 		type container
 		direction column
-		grow 1
-		padding 3vh 1.67vw 4vh 1.94vw
+		width PERCENT 1
+		height PERCENT 1
+		grow 0
+		padding 2vh 1.67vw 4vh 1.94vw
 
-		itemDef { name "hud_row_top" type container direction row grow 0
-			itemDef { name "hud_top_left" type container grow 1 }
-			itemDef { name "hud_top_right" type container direction column gap $spacing_sm grow 0 alignX end 
-				#include "ui/widgets/qw_hud_kill_feed.wui"
+		itemDef { name "hud_row_top" type container direction row width PERCENT 1 height 32vh grow 0
+			itemDef { name "hud_top_left" type container direction column height PERCENT 1 grow 1
+				#include "ui/widgets/qw_hud_overlay_messages.wui"
+				#include "ui/widgets/qw_hud_objectives.wui"
+			}
+			itemDef { name "hud_top_center" type container direction column width 33.33vw height PERCENT 1 alignX center grow 0
+				#include "ui/widgets/qw_hud_scoreboard_bar.wui"
+				itemDef { name "hud_top_center_gap" type container height 6vh grow 0 }
+				#include "ui/widgets/qw_hud_msgqueue.wui"
+				#include "ui/widgets/qw_hud_rewards.wui"
+				#include "ui/widgets/qw_hud_warmup.wui"
+			}
+			itemDef { name "hud_top_right" type container direction column height PERCENT 1 gap $spacing_sm grow 1 alignX end
 				#include "ui/widgets/qw_hud_telemetry.wui"
+				#include "ui/widgets/qw_hud_kill_feed.wui"
 			}
 		}
 
-		itemDef { name "hud_mid_spacer" type container grow 1 }
+		itemDef { name "hud_mid_spacer" type container direction row width PERCENT 1 grow 1 alignY center
+			itemDef { name "hud_mid_left" type container grow 1 }
+			#include "ui/widgets/qw_hud_crosshair.wui"
+			itemDef { name "hud_mid_right" type container direction column height PERCENT 1 padding 2vh 0 0 0 gap 1.2vh grow 1 alignX end
+				#include "ui/widgets/qw_hud_powerups.wui"
+				#include "ui/widgets/qw_hud_holdables_strip.wui"
+			}
+		}
 
-		itemDef { name "hud_row_bottom" type container direction row grow 0
-			itemDef { name "hud_bottom_left" type container direction column gap $spacing_sm grow 0 alignX start 
+		itemDef { name "hud_row_bottom" type container direction row width PERCENT 1 height 25vh grow 0
+			itemDef { name "hud_bottom_left" type container direction row height PERCENT 1 gap 1.25vw grow 0 alignY end
 				#include "ui/widgets/qw_hud_health_panel.wui"
 				#include "ui/widgets/qw_hud_armor_panel.wui"
 			}
-			itemDef { name "hud_bottom_gap" type container grow 1 }
-			itemDef { name "hud_bottom_right" type container direction column gap $spacing_sm grow 0 alignX end 
+			// The carousel is a flex-sized leaf. Keep it inside a real centre
+			// column so its resolved rect survives the absolute-to-flex HUD
+			// migration while remaining independent of the status-card layout.
+			itemDef { name "hud_bottom_center" type container direction column height PERCENT 1 padding 7vh 0 0 0 grow 1 alignX center
+				#include "ui/widgets/qw_hud_weapon_carousel.wui"
+			}
+			itemDef { name "hud_bottom_right" type container direction column height PERCENT 1 gap $spacing_sm grow 0 alignX end justify end
 				#include "ui/widgets/qw_hud_ammo_readout.wui"
-				#include "ui/widgets/qw_hud_weapon_placeholder.wui"
 			}
 		}
 	}
 
-	#include "ui/widgets/qw_hud_scoreboard_bar.wui"
-	#include "ui/widgets/qw_hud_weapon_carousel.wui"
-	#include "ui/widgets/qw_hud_holdables_strip.wui"
 	// HUD redesign (Eser, minimalist): the weapon-viewmodel PLACEHOLDER box is
 	// removed. The real 3D viewmodel already renders in that region; the empty
 	// dark panel only added clutter and ate field-of-view. Bottom-right is now
@@ -79,15 +106,8 @@ menuDef {
 	// the widget that already has it).
 	// #include "ui/widgets/qw_hud_scoreboard_overlay.wui"
 	// HUD redesign (Eser) Phase C — feedback + status layers:
-	#include "ui/widgets/qw_hud_msgqueue.wui"   // pickup / centerprint / FIGHT, top-center
-	#include "ui/widgets/qw_hud_powerups.wui"   // quad/haste/regen timers, mid-right stack
 	// HUD redesign (Eser) Phase D — status: medals + relocated holdables:
-	#include "ui/widgets/qw_hud_rewards.wui"    // Excellent/Impressive medals, top-center below msgqueue
 	// HUD redesign (Eser) Phase E — overlay (CTF-less scope): vote/follow/spec + warmup countdown
-	#include "ui/widgets/qw_hud_overlay_messages.wui" // vote + following + spectator, top-left
-	#include "ui/widgets/qw_hud_warmup.wui"           // "Starts in: N" countdown, top-center
-	#include "ui/widgets/qw_hud_crosshair.wui"
 	#include "ui/widgets/qw_hud_markers.wui"
 	#include "ui/widgets/qw_hud_subtitle.wui"    // localized cinematic subtitle (survives HUD-suppress)
-	#include "ui/widgets/qw_hud_objectives.wui"  // localized mission objectives (standard HUD gate)
 }

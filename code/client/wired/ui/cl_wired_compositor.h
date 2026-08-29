@@ -24,6 +24,9 @@ See docs/wiredui-compositor-spec.md for the authoritative migration spec.
 #include "../../../qcommon/arena.h"
 #include "cl_wired_layout.h"   /* wuiEasing_t — used by Anim_* API */
 
+struct wiredMenuDef_s;
+struct wiredItemDef_s;
+
 /* ── canonical window rect ────────────────────────────────────────────
  * Owned by the compositor. Initially seeds from cls.glconfig.vidWidth/Height
  * (still overloaded at this stage — a later stage restores it to canonical
@@ -162,7 +165,7 @@ int      WiredUI_CompositorGetVisiblePanelCount( void );
 /* Fetch the actual Clay-rendered rect (physical px) of an item from the
  * previous frame's layout. Returns qtrue when the element was found. Settings
  * rows inside flexbox panels are flex-positioned by Clay, so this is the
- * authoritative on-screen rect — not the legacy WUI_LayoutMenu resolvedRect. */
+ * authoritative on-screen rect — not the compatibility resolvedRect snapshot. */
 qboolean WiredUI_ClayItemRenderedRect( const struct wiredMenuDef_s *panel,
                                        const struct wiredItemDef_s *item,
                                        wuiPixelRect_t *out );

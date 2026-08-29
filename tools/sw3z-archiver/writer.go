@@ -82,8 +82,18 @@ func Create(w io.Writer) *Writer {
 // with forward slashes. Data is the uncompressed file contents. Compression
 // specifies the algorithm (CompressNone or CompressLZ4).
 func (w *Writer) AddFile(path string, data []byte, compression uint8) error {
+	return w.AddFileWithFlags(path, data, compression, 0)
+}
+
+// AddFileWithFlags adds a regular file with portable SW3Z metadata. Symlink
+// entries are intentionally not accepted by this writer; toolchain packages
+// use FlagExecutable so extraction restores their executable bit.
+func (w *Writer) AddFileWithFlags(path string, data []byte, compression uint8, flags uint8) error {
 	if w.closed {
 		return fmt.Errorf("sw3z: writer is closed")
+	}
+	if flags & ^uint8(FlagExecutable|FlagAligned) != 0 {
+		return fmt.Errorf("sw3z: unsupported regular-file flags 0x%02x", flags)
 	}
 
 	path = normalizePath(path)
@@ -118,6 +128,7 @@ func (w *Writer) AddFile(path string, data []byte, compression uint8) error {
 		uncompSize:  uint32(len(data)),
 		crc32c:      checksum,
 		compression: compression,
+		flags:       flags,
 	})
 	w.paths[path] = true
 
@@ -206,29 +217,29 @@ func (w *Writer) Close() error {
 
 func (w *Writer) writeHeader(entryCount, stringTableSize uint32, dataOffset uint64) error {
 	var buf [HeaderSize]byte
-	binary.LittleEndian.PutUint32(buf[0:4], Magic)            // magic
-	binary.LittleEndian.PutUint16(buf[4:6], Version)          // version
-	binary.LittleEndian.PutUint16(buf[6:8], 0)                // flags (no signing)
-	binary.LittleEndian.PutUint32(buf[8:12], entryCount)      // entry_count
+	binary.LittleEndian.PutUint32(buf[0:4], Magic)             // magic
+	binary.LittleEndian.PutUint16(buf[4:6], Version)           // version
+	binary.LittleEndian.PutUint16(buf[6:8], 0)                 // flags (no signing)
+	binary.LittleEndian.PutUint32(buf[8:12], entryCount)       // entry_count
 	binary.LittleEndian.PutUint32(buf[12:16], stringTableSize) // string_table_size
-	binary.LittleEndian.PutUint64(buf[16:24], dataOffset)     // data_offset
+	binary.LittleEndian.PutUint64(buf[16:24], dataOffset)      // data_offset
 	_, err := w.w.Write(buf[:])
 	return err
 }
 
 func (w *Writer) writeIndexEntry(e fileEntry, ref struct{ offset, length uint32 }, dataOffset uint64) error {
 	var buf [EntrySize]byte
-	binary.LittleEndian.PutUint64(buf[0:8], FNV1a64(e.path))          // path_hash
-	binary.LittleEndian.PutUint32(buf[8:12], ref.offset)              // string_offset
-	binary.LittleEndian.PutUint32(buf[12:16], ref.length)             // string_length
-	binary.LittleEndian.PutUint64(buf[16:24], dataOffset)             // data_offset
-	binary.LittleEndian.PutUint32(buf[24:28], uint32(len(e.data)))    // compressed_size
-	binary.LittleEndian.PutUint32(buf[28:32], e.uncompSize)           // uncompressed_size
-	binary.LittleEndian.PutUint32(buf[32:36], e.crc32c)              // crc32c
-	buf[36] = e.compression                                           // compression
-	buf[37] = e.flags                                                  // flags
-	buf[38] = e.alignment                                              // alignment
-	buf[39] = 0                                                        // reserved
+	binary.LittleEndian.PutUint64(buf[0:8], FNV1a64(e.path))       // path_hash
+	binary.LittleEndian.PutUint32(buf[8:12], ref.offset)           // string_offset
+	binary.LittleEndian.PutUint32(buf[12:16], ref.length)          // string_length
+	binary.LittleEndian.PutUint64(buf[16:24], dataOffset)          // data_offset
+	binary.LittleEndian.PutUint32(buf[24:28], uint32(len(e.data))) // compressed_size
+	binary.LittleEndian.PutUint32(buf[28:32], e.uncompSize)        // uncompressed_size
+	binary.LittleEndian.PutUint32(buf[32:36], e.crc32c)            // crc32c
+	buf[36] = e.compression                                        // compression
+	buf[37] = e.flags                                              // flags
+	buf[38] = e.alignment                                          // alignment
+	buf[39] = 0                                                    // reserved
 	_, err := w.w.Write(buf[:])
 	return err
 }

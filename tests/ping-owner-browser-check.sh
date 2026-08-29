@@ -4,6 +4,7 @@
 # Direct/global same-address ping ownership and browser consumer/cache lifecycle.
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/lib/wired_paths.sh"
 FIXTURE="$SCRIPT_DIR/ping-owner-fixture.py"
 TIMEOUT_RUNNER="$SCRIPT_DIR/run-with-timeout.py"
 
@@ -195,12 +196,11 @@ fi
 command -v python3 >/dev/null 2>&1 && [ -f "$FIXTURE" ] && [ -f "$TIMEOUT_RUNNER" ] || { echo 'SKIP: Python unavailable'; exit 77; }
 WIRED="${1:-}"; [ -n "$WIRED" ] && [ -x "$WIRED" ] || { echo 'SKIP: pass assembled Wired GUI binary'; exit 77; }
 WIRED="$(cd "$(dirname "$WIRED")" && pwd)/$(basename "$WIRED")"; WD="$(dirname "$WIRED")"
-PACK=""; for c in "$WD" "$WD/../Resources" "$WD/../../.."; do [ -f "$c/base/pax21.sw3z" ] && PACK="$(cd "$c" && pwd)" && break; done
-[ -n "$PACK" ] || { echo 'SKIP: pax21 missing'; exit 77; }; BASE="${WIRED_CONTENT_ROOT:-$PACK}"
-if [ -f "$BASE/base/pax01.sw3z" ]; then ARCH="$BASE/base/pax01.sw3z"; elif [ -f "$BASE/base/pak0.pk3" ]; then ARCH="$BASE/base/pak0.pk3"; else echo 'SKIP: base archive missing'; exit 77; fi
+PACK="$(wired_find_archive_root "$WD" "$WD/../Resources" "$WD/../../.." 2>/dev/null || true)"
+[ -n "$PACK" ] || { echo 'SKIP: current VFS archives missing'; exit 77; }
 ROOT="$(mktemp -d -t ping-owner-XXXXXX 2>/dev/null || mktemp -d)"; HOME_DIR="$ROOT/q3now-preview"; EVENTS="$ROOT/fixture.jsonl"; STDOUT="$ROOT/stdout"; PID=""
 cleanup(){ [ -n "$PID" ] && kill -TERM "$PID" 2>/dev/null || true; [ -n "$PID" ] && wait "$PID" 2>/dev/null || true; [ "${WIRED_KEEP_ARTIFACTS:-0}" = 1 ] || rm -rf "$ROOT"; }; trap cleanup EXIT INT TERM
-mkdir -p "$HOME_DIR/base"; cp "$ARCH" "$HOME_DIR/base/" || exit 1; cp "$PACK/base/pax21.sw3z" "$HOME_DIR/base/pax21.sw3z" || exit 1
+wired_link_content_into_home "$HOME_DIR" "$PACK/base" || exit 1
 python3 "$FIXTURE" --events "$EVENTS" --timeout 90 & PID=$!; for _ in $(seq 1 100); do [ -s "$EVENTS" ] && break; sleep .05; done; [ -s "$EVENTS" ] || { echo 'FAIL fixture ready'; exit 1; }
 read -r MASTER_PORT ENDPOINT_PORT <<EOF
 $(python3 - "$EVENTS" <<'PYEOF'

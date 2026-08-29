@@ -74,7 +74,7 @@ slice_between(_render "${_vk}" "void RB_DrawAtmospheric( void )"
 	"static qboolean vk_mat4_inverse")
 slice_between(_begin_frame "${_vk}" "void vk_begin_frame( const temporalBatchRequest_t *temporalRequest )"
 	"void vk_end_frame( void )")
-slice_between(_atm_struct "${_vk_h}" "\t// ── GPU-resident atmospheric weather"
+slice_between(_atm_struct "${_vk_h}" "\t// ── GPU-resident atmospheric precipitation"
 	"#if FEAT_IQM")
 
 # Atmospheric is a thin semantic adapter over the shared native-free owner.
@@ -86,9 +86,9 @@ FOREACH(_needle IN ITEMS "Vk" "qvk" "ral_vulkan")
 ENDFOREACH()
 FOREACH(_needle IN ITEMS
 		"VK_ATMOSPHERIC_FRAME_SLOT_COUNT VK_RAL_FRAME_UNIFORM_SLOT_COUNT"
-		"VK_ATMOSPHERIC_FRAME_BYTE_SIZE 208u"
+		"VK_ATMOSPHERIC_FRAME_BYTE_SIZE 1152u"
 		"VK_ATMOSPHERIC_FRAME_COMPUTE_OFFSET 96u"
-		"VK_ATMOSPHERIC_FRAME_COMPUTE_SIZE 100u"
+		"VK_ATMOSPHERIC_FRAME_COMPUTE_SIZE 1040u"
 		"typedef vkRalFrameUniformResourcesReceipt_t"
 		"typedef vkRalFrameUniformReceipt_t vkAtmosphericFrameReceipt_t;"
 		"typedef vkRalFrameUniformOwner_t vkAtmosphericFrameOwner_t;")
@@ -170,6 +170,14 @@ require_text("${_begin_frame}" "slotFenceCompleted )"
 # units. Render's whole-shadow write finalizes both disjoint CPU owners.
 require_call_count("${_compute}" "VK_AtmosphericFrameGetShadow[(]" 1
 	"compute shadow")
+require_call_count("${_compute}" "Ral_AtmosphereRuntimeAdvance[(]" 1
+	"backend-neutral atmosphere lifecycle consumer")
+require_call_count("${_compute}" "Ral_AtmosphereRuntimeReceiptExact[(]" 1
+	"exact atmosphere lifecycle receipt")
+require_text("${_compute}" "RAL_ATMOSPHERE_EVENT_RESIZE"
+	"resize invalidation")
+require_text("${_compute}" "RAL_ATMOSPHERE_EVENT_MAP_TRANSITION"
+	"timeline rewind invalidation")
 require_call_count("${_compute}" "VK_AtmosphericFramePublishCompute[(]" 1
 	"compute publication")
 STRING(FIND "${_compute}" "VK_AtmosphericFramePublishCompute" _compute_write)

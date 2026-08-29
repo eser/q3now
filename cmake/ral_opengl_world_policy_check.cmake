@@ -34,6 +34,24 @@ foreach(_needle IN ITEMS
 	"productDrawUniforms_t"
 	"UploadProductDraw"
 	"ApplyWorldView"
+	"ApplyAtmosphere"
+	"RenderSubmission_AtmosphereSnapshot"
+	"atmosphereColorVisibility"
+	"sizeof( productDrawUniforms_t ) == 256u"
+	"MaterialEmission"
+	"emissiveRadiance"
+	"Ral_LightingSurfaceBindingBuild"
+	"directionalStaticBound"
+	"surfaceLightingBindingDigest"
+	"gl.BindTextureUnit( 2u"
+	"gl.BindTextureUnit( 3u"
+	"gl.BindTextureUnit( 4u"
+	"blendedCoefficientsQ16"
+	"localSh[4][4]"
+	"offsetof( effectVertex_t, normal )"
+	"GL_SHADER_STORAGE_BUFFER_VALUE"
+	"atmosphereFroxelGrid"
+	"info->atmosphereBufferName"
 	"GL_DEPTH_TEST_VALUE"
 	"RalOpenGl_FrontendPlanReceiptExact"
 	"RenderSubmission_ModelSnapshot"
@@ -46,6 +64,9 @@ foreach(_needle IN ITEMS
 endforeach()
 if(_world MATCHES "glProgramUniform")
 	message(FATAL_ERROR "OpenGL world lowering bypassed the canonical product uniform block")
+endif()
+if(NOT _world MATCHES "gl.BindTextureUnit\\( 1u, 0u \\)")
+	message(FATAL_ERROR "OpenGL world lowering does not unbind legacy lightmap under modern authority")
 endif()
 if(_world MATCHES "code/renderer/|code/renderer2/|renderervk")
 	message(FATAL_ERROR "OpenGL world lowering reached into deprecated renderer ownership")

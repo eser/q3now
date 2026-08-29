@@ -125,6 +125,7 @@ void G_ExplodeMissile( gentity_t *ent ) {
 	dir[2] = 1;
 
 	ent->s.eType = ET_GENERAL;
+	ent->s.generic1 |= WIRED_MISSILE_EVENT_FREE_AIR;
 	G_AddEvent( ent, EV_MISSILE_MISS, DirToByte( dir ) );
 	trap_WCE_EmitEvent( WCE_PROJECTILE_IMPACT,
 	                    g_entities[ent->r.ownerNum].s.number,

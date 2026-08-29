@@ -43,7 +43,6 @@ menuDef {
 		itemDef {
 			name "callvote_root"
 			type container
-			rect 0 0 0.46 0.86
 			direction column
 			padding $popup_padding
 			gap $spacing_md
@@ -67,7 +66,7 @@ menuDef {
 			itemDef {
 				name "form_content"
 				type container
-				rect 0 0 1 0.7
+				width PERCENT 1
 				direction column
 				gap $spacing_sm
 				grow 1
@@ -87,10 +86,10 @@ menuDef {
 				itemDef { name "cat_param_label" type 0 height FIT text "PARAMETER VOTES" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
 
 				itemDef { name "row_timelimit" type spinner height FIXED 36px width PERCENT 0.95 text "Timelimit" textalign 0 font $font_sans 13 forecolor $bone cvarSpinner "ui_voteTimelimit" 5 5 30 5 visible 1 grow 0 }
-				itemDef { type 1 height FIXED 32px width PERCENT 0.95 text "Vote Timelimit" textalign 0 font $font_sans 12 forecolor $accent forecolor.active $accent visible 1 grow 0 action { exec "callvote g_timelimit $ui_voteTimelimit" ; close } }
+				itemDef { type 1 height FIXED 32px width PERCENT 0.95 text "Vote Timelimit" textalign 0 font $font_sans 12 forecolor $accent forecolor.active $accent visible 1 grow 0 action { callvotestate g_timelimit ui_voteTimelimit ; close } }
 
 				itemDef { name "row_scorelimit" type spinner height FIXED 36px width PERCENT 0.95 text "Scorelimit" textalign 0 font $font_sans 13 forecolor $bone cvarSpinner "ui_voteScorelimit" 10 10 100 10 visible 1 grow 0 }
-				itemDef { type 1 height FIXED 32px width PERCENT 0.95 text "Vote Scorelimit" textalign 0 font $font_sans 12 forecolor $accent forecolor.active $accent visible 1 grow 0 action { exec "callvote g_scorelimit $ui_voteScorelimit" ; close } }
+				itemDef { type 1 height FIXED 32px width PERCENT 0.95 text "Vote Scorelimit" textalign 0 font $font_sans 12 forecolor $accent forecolor.active $accent visible 1 grow 0 action { callvotestate g_scorelimit ui_voteScorelimit ; close } }
 
 				// ── Gametype vote — one literal callvote per type (fully wired)
 				// Numbers/names track startserver's ui_netGameType list (0-6).
@@ -193,13 +192,13 @@ menuDef {
 			itemDef {
 				name "popup_footer"
 				type container
-				rect 0 0 1 0.05
+				width PERCENT 1
 				direction row
 				gap $spacing_md
 				alignX end
 				height FIT
 
-				itemDef { type 1 rect 0 0 0.14 0.04 height FIT text "Cancel" textalign 1 font $font_sans 13 forecolor $boneDim forecolor.active $accent visible 1 grow 0 action { close } }
+				itemDef { type 1 width PERCENT 0.14 height FIT text "Cancel" textalign 1 font $font_sans 13 forecolor $boneDim forecolor.active $accent visible 1 grow 0 action { close } }
 			}
 		}
 	}

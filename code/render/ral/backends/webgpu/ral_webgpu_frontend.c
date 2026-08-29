@@ -167,6 +167,14 @@ qboolean RalWebGpu_FrontendPlanBuild( ralWebGpuRuntime_t *runtime,
 	for ( uint32_t i = 0u; entities && i < entityCount; ++i ) {
 		const refEntity_t *entity = &entities[i].entity;
 		if ( entities[i].hasTemporal ) candidate.temporalEntityCount++;
+		if ( entities[i].hasLocalIrradiance ) {
+			if ( !Ral_IrradianceEntitySampleReceiptValid( &entities[i].localIrradiance )
+					|| !Ral_LightingCompositionReceiptValid( &entities[i].lightingComposition )
+					|| entities[i].lightingComposition.diffuseAuthority
+						!= RAL_LIGHTING_DIFFUSE_AUTHORITY_LOCAL_SH ) {
+				PLAN_STAGE( 24u ); candidate.unresolvedCount++;
+			} else candidate.localIrradianceEntityCount++;
+		}
 		if ( entity->reType == RT_MODEL ) {
 			renderModelSnapshot_t model;
 			if ( entity->hModel <= 0 || !RenderSubmission_ModelSnapshot( frontend,
@@ -181,8 +189,8 @@ qboolean RalWebGpu_FrontendPlanBuild( ralWebGpuRuntime_t *runtime,
 				PLAN_STAGE( 9u ); candidate.unresolvedCount++; continue;
 			}
 			for ( uint32_t batch = 0u; batch < model.batchCount; ++batch ) {
-				qhandle_t material = entity->customShader > 0
-					? entity->customShader : model.batches[batch].material;
+				qhandle_t material = RenderSubmission_EntityBatchMaterial(
+					frontend, &entities[i], &model.batches[batch] );
 				if ( !MaterialReady( frontend, material, NULL ) )
 					{ PLAN_STAGE( 10u ); candidate.unresolvedCount++; }
 			}
@@ -200,6 +208,10 @@ qboolean RalWebGpu_FrontendPlanBuild( ralWebGpuRuntime_t *runtime,
 	if ( candidate.temporalEntityCount != submission->temporalEntityCount ) {
 		PLAN_STAGE( 13u );
 		candidate.unresolvedCount++;
+	}
+	if ( candidate.localIrradianceEntityCount
+			!= submission->localIrradianceEntityCount ) {
+		PLAN_STAGE( 25u ); candidate.unresolvedCount++;
 	}
 	ui = RenderSubmission_UiPrimitives( frontend, &uiCount );
 	if ( uiCount != submission->uiPrimitiveCount || ( uiCount && !ui ) ) {
@@ -274,6 +286,8 @@ qboolean RalWebGpu_FrontendPlanBuild( ralWebGpuRuntime_t *runtime,
 		| candidate.entityIndexCount );
 	candidate.loweringDigest = HashU64( candidate.loweringDigest,
 		( (uint64_t)candidate.polygonCount << 32u ) | candidate.lightCount );
+	candidate.loweringDigest = HashU64( candidate.loweringDigest,
+		candidate.localIrradianceEntityCount );
 	if ( !candidate.loweringDigest ) candidate.loweringDigest = 1u;
 	candidate.ready = qtrue;
 	if ( !ReceiptValid( &candidate ) ) { PLAN_STAGE( 23u ); return qfalse; }

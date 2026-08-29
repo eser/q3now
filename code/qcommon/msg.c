@@ -547,6 +547,9 @@ void MSG_WriteDeltaUsercmdKey( msg_t *msg, int key, const usercmd_t *from, const
 	if (from->angles[0] == to->angles[0] &&
 		from->angles[1] == to->angles[1] &&
 		from->angles[2] == to->angles[2] &&
+		from->aimAngles[0] == to->aimAngles[0] &&
+		from->aimAngles[1] == to->aimAngles[1] &&
+		from->aimMode == to->aimMode &&
 		from->forwardmove == to->forwardmove &&
 		from->rightmove == to->rightmove &&
 		from->upmove == to->upmove &&
@@ -560,6 +563,11 @@ void MSG_WriteDeltaUsercmdKey( msg_t *msg, int key, const usercmd_t *from, const
 	MSG_WriteDeltaKey( msg, key, from->angles[0], to->angles[0], 16 );
 	MSG_WriteDeltaKey( msg, key, from->angles[1], to->angles[1], 16 );
 	MSG_WriteDeltaKey( msg, key, from->angles[2], to->angles[2], 16 );
+	MSG_WriteDeltaKey( msg, key, from->aimMode, to->aimMode, 2 );
+	if ( to->aimMode != UCMD_AIM_NONE ) {
+		MSG_WriteDeltaKey( msg, key, from->aimAngles[0], to->aimAngles[0], 16 );
+		MSG_WriteDeltaKey( msg, key, from->aimAngles[1], to->aimAngles[1], 16 );
+	}
 	MSG_WriteDeltaKey( msg, key, from->forwardmove, to->forwardmove, 8 );
 	MSG_WriteDeltaKey( msg, key, from->rightmove, to->rightmove, 8 );
 	MSG_WriteDeltaKey( msg, key, from->upmove, to->upmove, 8 );
@@ -584,6 +592,14 @@ void MSG_ReadDeltaUsercmdKey( msg_t *msg, int key, const usercmd_t *from, usercm
 		to->angles[0] = MSG_ReadDeltaKey( msg, key, from->angles[0], 16);
 		to->angles[1] = MSG_ReadDeltaKey( msg, key, from->angles[1], 16);
 		to->angles[2] = MSG_ReadDeltaKey( msg, key, from->angles[2], 16);
+		to->aimMode = MSG_ReadDeltaKey( msg, key, from->aimMode, 2 );
+		if ( to->aimMode != UCMD_AIM_NONE ) {
+			to->aimAngles[0] = MSG_ReadDeltaKey( msg, key, from->aimAngles[0], 16 );
+			to->aimAngles[1] = MSG_ReadDeltaKey( msg, key, from->aimAngles[1], 16 );
+		} else {
+			to->aimAngles[0] = 0;
+			to->aimAngles[1] = 0;
+		}
 		to->forwardmove = MSG_ReadDeltaKey( msg, key, from->forwardmove, 8);
 		if( to->forwardmove == -128 )
 			to->forwardmove = -127;
@@ -599,6 +615,9 @@ void MSG_ReadDeltaUsercmdKey( msg_t *msg, int key, const usercmd_t *from, usercm
 		to->angles[0] = from->angles[0];
 		to->angles[1] = from->angles[1];
 		to->angles[2] = from->angles[2];
+		to->aimAngles[0] = from->aimAngles[0];
+		to->aimAngles[1] = from->aimAngles[1];
+		to->aimMode = from->aimMode;
 		to->forwardmove = from->forwardmove;
 		to->rightmove = from->rightmove;
 		to->upmove = from->upmove;

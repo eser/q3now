@@ -4,11 +4,18 @@
 // tr_init.c -- functions that are not called every frame
 
 #include "tr_local.h"
-#include "../../../../frontend/r_log.h"  // rilog-channel-mechanism — R_LOG / R_LOG_DECLARE_CHANNEL
+#include "maps/map_format_registry.h"
+#include "../../../../frontend/r_log.h" // rilog-channel-mechanism — R_LOG / R_LOG_DECLARE_CHANNEL
 #include "../../../../frontend/render_submission.h"
-#include "../../../../../qcommon/wired/wired_build_stamp.h"  // WIRED_BUILD_ID / WIRED_BUILD_DATE (this DLL's own stamp)
+#include "../../../../frontend/render_lighting_project_cook.h"
+#include "../../../../frontend/render_lighting_sidecar.h"
+#include "../../../../frontend/render_material_script.h"
+#include "../../../core/ral_atmosphere_conformance.h"
+#include "../ral_vulkan_lighting.h"
+#include "vk_ral_textures.h"
+#include "../../../../../qcommon/wired/wired_build_stamp.h" // WIRED_BUILD_ID / WIRED_BUILD_DATE (this DLL's own stamp)
 #ifdef USE_VULKAN
-#include "vk_ral_textures.h"   // \ral_textures dump cmd registration
+#include "vk_ral_textures.h" // \ral_textures dump cmd registration
 #endif
 #include <stdlib.h>
 #include <limits.h>
@@ -20,7 +27,7 @@
 // belong to per-frame command surface and route through rch_cmd. Engine
 // root `renderer` is floored to WARN; both sub-channels inherit.
 R_LOG_DECLARE_CHANNEL( rch_init, "renderer.init" );
-R_LOG_DECLARE_CHANNEL( rch_cmd,  "renderer.cmd"  );
+R_LOG_DECLARE_CHANNEL( rch_cmd, "renderer.cmd" );
 
 static int s_r_device_mod = -1;
 
@@ -36,20 +43,20 @@ static int s_r_device_mod = -1;
    Arena migration: malloc/free → Arena_Create / Arena_Destroy.
    No size, layout, or lifetime change.
    -----------------------------------------------------------------------*/
-static arena_t *s_backEndArena      = NULL;
-static void    *s_backEndStorage    = NULL;
-static size_t   s_backEndStorageSize = 0;
+static arena_t *s_backEndArena		 = NULL;
+static void	   *s_backEndStorage	 = NULL;
+static size_t	s_backEndStorageSize = 0;
 
-glconfig_t	glConfig;
+glconfig_t glConfig;
 
-qboolean	textureFilterAnisotropic;
-int			maxAnisotropy;
-int			gl_version;
-int			gl_clamp_mode;	// GL_CLAMP or GL_CLAMP_TO_EGGE
+qboolean textureFilterAnisotropic;
+int		 maxAnisotropy;
+int		 gl_version;
+int		 gl_clamp_mode; // GL_CLAMP or GL_CLAMP_TO_EGGE
 
-glstate_t	glState;
+glstate_t glState;
 
-glstatic_t	gls;
+glstatic_t gls;
 
 #ifdef USE_VULKAN
 static void VkInfo_f( void );
@@ -58,10 +65,10 @@ static void GfxInfo( void );
 static void VarInfo( void );
 static void GL_SetDefaultState( void );
 
-cvar_t	*r_flareSize;
-cvar_t	*r_flareFade;
-cvar_t	*r_flareCoeff;
-cvar_t	*r_flareTarget;
+cvar_t *r_flareSize;
+cvar_t *r_flareFade;
+cvar_t *r_flareCoeff;
+cvar_t *r_flareTarget;
 
 /* c2-shadertime-pin — dev/C2-smoke-only override of the wall-clock-driven
  * shader animation time. When non-zero, RE_RenderScene clamps the inputs
@@ -70,266 +77,277 @@ cvar_t	*r_flareTarget;
  * no override → wall-clock-driven shader animation as in normal gameplay.
  * Set by the C2 smoke harness via +set; CVAR_CHEAT keeps it dev-only and
  * non-archive so it never persists to config.cfg. */
-cvar_t	*r_pinShaderTime;
+cvar_t *r_pinShaderTime;
 
-#if FEAT_FOG_SYSTEM
-cvar_t	*r_useGlFog;
-cvar_t	*r_defaultFogParmsType;
-cvar_t	*r_globalLinearFogDrawSky;
-#endif
+cvar_t *r_useGlFog;
+cvar_t *r_defaultFogParmsType;
+cvar_t *r_globalLinearFogDrawSky;
 
-cvar_t	*r_detailTextures;
+cvar_t *r_detailTextures;
 
-cvar_t	*r_znear;
-cvar_t	*r_zproj;
-cvar_t	*r_stereoSeparation;
+cvar_t *r_znear;
+cvar_t *r_zproj;
+cvar_t *r_stereoSeparation;
 
-cvar_t	*r_skipBackEnd;
+cvar_t *r_skipBackEnd;
 
 //cvar_t	*r_anaglyphMode;
 
-cvar_t	*r_saturation;
-cvar_t	*r_dither;
-cvar_t	*r_chromaticAberration;
-cvar_t	*r_presentBits;
+cvar_t *r_saturation;
+cvar_t *r_dither;
+cvar_t *r_chromaticAberration;
+cvar_t *r_presentBits;
 #if FEAT_DEPTH_CLAMP
-cvar_t	*r_depthClamp;
+cvar_t *r_depthClamp;
 #endif
 
 static cvar_t *r_ignorehwgamma;
 
-cvar_t  *r_teleporterFlash;
+cvar_t *r_teleporterFlash;
 
-cvar_t	*r_fastsky;
-cvar_t	*r_neatsky;
-cvar_t	*r_drawSky;
-cvar_t	*r_drawSun;
-cvar_t	*r_dynamiclight;
-cvar_t  *r_mergeLightmaps;
-cvar_t  *r_lightmapAtlas;
-cvar_t  *r_loadingFpsCap;
+cvar_t *r_fastsky;
+cvar_t *r_neatsky;
+cvar_t *r_drawSky;
+cvar_t *r_drawSun;
+cvar_t *r_dynamiclight;
+cvar_t *r_mergeLightmaps;
+cvar_t *r_lightmapAtlas;
+cvar_t *r_loadingFpsCap;
 #ifdef USE_PMLIGHT
-cvar_t	*r_dlightScale;
-cvar_t	*r_dlightIntensity;
+cvar_t *r_dlightScale;
+cvar_t *r_dlightIntensity;
 #endif
-cvar_t	*r_dlightSaturation;
+cvar_t *r_dlightSaturation;
 #ifdef USE_VULKAN
-cvar_t	*r_device;
+cvar_t *r_device;
 #ifdef USE_VBO
-cvar_t	*r_vbo;
+cvar_t *r_vbo;
 #endif
-cvar_t	*r_fbo;
-cvar_t	*r_hdr;
+cvar_t *r_fbo;
+cvar_t *r_hdr;
 // legacy-mainpath-retire: r_bindlessMainPath cvar retired (declaration
 // in tr_local.h also gone). Bindless is the sole main path post-retire.
-cvar_t	*r_hdrDisplay;        // HDR10 swapchain colorspace (BT.2020 + PQ)
-cvar_t	*r_hdrPeakLuminance;  // HDR10 display peak (nits) — tonemap shoulder + metadata hint
-cvar_t	*r_hdrMinLuminance;   // HDR10 display min (nits) — metadata hint only
-cvar_t	*r_hdrAutoExposure;   // histogram auto-exposure master toggle
+cvar_t *r_hdrDisplay;		// HDR10 swapchain colorspace (BT.2020 + PQ)
+cvar_t *r_hdrPeakLuminance; // HDR10 display peak (nits) — tonemap shoulder + metadata hint
+cvar_t *r_hdrMinLuminance;	// HDR10 display min (nits) — metadata hint only
+cvar_t *r_hdrAutoExposure;	// histogram auto-exposure master toggle
 #ifndef NDEBUG
-cvar_t	*r_hdrHistogramDebug; // developer histogram readback + log (debug build only)
-cvar_t	*r_brdfLutDebug;      // developer BRDF LUT readback + log (debug build only)
-cvar_t	*r_probeSourceDebug;  // developer IBL source-cube readback + log (debug build only)
-cvar_t	*r_probeRadianceDebug;// developer IBL convolve readback + log (debug build only)
+cvar_t *r_hdrHistogramDebug;  // developer histogram readback + log (debug build only)
+cvar_t *r_brdfLutDebug;		  // developer BRDF LUT readback + log (debug build only)
+cvar_t *r_probeSourceDebug;	  // developer IBL source-cube readback + log (debug build only)
+cvar_t *r_probeRadianceDebug; // developer IBL convolve readback + log (debug build only)
 #endif
-cvar_t	*r_hdrExposureKey;    // middle-grey target
-cvar_t	*r_hdrExposurePctLow; // low histogram percentile clip
-cvar_t	*r_hdrExposurePctHigh;// high histogram percentile clip
-cvar_t	*r_hdrAdaptionRateUp; // exposure multiplier rises; output brightens
-cvar_t	*r_hdrAdaptionRateDown;// exposure multiplier falls; output darkens
-cvar_t	*r_hdrExposureMin;    // exposure clamp floor
-cvar_t	*r_hdrExposureMax;    // exposure clamp ceiling
+cvar_t *r_hdrExposureKey;	   // middle-grey target
+cvar_t *r_hdrExposurePctLow;   // low histogram percentile clip
+cvar_t *r_hdrExposurePctHigh;  // high histogram percentile clip
+cvar_t *r_hdrAdaptionRateUp;   // exposure multiplier rises; output brightens
+cvar_t *r_hdrAdaptionRateDown; // exposure multiplier falls; output darkens
+cvar_t *r_hdrExposureMin;	   // exposure clamp floor
+cvar_t *r_hdrExposureMax;	   // exposure clamp ceiling
 #if FEAT_PBR
-cvar_t	*r_pbr;
+cvar_t *r_pbr;
 #endif
-cvar_t	*r_forwardPlus;
-cvar_t	*r_unbakeStaticLights;
+cvar_t *r_forwardPlus;
+cvar_t *r_unbakeStaticLights;
 #if FEAT_SHADOW_MAPPING
-cvar_t	*r_dlightShadows;
-cvar_t	*r_dlightShadowK;
-cvar_t	*r_dlightShadowTest;
-cvar_t	*r_dlightShadowTestN;
-cvar_t	*r_dlightShadowCount;
-cvar_t	*r_dlightShadowProfile;
-cvar_t	*r_shadowAtestTest;
+cvar_t *r_dlightShadows;
+cvar_t *r_dlightShadowK;
+cvar_t *r_dlightShadowTest;
+cvar_t *r_dlightShadowTestN;
+cvar_t *r_dlightShadowCount;
+cvar_t *r_dlightShadowProfile;
+cvar_t *r_shadowAtestTest;
 #endif
-cvar_t	*r_bloom;
-cvar_t	*r_bloomPasses;
-cvar_t	*r_vrs;
+cvar_t *r_bloom;
+cvar_t *r_bloomPasses;
+cvar_t *r_vrs;
 #ifdef __APPLE__
-cvar_t	*r_vkApplePinkBarrier;
+cvar_t *r_vkApplePinkBarrier;
 #endif
-cvar_t	*r_bloomThreshold;
-cvar_t	*r_bloomIntensity;
-cvar_t	*r_bloomThresholdMode;
-cvar_t	*r_renderWidth;
-cvar_t	*r_renderHeight;
-cvar_t	*r_renderScale;
-cvar_t	*r_ext_supersample;
-cvar_t	*r_depthFade;
-cvar_t	*r_depthFadeScale;
+cvar_t *r_bloomThreshold;
+cvar_t *r_bloomIntensity;
+cvar_t *r_bloomThresholdMode;
+cvar_t *r_renderWidth;
+cvar_t *r_renderHeight;
+cvar_t *r_renderScale;
+cvar_t *r_ext_supersample;
+cvar_t *r_depthFade;
+cvar_t *r_depthFadeScale;
 #if FEAT_PARALLAX_MAPPING
-cvar_t	*r_parallaxMapping;
+cvar_t *r_parallaxMapping;
 #endif
 #if FEAT_SSAO
-cvar_t	*r_ssao;
-cvar_t	*r_ssaoRadius;
-cvar_t	*r_ssaoQuality;
-cvar_t	*r_ssaoIntensity;
-cvar_t	*r_showAO;
+cvar_t *r_ssao;
+cvar_t *r_ssaoRadius;
+cvar_t *r_ssaoQuality;
+cvar_t *r_ssaoIntensity;
+cvar_t *r_showAO;
 // SSCS (directional screen-space contact shadow) — folded into the GTAO pass,
 // gated on r_shadows (cast) + a real map sun. Tuning only; the on/off is r_shadows.
-cvar_t	*r_sscsRadius;
-cvar_t	*r_sscsStrength;
+cvar_t *r_sscsRadius;
+cvar_t *r_sscsStrength;
 #endif
-cvar_t	*r_asyncCompute;   // async-compute: GTAO on the dedicated compute queue
-cvar_t	*r_asyncTextureUpload;   // async-transfer: pipeline texture uploads on the dedicated transfer queue
+cvar_t *r_asyncCompute;		  // async-compute: GTAO on the dedicated compute queue
+cvar_t *r_asyncTextureUpload; // async-transfer: pipeline texture uploads on the dedicated transfer queue
 #if FEAT_TONEMAP
-cvar_t	*r_tonemap;
-cvar_t	*r_tonemapExposure;
-cvar_t	*r_lottes_contrast;
-cvar_t	*r_lottes_shoulder;
-cvar_t	*r_lottes_mid_in;
-cvar_t	*r_lottes_mid_out;
-cvar_t	*r_lottes_hdr_max;
+cvar_t *r_tonemap;
+cvar_t *r_tonemapExposure;
+cvar_t *r_lottes_contrast;
+cvar_t *r_lottes_shoulder;
+cvar_t *r_lottes_mid_in;
+cvar_t *r_lottes_mid_out;
+cvar_t *r_lottes_hdr_max;
 #endif
 #if FEAT_COLOR_GRADING
-cvar_t	*r_colorGrading;
-cvar_t	*r_grade_tint_r;
-cvar_t	*r_grade_tint_g;
-cvar_t	*r_grade_tint_b;
-cvar_t	*r_grade_saturation;
-cvar_t	*r_grade_contrast;
+cvar_t *r_colorGrading;
+cvar_t *r_grade_tint_r;
+cvar_t *r_grade_tint_g;
+cvar_t *r_grade_tint_b;
+cvar_t *r_grade_saturation;
+cvar_t *r_grade_contrast;
 #endif
 #if FEAT_SUNRAYS
-cvar_t	*r_drawSunRays;
-cvar_t	*r_sunRayIntensity;
-cvar_t	*r_sunRayDecay;
+cvar_t *r_drawSunRays;
+cvar_t *r_sunRayIntensity;
+cvar_t *r_sunRayDecay;
 #endif
-cvar_t	*r_smaa;
-cvar_t	*r_smaa_threshold;
-cvar_t	*r_lerpLightstyles;
+cvar_t *r_smaa;
+cvar_t *r_smaa_threshold;
+cvar_t *r_lerpLightstyles;
 #endif // USE_VULKAN
 
-cvar_t	*r_dlightBacks;
+cvar_t *r_dlightBacks;
 
-cvar_t	*r_lodbias;
-cvar_t	*r_lodscale;
+cvar_t *r_lodbias;
+cvar_t *r_lodscale;
 
-cvar_t	*r_norefresh;
-cvar_t	*r_drawEntities;
-cvar_t	*r_drawWorld;
-cvar_t	*r_speeds;
-cvar_t	*r_gpuSpeeds;
-cvar_t	*r_profileMarkers;
-cvar_t	*r_ralEffectsSmoke;
-cvar_t	*r_temporalInputTest;
-cvar_t	*r_vkDebugTiming;
-cvar_t	*r_frameSpikeUs;
-cvar_t	*r_fullbright;
-cvar_t	*r_novis;
-cvar_t	*r_nocull;
-cvar_t	*r_gpuBatchDecomp;   // host frame-current cull drives the VBO-eligible world draw
-cvar_t	*r_facePlaneCull;
-cvar_t	*r_showCluster;
-cvar_t	*r_nocurves;
+cvar_t *r_norefresh;
+cvar_t *r_drawEntities;
+cvar_t *r_drawWorld;
+cvar_t *r_speeds;
+cvar_t *r_gpuSpeeds;
+cvar_t *r_profileMarkers;
+cvar_t *r_ralEffectsSmoke;
+cvar_t *r_lightingReferenceFixture;
+cvar_t *r_temporalInputTest;
+cvar_t *r_vkDebugTiming;
+cvar_t *r_frameSpikeUs;
+cvar_t *r_fullbright;
+cvar_t *r_novis;
+cvar_t *r_nocull;
+cvar_t *r_gpuBatchDecomp; // host frame-current cull drives the VBO-eligible world draw
+cvar_t *r_facePlaneCull;
+cvar_t *r_showCluster;
+cvar_t *r_nocurves;
 
 // File-scope refexport_t. Hoisted to module-top so R_Init can check
 // s_re.initFailed (set by R_DeclineInit via vk_initialize's caps-decline path)
 // without forward-reference juggling. GetRefAPI populates this struct and
 // returns its address; cl_main keeps a pointer (s_re_dll) and polls
 // initFailed after BeginRegistration.
-static refexport_t s_re;
-static renderSubmissionState_t s_frontendSubmission;
+static refexport_t				 s_re;
+static renderSubmissionState_t	 s_frontendSubmission;
+static const mapFile_t			*s_frontendLoadedWorld;
+static renderMaterialScriptCatalog_t s_frontendMaterialScripts;
+static renderLightingSidecarReceipt_t s_frontendLightingSidecar;
+static renderIrradianceSidecarReceipt_t s_frontendIrradianceSidecar;
+static ralVulkanLighting_t *s_frontendDirectionalLighting;
+static ralVulkanLightingReceipt_t s_frontendDirectionalLightingReceipt;
 static renderSubmissionReceipt_t s_frontendPublished;
-static uint64_t s_frontendModuleGeneration;
-static uint64_t s_frontendFrameGeneration;
-static uint64_t s_frontendLastLoggedWorldDigest;
-static qboolean s_frontendLoggedCompleteReceipt;
+static uint64_t					 s_frontendModuleGeneration;
+static uint64_t					 s_frontendFrameGeneration;
+static uint64_t					 s_frontendLastLoggedWorldDigest;
+static qboolean					 s_frontendLoggedCompleteReceipt;
+static qboolean					 s_frontendLoggedIrradianceReceipt;
+static qboolean					 s_frontendEmissiveProxiesBridged;
+static cvar_t					*s_frontendEmissiveAuthorityFixture;
 
-void R_DeclineInit( void ) {
+void R_DeclineInit( void )
+{
 	s_re.initFailed = qtrue;
 }
 
-cvar_t	*r_allowExtensions;
+cvar_t *r_allowExtensions;
 
-cvar_t	*r_ext_compressed_textures;
-cvar_t	*r_ext_multitexture;
-cvar_t	*r_ext_compiled_vertex_array;
-cvar_t	*r_ext_texture_env_add;
-cvar_t	*r_ext_texture_filter_anisotropic;
-cvar_t	*r_ext_max_anisotropy;
+cvar_t *r_ext_compressed_textures;
+cvar_t *r_ext_multitexture;
+cvar_t *r_ext_compiled_vertex_array;
+cvar_t *r_ext_texture_env_add;
+cvar_t *r_ext_texture_filter_anisotropic;
+cvar_t *r_ext_max_anisotropy;
 
-cvar_t	*r_ignoreGLErrors;
+cvar_t *r_ignoreGLErrors;
 
 //cvar_t	*r_stencilBits;
-cvar_t	*r_textureBits;
+cvar_t *r_textureBits;
 // r_useRALTextures / r_useRALBuffers /
 // r_useRALPipelines retired (RAL backend unconditional now).
-cvar_t	*r_ext_alpha_to_coverage;
+cvar_t *r_ext_alpha_to_coverage;
 
-cvar_t	*r_drawBuffer;
-cvar_t	*r_lightmap;
-cvar_t	*r_entitySSBO;
-cvar_t	*r_vertexLight;
-cvar_t	*r_shadows;
-cvar_t	*r_flares;
-cvar_t	*r_lens;
-cvar_t	*r_halos;
-cvar_t	*r_nobind;
-cvar_t	*r_singleShader;
-cvar_t	*r_roundImagesDown;
-cvar_t	*r_colorMipLevels;
-cvar_t	*r_picmip;
-cvar_t	*r_nomip;
-cvar_t	*r_showTris;
-cvar_t	*r_showSky;
-cvar_t	*r_showNormals;
-cvar_t	*r_finish;
-cvar_t	*r_clear;
-cvar_t	*r_textureMode;
-cvar_t	*r_offsetFactor;
-cvar_t	*r_offsetUnits;
-cvar_t	*r_gamma;
-cvar_t	*r_intensity;
-cvar_t	*r_lockpvs;
-cvar_t	*r_noportals;
-cvar_t	*r_portalOnly;
+cvar_t *r_drawBuffer;
+cvar_t *r_lightmap;
+cvar_t *r_entitySSBO;
+cvar_t *r_vertexLight;
+cvar_t *r_shadows;
+cvar_t *r_flares;
+cvar_t *r_lens;
+cvar_t *r_halos;
+cvar_t *r_nobind;
+cvar_t *r_singleShader;
+cvar_t *r_roundImagesDown;
+cvar_t *r_colorMipLevels;
+cvar_t *r_picmip;
+cvar_t *r_nomip;
+cvar_t *r_showTris;
+cvar_t *r_showIrradianceProbes;
+cvar_t *r_showEmissiveLights;
+cvar_t *r_showSky;
+cvar_t *r_showNormals;
+cvar_t *r_finish;
+cvar_t *r_clear;
+cvar_t *r_textureMode;
+cvar_t *r_offsetFactor;
+cvar_t *r_offsetUnits;
+cvar_t *r_gamma;
+cvar_t *r_intensity;
+cvar_t *r_lockpvs;
+cvar_t *r_noportals;
+cvar_t *r_portalOnly;
 
-cvar_t	*r_subdivisions;
-cvar_t	*r_lodCurveError;
+cvar_t *r_subdivisions;
+cvar_t *r_lodCurveError;
 
-cvar_t	*r_brightness;
-cvar_t	*r_mapSaturation;
-cvar_t	*r_lightmapSaturation;
-cvar_t	*r_lightmapBoost;     // world-lightmap overbright (vanilla-x2 = 4.6 default; live)
+cvar_t *r_brightness;
+cvar_t *r_mapSaturation;
+cvar_t *r_lightmapSaturation;
+cvar_t *r_lightmapBoost; // world-lightmap overbright (vanilla-x2 = 4.6 default; live)
 
-cvar_t	*r_debugSurface;
-cvar_t	*r_simpleMipMaps;
+cvar_t *r_debugSurface;
+cvar_t *r_simpleMipMaps;
 
-cvar_t	*r_showImages;
-cvar_t	*r_defaultImage;
+cvar_t *r_showImages;
+cvar_t *r_defaultImage;
 
-cvar_t	*r_ambientScale;
-cvar_t	*r_directedScale;
-cvar_t	*r_debugLight;
-cvar_t	*r_debugSort;
-cvar_t	*r_printShaders;
-cvar_t	*r_saveFontData;
+cvar_t *r_ambientScale;
+cvar_t *r_directedScale;
+cvar_t *r_debugLight;
+cvar_t *r_debugSort;
+cvar_t *r_printShaders;
+cvar_t *r_saveFontData;
 
-cvar_t	*r_marksOnTriangleMeshes;
+cvar_t *r_marksOnTriangleMeshes;
 
-cvar_t	*r_gpuDecals;          // GPU decal projector pass (RB_DrawDecals) on/off
-cvar_t	*r_atmosphericGPU;     // GPU-resident atmospheric weather: 1 = draw, 0 = skip (no weather)
-cvar_t	*r_particles;          // GPU particle pass (RB_DrawParticles) on/off
+cvar_t *r_gpuDecals;	  // GPU decal projector pass (RB_DrawDecals) on/off
+cvar_t *r_atmosphericGPU; // GPU-resident atmospheric weather: 1 = draw, 0 = skip (no weather)
+cvar_t *r_particles;	  // GPU particle pass (RB_DrawParticles) on/off
 
-cvar_t	*r_aviMotionJpegQuality;
-cvar_t	*r_screenshotJpegQuality;
+cvar_t *r_aviMotionJpegQuality;
+cvar_t *r_screenshotJpegQuality;
 
 static cvar_t *r_maxpolys;
-static cvar_t* r_maxpolyverts;
-int		max_polys;
-int		max_polyverts;
+static cvar_t *r_maxpolyverts;
+int			   max_polys;
+int			   max_polyverts;
 
 #ifdef USE_VULKAN
 
@@ -339,21 +357,21 @@ Vk_World	vk_world;
 
 #else
 
-static char gl_extensions[ 32768 ];
+static char gl_extensions[32768];
 
-#define GLE( ret, name, ... ) ret ( APIENTRY * q##name )( __VA_ARGS__ );
-	QGL_Core_PROCS;
-	QGL_Ext_PROCS;
+#define GLE( ret, name, ... ) ret( APIENTRY *q##name )( __VA_ARGS__ );
+QGL_Core_PROCS;
+QGL_Ext_PROCS;
 #undef GLE
 
 typedef struct {
-	void **symbol;
+	void	  **symbol;
 	const char *name;
 } sym_t;
 
-#define GLE( ret, name, ... ) { (void**)&q##name, XSTRING(name) },
+#define GLE( ret, name, ... ) { (void **)&q##name, XSTRING( name ) },
 static sym_t core_procs[] = { QGL_Core_PROCS };
-static sym_t ext_procs[] = { QGL_Ext_PROCS };
+static sym_t ext_procs[]  = { QGL_Ext_PROCS };
 #undef GLE
 
 
@@ -366,12 +384,10 @@ returns NULL on success or last failed symbol name otherwise
 */
 static const char *R_ResolveSymbols( sym_t *syms, int count )
 {
-	for ( int i = 0; i < count; i++ )
-	{
-		*syms[ i ].symbol = ri.GL_GetProcAddress( syms[ i ].name );
-		if ( *syms[ i ].symbol == NULL )
-		{
-			return syms[ i ].name;
+	for ( int i = 0; i < count; i++ ) {
+		*syms[i].symbol = ri.GL_GetProcAddress( syms[i].name );
+		if ( *syms[i].symbol == NULL ) {
+			return syms[i].name;
 		}
 	}
 	return NULL;
@@ -380,9 +396,8 @@ static const char *R_ResolveSymbols( sym_t *syms, int count )
 
 static void R_ClearSymbols( sym_t *syms, int count )
 {
-	for ( int i = 0; i < count; i++ )
-	{
-		*syms[ i ].symbol = NULL;
+	for ( int i = 0; i < count; i++ ) {
+		*syms[i].symbol = NULL;
 	}
 }
 
@@ -400,13 +415,13 @@ static void R_ClearSymTables( void )
 #ifdef USE_RENDERER_DLOPEN
 void QDECL Com_Log_Impl( log_severity_t severity, int channel, const char *fmt, ... )
 {
-	char buf[ MAXPRINTMSG ];
-	va_list	argptr;
-	(void)channel;  // renderer DLL routes everything through ri.Log → "renderer"
+	char	buf[MAXPRINTMSG];
+	va_list argptr;
+	(void)channel; // renderer DLL routes everything through ri.Log → "renderer"
 	va_start( argptr, fmt );
 	vsnprintf( buf, sizeof( buf ), fmt, argptr );
 	va_end( argptr );
-	R_LOG( rch_init,severity, "%s", buf );
+	R_LOG( rch_init, severity, "%s", buf );
 }
 
 // Stub for q_shared.c's LOG_CH expansion. The renderer DLL has no access
@@ -420,8 +435,8 @@ int Log_GetChannel( const char *name )
 
 void NORETURN QDECL Com_Terminate( terminationReason_t reason, const char *fmt, ... )
 {
-	char buf[ MAXPRINTMSG ];
-	va_list	argptr;
+	char	buf[MAXPRINTMSG];
+	va_list argptr;
 	va_start( argptr, fmt );
 	vsnprintf( buf, sizeof( buf ), fmt, argptr );
 	va_end( argptr );
@@ -437,10 +452,10 @@ void NORETURN QDECL Com_Terminate( terminationReason_t reason, const char *fmt, 
 static qboolean R_HaveExtension( const char *ext )
 {
 	const char *ptr = Q_stristr( gl_extensions, ext );
-	if (ptr == NULL)
+	if ( ptr == NULL )
 		return qfalse;
-	ptr += strlen(ext);
-	return ((*ptr == ' ') || (*ptr == '\0'));  // verify its complete string.
+	ptr += strlen( ext );
+	return ( ( *ptr == ' ' ) || ( *ptr == '\0' ) ); // verify its complete string.
 }
 
 
@@ -449,42 +464,42 @@ static qboolean R_HaveExtension( const char *ext )
 */
 static void R_InitExtensions( void )
 {
-	GLint max_texture_size = 0;
-	float version;
+	GLint  max_texture_size = 0;
+	float  version;
 	size_t len;
 
-	if ( !qglGetString( GL_EXTENSIONS ) )
-	{
-		ri.Terminate( TERM_UNRECOVERABLE, "OpenGL installation is broken. Please fix video drivers and/or restart your system" );
+	if ( !qglGetString( GL_EXTENSIONS ) ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+					  "OpenGL installation is broken. Please fix video drivers and/or restart your system" );
 	}
 
 	// get our config strings
-	Q_strncpyz( glConfig.vendor_string, (char *)qglGetString (GL_VENDOR), sizeof( glConfig.vendor_string ) );
-	Q_strncpyz( glConfig.renderer_string, (char *)qglGetString (GL_RENDERER), sizeof( glConfig.renderer_string ) );
+	Q_strncpyz( glConfig.vendor_string, (char *)qglGetString( GL_VENDOR ), sizeof( glConfig.vendor_string ) );
+	Q_strncpyz( glConfig.renderer_string, (char *)qglGetString( GL_RENDERER ), sizeof( glConfig.renderer_string ) );
 	len = strlen( glConfig.renderer_string );
-	if ( len && glConfig.renderer_string[ len - 1 ] == '\n' )
-		glConfig.renderer_string[ len - 1 ] = '\0';
+	if ( len && glConfig.renderer_string[len - 1] == '\n' )
+		glConfig.renderer_string[len - 1] = '\0';
 	Q_strncpyz( glConfig.version_string, (char *)qglGetString( GL_VERSION ), sizeof( glConfig.version_string ) );
 
 	Q_strncpyz( gl_extensions, (char *)qglGetString( GL_EXTENSIONS ), sizeof( gl_extensions ) );
 	Q_strncpyz( glConfig.extensions_string, gl_extensions, sizeof( glConfig.extensions_string ) );
 
-	version = Q_atof( (const char *)qglGetString( GL_VERSION ) );
-	gl_version = (int)(version * 10.001);
+	version	   = Q_atof( (const char *)qglGetString( GL_VERSION ) );
+	gl_version = (int)( version * 10.001 );
 
 	glConfig.textureCompression = TC_NONE;
 
 	glConfig.textureEnvAddAvailable = qfalse;
 
 	textureFilterAnisotropic = qfalse;
-	maxAnisotropy = 0;
+	maxAnisotropy			 = 0;
 
-	qglLockArraysEXT = NULL;
+	qglLockArraysEXT   = NULL;
 	qglUnlockArraysEXT = NULL;
 
-	glConfig.numTextureUnits = 1;
-	qglMultiTexCoord2fARB = NULL;
-	qglActiveTextureARB = NULL;
+	glConfig.numTextureUnits  = 1;
+	qglMultiTexCoord2fARB	  = NULL;
+	qglActiveTextureARB		  = NULL;
 	qglClientActiveTextureARB = NULL;
 
 	gl_clamp_mode = GL_CLAMP; // by default
@@ -499,8 +514,7 @@ static void R_InitExtensions( void )
 	else if ( glConfig.maxTextureSize > MAX_TEXTURE_SIZE )
 		glConfig.maxTextureSize = MAX_TEXTURE_SIZE; // ResampleTexture() relies on that maximum
 
-	if ( !r_allowExtensions->integer )
-	{
+	if ( !r_allowExtensions->integer ) {
 		R_LOG( rch_init, SEV_INFO, "*** IGNORING OPENGL EXTENSIONS ***\n" );
 		return;
 	}
@@ -516,10 +530,8 @@ static void R_InitExtensions( void )
 	}
 
 	// GL_EXT_texture_compression_s3tc
-	if ( R_HaveExtension( "GL_ARB_texture_compression" ) &&
-		 R_HaveExtension( "GL_EXT_texture_compression_s3tc" ) )
-	{
-		if ( r_ext_compressed_textures->integer ){
+	if ( R_HaveExtension( "GL_ARB_texture_compression" ) && R_HaveExtension( "GL_EXT_texture_compression_s3tc" ) ) {
+		if ( r_ext_compressed_textures->integer ) {
 			glConfig.textureCompression = TC_S3TC_ARB;
 			R_LOG( rch_init, SEV_INFO, "...using GL_EXT_texture_compression_s3tc\n" );
 		} else {
@@ -558,24 +570,20 @@ static void R_InitExtensions( void )
 	}
 
 	// GL_ARB_multitexture
-	if ( R_HaveExtension( "GL_ARB_multitexture" ) )
-	{
-		if ( r_ext_multitexture->integer )
-		{
-			qglMultiTexCoord2fARB = ri.GL_GetProcAddress( "glMultiTexCoord2fARB" );
-			qglActiveTextureARB = ri.GL_GetProcAddress( "glActiveTextureARB" );
+	if ( R_HaveExtension( "GL_ARB_multitexture" ) ) {
+		if ( r_ext_multitexture->integer ) {
+			qglMultiTexCoord2fARB	  = ri.GL_GetProcAddress( "glMultiTexCoord2fARB" );
+			qglActiveTextureARB		  = ri.GL_GetProcAddress( "glActiveTextureARB" );
 			qglClientActiveTextureARB = ri.GL_GetProcAddress( "glClientActiveTextureARB" );
 
-			if ( qglActiveTextureARB && qglClientActiveTextureARB )
-			{
+			if ( qglActiveTextureARB && qglClientActiveTextureARB ) {
 				GLint textureUnits = 0;
 
 				qglGetIntegerv( GL_MAX_ACTIVE_TEXTURES_ARB, &textureUnits );
 
-				if ( textureUnits > 1 )
-				{
+				if ( textureUnits > 1 ) {
 					GLint max_shader_units = 0;
-					GLint max_bind_units = 0;
+					GLint max_bind_units   = 0;
 
 					qglGetIntegerv( GL_MAX_TEXTURE_IMAGE_UNITS, &max_shader_units );
 					qglGetIntegerv( GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &max_bind_units );
@@ -587,70 +595,51 @@ static void R_InitExtensions( void )
 
 					glConfig.numTextureUnits = MAX( textureUnits, max_bind_units );
 					R_LOG( rch_init, SEV_INFO, "...using GL_ARB_multitexture\n" );
-				}
-				else
-				{
-					qglMultiTexCoord2fARB = NULL;
-					qglActiveTextureARB = NULL;
+				} else {
+					qglMultiTexCoord2fARB	  = NULL;
+					qglActiveTextureARB		  = NULL;
 					qglClientActiveTextureARB = NULL;
 					R_LOG( rch_init, SEV_INFO, "...not using GL_ARB_multitexture, < 2 texture units\n" );
 				}
 			}
-		}
-		else
-		{
+		} else {
 			R_LOG( rch_init, SEV_INFO, "...ignoring GL_ARB_multitexture\n" );
 		}
-	}
-	else
-	{
+	} else {
 		R_LOG( rch_init, SEV_INFO, "...GL_ARB_multitexture not found\n" );
 	}
 
 	// GL_EXT_compiled_vertex_array
-	if ( R_HaveExtension( "GL_EXT_compiled_vertex_array" ) )
-	{
-		if ( r_ext_compiled_vertex_array->integer )
-		{
+	if ( R_HaveExtension( "GL_EXT_compiled_vertex_array" ) ) {
+		if ( r_ext_compiled_vertex_array->integer ) {
 			R_LOG( rch_init, SEV_INFO, "...using GL_EXT_compiled_vertex_array\n" );
-			qglLockArraysEXT = ri.GL_GetProcAddress( "glLockArraysEXT" );
+			qglLockArraysEXT   = ri.GL_GetProcAddress( "glLockArraysEXT" );
 			qglUnlockArraysEXT = ri.GL_GetProcAddress( "glUnlockArraysEXT" );
 			if ( !qglLockArraysEXT || !qglUnlockArraysEXT ) {
 				ri.Terminate( TERM_UNRECOVERABLE, "bad getprocaddress" );
 			}
-		}
-		else
-		{
+		} else {
 			R_LOG( rch_init, SEV_INFO, "...ignoring GL_EXT_compiled_vertex_array\n" );
 		}
-	}
-	else
-	{
+	} else {
 		R_LOG( rch_init, SEV_INFO, "...GL_EXT_compiled_vertex_array not found\n" );
 	}
 
-	if ( R_HaveExtension( "GL_EXT_texture_filter_anisotropic" ) )
-	{
+	if ( R_HaveExtension( "GL_EXT_texture_filter_anisotropic" ) ) {
 		if ( r_ext_texture_filter_anisotropic->integer ) {
 			qglGetIntegerv( GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &maxAnisotropy );
 			if ( maxAnisotropy <= 0 ) {
 				R_LOG( rch_init, SEV_INFO, "...GL_EXT_texture_filter_anisotropic not properly supported!\n" );
 				maxAnisotropy = 0;
-			}
-			else
-			{
+			} else {
 				R_LOG( rch_init, SEV_INFO, "...using GL_EXT_texture_filter_anisotropic (max: %i)\n", maxAnisotropy );
 				textureFilterAnisotropic = qtrue;
-				maxAnisotropy = MIN( r_ext_texture_filter_anisotropic->integer, maxAnisotropy );
+				maxAnisotropy			 = MIN( r_ext_texture_filter_anisotropic->integer, maxAnisotropy );
 			}
-		}
-		else
-		{
+		} else {
 			R_LOG( rch_init, SEV_INFO, "...ignoring GL_EXT_texture_filter_anisotropic\n" );
 		}
-	}
-	else
-	{
+	} else {
 		R_LOG( rch_init, SEV_INFO, "...GL_EXT_texture_filter_anisotropic not found\n" );
 	}
 }
@@ -678,60 +667,42 @@ static void InitOpenGL( void )
 	//		- r_gamma
 	//
 
-	if ( glConfig.vidWidth == 0 )
-	{
+	if ( glConfig.vidWidth == 0 ) {
 #ifdef USE_VULKAN
-		if ( !ri.VKimp_Init )
-		{
+		if ( !ri.VKimp_Init ) {
 			ri.Terminate( TERM_UNRECOVERABLE, "Vulkan interface is not initialized" );
 		}
 
 		// This function is responsible for initializing a valid Vulkan subsystem.
 		ri.VKimp_Init( &glConfig );
 
-		gls.windowWidth = glConfig.vidWidth;
+		gls.windowWidth	 = glConfig.vidWidth;
 		gls.windowHeight = glConfig.vidHeight;
 
-		gls.captureWidth = glConfig.vidWidth;
+		gls.captureWidth  = glConfig.vidWidth;
 		gls.captureHeight = glConfig.vidHeight;
 
 		ri.CL_SetScaling( 1.0, glConfig.vidWidth, glConfig.vidHeight );
 
-		if ( r_fbo->integer )
-		{
-			if ( r_renderScale->integer )
-			{
-				glConfig.vidWidth = r_renderWidth->integer;
+		if ( r_fbo->integer ) {
+			if ( r_renderScale->integer ) {
+				glConfig.vidWidth  = r_renderWidth->integer;
 				glConfig.vidHeight = r_renderHeight->integer;
 			}
 
-			gls.captureWidth = glConfig.vidWidth;
-			gls.captureHeight = glConfig.vidHeight;
-
+			/* Screenshot/readback remains in the native presentation domain.
+			 * glConfig now owns only the independently scaled 3D extent; binding
+			 * capture to it would shrink HUD/menu/console screenshots and undo the
+			 * output/render separation at the last step. */
 			ri.CL_SetScaling( 1.0, gls.captureWidth, gls.captureHeight );
 
-			if ( r_ext_supersample->integer )
-			{
+			if ( r_ext_supersample->integer ) {
 				glConfig.vidWidth *= 2;
 				glConfig.vidHeight *= 2;
-				// vidWidthLogical/Height are deliberately NOT scaled here.
-				//
-				// WiredUI derives dpiScale = vidHeight / vidHeightLogical
-				// (cl_wired_compositor.c) and lays Clay out on a canvas of
-				// vidWidth × vidHeight — the supersampled target. For the UI to
-				// keep the same share of the screen, everything authored in
-				// points has to grow with that canvas, so dpiScale must absorb
-				// the supersample factor: a 2x display with supersampling on
-				// wants 4, not 2. Scaling the logical size alongside would pin
-				// dpiScale to the display's own ratio and leave the entire UI at
-				// half size on the enlarged canvas.
-				//
-				// So the font path is already correct. What is NOT correct is
-				// cls.con_factor: CL_SetScaling's 2.0 reaches only the console
-				// (client/wired/ui/elements/console.c), which is the one surface
-				// that draws in raw character cells rather than through
-				// WUI_Resolve. See TASK-200.
-				ri.CL_SetScaling( 2.0, gls.captureWidth, gls.captureHeight );
+				/* This changes only the internal 3D target. The client restores
+				 * HUD/menu/console geometry and DPI from the presentation receipt;
+				 * feeding the supersample factor through CL_SetScaling would make
+				 * the console the sole UI surface to scale twice. */
 			}
 		}
 
@@ -801,46 +772,47 @@ static void InitOpenGL( void )
 GL_CheckErrors
 ==================
 */
-void GL_CheckErrors( void ) {
+void GL_CheckErrors( void )
+{
 #ifdef USE_VULKAN
 #else
-	int		err;
-    const char *s;
-    char buf[32];
+	int			err;
+	const char *s;
+	char		buf[32];
 
-    err = qglGetError();
-    if ( err == GL_NO_ERROR ) {
-        return;
-    }
-    if ( r_ignoreGLErrors->integer ) {
-        return;
-    }
-    switch( err ) {
-        case GL_INVALID_ENUM:
-            s = "GL_INVALID_ENUM";
-            break;
-        case GL_INVALID_VALUE:
-            s = "GL_INVALID_VALUE";
-            break;
-        case GL_INVALID_OPERATION:
-            s = "GL_INVALID_OPERATION";
-            break;
-        case GL_STACK_OVERFLOW:
-            s = "GL_STACK_OVERFLOW";
-            break;
-        case GL_STACK_UNDERFLOW:
-            s = "GL_STACK_UNDERFLOW";
-            break;
-        case GL_OUT_OF_MEMORY:
-            s = "GL_OUT_OF_MEMORY";
-            break;
-        default:
-            Com_sprintf( buf, sizeof(buf), "%i", err);
-            s = buf;
-            break;
-    }
+	err = qglGetError();
+	if ( err == GL_NO_ERROR ) {
+		return;
+	}
+	if ( r_ignoreGLErrors->integer ) {
+		return;
+	}
+	switch ( err ) {
+	case GL_INVALID_ENUM:
+		s = "GL_INVALID_ENUM";
+		break;
+	case GL_INVALID_VALUE:
+		s = "GL_INVALID_VALUE";
+		break;
+	case GL_INVALID_OPERATION:
+		s = "GL_INVALID_OPERATION";
+		break;
+	case GL_STACK_OVERFLOW:
+		s = "GL_STACK_OVERFLOW";
+		break;
+	case GL_STACK_UNDERFLOW:
+		s = "GL_STACK_UNDERFLOW";
+		break;
+	case GL_OUT_OF_MEMORY:
+		s = "GL_OUT_OF_MEMORY";
+		break;
+	default:
+		Com_sprintf( buf, sizeof( buf ), "%i", err );
+		s = buf;
+		break;
+	}
 
-    ri.Terminate( TERM_UNRECOVERABLE, "GL_CheckErrors: %s", s );
+	ri.Terminate( TERM_UNRECOVERABLE, "GL_CheckErrors: %s", s );
 #endif
 }
 
@@ -880,12 +852,12 @@ Stores the length of padding after a line of pixels to address padlen
 Return value must be freed with ri.Hunk_FreeTempMemory()
 ==================
 */
-static byte *RB_ReadPixels(int x, int y, int width, int height, size_t *offset, int *padlen, int lineAlign )
+static byte *RB_ReadPixels( int x, int y, int width, int height, size_t *offset, int *padlen, int lineAlign )
 {
 #ifdef USE_VULKAN
 	byte *buffer, *bufstart;
-	int	bufAlign;
-	int packAlign = 1;
+	int	  bufAlign;
+	int	  packAlign = 1;
 
 	int linelen = width * 3;
 
@@ -893,40 +865,40 @@ static byte *RB_ReadPixels(int x, int y, int width, int height, size_t *offset, 
 
 	// Allocate a few more bytes so that we can choose an alignment we like
 	//buffer = ri.Hunk_AllocateTempMemory(padwidth * height + *offset + bufAlign - 1);
-	buffer = ri.Hunk_AllocateTempMemory(width * height * 4 + *offset + bufAlign - 1);
-	bufstart = PADP((intptr_t) buffer + *offset, bufAlign);
+	buffer	 = ri.Hunk_AllocateTempMemory( width * height * 4 + *offset + bufAlign - 1 );
+	bufstart = PADP( (intptr_t)buffer + *offset, bufAlign );
 
 	vk_read_pixels( bufstart, width, height );
 
 	*offset = bufstart - buffer;
-	*padlen = PAD(linelen, packAlign) - linelen;
+	*padlen = PAD( linelen, packAlign ) - linelen;
 
 	return buffer;
 #else
 	byte *buffer, *bufstart;
-	int padwidth, linelen;
-	int	bufAlign;
+	int	  padwidth, linelen;
+	int	  bufAlign;
 	GLint packAlign;
 
-	qglGetIntegerv(GL_PACK_ALIGNMENT, &packAlign);
+	qglGetIntegerv( GL_PACK_ALIGNMENT, &packAlign );
 
 	linelen = width * 3;
 
 	if ( packAlign < lineAlign )
-		padwidth = PAD(linelen, lineAlign);
+		padwidth = PAD( linelen, lineAlign );
 	else
-		padwidth = PAD(linelen, packAlign);
+		padwidth = PAD( linelen, packAlign );
 
 	bufAlign = MAX( packAlign, 16 ); // for SIMD
 
 	// Allocate a few more bytes so that we can choose an alignment we like
-	buffer = ri.Hunk_AllocateTempMemory(padwidth * height + *offset + bufAlign - 1);
-	bufstart = PADP((intptr_t) buffer + *offset, bufAlign);
+	buffer	 = ri.Hunk_AllocateTempMemory( padwidth * height + *offset + bufAlign - 1 );
+	bufstart = PADP( (intptr_t)buffer + *offset, bufAlign );
 
 	qglReadPixels( x, y, width, height, GL_RGB, GL_UNSIGNED_BYTE, bufstart );
 
 	*offset = bufstart - buffer;
-	*padlen = PAD(linelen, packAlign) - linelen;
+	*padlen = PAD( linelen, packAlign ) - linelen;
 
 	return buffer;
 #endif
@@ -941,38 +913,36 @@ RB_TakeScreenshot
 void RB_TakeScreenshot( int x, int y, int width, int height, const char *fileName )
 {
 	const int header_size = 18;
-	byte *allbuf, *buffer;
-	byte *srcptr, *destptr;
-	byte *endline, *endmem;
-	byte temp;
-	int linelen, padlen;
-	size_t offset, memcount;
+	byte	 *allbuf, *buffer;
+	byte	 *srcptr, *destptr;
+	byte	 *endline, *endmem;
+	byte	  temp;
+	int		  linelen, padlen;
+	size_t	  offset, memcount;
 
 	offset = header_size;
 	allbuf = RB_ReadPixels( x, y, width, height, &offset, &padlen, 0 );
 	buffer = allbuf + offset - header_size;
 
 	memset( buffer, 0, header_size );
-	buffer[2] = 2;		// uncompressed type
+	buffer[2]  = 2; // uncompressed type
 	buffer[12] = width & 255;
 	buffer[13] = width >> 8;
 	buffer[14] = height & 255;
 	buffer[15] = height >> 8;
-	buffer[16] = 24;	// pixel size
+	buffer[16] = 24; // pixel size
 
 	// swap rgb to bgr and remove padding from line endings
 	linelen = width * 3;
 
 	srcptr = destptr = allbuf + offset;
-	endmem = srcptr + (linelen + padlen) * height;
+	endmem			 = srcptr + ( linelen + padlen ) * height;
 
-	while(srcptr < endmem)
-	{
+	while ( srcptr < endmem ) {
 		endline = srcptr + linelen;
 
-		while(srcptr < endline)
-		{
-			temp = srcptr[0];
+		while ( srcptr < endline ) {
+			temp	   = srcptr[0];
 			*destptr++ = srcptr[2];
 			*destptr++ = srcptr[1];
 			*destptr++ = temp;
@@ -1002,12 +972,12 @@ RB_TakeScreenshotJPEG
 */
 void RB_TakeScreenshotJPEG( int x, int y, int width, int height, const char *fileName )
 {
-	byte *buffer;
+	byte  *buffer;
 	size_t offset = 0, memcount;
-	int padlen;
+	int	   padlen;
 
-	buffer = RB_ReadPixels(x, y, width, height, &offset, &padlen, 0);
-	memcount = (width * 3 + padlen) * height;
+	buffer	 = RB_ReadPixels( x, y, width, height, &offset, &padlen, 0 );
+	memcount = ( width * 3 + padlen ) * height;
 
 	// gamma correction
 	R_GammaCorrect( buffer + offset, memcount );
@@ -1022,33 +992,33 @@ static void FillBMPHeader( byte *buffer, int width, int height, int memcount, in
 	memset( buffer, 0, header_size );
 
 	// bitmap file header
-	buffer[0] = 'B';
-	buffer[1] = 'M';
+	buffer[0]	 = 'B';
+	buffer[1]	 = 'M';
 	int filesize = memcount + header_size;
-	buffer[2] = (filesize >> 0) & 255;
-	buffer[3] = (filesize >> 8) & 255;
-	buffer[4] = (filesize >> 16) & 255;
-	buffer[5] = (filesize >> 24) & 255;
-	buffer[10] = header_size; // data offset
+	buffer[2]	 = ( filesize >> 0 ) & 255;
+	buffer[3]	 = ( filesize >> 8 ) & 255;
+	buffer[4]	 = ( filesize >> 16 ) & 255;
+	buffer[5]	 = ( filesize >> 24 ) & 255;
+	buffer[10]	 = header_size; // data offset
 
 	// bitmap info header
 	buffer[14] = 40; // size of this header
-	buffer[18] = (width >> 0) & 255;
-	buffer[19] = (width >> 8) & 255;
-	buffer[20] = (width >> 16) & 255;
-	buffer[21] = (width >> 24) & 255;
+	buffer[18] = ( width >> 0 ) & 255;
+	buffer[19] = ( width >> 8 ) & 255;
+	buffer[20] = ( width >> 16 ) & 255;
+	buffer[21] = ( width >> 24 ) & 255;
 
-	buffer[22] = (height >> 0) & 255;
-	buffer[23] = (height >> 8) & 255;
-	buffer[24] = (height >> 16) & 255;
-	buffer[25] = (height >> 24) & 255;
-	buffer[26] = 1; // number of color planes
+	buffer[22] = ( height >> 0 ) & 255;
+	buffer[23] = ( height >> 8 ) & 255;
+	buffer[24] = ( height >> 16 ) & 255;
+	buffer[25] = ( height >> 24 ) & 255;
+	buffer[26] = 1;	 // number of color planes
 	buffer[28] = 24; // bpp
 
-	buffer[34] = (memcount >> 0) & 255;
-	buffer[35] = (memcount >> 8) & 255;
-	buffer[36] = (memcount >> 16) & 255;
-	buffer[37] = (memcount >> 24) & 255;
+	buffer[34] = ( memcount >> 0 ) & 255;
+	buffer[35] = ( memcount >> 8 ) & 255;
+	buffer[36] = ( memcount >> 16 ) & 255;
+	buffer[37] = ( memcount >> 24 ) & 255;
 	buffer[38] = 0xC4; // horizontal dpi
 	buffer[39] = 0x0E; // horizontal dpi
 	buffer[42] = 0xC4; // vertical dpi
@@ -1063,16 +1033,16 @@ RB_TakeScreenshotBMP
 */
 void RB_TakeScreenshotBMP( int x, int y, int width, int height, const char *fileName, int clipboardOnly )
 {
-	byte *allbuf;
-	byte *buffer; // destination buffer
-	byte *srcptr, *srcline;
-	byte *destptr, *dstline;
-	byte *endmem;
-	byte temp[4];
-	size_t memcount, offset;
+	byte	 *allbuf;
+	byte	 *buffer; // destination buffer
+	byte	 *srcptr, *srcline;
+	byte	 *destptr, *dstline;
+	byte	 *endmem;
+	byte	  temp[4];
+	size_t	  memcount, offset;
 	const int header_size = 54; // bitmapfileheader(14) + bitmapinfoheader(40)
-	int scanlen, padlen;
-	int scanpad, len;
+	int		  scanlen, padlen;
+	int		  scanpad, len;
 
 	offset = header_size;
 
@@ -1080,17 +1050,17 @@ void RB_TakeScreenshotBMP( int x, int y, int width, int height, const char *file
 	buffer = allbuf + offset;
 
 	// scanline length
-	scanlen = PAD( width*3, 4 );
-	scanpad = scanlen - width*3;
+	scanlen	 = PAD( width * 3, 4 );
+	scanpad	 = scanlen - width * 3;
 	memcount = scanlen * height;
 
 	// swap rgb to bgr and add line padding
 	if ( scanpad == 0 && padlen == 0 ) {
 		// fastest case
 		srcptr = destptr = allbuf + offset;
-		endmem = srcptr + scanlen * height;
+		endmem			 = srcptr + scanlen * height;
 		while ( srcptr < endmem ) {
-			temp[0] = srcptr[0];
+			temp[0]	   = srcptr[0];
 			destptr[0] = srcptr[2];
 			destptr[2] = temp[0];
 			destptr += 3;
@@ -1099,25 +1069,25 @@ void RB_TakeScreenshotBMP( int x, int y, int width, int height, const char *file
 	} else {
 		// move destination buffer forward if source padding is greater than for BMP
 		if ( padlen > scanpad )
-			buffer += (width * 3 + padlen - scanlen ) * height;
+			buffer += ( width * 3 + padlen - scanlen ) * height;
 		// point on last line
-		srcptr = allbuf + offset + (height-1) * (width * 3 + padlen);
-		destptr = buffer + (height-1) * scanlen;
-		len = (width * 3 - 3);
+		srcptr	= allbuf + offset + ( height - 1 ) * ( width * 3 + padlen );
+		destptr = buffer + ( height - 1 ) * scanlen;
+		len		= ( width * 3 - 3 );
 		while ( destptr >= buffer ) {
 			srcline = srcptr + len;
 			dstline = destptr + len;
 			while ( srcline >= srcptr ) {
-				temp[2] = srcline[0];
-				temp[1] = srcline[1];
-				temp[0] = srcline[2];
+				temp[2]	   = srcline[0];
+				temp[1]	   = srcline[1];
+				temp[0]	   = srcline[2];
 				dstline[0] = temp[0];
 				dstline[1] = temp[1];
 				dstline[2] = temp[2];
-				dstline-=3;
-				srcline-=3;
+				dstline -= 3;
+				srcline -= 3;
 			}
-			srcptr -= (width * 3 + padlen);
+			srcptr -= ( width * 3 + padlen );
 			destptr -= scanlen;
 		}
 	}
@@ -1152,12 +1122,12 @@ clipboard path that lifts the earlier Windows-only restriction.
 */
 void RB_TakeScreenshotPNG( int x, int y, int width, int height, const char *fileName, int clipboardOnly )
 {
-	byte	*allbuf;
-	byte	*buffer;
-	byte	*pngBytes = NULL;
-	int		 pngLen = 0;
-	size_t	 offset = 0;
-	int		 padlen;
+	byte  *allbuf;
+	byte  *buffer;
+	byte  *pngBytes = NULL;
+	int	   pngLen	= 0;
+	size_t offset	= 0;
+	int	   padlen;
 
 	allbuf = RB_ReadPixels( x, y, width, height, &offset, &padlen, 0 );
 	buffer = allbuf + offset;
@@ -1167,9 +1137,10 @@ void RB_TakeScreenshotPNG( int x, int y, int width, int height, const char *file
 	if ( padlen != 0 ) {
 		byte *src = buffer;
 		byte *dst = buffer;
-		int  i;
+		int	  i;
 		for ( i = 0; i < height; i++ ) {
-			if ( src != dst ) memmove( dst, src, width * 3 );
+			if ( src != dst )
+				memmove( dst, src, width * 3 );
 			src += width * 3 + padlen;
 			dst += width * 3;
 		}
@@ -1206,29 +1177,30 @@ Non-static — called by the shared screenshot grammar (code/render/frontend/
 tr_screenshot.c) via the R_LevelShot hook.
 ====================
 */
-void R_LevelShot( void ) {
-	char		checkname[MAX_OSPATH];
-	byte		*buffer;
-	byte		*source, *allsource;
-	byte		*src, *dst;
-	size_t		offset = 0;
-	int			padlen;
-	int			x, y;
-	int			r, g, b;
-	float		xScale, yScale;
-	int			xx, yy;
+void R_LevelShot( void )
+{
+	char   checkname[MAX_OSPATH];
+	byte  *buffer;
+	byte  *source, *allsource;
+	byte  *src, *dst;
+	size_t offset = 0;
+	int	   padlen;
+	int	   x, y;
+	int	   r, g, b;
+	float  xScale, yScale;
+	int	   xx, yy;
 
-	Com_sprintf(checkname, sizeof(checkname), "levelshots/%s.tga", tr.world->baseName);
+	Com_sprintf( checkname, sizeof( checkname ), "levelshots/%s.tga", tr.world->baseName );
 
-	allsource = RB_ReadPixels(0, 0, gls.captureWidth, gls.captureHeight, &offset, &padlen, 0 );
-	source = allsource + offset;
+	allsource = RB_ReadPixels( 0, 0, gls.captureWidth, gls.captureHeight, &offset, &padlen, 0 );
+	source	  = allsource + offset;
 
-	buffer = ri.Hunk_AllocateTempMemory(128 * 128*3 + 18);
-	memset (buffer, 0, 18);
-	buffer[2] = 2;		// uncompressed type
+	buffer = ri.Hunk_AllocateTempMemory( 128 * 128 * 3 + 18 );
+	memset( buffer, 0, 18 );
+	buffer[2]  = 2; // uncompressed type
 	buffer[12] = 128;
 	buffer[14] = 128;
-	buffer[16] = 24;	// pixel size
+	buffer[16] = 24; // pixel size
 
 	// resample from source — drive the scale and row stride from the SAME
 	// dimensions RB_ReadPixels filled (gls.captureWidth/Height), not
@@ -1236,19 +1208,19 @@ void R_LevelShot( void ) {
 	// differ, the old stride read past the captured buffer.
 	xScale = gls.captureWidth / 512.0f;
 	yScale = gls.captureHeight / 384.0f;
-	for ( y = 0 ; y < 128 ; y++ ) {
-		for ( x = 0 ; x < 128 ; x++ ) {
+	for ( y = 0; y < 128; y++ ) {
+		for ( x = 0; x < 128; x++ ) {
 			r = g = b = 0;
-			for ( yy = 0 ; yy < 3 ; yy++ ) {
-				for ( xx = 0 ; xx < 4 ; xx++ ) {
-					src = source + (3 * gls.captureWidth + padlen) * (int)((y*3 + yy) * yScale) +
-						3 * (int) ((x*4 + xx) * xScale);
+			for ( yy = 0; yy < 3; yy++ ) {
+				for ( xx = 0; xx < 4; xx++ ) {
+					src = source + ( 3 * gls.captureWidth + padlen ) * (int)( ( y * 3 + yy ) * yScale ) +
+						  3 * (int)( ( x * 4 + xx ) * xScale );
 					r += src[0];
 					g += src[1];
 					b += src[2];
 				}
 			}
-			dst = buffer + 18 + 3 * ( y * 128 + x );
+			dst	   = buffer + 18 + 3 * ( y * 128 + x );
 			dst[0] = b / 12;
 			dst[1] = g / 12;
 			dst[2] = r / 12;
@@ -1258,10 +1230,10 @@ void R_LevelShot( void ) {
 	// gamma correction
 	R_GammaCorrect( buffer + 18, 128 * 128 * 3 );
 
-	ri.FS_WriteFile( checkname, buffer, 128 * 128*3 + 18 );
+	ri.FS_WriteFile( checkname, buffer, 128 * 128 * 3 + 18 );
 
-	ri.Hunk_FreeTempMemory(buffer);
-	ri.Hunk_FreeTempMemory(allsource);
+	ri.Hunk_FreeTempMemory( buffer );
+	ri.Hunk_FreeTempMemory( allsource );
 
 	R_LOG( rch_cmd, SEV_INFO, "Wrote %s\n", checkname );
 }
@@ -1278,9 +1250,11 @@ happens at end of RE_EndFrame. Returns qfalse when the screenshot cannot
 be taken (minimized with no FBO) or is already scheduled for that format.
 ==================
 */
-qboolean RB_ScheduleScreenshot( int typeMask, const char *fileName, qboolean silent ) {
+qboolean RB_ScheduleScreenshot( int typeMask, const char *fileName, qboolean silent )
+{
 	if ( ri.CL_IsMinimized() && !RE_CanMinimize() ) {
-		R_LOG( rch_cmd, SEV_WARN, "WARNING: unable to take screenshot when minimized because FBO is not available/enabled.\n" );
+		R_LOG( rch_cmd, SEV_WARN,
+			   "WARNING: unable to take screenshot when minimized because FBO is not available/enabled.\n" );
 		return qfalse;
 	}
 
@@ -1316,34 +1290,34 @@ RB_TakeVideoFrameCmd
 const void *RB_TakeVideoFrameCmd( const void *data )
 {
 	const videoFrameCommand_t *cmd;
-	byte		*cBuf;
-	size_t		memcount, linelen;
-	int			padwidth, avipadwidth, padlen, avipadlen;
-	int			packAlign;
+	byte					  *cBuf;
+	size_t					   memcount, linelen;
+	int						   padwidth, avipadwidth, padlen, avipadlen;
+	int						   packAlign;
 
 	cmd = (const videoFrameCommand_t *)data;
 
 #ifdef USE_VULKAN
 	packAlign = 1;
 #else
-	qglGetIntegerv(GL_PACK_ALIGNMENT, &packAlign);
+	qglGetIntegerv( GL_PACK_ALIGNMENT, &packAlign );
 #endif
 
 	linelen = cmd->width * 3;
 
 	// Alignment stuff for glReadPixels
-	padwidth = PAD(linelen, packAlign);
-	padlen = padwidth - linelen;
+	padwidth = PAD( linelen, packAlign );
+	padlen	 = padwidth - linelen;
 	// AVI line padding
-	avipadwidth = PAD(linelen, AVI_LINE_PADDING);
-	avipadlen = avipadwidth - linelen;
+	avipadwidth = PAD( linelen, AVI_LINE_PADDING );
+	avipadlen	= avipadwidth - linelen;
 
-	cBuf = PADP(cmd->captureBuffer, packAlign);
+	cBuf = PADP( cmd->captureBuffer, packAlign );
 
 #ifdef USE_VULKAN
-	vk_read_pixels(cBuf, cmd->width, cmd->height);
+	vk_read_pixels( cBuf, cmd->width, cmd->height );
 #else
-	qglReadPixels(0, 0, cmd->width, cmd->height, GL_RGB, GL_UNSIGNED_BYTE, cBuf);
+	qglReadPixels( 0, 0, cmd->width, cmd->height, GL_RGB, GL_UNSIGNED_BYTE, cBuf );
 #endif
 
 	memcount = padwidth * cmd->height;
@@ -1351,44 +1325,38 @@ const void *RB_TakeVideoFrameCmd( const void *data )
 	// gamma correction
 	R_GammaCorrect( cBuf, memcount );
 
-	if ( cmd->motionJpeg )
-	{
-		memcount = ri.CL_SaveJPGToBuffer( cmd->encodeBuffer, linelen * cmd->height,
-			r_aviMotionJpegQuality->integer,
-			cmd->width, cmd->height, cBuf, padlen );
-		ri.CL_WriteAVIVideoFrame(cmd->encodeBuffer, memcount);
-	}
-	else
-	{
+	if ( cmd->motionJpeg ) {
+		memcount = ri.CL_SaveJPGToBuffer( cmd->encodeBuffer, linelen * cmd->height, r_aviMotionJpegQuality->integer,
+										  cmd->width, cmd->height, cBuf, padlen );
+		ri.CL_WriteAVIVideoFrame( cmd->encodeBuffer, memcount );
+	} else {
 		byte *lineend, *memend;
 		byte *srcptr, *destptr;
 
-		srcptr = cBuf;
+		srcptr	= cBuf;
 		destptr = cmd->encodeBuffer;
-		memend = srcptr + memcount;
+		memend	= srcptr + memcount;
 
 		// swap R and B and remove line paddings
-		while(srcptr < memend)
-		{
+		while ( srcptr < memend ) {
 			lineend = srcptr + linelen;
-			while(srcptr < lineend)
-			{
+			while ( srcptr < lineend ) {
 				*destptr++ = srcptr[2];
 				*destptr++ = srcptr[1];
 				*destptr++ = srcptr[0];
 				srcptr += 3;
 			}
 
-			memset(destptr, '\0', avipadlen);
+			memset( destptr, '\0', avipadlen );
 			destptr += avipadlen;
 
 			srcptr += padlen;
 		}
 
-		ri.CL_WriteAVIVideoFrame(cmd->encodeBuffer, avipadwidth * cmd->height);
+		ri.CL_WriteAVIVideoFrame( cmd->encodeBuffer, avipadwidth * cmd->height );
 	}
 
-	return (const void *)(cmd + 1);
+	return (const void *)( cmd + 1 );
 }
 
 
@@ -1404,13 +1372,12 @@ static void GL_SetDefaultState( void )
 
 	glState.glStateBits = GLS_DEPTHTEST_DISABLE | GLS_DEPTHMASK_TRUE;
 #else
-	glState.currenttmu = 0;
+	glState.currenttmu	 = 0;
 	glState.currentArray = 0;
 
-	for ( int i = 0; i < MAX_TEXTURE_UNITS; i++ )
-	{
-		glState.currenttextures[ i ] = 0;
-		glState.glClientStateBits[ i ] = 0;
+	for ( int i = 0; i < MAX_TEXTURE_UNITS; i++ ) {
+		glState.currenttextures[i]	 = 0;
+		glState.glClientStateBits[i] = 0;
 	}
 
 	qglClearDepth( 1.0f );
@@ -1422,8 +1389,7 @@ static void GL_SetDefaultState( void )
 
 	// initialize downstream texture unit if we're running
 	// in a multitexture environment
-	if ( qglActiveTextureARB )
-	{
+	if ( qglActiveTextureARB ) {
 		qglActiveTextureARB( GL_TEXTURE1_ARB );
 		GL_TextureMode( r_textureMode->string );
 		GL_TexEnv( GL_MODULATE );
@@ -1469,15 +1435,15 @@ R_PrintLongString
 Workaround for ri.Printf's 1024 characters buffer limit.
 ================
 */
-static void R_PrintLongString(const char *string) {
-	char buffer[1024];
+static void R_PrintLongString( const char *string )
+{
+	char		buffer[1024];
 	const char *p;
-	int size = strlen(string);
+	int			size = strlen( string );
 
 	p = string;
-	while(size > 0)
-	{
-		Q_strncpyz(buffer, p, sizeof (buffer) );
+	while ( size > 0 ) {
+		Q_strncpyz( buffer, p, sizeof( buffer ) );
 		R_LOG( rch_init, SEV_DEBUG, "%s", buffer );
 		p += 1023;
 		size -= 1023;
@@ -1496,15 +1462,14 @@ static void GfxInfo( void )
 {
 	const char *fsstrings[] = { "windowed", "fullscreen" };
 	const char *fs;
-	int mode;
+	int			mode;
 #ifdef USE_VULKAN
 	R_LOG( rch_init, SEV_INFO, "\n" );
 	R_LOG( rch_init, SEV_INFO, "VK_VENDOR: %s\n", glConfig.vendor_string );
 	R_LOG( rch_init, SEV_INFO, "VK_RENDERER: %s\n", glConfig.renderer_string );
 	R_LOG( rch_init, SEV_INFO, "VK_VERSION: %s\n", glConfig.version_string );
 
-	if ( vk.driverNote[0] != '\0' )
-	{
+	if ( vk.driverNote[0] != '\0' ) {
 		R_LOG( rch_init, SEV_INFO, "%s", vk.driverNote );
 	}
 
@@ -1526,7 +1491,8 @@ static void GfxInfo( void )
 #endif
 
 	R_LOG( rch_init, SEV_INFO, "\n" );
-	R_LOG( rch_init, SEV_INFO, "PIXELFORMAT: color(%d-bits) Z(%d-bit) stencil(%d-bits)\n", glConfig.colorBits, glConfig.depthBits, glConfig.stencilBits );
+	R_LOG( rch_init, SEV_INFO, "PIXELFORMAT: color(%d-bits) Z(%d-bit) stencil(%d-bits)\n", glConfig.colorBits,
+		   glConfig.depthBits, glConfig.stencilBits );
 #ifdef USE_VULKAN
 	R_LOG( rch_init, SEV_INFO, " presentation: %s\n", vk_format_string( vk.present_format.format ) );
 	if ( vk.color_format != vk.present_format.format ) {
@@ -1545,44 +1511,36 @@ static void GfxInfo( void )
 	R_LOG( rch_init, SEV_INFO, "\n" );
 	vk_hdr_state_print();
 #endif
-	if ( glConfig.isFullscreen )
-	{
+	if ( glConfig.isFullscreen ) {
 		const char *modefs = ri.Cvar_VariableString( "r_modeFullscreen" );
 		if ( *modefs )
 			mode = atoi( modefs );
 		else
 			mode = ri.Cvar_VariableIntegerValue( "r_mode" );
 		fs = fsstrings[1];
-	}
-	else
-	{
+	} else {
 		mode = ri.Cvar_VariableIntegerValue( "r_mode" );
-		fs = fsstrings[0];
+		fs	 = fsstrings[0];
 	}
 
-	if ( glConfig.vidWidth != gls.windowWidth || glConfig.vidHeight != gls.windowHeight )
-	{
-		R_LOG( rch_init, SEV_INFO, "RENDER: %d x %d, MODE: %d, %d x %d %s hz:", glConfig.vidWidth, glConfig.vidHeight, mode, gls.windowWidth, gls.windowHeight, fs );
-	}
-	else
-	{
+	if ( glConfig.vidWidth != gls.windowWidth || glConfig.vidHeight != gls.windowHeight ) {
+		R_LOG( rch_init, SEV_INFO, "RENDER: %d x %d, MODE: %d, %d x %d %s hz:", glConfig.vidWidth, glConfig.vidHeight,
+			   mode, gls.windowWidth, gls.windowHeight, fs );
+	} else {
 		R_LOG( rch_init, SEV_INFO, "MODE: %d, %d x %d %s hz:", mode, gls.windowWidth, gls.windowHeight, fs );
 	}
 
-	if ( glConfig.displayFrequency )
-	{
+	if ( glConfig.displayFrequency ) {
 		R_LOG( rch_init, SEV_INFO, "%d\n", glConfig.displayFrequency );
-	}
-	else
-	{
+	} else {
 		R_LOG( rch_init, SEV_INFO, "N/A\n" );
 	}
 
 #ifndef USE_VULKAN
 	R_LOG( rch_init, SEV_INFO, "multitexture: %s\n", enablestrings[qglActiveTextureARB != 0] );
-	R_LOG( rch_init, SEV_INFO, "compiled vertex arrays: %s\n", enablestrings[qglLockArraysEXT != 0 ] );
+	R_LOG( rch_init, SEV_INFO, "compiled vertex arrays: %s\n", enablestrings[qglLockArraysEXT != 0] );
 	R_LOG( rch_init, SEV_INFO, "texenv add: %s\n", enablestrings[glConfig.textureEnvAddAvailable != 0] );
-	R_LOG( rch_init, SEV_INFO, "compressed textures: %s\n", enablestrings[glConfig.textureCompression!=TC_NONE] );
+	R_LOG( rch_init, SEV_INFO, "compressed textures: %s\n", enablestrings[glConfig.textureCompression != TC_NONE] );
 #endif
 }
 
@@ -1643,7 +1601,7 @@ static void GfxInfo_f( void )
 #ifdef USE_VULKAN
 static void VkInfo_f( void )
 {
-	R_LOG( rch_init, SEV_INFO, "max_vertex_usage: %iKb\n", (int)((vk.stats.vertex_buffer_max + 1023) / 1024) );
+	R_LOG( rch_init, SEV_INFO, "max_vertex_usage: %iKb\n", (int)( ( vk.stats.vertex_buffer_max + 1023 ) / 1024 ) );
 	R_LOG( rch_init, SEV_INFO, "max_push_size: %ib\n", vk.stats.push_size_max );
 
 	R_LOG( rch_init, SEV_INFO, "pipeline handles: %i\n", vk.pipeline_create_count );
@@ -1669,7 +1627,8 @@ static void RE_SyncRender( void )
 }
 
 
-qboolean R_ShadowDlightActive( void ) {
+qboolean R_ShadowDlightActive( void )
+{
 	// dlight-omni stays its own LATCH sub-toggle: it renders only from `cast` up AND
 	// when r_dlightShadows is on, keeping its 6-pass-per-frame cost opt-in.
 	if ( !r_shadows->integer )
@@ -1699,8 +1658,8 @@ static void R_Register( void )
 	// own copy of WIRED_BUILD_ID/DATE, so a stale renderer self-reports an older
 	// stamp than the engine. ri.Cvar_Get is the renderer→engine cvar route (no ABI
 	// change), mirroring how gfxinfo state is surfaced.
-	ri.Cvar_Get( "r_buildId",   WIRED_BUILD_ID_STR, CVAR_ROM );
-	ri.Cvar_Get( "r_buildDate", WIRED_BUILD_DATE,   CVAR_ROM );
+	ri.Cvar_Get( "r_buildId", WIRED_BUILD_ID_STR, CVAR_ROM );
+	ri.Cvar_Get( "r_buildDate", WIRED_BUILD_DATE, CVAR_ROM );
 
 	//
 	// temporary latched variables that can only change over a restart
@@ -1708,9 +1667,9 @@ static void R_Register( void )
 	r_fullbright = ri.Cvar_Get( "r_fullbright", "0", CVAR_LATCH );
 	ri.Cvar_SetDescription( r_fullbright, "Debugging tool to render the entire level without lighting." );
 
-	// r_brightness is a runtime-live pre-tonemap exposure multiplier
-	// (tonemap.frag spec constant id 1, applied on linear-radiance scene
-	// values before the tonemap operator). CVG_RENDERER group membership
+	// r_brightness is the runtime-live user visibility control. RAL derives a
+	// bounded exposure trim plus a low-luminance toe curve before tonemapping;
+	// it never changes authored light energy. CVG_RENDERER group membership
 	// wires it into tr_cmds.c's per-frame check that rebakes the
 	// post-process pipeline spec constants on modificationCount change;
 	// no vid_restart required.
@@ -1723,34 +1682,38 @@ static void R_Register( void )
 	// so 1.0 is the committed value.) Eser tunes from console
 	// if the scene reads hot on visual verification.
 	r_brightness = ri.Cvar_Get( "r_brightness", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_CheckRange( r_brightness, "0.25", "32", CV_FLOAT );
-	ri.Cvar_SetDescription( r_brightness,
-		"Pre-tonemap exposure multiplier.\n"
-		"Range 0.25-32, default 1.0 (no boost).\n"
-		"Values >1 brighten the scene; tonemap operator\n"
-		"rolls off highlights smoothly instead of clipping.\n"
-		"Values <1 darken atmospherically.\n"
-		"Live: takes effect on next frame via the renderer\n"
-		"post-process pipeline group." );
+	ri.Cvar_CheckRange( r_brightness, "0", "32", CV_FLOAT );
+	ri.Cvar_SetDescription( r_brightness, "Continuous user shadow-visibility scalar.\n"
+										  "Range 0-32, default 1.0 (authored identity).\n"
+										  "Fractional values such as 1.4 or 5.2 are preserved;\n"
+										  "there are no modes, steps or preset snapping.\n"
+										  "The bounded display curve\n"
+										  "preserves authored lighting and highlights.\n"
+										  "Live: takes effect on next frame via the renderer\n"
+										  "post-process pipeline group." );
 	ri.Cvar_SetGroup( r_brightness, CVG_RENDERER );
 
 	r_intensity = ri.Cvar_Get( "r_intensity", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_intensity, "1", "255", CV_FLOAT );
-	ri.Cvar_SetDescription( r_intensity,
-		"Global texture lighting scale (range 1-255, default 1 = off).\n"
-		"Legacy brighten-only byte-space multiply baked into sRGB texture\n"
-		"bytes at upload (R_LightScaleTexture); not domain-correct as a\n"
-		"linear lighting multiplier — kept as-is for backward compatibility\n"
-		"with user-calibrated values. Vid_restart required." );
+	ri.Cvar_SetDescription( r_intensity, "Global texture lighting scale (range 1-255, default 1 = off).\n"
+										 "Legacy brighten-only byte-space multiply baked into sRGB texture\n"
+										 "bytes at upload (R_LightScaleTexture); not domain-correct as a\n"
+										 "linear lighting multiplier — kept as-is for backward compatibility\n"
+										 "with user-calibrated values. Vid_restart required." );
 	r_singleShader = ri.Cvar_Get( "r_singleShader", "0", CVAR_CHEAT | CVAR_LATCH );
 	ri.Cvar_SetDescription( r_singleShader, "Debugging tool that only uses the default shader for all rendering." );
 	r_defaultImage = ri.Cvar_Get( "r_defaultImage", "", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
-	ri.Cvar_SetDescription( r_defaultImage, "Replace default (missing) image texture by either exact file or solid #rgb|#rrggbb background color." );
+	ri.Cvar_SetDescription(
+		r_defaultImage,
+		"Replace default (missing) image texture by either exact file or solid #rgb|#rrggbb background color." );
 
 	r_simpleMipMaps = ri.Cvar_Get( "r_simpleMipMaps", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
-	ri.Cvar_SetDescription( r_simpleMipMaps, "Whether or not to use a simple mipmapping algorithm or a more correct one:\n 0: off (proper linear filter)\n 1: on (for slower machines)" );
+	ri.Cvar_SetDescription( r_simpleMipMaps, "Whether or not to use a simple mipmapping algorithm or a more correct "
+											 "one:\n 0: off (proper linear filter)\n 1: on (for slower machines)" );
 	r_vertexLight = ri.Cvar_Get( "r_vertexLight", "0", CVAR_ARCHIVE | CVAR_LATCH );
-	ri.Cvar_SetDescription( r_vertexLight, "Set to 1 to use vertex light instead of lightmaps, collapse all multi-stage shaders into single-stage ones, might cause rendering artifacts." );
+	ri.Cvar_SetDescription( r_vertexLight,
+							"Set to 1 to use vertex light instead of lightmaps, collapse all multi-stage shaders into "
+							"single-stage ones, might cause rendering artifacts." );
 
 	r_picmip = ri.Cvar_Get( "r_picmip", "0", CVAR_ARCHIVE | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_picmip, "0", "16", CV_INTEGER );
@@ -1762,10 +1725,12 @@ static void R_Register( void )
 
 	r_neatsky = ri.Cvar_Get( "r_neatsky", "0", CVAR_ARCHIVE | CVAR_LATCH );
 	ri.Cvar_SetDescription( r_neatsky, "Disables texture mipping for skies." );
-	r_roundImagesDown = ri.Cvar_Get ("r_roundImagesDown", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
+	r_roundImagesDown = ri.Cvar_Get( "r_roundImagesDown", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_SetDescription( r_roundImagesDown, "When images are scaled, round images down instead of up." );
-	r_colorMipLevels = ri.Cvar_Get ("r_colorMipLevels", "0", CVAR_LATCH );
-	ri.Cvar_SetDescription( r_colorMipLevels, "Debugging tool to artificially color different mipmap levels so that they are more apparent." );
+	r_colorMipLevels = ri.Cvar_Get( "r_colorMipLevels", "0", CVAR_LATCH );
+	ri.Cvar_SetDescription(
+		r_colorMipLevels,
+		"Debugging tool to artificially color different mipmap levels so that they are more apparent." );
 	r_detailTextures = ri.Cvar_Get( "r_detailtextures", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_SetDescription( r_detailTextures, "Enables usage of shader stages flagged as detail." );
 	r_textureBits = ri.Cvar_Get( "r_textureBits", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
@@ -1785,23 +1750,22 @@ static void R_Register( void )
 	// atlas pack to be built. Vulkan descriptor sets still benefit from
 	// fewer image views, so leave this on by default.
 	r_lightmapAtlas = ri.Cvar_Get( "r_lightmapAtlas", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
-	ri.Cvar_SetDescription( r_lightmapAtlas,
-		"Pack individual BSP lightmaps into larger atlas textures.\n"
-		" 1: pack into atlases (default, fewer image/descriptor allocations)\n"
-		" 0: one image per lightmap (legacy behaviour)\n"
-		" Works together with r_mergeLightmaps." );
+	ri.Cvar_SetDescription( r_lightmapAtlas, "Pack individual BSP lightmaps into larger atlas textures.\n"
+											 " 1: pack into atlases (default, fewer image/descriptor allocations)\n"
+											 " 0: one image per lightmap (legacy behaviour)\n"
+											 " Works together with r_mergeLightmaps." );
 
 	// cap presentation while map is loading to reduce CPU/GPU contention
 	// with BSP parse, lightmap upload, shader compile.
 	r_loadingFpsCap = ri.Cvar_Get( "r_loadingFpsCap", "10", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_loadingFpsCap, "0", "60", CV_INTEGER );
-	ri.Cvar_SetDescription( r_loadingFpsCap,
-		"Maximum render backend frames per second while loading a map.\n"
-		" 0: no cap (legacy behaviour)\n"
-		" 1-60: cap presentation to this rate. Default 10." );
-#if defined (USE_VULKAN) && defined (USE_VBO)
+	ri.Cvar_SetDescription( r_loadingFpsCap, "Maximum render backend frames per second while loading a map.\n"
+											 " 0: no cap (legacy behaviour)\n"
+											 " 1-60: cap presentation to this rate. Default 10." );
+#if defined( USE_VULKAN ) && defined( USE_VBO )
 	r_vbo = ri.Cvar_Get( "r_vbo", "1", CVAR_ARCHIVE | CVAR_LATCH );
-	ri.Cvar_SetDescription( r_vbo, "Use Vertex Buffer Objects to cache static map geometry, may improve FPS on modern GPUs, increases hunk memory usage by 15-30MB (map-dependent)." );
+	ri.Cvar_SetDescription( r_vbo, "Use Vertex Buffer Objects to cache static map geometry, may improve FPS on modern "
+								   "GPUs, increases hunk memory usage by 15-30MB (map-dependent)." );
 #endif
 
 	// r_mapSaturation is baked into world texture pixel data and
@@ -1810,29 +1774,27 @@ static void R_Register( void )
 	// Vid_restart required.
 	r_mapSaturation = ri.Cvar_Get( "r_mapSaturation", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_mapSaturation, "0", "2", CV_FLOAT );
-	ri.Cvar_SetDescription( r_mapSaturation,
-		"World texture and fog saturation multiplier baked\n"
-		"into pixel data at BSP load. Range 0.0-2.0,\n"
-		"default 1.0.\n"
-		"  0.0 = grayscale\n"
-		"  1.0 = full color (identity)\n"
-		"  2.0 = super-saturated (clamps on 8-bit)\n"
-		"Vid_restart required. Independent of\n"
-		"r_lightmapSaturation and r_saturation." );
+	ri.Cvar_SetDescription( r_mapSaturation, "World texture and fog saturation multiplier baked\n"
+											 "into pixel data at BSP load. Range 0.0-2.0,\n"
+											 "default 1.0.\n"
+											 "  0.0 = grayscale\n"
+											 "  1.0 = full color (identity)\n"
+											 "  2.0 = super-saturated (clamps on 8-bit)\n"
+											 "Vid_restart required. Independent of\n"
+											 "r_lightmapSaturation and r_saturation." );
 
 	// r_lightmapSaturation is baked into lightmap pixel data at BSP
 	// load (R_ColorShiftLightingBytes). World textures and fog are
 	// NOT affected — see r_mapSaturation. Vid_restart required.
 	r_lightmapSaturation = ri.Cvar_Get( "r_lightmapSaturation", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_lightmapSaturation, "0", "2", CV_FLOAT );
-	ri.Cvar_SetDescription( r_lightmapSaturation,
-		"Lightmap saturation multiplier baked into pixel\n"
-		"data at BSP load. Range 0.0-2.0, default 1.0.\n"
-		"  0.0 = grayscale\n"
-		"  1.0 = full color (identity)\n"
-		"  2.0 = super-saturated (clamps on 8-bit)\n"
-		"Vid_restart required. Independent of\n"
-		"r_mapSaturation and r_saturation." );
+	ri.Cvar_SetDescription( r_lightmapSaturation, "Lightmap saturation multiplier baked into pixel\n"
+												  "data at BSP load. Range 0.0-2.0, default 1.0.\n"
+												  "  0.0 = grayscale\n"
+												  "  1.0 = full color (identity)\n"
+												  "  2.0 = super-saturated (clamps on 8-bit)\n"
+												  "Vid_restart required. Independent of\n"
+												  "r_mapSaturation and r_saturation." );
 
 	// World-lightmap overbright. The base-pass world shader multiplies
 	// diffuse × lightmap × r_lightmapBoost in LINEAR space. Vanilla Quake 3
@@ -1848,16 +1810,16 @@ static void R_Register( void )
 	//   ~21  = vanilla ×4 (r_overBrightBits 2; usually too hot)
 	r_lightmapBoost = ri.Cvar_Get( "r_lightmapBoost", "4.6", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_lightmapBoost, "1", "24", CV_FLOAT );
-	ri.Cvar_SetDescription( r_lightmapBoost,
-		"World-lightmap overbright (linear-domain boost equivalent of vanilla\n"
-		"overbright-bits). diffuse × lightmap × this, in linear space.\n"
-		"  4.6  = vanilla ×2 (default; 2^2.2 — matches vanilla brightness)\n"
-		"  ~21  = vanilla ×4 (usually too hot)\n"
-		"  2.0  = the old under-brightened value (~1.46× darker than vanilla)\n"
-		"Range 1.0-24.0. Requires \\r_fbo 1. Live: takes effect next frame." );
+	ri.Cvar_SetDescription( r_lightmapBoost, "World-lightmap overbright (linear-domain boost equivalent of vanilla\n"
+											 "overbright-bits). diffuse × lightmap × this, in linear space.\n"
+											 "  4.6  = vanilla ×2 (default; 2^2.2 — matches vanilla brightness)\n"
+											 "  ~21  = vanilla ×4 (usually too hot)\n"
+											 "  2.0  = the old under-brightened value (~1.46× darker than vanilla)\n"
+											 "Range 1.0-24.0. Requires \\r_fbo 1. Live: takes effect next frame." );
 
 	r_subdivisions = ri.Cvar_Get( "r_subdivisions", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
-	ri.Cvar_SetDescription(r_subdivisions, "Distance to subdivide bezier curved surfaces. Higher values mean less subdivision and less geometric complexity.");
+	ri.Cvar_SetDescription( r_subdivisions, "Distance to subdivide bezier curved surfaces. Higher values mean less "
+											"subdivision and less geometric complexity." );
 
 	r_maxpolys = ri.Cvar_Get( "r_maxpolys", XSTRING( MAX_POLYS ), CVAR_LATCH );
 	// Bound the upper end (and forbid <= 0): these feed sizeof(srfPoly_t)*max_polys
@@ -1874,27 +1836,37 @@ static void R_Register( void )
 	//
 	r_lodCurveError = ri.Cvar_Get( "r_lodCurveError", "250", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_lodCurveError, "-1", "8192", CV_FLOAT );
-	ri.Cvar_SetDescription( r_lodCurveError, "Level of detail error on curved surface grids. Higher values result in better quality at a distance." );
+	ri.Cvar_SetDescription(
+		r_lodCurveError,
+		"Level of detail error on curved surface grids. Higher values result in better quality at a distance." );
 	r_lodbias = ri.Cvar_Get( "r_lodbias", "-2", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_SetDescription( r_lodbias, "Sets the level of detail of in-game models:\n -2: Ultra (further delays LOD transition in the distance)\n -1: Very High (delays LOD transition in the distance)\n 0: High\n 1: Medium\n 2: Low" );
-	r_flares = ri.Cvar_Get ("r_flares", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_SetDescription(
+		r_lodbias, "Sets the level of detail of in-game models:\n -2: Ultra (further delays LOD transition in the "
+				   "distance)\n -1: Very High (delays LOD transition in the distance)\n 0: High\n 1: Medium\n 2: Low" );
+	r_flares = ri.Cvar_Get( "r_flares", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_SetDescription( r_flares, "Enables halo effects on light sources." );
-	r_lens = ri.Cvar_Get ("r_lens", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	r_lens = ri.Cvar_Get( "r_lens", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_lens, "0", "1", CV_INTEGER );
-	ri.Cvar_SetDescription( r_lens, "Depth-sampled lens occlusion oracle for flares (replaces the per-flare dot-probe with a smooth N-tap visibility). Requires r_fbo 1 + r_flares 1." );
-	r_halos = ri.Cvar_Get ("r_halos", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_SetDescription( r_halos, "Enables direction-independent halo glows on lights, independent of r_flares surface flares." );
+	ri.Cvar_SetDescription( r_lens, "Depth-sampled lens occlusion oracle for flares (replaces the per-flare dot-probe "
+									"with a smooth N-tap visibility). Requires r_fbo 1 + r_flares 1." );
+	r_halos = ri.Cvar_Get( "r_halos", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_SetDescription(
+		r_halos, "Enables direction-independent halo glows on lights, independent of r_flares surface flares." );
 	r_znear = ri.Cvar_Get( "r_znear", "4", CVAR_CHEAT );
 	ri.Cvar_CheckRange( r_znear, "0.001", "200", CV_FLOAT );
-	ri.Cvar_SetDescription( r_znear, "Viewport distance from view origin (how close objects can be to the player before they're clipped out of the scene)." );
+	ri.Cvar_SetDescription( r_znear, "Viewport distance from view origin (how close objects can be to the player "
+									 "before they're clipped out of the scene)." );
 	r_zproj = ri.Cvar_Get( "r_zproj", "64", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_SetDescription( r_zproj, "Projected viewport frustum." );
 	r_stereoSeparation = ri.Cvar_Get( "r_stereoSeparation", "64", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_SetDescription( r_stereoSeparation, "Control eye separation. Resulting separation is \\r_zproj divided by this value in standard units." );
+	ri.Cvar_SetDescription(
+		r_stereoSeparation,
+		"Control eye separation. Resulting separation is \\r_zproj divided by this value in standard units." );
 	r_ignoreGLErrors = ri.Cvar_Get( "r_ignoreGLErrors", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_SetDescription( r_ignoreGLErrors, "Ignore OpenGL errors." );
 	r_teleporterFlash = ri.Cvar_Get( "r_teleporterFlash", "1", CVAR_ARCHIVE );
-	ri.Cvar_SetDescription( r_teleporterFlash, "Show a white screen instead of a black screen when being teleported in hyperspace." );
+	ri.Cvar_SetDescription( r_teleporterFlash,
+							"Show a white screen instead of a black screen when being teleported in hyperspace." );
 	r_fastsky = ri.Cvar_Get( "r_fastsky", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_SetDescription( r_fastsky, "Draw flat colored skies." );
 	// sky renders by default (modernized-experience default),
@@ -1915,7 +1887,8 @@ static void R_Register( void )
 	// `!= 0`; every "MD3 too" site asks `== 2`.
 	r_dynamiclight = ri.Cvar_Get( "r_dynamiclight", "2", CVAR_ARCHIVE );
 	ri.Cvar_CheckRange( r_dynamiclight, "0", "2", CV_INTEGER );
-	ri.Cvar_SetDescription( r_dynamiclight, "Dynamic lights:\n 0: off\n 1: per-pixel, world only\n 2: per-pixel, world + models" );
+	ri.Cvar_SetDescription( r_dynamiclight,
+							"Dynamic lights:\n 0: off\n 1: per-pixel, world only\n 2: per-pixel, world + models" );
 #ifdef USE_PMLIGHT
 	r_dlightScale = ri.Cvar_Get( "r_dlightScale", "0.5", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_dlightScale, "0.1", "1", CV_FLOAT );
@@ -1929,17 +1902,28 @@ static void R_Register( void )
 	ri.Cvar_CheckRange( r_dlightSaturation, "0", "1", CV_FLOAT );
 
 	r_dlightBacks = ri.Cvar_Get( "r_dlightBacks", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_SetDescription( r_dlightBacks, "Whether or not dynamic lights should light up back-face culled geometry, affects only VQ3 dynamic lights." );
+	ri.Cvar_SetDescription(
+		r_dlightBacks,
+		"Whether or not dynamic lights should light up back-face culled geometry, affects only VQ3 dynamic lights." );
 	r_finish = ri.Cvar_Get( "r_finish", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_SetDescription( r_finish, "Force a glFinish call after rendering a scene." );
 	r_textureMode = ri.Cvar_Get( "r_textureMode", "GL_LINEAR_MIPMAP_NEAREST", CVAR_ARCHIVE );
-	ri.Cvar_SetDescription( r_textureMode, "Texture interpolation mode:\n GL_NEAREST: Nearest neighbor interpolation and will therefore appear similar to Quake II except with the added colored lighting\n GL_LINEAR: Linear interpolation and will appear to blend in objects that are closer than the resolution that the textures are set as\n GL_NEAREST_MIPMAP_NEAREST: Nearest neighbor interpolation with mipmapping for bilinear hardware, mipmapping will blend objects that are farther away than the resolution that they are set as\n GL_LINEAR_MIPMAP_NEAREST: Linear interpolation with mipmapping for bilinear hardware\n GL_NEAREST_MIPMAP_LINEAR: Nearest neighbor interpolation with mipmapping for trilinear hardware\n GL_LINEAR_MIPMAP_LINEAR: Linear interpolation with mipmapping for trilinear hardware" );
+	ri.Cvar_SetDescription(
+		r_textureMode,
+		"Texture interpolation mode:\n GL_NEAREST: Nearest neighbor interpolation and will therefore appear similar to "
+		"Quake II except with the added colored lighting\n GL_LINEAR: Linear interpolation and will appear to blend in "
+		"objects that are closer than the resolution that the textures are set as\n GL_NEAREST_MIPMAP_NEAREST: Nearest "
+		"neighbor interpolation with mipmapping for bilinear hardware, mipmapping will blend objects that are farther "
+		"away than the resolution that they are set as\n GL_LINEAR_MIPMAP_NEAREST: Linear interpolation with "
+		"mipmapping for bilinear hardware\n GL_NEAREST_MIPMAP_LINEAR: Nearest neighbor interpolation with mipmapping "
+		"for trilinear hardware\n GL_LINEAR_MIPMAP_LINEAR: Linear interpolation with mipmapping for trilinear "
+		"hardware" );
 	ri.Cvar_SetGroup( r_textureMode, CVG_RENDERER );
 	r_gamma = ri.Cvar_Get( "r_gamma", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_gamma, "0.5", "3", CV_FLOAT );
 	ri.Cvar_SetDescription( r_gamma, "Gamma correction factor." );
 	ri.Cvar_SetGroup( r_gamma, CVG_RENDERER );
-	r_facePlaneCull = ri.Cvar_Get ("r_facePlaneCull", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	r_facePlaneCull = ri.Cvar_Get( "r_facePlaneCull", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_SetDescription( r_facePlaneCull, "Enables culling of planar surfaces with back side test." );
 
 	r_ambientScale = ri.Cvar_Get( "r_ambientScale", "0.6", CVAR_CHEAT );
@@ -1960,67 +1944,79 @@ static void R_Register( void )
 	// domain; verified correct for the linear pipeline. No retune.
 	r_saturation = ri.Cvar_Get( "r_saturation", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_saturation, "0", "2", CV_FLOAT );
-	ri.Cvar_SetDescription( r_saturation,
-		"Post-process saturation multiplier.\n"
-		"Range 0.0-2.0, default 1.0.\n"
-		"  0.0 = grayscale\n"
-		"  1.0 = full color (identity)\n"
-		"  2.0 = super-saturated (may clamp on 8-bit)\n"
-		"Requires r_fbo 1. Live: takes effect on next frame." );
+	ri.Cvar_SetDescription( r_saturation, "Post-process saturation multiplier.\n"
+										  "Range 0.0-2.0, default 1.0.\n"
+										  "  0.0 = grayscale\n"
+										  "  1.0 = full color (identity)\n"
+										  "  2.0 = super-saturated (may clamp on 8-bit)\n"
+										  "Requires r_fbo 1. Live: takes effect on next frame." );
 	ri.Cvar_SetGroup( r_saturation, CVG_RENDERER );
 
 	r_dither = ri.Cvar_Get( "r_dither", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_dither, "0", "2", CV_INTEGER );
-	ri.Cvar_SetDescription(r_dither, "Set dithering mode:\n 0 - disabled\n 1 - ordered\n 2 - blue-noise\nRequires " S_COLOR_CYAN "\\r_fbo 1." );
+	ri.Cvar_SetDescription( r_dither,
+							"Set dithering mode:\n 0 - disabled\n 1 - ordered\n 2 - blue-noise\nRequires " S_COLOR_CYAN
+							"\\r_fbo 1." );
 
 	// Chromatic aberration (lens fringe) strength, 0..1. Opt-in stylistic effect;
 	// default 0 = off (zero cost, byte-identical) to keep competitive readability.
 	r_chromaticAberration = ri.Cvar_Get( "r_chromaticAberration", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_chromaticAberration, "0", "1", CV_FLOAT );
-	ri.Cvar_SetDescription( r_chromaticAberration, "Chromatic aberration (radial R/G/B lens fringe) strength, 0..1.\n 0 - off\nRequires " S_COLOR_CYAN "\\r_fbo 1." );
+	ri.Cvar_SetDescription(
+		r_chromaticAberration,
+		"Chromatic aberration (radial R/G/B lens fringe) strength, 0..1.\n 0 - off\nRequires " S_COLOR_CYAN
+		"\\r_fbo 1." );
 	ri.Cvar_SetGroup( r_chromaticAberration, CVG_RENDERER );
 
 #if FEAT_DEPTH_CLAMP
 	r_depthClamp = ri.Cvar_Get( "r_depthClamp", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_depthClamp, "0", "1", CV_INTEGER );
-	ri.Cvar_SetDescription( r_depthClamp, "Disable near-plane vertex clipping. Prevents seeing through objects at high FOV." );
+	ri.Cvar_SetDescription( r_depthClamp,
+							"Disable near-plane vertex clipping. Prevents seeing through objects at high FOV." );
 #endif
 	ri.Cvar_SetGroup( r_dither, CVG_RENDERER );
 
 	r_presentBits = ri.Cvar_Get( "r_presentBits", "24", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_presentBits, "16", "30", CV_INTEGER );
-	ri.Cvar_SetDescription( r_presentBits, "Select color bits used for presentation surfaces\nRequires " S_COLOR_CYAN "\\r_fbo 1." );
+	ri.Cvar_SetDescription( r_presentBits,
+							"Select color bits used for presentation surfaces\nRequires " S_COLOR_CYAN "\\r_fbo 1." );
 
 	//
 	// temporary variables that can change at any time
 	//
 	r_showImages = ri.Cvar_Get( "r_showImages", "0", CVAR_TEMP );
-	ri.Cvar_SetDescription( r_showImages, "Draw all images currently loaded into memory:\n 0: Disabled\n 1: Show images set to uniform size\n 2: Show images with scaled relative to largest image" );
+	ri.Cvar_SetDescription( r_showImages,
+							"Draw all images currently loaded into memory:\n 0: Disabled\n 1: Show images set to "
+							"uniform size\n 2: Show images with scaled relative to largest image" );
 
 	// r_layoutDump — visual-regression instrumentation hook. The renderer
 	// does not consume this; it is registered here for global visibility so
-	// the client-side Wired UI layout pass (cl_wired_layout_dump.c) can read
-	// it. When non-zero, every WUI_LayoutMenu pass appends each named item's
-	// resolved pixel rect + authored colours to layoutdump.jsonl (in the
+	// the client-side Wired UI snapshot writer (cl_wired_layout_dump.c) can read
+	// it. When non-zero, every completed Clay layout appends each named item's
+	// rendered pixel rect + authored colours to layoutdump.jsonl (in the
 	// process working directory). Consumed by tools/visual_regression.
-	ri.Cvar_SetDescription( ri.Cvar_Get( "r_layoutDump", "0", CVAR_TEMP ),
-		"Visual-regression instrumentation: when non-zero, the Wired UI layout pass appends each named item's resolved rect + authored colours to layoutdump.jsonl (working directory) every frame. 0 = disabled." );
+	ri.Cvar_SetDescription(
+		ri.Cvar_Get( "r_layoutDump", "0", CVAR_TEMP ),
+		"Visual-regression instrumentation: when non-zero, the Wired UI Clay pass appends each named item's rendered "
+		"rect + authored colours to layoutdump.jsonl (working directory) every frame. 0 = disabled." );
 
 	r_debugLight = ri.Cvar_Get( "r_debugLight", "0", CVAR_TEMP );
 	ri.Cvar_SetDescription( r_debugLight, "Debugging tool to print ambient and directed lighting information." );
 	r_debugSort = ri.Cvar_Get( "r_debugSort", "0", CVAR_CHEAT );
-	ri.Cvar_SetDescription( r_debugSort, "Debugging tool to filter out shaders with depth sorting order values higher than the set value." );
+	ri.Cvar_SetDescription(
+		r_debugSort,
+		"Debugging tool to filter out shaders with depth sorting order values higher than the set value." );
 	r_printShaders = ri.Cvar_Get( "r_printShaders", "0", 0 );
 	ri.Cvar_SetDescription( r_printShaders, "Debugging tool to print on console of the number of shaders used." );
 	r_saveFontData = ri.Cvar_Get( "r_saveFontData", "0", 0 );
 
-	r_nocurves = ri.Cvar_Get ("r_nocurves", "0", CVAR_CHEAT );
+	r_nocurves = ri.Cvar_Get( "r_nocurves", "0", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_nocurves, "Set to 1 to disable drawing world bezier curves. Set to 0 to enable." );
-	r_drawWorld = ri.Cvar_Get ("r_drawWorld", "1", CVAR_CHEAT );
+	r_drawWorld = ri.Cvar_Get( "r_drawWorld", "1", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_drawWorld, "Set to 0 to disable drawing the world. Set to 1 to enable." );
-	r_lightmap = ri.Cvar_Get ("r_lightmap", "0", 0 );
+	r_lightmap = ri.Cvar_Get( "r_lightmap", "0", 0 );
 	ri.Cvar_SetDescription( r_lightmap, "Show only lightmaps on all world surfaces." );
-	r_portalOnly = ri.Cvar_Get ("r_portalOnly", "0", CVAR_CHEAT );
+	r_portalOnly = ri.Cvar_Get( "r_portalOnly", "0", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_portalOnly, "Set to 1 to render only first portal view if it is present on the scene." );
 
 	r_flareSize = ri.Cvar_Get( "r_flareSize", "22", CVAR_ARCHIVE | CVAR_NODEFAULT );
@@ -2031,10 +2027,13 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_flareFade, "Distance to fade out light flares. Requires \\r_flares 1." );
 	r_flareCoeff = ri.Cvar_Get( "r_flareCoeff", "150", CVAR_CHEAT );
 	ri.Cvar_CheckRange( r_flareCoeff, "0.1", NULL, CV_FLOAT );
-	ri.Cvar_SetDescription( r_flareCoeff, "Coefficient for the light flare intensity falloff function. Requires \\r_flares 1." );
+	ri.Cvar_SetDescription( r_flareCoeff,
+							"Coefficient for the light flare intensity falloff function. Requires \\r_flares 1." );
 	r_flareTarget = ri.Cvar_Get( "r_flareTarget", "1.0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_flareTarget, "0.1", "4.0", CV_FLOAT );
-	ri.Cvar_SetDescription( r_flareTarget, "Exposure-invariant target brightness for light flares — the flare reads at a fixed display brightness regardless of auto-exposure. Requires \\r_flares 1." );
+	ri.Cvar_SetDescription( r_flareTarget,
+							"Exposure-invariant target brightness for light flares — the flare reads at a fixed "
+							"display brightness regardless of auto-exposure. Requires \\r_flares 1." );
 
 	/* c2-shadertime-pin — dev-only override of wall-clock-driven shader
 	 * animation time, used to make C2 captures deterministic. Pinning
@@ -2045,110 +2044,150 @@ static void R_Register( void )
 	 * (= disabled = today's behaviour). The C2 smoke harness sets it
 	 * via `+set r_pinShaderTime 1.0`. */
 	r_pinShaderTime = ri.Cvar_Get( "r_pinShaderTime", "0", CVAR_CHEAT );
-	ri.Cvar_SetDescription( r_pinShaderTime, "Dev/C2-smoke only: pin shader animation time (seconds) for deterministic captures. 0 = off (default, wall-clock-driven gameplay). Non-zero = pin tr.refdef.floatTime to this value." );
+	ri.Cvar_SetDescription(
+		r_pinShaderTime, "Dev/C2-smoke only: pin shader animation time (seconds) for deterministic captures. 0 = off "
+						 "(default, wall-clock-driven gameplay). Non-zero = pin tr.refdef.floatTime to this value." );
 
-#if FEAT_FOG_SYSTEM
 	r_useGlFog = ri.Cvar_Get( "r_useGlFog", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_SetDescription( r_useGlFog, "Enable advanced linear/exp/exp2 fog for explicitly typed map fog volumes." );
 	r_defaultFogParmsType = ri.Cvar_Get( "r_defaultFogParmsType", "-1", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_SetDescription( r_defaultFogParmsType, "Advanced fog fallback for untyped map fog volumes: -1=classic fogCollapse, 0=linear, 1=exp, 2=exp2." );
+	ri.Cvar_SetDescription(
+		r_defaultFogParmsType,
+		"Advanced fog fallback for untyped map fog volumes: -1=classic fogCollapse, 0=linear, 1=exp, 2=exp2." );
 	ri.Cvar_CheckRange( r_defaultFogParmsType, "-1", "2", CV_INTEGER );
 	r_globalLinearFogDrawSky = ri.Cvar_Get( "r_globalLinearFogDrawSky", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_SetDescription( r_globalLinearFogDrawSky, "Draw sky surfaces through linear global fog (Spearmint compat)." );
-#endif
+	ri.Cvar_SetDescription( r_globalLinearFogDrawSky,
+							"Draw sky surfaces through linear global fog (Spearmint compat)." );
 
-	r_skipBackEnd = ri.Cvar_Get ("r_skipBackEnd", "0", CVAR_CHEAT);
+	r_skipBackEnd = ri.Cvar_Get( "r_skipBackEnd", "0", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_skipBackEnd, "Skips loading rendering backend." );
 
 	r_lodscale = ri.Cvar_Get( "r_lodscale", "5", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_lodscale, "Set scale for level of detail adjustment." );
-	r_norefresh = ri.Cvar_Get ("r_norefresh", "0", CVAR_CHEAT);
+	r_norefresh = ri.Cvar_Get( "r_norefresh", "0", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_norefresh, "Bypasses refreshing of the rendered scene." );
-	r_drawEntities = ri.Cvar_Get ("r_drawEntities", "1", CVAR_CHEAT );
+	r_drawEntities = ri.Cvar_Get( "r_drawEntities", "1", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_drawEntities, "Draw all world entities." );
-	r_nocull = ri.Cvar_Get ("r_nocull", "0", CVAR_CHEAT);
+	r_nocull = ri.Cvar_Get( "r_nocull", "0", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_nocull, "Draw all culled objects." );
 	r_gpuBatchDecomp = ri.Cvar_Get( "r_gpuBatchDecomp", "0", CVAR_ARCHIVE | CVAR_LATCH );
-	ri.Cvar_SetDescription( r_gpuBatchDecomp, "1 = drive the VBO-eligible world draw from a host frame-current cull re-derivation (CPU per-surface recursion retired); 0 = CPU recursion (default)." );
-	r_novis = ri.Cvar_Get ("r_novis", "0", CVAR_CHEAT);
+	ri.Cvar_SetDescription( r_gpuBatchDecomp,
+							"1 = drive the VBO-eligible world draw from a host frame-current cull re-derivation (CPU "
+							"per-surface recursion retired); 0 = CPU recursion (default)." );
+	r_novis = ri.Cvar_Get( "r_novis", "0", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_novis, "Disables usage of PVS." );
-	r_showCluster = ri.Cvar_Get ("r_showCluster", "0", CVAR_CHEAT);
+	r_showCluster = ri.Cvar_Get( "r_showCluster", "0", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_showCluster, "Shows current cluster index." );
-	r_speeds = ri.Cvar_Get ("r_speeds", "0", CVAR_CHEAT);
-	ri.Cvar_SetDescription( r_speeds, "Prints out various debugging stats from PVS:\n 0: Disabled\n 1: Backend BSP\n 2: Frontend grid culling\n 3: Current view cluster index\n 4: Dynamic lighting\n 5: zFar clipping\n 6: Flares" );
+	r_speeds = ri.Cvar_Get( "r_speeds", "0", CVAR_CHEAT );
+	ri.Cvar_SetDescription(
+		r_speeds, "Prints renderer debugging stats:\n 0: Disabled\n 1: Backend BSP\n 2: Frontend grid "
+				  "culling\n 3: Current view cluster index\n 4: Dynamic lighting\n 5: zFar clipping\n 6: Flares"
+				  "\n 7: GPU particles/atmosphere\n 8: 2D batches (white/MSDF/interleave)" );
 	r_gpuSpeeds = ri.Cvar_Get( "r_gpuSpeeds", "0", CVAR_CHEAT );
-	ri.Cvar_SetDescription( r_gpuSpeeds, "Per-pass GPU timestamp report.\n 0: off\n 1: 200-frame averages\n N(>=2): only frames where total GPU time >= N ms" );
+	ri.Cvar_SetDescription( r_gpuSpeeds, "Per-pass GPU timestamp report.\n 0: off\n 1: 200-frame averages\n N(>=2): "
+										 "only frames where total GPU time >= N ms" );
 	// Profiling instrumentation is local and frame-byte-inert; unlike visual cheat
 	// cvars it must survive normal local-server map startup so a capture can be
 	// armed without enabling gameplay cheats. Default remains off.
 	r_profileMarkers = ri.Cvar_Get( "r_profileMarkers", "0", 0 );
 	ri.Cvar_CheckRange( r_profileMarkers, "0", "1", CV_INTEGER );
-	ri.Cvar_SetDescription( r_profileMarkers,
-		"Emit semantic RAL dynamic-rendering GPU debug labels when Vulkan debug-utils is available.\n"
-		" 0: off (default)\n 1: on\n"
-		"Use `ral_dump live markers` for a one-frame backend receipt." );
+	ri.Cvar_SetDescription(
+		r_profileMarkers, "Emit semantic RAL dynamic-rendering GPU debug labels when Vulkan debug-utils is available.\n"
+						  " 0: off (default)\n 1: on\n"
+						  "Use `ral_dump live markers` for a one-frame backend receipt." );
 	r_ralEffectsSmoke = ri.Cvar_Get( "r_ralEffectsSmoke", "0", CVAR_CHEAT );
 	ri.Cvar_CheckRange( r_ralEffectsSmoke, "0", "1", CV_INTEGER );
-	ri.Cvar_SetDescription( r_ralEffectsSmoke,
-		"Default-off native RAL procedural-effects smoke. Injects one ribbon, "
-		"rail ribbon, beam and sprite on the first primary view of each map; "
-		"renderer.ral emits a receipt only after the corresponding RAL draw." );
+	ri.Cvar_SetDescription( r_ralEffectsSmoke, "Default-off native RAL procedural-effects smoke. Injects one ribbon, "
+											   "rail ribbon, beam and sprite on the first primary view of each map; "
+											   "renderer.ral emits a receipt only after the corresponding RAL draw." );
+	r_lightingReferenceFixture = ri.Cvar_Get( "r_lightingReferenceFixture", "0", CVAR_CHEAT );
+	ri.Cvar_CheckRange( r_lightingReferenceFixture, "0", "1", CV_INTEGER );
+	ri.Cvar_SetDescription( r_lightingReferenceFixture,
+		"Test-only canonical lighting-reference atmosphere: stable cool participating media, "
+		"no precipitation or particle injection. 0 = off, 1 = on." );
 	r_temporalInputTest = ri.Cvar_Get( "r_temporalInputTest", "0", CVAR_CHEAT );
 	ri.Cvar_CheckRange( r_temporalInputTest, "0", "2", CV_INTEGER );
 	ri.Cvar_SetDescription( r_temporalInputTest,
-		"Default-off Phase 7.10 projection-jitter diagnostic. This is not a TAA resolve.\n"
-		" 0: canonical unjittered renderer path (default)\n"
-		" 1: primary world views consume the backend-neutral temporal sequence\n"
-		" 2: same temporal path, but force-defer ATEST draws as a measurement baseline\n"
-		"Use `ral_dump live temporal` for the latest committed receipt." );
+							"Default-off Phase 7.10 projection-jitter diagnostic. This is not a TAA resolve.\n"
+							" 0: canonical unjittered renderer path (default)\n"
+							" 1: primary world views consume the backend-neutral temporal sequence\n"
+							" 2: same temporal path, but force-defer ATEST draws as a measurement baseline\n"
+							"Use `ral_dump live temporal` for the latest committed receipt." );
 	r_vkDebugTiming = ri.Cvar_Get( "r_vkDebugTiming", "0", CVAR_CHEAT );
-	ri.Cvar_SetDescription( r_vkDebugTiming, "Print Vulkan host-side timing averages every 200 frames.\n 0: off\n 1: on (fence, acquire, submit, present, draw calls, pipeline binds)" );
+	ri.Cvar_SetDescription( r_vkDebugTiming, "Print Vulkan host-side timing averages every 200 frames.\n 0: off\n 1: "
+											 "on (fence, acquire, submit, present, draw calls, pipeline binds)" );
 	r_frameSpikeUs = ri.Cvar_Get( "r_frameSpikeUs", "0", CVAR_CHEAT );
-	ri.Cvar_SetDescription( r_frameSpikeUs, "Per-frame host-side stage-timing report (CPU side of the Vulkan pipeline).\n 0: off\n N>0: print stage breakdown for each frame whose total host time >= N us\n Recommended: 12000 (>12ms is a perceptible spike at 120Hz)" );
-	r_debugSurface = ri.Cvar_Get ("r_debugSurface", "0", CVAR_CHEAT);
+	ri.Cvar_SetDescription( r_frameSpikeUs,
+							"Per-frame host-side stage-timing report (CPU side of the Vulkan pipeline).\n 0: off\n "
+							"N>0: print stage breakdown for each frame whose total host time >= N us\n Recommended: "
+							"12000 (>12ms is a perceptible spike at 120Hz)" );
+	r_debugSurface = ri.Cvar_Get( "r_debugSurface", "0", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_debugSurface, "Backend visual debugging tool for bezier mesh surfaces." );
-	r_nobind = ri.Cvar_Get ("r_nobind", "0", CVAR_CHEAT);
+	r_nobind = ri.Cvar_Get( "r_nobind", "0", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_nobind, "Backend debugging tool: Disables texture binding." );
-	r_showTris = ri.Cvar_Get ("r_showTris", "0", CVAR_CHEAT);
+	r_showTris = ri.Cvar_Get( "r_showTris", "0", CVAR_CHEAT );
+	r_showIrradianceProbes = ri.Cvar_Get( "r_showIrradianceProbes", "0", CVAR_CHEAT );
+	ri.Cvar_SetDescription( r_showIrradianceProbes,
+		"Draw local-SH probe cells and contributors: cyan cell edges, red invalid probes, "
+		"L0-colored valid probes, and marker size proportional to selected weight." );
+	r_showEmissiveLights = ri.Cvar_Get( "r_showEmissiveLights", "0", CVAR_CHEAT );
+	ri.Cvar_SetDescription( r_showEmissiveLights,
+		"Draw authored emissive-light authority: radiance-colored source bounds and proxies, "
+		"axis influence extents, shadow-priority marker size, magenta changed routes, and red rejected routes." );
+	s_frontendEmissiveAuthorityFixture = ri.Cvar_Get( "r_emissiveAuthorityFixture", "0", CVAR_CHEAT );
+	ri.Cvar_SetDescription( s_frontendEmissiveAuthorityFixture,
+		"Test-only typed stationary emissive authority for the canonical lava-sanctum visual gate." );
 	ri.Cvar_SetDescription( r_showTris, "Debugging tool: Wireframe rendering of polygon triangles in the world." );
 	r_showNormals = ri.Cvar_Get( "r_showNormals", "0", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_showNormals, "Debugging tool: Show wireframe surface normals." );
 	r_clear = ri.Cvar_Get( "r_clear", "0", 0 );
-	ri.Cvar_SetDescription( r_clear, "Forces screen buffer clearing every frame, removing any hall of mirrors effect in void.\n Use \\r_clearColor to set color." );
+	ri.Cvar_SetDescription( r_clear, "Forces screen buffer clearing every frame, removing any hall of mirrors effect "
+									 "in void.\n Use \\r_clearColor to set color." );
 	r_offsetFactor = ri.Cvar_Get( "r_offsetFactor", "-2", CVAR_CHEAT | CVAR_LATCH );
 	ri.Cvar_SetDescription( r_offsetFactor, "Offset factor for shaders with polygonOffset stages." );
 	r_offsetUnits = ri.Cvar_Get( "r_offsetunits", "-1", CVAR_CHEAT | CVAR_LATCH );
 	ri.Cvar_SetDescription( r_offsetUnits, "Offset units for shaders with polygonOffset stages." );
 	r_drawBuffer = ri.Cvar_Get( "r_drawBuffer", "GL_BACK", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_drawBuffer, "Sets which frame buffer to draw into." );
-	r_lockpvs = ri.Cvar_Get ("r_lockpvs", "0", CVAR_CHEAT);
-	ri.Cvar_SetDescription( r_lockpvs, "Debugging tool: Locks to current potentially visible set. Useful for testing vis-culling in maps." );
+	r_lockpvs = ri.Cvar_Get( "r_lockpvs", "0", CVAR_CHEAT );
+	ri.Cvar_SetDescription(
+		r_lockpvs,
+		"Debugging tool: Locks to current potentially visible set. Useful for testing vis-culling in maps." );
 	r_noportals = ri.Cvar_Get( "r_noportals", "0", 0 );
-	ri.Cvar_SetDescription(r_noportals, "Disables in-game portals, valid values: 0: Portals enabled\n 1: Portals disabled\n 2: Portals and mirrors disabled" );
+	ri.Cvar_SetDescription( r_noportals, "Disables in-game portals, valid values: 0: Portals enabled\n 1: Portals "
+										 "disabled\n 2: Portals and mirrors disabled" );
 	r_shadows = ri.Cvar_Get( "r_shadows", "1", CVAR_ARCHIVE );
 	ri.Cvar_CheckRange( r_shadows, "0", "1", CV_INTEGER );
-	ri.Cvar_SetDescription( r_shadows,
-		"Sun-driven cascaded shadow map with PCF filtering: 0 = off, 1 = cast\n"
-		" (directional CSM sun-cast; + dlight-omni if \\r_dlightShadows). Requires\n"
-		" \\r_fbo 1. Takes effect on the next frame." );
+	ri.Cvar_SetDescription( r_shadows, "Sun-driven cascaded shadow map with PCF filtering: 0 = off, 1 = cast\n"
+									   " (directional CSM sun-cast; + dlight-omni if \\r_dlightShadows). Requires\n"
+									   " \\r_fbo 1. Takes effect on the next frame." );
 	ri.Cvar_SetGroup( r_shadows, CVG_RENDERER );
 
-	r_marksOnTriangleMeshes = ri.Cvar_Get("r_marksOnTriangleMeshes", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_SetDescription( r_marksOnTriangleMeshes, "Enables impact marks on triangle mesh surfaces (ie: MD3 models.) Requires impact marks to be enabled in the game code." );
+	r_marksOnTriangleMeshes = ri.Cvar_Get( "r_marksOnTriangleMeshes", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_SetDescription( r_marksOnTriangleMeshes, "Enables impact marks on triangle mesh surfaces (ie: MD3 models.) "
+													 "Requires impact marks to be enabled in the game code." );
 
 	r_gpuDecals = ri.Cvar_Get( "r_gpuDecals", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_SetDescription( r_gpuDecals, "Draw the GPU decal ring as surface-aligned projector quads in the main pass. With the ring empty (normal play) this is byte-identical to off." );
+	ri.Cvar_SetDescription( r_gpuDecals, "Draw the GPU decal ring as surface-aligned projector quads in the main pass. "
+										 "With the ring empty (normal play) this is byte-identical to off." );
 
 	r_atmosphericGPU = ri.Cvar_Get( "r_atmosphericGPU", "1", CVAR_ARCHIVE );
-	ri.Cvar_SetDescription( r_atmosphericGPU, "GPU-resident atmospheric weather (rain/snow): 1 = draw the GPU compute pool (spawn/integrate/collide/draw on the GPU), 0 = skip it (no weather rendered). Gates the renderer's atmospheric compute + draw." );
+	ri.Cvar_SetDescription(
+		r_atmosphericGPU,
+		"GPU-resident atmospheric weather (rain/snow): 1 = draw the GPU compute pool (spawn/integrate/collide/draw on "
+		"the GPU), 0 = skip it (no weather rendered). Gates the renderer's atmospheric compute + draw." );
 
 	r_particles = ri.Cvar_Get( "r_particles", "1", CVAR_ARCHIVE );
-	ri.Cvar_SetDescription( r_particles, "Draw the GPU particle pass (RB_DrawParticles). Also registers particles as a scene-depth consumer so the soft-particle depth fade has a fresh depth copy." );
+	ri.Cvar_SetDescription( r_particles,
+							"Draw the GPU particle pass (RB_DrawParticles). Also registers particles as a scene-depth "
+							"consumer so the soft-particle depth fade has a fresh depth copy." );
 
 	r_aviMotionJpegQuality = ri.Cvar_Get( "r_aviMotionJpegQuality", "100", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_SetDescription( r_aviMotionJpegQuality, "Controls quality of Jpeg video capture when \\cl_aviMotionJpeg 1." );
+	ri.Cvar_SetDescription( r_aviMotionJpegQuality,
+							"Controls quality of Jpeg video capture when \\cl_aviMotionJpeg 1." );
 	r_screenshotJpegQuality = ri.Cvar_Get( "r_screenshotJpegQuality", "100", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_SetDescription( r_screenshotJpegQuality, "Controls quality of Jpeg screenshots when using screenshotJpeg." );
+	ri.Cvar_SetDescription( r_screenshotJpegQuality,
+							"Controls quality of Jpeg screenshots when using screenshotJpeg." );
 
 	// Block 3 (colour closure): bloom-extract is now a soft knee in
 	// bloom.frag — extraction = `max(metric(base) - threshold, 0)`
@@ -2162,7 +2201,9 @@ static void R_Register( void )
 	// and its bloom.frag `base_modulate` spec constant were both removed —
 	// the soft knee subsumes that post-tweak.
 	r_bloomThreshold = ri.Cvar_Get( "r_bloomThreshold", "0.32", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_SetDescription( r_bloomThreshold, "Linear-radiance knee below which a pixel contributes nothing to bloom; over-threshold excess is extracted via a soft-knee subtraction. Default 0.32." );
+	ri.Cvar_SetDescription( r_bloomThreshold,
+							"Linear-radiance knee below which a pixel contributes nothing to bloom; over-threshold "
+							"excess is extracted via a soft-knee subtraction. Default 0.32." );
 	ri.Cvar_SetGroup( r_bloomThreshold, CVG_RENDERER );
 
 	// Block 3 (colour closure): the three modes now select the *metric*
@@ -2170,7 +2211,10 @@ static void R_Register( void )
 	// excess) — not a hard pass/fail gate that emits the full pixel.
 	// Default unchanged (0 = per-channel knee).
 	r_bloomThresholdMode = ri.Cvar_Get( "r_bloomThresholdMode", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_SetDescription( r_bloomThresholdMode, "Bloom soft-knee metric:\n 0: per-channel  excess = max(rgb - threshold, 0)\n 1: average      knee on (r+g+b)/3, hue-preserving scale\n 2: luma         knee on Rec.709 luma, hue-preserving scale" );
+	ri.Cvar_SetDescription(
+		r_bloomThresholdMode,
+		"Bloom soft-knee metric:\n 0: per-channel  excess = max(rgb - threshold, 0)\n 1: average      knee on "
+		"(r+g+b)/3, hue-preserving scale\n 2: luma         knee on Rec.709 luma, hue-preserving scale" );
 	ri.Cvar_SetGroup( r_bloomThresholdMode, CVG_RENDERER );
 
 	// blend factor left at 0.5. blend.frag adds
@@ -2191,24 +2235,33 @@ static void R_Register( void )
 	//
 	// latched and archived variables that can only change over a vid_restart
 	//
-	r_allowExtensions = ri.Cvar_Get( "r_allowExtensions", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH | CVAR_CHEAT );
+	r_allowExtensions =
+		ri.Cvar_Get( "r_allowExtensions", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH | CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_allowExtensions, "Use all of the OpenGL extensions your card is capable of." );
-	r_ext_compressed_textures = ri.Cvar_Get( "r_ext_compressed_textures", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH | CVAR_CHEAT );
+	r_ext_compressed_textures =
+		ri.Cvar_Get( "r_ext_compressed_textures", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH | CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_ext_compressed_textures, "Enables texture compression." );
-	r_ext_multitexture = ri.Cvar_Get( "r_ext_multitexture", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH | CVAR_CHEAT );
+	r_ext_multitexture =
+		ri.Cvar_Get( "r_ext_multitexture", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH | CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_ext_multitexture, "Enables hardware multi-texturing (0: off, 1: on)." );
-	r_ext_compiled_vertex_array = ri.Cvar_Get( "r_ext_compiled_vertex_array", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH | CVAR_CHEAT );
+	r_ext_compiled_vertex_array =
+		ri.Cvar_Get( "r_ext_compiled_vertex_array", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH | CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_ext_compiled_vertex_array, "Enables hardware-compiled vertex array rendering method." );
-	r_ext_texture_env_add = ri.Cvar_Get( "r_ext_texture_env_add", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH | CVAR_CHEAT );
-	ri.Cvar_SetDescription( r_ext_texture_env_add, "Enables additive blending in multitexturing. Requires \\r_ext_multitexture 1." );
+	r_ext_texture_env_add =
+		ri.Cvar_Get( "r_ext_texture_env_add", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH | CVAR_CHEAT );
+	ri.Cvar_SetDescription( r_ext_texture_env_add,
+							"Enables additive blending in multitexturing. Requires \\r_ext_multitexture 1." );
 
-	r_ext_texture_filter_anisotropic = ri.Cvar_Get( "r_ext_texture_filter_anisotropic",	"1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
+	r_ext_texture_filter_anisotropic =
+		ri.Cvar_Get( "r_ext_texture_filter_anisotropic", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_ext_texture_filter_anisotropic, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( r_ext_texture_filter_anisotropic, "Allow anisotropic filtering." );
 
 	r_ext_max_anisotropy = ri.Cvar_Get( "r_ext_max_anisotropy", "8", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_ext_max_anisotropy, "1", NULL, CV_INTEGER );
-	ri.Cvar_SetDescription( r_ext_max_anisotropy, "Sets maximum anisotropic level for your graphics driver. Requires \\r_ext_texture_filter_anisotropic." );
+	ri.Cvar_SetDescription(
+		r_ext_max_anisotropy,
+		"Sets maximum anisotropic level for your graphics driver. Requires \\r_ext_texture_filter_anisotropic." );
 
 	//r_stencilBits = ri.Cvar_Get( "r_stencilBits", "8", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	r_ignorehwgamma = ri.Cvar_Get( "r_ignorehwgamma", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
@@ -2220,10 +2273,10 @@ static void R_Register( void )
 #ifdef USE_VULKAN
 	r_device = ri.Cvar_Get( "r_device", "-1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_device, "-2", NULL, CV_INTEGER );
-	ri.Cvar_SetDescription( r_device, "Select physical device to render:\n" \
-		" 0+ - use explicit device index\n" \
-		" -1 - first discrete GPU\n" \
-		" -2 - first integrated GPU" );
+	ri.Cvar_SetDescription( r_device, "Select physical device to render:\n"
+									  " 0+ - use explicit device index\n"
+									  " -1 - first discrete GPU\n"
+									  " -2 - first integrated GPU" );
 	s_r_device_mod = r_device->modificationCount;
 
 	// r_fbo live conversion. Previously this was CVAR_LATCH
@@ -2237,13 +2290,12 @@ static void R_Register( void )
 	// FBO-only rebuild because the swapchain itself is recreated).
 	r_fbo = ri.Cvar_Get( "r_fbo", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_fbo, "0", "1", CV_INTEGER );
-	ri.Cvar_SetDescription( r_fbo,
-		"Use framebuffer objects: enables gamma correction in windowed mode\n"
-		"and allows arbitrary video size and screenshot/video capture.\n"
-		"Required for bloom, HDR rendering, anti-aliasing and post-process\n"
-		"saturation/tonemap effects.\n"
-		"Live: takes effect on next frame; expect a noticeable hitch as the\n"
-		"swapchain + FBO chain rebuild." );
+	ri.Cvar_SetDescription( r_fbo, "Use framebuffer objects: enables gamma correction in windowed mode\n"
+								   "and allows arbitrary video size and screenshot/video capture.\n"
+								   "Required for bloom, HDR rendering, anti-aliasing and post-process\n"
+								   "saturation/tonemap effects.\n"
+								   "Live: takes effect on next frame; expect a noticeable hitch as the\n"
+								   "swapchain + FBO chain rebuild." );
 	ri.Cvar_SetGroup( r_fbo, CVG_RENDERER );
 	// r_hdr live conversion. Previously this was CVAR_LATCH
 	// because flipping the color attachment format requires tearing
@@ -2260,17 +2312,16 @@ static void R_Register( void )
 
 	r_hdr = ri.Cvar_Get( "r_hdr", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_hdr, "0", "2", CV_INTEGER );
-	ri.Cvar_SetDescription( r_hdr,
-		"High dynamic range frame buffer texture format. Requires \\r_fbo 1.\n"
-		"  0: 8 bit BGRA, no HDR pipeline (legacy fallback)\n"
-		"  1: 16 bit SFLOAT, true HDR (default), supports values >1.0,\n"
-		"     foundation for tonemap, auto-exposure, and PBR shading.\n"
-		"  2: 16 bit UNORM, clamped HDR [0,1] range, enhanced precision\n"
-		"     but no highlights above white. For GPUs lacking SFLOAT\n"
-		"     storage / blend support — engine downgrades 1->2 automatically.\n"
-		"Live: takes effect on next frame via the renderer post-process\n"
-		"pipeline group; expect a one-frame hitch on the change frame as\n"
-		"the FBO color attachment + render passes + pipelines rebuild." );
+	ri.Cvar_SetDescription( r_hdr, "High dynamic range frame buffer texture format. Requires \\r_fbo 1.\n"
+								   "  0: 8 bit BGRA, no HDR pipeline (legacy fallback)\n"
+								   "  1: 16 bit SFLOAT, true HDR (default), supports values >1.0,\n"
+								   "     foundation for tonemap, auto-exposure, and PBR shading.\n"
+								   "  2: 16 bit UNORM, clamped HDR [0,1] range, enhanced precision\n"
+								   "     but no highlights above white. For GPUs lacking SFLOAT\n"
+								   "     storage / blend support — engine downgrades 1->2 automatically.\n"
+								   "Live: takes effect on next frame via the renderer post-process\n"
+								   "pipeline group; expect a one-frame hitch on the change frame as\n"
+								   "the FBO color attachment + render passes + pipelines rebuild." );
 	ri.Cvar_SetGroup( r_hdr, CVG_RENDERER );
 
 	// HDR10 display output. r_hdr (above) controls the
@@ -2282,18 +2333,17 @@ static void R_Register( void )
 	// negotiated/effective state shows in `gfxinfo`.
 	r_hdrDisplay = ri.Cvar_Get( "r_hdrDisplay", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_hdrDisplay, "0", "1", CV_INTEGER );
-	ri.Cvar_SetDescription( r_hdrDisplay,
-		"HDR10 (PQ / ST.2084, BT.2020) display output. Requires \\r_fbo 1,\n"
-		"\\r_hdr 1, an HDR-capable display in HDR mode, and a Vulkan surface\n"
-		"that enumerates VK_COLOR_SPACE_HDR10_ST2084_EXT (else falls back to\n"
-		"SDR with a warning).\n"
-		"  0: SDR sRGB swapchain (default)\n"
-		"  1: HDR10 swapchain — A2B10G10R10_UNORM_PACK32 + HDR10_ST2084.\n"
-		"     The gamma pass PQ-encodes; the tonemap operator uses an HDR\n"
-		"     shoulder peaking at r_hdrPeakLuminance.\n"
-		"Use `gfxinfo` to confirm the negotiated swapchain colorspace.\n"
-		"Live: takes effect on next frame (swapchain recreate; one-frame\n"
-		"hitch) via the renderer post-process pipeline group." );
+	ri.Cvar_SetDescription( r_hdrDisplay, "HDR10 (PQ / ST.2084, BT.2020) display output. Requires \\r_fbo 1,\n"
+										  "\\r_hdr 1, an HDR-capable display in HDR mode, and a Vulkan surface\n"
+										  "that enumerates VK_COLOR_SPACE_HDR10_ST2084_EXT (else falls back to\n"
+										  "SDR with a warning).\n"
+										  "  0: SDR sRGB swapchain (default)\n"
+										  "  1: HDR10 swapchain — A2B10G10R10_UNORM_PACK32 + HDR10_ST2084.\n"
+										  "     The gamma pass PQ-encodes; the tonemap operator uses an HDR\n"
+										  "     shoulder peaking at r_hdrPeakLuminance.\n"
+										  "Use `gfxinfo` to confirm the negotiated swapchain colorspace.\n"
+										  "Live: takes effect on next frame (swapchain recreate; one-frame\n"
+										  "hitch) via the renderer post-process pipeline group." );
 	ri.Cvar_SetGroup( r_hdrDisplay, CVG_RENDERER );
 	// r_hdrPeakLuminance — display peak luminance in nits. Feeds (a) the
 	// tonemap operator's HDR shoulder (peak_norm = nits/100, so a fully-
@@ -2303,18 +2353,16 @@ static void R_Register( void )
 	// nits regardless; only scene highlights reach the peak.
 	r_hdrPeakLuminance = ri.Cvar_Get( "r_hdrPeakLuminance", "1000", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_hdrPeakLuminance, "100", "10000", CV_INTEGER );
-	ri.Cvar_SetDescription( r_hdrPeakLuminance,
-		"HDR10 display peak luminance (nits, 100-10000, default 1000).\n"
-		"Sets the tonemap HDR shoulder and the mastering-metadata hint.\n"
-		"Live: takes effect on next frame (post-process pipeline rebuild +\n"
-		"vkSetHdrMetadataEXT re-issue). No effect unless r_hdrDisplay 1." );
+	ri.Cvar_SetDescription( r_hdrPeakLuminance, "HDR10 display peak luminance (nits, 100-10000, default 1000).\n"
+												"Sets the tonemap HDR shoulder and the mastering-metadata hint.\n"
+												"Live: takes effect on next frame (post-process pipeline rebuild +\n"
+												"vkSetHdrMetadataEXT re-issue). No effect unless r_hdrDisplay 1." );
 	ri.Cvar_SetGroup( r_hdrPeakLuminance, CVG_RENDERER );
 	r_hdrMinLuminance = ri.Cvar_Get( "r_hdrMinLuminance", "0.01", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_hdrMinLuminance, "0.0001", "1.0", CV_FLOAT );
-	ri.Cvar_SetDescription( r_hdrMinLuminance,
-		"HDR10 display minimum luminance (nits, default 0.01) — the\n"
-		"mastering-metadata black-level hint only. Live: re-issues\n"
-		"vkSetHdrMetadataEXT. No effect unless r_hdrDisplay 1." );
+	ri.Cvar_SetDescription( r_hdrMinLuminance, "HDR10 display minimum luminance (nits, default 0.01) — the\n"
+											   "mastering-metadata black-level hint only. Live: re-issues\n"
+											   "vkSetHdrMetadataEXT. No effect unless r_hdrDisplay 1." );
 	ri.Cvar_SetGroup( r_hdrMinLuminance, CVG_RENDERER );
 
 	// Histogram auto-exposure. The toggle gates the (future) compute path and
@@ -2323,11 +2371,10 @@ static void R_Register( void )
 	// the buffer next frame with no post-process pipeline rebuild.
 	r_hdrAutoExposure = ri.Cvar_Get( "r_hdrAutoExposure", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_hdrAutoExposure, "0", "1", CV_INTEGER );
-	ri.Cvar_SetDescription( r_hdrAutoExposure,
-		"Histogram-based automatic scene exposure (eye adaptation).\n"
-		"  0: off — exposure is the manual r_brightness value\n"
-		"  1: on (default) — exposure adapts to scene luminance.\n"
-		"Requires \\r_fbo 1 and \\r_hdr 1 or 2." );
+	ri.Cvar_SetDescription( r_hdrAutoExposure, "Histogram-based automatic scene exposure (eye adaptation).\n"
+											   "  0: off — exposure is the manual r_brightness value\n"
+											   "  1: on (default) — exposure adapts to scene luminance.\n"
+											   "Requires \\r_fbo 1 and \\r_hdr 1 or 2." );
 	ri.Cvar_SetGroup( r_hdrAutoExposure, CVG_RENDERER );
 
 #ifndef NDEBUG
@@ -2337,91 +2384,92 @@ static void R_Register( void )
 	r_hdrHistogramDebug = ri.Cvar_Get( "r_hdrHistogramDebug", "0", CVAR_CHEAT );
 	ri.Cvar_CheckRange( r_hdrHistogramDebug, "0", "2", CV_INTEGER );
 	ri.Cvar_SetDescription( r_hdrHistogramDebug,
-		"Developer: read the auto-exposure luminance histogram back to the CPU\n"
-		"and log a bin summary, to verify the compute pass populates it. No effect\n"
-		"on the rendered frame.\n"
-		"  1: ~1 Hz summary (exposure_bias + bin peaks)\n"
-		"  2: PER-FRAME exposure_bias + bin summary (for measuring adaptation swing)." );
+							"Developer: read the auto-exposure luminance histogram back to the CPU\n"
+							"and log a bin summary, to verify the compute pass populates it. No effect\n"
+							"on the rendered frame.\n"
+							"  1: ~1 Hz summary (exposure_bias + bin peaks)\n"
+							"  2: PER-FRAME exposure_bias + bin summary (for measuring adaptation swing)." );
 
 	r_brdfLutDebug = ri.Cvar_Get( "r_brdfLutDebug", "0", CVAR_CHEAT );
 	ri.Cvar_CheckRange( r_brdfLutDebug, "0", "1", CV_INTEGER );
-	ri.Cvar_SetDescription( r_brdfLutDebug,
-		"Developer: read the split-sum BRDF integration LUT back to the CPU and\n"
-		"log a few decoded texels once, to verify the one-shot boot compute pass\n"
-		"populated it. No effect on the rendered frame." );
+	ri.Cvar_SetDescription( r_brdfLutDebug, "Developer: read the split-sum BRDF integration LUT back to the CPU and\n"
+											"log a few decoded texels once, to verify the one-shot boot compute pass\n"
+											"populated it. No effect on the rendered frame." );
 
 	r_probeSourceDebug = ri.Cvar_Get( "r_probeSourceDebug", "0", CVAR_CHEAT );
 	ri.Cvar_CheckRange( r_probeSourceDebug, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( r_probeSourceDebug,
-		"Developer: read the IBL analytic-sky source cube back to the CPU and log\n"
-		"a few decoded texels once, to verify the one-shot boot compute pass filled\n"
-		"a plausible directional sky. No effect on the rendered frame." );
+							"Developer: read the IBL analytic-sky source cube back to the CPU and log\n"
+							"a few decoded texels once, to verify the one-shot boot compute pass filled\n"
+							"a plausible directional sky. No effect on the rendered frame." );
 
 	r_probeRadianceDebug = ri.Cvar_Get( "r_probeRadianceDebug", "0", CVAR_CHEAT );
 	ri.Cvar_CheckRange( r_probeRadianceDebug, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( r_probeRadianceDebug,
-		"Developer: read the IBL convolved radiance (mip0) + irradiance cubes back\n"
-		"to the CPU and log a few decoded texels once, to verify the convolve passes\n"
-		"converged (mip0 tracks the source, irradiance smoothed). No frame effect." );
+							"Developer: read the IBL convolved radiance (mip0) + irradiance cubes back\n"
+							"to the CPU and log a few decoded texels once, to verify the convolve passes\n"
+							"converged (mip0 tracks the source, irradiance smoothed). No frame effect." );
 #endif
 
 	r_hdrExposureKey = ri.Cvar_Get( "r_hdrExposureKey", "0.0123", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_hdrExposureKey, "0.01", "1.0", CV_FLOAT );
-	ri.Cvar_SetDescription( r_hdrExposureKey,
-		"Auto-exposure middle-grey key (default 0.0123): the average scene\n"
-		"luminance is exposed to land at this value. 0.0123 is this engine's\n"
-		"measured middle-grey radiance scale, so a well-lit scene auto-exposes\n"
-		"near 1x (not washed out) and a dark scene lifts modestly to readable.\n"
-		"Live: next frame." );
+	ri.Cvar_SetDescription( r_hdrExposureKey, "Auto-exposure middle-grey key (default 0.0123): the average scene\n"
+											  "luminance is exposed to land at this value. 0.0123 is this engine's\n"
+											  "measured middle-grey radiance scale, so a well-lit scene auto-exposes\n"
+											  "near 1x (not washed out) and a dark scene lifts modestly to readable.\n"
+											  "Live: next frame." );
 
 	r_hdrExposurePctLow = ri.Cvar_Get( "r_hdrExposurePctLow", "0.5", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_hdrExposurePctLow, "0.0", "1.0", CV_FLOAT );
-	ri.Cvar_SetDescription( r_hdrExposurePctLow,
-		"Auto-exposure low histogram percentile clipped before averaging\n"
-		"(default 0.5) — discards the darkest fraction. Live: next frame." );
+	ri.Cvar_SetDescription( r_hdrExposurePctLow, "Auto-exposure low histogram percentile clipped before averaging\n"
+												 "(default 0.5) — discards the darkest fraction. Live: next frame." );
 
 	r_hdrExposurePctHigh = ri.Cvar_Get( "r_hdrExposurePctHigh", "0.2", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_hdrExposurePctHigh, "0.0", "1.0", CV_FLOAT );
 	ri.Cvar_SetDescription( r_hdrExposurePctHigh,
-		"Auto-exposure high histogram percentile clipped before averaging\n"
-		"(default 0.2) — discards the brightest fraction. Live: next frame." );
+							"Auto-exposure high histogram percentile clipped before averaging\n"
+							"(default 0.2) — discards the brightest fraction. Live: next frame." );
 
 	r_hdrAdaptionRateUp = ri.Cvar_Get( "r_hdrAdaptionRateUp", "1.5", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_hdrAdaptionRateUp, "0.0", "100.0", CV_FLOAT );
 	ri.Cvar_SetDescription( r_hdrAdaptionRateUp,
-		"Auto-exposure adaptation speed when required exposure rises: the scene\n"
-		"darkens and the output brightens (per second, default 1.5). Live: next frame." );
+							"Auto-exposure adaptation speed when required exposure rises: the scene\n"
+							"darkens and the output brightens (per second, default 1.5). Live: next frame." );
 
 	r_hdrAdaptionRateDown = ri.Cvar_Get( "r_hdrAdaptionRateDown", "0.5", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_hdrAdaptionRateDown, "0.0", "100.0", CV_FLOAT );
 	ri.Cvar_SetDescription( r_hdrAdaptionRateDown,
-		"Auto-exposure adaptation speed when required exposure falls: the scene\n"
-		"brightens and the output darkens (per second, default 0.5). Live: next frame." );
+							"Auto-exposure adaptation speed when required exposure falls: the scene\n"
+							"brightens and the output darkens (per second, default 0.5). Live: next frame." );
 
 	r_hdrExposureMin = ri.Cvar_Get( "r_hdrExposureMin", "0.25", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_hdrExposureMin, "0.01", "1.0", CV_FLOAT );
-	ri.Cvar_SetDescription( r_hdrExposureMin,
-		"Auto-exposure clamp floor (default 0.25): the lowest exposure\n"
-		"multiplier auto-exposure may apply. Live: next frame." );
+	ri.Cvar_SetDescription( r_hdrExposureMin, "Auto-exposure clamp floor (default 0.25): the lowest exposure\n"
+											  "multiplier auto-exposure may apply. Live: next frame." );
 
 	r_hdrExposureMax = ri.Cvar_Get( "r_hdrExposureMax", "8.0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_hdrExposureMax, "1.0", "64.0", CV_FLOAT );
-	ri.Cvar_SetDescription( r_hdrExposureMax,
-		"Auto-exposure clamp ceiling (default 8.0): the highest exposure\n"
-		"multiplier auto-exposure may apply. Live: next frame." );
+	ri.Cvar_SetDescription( r_hdrExposureMax, "Auto-exposure clamp ceiling (default 8.0): the highest exposure\n"
+											  "multiplier auto-exposure may apply. Live: next frame." );
 
 	r_bloom = ri.Cvar_Get( "r_bloom", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_bloom, "0", "1", CV_INTEGER );
-	ri.Cvar_SetDescription(r_bloom, "Enables bloom post-processing effect. Requires \\r_fbo 1.");
+	ri.Cvar_SetDescription( r_bloom, "Enables bloom post-processing effect. Requires \\r_fbo 1." );
 	r_bloomPasses = ri.Cvar_Get( "r_bloomPasses", "2", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_bloomPasses, "1", "4", CV_INTEGER );
-	ri.Cvar_SetDescription( r_bloomPasses, "Number of bloom pyramid levels (1-4). Lower = fewer GPU render passes = higher FPS. Default 2 is a good balance between quality and performance." );
+	ri.Cvar_SetDescription( r_bloomPasses, "Number of bloom pyramid levels (1-4). Lower = fewer GPU render passes = "
+										   "higher FPS. Default 2 is a good balance between quality and performance." );
 	r_vrs = ri.Cvar_Get( "r_vrs", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_vrs, "0", "1", CV_INTEGER );
-	ri.Cvar_SetDescription( r_vrs, "Variable-rate shading on the bloom post-process pass only (2x2). Reduces bloom GPU cost; imperceptible since bloom is low-frequency. No effect on the HUD, world, or crosshair (those always render at full rate). Requires VRS-capable hardware (else 1x1). Default off." );
+	ri.Cvar_SetDescription(
+		r_vrs, "Variable-rate shading on the bloom post-process pass only (2x2). Reduces bloom GPU cost; imperceptible "
+			   "since bloom is low-frequency. No effect on the HUD, world, or crosshair (those always render at full "
+			   "rate). Requires VRS-capable hardware (else 1x1). Default off." );
 #ifdef __APPLE__
 	r_vkApplePinkBarrier = ri.Cvar_Get( "r_vkApplePinkBarrier", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_SetDescription( r_vkApplePinkBarrier, "MoltenVK: emit explicit tile-cache barrier between main and gamma passes. Disable (0) to test FPS impact; re-enable (1) if pink glitch appears." );
+	ri.Cvar_SetDescription( r_vkApplePinkBarrier,
+							"MoltenVK: emit explicit tile-cache barrier between main and gamma passes. Disable (0) to "
+							"test FPS impact; re-enable (1) if pink glitch appears." );
 #endif
 
 	r_ext_supersample = ri.Cvar_Get( "r_ext_supersample", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
@@ -2445,27 +2493,28 @@ static void R_Register( void )
 	r_renderScale = ri.Cvar_Get( "r_renderScale", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_renderScale, "0", "4", CV_INTEGER );
 	ri.Cvar_SetDescription( r_renderScale, "Scaling mode to be used with custom render resolution:\n"
-		" 0 - disabled\n"
-		" 1 - nearest filtering, stretch to full size\n"
-		" 2 - nearest filtering, preserve aspect ratio (black bars on sides)\n"
-		" 3 - linear filtering, stretch to full size\n"
-		" 4 - linear filtering, preserve aspect ratio (black bars on sides)\n" );
+										   " 0 - disabled\n"
+										   " 1 - nearest filtering, stretch to full size\n"
+										   " 2 - nearest filtering, preserve aspect ratio (black bars on sides)\n"
+										   " 3 - linear filtering, stretch to full size\n"
+										   " 4 - linear filtering, preserve aspect ratio (black bars on sides)\n" );
 
 	r_depthFade = ri.Cvar_Get( "r_depthFade", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_depthFade, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( r_depthFade, "Soft particle edges: fade transparent surfaces near opaque geometry.\n"
-		" Requires \\r_fbo 1." );
+										 " Requires \\r_fbo 1." );
 
 	r_depthFadeScale = ri.Cvar_Get( "r_depthFadeScale", "2.0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
-	ri.Cvar_SetDescription( r_depthFadeScale, "Soft-particle depth-fade distance scale (larger = wider, softer\n"
-		" intersection band). Baked into the shader at pipeline creation (spec constant),\n"
-		" so a change applies on \\vid_restart. Default 2.0." );
+	ri.Cvar_SetDescription( r_depthFadeScale,
+							"Soft-particle depth-fade distance scale (larger = wider, softer\n"
+							" intersection band). Baked into the shader at pipeline creation (spec constant),\n"
+							" so a change applies on \\vid_restart. Default 2.0." );
 
 #if FEAT_PARALLAX_MAPPING
 	r_parallaxMapping = ri.Cvar_Get( "r_parallaxMapping", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_parallaxMapping, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( r_parallaxMapping, "Steep parallax mapping on surfaces with normalMap textures.\n"
-		" Height data from normalmap alpha channel." );
+											   " Height data from normalmap alpha channel." );
 #endif
 
 #if FEAT_SSAO
@@ -2474,7 +2523,7 @@ static void R_Register( void )
 	r_ssao = ri.Cvar_Get( "r_ssao", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_ssao, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( r_ssao, "Ground-truth ambient occlusion (GTAO).\n"
-		" Requires \\r_fbo 1. Default on; set 0 to disable." );
+									" Requires \\r_fbo 1. Default on; set 0 to disable." );
 	// Live-tunable GTAO knobs (no vid_restart — read each frame by the dispatch).
 	r_ssaoRadius = ri.Cvar_Get( "r_ssaoRadius", "12", CVAR_ARCHIVE );
 	ri.Cvar_CheckRange( r_ssaoRadius, "1", "512", CV_FLOAT );
@@ -2489,10 +2538,14 @@ static void R_Register( void )
 	// a real map sun; these only shape it). Live-tunable, read each frame.
 	r_sscsRadius = ri.Cvar_Get( "r_sscsRadius", "6", CVAR_ARCHIVE );
 	ri.Cvar_CheckRange( r_sscsRadius, "0", "64", CV_FLOAT );
-	ri.Cvar_SetDescription( r_sscsRadius, "Directional contact-shadow (SSCS) march length in world units — the fine model-on-ground contact scale toward the sun. Folded into GTAO; active only when \\r_shadows casts and the map has a real sun. 0 disables the contact fold." );
+	ri.Cvar_SetDescription( r_sscsRadius,
+							"Directional contact-shadow (SSCS) march length in world units — the fine model-on-ground "
+							"contact scale toward the sun. Folded into GTAO; active only when \\r_shadows casts and "
+							"the map has a real sun. 0 disables the contact fold." );
 	r_sscsStrength = ri.Cvar_Get( "r_sscsStrength", "0.6", CVAR_ARCHIVE );
 	ri.Cvar_CheckRange( r_sscsStrength, "0", "1", CV_FLOAT );
-	ri.Cvar_SetDescription( r_sscsStrength, "Directional contact-shadow (SSCS) darkening strength where the sun-march hits a near occluder. 0 off, 1 fully dark." );
+	ri.Cvar_SetDescription( r_sscsStrength, "Directional contact-shadow (SSCS) darkening strength where the sun-march "
+											"hits a near occluder. 0 off, 1 fully dark." );
 	// Debug-visibility view (NOT a developer cvar): output the denoised AO buffer as
 	// grayscale instead of compositing it, so the visual gate can capture + assert the
 	// AO field directly. Default 0 (normal composite). LATCH (baked into the SSAO
@@ -2514,20 +2567,22 @@ static void R_Register( void )
 	// compute command buffers + semaphores are allocated at init. Set 0 to force serial.
 	r_asyncCompute = ri.Cvar_Get( "r_asyncCompute", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_asyncCompute, "0", "1", CV_INTEGER );
-	ri.Cvar_SetDescription( r_asyncCompute, "Run eligible compute (GTAO) on the dedicated async-compute queue,\n"
-		" overlapping graphics. Default on; falls back to serial (byte-identical) on\n"
-		" GPUs without a separate compute queue. Set 0 to force serial." );
+	ri.Cvar_SetDescription( r_asyncCompute,
+							"Run eligible compute (GTAO) on the dedicated async-compute queue,\n"
+							" overlapping graphics. Default on; falls back to serial (byte-identical) on\n"
+							" GPUs without a separate compute queue. Set 0 to force serial." );
 
 	r_asyncTextureUpload = ri.Cvar_Get( "r_asyncTextureUpload", "1", CVAR_ARCHIVE );
 	ri.Cvar_CheckRange( r_asyncTextureUpload, "0", "1", CV_INTEGER );
-	ri.Cvar_SetDescription( r_asyncTextureUpload, "Pipeline eligible texture uploads on the dedicated transfer queue\n"
-		" (the copy submits without blocking; the texture shows the default placeholder\n"
-		" until a per-frame drain swaps in the real texture and a graphics-queue barrier\n"
-		" makes it visible to sampling). Default 1. Boot-critical fonts + the cursor load\n"
-		" synchronously at boot; rare fonts lazy-load on first use (block-until-resident);\n"
-		" menu decor streams in-frame. Falls back to synchronous when there is no dedicated\n"
-		" transfer queue or for built-in / mip-gen / sub-region uploads. Set 0 to force the\n"
-		" synchronous path." );
+	ri.Cvar_SetDescription( r_asyncTextureUpload,
+							"Pipeline eligible texture uploads on the dedicated transfer queue\n"
+							" (the copy submits without blocking; the texture shows the default placeholder\n"
+							" until a per-frame drain swaps in the real texture and a graphics-queue barrier\n"
+							" makes it visible to sampling). Default 1. Boot-critical fonts + the cursor load\n"
+							" synchronously at boot; rare fonts lazy-load on first use (block-until-resident);\n"
+							" menu decor streams in-frame. Falls back to synchronous when there is no dedicated\n"
+							" transfer queue or for built-in / mip-gen / sub-region uploads. Set 0 to force the\n"
+							" synchronous path." );
 
 #if FEAT_TONEMAP
 	// r_tonemap is in CVG_RENDERER (runtime-live): the operator
@@ -2555,18 +2610,17 @@ static void R_Register( void )
 	//                       ceiling) — not domain-sensitive.
 	r_tonemap = ri.Cvar_Get( "r_tonemap", "3", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_tonemap, "0", "4", CV_INTEGER );
-	ri.Cvar_SetDescription( r_tonemap,
-		"HDR tone mapping operator. Compresses scene radiance to LDR\n"
-		"display range. All operators are hue-preserving except where\n"
-		"noted.\n"
-		"  0 - identity passthrough (HDR clipped at display range, legacy)\n"
-		"  1 - PBR Neutral (default, glTF 2.0 reference, minimal manipulation,\n"
-		"      preserves LDR mid-tones, soft highlight roll-off)\n"
-		"  2 - AgX (modern hue-preserving, sigmoid curve, polished cinematic feel)\n"
-		"  3 - Lottes (configurable filmic, tunable via r_lottes_* cvars)\n"
-		"  4 - Reinhard (classical 1985 reference, alters mid-tones, hue-shift)\n"
-		"Requires r_fbo 1. Live: takes effect on next frame via the\n"
-		"renderer post-process pipeline group." );
+	ri.Cvar_SetDescription( r_tonemap, "HDR tone mapping operator. Compresses scene radiance to LDR\n"
+									   "display range. All operators are hue-preserving except where\n"
+									   "noted.\n"
+									   "  0 - identity passthrough (HDR clipped at display range, legacy)\n"
+									   "  1 - PBR Neutral (default, glTF 2.0 reference, minimal manipulation,\n"
+									   "      preserves LDR mid-tones, soft highlight roll-off)\n"
+									   "  2 - AgX (modern hue-preserving, sigmoid curve, polished cinematic feel)\n"
+									   "  3 - Lottes (configurable filmic, tunable via r_lottes_* cvars)\n"
+									   "  4 - Reinhard (classical 1985 reference, alters mid-tones, hue-shift)\n"
+									   "Requires r_fbo 1. Live: takes effect on next frame via the\n"
+									   "renderer post-process pipeline group." );
 	ri.Cvar_SetGroup( r_tonemap, CVG_RENDERER );
 
 	// r_tonemapExposure is the pre-tonemap multiplier (gamma.frag
@@ -2578,14 +2632,13 @@ static void R_Register( void )
 	// doesn't reach a running shader.
 	r_tonemapExposure = ri.Cvar_Get( "r_tonemapExposure", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_tonemapExposure, "0.1", "8.0", CV_FLOAT );
-	ri.Cvar_SetDescription( r_tonemapExposure,
-		"Pre-tonemap exposure multiplier.\n"
-		"Range 0.1-8.0, default 1.0.\n"
-		"Multiplies HDR colour before the tonemap operator;\n"
-		"values below 1.0 darken atmospherically (Doom-3-style\n"
-		"shoulder compression), values above 1.0 brighten.\n"
-		"Requires r_tonemap > 0 and r_fbo 1. Live: takes\n"
-		"effect on next frame." );
+	ri.Cvar_SetDescription( r_tonemapExposure, "Pre-tonemap exposure multiplier.\n"
+											   "Range 0.1-8.0, default 1.0.\n"
+											   "Multiplies HDR colour before the tonemap operator;\n"
+											   "values below 1.0 darken atmospherically (Doom-3-style\n"
+											   "shoulder compression), values above 1.0 brighten.\n"
+											   "Requires r_tonemap > 0 and r_fbo 1. Live: takes\n"
+											   "effect on next frame." );
 	ri.Cvar_SetGroup( r_tonemapExposure, CVG_RENDERER );
 
 	// Lottes (r_tonemap 3) configurable filmic parameters. All five
@@ -2597,42 +2650,37 @@ static void R_Register( void )
 	// GDC 2016 reference curve.
 	r_lottes_contrast = ri.Cvar_Get( "r_lottes_contrast", "1.6", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_lottes_contrast, "0.5", "3.0", CV_FLOAT );
-	ri.Cvar_SetDescription( r_lottes_contrast,
-		"Lottes tonemap contrast parameter. Higher = steeper mid-tones.\n"
-		"Default 1.6 (canonical Lottes 2016 reference).\n"
-		"Effective only when r_tonemap 3 is active. Live cvar." );
+	ri.Cvar_SetDescription( r_lottes_contrast, "Lottes tonemap contrast parameter. Higher = steeper mid-tones.\n"
+											   "Default 1.6 (canonical Lottes 2016 reference).\n"
+											   "Effective only when r_tonemap 3 is active. Live cvar." );
 	ri.Cvar_SetGroup( r_lottes_contrast, CVG_RENDERER );
 
 	r_lottes_shoulder = ri.Cvar_Get( "r_lottes_shoulder", "0.977", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_lottes_shoulder, "0.5", "1.0", CV_FLOAT );
-	ri.Cvar_SetDescription( r_lottes_shoulder,
-		"Lottes tonemap highlight shoulder softness. Higher = softer roll-off.\n"
-		"Default 0.977 (canonical).\n"
-		"Effective only when r_tonemap 3 is active. Live cvar." );
+	ri.Cvar_SetDescription( r_lottes_shoulder, "Lottes tonemap highlight shoulder softness. Higher = softer roll-off.\n"
+											   "Default 0.977 (canonical).\n"
+											   "Effective only when r_tonemap 3 is active. Live cvar." );
 	ri.Cvar_SetGroup( r_lottes_shoulder, CVG_RENDERER );
 
 	r_lottes_mid_in = ri.Cvar_Get( "r_lottes_mid_in", "0.18", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_lottes_mid_in, "0.0", "1.0", CV_FLOAT );
-	ri.Cvar_SetDescription( r_lottes_mid_in,
-		"Lottes tonemap input mid-point. Anchors the curve's middle.\n"
-		"Default 0.18 (canonical, 18% gray photographic reference).\n"
-		"Effective only when r_tonemap 3 is active. Live cvar." );
+	ri.Cvar_SetDescription( r_lottes_mid_in, "Lottes tonemap input mid-point. Anchors the curve's middle.\n"
+											 "Default 0.18 (canonical, 18% gray photographic reference).\n"
+											 "Effective only when r_tonemap 3 is active. Live cvar." );
 	ri.Cvar_SetGroup( r_lottes_mid_in, CVG_RENDERER );
 
 	r_lottes_mid_out = ri.Cvar_Get( "r_lottes_mid_out", "0.267", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_lottes_mid_out, "0.0", "1.0", CV_FLOAT );
-	ri.Cvar_SetDescription( r_lottes_mid_out,
-		"Lottes tonemap output mid-point. The display value mid_in maps to.\n"
-		"Default 0.267 (canonical).\n"
-		"Effective only when r_tonemap 3 is active. Live cvar." );
+	ri.Cvar_SetDescription( r_lottes_mid_out, "Lottes tonemap output mid-point. The display value mid_in maps to.\n"
+											  "Default 0.267 (canonical).\n"
+											  "Effective only when r_tonemap 3 is active. Live cvar." );
 	ri.Cvar_SetGroup( r_lottes_mid_out, CVG_RENDERER );
 
 	r_lottes_hdr_max = ri.Cvar_Get( "r_lottes_hdr_max", "8.0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_lottes_hdr_max, "1.0", "64.0", CV_FLOAT );
-	ri.Cvar_SetDescription( r_lottes_hdr_max,
-		"Lottes tonemap maximum HDR input value (mapped to display white).\n"
-		"Default 8.0 (canonical).\n"
-		"Effective only when r_tonemap 3 is active. Live cvar." );
+	ri.Cvar_SetDescription( r_lottes_hdr_max, "Lottes tonemap maximum HDR input value (mapped to display white).\n"
+											  "Default 8.0 (canonical).\n"
+											  "Effective only when r_tonemap 3 is active. Live cvar." );
 	ri.Cvar_SetGroup( r_lottes_hdr_max, CVG_RENDERER );
 #endif
 
@@ -2647,10 +2695,10 @@ static void R_Register( void )
 	r_colorGrading = ri.Cvar_Get( "r_colorGrading", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_colorGrading, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( r_colorGrading, "Color grading post-process (tint, saturation, contrast).\n"
-		" 0: off (default)\n"
-		" 1: on — bind USE_COLOR_GRADING tonemap variant; r_grade_*\n"
-		"        live cvars then control the look.\n"
-		"Requires \\r_fbo 1. vid_restart required when toggling on/off." );
+											" 0: off (default)\n"
+											" 1: on — bind USE_COLOR_GRADING tonemap variant; r_grade_*\n"
+											"        live cvars then control the look.\n"
+											"Requires \\r_fbo 1. vid_restart required when toggling on/off." );
 
 	// live colour-grading knobs. CVG_RENDERER routes
 	// every change through vk_update_post_process_pipelines, which
@@ -2659,40 +2707,35 @@ static void R_Register( void )
 	// when r_colorGrading 1 (master gate).
 	r_grade_tint_r = ri.Cvar_Get( "r_grade_tint_r", "1.0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_grade_tint_r, "0.0", "2.0", CV_FLOAT );
-	ri.Cvar_SetDescription( r_grade_tint_r,
-		"Colour grading red tint multiplier. 1.0 = neutral, <1.0 less\n"
-		"red, >1.0 more red. Live; requires r_colorGrading 1." );
+	ri.Cvar_SetDescription( r_grade_tint_r, "Colour grading red tint multiplier. 1.0 = neutral, <1.0 less\n"
+											"red, >1.0 more red. Live; requires r_colorGrading 1." );
 	ri.Cvar_SetGroup( r_grade_tint_r, CVG_RENDERER );
 
 	r_grade_tint_g = ri.Cvar_Get( "r_grade_tint_g", "1.0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_grade_tint_g, "0.0", "2.0", CV_FLOAT );
-	ri.Cvar_SetDescription( r_grade_tint_g,
-		"Colour grading green tint multiplier. 1.0 = neutral, <1.0 less\n"
-		"green, >1.0 more green. Live; requires r_colorGrading 1." );
+	ri.Cvar_SetDescription( r_grade_tint_g, "Colour grading green tint multiplier. 1.0 = neutral, <1.0 less\n"
+											"green, >1.0 more green. Live; requires r_colorGrading 1." );
 	ri.Cvar_SetGroup( r_grade_tint_g, CVG_RENDERER );
 
 	r_grade_tint_b = ri.Cvar_Get( "r_grade_tint_b", "1.0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_grade_tint_b, "0.0", "2.0", CV_FLOAT );
-	ri.Cvar_SetDescription( r_grade_tint_b,
-		"Colour grading blue tint multiplier. 1.0 = neutral, <1.0 less\n"
-		"blue, >1.0 more blue. Live; requires r_colorGrading 1." );
+	ri.Cvar_SetDescription( r_grade_tint_b, "Colour grading blue tint multiplier. 1.0 = neutral, <1.0 less\n"
+											"blue, >1.0 more blue. Live; requires r_colorGrading 1." );
 	ri.Cvar_SetGroup( r_grade_tint_b, CVG_RENDERER );
 
 	r_grade_saturation = ri.Cvar_Get( "r_grade_saturation", "1.0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_grade_saturation, "0.0", "2.0", CV_FLOAT );
-	ri.Cvar_SetDescription( r_grade_saturation,
-		"Colour grading saturation. 1.0 = identity, 0.0 = greyscale,\n"
-		"2.0 = oversaturated. Distinct from r_saturation (radiance\n"
-		"domain, pre-tonemap); this applies post-tonemap in display\n"
-		"domain. Live; requires r_colorGrading 1." );
+	ri.Cvar_SetDescription( r_grade_saturation, "Colour grading saturation. 1.0 = identity, 0.0 = greyscale,\n"
+												"2.0 = oversaturated. Distinct from r_saturation (radiance\n"
+												"domain, pre-tonemap); this applies post-tonemap in display\n"
+												"domain. Live; requires r_colorGrading 1." );
 	ri.Cvar_SetGroup( r_grade_saturation, CVG_RENDERER );
 
 	r_grade_contrast = ri.Cvar_Get( "r_grade_contrast", "1.0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_grade_contrast, "0.5", "2.0", CV_FLOAT );
-	ri.Cvar_SetDescription( r_grade_contrast,
-		"Colour grading contrast. 1.0 = identity, <1.0 flatter, >1.0\n"
-		"punchier. Applied around the 0.5 luminance pivot. Live;\n"
-		"requires r_colorGrading 1." );
+	ri.Cvar_SetDescription( r_grade_contrast, "Colour grading contrast. 1.0 = identity, <1.0 flatter, >1.0\n"
+											  "punchier. Applied around the 0.5 luminance pivot. Live;\n"
+											  "requires r_colorGrading 1." );
 	ri.Cvar_SetGroup( r_grade_contrast, CVG_RENDERER );
 #endif
 
@@ -2706,16 +2749,15 @@ static void R_Register( void )
 	// triggered, just a different cached pipeline gets bound.
 	r_pbr = ri.Cvar_Get( "r_pbr", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_pbr, "0", "1", CV_INTEGER );
-	ri.Cvar_SetDescription( r_pbr,
-		"Physically based rendering on surfaces with pbrMap textures.\n"
-		" pbrMap follows glTF 2.0 ORM packing:\n"
-		"   R = ambient occlusion (linear)\n"
-		"   G = roughness (linear)\n"
-		"   B = metalness (linear)\n"
-		" Authors using Substance, Blender, Godot, UE5 glTF export\n"
-		" produce this packing by default.\n"
-		" Ambient occlusion consumed by the IBL path.\n"
-		" Live: 0 disables the PBR pipeline swap, 1 enables it." );
+	ri.Cvar_SetDescription( r_pbr, "Physically based rendering on surfaces with pbrMap textures.\n"
+								   " pbrMap follows glTF 2.0 ORM packing:\n"
+								   "   R = ambient occlusion (linear)\n"
+								   "   G = roughness (linear)\n"
+								   "   B = metalness (linear)\n"
+								   " Authors using Substance, Blender, Godot, UE5 glTF export\n"
+								   " produce this packing by default.\n"
+								   " Ambient occlusion consumed by the IBL path.\n"
+								   " Live: 0 disables the PBR pipeline swap, 1 enables it." );
 	ri.Cvar_SetGroup( r_pbr, CVG_RENDERER );
 #endif
 
@@ -2727,10 +2769,10 @@ static void R_Register( void )
 	r_forwardPlus = ri.Cvar_Get( "r_forwardPlus", "0", CVAR_ARCHIVE | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_forwardPlus, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( r_forwardPlus,
-		"Tiled (Forward+) dynamic lighting: a compute pass bins lights into screen\n"
-		" tiles; the lit fragment iterates only its tile's lights. Scales the dynamic\n"
-		" light count. 0 = the per-light-pass PMLIGHT path (default, byte-identical).\n"
-		" Latched: applies on vid_restart." );
+							"Tiled (Forward+) dynamic lighting: a compute pass bins lights into screen\n"
+							" tiles; the lit fragment iterates only its tile's lights. Scales the dynamic\n"
+							" light count. 0 = the per-light-pass PMLIGHT path (default, byte-identical).\n"
+							" Latched: applies on vid_restart." );
 	ri.Cvar_SetGroup( r_forwardPlus, CVG_RENDERER );
 
 	// Extract BSP `light` entities into the Forward+ dlight set (so static map
@@ -2744,10 +2786,10 @@ static void R_Register( void )
 	r_unbakeStaticLights = ri.Cvar_Get( "r_unbakeStaticLights", "0", CVAR_ARCHIVE | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_unbakeStaticLights, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( r_unbakeStaticLights,
-		"Extract BSP static `light` entities into Forward+ dynamic lighting and dim\n"
-		" the baked lightmap to bound the double-count. 0 = off (default, byte-\n"
-		" identical). 1 = extract + tuned global dim (an approximation — the baked\n"
-		" lightmap can't be surgically un-baked). Latched: applies on vid_restart." );
+							"Extract BSP static `light` entities into Forward+ dynamic lighting and dim\n"
+							" the baked lightmap to bound the double-count. 0 = off (default, byte-\n"
+							" identical). 1 = extract + tuned global dim (an approximation — the baked\n"
+							" lightmap can't be surgically un-baked). Latched: applies on vid_restart." );
 	ri.Cvar_SetGroup( r_unbakeStaticLights, CVG_RENDERER );
 
 #if FEAT_SHADOW_MAPPING
@@ -2760,11 +2802,11 @@ static void R_Register( void )
 	r_dlightShadows = ri.Cvar_Get( "r_dlightShadows", "1", CVAR_ARCHIVE );
 	ri.Cvar_CheckRange( r_dlightShadows, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( r_dlightShadows,
-		"Omni shadows for dynamic point lights: the brightest visible runtime dlights\n"
-		" render the scene depth from their position (a 2D-atlas cubemap) and the lit\n"
-		" fragment depth-compares for occlusion. 1 = on (default). 0 = no dlight shadows\n"
-		" (byte-identical to the pre-feature path). Live: toggling allocates/releases the\n"
-		" atlas at the next frame boundary (no vid_restart)." );
+							"Omni shadows for dynamic point lights: the brightest visible runtime dlights\n"
+							" render the scene depth from their position (a 2D-atlas cubemap) and the lit\n"
+							" fragment depth-compares for occlusion. 1 = on (default). 0 = no dlight shadows\n"
+							" (byte-identical to the pre-feature path). Live: toggling allocates/releases the\n"
+							" atlas at the next frame boundary (no vid_restart)." );
 	ri.Cvar_SetGroup( r_dlightShadows, CVG_RENDERER );
 
 	// Number of shadow-casting dynamic lights (the top-K brightest visible runtime
@@ -2774,8 +2816,8 @@ static void R_Register( void )
 	r_dlightShadowK = ri.Cvar_Get( "r_dlightShadowK", "1", CVAR_ARCHIVE );
 	ri.Cvar_CheckRange( r_dlightShadowK, "1", "4", CV_INTEGER );
 	ri.Cvar_SetDescription( r_dlightShadowK,
-		"Number of shadow-casting dynamic point lights (top-K brightest). 1 (default)\n"
-		" = the single brightest light. Range 1..4. Live (no vid_restart)." );
+							"Number of shadow-casting dynamic point lights (top-K brightest). 1 (default)\n"
+							" = the single brightest light. Range 1..4. Live (no vid_restart)." );
 	ri.Cvar_SetGroup( r_dlightShadowK, CVG_RENDERER );
 
 	// Test-only (CVAR_CHEAT): inject a synthetic dlight each scene so the omni-shadow
@@ -2793,9 +2835,9 @@ static void R_Register( void )
 	r_dlightShadowCount = ri.Cvar_Get( "r_dlightShadowCount", "0", CVAR_CHEAT );
 	ri.Cvar_CheckRange( r_dlightShadowCount, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( r_dlightShadowCount,
-		"Diagnostic: log the per-frame count + running peak of shadow-eligible dynamic\n"
-		" lights (radius > 0 in the view's dlight set) — the candidate set a K-light\n"
-		" shadow budget would draw from. 0 = off." );
+							"Diagnostic: log the per-frame count + running peak of shadow-eligible dynamic\n"
+							" lights (radius > 0 in the view's dlight set) — the candidate set a K-light\n"
+							" shadow budget would draw from. 0 = off." );
 
 	// Diagnostic (CVAR_CHEAT): wall-clock the dlight-shadow bake. When set, the omni
 	// depth bake is wrapped with a CPU microsecond timer (the deterministic, automatable
@@ -2804,8 +2846,8 @@ static void R_Register( void )
 	r_dlightShadowProfile = ri.Cvar_Get( "r_dlightShadowProfile", "0", CVAR_CHEAT );
 	ri.Cvar_CheckRange( r_dlightShadowProfile, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( r_dlightShadowProfile,
-		"Diagnostic: log the dlight-shadow bake CPU-submit cost (us/frame) + face-pass\n"
-		" count over a 1-second window. 0 = off." );
+							"Diagnostic: log the dlight-shadow bake CPU-submit cost (us/frame) + face-pass\n"
+							" count over a 1-second window. 0 = off." );
 
 	// Test-only (CVAR_CHEAT): inject a synthetic alpha-tested quad into the CSM
 	// caster set so the cut-out shadow path can be exercised + verified headless.
@@ -2822,7 +2864,7 @@ static void R_Register( void )
 #if FEAT_ADVANCED_WATER
 	ri.Cvar_Get( "r_waterRefraction", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_SetDescription( ri.Cvar_Get( "r_waterRefraction", "1", 0 ),
-		"Advanced water with screen-space refraction, Fresnel, and ripple noise." );
+							"Advanced water with screen-space refraction, Fresnel, and ripple noise." );
 #endif
 
 #if FEAT_SHADOW_MAPPING
@@ -2840,58 +2882,58 @@ static void R_Register( void )
 	r_entitySSBO = ri.Cvar_Get( "r_entitySSBO", "0", CVAR_ARCHIVE | CVAR_LATCH | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( ri.Cvar_Get( "r_entitySSBO", "0", 0 ), "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( ri.Cvar_Get( "r_entitySSBO", "0", 0 ),
-		"Deliver per-entity matrices via a frame-wide storage buffer indexed by\n"
-		" instance, instead of the per-draw uniform ring. Render-identical; a\n"
-		" portable-binding surface. Latched: takes effect on vid_restart." );
+							"Deliver per-entity matrices via a frame-wide storage buffer indexed by\n"
+							" instance, instead of the per-draw uniform ring. Render-identical; a\n"
+							" portable-binding surface. Latched: takes effect on vid_restart." );
 	ri.Cvar_SetGroup( ri.Cvar_Get( "r_entitySSBO", "0", 0 ), CVG_RENDERER );
 	ri.Cvar_Get( "r_shadowPCF", "5", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( ri.Cvar_Get( "r_shadowPCF", "5", 0 ), "1", "9", CV_INTEGER );
 	ri.Cvar_Get( "r_shadowMapSize", "2048", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( ri.Cvar_Get( "r_shadowMapSize", "2048", 0 ), "512", "4096", CV_INTEGER );
 	ri.Cvar_SetDescription( ri.Cvar_Get( "r_shadowMapSize", "2048", 0 ),
-		"Shadow-map resolution (per cascade). Live: rebuilt on the next frame." );
+							"Shadow-map resolution (per cascade). Live: rebuilt on the next frame." );
 	ri.Cvar_SetGroup( ri.Cvar_Get( "r_shadowMapSize", "2048", 0 ), CVG_RENDERER );
 	ri.Cvar_Get( "r_csmCascades", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( ri.Cvar_Get( "r_csmCascades", "1", 0 ), "1", "4", CV_INTEGER ); // 4 == SHADOWMAP_MAX_CASCADES
 	ri.Cvar_SetDescription( ri.Cvar_Get( "r_csmCascades", "1", 0 ),
-		"Number of cascaded shadow-map cascades to render (1..4). Cascades beyond\n"
-		" this count are left fully lit. Live (re-read per frame)." );
+							"Number of cascaded shadow-map cascades to render (1..4). Cascades beyond\n"
+							" this count are left fully lit. Live (re-read per frame)." );
 	ri.Cvar_SetGroup( ri.Cvar_Get( "r_csmCascades", "1", 0 ), CVG_RENDERER );
 
 	// CSM polish knobs (all live via CVG_RENDERER).
 	ri.Cvar_Get( "r_csmBias", "0.005", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( ri.Cvar_Get( "r_csmBias", "0.005", 0 ), "0", "0.1", CV_FLOAT );
 	ri.Cvar_SetDescription( ri.Cvar_Get( "r_csmBias", "0.005", 0 ),
-		"Shadow depth-bias intensity. Drives the depth pass's slope-scaled bias\n"
-		" (0.005 == the prior fixed conservative value). Lower → acne, higher → peter-panning." );
+							"Shadow depth-bias intensity. Drives the depth pass's slope-scaled bias\n"
+							" (0.005 == the prior fixed conservative value). Lower → acne, higher → peter-panning." );
 	ri.Cvar_SetGroup( ri.Cvar_Get( "r_csmBias", "0.005", 0 ), CVG_RENDERER );
 
 	ri.Cvar_Get( "r_csmLambda", "0.5", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( ri.Cvar_Get( "r_csmLambda", "0.5", 0 ), "0", "1", CV_FLOAT );
 	ri.Cvar_SetDescription( ri.Cvar_Get( "r_csmLambda", "0.5", 0 ),
-		"Practical Split blend: 0 = uniform splits, 1 = logarithmic splits." );
+							"Practical Split blend: 0 = uniform splits, 1 = logarithmic splits." );
 	ri.Cvar_SetGroup( ri.Cvar_Get( "r_csmLambda", "0.5", 0 ), CVG_RENDERER );
 
 	ri.Cvar_Get( "r_csmMaxDistance", "4096", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( ri.Cvar_Get( "r_csmMaxDistance", "4096", 0 ), "256", "16384", CV_FLOAT );
 	ri.Cvar_SetDescription( ri.Cvar_Get( "r_csmMaxDistance", "4096", 0 ),
-		"Far distance covered by the last cascade (clamps the view far plane for CSM)." );
+							"Far distance covered by the last cascade (clamps the view far plane for CSM)." );
 	ri.Cvar_SetGroup( ri.Cvar_Get( "r_csmMaxDistance", "4096", 0 ), CVG_RENDERER );
 
 	ri.Cvar_Get( "r_csmShowCascades", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( ri.Cvar_Get( "r_csmShowCascades", "0", 0 ), "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( ri.Cvar_Get( "r_csmShowCascades", "0", 0 ),
-		"Debug: tint lit-pass output by the cascade sampled per pixel\n"
-		" (0 = red, 1 = green, 2 = blue, 3 = yellow)." );
+							"Debug: tint lit-pass output by the cascade sampled per pixel\n"
+							" (0 = red, 1 = green, 2 = blue, 3 = yellow)." );
 	ri.Cvar_SetGroup( ri.Cvar_Get( "r_csmShowCascades", "0", 0 ), CVG_RENDERER );
 
 	ri.Cvar_Get( "r_csmCull", "1", CVAR_ARCHIVE );
 	ri.Cvar_CheckRange( ri.Cvar_Get( "r_csmCull", "1", 0 ), "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( ri.Cvar_Get( "r_csmCull", "1", 0 ),
-		"Per-cascade caster cull: skip an entity caster (brush-model / animated\n"
-		" mesh / skinned player) from a cascade its bounding sphere doesn't reach.\n"
-		" Correctness-preserving (shadows identical); reduces shadow draw calls.\n"
-		" 0 draws every entity caster into every cascade (the A/B baseline). Live." );
+							"Per-cascade caster cull: skip an entity caster (brush-model / animated\n"
+							" mesh / skinned player) from a cascade its bounding sphere doesn't reach.\n"
+							" Correctness-preserving (shadows identical); reduces shadow draw calls.\n"
+							" 0 draws every entity caster into every cascade (the A/B baseline). Live." );
 	ri.Cvar_SetGroup( ri.Cvar_Get( "r_csmCull", "1", 0 ), CVG_RENDERER );
 #endif
 
@@ -2904,7 +2946,7 @@ static void R_Register( void )
 	r_drawSunRays = ri.Cvar_Get( "r_drawSunRays", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_drawSunRays, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( r_drawSunRays, "Screen-space crepuscular sun-rays from the map sun.\n"
-		" Requires \\r_fbo 1." );
+										   " Requires \\r_fbo 1." );
 	ri.Cvar_SetGroup( r_drawSunRays, CVG_RENDERER );
 	// Look-tuning for the sun-ray accumulation, fed per-frame into the exposure UBO
 	// (no latch — adjustable live). Intensity scales the additive ray contribution;
@@ -2943,16 +2985,16 @@ static void R_Register( void )
 	r_smaa = ri.Cvar_Get( "r_smaa", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_smaa, "0", "4", CV_INTEGER );
 	ri.Cvar_SetDescription( r_smaa, "SMAA anti-aliasing quality:\n"
-		" 0 - disabled\n"
-		" 1 - low     (threshold 0.15, 4-step search)\n"
-		" 2 - medium  (threshold 0.10, 8-step search)\n"
-		" 3 - high    (threshold 0.10, 16-step search + diagonal + corner rounding)\n"
-		" 4 - ultra   (threshold 0.05, 32-step search + diagonal + corner rounding)\n"
-		"Threshold is a relative-luma delta (same semantic at LDR and HDR).\n"
-		"Override the preset threshold via r_smaa_threshold.\n"
-		"Anti-aliases the tonemapped scene (img 265) before the HUD pass —\n"
-		"the HUD stays sharp. Requires r_fbo 1. Live: takes effect on next\n"
-		"frame via the renderer post-process pipeline group." );
+									" 0 - disabled\n"
+									" 1 - low     (threshold 0.15, 4-step search)\n"
+									" 2 - medium  (threshold 0.10, 8-step search)\n"
+									" 3 - high    (threshold 0.10, 16-step search + diagonal + corner rounding)\n"
+									" 4 - ultra   (threshold 0.05, 32-step search + diagonal + corner rounding)\n"
+									"Threshold is a relative-luma delta (same semantic at LDR and HDR).\n"
+									"Override the preset threshold via r_smaa_threshold.\n"
+									"Anti-aliases the tonemapped scene (img 265) before the HUD pass —\n"
+									"the HUD stays sharp. Requires r_fbo 1. Live: takes effect on next\n"
+									"frame via the renderer post-process pipeline group." );
 	ri.Cvar_SetGroup( r_smaa, CVG_RENDERER );
 
 	// r_smaa_threshold — Overrides the quality preset
@@ -2964,18 +3006,19 @@ static void R_Register( void )
 	// everything.
 	r_smaa_threshold = ri.Cvar_Get( "r_smaa_threshold", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_smaa_threshold, "0", "0.5", CV_FLOAT );
-	ri.Cvar_SetDescription( r_smaa_threshold,
-		"SMAA edge detection threshold override (relative-luma delta).\n"
-		" 0       - use r_smaa quality preset (default)\n"
-		" 0.001+  - explicit threshold value; overrides preset\n"
-		"Higher = fewer edges detected (less smoothing).\n"
-		"Lower  = more edges detected (more smoothing).\n"
-		"Live: takes effect on next frame via the renderer\n"
-		"post-process pipeline group." );
+	ri.Cvar_SetDescription( r_smaa_threshold, "SMAA edge detection threshold override (relative-luma delta).\n"
+											  " 0       - use r_smaa quality preset (default)\n"
+											  " 0.001+  - explicit threshold value; overrides preset\n"
+											  "Higher = fewer edges detected (less smoothing).\n"
+											  "Lower  = more edges detected (more smoothing).\n"
+											  "Live: takes effect on next frame via the renderer\n"
+											  "post-process pipeline group." );
 	ri.Cvar_SetGroup( r_smaa_threshold, CVG_RENDERER );
 
 	r_lerpLightstyles = ri.Cvar_Get( "r_lerpLightstyles", "1", CVAR_ARCHIVE );
-	ri.Cvar_SetDescription( r_lerpLightstyles, "Interpolate lightstyle animation between pattern characters for smooth fading (1=on, 0=stepped 10Hz)." );
+	ri.Cvar_SetDescription(
+		r_lerpLightstyles,
+		"Interpolate lightstyle animation between pattern characters for smooth fading (1=on, 0=stepped 10Hz)." );
 #endif // USE_VULKAN
 }
 
@@ -2986,9 +3029,10 @@ static void R_Register( void )
 R_Init
 ===============
 */
-void R_Init( void ) {
+void R_Init( void )
+{
 #ifndef USE_VULKAN
-	int	err;
+	int err;
 #endif
 	byte *ptr;
 
@@ -3006,7 +3050,8 @@ void R_Init( void ) {
 	// from the same tr_types.h, so they agree on the new size; this constant is
 	// the human tripwire that forces that coordinated rebuild.
 	if ( sizeof( glconfig_t ) != 11340 )
-		ri.Terminate( TERM_UNRECOVERABLE, "Mod ABI incompatible: sizeof(glconfig_t) == %u != 11340", (unsigned int) sizeof( glconfig_t ) );
+		ri.Terminate( TERM_UNRECOVERABLE, "Mod ABI incompatible: sizeof(glconfig_t) == %u != 11340",
+					  (unsigned int)sizeof( glconfig_t ) );
 
 	if ( (intptr_t)tess.xyz & 15 ) {
 		R_LOG( rch_init, SEV_WARN, "tess.xyz not 16 byte aligned\n" );
@@ -3017,8 +3062,8 @@ void R_Init( void ) {
 	// init function tables
 	//
 	for ( int i = 0; i < FUNCTABLE_SIZE; i++ ) {
-		tr.sinTable[i] = sin( DEG2RAD( i * 360.0f / FUNCTABLE_SIZE ) + 0.0001f );
-		tr.squareTable[i] = (i < FUNCTABLE_SIZE / 2) ? 1.0f : -1.0f;
+		tr.sinTable[i]	  = sin( DEG2RAD( i * 360.0f / FUNCTABLE_SIZE ) + 0.0001f );
+		tr.squareTable[i] = ( i < FUNCTABLE_SIZE / 2 ) ? 1.0f : -1.0f;
 		if ( i == 0 ) {
 			tr.sawToothTable[i] = EPSILON;
 		} else {
@@ -3030,7 +3075,7 @@ void R_Init( void ) {
 				if ( i == 0 ) {
 					tr.triangleTable[i] = EPSILON;
 				} else {
-					tr.triangleTable[i] = (float)i / (FUNCTABLE_SIZE / 4);
+					tr.triangleTable[i] = (float)i / ( FUNCTABLE_SIZE / 4 );
 				}
 			} else {
 				tr.triangleTable[i] = 1.0f - tr.triangleTable[i - FUNCTABLE_SIZE / 4];
@@ -3046,7 +3091,7 @@ void R_Init( void ) {
 
 	R_Register();
 
-	max_polys = r_maxpolys->integer;
+	max_polys	  = r_maxpolys->integer;
 	max_polyverts = r_maxpolyverts->integer;
 
 	// Allocate backEndData in a persistent arena so it survives
@@ -3056,9 +3101,7 @@ void R_Init( void ) {
 	// code != REF_LEVEL_ONLY branch below). Re-grows when r_maxpolys /
 	// r_maxpolyverts changes via vid_restart: destroy + recreate.
 	{
-		size_t bdSize = sizeof( *backEndData )
-			+ sizeof( srfPoly_t ) * max_polys
-			+ sizeof( polyVert_t ) * max_polyverts;
+		size_t bdSize = sizeof( *backEndData ) + sizeof( srfPoly_t ) * max_polys + sizeof( polyVert_t ) * max_polyverts;
 		if ( !s_backEndStorage || s_backEndStorageSize < bdSize ) {
 			if ( s_backEndArena ) {
 				ri.Arena_Destroy( s_backEndArena );
@@ -3069,18 +3112,18 @@ void R_Init( void ) {
 			 * we make consumes bdSize bytes after alignment.
 			 * ri.Arena_* bridges to qcommon/arena.c in the engine — the
 			 * renderer DLL has no direct link to that translation unit. */
-			s_backEndArena       = ri.Arena_Create( "RendererBackEnd", bdSize + 256 );
-			s_backEndStorage     = ri.Arena_Alloc( s_backEndArena, bdSize, 16 );
+			s_backEndArena		 = ri.Arena_Create( "RendererBackEnd", bdSize + 256 );
+			s_backEndStorage	 = ri.Arena_Alloc( s_backEndArena, bdSize, 16 );
 			s_backEndStorageSize = bdSize;
 			if ( !s_backEndStorage ) {
 				ri.Terminate( TERM_UNRECOVERABLE, "R_Init: failed to allocate backEndData (%zu bytes)", bdSize );
 			}
 		}
-		ptr = (byte*)s_backEndStorage;
+		ptr = (byte *)s_backEndStorage;
 	}
-	backEndData = (backEndData_t *) ptr;
-	backEndData->polys = (srfPoly_t *) ((char *) ptr + sizeof( *backEndData ));
-	backEndData->polyVerts = (polyVert_t *) ((char *) ptr + sizeof( *backEndData ) + sizeof(srfPoly_t) * max_polys);
+	backEndData			   = (backEndData_t *)ptr;
+	backEndData->polys	   = (srfPoly_t *)( (char *)ptr + sizeof( *backEndData ) );
+	backEndData->polyVerts = (polyVert_t *)( (char *)ptr + sizeof( *backEndData ) + sizeof( srfPoly_t ) * max_polys );
 
 	R_InitNextFrame();
 
@@ -3161,7 +3204,8 @@ path). Function-pointer targets live in this DLL so the lifecycle correctly
 matches DLL load/unload, not level transitions.
 ===============
 */
-static void RE_RegisterPersistentCommands( void ) {
+static void RE_RegisterPersistentCommands( void )
+{
 	ri.Cmd_AddCommand( "imagelist", R_ImageList_f );
 	ri.Cmd_AddCommand( "testdds", R_TestDDS_f );
 	// Phase 7.15.4-b test harness (default-inert, manual, render-thread): force-evict
@@ -3189,7 +3233,8 @@ static void RE_RegisterPersistentCommands( void ) {
 #endif
 }
 
-static void RE_RemovePersistentCommands( void ) {
+static void RE_RemovePersistentCommands( void )
+{
 	ri.Cmd_RemoveCommand( "imagelist" );
 	ri.Cmd_RemoveCommand( "testdds" );
 	ri.Cmd_RemoveCommand( "shaderlist" );
@@ -3210,7 +3255,8 @@ static void RE_RemovePersistentCommands( void ) {
 RE_Shutdown
 ===============
 */
-static void RE_Shutdown( refShutdownCode_t code ) {
+static void RE_Shutdown( refShutdownCode_t code )
+{
 	R_LOG( rch_init, SEV_INFO, "RE_Shutdown( %i )\n", code );
 
 	// the persistent introspection + screenshot command set
@@ -3234,7 +3280,7 @@ static void RE_Shutdown( refShutdownCode_t code ) {
 	// needs explicit cleanup.
 	if ( tr.propLightmaps ) {
 		ri.Free( tr.propLightmaps );
-		tr.propLightmaps    = NULL;
+		tr.propLightmaps	= NULL;
 		tr.numPropLightmaps = 0;
 		tr.maxPropLightmaps = 0;
 	}
@@ -3319,12 +3365,12 @@ static void RE_Shutdown( refShutdownCode_t code ) {
 			ri.Arena_Destroy( s_backEndArena );
 			s_backEndArena = NULL;
 		}
-		s_backEndStorage     = NULL;
+		s_backEndStorage	 = NULL;
 		s_backEndStorageSize = 0;
 	}
 
 	tr.registered = qfalse;
-	tr.inited = qfalse;
+	tr.inited	  = qfalse;
 }
 
 
@@ -3335,7 +3381,8 @@ RE_EndRegistration
 Touch all images to make sure they are resident
 =============
 */
-static void RE_EndRegistration( void ) {
+static void RE_EndRegistration( void )
+{
 #ifdef USE_VULKAN
 	vk_wait_idle();
 	// command buffer is not in recording state at this stage
@@ -3348,200 +3395,1043 @@ static void RE_EndRegistration( void ) {
 #endif
 }
 
-static void FrontendDecline( qboolean ok, const char *operation ) {
-	if ( ok ) return;
+static void FrontendDecline( qboolean ok, const char *operation )
+{
+	if ( ok )
+		return;
 	R_LOG( rch_init, SEV_WARN, "RAL frontend submission rejected %s\n", operation );
 	R_DeclineInit();
 }
 
-static void FrontendShutdown( refShutdownCode_t code ) {
+static void FrontendDestroyDirectionalLighting( void ) {
+	ralBackend_t *backend = vk_ral_get_backend();
+	if ( s_frontendDirectionalLighting && backend )
+		(void)RalVulkan_LightingDestroy( backend, s_frontendDirectionalLighting,
+			&s_frontendDirectionalLightingReceipt );
+	s_frontendDirectionalLighting = NULL;
+	memset( &s_frontendDirectionalLightingReceipt, 0,
+		sizeof( s_frontendDirectionalLightingReceipt ) );
+}
+
+static qboolean FrontendUploadDirectionalLighting( void ) {
+	const renderDirectionalLightingRecord_t *record;
+	ralLightingRuntimePlan_t plan;
+	ralStaticLightingCapabilities_t capabilities = { qtrue, qtrue, qtrue, qtrue };
+	ralBackend_t *backend = vk_ral_get_backend();
+	uint64_t digest;
+	FrontendDestroyDirectionalLighting();
+	if ( s_frontendLightingSidecar.status ==
+			RENDER_LIGHTING_SIDECAR_MISSING_COMPATIBILITY ) return qtrue;
+	if ( !backend || !RenderSubmission_DirectionalLightingSnapshot(
+			&s_frontendSubmission, &record, &digest ) || !record || !digest
+			|| !Ral_LightingRuntimePlanBuild( RAL_BACKEND_VULKAN,
+				record->artifact.artifactGeneration, record->ownedArtifactBytes,
+				record->artifactByteLength, &record->artifact, &capabilities,
+				&plan ) ) return qfalse;
+	return RalVulkan_LightingUpload( backend, record->ownedArtifactBytes,
+		record->artifactByteLength, &plan, &s_frontendDirectionalLighting,
+		&s_frontendDirectionalLightingReceipt );
+}
+
+static void FrontendShutdown( refShutdownCode_t code )
+{
+	s_frontendLoadedWorld = NULL;
+	FrontendDestroyDirectionalLighting();
 	RE_Shutdown( code );
 	if ( code != REF_LEVEL_ONLY ) {
 		RenderSubmission_Reset( &s_frontendSubmission );
 		memset( &s_frontendPublished, 0, sizeof( s_frontendPublished ) );
 		s_frontendLastLoggedWorldDigest = 0u;
 		s_frontendLoggedCompleteReceipt = qfalse;
+		s_frontendLoggedIrradianceReceipt = qfalse;
+		s_frontendEmissiveProxiesBridged = qfalse;
 	}
 }
 
-static qhandle_t FrontendRegister( renderAssetKind_t kind, const char *name,
-		qhandle_t handle ) {
-	if ( handle > 0 ) FrontendDecline( RenderSubmission_RecordAsset(
-		&s_frontendSubmission, kind, name, handle ), "asset" );
+static qhandle_t FrontendEnsureMaterial( renderAssetKind_t kind, const char *name )
+{
+	static const byte fallbackPixel[4] = { 255u, 255u, 255u, 255u };
+	qhandle_t material = RenderSubmission_MaterialHandle( &s_frontendSubmission, name );
+	if ( material ) return material;
+	material = RenderSubmission_RegisterMaterialImage( &s_frontendSubmission, kind,
+		name, qtrue, fallbackPixel, 1u, 1u );
+	if ( material && kind == RENDER_ASSET_MATERIAL ) {
+		renderMaterialScriptEntry_t scripted;
+		if ( RenderMaterialScript_Lookup( &s_frontendMaterialScripts, name, &scripted ) && scripted.hasLighting )
+			FrontendDecline( RenderMaterialScript_ApplyLighting( &s_frontendMaterialScripts,
+				name, &s_frontendSubmission, material ), "material-lighting" );
+	}
+	return material;
+}
+
+static void FrontendSyncLegacyWorldEmission( void )
+{
+	const renderWorldSnapshot_t *world = &s_frontendSubmission.worldSnapshot;
+	if ( !tr.world || !world->ready || !world->batches ) return;
+	for ( uint32_t i = 0u; i < world->batchCount; ++i ) {
+		const renderWorldBatch_t *batch = &world->batches[i];
+		renderMaterialSnapshot_t material;
+		shader_t *legacy;
+		if ( batch->sourceSurfaceIndex >= (uint32_t)tr.world->numsurfaces ) continue;
+		legacy = tr.world->surfaces[batch->sourceSurfaceIndex].shader;
+		if ( !legacy ) continue;
+		VectorClear( legacy->emissionRadiance );
+		if ( batch->baseMaterial <= 0
+				|| !RenderSubmission_MaterialSnapshot( &s_frontendSubmission,
+					batch->baseMaterial, &material )
+				|| material.lighting.ready != qtrue ) continue;
+		for ( uint32_t channel = 0u; channel < 3u; ++channel )
+			legacy->emissionRadiance[channel] =
+				(float)material.lighting.emissionRadianceQ16[channel]
+				/ (float)RENDER_MATERIAL_LIGHTING_Q16_ONE;
+	}
+}
+
+static qhandle_t FrontendRegister( renderAssetKind_t kind, const char *name, qhandle_t handle )
+{
+	if ( handle > 0 ) {
+		if ( kind == RENDER_ASSET_MATERIAL || kind == RENDER_ASSET_MSDF ||
+			 kind == RENDER_ASSET_PRIMITIVE_MATERIAL || kind == RENDER_ASSET_LIGHTMAP )
+			FrontendDecline( FrontendEnsureMaterial( kind, name ) > 0, "material" );
+		else FrontendDecline( RenderSubmission_RecordAsset( &s_frontendSubmission,
+			kind, name, handle ), "asset" );
+	}
 	return handle;
 }
 
-static qhandle_t FrontendRegisterModel( const char *name ) {
+static qhandle_t FrontendRegisterModel( const char *name )
+{
 	return FrontendRegister( RENDER_ASSET_MODEL, name, RE_RegisterModel( name ) );
 }
-static qhandle_t FrontendRegisterSkin( const char *name ) {
+static qhandle_t FrontendRegisterSkin( const char *name )
+{
 	return FrontendRegister( RENDER_ASSET_SKIN, name, RE_RegisterSkin( name ) );
 }
-static qhandle_t FrontendRegisterShader( const char *name ) {
+static qhandle_t FrontendRegisterShader( const char *name )
+{
 	return FrontendRegister( RENDER_ASSET_MATERIAL, name, RE_RegisterShader( name ) );
 }
-static qhandle_t FrontendRegisterShaderNoMip( const char *name ) {
+static qhandle_t FrontendRegisterShaderNoMip( const char *name )
+{
 	return FrontendRegister( RENDER_ASSET_MATERIAL, name, RE_RegisterShaderNoMip( name ) );
 }
-static qhandle_t FrontendRegisterShaderLightMap( const char *name, int lightmap ) {
-	return FrontendRegister( RENDER_ASSET_MATERIAL, name,
-		RE_RegisterShaderLightMap( name, lightmap ) );
+static qhandle_t FrontendRegisterShaderLightMap( const char *name, int lightmap )
+{
+	return FrontendRegister( RENDER_ASSET_MATERIAL, name, RE_RegisterShaderLightMap( name, lightmap ) );
 }
-static qhandle_t FrontendRegisterMsdf( const char *name, float range,
-		int width, int height ) {
-	return FrontendRegister( RENDER_ASSET_MSDF, name,
-		RE_RegisterMSDFShader( name, range, width, height ) );
+static qhandle_t FrontendRegisterMsdf( const char *name, float range, int width, int height )
+{
+	return FrontendRegister( RENDER_ASSET_MSDF, name, RE_RegisterMSDFShader( name, range, width, height ) );
 }
-static qhandle_t FrontendRegisterPrimitive( const char *name ) {
-	return FrontendRegister( RENDER_ASSET_PRIMITIVE_MATERIAL, name,
-		RE_RegisterPrimitiveShader( name ) );
+static qhandle_t FrontendRegisterPrimitive( const char *name )
+{
+	return FrontendRegister( RENDER_ASSET_PRIMITIVE_MATERIAL, name, RE_RegisterPrimitiveShader( name ) );
 }
-static void FrontendLoadWorld( const mapFile_t *bsp, int worldIndex ) {
-	FrontendDecline( RenderSubmission_LoadWorld( &s_frontendSubmission,
-		bsp, worldIndex ), "world" );
+static void FrontendLoadWorld( const mapFile_t *bsp, int worldIndex )
+{
+	if ( !bsp || bsp->numShaders < 0 || ( bsp->numShaders && !bsp->shaders ) ) {
+		R_DeclineInit();
+		return;
+	}
 	RE_LoadWorldMap( bsp, worldIndex );
+	for ( int shaderIndex = 0; shaderIndex < bsp->numShaders; ++shaderIndex )
+		if ( !RenderSubmission_MaterialHandle( &s_frontendSubmission, bsp->shaders[shaderIndex].shader ) )
+			FrontendDecline( FrontendEnsureMaterial( RENDER_ASSET_MATERIAL,
+				bsp->shaders[shaderIndex].shader ) > 0, "world-material" );
+	FrontendDecline( RenderSubmission_LoadWorld( &s_frontendSubmission, bsp, worldIndex ), "world" );
+	FrontendSyncLegacyWorldEmission();
+	FrontendDecline( RenderLightingSidecar_LoadDirectional( &s_frontendSubmission,
+		&ri, bsp->name, &s_frontendLightingSidecar ), "directional-lighting-sidecar" );
+	FrontendDecline( RenderLightingSidecar_LoadIrradiance( &s_frontendSubmission,
+		&ri, bsp->name, &s_frontendIrradianceSidecar ), "irradiance-lighting-sidecar" );
+	FrontendDecline( FrontendUploadDirectionalLighting(), "directional-lighting-upload" );
+	if ( !s_re.initFailed ) s_frontendLoadedWorld = bsp;
 }
-static void FrontendBeginFrame( stereoFrame_t stereoFrame ) {
+
+static qboolean FrontendCookLightingProject( const char *derivedRoot )
+{
+	renderLightingProjectCookRequest_t request;
+	renderLightingProjectCookReceipt_t receipt;
+	char worldStem[RENDER_LIGHTING_PROJECT_WORLD_STEM_CAPACITY];
+	return s_frontendLoadedWorld &&
+		RenderLightingProjectCook_DefaultRequest( s_frontendLoadedWorld,
+			derivedRoot, &request, worldStem ) &&
+		RenderLightingProjectCook_Execute( &s_frontendSubmission,
+			s_frontendLoadedWorld, &ri, &request, &receipt ) &&
+		RenderLightingProjectCook_ReceiptValid( &receipt );
+}
+static void FrontendBeginFrame( stereoFrame_t stereoFrame )
+{
 	RE_BeginFrame( stereoFrame );
 	if ( s_frontendFrameGeneration == UINT64_MAX - 1u ) {
-		R_DeclineInit(); return;
+		R_DeclineInit();
+		return;
 	}
-	FrontendDecline( RenderSubmission_BeginFrame( &s_frontendSubmission,
-		++s_frontendFrameGeneration ), "begin-frame" );
+	FrontendDecline( RenderSubmission_BeginFrame( &s_frontendSubmission, ++s_frontendFrameGeneration ), "begin-frame" );
+	FrontendSyncLegacyWorldEmission();
 }
-static void FrontendEndFrame( int *frontEndMsec, int *backEndMsec ) {
+static void FrontendEndFrame( int *frontEndMsec, int *backEndMsec )
+{
 	qboolean worldChanged, completeContent, logContent;
 	RE_EndFrame( frontEndMsec, backEndMsec );
-	FrontendDecline( RenderSubmission_EndFrame( &s_frontendSubmission,
-		s_frontendFrameGeneration, &s_frontendPublished ), "end-frame" );
-	worldChanged = ( s_frontendPublished.worldDigest
-		!= s_frontendLastLoggedWorldDigest ) ? qtrue : qfalse;
-	completeContent = ( s_frontendPublished.entityCount > 0u
-		&& s_frontendPublished.uiPrimitiveCount > 0u
-		&& s_frontendSubmission.worldSnapshot.batchCount > 0u
-		&& s_frontendSubmission.worldSnapshot.patchBatchCount > 0u
-		&& tr.numModels > 1 ) ? qtrue : qfalse;
-	if ( worldChanged ) s_frontendLoggedCompleteReceipt = qfalse;
-	logContent = ( worldChanged || ( completeContent
-		&& !s_frontendLoggedCompleteReceipt ) ) ? qtrue : qfalse;
-	if ( s_frontendPublished.worldLoaded == qtrue
-			&& s_frontendPublished.sceneRendered == qtrue
-			&& logContent ) {
+	FrontendDecline(
+		RenderSubmission_EndFrame( &s_frontendSubmission, s_frontendFrameGeneration, &s_frontendPublished ),
+		"end-frame" );
+	worldChanged	= ( s_frontendPublished.worldDigest != s_frontendLastLoggedWorldDigest ) ? qtrue : qfalse;
+	completeContent = ( s_frontendPublished.entityCount > 0u && s_frontendPublished.uiPrimitiveCount > 0u &&
+						s_frontendSubmission.worldSnapshot.batchCount > 0u &&
+						s_frontendSubmission.worldSnapshot.patchBatchCount > 0u && tr.numModels > 1 )
+						  ? qtrue
+						  : qfalse;
+	if ( worldChanged ) {
+		s_frontendLoggedCompleteReceipt = qfalse;
+		s_frontendLoggedIrradianceReceipt = qfalse;
+	}
+	logContent = ( worldChanged || ( completeContent && !s_frontendLoggedCompleteReceipt ) ) ? qtrue : qfalse;
+	if ( s_frontendPublished.worldLoaded == qtrue && s_frontendPublished.sceneRendered == qtrue && logContent ) {
 		uint32_t materialWorld = 0u, lightmappedWorld = 0u;
-		for ( uint32_t batch = 0u;
-				batch < s_frontendSubmission.worldSnapshot.batchCount; ++batch ) {
-			const renderWorldBatch_t *worldBatch =
-				&s_frontendSubmission.worldSnapshot.batches[batch];
-			if ( worldBatch->shaderIndex >= 0 ) materialWorld++;
-			if ( worldBatch->lightmapIndex >= 0 ) lightmappedWorld++;
+		for ( uint32_t batch = 0u; batch < s_frontendSubmission.worldSnapshot.batchCount; ++batch ) {
+			const renderWorldBatch_t *worldBatch = &s_frontendSubmission.worldSnapshot.batches[batch];
+			if ( worldBatch->shaderIndex >= 0 )
+				materialWorld++;
+			if ( worldBatch->lightmapIndex >= 0 )
+				lightmappedWorld++;
 		}
 		R_LOG( rch_init, SEV_INFO,
-			"Wired Vulkan RAL: content receipt asset=%016llx world=%016llx frame=%016llx surfaces=%u vertices=%u indices=%u assets=%u materials=%u entities=%u ui=%u worldBatches=%u patchWorld=%u materialWorld=%u lightmappedWorld=%u modelAssets=%u\n",
-			(unsigned long long)s_frontendPublished.assetDigest,
-			(unsigned long long)s_frontendPublished.worldDigest,
-			(unsigned long long)s_frontendPublished.frameDigest,
-			s_frontendPublished.worldSurfaceCount,
-			s_frontendPublished.worldVertexCount,
-			s_frontendPublished.worldIndexCount,
-			s_frontendPublished.registeredAssetCount,
-			s_frontendPublished.registeredMaterialCount,
-			s_frontendPublished.entityCount,
-			s_frontendPublished.uiPrimitiveCount,
-			s_frontendSubmission.worldSnapshot.batchCount,
-			s_frontendSubmission.worldSnapshot.patchBatchCount,
-			materialWorld, lightmappedWorld,
-			tr.numModels > 1 ? (uint32_t)( tr.numModels - 1 ) : 0u );
+			   "Wired Vulkan RAL: content receipt asset=%016llx world=%016llx frame=%016llx surfaces=%u vertices=%u "
+			   "indices=%u assets=%u materials=%u entities=%u localIrradianceEntities=%u irradianceVolumes=%u ui=%u worldBatches=%u patchWorld=%u materialWorld=%u "
+			   "lightmappedWorld=%u modelAssets=%u\n",
+			   (unsigned long long)s_frontendPublished.assetDigest, (unsigned long long)s_frontendPublished.worldDigest,
+			   (unsigned long long)s_frontendPublished.frameDigest, s_frontendPublished.worldSurfaceCount,
+			   s_frontendPublished.worldVertexCount, s_frontendPublished.worldIndexCount,
+			   s_frontendPublished.registeredAssetCount, s_frontendPublished.registeredMaterialCount,
+			   s_frontendPublished.entityCount, s_frontendPublished.localIrradianceEntityCount,
+			   s_frontendPublished.irradianceVolumeCount, s_frontendPublished.uiPrimitiveCount,
+			   s_frontendSubmission.worldSnapshot.batchCount, s_frontendSubmission.worldSnapshot.patchBatchCount,
+			   materialWorld, lightmappedWorld, tr.numModels > 1 ? (uint32_t)( tr.numModels - 1 ) : 0u );
 		s_frontendLastLoggedWorldDigest = s_frontendPublished.worldDigest;
-		if ( completeContent ) s_frontendLoggedCompleteReceipt = qtrue;
+		if ( completeContent )
+			s_frontendLoggedCompleteReceipt = qtrue;
+	}
+	if ( s_frontendPublished.irradianceVolumeCount > 0u
+		 && s_frontendPublished.localIrradianceEntityCount > 0u
+		 && !s_frontendLoggedIrradianceReceipt ) {
+		R_LOG( rch_init, SEV_INFO,
+			   "Wired Vulkan RAL: irradiance receipt volumes=%u entities=%u\n",
+			   s_frontendPublished.irradianceVolumeCount,
+			   s_frontendPublished.localIrradianceEntityCount );
+		s_frontendLoggedIrradianceReceipt = qtrue;
 	}
 }
-static void FrontendClearScene( void ) {
+static void FrontendClearScene( void )
+{
 	RE_ClearScene();
 	FrontendDecline( RenderSubmission_ClearScene( &s_frontendSubmission ), "clear-scene" );
+	s_frontendEmissiveProxiesBridged = qfalse;
 }
-static void FrontendAddEntity( const refEntity_t *entity, qboolean shaderTime ) {
+
+static void FrontendBridgeEmissiveProxyLights( void )
+{
+	const ralEmissiveRouteReceipt_t *routes;
+	const ralLightDescription_t *proxies;
+	const renderEmissiveRoutingReceipt_t *receipt;
+	uint32_t routeCount, proxyCount;
+	if ( s_frontendEmissiveProxiesBridged ||
+		 !RenderSubmission_EmissiveAuthoritySnapshot( &s_frontendSubmission,
+			&routes, &routeCount, &proxies, &proxyCount, &receipt ) ) return;
+	(void)routes;
+	(void)routeCount;
+	(void)receipt;
+	for ( uint32_t index = 0u; index < proxyCount; ++index ) {
+		const ralLightDescription_t *proxy = &proxies[index];
+		vec3_t origin;
+		if ( !( proxy->flags & RAL_LIGHT_CONTRIBUTE_DIRECT ) ) continue;
+		origin[0] = (float)proxy->position.x / RAL_LIGHT_Q16_ONE;
+		origin[1] = (float)proxy->position.y / RAL_LIGHT_Q16_ONE;
+		origin[2] = (float)proxy->position.z / RAL_LIGHT_Q16_ONE;
+		RE_AddLightToScene( origin,
+			(float)proxy->rangeQ16 / RAL_LIGHT_Q16_ONE,
+			(float)proxy->radianceQ16[0] / RAL_LIGHT_Q16_ONE,
+			(float)proxy->radianceQ16[1] / RAL_LIGHT_Q16_ONE,
+			(float)proxy->radianceQ16[2] / RAL_LIGHT_Q16_ONE );
+	}
+	s_frontendEmissiveProxiesBridged = qtrue;
+}
+static void FrontendAddEntity( const refEntity_t *entity, qboolean shaderTime )
+{
 	RE_AddRefEntityToScene( entity, shaderTime );
-	FrontendDecline( RenderSubmission_AddEntity( &s_frontendSubmission,
-		entity, NULL ), "entity" );
+	FrontendDecline( RenderSubmission_AddEntity( &s_frontendSubmission, entity, NULL ), "entity" );
 }
-static void FrontendAddEntityTemporal( const refEntity_t *entity,
-		const refEntityMotion_t *motion ) {
+static void FrontendAddEntityTemporal( const refEntity_t *entity, const refEntityMotion_t *motion )
+{
 	RE_AddRefEntityToSceneTemporal( entity, motion );
-	FrontendDecline( RenderSubmission_AddEntity( &s_frontendSubmission,
-		entity, motion ), "temporal-entity" );
+	FrontendDecline( RenderSubmission_AddEntity( &s_frontendSubmission, entity, motion ), "temporal-entity" );
 }
-static void FrontendAddPoly( qhandle_t shader, int vertices,
-		const polyVert_t *data, int count ) {
+static void FrontendAddPoly( qhandle_t shader, int vertices, const polyVert_t *data, int count )
+{
 	RE_AddPolyToScene( shader, vertices, data, count );
-	FrontendDecline( RenderSubmission_AddPoly( &s_frontendSubmission,
-		shader, vertices, data, count ), "poly" );
+	FrontendDecline( RenderSubmission_AddPoly( &s_frontendSubmission, shader, vertices, data, count ), "poly" );
 }
-static void FrontendAddLight( const vec3_t origin, float intensity,
-		float red, float green, float blue ) {
+static void FrontendAddLight( const vec3_t origin, float intensity, float red, float green, float blue )
+{
 	RE_AddLightToScene( origin, intensity, red, green, blue );
-	FrontendDecline( RenderSubmission_AddLight( &s_frontendSubmission,
-		origin, NULL, intensity, red, green, blue ), "light" );
+	FrontendDecline( RenderSubmission_AddLight( &s_frontendSubmission, origin, NULL, intensity, red, green, blue ),
+					 "light" );
 }
-static void FrontendAddAdditiveLight( const vec3_t origin, float intensity,
-		float red, float green, float blue ) {
+static void FrontendAddAdditiveLight( const vec3_t origin, float intensity, float red, float green, float blue )
+{
 	RE_AddAdditiveLightToScene( origin, intensity, red, green, blue );
-	FrontendDecline( RenderSubmission_AddLight( &s_frontendSubmission,
-		origin, NULL, intensity, red, green, blue ), "additive-light" );
+	FrontendDecline( RenderSubmission_AddLight( &s_frontendSubmission, origin, NULL, intensity, red, green, blue ),
+					 "additive-light" );
 }
-static void FrontendAddLinearLight( const vec3_t start, const vec3_t end,
-		float intensity, float red, float green, float blue ) {
+static void FrontendAddLinearLight( const vec3_t start, const vec3_t end, float intensity, float red, float green,
+									float blue )
+{
 	RE_AddLinearLightToScene( start, end, intensity, red, green, blue );
-	FrontendDecline( RenderSubmission_AddLight( &s_frontendSubmission,
-		start, end, intensity, red, green, blue ), "linear-light" );
+	FrontendDecline( RenderSubmission_AddLight( &s_frontendSubmission, start, end, intensity, red, green, blue ),
+					 "linear-light" );
 }
-static void FrontendRenderScene( const refdef_t *view, int worldIndex ) {
-	FrontendDecline( RenderSubmission_RenderScene( &s_frontendSubmission,
-		view, worldIndex ), "scene" );
+static qboolean FrontendTrySetAtmosphere( const atmosphericDesc_t *atmosphere )
+{
+	renderAtmosphereSnapshot_t snapshot;
+	const atmosphereEmitter_t *emitters;
+	if ( !RenderSubmission_SetAtmosphere( &s_frontendSubmission, atmosphere ) ||
+		 !RenderSubmission_AtmosphereSnapshot( &s_frontendSubmission, &snapshot, &emitters ) ) {
+		return qfalse;
+	}
+	(void)emitters;
+	RE_SetAtmosphere( &snapshot.state );
+	return qtrue;
+}
+static void FrontendSetAtmosphere( const atmosphericDesc_t *atmosphere )
+{
+	FrontendDecline( FrontendTrySetAtmosphere( atmosphere ), "atmosphere-state" );
+}
+static qboolean FrontendTryAddAtmosphereEmitter( const atmosphereEmitter_t *emitter )
+{
+	atmosphereEffectProfile_t profile;
+	qboolean				  accepted = RenderSubmission_AddAtmosphereEmitter( &s_frontendSubmission, emitter );
+	if ( accepted && emitter && emitter->profile > 0u &&
+		 RenderSubmission_GetAtmosphereEffectProfile( &s_frontendSubmission, emitter->profile, &profile ) )
+		RE_EmitAtmosphereProfile( emitter, &profile );
+	return accepted;
+}
+static void FrontendAddAtmosphereEmitter( const atmosphereEmitter_t *emitter )
+{
+	FrontendDecline( FrontendTryAddAtmosphereEmitter( emitter ), "atmosphere-emitter" );
+}
+static qboolean FrontendTryRegisterAtmosphereEffectProfile( uint32_t handle, const atmosphereEffectProfile_t *profile )
+{
+	atmosphereEffectProfile_t resolved;
+	qboolean accepted = RenderSubmission_RegisterAtmosphereEffectProfile( &s_frontendSubmission, handle, profile );
+	if ( accepted )
+		accepted = RenderSubmission_GetAtmosphereEffectProfile( &s_frontendSubmission, handle, &resolved );
+	if ( accepted )
+		accepted = vk_particle_shadow_write_atmosphere_profile( handle - 1u, &resolved );
+	return accepted;
+}
+static void FrontendRegisterAtmosphereEffectProfile( uint32_t handle, const atmosphereEffectProfile_t *profile )
+{
+	FrontendDecline( FrontendTryRegisterAtmosphereEffectProfile( handle, profile ), "atmosphere-effect-profile" );
+}
+static void FrontendRegisterParticleClass( particleClassHandle_t handle, const particleClass_t *particleClass )
+{
+	qboolean accepted = RenderSubmission_RegisterParticleClass( &s_frontendSubmission, handle, particleClass );
+	if ( accepted )
+		RE_RegisterParticleClass( handle, particleClass );
+	FrontendDecline( accepted, "particle-class" );
+}
+static void FrontendAddAtmosphereSurfaceEvent( const atmosphereSurfaceEvent_t *event )
+{
+	FrontendDecline( RenderSubmission_AddAtmosphereSurfaceEvent( &s_frontendSubmission, event ),
+					 "atmosphere-surface-event" );
+}
+static void FrontendAddAtmosphereMediaVolume( const atmosphereMediaVolume_t *volume )
+{
+	FrontendDecline( RenderSubmission_AddAtmosphereMediaVolume( &s_frontendSubmission, volume ),
+					 "atmosphere-media-volume" );
+}
+
+#ifdef USE_VULKAN
+static char	 s_ralAtmosphereGraphSmokeMap[MAX_QPATH];
+static float s_ralAtmosphereSmokeHeightgrid[256u * 256u];
+
+// Test-only authored atmosphere fixture. It deliberately crosses the same
+// frontend contract as game content: one cold climate state, one immutable
+// breath graph and one semantic emitter. Particle instances, collision/death
+// child expansion, simulation and bounded overflow remain GPU-owned.
+static void FrontendInjectRalAtmosphereGraphSmoke( const refdef_t *view )
+{
+	atmosphericDesc_t		  atmosphere;
+	atmosphereEffectProfile_t profile;
+	atmosphereEmitter_t		  emitter;
+	atmosphereMediaVolume_t	  mediaVolume;
+	particleClass_t			  cls;
+	qhandle_t				  shader;
+	vec3_t					  center;
+	uint32_t				  requestsBefore, particlesBefore;
+
+	if ( !r_ralEffectsSmoke || !r_ralEffectsSmoke->integer || !tr.world || !view ||
+		 ( view->rdflags & RDF_NOWORLDMODEL ) || !vk.atm.available || !vk.particle.available )
+		return;
+	if ( !Q_stricmp( s_ralAtmosphereGraphSmokeMap, tr.world->baseName ) )
+		return;
+
+	shader = FrontendRegisterPrimitive( "gfx/misc/particle" );
+	if ( shader == 0 )
+		return;
+	VectorMA( view->vieworg, 72.0f, view->viewaxis[0], center );
+
+	memset( &cls, 0, sizeof( cls ) );
+	cls.shader			 = shader;
+	cls.renderFlags		 = PRIM_FLAG_CAMERA_FACING;
+	cls.emitMode		 = EMIT_POINT;
+	cls.scatterShape	 = SCATTER_SPHERE;
+	cls.scatterMagnitude = 1.5f;
+	cls.velocityShape	 = VEL_CONE;
+	cls.axialSpeed		 = 10.0f;
+	cls.coneHalfAngle	 = 0.3f;
+	cls.lifetimeMean	 = 0.75f;
+	cls.lifetimeJitter	 = 0.15f;
+	cls.paletteCount	 = 1;
+	Vector4Set( cls.colorPalette[0], 0.82f, 0.9f, 1.0f, 0.55f );
+	Vector4Set( cls.colorEndMult, 1.0f, 1.0f, 1.0f, 0.0f );
+	cls.sizeStart = 2.5f;
+	cls.sizeEnd	  = 8.0f;
+	cls.drag	  = 1.5f;
+	RE_RegisterParticleClass( MAX_PARTICLE_CLASSES, &cls );
+
+	memset( &atmosphere, 0, sizeof( atmosphere ) );
+	atmosphere.type			 = ATMOSPHERE_PRECIP_SNOW;
+	atmosphere.schemaVersion = WIRED_ATMOSPHERE_SCHEMA_VERSION;
+	atmosphere.flags		 = ATMOSPHERE_FLAG_ENABLED | ATMOSPHERE_FLAG_HEIGHTGRID | ATMOSPHERE_FLAG_INDOOR_EXPOSURE |
+					   ATMOSPHERE_FLAG_SURFACE_CLIMATE | ATMOSPHERE_FLAG_SKY_LIGHTING |
+					   ATMOSPHERE_FLAG_VOLUMETRIC_MEDIA;
+	atmosphere.qualityTier	= ATMOSPHERE_QUALITY_FULL;
+	atmosphere.seed			= 0x52414c41u;
+	atmosphere.temperatureC = -8.0f;
+	atmosphere.humidity		= 0.9f;
+	// Synthetic product matrix: all five portable weather families execute in
+	// one bounded pool at 75% outdoor exposure. The split heightgrid below puts
+	// a roof over half the authored volume while leaving the other half open.
+	atmosphere.indoorExposure = 0.75f;
+	for ( uint32_t i = 0u; i < 5u; ++i )
+		atmosphere.precipitation[i] = 0.2f;
+	atmosphere.visibility		= 768.0f;
+	atmosphere.surfaceWetness	= 0.2f;
+	atmosphere.surfaceFrost		= 0.7f;
+	atmosphere.snowAccumulation = 0.5f;
+	atmosphere.sunDirection[2]	= 1.0f;
+	atmosphere.sunIntensity		= 1.0f;
+	VectorSet( atmosphere.ambientColor, 0.2f, 0.25f, 0.32f );
+	VectorSet( atmosphere.wind, 18.0f, 7.0f, 0.0f );
+	atmosphere.cloudCover		  = 0.65f;
+	atmosphere.cloudShadow		  = 0.35f;
+	atmosphere.mediaDensity		  = 0.02f;
+	atmosphere.mediaHeightFalloff = 0.01f;
+	atmosphere.distance			  = 512.0f;
+	atmosphere.bounds[0]		  = center[0] - 128.0f;
+	atmosphere.bounds[1]		  = center[1] - 128.0f;
+	atmosphere.bounds[2]		  = center[2] - 128.0f;
+	atmosphere.bounds[3]		  = center[0] + 128.0f;
+	atmosphere.bounds[4]		  = center[1] + 128.0f;
+	atmosphere.bounds[5]		  = center[2] + 128.0f;
+	atmosphere.worldMins[0]		  = atmosphere.bounds[0];
+	atmosphere.worldMins[1]		  = atmosphere.bounds[1];
+	atmosphere.worldMaxs[0]		  = atmosphere.bounds[3];
+	atmosphere.worldMaxs[1]		  = atmosphere.bounds[4];
+	atmosphere.gridSize			  = 256;
+	if ( !FrontendTrySetAtmosphere( &atmosphere ) )
+		return;
+	for ( uint32_t y = 0u; y < 256u; ++y ) {
+		for ( uint32_t x = 0u; x < 256u; ++x ) {
+			s_ralAtmosphereSmokeHeightgrid[y * 256u + x] = x < 128u ? center[2] + 300.0f : center[2] - 128.0f;
+		}
+	}
+	RE_SetAtmosphereHeightgrid( s_ralAtmosphereSmokeHeightgrid, (int)( 256u * 256u ) );
+
+	memset( &mediaVolume, 0, sizeof( mediaVolume ) );
+	mediaVolume.schemaVersion = WIRED_ATMOSPHERE_MEDIA_VOLUME_SCHEMA_VERSION;
+	mediaVolume.shape		  = ATMOSPHERE_MEDIA_VOLUME_SPHERE;
+	mediaVolume.id			  = 0x4d495354u;
+	mediaVolume.flags		  = ATMOSPHERE_MEDIA_VOLUME_NOISE;
+	mediaVolume.priority	  = 100u;
+	mediaVolume.seed		  = 0x464f4721u;
+	VectorCopy( center, mediaVolume.origin );
+	mediaVolume.radius = 96.0f;
+	VectorSet( mediaVolume.albedo, 0.72f, 0.82f, 0.92f );
+	mediaVolume.extinction	  = 0.035f;
+	mediaVolume.anisotropy	  = 0.25f;
+	mediaVolume.heightFalloff = 0.004f;
+	mediaVolume.noiseScale	  = 48.0f;
+	mediaVolume.timelineStart = atmosphere.timelineSeconds;
+	if ( !RenderSubmission_AddAtmosphereMediaVolume( &s_frontendSubmission, &mediaVolume ) )
+		return;
+
+	memset( &profile, 0, sizeof( profile ) );
+	profile.schemaVersion			 = WIRED_ATMOSPHERE_EFFECT_PROFILE_SCHEMA_VERSION;
+	profile.stageCount				 = 3u;
+	profile.maxParticles			 = 24u;
+	profile.seed					 = 0x42524541u;
+	profile.duration				 = 1.0f;
+	profile.lodFar					 = 512.0f;
+	profile.boundsRadius			 = 64.0f;
+	profile.stages[0].trigger		 = ATMOSPHERE_STAGE_EMISSION;
+	profile.stages[0].particleClass	 = MAX_PARTICLE_CLASSES;
+	profile.stages[0].parentStage	 = UINT32_MAX;
+	profile.stages[0].maxParticles	 = 8u;
+	profile.stages[0].burstCount	 = 4u;
+	profile.stages[0].spawnRate		 = 4.0f;
+	profile.stages[0].duration		 = 1.0f;
+	profile.stages[0].lodFar		 = 512.0f;
+	profile.stages[0].boundsRadius	 = 32.0f;
+	profile.stages[0].intensityScale = 1.0f;
+	profile.stages[1]				 = profile.stages[0];
+	profile.stages[1].trigger		 = ATMOSPHERE_STAGE_COLLISION;
+	profile.stages[1].parentStage	 = 0u;
+	profile.stages[1].flags			 = ATMOSPHERE_STAGE_INHERIT_POSITION | ATMOSPHERE_STAGE_INHERIT_VELOCITY |
+							  ATMOSPHERE_STAGE_INHERIT_COLOR | ATMOSPHERE_STAGE_INHERIT_INTENSITY;
+	profile.stages[1].burstCount = 2u;
+	profile.stages[1].spawnRate	 = 0.0f;
+	profile.stages[2]			 = profile.stages[1];
+	profile.stages[2].trigger	 = ATMOSPHERE_STAGE_DEATH;
+	if ( !FrontendTryRegisterAtmosphereEffectProfile( ATMOSPHERE_EFFECT_MAX_PROFILES, &profile ) )
+		return;
+
+	memset( &emitter, 0, sizeof( emitter ) );
+	emitter.schemaVersion = WIRED_ATMOSPHERE_SCHEMA_VERSION;
+	emitter.kind		  = ATMOSPHERE_EMITTER_BREATH;
+	emitter.id			  = 0x42524541u;
+	emitter.seed		  = 0x544831u;
+	emitter.profile		  = ATMOSPHERE_EFFECT_MAX_PROFILES;
+	VectorCopy( center, emitter.origin );
+	VectorCopy( view->viewaxis[0], emitter.direction );
+	emitter.intensity	 = 1.0f;
+	emitter.radius		 = 6.0f;
+	emitter.temperatureC = 37.0f;
+	emitter.humidity	 = 0.9f;
+	emitter.lifetime	 = 1.0f;
+	requestsBefore		 = vk.particle.spawnRequestCount;
+	particlesBefore		 = vk.particle.spawnParticleCount;
+	if ( !FrontendTryAddAtmosphereEmitter( &emitter ) || vk.particle.spawnRequestCount <= requestsBefore ||
+		 vk.particle.spawnParticleCount <= particlesBefore )
+		return;
+
+	vk.particle.atmosphereGraphSmokeRequests  = vk.particle.spawnRequestCount - requestsBefore;
+	vk.particle.atmosphereGraphSmokeParticles = vk.particle.spawnParticleCount - particlesBefore;
+	vk.particle.atmosphereGraphSmokePending	  = qtrue;
+	Q_strncpyz( s_ralAtmosphereGraphSmokeMap, tr.world->baseName, sizeof( s_ralAtmosphereGraphSmokeMap ) );
+}
+
+static void FrontendInjectRalAtmosphereFixtureSmoke( const refdef_t *view )
+{
+	static char mapName[MAX_QPATH];
+	static int lastViewTime = -1;
+	static uint32_t authoredFrame;
+	static qboolean warmup;
+	ralAtmosphereFixtureState_t authored;
+	atmosphereEmitter_t emitter;
+	atmosphereMediaVolume_t media;
+	vec3_t center;
+	uint32_t fixtureIndex;
+	if ( !r_ralEffectsSmoke || !r_ralEffectsSmoke->integer || !tr.world ||
+			!view || ( view->rdflags & RDF_NOWORLDMODEL ) ) return;
+	if ( Q_stricmp( mapName, tr.world->baseName ) ) {
+		Q_strncpyz( mapName, tr.world->baseName, sizeof( mapName ) );
+		authoredFrame = 0u;
+		lastViewTime = -1;
+		warmup = qtrue;
+	}
+	if ( view->time == lastViewTime ) return;
+	lastViewTime = view->time;
+	if ( warmup ) {
+		warmup = qfalse;
+		return;
+	}
+	fixtureIndex = authoredFrame / 4u;
+	if ( fixtureIndex >= RAL_ATMOSPHERE_FIXTURE_COUNT )
+		fixtureIndex = RAL_ATMOSPHERE_FIXTURE_COUNT - 1u;
+	if ( !Ral_AtmosphereConformanceFixture(
+			(ralAtmosphereFixture_t)fixtureIndex, &authored ) ) return;
+	VectorMA( view->vieworg, 72.0f, view->viewaxis[0], center );
+	for ( uint32_t i = 0u; i < 3u; ++i ) {
+		authored.state.bounds[i] += center[i];
+		authored.state.bounds[i + 3u] += center[i];
+	}
+	if ( authored.familyMask ) {
+		authored.state.flags |= ATMOSPHERE_FLAG_HEIGHTGRID;
+		authored.state.gridSize = 256;
+		authored.state.worldMins[0] = authored.state.bounds[0];
+		authored.state.worldMins[1] = authored.state.bounds[1];
+		authored.state.worldMaxs[0] = authored.state.bounds[3];
+		authored.state.worldMaxs[1] = authored.state.bounds[4];
+	}
+	if ( !FrontendTrySetAtmosphere( &authored.state ) ) return;
+	if ( authored.localMedia ) {
+		Ral_AtmosphereConformanceLocalMedia( &media );
+		VectorCopy( center, media.origin );
+		FrontendAddAtmosphereMediaVolume( &media );
+	}
+	if ( authored.breathEmitter ) {
+		Ral_AtmosphereConformanceBreathEmitter(
+			ATMOSPHERE_EFFECT_MAX_PROFILES, &emitter );
+		VectorCopy( center, emitter.origin );
+		VectorCopy( view->viewaxis[0], emitter.direction );
+		FrontendAddAtmosphereEmitter( &emitter );
+	}
+	authoredFrame++;
+}
+
+static void FrontendInjectLightingReferenceFixture( const refdef_t *view )
+{
+	static char injectedMap[MAX_QPATH];
+	atmosphericDesc_t atmosphere;
+	atmosphereMediaVolume_t media;
+	vec3_t center;
+	if ( !r_lightingReferenceFixture || !r_lightingReferenceFixture->integer || !tr.world || !view ||
+		 ( view->rdflags & RDF_NOWORLDMODEL ) || !Q_stricmp( injectedMap, tr.world->baseName ) ) return;
+	VectorMA( view->vieworg, 160.0f, view->viewaxis[0], center );
+	memset( &atmosphere, 0, sizeof( atmosphere ) );
+	atmosphere.type = ATMOSPHERE_PRECIP_NONE;
+	atmosphere.schemaVersion = WIRED_ATMOSPHERE_SCHEMA_VERSION;
+	atmosphere.flags = ATMOSPHERE_FLAG_ENABLED | ATMOSPHERE_FLAG_SKY_LIGHTING |
+		ATMOSPHERE_FLAG_VOLUMETRIC_MEDIA;
+	atmosphere.qualityTier = ATMOSPHERE_QUALITY_FULL;
+	atmosphere.seed = 0x4c415641u;
+	atmosphere.temperatureC = 18.0f;
+	atmosphere.humidity = 0.35f;
+	atmosphere.visibility = 1400.0f;
+	atmosphere.distance = 1400.0f;
+	atmosphere.sunDirection[2] = 1.0f;
+	atmosphere.sunIntensity = 0.2f;
+	VectorSet( atmosphere.ambientColor, 0.035f, 0.055f, 0.10f );
+	atmosphere.mediaDensity = 0.0008f;
+	atmosphere.mediaHeightFalloff = 0.001f;
+	for ( uint32_t axis = 0u; axis < 3u; ++axis ) {
+		atmosphere.bounds[axis] = center[axis] - 512.0f;
+		atmosphere.bounds[axis + 3u] = center[axis] + 512.0f;
+	}
+	if ( !FrontendTrySetAtmosphere( &atmosphere ) ) return;
+	memset( &media, 0, sizeof( media ) );
+	media.schemaVersion = WIRED_ATMOSPHERE_MEDIA_VOLUME_SCHEMA_VERSION;
+	media.shape = ATMOSPHERE_MEDIA_VOLUME_SPHERE;
+	media.id = 0x4c415641u;
+	media.flags = ATMOSPHERE_MEDIA_VOLUME_NOISE;
+	media.priority = 100u;
+	media.seed = 0x434f4f4cu;
+	VectorCopy( center, media.origin );
+	media.radius = 320.0f;
+	VectorSet( media.albedo, 0.30f, 0.42f, 0.70f );
+	VectorSet( media.emissive, 0.004f, 0.008f, 0.018f );
+	media.extinction = 0.0035f;
+	media.emissionIntensity = 1.0f;
+	media.anisotropy = 0.25f;
+	media.heightFalloff = 0.001f;
+	media.noiseScale = 96.0f;
+	FrontendAddAtmosphereMediaVolume( &media );
+	Q_strncpyz( injectedMap, tr.world->baseName, sizeof( injectedMap ) );
+}
+
+static void FrontendInjectEmissiveAuthorityFixture( void )
+{
+	static char injectedMap[MAX_QPATH];
+	static qboolean injectedUnnamedWorld;
+	static qboolean receiptLogged;
+	renderMaterialLighting_t lighting;
+	qhandle_t material;
+	if ( !s_frontendEmissiveAuthorityFixture || !s_frontendEmissiveAuthorityFixture->integer ||
+		 !tr.world ) return;
+	if ( tr.world->baseName[0] ?
+		 ( injectedMap[0] && !Q_stricmp( injectedMap, tr.world->baseName ) ) : injectedUnnamedWorld ) {
+		const ralEmissiveRouteReceipt_t *routes;
+		const ralLightDescription_t *proxies;
+		const renderEmissiveRoutingReceipt_t *receipt;
+		uint32_t routeCount, proxyCount;
+		if ( !receiptLogged && RenderSubmission_EmissiveAuthoritySnapshot( &s_frontendSubmission,
+				&routes, &routeCount, &proxies, &proxyCount, &receipt ) && routeCount ) {
+			R_LOG( rch_init, SEV_INFO,
+				"emissive-authority-fixture schema=1 routes=%u proxies=%u rejected=%u digest=%llu\n",
+				routeCount, proxyCount, receipt->rejectedProxyRouteCount,
+				(unsigned long long)receipt->routeDigest );
+			receiptLogged = qtrue;
+		}
+		return;
+	}
+	receiptLogged = qfalse;
+	material = 0;
+	for ( uint32_t batchIndex = 0u;
+		 batchIndex < s_frontendSubmission.worldSnapshot.batchCount; ++batchIndex ) {
+		const qhandle_t candidate = s_frontendSubmission.worldSnapshot.batches[batchIndex].baseMaterial;
+		for ( uint32_t materialIndex = 0u;
+			 materialIndex < s_frontendSubmission.materialCount; ++materialIndex )
+			if ( s_frontendSubmission.materials[materialIndex].snapshot.handle == candidate &&
+				strstr( s_frontendSubmission.materials[materialIndex].name, "lava" ) ) {
+				material = candidate;
+				break;
+			}
+		if ( material ) break;
+	}
+	if ( !material ) {
+		R_LOG( rch_init, SEV_WARN,
+			"emissive-authority-fixture rejected reason=material-missing materials=%u\n",
+			s_frontendSubmission.materialCount );
+		return;
+	}
+	memset( &lighting, 0, sizeof( lighting ) );
+	lighting.schemaVersion = RENDER_MATERIAL_LIGHTING_SCHEMA_VERSION;
+	lighting.sourceGeneration = (uint64_t)(uint32_t)tr.world->dataSize + 1u;
+	lighting.provenanceHash = UINT64_C( 0x6c61766173616e63 );
+	lighting.diffuseReflectanceQ16[0] = RAL_LIGHT_Q16_ONE / 2;
+	lighting.diffuseReflectanceQ16[1] = RAL_LIGHT_Q16_ONE / 4;
+	lighting.diffuseReflectanceQ16[2] = RAL_LIGHT_Q16_ONE / 8;
+	lighting.emissionRadianceQ16[0] = RAL_LIGHT_Q16_ONE * 6;
+	lighting.emissionRadianceQ16[1] = RAL_LIGHT_Q16_ONE * 2;
+	lighting.emissionRadianceQ16[2] = RAL_LIGHT_Q16_ONE / 2;
+	lighting.emissiveMobility = RAL_LIGHT_MOBILITY_STATIONARY;
+	lighting.emissiveInfluenceRangeQ16 = RAL_LIGHT_Q16_ONE * 192;
+	lighting.emissiveShadowPriority = 8u;
+	lighting.emissiveRequestedProxyCount = 4u;
+	lighting.participatesInStaticBake = qtrue;
+	lighting.emissiveInjectsAtmosphere = qtrue;
+	lighting.ready = qtrue;
+	if ( RenderSubmission_SetMaterialLighting( &s_frontendSubmission, material, &lighting ) ) {
+		Q_strncpyz( injectedMap, tr.world->baseName, sizeof( injectedMap ) );
+		injectedUnnamedWorld = tr.world->baseName[0] ? qfalse : qtrue;
+	} else R_LOG( rch_init, SEV_WARN,
+		"emissive-authority-fixture rejected reason=material-lighting material=%d world=%d\n",
+		material, s_frontendSubmission.worldLoaded );
+}
+#endif
+#define FRONTEND_IRRADIANCE_DEBUG_MAX_ENTITIES 12u
+
+static void FrontendIrradianceDebugQuad( const vec3_t center, const vec3_t right,
+		const vec3_t up, float halfExtent, const byte color[4] ) {
+	polyVert_t vertices[4];
+	static const float texCoords[4][2] = { { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 } };
+	uint32_t index;
+	memset( vertices, 0, sizeof( vertices ) );
+	for ( index = 0u; index < 4u; ++index ) {
+		const float rightScale = index == 0u || index == 3u ? -halfExtent : halfExtent;
+		const float upScale = index < 2u ? -halfExtent : halfExtent;
+		VectorCopy( center, vertices[index].xyz );
+		VectorMA( vertices[index].xyz, rightScale, right, vertices[index].xyz );
+		VectorMA( vertices[index].xyz, upScale, up, vertices[index].xyz );
+		vertices[index].st[0] = texCoords[index][0];
+		vertices[index].st[1] = texCoords[index][1];
+		memcpy( vertices[index].modulate.rgba, color, 4u );
+	}
+	FrontendAddPoly( tr.whiteShader->index, 4, vertices, 1 );
+}
+
+static void FrontendIrradianceDebugSegment( const vec3_t start, const vec3_t end,
+		const refdef_t *view, float width, const byte color[4] ) {
+	polyVert_t vertices[4];
+	vec3_t direction, side;
+	uint32_t index;
+	VectorSubtract( end, start, direction );
+	if ( VectorLengthSquared( direction ) <= 0.0001f ) return;
+	CrossProduct( direction, view->viewaxis[0], side );
+	if ( VectorNormalize( side ) == 0.0f ) VectorCopy( view->viewaxis[1], side );
+	VectorScale( side, width, side );
+	memset( vertices, 0, sizeof( vertices ) );
+	VectorSubtract( start, side, vertices[0].xyz );
+	VectorAdd( start, side, vertices[1].xyz );
+	VectorAdd( end, side, vertices[2].xyz );
+	VectorSubtract( end, side, vertices[3].xyz );
+	for ( index = 0u; index < 4u; ++index ) {
+		vertices[index].st[0] = index == 0u || index == 3u ? 0.0f : 1.0f;
+		vertices[index].st[1] = index < 2u ? 0.0f : 1.0f;
+		memcpy( vertices[index].modulate.rgba, color, 4u );
+	}
+	FrontendAddPoly( tr.whiteShader->index, 4, vertices, 1 );
+}
+
+static int64_t FrontendIrradianceFloorDiv( int64_t numerator, int32_t denominator ) {
+	int64_t quotient = numerator / denominator;
+	if ( numerator < 0 && numerator % denominator ) quotient--;
+	return quotient;
+}
+
+static int64_t FrontendIrradiancePositionQ16( float value ) {
+	double scaled = (double)value * RAL_LIGHT_Q16_ONE;
+	return (int64_t)( scaled < 0.0 ? scaled - 0.5 : scaled + 0.5 );
+}
+
+static byte FrontendIrradianceDebugChannel( int32_t q16 ) {
+	int64_t value = (int64_t)q16 * 255 / RAL_LIGHT_Q16_ONE;
+	return (byte)( value < 0 ? 0 : ( value > 255 ? 255 : value ) );
+}
+
+static void FrontendDrawEmissiveDebug( const refdef_t *view )
+{
+	const ralEmissiveRouteReceipt_t *routes;
+	const ralLightDescription_t *proxies;
+	const renderEmissiveRoutingReceipt_t *receipt;
+	static uint64_t lastRouteDigest;
+	uint32_t routeCount, proxyCount;
+	qboolean dirty;
+	static const byte influenceColor[4] = { 32, 220, 255, 255 };
+	if ( !r_showEmissiveLights || !r_showEmissiveLights->integer || !tr.whiteShader ||
+		 !RenderSubmission_EmissiveAuthoritySnapshot( &s_frontendSubmission,
+			&routes, &routeCount, &proxies, &proxyCount, &receipt ) ) return;
+	dirty = lastRouteDigest != receipt->routeDigest ? qtrue : qfalse;
+	lastRouteDigest = receipt->routeDigest;
+	for ( uint32_t routeIndex = 0u; routeIndex < routeCount; ++routeIndex ) {
+		const ralEmissiveRouteReceipt_t *route = &routes[routeIndex];
+		vec3_t center, corners[8];
+		byte color[4] = {
+			FrontendIrradianceDebugChannel( route->radianceQ16[0] ),
+			FrontendIrradianceDebugChannel( route->radianceQ16[1] ),
+			FrontendIrradianceDebugChannel( route->radianceQ16[2] ), 255 };
+		if ( route->proxyReason != RAL_EMISSIVE_PROXY_ACCEPTED ) {
+			color[0] = 255; color[1] = 24; color[2] = 24;
+		} else if ( dirty ) {
+			color[0] = 255; color[1] = 48; color[2] = 220;
+		}
+		for ( uint32_t axis = 0u; axis < 3u; ++axis ) {
+			const int32_t minimum = axis == 0u ? route->boundsMin.x :
+				( axis == 1u ? route->boundsMin.y : route->boundsMin.z );
+			const int32_t maximum = axis == 0u ? route->boundsMax.x :
+				( axis == 1u ? route->boundsMax.y : route->boundsMax.z );
+			center[axis] = (float)( (int64_t)minimum + maximum ) /
+				( 2.0f * RAL_LIGHT_Q16_ONE );
+		}
+		for ( uint32_t corner = 0u; corner < 8u; ++corner ) {
+			corners[corner][0] = (float)( ( corner & 1u ) ? route->boundsMax.x : route->boundsMin.x ) /
+				RAL_LIGHT_Q16_ONE;
+			corners[corner][1] = (float)( ( corner & 2u ) ? route->boundsMax.y : route->boundsMin.y ) /
+				RAL_LIGHT_Q16_ONE;
+			corners[corner][2] = (float)( ( corner & 4u ) ? route->boundsMax.z : route->boundsMin.z ) /
+				RAL_LIGHT_Q16_ONE;
+		}
+		for ( uint32_t edge = 0u; edge < 12u; ++edge ) {
+			static const uint8_t edges[12][2] = {
+				{0,1},{2,3},{4,5},{6,7},{0,2},{1,3},{4,6},{5,7},{0,4},{1,5},{2,6},{3,7}
+			};
+			FrontendIrradianceDebugSegment( corners[edges[edge][0]], corners[edges[edge][1]],
+				view, 0.45f, color );
+		}
+		FrontendIrradianceDebugQuad( center, view->viewaxis[1], view->viewaxis[2],
+			2.0f + (float)( route->shadowPriority > 12u ? 12u : route->shadowPriority ) * 0.25f, color );
+	}
+	for ( uint32_t proxyIndex = 0u; proxyIndex < proxyCount; ++proxyIndex ) {
+		const ralLightDescription_t *proxy = &proxies[proxyIndex];
+		vec3_t center, endpoint;
+		byte color[4] = {
+			FrontendIrradianceDebugChannel( proxy->radianceQ16[0] ),
+			FrontendIrradianceDebugChannel( proxy->radianceQ16[1] ),
+			FrontendIrradianceDebugChannel( proxy->radianceQ16[2] ), 255 };
+		center[0] = (float)proxy->position.x / RAL_LIGHT_Q16_ONE;
+		center[1] = (float)proxy->position.y / RAL_LIGHT_Q16_ONE;
+		center[2] = (float)proxy->position.z / RAL_LIGHT_Q16_ONE;
+		FrontendIrradianceDebugQuad( center, view->viewaxis[1], view->viewaxis[2],
+			2.0f + (float)( proxy->shadowPriority > 12u ? 12u : proxy->shadowPriority ) * 0.25f, color );
+		for ( uint32_t axis = 0u; axis < 3u; ++axis ) {
+			VectorCopy( center, endpoint );
+			endpoint[axis] += (float)proxy->rangeQ16 / RAL_LIGHT_Q16_ONE;
+			FrontendIrradianceDebugSegment( center, endpoint, view, 0.8f, influenceColor );
+		}
+	}
+}
+
+static void FrontendDrawIrradianceDebug( const refdef_t *view,
+		const renderEntityCommand_t *commands, uint32_t entityCount ) {
+	const renderIrradianceVolumeRecord_t *volumes;
+	uint32_t volumeCount, entityIndex, drawnEntities = 0u;
+	uint64_t volumeDigest;
+	static const byte cellColor[4] = { 32, 220, 255, 255 };
+	if ( !r_showIrradianceProbes || !r_showIrradianceProbes->integer || !tr.whiteShader ||
+		 !commands || !RenderSubmission_IrradianceVolumeSnapshot( &s_frontendSubmission,
+			&volumes, &volumeCount, &volumeDigest ) || !volumes || !volumeDigest ) return;
+	for ( entityIndex = 0u; entityIndex < entityCount &&
+		 drawnEntities < FRONTEND_IRRADIANCE_DEBUG_MAX_ENTITIES; ++entityIndex ) {
+		const renderEntityCommand_t *command = &commands[entityIndex];
+		const renderIrradianceVolumeRecord_t *volume = NULL;
+		ralIrradianceDebugReceipt_t debug;
+		vec3_t corners[8];
+		uint32_t volumeIndex, corner, edge;
+		int64_t cell[3];
+		if ( !command->hasLocalIrradiance ) continue;
+		for ( volumeIndex = 0u; volumeIndex < volumeCount; ++volumeIndex )
+			if ( volumes[volumeIndex].placement.volumeId == command->localIrradiance.volumeId ) {
+				volume = &volumes[volumeIndex]; break;
+			}
+		if ( !volume || !Ral_IrradianceDebugBuild( &volume->placement, &volume->volume,
+			&command->localIrradiance, volume->coefficientBytes, volume->coefficientByteLength,
+			volume->validityBytes, volume->validityCount, &debug ) ) continue;
+		cell[0] = FrontendIrradianceFloorDiv(
+			FrontendIrradiancePositionQ16( command->entity.origin[0] ) - volume->placement.origin.x,
+			volume->placement.spacing.x );
+		cell[1] = FrontendIrradianceFloorDiv(
+			FrontendIrradiancePositionQ16( command->entity.origin[1] ) - volume->placement.origin.y,
+			volume->placement.spacing.y );
+		cell[2] = FrontendIrradianceFloorDiv(
+			FrontendIrradiancePositionQ16( command->entity.origin[2] ) - volume->placement.origin.z,
+			volume->placement.spacing.z );
+		for ( uint32_t axis = 0u; axis < 3u; ++axis ) {
+			if ( cell[axis] < 0 ) cell[axis] = 0;
+			if ( cell[axis] >= (int64_t)volume->placement.dimensions[axis] - 1 )
+				cell[axis] = (int64_t)volume->placement.dimensions[axis] - 2;
+		}
+		for ( corner = 0u; corner < 8u; ++corner ) {
+			const uint32_t x = (uint32_t)cell[0] + ( corner & 1u );
+			const uint32_t y = (uint32_t)cell[1] + ( ( corner >> 1u ) & 1u );
+			const uint32_t z = (uint32_t)cell[2] + ( ( corner >> 2u ) & 1u );
+			corners[corner][0] = (float)( (int64_t)volume->placement.origin.x +
+				(int64_t)volume->placement.spacing.x * x ) / RAL_LIGHT_Q16_ONE;
+			corners[corner][1] = (float)( (int64_t)volume->placement.origin.y +
+				(int64_t)volume->placement.spacing.y * y ) / RAL_LIGHT_Q16_ONE;
+			corners[corner][2] = (float)( (int64_t)volume->placement.origin.z +
+				(int64_t)volume->placement.spacing.z * z ) / RAL_LIGHT_Q16_ONE;
+		}
+		for ( edge = 0u; edge < 12u; ++edge ) {
+			static const uint8_t edges[12][2] = {
+				{0,1},{2,3},{4,5},{6,7},{0,2},{1,3},{4,6},{5,7},{0,4},{1,5},{2,6},{3,7}
+			};
+			FrontendIrradianceDebugSegment( corners[edges[edge][0]], corners[edges[edge][1]],
+				view, 0.35f, cellColor );
+		}
+		for ( corner = 0u; corner < 8u; ++corner ) {
+			const uint32_t x = (uint32_t)cell[0] + ( corner & 1u );
+			const uint32_t y = (uint32_t)cell[1] + ( ( corner >> 1u ) & 1u );
+			const uint32_t z = (uint32_t)cell[2] + ( ( corner >> 2u ) & 1u );
+			const uint32_t probeIndex = x + volume->placement.dimensions[0] *
+				( y + volume->placement.dimensions[1] * z );
+			const ralIrradianceDebugProbe_t *selected = NULL;
+			byte color[4] = { 120, 120, 120, 255 };
+			float size = 1.5f;
+			for ( uint32_t selectedIndex = 0u; selectedIndex < debug.selectedProbeCount; ++selectedIndex )
+				if ( debug.selected[selectedIndex].probeIndex == probeIndex ) {
+					selected = &debug.selected[selectedIndex]; break;
+				}
+			if ( !volume->validityBytes[probeIndex] ) {
+				color[0] = 255; color[1] = 32; color[2] = 32;
+			} else if ( selected ) {
+				vec3_t coefficientDirection, rayEnd;
+				color[0] = FrontendIrradianceDebugChannel( selected->coefficientsQ16[0][0] );
+				color[1] = FrontendIrradianceDebugChannel( selected->coefficientsQ16[0][1] );
+				color[2] = FrontendIrradianceDebugChannel( selected->coefficientsQ16[0][2] );
+				size += 5.0f * (float)selected->weightQ16 / RAL_LIGHT_Q16_ONE;
+				for ( uint32_t axis = 0u; axis < 3u; ++axis )
+					coefficientDirection[axis] = (float)( selected->coefficientsQ16[axis + 1u][0] +
+						selected->coefficientsQ16[axis + 1u][1] + selected->coefficientsQ16[axis + 1u][2] ) /
+						( 3.0f * RAL_LIGHT_Q16_ONE );
+				if ( VectorNormalize( coefficientDirection ) > 0.0f ) {
+					VectorMA( corners[corner], 8.0f, coefficientDirection, rayEnd );
+					FrontendIrradianceDebugSegment( corners[corner], rayEnd, view, 0.5f, color );
+				}
+			}
+			FrontendIrradianceDebugQuad( corners[corner], view->viewaxis[1], view->viewaxis[2],
+				size, color );
+		}
+		drawnEntities++;
+	}
+}
+
+static void FrontendRenderScene( const refdef_t *view, int worldIndex )
+{
+	const renderEntityCommand_t *entityCommands;
+	uint32_t entityCount;
+	if ( view && !( view->rdflags & RDF_NOWORLDMODEL ) ) R_SetWorldSlot( worldIndex );
+#ifdef USE_VULKAN
+	renderAtmosphereMediaSnapshot_t	  mediaSnapshot;
+	renderSurfaceClimateSnapshot_t	  surfaceSnapshot;
+	const atmosphereMediaVolume_t	 *mediaVolumes;
+	const renderSurfaceClimateTile_t *surfaceTiles;
+	ralAtmosphereSurfaceTile_t		  gpuSurfaceTiles[RAL_ATMOSPHERE_MAX_SURFACE_TILES];
+	FrontendInjectRalAtmosphereGraphSmoke( view );
+	FrontendInjectRalAtmosphereFixtureSmoke( view );
+	FrontendInjectLightingReferenceFixture( view );
+	FrontendInjectEmissiveAuthorityFixture();
+	if ( RenderSubmission_AtmosphereMediaSnapshot( &s_frontendSubmission, &mediaSnapshot, &mediaVolumes ) )
+		RE_SetAtmosphereMediaVolumes( mediaVolumes, mediaSnapshot.count, mediaSnapshot.digest );
+	if ( RenderSubmission_AtmosphereSurfaceSnapshot( &s_frontendSubmission, &surfaceSnapshot, &surfaceTiles ) &&
+		 surfaceSnapshot.tileCount <= RAL_ATMOSPHERE_MAX_SURFACE_TILES ) {
+		memset( gpuSurfaceTiles, 0, sizeof( gpuSurfaceTiles ) );
+		for ( uint32_t i = 0u; i < surfaceSnapshot.tileCount; ++i ) {
+			gpuSurfaceTiles[i].tileX	  = surfaceTiles[i].tileX;
+			gpuSurfaceTiles[i].tileY	  = surfaceTiles[i].tileY;
+			gpuSurfaceTiles[i].eventMask  = surfaceTiles[i].eventMask;
+			gpuSurfaceTiles[i].climate[0] = surfaceTiles[i].wetness;
+			gpuSurfaceTiles[i].climate[1] = surfaceTiles[i].frost;
+			gpuSurfaceTiles[i].climate[2] = surfaceTiles[i].snow;
+			gpuSurfaceTiles[i].climate[3] = surfaceTiles[i].melt;
+		}
+		RE_SetAtmosphereSurfaceTiles( gpuSurfaceTiles, surfaceSnapshot.tileCount, surfaceSnapshot.generation );
+	}
+#endif
+	FrontendDrawEmissiveDebug( view );
+	FrontendDecline( RenderSubmission_RenderScene( &s_frontendSubmission, view, worldIndex ), "scene" );
+	FrontendBridgeEmissiveProxyLights();
+	entityCommands = RenderSubmission_EntityCommands( &s_frontendSubmission, &entityCount );
+	if ( entityCommands ) {
+		for ( uint32_t entityIndex = 0u; entityIndex < entityCount; ++entityIndex ) {
+			if ( !entityCommands[entityIndex].hasLocalIrradiance ) continue;
+			FrontendDecline( RE_SetRefEntityLocalIrradiance( entityIndex,
+				entityCommands[entityIndex].localIrradiance.blendedCoefficientsQ16,
+				entityCommands[entityIndex].localIrradiance.coefficientHash ),
+				"vulkan-entity-irradiance" );
+		}
+		FrontendDrawIrradianceDebug( view, entityCommands, entityCount );
+	}
 	RE_RenderScene( view, worldIndex );
 }
-static void FrontendSetColor( const float *color ) {
+static void FrontendSetColor( const float *color )
+{
 	RE_SetColor( color );
-	FrontendDecline( RenderSubmission_SetColor( &s_frontendSubmission,
-		color ), "ui-color" );
+	FrontendDecline( RenderSubmission_SetColor( &s_frontendSubmission, color ), "ui-color" );
 }
-static void FrontendStretchPic( float x, float y, float width, float height,
-		float s1, float t1, float s2, float t2, qhandle_t material ) {
+static void FrontendSetUiTransform( const refUiTransform_t *transform )
+{
+	RE_SetUiTransform( transform );
+	FrontendDecline( RenderSubmission_SetUiTransform( &s_frontendSubmission, transform ),
+		"ui-transform" );
+}
+static void FrontendStretchPic( float x, float y, float width, float height, float s1, float t1, float s2, float t2,
+								qhandle_t material )
+{
 	RE_StretchPic( x, y, width, height, s1, t1, s2, t2, material );
-	FrontendDecline( RenderSubmission_AddUiQuad( &s_frontendSubmission,
-		x, y, width, height, s1, t1, s2, t2, 0.0f, material ), "ui-quad" );
+	FrontendDecline(
+		RenderSubmission_AddUiQuad( &s_frontendSubmission, x, y, width, height, s1, t1, s2, t2, 0.0f, material ),
+		"ui-quad" );
 }
-static void FrontendStretchPicOverlay( float x, float y, float width, float height,
-		float s1, float t1, float s2, float t2, qhandle_t material ) {
+static void FrontendStretchPicOverlay( float x, float y, float width, float height, float s1, float t1, float s2,
+									   float t2, qhandle_t material )
+{
 	RE_StretchPicOverlay( x, y, width, height, s1, t1, s2, t2, material );
-	FrontendDecline( RenderSubmission_AddUiQuad( &s_frontendSubmission,
-		x, y, width, height, s1, t1, s2, t2, 0.0f, material ), "ui-overlay" );
+	FrontendDecline(
+		RenderSubmission_AddUiQuad( &s_frontendSubmission, x, y, width, height, s1, t1, s2, t2, 0.0f, material ),
+		"ui-overlay" );
 }
-static void FrontendRotatedPic( float x, float y, float width, float height,
-		float s1, float t1, float s2, float t2, float angle, qhandle_t material ) {
+static void FrontendRotatedPic( float x, float y, float width, float height, float s1, float t1, float s2, float t2,
+								float angle, qhandle_t material )
+{
 	RE_RotatedPic( x, y, width, height, s1, t1, s2, t2, angle, material );
-	FrontendDecline( RenderSubmission_AddUiQuad( &s_frontendSubmission,
-		x, y, width, height, s1, t1, s2, t2, angle, material ), "ui-rotated" );
+	FrontendDecline(
+		RenderSubmission_AddUiQuad( &s_frontendSubmission, x, y, width, height, s1, t1, s2, t2, angle, material ),
+		"ui-rotated" );
 }
-static void FrontendDrawLine( float x1, float y1, float x2, float y2,
-		float width, qhandle_t material ) {
+static void FrontendDrawLine( float x1, float y1, float x2, float y2, float width, qhandle_t material )
+{
 	RE_DrawLine( x1, y1, x2, y2, width, material );
-	FrontendDecline( RenderSubmission_AddUiLine( &s_frontendSubmission,
-		x1, y1, x2, y2, width, material ), "ui-line" );
+	FrontendDecline( RenderSubmission_AddUiLine( &s_frontendSubmission, x1, y1, x2, y2, width, material ), "ui-line" );
 }
-static void FrontendMenuBackdrop( float x, float y, float width, float height,
-		float time, float mouseX, float mouseY, float transition ) {
+static void FrontendMenuBackdrop( float x, float y, float width, float height, float time, float mouseX, float mouseY,
+								  float transition )
+{
 	RE_DrawMenuBackdrop( x, y, width, height, time, mouseX, mouseY, transition );
-	FrontendDecline( RenderSubmission_AddUiQuad( &s_frontendSubmission,
-		x, y, width, height, time, mouseX, mouseY, transition,
-		0.0f, INT_MAX ), "ui-backdrop" );
+	FrontendDecline( RenderSubmission_AddUiQuad( &s_frontendSubmission, x, y, width, height, time, mouseX, mouseY,
+												 transition, 0.0f, INT_MAX ),
+					 "ui-backdrop" );
 }
 
 #ifdef USE_RENDERER_DLOPEN
 Q_EXPORT
 #endif
-qboolean WiredVulkan_GetFrontendReceipt( renderSubmissionReceipt_t *outReceipt ) {
-	if ( !outReceipt || !RenderSubmission_ReceiptExact( &s_frontendPublished,
-			&s_frontendPublished ) ) return qfalse;
+qboolean WiredVulkan_GetFrontendReceipt( renderSubmissionReceipt_t *outReceipt )
+{
+	if ( !outReceipt || !RenderSubmission_ReceiptExact( &s_frontendPublished, &s_frontendPublished ) )
+		return qfalse;
 	*outReceipt = s_frontendPublished;
 	return qtrue;
 }
@@ -3553,9 +4443,11 @@ GetRefAPI
 @@@@@@@@@@@@@@@@@@@@@
 */
 #ifdef USE_RENDERER_DLOPEN
-Q_EXPORT refexport_t* QDECL GetRefAPI ( int apiVersion, refimport_t *rimp ) {
+Q_EXPORT refexport_t *QDECL GetRefAPI( int apiVersion, refimport_t *rimp )
+{
 #else
-refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
+refexport_t *GetRefAPI( int apiVersion, refimport_t *rimp )
+{
 #endif
 
 #define re s_re
@@ -3565,14 +4457,18 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	memset( &re, 0, sizeof( re ) );
 
 	if ( apiVersion != REF_API_VERSION ) {
-		R_LOG( rch_init, SEV_INFO, "Mismatched REF_API_VERSION: expected %i, got %i\n",
-			REF_API_VERSION, apiVersion );
+		R_LOG( rch_init, SEV_INFO, "Mismatched REF_API_VERSION: expected %i, got %i\n", REF_API_VERSION, apiVersion );
 		return NULL;
 	}
-	if ( s_frontendModuleGeneration == UINT64_MAX - 1u
-			|| !RenderSubmission_Init( &s_frontendSubmission,
-				++s_frontendModuleGeneration ) ) return NULL;
-	s_frontendFrameGeneration = s_frontendModuleGeneration;
+	if ( s_frontendModuleGeneration == UINT64_MAX - 1u ||
+		 !RenderSubmission_Init( &s_frontendSubmission, ++s_frontendModuleGeneration ) )
+		return NULL;
+	memset( &s_frontendMaterialScripts, 0, sizeof( s_frontendMaterialScripts ) );
+	if ( !RenderMaterialScript_Load( &s_frontendMaterialScripts, &ri ) ) {
+		RenderSubmission_Reset( &s_frontendSubmission );
+		return NULL;
+	}
+	s_frontendFrameGeneration		= s_frontendModuleGeneration;
 	s_frontendLastLoggedWorldDigest = 0u;
 	memset( &s_frontendPublished, 0, sizeof( s_frontendPublished ) );
 
@@ -3580,84 +4476,88 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 
 	re.Shutdown = FrontendShutdown;
 
-	re.BeginRegistration = RE_BeginRegistration;
-	re.RegisterModel = FrontendRegisterModel;
-	re.RegisterSkin = FrontendRegisterSkin;
-	re.RegisterShader = FrontendRegisterShader;
-	re.RegisterShaderNoMip = FrontendRegisterShaderNoMip;
-	re.RegisterShaderLightMap = FrontendRegisterShaderLightMap;
-	re.RegisterMSDFShader = FrontendRegisterMsdf;
+	re.BeginRegistration	   = RE_BeginRegistration;
+	re.RegisterModel		   = FrontendRegisterModel;
+	re.RegisterSkin			   = FrontendRegisterSkin;
+	re.RegisterShader		   = FrontendRegisterShader;
+	re.RegisterShaderNoMip	   = FrontendRegisterShaderNoMip;
+	re.RegisterShaderLightMap  = FrontendRegisterShaderLightMap;
+	re.RegisterMSDFShader	   = FrontendRegisterMsdf;
 	re.RegisterPrimitiveShader = FrontendRegisterPrimitive;
-	re.PinShaderImages = RE_PinShaderImages;
-	re.LoadWorld = FrontendLoadWorld;
-	re.SetWorldVisData = RE_SetWorldVisData;
-	re.EndRegistration = RE_EndRegistration;
+	re.PinShaderImages		   = RE_PinShaderImages;
+	re.LoadWorld			   = FrontendLoadWorld;
+	re.SetWorldVisData		   = RE_SetWorldVisData;
+	re.EndRegistration		   = RE_EndRegistration;
 
-	re.BeginFrame = FrontendBeginFrame;
-	re.EndFrame = FrontendEndFrame;
+	re.BeginFrame		   = FrontendBeginFrame;
+	re.EndFrame			   = FrontendEndFrame;
 	re.PresentationChanged = RE_PresentationChanged;
 	re.GetGpuProfileSample = vk_gpu_profile_sample;
 
 	re.MarkFragments = R_MarkFragments;
-	re.LerpTag = R_LerpTag;
-	re.ModelBounds = R_ModelBounds;
+	re.LerpTag		 = R_LerpTag;
+	re.ModelBounds	 = R_ModelBounds;
 
-	re.ClearScene = FrontendClearScene;
-	re.AddRefEntityToScene = FrontendAddEntity;
-	re.AddRefEntityToSceneTemporal = FrontendAddEntityTemporal;
-	re.AddPolyToScene = FrontendAddPoly;
-	re.LightForPoint = R_LightForPoint;
-	re.AddLightToScene = FrontendAddLight;
-	re.AddAdditiveLightToScene = FrontendAddAdditiveLight;
-	re.AddLinearLightToScene = FrontendAddLinearLight;
-	re.AddRibbonToScene = RE_AddRibbonToScene;
-	re.AddBeamToScene = RE_AddBeamToScene;
-	re.AddRailRibbonToScene = RE_AddRailRibbonToScene;
-	re.AddSpriteToScene = RE_AddSpriteToScene;
-	re.EmitParticles = RE_EmitParticles;
-	re.AddDecalToScene = RE_AddDecalToScene;
-	re.RegisterParticleClass = RE_RegisterParticleClass;
-	re.SetAtmosphere = RE_SetAtmosphere;
-	re.SetAtmosphereHeightgrid = RE_SetAtmosphereHeightgrid;
-	re.AddLensSourceToScene = RE_AddLensSourceToScene;
-	re.GetLensVisibility = RE_GetLensVisibility;
+	re.ClearScene					   = FrontendClearScene;
+	re.AddRefEntityToScene			   = FrontendAddEntity;
+	re.AddRefEntityToSceneTemporal	   = FrontendAddEntityTemporal;
+	re.AddPolyToScene				   = FrontendAddPoly;
+	re.LightForPoint				   = R_LightForPoint;
+	re.AddLightToScene				   = FrontendAddLight;
+	re.AddAdditiveLightToScene		   = FrontendAddAdditiveLight;
+	re.AddLinearLightToScene		   = FrontendAddLinearLight;
+	re.AddRibbonToScene				   = RE_AddRibbonToScene;
+	re.AddBeamToScene				   = RE_AddBeamToScene;
+	re.AddRailRibbonToScene			   = RE_AddRailRibbonToScene;
+	re.AddSpriteToScene				   = RE_AddSpriteToScene;
+	re.EmitParticles				   = RE_EmitParticles;
+	re.AddDecalToScene				   = RE_AddDecalToScene;
+	re.RegisterParticleClass		   = FrontendRegisterParticleClass;
+	re.SetAtmosphere				   = FrontendSetAtmosphere;
+	re.SetAtmosphereHeightgrid		   = RE_SetAtmosphereHeightgrid;
+	re.AddAtmosphereEmitter			   = FrontendAddAtmosphereEmitter;
+	re.RegisterAtmosphereEffectProfile = FrontendRegisterAtmosphereEffectProfile;
+	re.AddAtmosphereSurfaceEvent	   = FrontendAddAtmosphereSurfaceEvent;
+	re.AddAtmosphereMediaVolume		   = FrontendAddAtmosphereMediaVolume;
+	re.CookLightingProject			   = FrontendCookLightingProject;
+	re.AddLensSourceToScene			   = RE_AddLensSourceToScene;
+	re.GetLensVisibility			   = RE_GetLensVisibility;
 #if FEAT_HALO
 	re.AddHaloToScene = RE_AddHaloToScene;
 #endif
-#if FEAT_FOG_SYSTEM
 	re.GetGlobalFog = RE_GetGlobalFog;
-	re.GetViewFog = RE_GetViewFog;
-#endif
+	re.GetViewFog	= RE_GetViewFog;
 
 	re.RenderScene = FrontendRenderScene;
 
-	re.SetColor = FrontendSetColor;
-	re.SetClipRegion = RE_SetClipRegion;
-	re.SetMSDFOutline = RE_SetMSDFOutline;
-	re.SetMSDFShadow  = RE_SetMSDFShadow;
-	re.DrawStretchPic = FrontendStretchPic;
-	re.DrawMenuBackdrop = FrontendMenuBackdrop;
+	re.SetColor				 = FrontendSetColor;
+	re.SetClipRegion		 = RE_SetClipRegion;
+	re.SetUiTransform		 = FrontendSetUiTransform;
+	re.SetMSDFOutline		 = RE_SetMSDFOutline;
+	re.SetMSDFShadow		 = RE_SetMSDFShadow;
+	re.DrawStretchPic		 = FrontendStretchPic;
+	re.DrawMenuBackdrop		 = FrontendMenuBackdrop;
 	re.DrawStretchPicOverlay = FrontendStretchPicOverlay;
-	re.DrawRotatedPic = FrontendRotatedPic;
-	re.DrawLine = FrontendDrawLine;
-	re.DrawStretchRaw = RE_StretchRaw;
-	re.UploadCinematic = RE_UploadCinematic;
+	re.DrawRotatedPic		 = FrontendRotatedPic;
+	re.DrawLine				 = FrontendDrawLine;
+	re.DrawStretchRaw		 = RE_StretchRaw;
+	re.UploadCinematic		 = RE_UploadCinematic;
 
-	re.RegisterFont = RE_RegisterFont;
-	re.RemapShader = RE_RemapShader;
+	re.RegisterFont	  = RE_RegisterFont;
+	re.RemapShader	  = RE_RemapShader;
 	re.GetEntityToken = RE_GetEntityToken;
-	re.inPVS = R_inPVS;
+	re.inPVS		  = R_inPVS;
 
-	re.TakeVideoFrame = RE_TakeVideoFrame;
+	re.TakeVideoFrame	= RE_TakeVideoFrame;
 	re.SetColorMappings = R_SetColorMappings;
 
 	re.ThrottleBackend = RE_ThrottleBackend;
-	re.FinishBloom = RE_FinishBloom;
-	re.CanMinimize = RE_CanMinimize;
-	re.GetConfig = RE_GetConfig;
+	re.FinishBloom	   = RE_FinishBloom;
+	re.CanMinimize	   = RE_CanMinimize;
+	re.GetConfig	   = RE_GetConfig;
 	re.GetMemoryBudget = vk_ral_query_memory_budget;
-	re.VertexLighting = RE_VertexLighting;
-	re.SyncRender = RE_SyncRender;
+	re.VertexLighting  = RE_VertexLighting;
+	re.SyncRender	   = RE_SyncRender;
 
 #if FEAT_IQM
 	re.GetIQMAnimations = R_GetIQMAnimations;

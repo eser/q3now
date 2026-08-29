@@ -24,8 +24,9 @@ export async function createWiredWebClient({ moduleFactory, gpu, canvas,
   const startClient = module?._WiredWeb_ClientStart;
   const frameClient = module?._WiredWeb_ClientFrame;
   const stopClient = module?._WiredWeb_ClientShutdown;
+  const presentationChanged = module?._WiredWeb_ClientPresentationChanged;
   if (typeof startClient !== "function" || typeof frameClient !== "function"
-      || typeof stopClient !== "function") {
+      || typeof stopClient !== "function" || typeof presentationChanged !== "function") {
     aggregate.destroy();
     throw new TypeError("Emscripten full-client lifecycle exports are unavailable");
   }
@@ -43,11 +44,29 @@ export async function createWiredWebClient({ moduleFactory, gpu, canvas,
     if (typeof eventTarget?.addEventListener !== "function") return;
     eventTarget.addEventListener(type, handler); listeners.push([type, handler]);
   };
-  listen("keydown", (event) => module._WiredWeb_InputKey?.(event.keyCode ?? 0, 1));
-  listen("keyup", (event) => module._WiredWeb_InputKey?.(event.keyCode ?? 0, 0));
+  const browserKey = (event, down) => {
+    const code = Number(event.keyCode ?? 0);
+    if (typeof module._WiredWeb_InputBrowserKey === "function")
+      module._WiredWeb_InputBrowserKey(code, down ? 1 : 0);
+    else module._WiredWeb_InputKey?.(code, down ? 1 : 0);
+  };
+  listen("keydown", event => browserKey(event, true));
+  listen("keyup", event => browserKey(event, false));
   listen("keypress", (event) => module._WiredWeb_InputChar?.(event.charCode ?? 0));
   listen("pointermove", (event) => module._WiredWeb_InputMouse?.(
     Number(event.movementX ?? 0), Number(event.movementY ?? 0)));
+  const pointer = (event, down) => {
+    const bounds = canvas?.getBoundingClientRect?.();
+    if (!bounds || bounds.width <= 0 || bounds.height <= 0) return;
+    module._WiredWeb_InputPointer?.(
+      (Number(event.clientX ?? 0) - bounds.left) * canvas.width / bounds.width,
+      (Number(event.clientY ?? 0) - bounds.top) * canvas.height / bounds.height,
+      down ? 1 : 0);
+  };
+  listen("pointermove", event => pointer(event, Number(event.buttons ?? 0) !== 0));
+  listen("pointerdown", event => pointer(event, true));
+  listen("pointerup", event => pointer(event, false));
+  listen("wheel", event => module._WiredWeb_InputWheel?.(Number(event.deltaY ?? 0)));
 
   const fail = (reason) => {
     if (state === "failed" && lastFailure) return;
@@ -86,6 +105,9 @@ export async function createWiredWebClient({ moduleFactory, gpu, canvas,
 		if (pendingResize) {
 			if (!aggregate.resize?.(pendingResize)) {
 				frameHandle = requestAnimationFrame(tick); return;
+			}
+			if (!presentationChanged()) {
+				fail("Wired Web client rejected presentation resize publication"); return;
 			}
 			pendingResize = null;
 		}

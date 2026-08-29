@@ -9,7 +9,7 @@ cl_wired_msdf.c -- MSDF font loading and rendering
 #include "cl_wired_msdf.h"
 LOG_DECLARE_CHANNEL( ch_ui, "ui" );
 
-#if FEAT_WIRED_UI
+#if FEAT_WIRED_UI || defined(WIRED_WEB_UI_TEXT)
 
 /* ── font pool ──────────────────────────────────────────────────────── */
 
@@ -657,6 +657,14 @@ void MSDF_ReregisterShaders( void )
 
 int MSDF_GetFontCount( void ) { return wui_fontCount; }
 
+int MSDF_GetRenderableFontCount( void )
+{
+	int count = 0;
+	for ( int i = 0; i < wui_fontCount; ++i )
+		if ( wui_fonts[i].loaded && wui_fonts[i].atlasShader ) ++count;
+	return count;
+}
+
 /* ── character drawing ──────────────────────────────────────────────── */
 
 void MSDF_DrawChar( msdfFont_t *font, float x, float y,
@@ -1073,4 +1081,4 @@ int MSDF_ClampToWidth( msdfFont_t *font, float size,
 	return counted;
 }
 
-#endif /* FEAT_WIRED_UI */
+#endif /* FEAT_WIRED_UI || WIRED_WEB_UI_TEXT */

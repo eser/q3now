@@ -1233,6 +1233,21 @@ static void RB_CalcDiffuseColor_scalar( unsigned char *colors )
 	normal = tess.normal[0];
 
 	numVertexes = tess.numVertexes;
+	if ( ent->hasLocalIrradiance ) {
+		const float q16ToByte = 255.0f / (float)RAL_LIGHT_Q16_ONE;
+		for ( i = 0; i < numVertexes; ++i, normal += 4 ) {
+			for ( j = 0; j < 3; ++j ) {
+				float irradiance = (float)ent->localShQ16[0][j] +
+					(float)ent->localShQ16[1][j] * normal[0] +
+					(float)ent->localShQ16[2][j] * normal[1] +
+					(float)ent->localShQ16[3][j] * normal[2];
+				int value = myftol( irradiance * q16ToByte );
+				colors[i * 4 + j] = (byte)( value < 0 ? 0 : ( value > 255 ? 255 : value ) );
+			}
+			colors[i * 4 + 3] = 255;
+		}
+		return;
+	}
 	for (i = 0 ; i < numVertexes ; i++, normal += 4) {
 		incoming = DotProduct (normal, lightDir);
 		if ( incoming <= 0 ) {

@@ -33,6 +33,14 @@ typedef struct {
 	char reason[RAL_WEBGPU_BROWSER_ABI_REASON_BYTES];
 } ralWebGpuBrowserLoss_t;
 
+typedef struct {
+	uint32_t binding;
+	ralWebGpuBrowserBindResourceKind_t kind;
+	uintptr_t resourceIdentity;
+	uint64_t offset;
+	uint64_t byteSize;
+} ralWebGpuBrowserBindResource_t;
+
 qboolean RalWebGpu_BrowserBridgeCreate(
 	const ralWebGpuBrowserBridgeCreateInfo_t *createInfo,
 	ralWebGpuBrowserBridge_t **outBridge );
@@ -51,6 +59,12 @@ qboolean RalWebGpu_BrowserBridgeApplyPipelineInfo(
 	ralWebGpuBrowserBridge_t *bridge, ralWebGpuPipelineCreateInfo_t *info );
 qboolean RalWebGpu_BrowserBridgePollLoss(
 	ralWebGpuBrowserBridge_t *bridge, ralWebGpuBrowserLoss_t *outLoss );
+qboolean RalWebGpu_BrowserBridgeCreateBindGroup(
+	ralWebGpuBrowserBridge_t *bridge, uintptr_t layoutIdentity,
+	const ralWebGpuBrowserBindResource_t *entries, uint32_t entryCount,
+	uintptr_t *outIdentity );
+void RalWebGpu_BrowserBridgeDestroyBindGroup(
+	ralWebGpuBrowserBridge_t *bridge, uintptr_t identity );
 
 #ifdef __cplusplus
 }

@@ -138,7 +138,10 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
       try { device = await adapter.requestDevice(options.device ?? {}); } catch { device = null; }
       if (!device) { status = "failed"; reason = DEVICE_UNAVAILABLE; return currentReceipt(); }
       device.addEventListener?.("uncapturederror", (event) => {
-        uncapturedError = String(event?.error?.message ?? event?.message ?? "WebGPU validation error");
+        const message = String(event?.error?.message ?? event?.message ?? "WebGPU validation error");
+        if (!uncapturedError) uncapturedError = message;
+        else if (!uncapturedError.includes(message))
+          uncapturedError = `${uncapturedError}\n${message}`.slice(0, 2048);
       });
       limits = normalizedLimits(device.limits);
       put("device", device); put("queue", device.queue, { destroyable: false });
@@ -174,7 +177,20 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
       if (typeof descriptor?.code !== "string" || descriptor.code.length === 0) {
         throw new RalWebGpuBrowserHostError("invalid-argument", "WGSL code is required");
       }
-      return put("shader", getDevice().createShaderModule({ ...descriptor }));
+      const module = getDevice().createShaderModule({ ...descriptor });
+      if (typeof module.getCompilationInfo === "function") {
+        Promise.resolve(module.getCompilationInfo()).then((info) => {
+          const failures = [...(info?.messages ?? [])].filter((message) =>
+            message.type === "error").map((message) =>
+            `WGSL ${descriptor.label ?? "module"}:${message.lineNum ?? 0}:${message.linePos ?? 0}: ${message.message}`);
+          if (failures.length) {
+            const detail = failures.join("\n");
+            uncapturedError = uncapturedError ? `${uncapturedError}\n${detail}`.slice(0, 4096)
+              : detail.slice(0, 4096);
+          }
+        });
+      }
+      return put("shader", module);
     },
     createBindGroupLayout(expectedGeneration, descriptor) {
       assertReady(expectedGeneration);
@@ -210,6 +226,24 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
     },
     createBindGroup(expectedGeneration, descriptor) {
       assertReady(expectedGeneration); return put("bind-group", getDevice().createBindGroup(descriptor));
+    },
+    createBindGroupFromHandles(expectedGeneration, layoutHandle, entries) {
+      assertReady(expectedGeneration);
+      const converted = entries.map((entry) => {
+        let resource;
+        if (entry.kind === 1) {
+          resource = { buffer: get(entry.handle, "buffer"), offset: entry.offset };
+          if (entry.size) resource.size = entry.size;
+        } else if (entry.kind === 2) {
+          resource = get(entry.handle, "texture").createView();
+        } else if (entry.kind === 3) {
+          resource = get(entry.handle, "sampler");
+        } else throw new RalWebGpuBrowserHostError("invalid-argument", "bind resource kind");
+        return { binding: entry.binding, resource };
+      });
+      return put("bind-group", getDevice().createBindGroup({
+        layout: get(layoutHandle, "bind-group-layout"), entries: converted
+      }));
     },
     writeBuffer(expectedGeneration, bufferHandle, offset, data) {
       assertReady(expectedGeneration); getQueue().writeBuffer(get(bufferHandle, "buffer"), offset, data); return true;
@@ -324,7 +358,13 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
       return new Promise((resolve, reject) => { pendingCanvasCapture = { resolve, reject }; });
     },
     createCommandEncoder(expectedGeneration, descriptor = {}) {
-      assertReady(expectedGeneration); return put("encoder", getDevice().createCommandEncoder(descriptor));
+      assertReady(expectedGeneration);
+      const device = getDevice();
+      const validationScope = typeof device.pushErrorScope === "function"
+        && typeof device.popErrorScope === "function";
+      if (validationScope) device.pushErrorScope("validation");
+      return put("encoder", device.createCommandEncoder(descriptor),
+        { metadata: { validationScope } });
     },
     beginRenderPass(expectedGeneration, encoderHandle, viewHandle, descriptor = {}) {
       assertReady(expectedGeneration);
@@ -353,18 +393,37 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
       const pipeline = get(draw.pipelineHandle, "pipeline");
       const vertex = get(draw.vertexBufferHandle, "buffer");
       const index = get(draw.indexBufferHandle, "buffer");
-      if (draw.textureHandle) get(draw.textureHandle, "texture");
+	  const texture = draw.textureHandle ? get(draw.textureHandle, "texture") : null;
       if (draw.secondaryTextureHandle) get(draw.secondaryTextureHandle, "texture");
-      if (draw.samplerHandle) get(draw.samplerHandle, "sampler");
+	  const sampler = draw.samplerHandle ? get(draw.samplerHandle, "sampler") : null;
       finitePositive(draw.indexCount, "index count");
       pass.setPipeline(pipeline); pass.setVertexBuffer(draw.vertexSlot ?? 0, vertex, draw.vertexOffset ?? 0);
       pass.setIndexBuffer(index, draw.indexFormat ?? "uint32", draw.indexOffset ?? 0);
+	  if (draw.kind === 4 && texture && sampler) {
+		const group = getDevice().createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [
+		  { binding: 0, resource: texture.createView() }, { binding: 1, resource: sampler }
+		] });
+		pass.setBindGroup(0, group);
+	  }
       for (const binding of draw.bindGroups ?? []) pass.setBindGroup(binding.index, get(binding.handle, "bind-group"), binding.offsets ?? []);
       pass.drawIndexed(draw.indexCount, draw.instanceCount ?? 1, draw.firstIndex ?? 0,
         draw.baseVertex ?? 0, draw.firstInstance ?? 0);
       const encoderHandle = passEncoders.get(passHandle);
       if (encoderHandle) encoderDrawCounts.set(encoderHandle,
         (encoderDrawCounts.get(encoderHandle) ?? 0) + 1);
+      return true;
+    },
+    recordComputeDispatch(expectedGeneration, passHandle, dispatch) {
+      assertReady(expectedGeneration);
+      const pass = get(passHandle, "compute-pass");
+      pass.setPipeline(get(dispatch.pipelineHandle, "pipeline"));
+      for (const binding of dispatch.bindGroups ?? []) {
+        pass.setBindGroup(binding.index, get(binding.handle, "bind-group"), binding.offsets ?? []);
+      }
+      finitePositive(dispatch.groupCountX, "compute group count x");
+      finitePositive(dispatch.groupCountY, "compute group count y");
+      finitePositive(dispatch.groupCountZ, "compute group count z");
+      pass.dispatchWorkgroups(dispatch.groupCountX, dispatch.groupCountY, dispatch.groupCountZ);
       return true;
     },
     endRenderPass(expectedGeneration, passHandle) {
@@ -377,6 +436,7 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
     finishEncoder(expectedGeneration, encoderHandle, descriptor = {}) {
       assertReady(expectedGeneration);
       const encoder = get(encoderHandle, "encoder");
+      const validationScope = entries.get(encoderHandle)?.metadata?.validationScope === true;
       let canvasCapture = null;
       const textureHandle = encoderCanvasFrames.get(encoderHandle);
       if (pendingCanvasCapture && textureHandle && configured
@@ -396,16 +456,22 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
       encoderCanvasFrames.delete(encoderHandle); encoderDrawCounts.delete(encoderHandle);
       release(encoderHandle);
       return put("command-buffer", commandBuffer, { destroyable: false,
-        metadata: canvasCapture ? { canvasCapture } : null });
+        metadata: { canvasCapture, validationScope } });
     },
     submit(expectedGeneration, commandBufferHandle) {
       assertReady(expectedGeneration);
       const queue = getQueue(), commandBuffer = get(commandBufferHandle, "command-buffer");
-      const canvasCapture = entries.get(commandBufferHandle)?.metadata?.canvasCapture;
+      const commandMetadata = entries.get(commandBufferHandle)?.metadata;
+      const canvasCapture = commandMetadata?.canvasCapture;
       queue.submit([commandBuffer]); release(commandBufferHandle);
       if (canvasCapture) canvasCaptureCandidates.push(canvasCapture);
       const submission = { status: "pending", error: "" };
-      Promise.resolve(queue.onSubmittedWorkDone()).then(() => { submission.status = "ready"; }, (error) => {
+      const validation = commandMetadata?.validationScope
+        ? Promise.resolve(getDevice().popErrorScope()) : Promise.resolve(null);
+      Promise.all([validation, Promise.resolve(queue.onSubmittedWorkDone())]).then(([error]) => {
+        if (error) { submission.status = "failed"; submission.error = String(error.message ?? error); }
+        else submission.status = "ready";
+      }, (error) => {
         submission.status = "failed"; submission.error = String(error?.message ?? error ?? uncapturedError);
       });
       return put("submission", submission, { destroyable: false });

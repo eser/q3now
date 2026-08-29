@@ -18,6 +18,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/lib/wired_paths.sh"
 TIMEOUT_RUNNER="$SCRIPT_DIR/run-with-timeout.py"
 
 analyze_contract() {
@@ -340,34 +341,16 @@ if [ -z "$HEADLESS" ] || [ ! -x "$HEADLESS" ]; then
 fi
 HEADLESS="$(cd "$(dirname "$HEADLESS")" && pwd)/$(basename "$HEADLESS")"
 
-PACK_ROOT=""
-for candidate in "$WIRED_DIR" "$WIRED_DIR/../Resources" "$WIRED_DIR/../../.."; do
-    if [ -f "$candidate/base/pax21.sw3z" ]; then
-        PACK_ROOT="$(cd "$candidate" && pwd)"
-        break
-    fi
-done
+PACK_ROOT="$(wired_find_archive_root "$WIRED_DIR" "$WIRED_DIR/../Resources" "$WIRED_DIR/../../.." 2>/dev/null || true)"
 if [ -z "$PACK_ROOT" ]; then
-    echo "SKIP: current base/pax21.sw3z unavailable"
+    echo "SKIP: current VFS archives unavailable"
     exit 77
 fi
 
-CONTENT_ROOT=""
-for candidate in "${WIRED_CONTENT_ROOT:-}" "$PACK_ROOT"; do
-    [ -n "$candidate" ] || continue
-    if [ -f "$candidate/base/pax01.sw3z" ] || [ -f "$candidate/base/pak0.pk3" ]; then
-        CONTENT_ROOT="$(cd "$candidate" && pwd)"
-        break
-    fi
-done
+CONTENT_ROOT="$(wired_find_archive_root "${WIRED_CONTENT_ROOT:-}" "$WIRED_HOME" "$PACK_ROOT" 2>/dev/null || true)"
 if [ -z "$CONTENT_ROOT" ]; then
     echo "SKIP: licensed base content missing; set WIRED_CONTENT_ROOT"
     exit 77
-fi
-if [ -f "$CONTENT_ROOT/base/pax01.sw3z" ]; then
-    BASE_ARCHIVE="$CONTENT_ROOT/base/pax01.sw3z"
-else
-    BASE_ARCHIVE="$CONTENT_ROOT/base/pak0.pk3"
 fi
 
 RUN_ROOT="$(mktemp -d -t wired-q0connect-XXXXXX 2>/dev/null || mktemp -d)"
@@ -423,9 +406,7 @@ trap cleanup_runtime EXIT INT TERM
 
 stage_home() {
     local target="$1"
-    mkdir -p "$target/base"
-    cp "$BASE_ARCHIVE" "$target/base/" || return 1
-    cp "$PACK_ROOT/base/pax21.sw3z" "$target/base/pax21.sw3z" || return 1
+    wired_link_content_into_home "$target" "$CONTENT_ROOT/base" "$PACK_ROOT/base"
 }
 stage_home "$INVALID_HOME" || { echo "FAIL: invalid-phase staging failed"; exit 1; }
 stage_home "$VALID_HOME" || { echo "FAIL: valid-phase staging failed"; exit 1; }
@@ -552,7 +533,7 @@ import sys
 import time
 
 path, pid, port = sys.argv[1], int(sys.argv[2]), sys.argv[3]
-deadline = time.monotonic() + 45.0
+deadline = time.monotonic() + 90.0
 while time.monotonic() < deadline:
     try:
         os.kill(pid, 0)
@@ -575,8 +556,9 @@ while time.monotonic() < deadline:
         pass
     listening = any(re.search(rf"WiredNet: listening on port {re.escape(port)} \(IPv4\)", msg) for msg in messages)
     mapped = any(re.search(r"Server: arena7\b", msg) for msg in messages)
-    if listening and mapped:
-        print("  PASS server readiness: loopback listener + arena7")
+    nav_ready = any(re.search(r"\[NAV\] navmesh ready for 'arena7' \((?:built|from cache)\)", msg) for msg in messages)
+    if listening and mapped and nav_ready:
+        print("  PASS server readiness: loopback listener + arena7 + navmesh")
         raise SystemExit(0)
     time.sleep(0.1)
 raise SystemExit("FAIL: timed out waiting for server readiness")

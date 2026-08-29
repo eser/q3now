@@ -3,6 +3,7 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 #include "tr_local.h"
 #include "../../../../frontend/r_log.h"  // rilog-channel-mechanism Turn B — renderer.cmd
+#include "../../../../frontend/render_submission_ui.h"
 
 R_LOG_DECLARE_CHANNEL( rch_cmd, "renderer.cmd" );
 
@@ -12,6 +13,39 @@ static float re_last_rgba[4]            = { -1.0f, -1.0f, -1.0f, -1.0f };
 static float re_last_outline[10]        = { -1.0f };  // outlineW, outlineColor[4], glowW, glowColor[4]
 static float re_last_shadow[6]          = { -1.0f };  // offsetX, offsetY, color[4]
 static uint64_t re_temporal_batch_token;
+static refUiTransform_t re_ui_transform;
+static qboolean re_ui_transform_active;
+
+void RE_SetUiTransform( const refUiTransform_t *transform ) {
+	if ( !transform ) {
+		memset( &re_ui_transform, 0, sizeof( re_ui_transform ) );
+		re_ui_transform_active = qfalse;
+		return;
+	}
+	if ( transform->schemaVersion != REF_UI_TRANSFORM_SCHEMA_VERSION
+	  || !isfinite( transform->x ) || !isfinite( transform->y )
+	  || !isfinite( transform->width ) || transform->width <= 0.0f
+	  || !isfinite( transform->height ) || transform->height <= 0.0f
+	  || !isfinite( transform->perspective )
+	  || fabsf( transform->perspective ) > 0.35f ) return;
+	re_ui_transform = *transform;
+	re_ui_transform_active = qtrue;
+}
+
+void RE_TransformUiPoint( float *x, float *y ) {
+	if ( !re_ui_transform_active || !x || !y ) return;
+	RenderUi_ProjectPoint( &re_ui_transform, x, y );
+}
+
+static void RE_SetUiQuadPositions( float positions[4][2], float x, float y,
+		float w, float h ) {
+	positions[0][0] = x;     positions[0][1] = y;
+	positions[1][0] = x + w; positions[1][1] = y;
+	positions[2][0] = x + w; positions[2][1] = y + h;
+	positions[3][0] = x;     positions[3][1] = y + h;
+	for ( int corner = 0; corner < 4; corner++ )
+		RE_TransformUiPoint( &positions[corner][0], &positions[corner][1] );
+}
 
 void RE_PresentationChanged( const refPresentationChange_t *change ) {
 	vk_request_presentation_change( change );
@@ -71,10 +105,39 @@ static void R_PerformanceCounters( void ) {
 		if ( tr.pc.c_particleEmitters || backEnd.pc.c_particleComputes || backEnd.pc.c_particleDraws )
 		{
 			R_LOG( rch_cmd, SEV_INFO,
-				"particle emitters:%i particles:%i computes:%i draws:%i\n",
+				"particle emitters:%i particles:%i requests:%i dropped:%i/%i computes:%i draws:%i child-events:%i child-particles:%i child-dropped:%i/%i\n",
 				tr.pc.c_particleEmitters, tr.pc.c_particleParticles,
-				backEnd.pc.c_particleComputes, backEnd.pc.c_particleDraws );
+				tr.pc.c_particleSpawnRequests, tr.pc.c_particleDroppedRequests,
+				tr.pc.c_particleDroppedParticles,
+				backEnd.pc.c_particleComputes, backEnd.pc.c_particleDraws,
+				backEnd.pc.c_particleChildEvents,
+				backEnd.pc.c_particleChildParticles,
+				backEnd.pc.c_particleChildDroppedEvents,
+				backEnd.pc.c_particleChildDroppedParticles );
 		}
+		if ( backEnd.pc.c_atmosphereComputes || backEnd.pc.c_atmosphereDraws ||
+			 backEnd.pc.c_atmosphereDispatches )
+		{
+			R_LOG( rch_cmd, SEV_INFO,
+				"atmosphere particles:%i computes:%i draws:%i froxels:%i dispatches:%i clouds:%i heightgrid:%i depth:%i temporal:%i/%i surface-milli:%i/%i/%i/%i\n",
+				backEnd.pc.c_atmosphereParticles, backEnd.pc.c_atmosphereComputes,
+				backEnd.pc.c_atmosphereDraws, backEnd.pc.c_atmosphereFroxels,
+				backEnd.pc.c_atmosphereDispatches, backEnd.pc.c_atmosphereClouds,
+				backEnd.pc.c_atmosphereHeightgrid, backEnd.pc.c_atmosphereDepth,
+				backEnd.pc.c_atmosphereTemporalReuse, backEnd.pc.c_atmosphereTemporalReject,
+				(int)( vk.atm.surfaceTargets[0] * 1000.0f + 0.5f ),
+				(int)( vk.atm.surfaceTargets[1] * 1000.0f + 0.5f ),
+				(int)( vk.atm.surfaceTargets[2] * 1000.0f + 0.5f ),
+				(int)( vk.atm.surfaceTargets[3] * 1000.0f + 0.5f ) );
+		}
+	}
+	else if (r_speeds->integer == 8 )
+	{
+		R_LOG( rch_cmd, SEV_INFO,
+			"2d shaders:%i white:%i msdf:%i other:%i white-msdf-transitions:%i\n",
+			backEnd.pc.c_2dShaders, backEnd.pc.c_2dWhiteShaders,
+			backEnd.pc.c_2dMsdfShaders, backEnd.pc.c_2dOtherShaders,
+			backEnd.pc.c_2dWhiteMsdfTransitions );
 	}
 
 	memset( &tr.pc, 0, sizeof( tr.pc ) );
@@ -268,6 +331,7 @@ void RE_StretchPic( float x, float y, float w, float h,
 	cmd->t1 = t1;
 	cmd->s2 = s2;
 	cmd->t2 = t2;
+	RE_SetUiQuadPositions( cmd->positions, x, y, w, h );
 }
 
 
@@ -334,6 +398,7 @@ void RE_StretchPicOverlay( float x, float y, float w, float h,
 	cmd->t1 = t1;
 	cmd->s2 = s2;
 	cmd->t2 = t2;
+	RE_SetUiQuadPositions( cmd->positions, x, y, w, h );
 }
 
 
@@ -344,6 +409,7 @@ RE_DrawLine
 */
 void RE_DrawLine( float x1, float y1, float x2, float y2, float width, qhandle_t hShader ) {
 	drawLineCommand_t	*cmd;
+	float dx, dy, length, halfWidth, nx, ny;
 
 	if ( !tr.registered ) {
 		return;
@@ -359,6 +425,23 @@ void RE_DrawLine( float x1, float y1, float x2, float y2, float width, qhandle_t
 	cmd->x2 = x2;
 	cmd->y2 = y2;
 	cmd->width = width;
+	dx = x2 - x1;
+	dy = y2 - y1;
+	length = sqrtf( dx * dx + dy * dy );
+	if ( length < 0.001f ) {
+		memset( cmd->positions, 0, sizeof( cmd->positions ) );
+		return;
+	}
+	halfWidth = width * 0.5f;
+	if ( halfWidth < 0.25f ) halfWidth = 0.25f;
+	nx = -dy / length * halfWidth;
+	ny = dx / length * halfWidth;
+	cmd->positions[0][0] = x1 + nx; cmd->positions[0][1] = y1 + ny;
+	cmd->positions[1][0] = x1 - nx; cmd->positions[1][1] = y1 - ny;
+	cmd->positions[2][0] = x2 - nx; cmd->positions[2][1] = y2 - ny;
+	cmd->positions[3][0] = x2 + nx; cmd->positions[3][1] = y2 + ny;
+	for ( int corner = 0; corner < 4; corner++ )
+		RE_TransformUiPoint( &cmd->positions[corner][0], &cmd->positions[corner][1] );
 }
 
 #define MODE_RED_CYAN	1
@@ -437,6 +520,7 @@ void RE_BeginFrame( stereoFrame_t stereoFrame ) {
 	re_last_rgba[0]    = -1.0f;   // reset dedup sentinels for new frame
 	re_last_outline[0] = -1.0f;
 	re_last_shadow[0]  = -1.0f;
+	RE_SetUiTransform( NULL );
 
 	tr.frameCount++;
 	tr.frameSceneNum = 0;

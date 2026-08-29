@@ -5,13 +5,17 @@
 #define WIRED_RAL_WEBGPU_RENDERER_MODULE_H
 
 #include "ral_webgpu_product.h"
+#include "ral_webgpu_atmosphere.h"
+#include "ral_webgpu_weather.h"
+#include "ral_atmosphere.h"
+#include "ral_display_visibility.h"
 #include "tr_public.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define RAL_WEBGPU_RENDERER_MODULE_SCHEMA_VERSION 1u
+#define RAL_WEBGPU_RENDERER_MODULE_SCHEMA_VERSION 7u
 
 typedef struct {
 	uint32_t schemaVersion;
@@ -20,6 +24,11 @@ typedef struct {
 	uint64_t frameGeneration;
 	renderSubmissionReceipt_t frontend;
 	ralWebGpuProductFrameReceipt_t product;
+	ralDisplayVisibilityPlan_t displayVisibility;
+	ralAtmospherePlanReceipt_t atmosphere;
+	ralWebGpuAtmosphereReceipt_t atmosphereExecution;
+	ralAtmosphereWeatherReceipt_t weather;
+	ralWebGpuWeatherReceipt_t weatherExecution;
 	qboolean presented;
 	qboolean ready;
 } ralWebGpuRendererModuleFrameReceipt_t;
@@ -33,6 +42,7 @@ Q_EXPORT qboolean RalWebGpu_RendererModuleFrameReceiptExact(
 Q_EXPORT int WiredWebGpu_RendererSmokeBegin( void );
 Q_EXPORT int WiredWebGpu_RendererSmokePoll( void );
 Q_EXPORT int WiredWebGpu_RendererResize( uint32_t width, uint32_t height );
+Q_EXPORT int WiredWebGpu_RendererFailureStage( void );
 
 #ifdef __cplusplus
 }

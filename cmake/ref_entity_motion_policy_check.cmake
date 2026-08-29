@@ -13,7 +13,7 @@ function(require_text path needle)
   endif()
 endfunction()
 
-require_text("code/render/frontend/tr_public.h" "#define\tREF_API_VERSION\t\t22")
+require_text("code/render/frontend/tr_public.h" "#define\tREF_API_VERSION\t\t28")
 require_text("code/render/frontend/tr_public.h" "AddRefEntityToSceneTemporal")
 require_text("code/cgame/cg_public.h" "CG_R_ADDREFENTITYTOSCENETEMPORAL = 232")
 require_text("code/client/cl_cgame.c" "&& re.AddRefEntityToSceneTemporal")
@@ -36,12 +36,17 @@ endif()
 
 foreach(renderer_dir IN ITEMS
     "code/renderer"
-    "code/renderer2"
-    "code/render/ral/backends/vulkan/renderer")
+    "code/renderer2")
   require_text("${renderer_dir}/tr_scene.c" "RefEntityMotion_ClearOwned")
   require_text("${renderer_dir}/tr_scene.c" "if ( r_numentities == before + 1 )")
   require_text("${renderer_dir}/tr_scene.c" "RefEntityMotion_CopyOwned")
   require_text("${renderer_dir}/tr_init.c" "AddRefEntityToSceneTemporal = RE_AddRefEntityToSceneTemporal")
 endforeach()
+set(vulkan_renderer "code/render/ral/backends/vulkan/renderer")
+require_text("${vulkan_renderer}/tr_scene.c" "RefEntityMotion_ClearOwned")
+require_text("${vulkan_renderer}/tr_scene.c" "if ( r_numentities == before + 1 )")
+require_text("${vulkan_renderer}/tr_scene.c" "RefEntityMotion_CopyOwned")
+require_text("${vulkan_renderer}/tr_init.c" "RE_AddRefEntityToSceneTemporal( entity, motion )")
+require_text("${vulkan_renderer}/tr_init.c" "AddRefEntityToSceneTemporal = FrontendAddEntityTemporal")
 
 message(STATUS "temporal entity identity ABI/source policy: PASS")

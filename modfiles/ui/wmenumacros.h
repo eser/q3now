@@ -38,6 +38,16 @@
 #define WM_SEPARATOR_H  0.002
 #define WM_MARGIN        0.025
 
+// ── HUD instrument-card chrome ─────────────────────────────────────
+// Shared visual shell only: consumers retain their authored size, placement,
+// flex/content tree and statusbar bindings.  The full hairline frame restores
+// the mockup's readable card silhouette.  State colour stays in the card's
+// semantic icon/value/bar instead of tinting the structural frame.
+
+#define WHUD_CARD_CHROME \
+	background $hud_panel_bg60 \
+	border 1px $line
+
 // ── font sizes (points) ────────────────────────────────────────────
 
 #define WM_FONT_BODY    12
@@ -60,7 +70,7 @@
 		name "bg_full" \
 		position viewport \
 		ownerdraw "background_full" \
-		rect 0 0 100vw 100vh \
+		width FIXED 100vw height FIXED 100vh \
 		decoration \
 		visible 1 \
 	}
@@ -75,7 +85,7 @@
 
 #define WBACKGROUND_GRID \
 	itemDef { \
-		rect 0 0 1 1 \
+		width FIXED 1 height FIXED 1 \
 		ownerdraw "background_grid" \
 		visible 1 \
 		decoration \
@@ -96,7 +106,7 @@
 
 #define WLABEL(X, Y, W, H, TEXT, FONTSIZE, ALIGN) \
 	itemDef { \
-		rect X Y W H \
+		width FIXED W height FIXED H marginLeft X marginTop Y \
 		type 0 \
 		text TEXT \
 		textalign ALIGN \
@@ -122,7 +132,7 @@
 
 #define WBUTTON(X, Y, W, H, TEXT, FONTSIZE, ACTION) \
 	itemDef { \
-		rect X Y W H \
+		width FIXED W height FIXED H marginLeft X marginTop Y \
 		type 1 \
 		text TEXT \
 		textalign 1 \
@@ -147,7 +157,7 @@
 
 #define WSEPARATOR(X, Y, W) \
 	itemDef { \
-		rect X Y W WM_SEPARATOR_H \
+		width FIXED W height FIXED WM_SEPARATOR_H marginLeft X marginTop Y \
 		type 0 \
 		style 1 \
 		backcolor WCOLOR_SEPARATOR \
@@ -171,7 +181,7 @@
 
 #define WYESNO(X, Y, W, H, LABEL, FONTSIZE, CVAR) \
 	itemDef { \
-		rect X Y W H \
+		width FIXED W height FIXED H marginLeft X marginTop Y \
 		type 11 \
 		text LABEL \
 		font "oxanium" FONTSIZE \
@@ -201,7 +211,7 @@
 
 #define WSLIDER(X, Y, W, H, LABEL, FONTSIZE, CVAR, MIN, MAX, STEP) \
 	itemDef { \
-		rect X Y W H \
+		width FIXED W height FIXED H marginLeft X marginTop Y \
 		type 10 \
 		text LABEL \
 		font "oxanium" FONTSIZE \
@@ -230,7 +240,7 @@
 
 #define WMULTI(X, Y, W, H, LABEL, FONTSIZE, CVAR, LIST) \
 	itemDef { \
-		rect X Y W H \
+		width FIXED W height FIXED H marginLeft X marginTop Y \
 		type 12 \
 		text LABEL \
 		font "oxanium" FONTSIZE \
@@ -258,7 +268,7 @@
 
 #define WBIND(X, Y, W, H, LABEL, FONTSIZE, COMMAND) \
 	itemDef { \
-		rect X Y W H \
+		width FIXED W height FIXED H marginLeft X marginTop Y \
 		type 13 \
 		text LABEL \
 		font "oxanium" FONTSIZE \
@@ -286,7 +296,7 @@
 
 #define WEDITFIELD(X, Y, W, H, LABEL, FONTSIZE, CVAR, MAXCHARS) \
 	itemDef { \
-		rect X Y W H \
+		width FIXED W height FIXED H marginLeft X marginTop Y \
 		type 4 \
 		text LABEL \
 		font "oxanium" FONTSIZE \
@@ -313,7 +323,7 @@
 
 #define WSUBWINDOW(X, Y, W, H, TITLE) \
 	itemDef { \
-		rect X Y W 0.033 \
+		width FIXED W height FIXED 0.033 marginLeft X marginTop Y \
 		type 0 \
 		text TITLE \
 		textalign 0 \
@@ -337,7 +347,7 @@
 
 #define WSECTION_HEADER(X, Y, W, TEXT) \
 	itemDef { \
-		rect X Y W WM_LABEL_H \
+		width FIXED W height FIXED WM_LABEL_H marginLeft X marginTop Y \
 		type 0 \
 		text TEXT \
 		textalign 0 \

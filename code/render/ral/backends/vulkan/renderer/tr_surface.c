@@ -128,7 +128,8 @@ void RB_AddQuadStampExt( const vec3_t origin, const vec3_t left, const vec3_t up
 }
 
 
-void RB_AddQuadStamp2( float x, float y, float w, float h, float s1, float t1, float s2, float t2, color4ub_t color ) {
+void RB_AddQuadStamp2D( const float positions[4][2], float s1, float t1,
+		float s2, float t2, color4ub_t color ) {
 	int			numIndexes;
 	int			numVerts;
 
@@ -160,20 +161,20 @@ void RB_AddQuadStamp2( float x, float y, float w, float h, float s1, float t1, f
 	tess.vertexColors[numVerts + 2] =
 	tess.vertexColors[numVerts + 3] = color;
 
-	tess.xyz[numVerts + 0][0] = x;
-	tess.xyz[numVerts + 0][1] = y;
+	tess.xyz[numVerts + 0][0] = positions[0][0];
+	tess.xyz[numVerts + 0][1] = positions[0][1];
 	tess.xyz[numVerts + 0][2] = 0;
 
-	tess.xyz[numVerts + 1][0] = x + w;
-	tess.xyz[numVerts + 1][1] = y;
+	tess.xyz[numVerts + 1][0] = positions[1][0];
+	tess.xyz[numVerts + 1][1] = positions[1][1];
 	tess.xyz[numVerts + 1][2] = 0;
 
-	tess.xyz[numVerts + 2][0] = x + w;
-	tess.xyz[numVerts + 2][1] = y + h;
+	tess.xyz[numVerts + 2][0] = positions[2][0];
+	tess.xyz[numVerts + 2][1] = positions[2][1];
 	tess.xyz[numVerts + 2][2] = 0;
 
-	tess.xyz[numVerts + 3][0] = x;
-	tess.xyz[numVerts + 3][1] = y + h;
+	tess.xyz[numVerts + 3][0] = positions[3][0];
+	tess.xyz[numVerts + 3][1] = positions[3][1];
 	tess.xyz[numVerts + 3][2] = 0;
 
 	tess.texCoords[0][numVerts + 0][0] = s1;
@@ -184,6 +185,14 @@ void RB_AddQuadStamp2( float x, float y, float w, float h, float s1, float t1, f
 	tess.texCoords[0][numVerts + 2][1] = t2;
 	tess.texCoords[0][numVerts + 3][0] = s1;
 	tess.texCoords[0][numVerts + 3][1] = t2;
+}
+
+void RB_AddQuadStamp2( float x, float y, float w, float h, float s1, float t1,
+		float s2, float t2, color4ub_t color ) {
+	const float positions[4][2] = {
+		{ x, y }, { x + w, y }, { x + w, y + h }, { x, y + h }
+	};
+	RB_AddQuadStamp2D( positions, s1, t1, s2, t2, color );
 }
 
 

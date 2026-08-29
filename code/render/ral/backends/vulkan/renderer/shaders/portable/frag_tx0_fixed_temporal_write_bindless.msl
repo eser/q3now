@@ -43,6 +43,7 @@ struct UBO
     float4 worldLightParams;
     float4 advancedFogColorDensity;
     float4 advancedFogTypeFarEnabled;
+    float4 emissionRadiance;
 };
 
 constant int tex_domain_tmp [[function_constant(4)]];
@@ -56,10 +57,11 @@ constant float identity_alpha = is_function_constant_defined(identity_alpha_tmp)
 constant bool _446 = (alpha_test_func == 1);
 constant bool _456 = (alpha_test_func == 2);
 constant bool _466 = (alpha_test_func == 3);
+constant bool _476 = (lightmap_slot != 0);
 constant int discard_mode_tmp [[function_constant(7)]];
 constant int discard_mode = is_function_constant_defined(discard_mode_tmp) ? discard_mode_tmp : 0;
-constant bool _497 = (discard_mode == 1);
-constant bool _507 = (discard_mode == 2);
+constant bool _565 = (discard_mode == 1);
+constant bool _575 = (discard_mode == 2);
 constant int alpha_to_coverage_tmp [[function_constant(3)]];
 constant int alpha_to_coverage = is_function_constant_defined(alpha_to_coverage_tmp) ? alpha_to_coverage_tmp : 0;
 
@@ -335,16 +337,37 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
         }
     }
     base = color0;
+    if (_476)
+    {
+        float wetness = fast::clamp((*spvDescriptorSet0.m_269).worldLightParams.y, 0.0, 1.0);
+        float frost = fast::clamp((*spvDescriptorSet0.m_269).worldLightParams.z, 0.0, 1.0);
+        float luminance = dot(base.xyz, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+        float4 _498 = base;
+        float3 _500 = _498.xyz * mix(1.0, 0.819999992847442626953125, wetness);
+        base.x = _500.x;
+        base.y = _500.y;
+        base.z = _500.z;
+        float4 _507 = base;
+        float3 _521 = mix(_507.xyz, float3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), float3(frost * 0.550000011920928955078125));
+        base.x = _521.x;
+        base.y = _521.y;
+        base.z = _521.z;
+    }
+    float4 _536 = base;
+    float3 _538 = _536.xyz + (color0.xyz * (*spvDescriptorSet0.m_269).emissionRadiance.xyz);
+    base.x = _538.x;
+    base.y = _538.y;
+    base.z = _538.z;
     if (wired_advanced_fog_enabled((*spvDescriptorSet0.m_269)))
     {
         float fogAmount = wired_advanced_fog_amount((*spvDescriptorSet0.m_269), gl_FragCoord);
-        float4 _481 = base;
-        float3 _489 = mix(_481.xyz, (*spvDescriptorSet0.m_269).advancedFogColorDensity.xyz, float3(fogAmount));
-        base.x = _489.x;
-        base.y = _489.y;
-        base.z = _489.z;
+        float4 _550 = base;
+        float3 _557 = mix(_550.xyz, (*spvDescriptorSet0.m_269).advancedFogColorDensity.xyz, float3(fogAmount));
+        base.x = _557.x;
+        base.y = _557.y;
+        base.z = _557.z;
     }
-    if (_497)
+    if (_565)
     {
         if (base.w == 0.0)
         {
@@ -353,7 +376,7 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
     }
     else
     {
-        if (_507)
+        if (_575)
         {
             if (dot(base.xyz, base.xyz) == 0.0)
             {

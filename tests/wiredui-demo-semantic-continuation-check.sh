@@ -5,6 +5,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/lib/wired_paths.sh"
 TIMEOUT_RUNNER="$SCRIPT_DIR/run-with-timeout.py"
 DEMO_HEX="0100000005000000aabfaa9200ffffffffffffffff"
 DEMO_SHA="3c4c57e19d889d35b3e913e40bd2c7afd0382b13eb6946aee28271d902208faf"
@@ -49,7 +50,7 @@ for row,message in zip(rows,messages):
     if semantic and (len(parts)!=1 or clean!=semantic[0]):
         raise SystemExit(f"FAIL semantic-{mode}: logical-line smuggling")
 
-file_index=exact("Demo file: demos/","Demo file: demos/semantic.current.dm_74","INFO","client","file")
+file_index=exact("Demo file: demos/","Demo file: demos/semantic.current.dm_75","INFO","client","file")
 marker=exact("Demo semantic parse recovered ",
  "Demo semantic parse recovered command=7 detail=snapshot-areamask areabytes=255 generic_teardown=0",
  "DEBUG","client","typed local marker")
@@ -130,7 +131,7 @@ if mode=="nextdemo":
     add("DEBUG","ui","WiredUI: queued validated demo playback name=semantic.current")
     add("DEBUG","ui","WiredUI: close all postcondition depth=0 active=none catcher_ui=0 paused=0")
     add("DEBUG","ui","wui_menu_nav: K_ENTER dispatched")
-add("INFO","client","Demo file: demos/semantic.current.dm_74")
+add("INFO","client","Demo file: demos/semantic.current.dm_75")
 add("DEBUG","client","Demo semantic parse recovered command=7 detail=snapshot-areamask areabytes=255 generic_teardown=0")
 add("INFO","client","Demo playback rejected reason=semantic-payload continuation=1")
 add("ERROR","system","Error: The demo contains an invalid server message.")
@@ -154,7 +155,7 @@ PYEOF
 }
 
 if [ "${1:-}" = "--analyze" ]; then
-    [ "$#" -eq 4 ] || { echo "usage: $0 --analyze attract|nextdemo qconsole.jsonl demo.dm_74"; exit 64; }
+    [ "$#" -eq 4 ] || { echo "usage: $0 --analyze attract|nextdemo qconsole.jsonl demo.dm_75"; exit 64; }
     analyze_mode "$2" "$3" "$4"
     exit $?
 fi
@@ -165,8 +166,8 @@ if [ "${1:-}" = "--self-test" ]; then
     defects=(missing-marker duplicate-marker marker-category wrong-command wrong-detail wrong-areabytes generic-teardown marker-cr-smuggle wrong-reason continuation-zero missing-error wrong-error error-category second-error ui-warn first-frame accept admission bad-fixture)
     total=0
     for mode in attract nextdemo; do
-        write_clean "$mode" "$ROOT/$mode-clean.jsonl" "$ROOT/$mode.dm_74"
-        analyze_mode "$mode" "$ROOT/$mode-clean.jsonl" "$ROOT/$mode.dm_74" >/dev/null || exit 1
+        write_clean "$mode" "$ROOT/$mode-clean.jsonl" "$ROOT/$mode.dm_75"
+        analyze_mode "$mode" "$ROOT/$mode-clean.jsonl" "$ROOT/$mode.dm_75" >/dev/null || exit 1
         mode_defects=("${defects[@]}")
         if [ "$mode" = attract ]; then
             mode_defects+=(missing-status wrong-state wrong-index retained-owner wrong-panel nextdemo-substitution popup-substitution recovery-substitution retained-error)
@@ -219,7 +220,7 @@ elif mode=="extra-push": rows.insert(find("Demo file:"),{"sev":"DEBUG","cat":"ui
 with open(path,"w") as f:
     for row in rows: f.write(json.dumps(row)+"\n")
 PYEOF
-            demo="$ROOT/$mode.dm_74"
+            demo="$ROOT/$mode.dm_75"
             if [ "$defect" = bad-fixture ]; then printf '\001' >>"$demo"; fi
             if analyze_mode "$mode" "$ROOT/$mode-$defect.jsonl" "$demo" >/dev/null 2>&1; then
                 echo "FAIL: semantic $mode analyzer accepted $defect"; exit 1
@@ -239,18 +240,12 @@ fi
 WIRED="${1:-}"
 [ -n "$WIRED" ] && [ -x "$WIRED" ] || { echo "usage: $0 /absolute/path/to/wired"; exit 64; }
 WIRED="$(cd "$(dirname "$WIRED")" && pwd)/$(basename "$WIRED")"
-WIRED_DIR="$(dirname "$WIRED")"; PACK_ROOT=""
-for candidate in "$WIRED_DIR" "$WIRED_DIR/../Resources" "$WIRED_DIR/../../.."; do
-    [ -f "$candidate/base/pax21.sw3z" ] && { PACK_ROOT="$(cd "$candidate" && pwd)"; break; }
-done
-[ -n "$PACK_ROOT" ] || { echo "SKIP: current pax21 not found"; exit 77; }
-CONTENT_ROOT=""
-for candidate in "${WIRED_CONTENT_ROOT:-}" "$PACK_ROOT"; do
-    [ -n "$candidate" ] || continue
-    if [ -f "$candidate/base/pax01.sw3z" ] || [ -f "$candidate/base/pak0.pk3" ]; then CONTENT_ROOT="$(cd "$candidate" && pwd)"; break; fi
-done
+WIRED_DIR="$(dirname "$WIRED")"
+PACK_ROOT="$(wired_find_archive_root "$WIRED_DIR" "$WIRED_DIR/../Resources" "$WIRED_DIR/../../.." 2>/dev/null || true)"
+[ -n "$PACK_ROOT" ] || { echo "SKIP: current VFS archives not found"; exit 77; }
+CONTENT_ROOT="$(wired_find_archive_root "${WIRED_CONTENT_ROOT:-}" "$WIRED_HOME" "$PACK_ROOT" 2>/dev/null || true)"
 [ -n "$CONTENT_ROOT" ] || { echo "SKIP: set WIRED_CONTENT_ROOT"; exit 77; }
-if [ -f "$CONTENT_ROOT/base/pax01.sw3z" ]; then BASE_ARCHIVE="$CONTENT_ROOT/base/pax01.sw3z"; else BASE_ARCHIVE="$CONTENT_ROOT/base/pak0.pk3"; fi
+CURRENT_ARCHIVE="$(wired_first_archive "$PACK_ROOT/base")"; BASE_ARCHIVE="$(wired_first_archive "$CONTENT_ROOT/base")"
 
 RUN_ROOT="$(mktemp -d -t wired-demo-semantic-XXXXXX 2>/dev/null || mktemp -d)"
 ATTRACT_HOME="$RUN_ROOT/attract/q3now-preview"; NEXT_HOME="$RUN_ROOT/next/q3now-preview"
@@ -258,9 +253,8 @@ mkdir -p "$ATTRACT_HOME/base/demos" "$NEXT_HOME/base/demos" "$RUN_ROOT/attract-r
 cleanup(){ if [ "${WIRED_KEEP_ARTIFACTS:-0}" = 1 ]; then echo "    kept artifacts: $RUN_ROOT"; else rm -rf "$RUN_ROOT"; fi; }
 trap cleanup EXIT INT TERM
 for home in "$ATTRACT_HOME" "$NEXT_HOME"; do
-    cp "$BASE_ARCHIVE" "$home/base/" || exit 1
-    cp "$PACK_ROOT/base/pax21.sw3z" "$home/base/pax21.sw3z" || exit 1
-    python3 - "$home/base/demos/semantic.current.dm_74" "$DEMO_HEX" <<'PYEOF'
+    wired_link_content_into_home "$home" "$CONTENT_ROOT/base" "$PACK_ROOT/base" || exit 1
+    python3 - "$home/base/demos/semantic.current.dm_75" "$DEMO_HEX" <<'PYEOF'
 import sys
 open(sys.argv[1],"wb").write(bytes.fromhex(sys.argv[2]))
 PYEOF
@@ -320,13 +314,13 @@ run_phase() {
         +set log_severity DEBUG +set log_file_severity DEBUG +set log_file_mode overwrite_synced \
         +exec "$cfg"
     [ "$?" -eq 0 ] || { echo "FAIL: semantic $mode process did not exit cleanly"; exit 1; }
-    analyze_mode "$mode" "$home/qconsole.jsonl" "$home/base/demos/semantic.current.dm_74" || exit 1
+    analyze_mode "$mode" "$home/qconsole.jsonl" "$home/base/demos/semantic.current.dm_75" || exit 1
 }
 run_phase attract "$ATTRACT_HOME" "$ATTRACT_NATIVE" q0-semantic-attract.cfg "$RUN_ROOT/attract-run"
 run_phase nextdemo "$NEXT_HOME" "$NEXT_NATIVE" q0-semantic-nextdemo.cfg "$RUN_ROOT/next-run"
-python3 - "$WIRED" "$PACK_ROOT/base/pax21.sw3z" "$BASE_ARCHIVE" "$0" <<'PYEOF'
+python3 - "$WIRED" "$CURRENT_ARCHIVE" "$BASE_ARCHIVE" "$0" <<'PYEOF'
 import hashlib,sys
-for label,path in zip(("binary","pax21","base","harness"),sys.argv[1:]):
+for label,path in zip(("binary","product-archive","base-archive","harness"),sys.argv[1:]):
     print(f"    {label}_sha256={hashlib.sha256(open(path,'rb').read()).hexdigest()}")
 PYEOF
 echo "==> WiredUI semantic continuation gate: PASS"

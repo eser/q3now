@@ -1262,9 +1262,10 @@ dlight-shadow|dlight-shadow-lifecycle)
 
         DLS_ON_A="$SHOTDIR/vrf_dls_on_a.png"
         DLS_ON_B="$SHOTDIR/vrf_dls_on_b.png"
+        DLS_K1="$SHOTDIR/vrf_dls_k1.png"
         DLS_OFF_A="$SHOTDIR/vrf_dls_off.png"
         DLS_NO_LIGHT="$SHOTDIR/vrf_dls_no_light.png"
-        rm -f "$DLS_ON_A" "$DLS_ON_B" "$DLS_OFF_A" "$DLS_NO_LIGHT" "$SMOKE_HOME/base/config.cfg" 2>/dev/null
+        rm -f "$DLS_ON_A" "$DLS_ON_B" "$DLS_K1" "$DLS_OFF_A" "$DLS_NO_LIGHT" "$SMOKE_HOME/base/config.cfg" 2>/dev/null
         scrub_home_cgame
         {
             printf 'set r_forwardPlus 1\n'
@@ -1285,6 +1286,10 @@ dlight-shadow|dlight-shadow-lifecycle)
             printf 'wait %s\n' "${DLS_SETTLE_FRAMES:-250}"
             printf 'screenshot vrf_dls_on_a\nwait 30\n'
             printf 'screenshot vrf_dls_on_b\nwait 30\n'
+            if [ "$MODE" = "dlight-shadow-lifecycle" ]; then
+                printf 'set r_dlightShadowK 1\nwait %s\n' "${DLS_TOGGLE_SETTLE_FRAMES:-90}"
+                printf 'screenshot vrf_dls_k1\nwait 30\n'
+            fi
             printf 'set r_dlightShadows 0\nwait %s\n' "${DLS_TOGGLE_SETTLE_FRAMES:-90}"
             printf 'screenshot vrf_dls_off\nwait 30\n'
             printf 'set r_dlightShadowTest 0\nwait %s\n' "${DLS_TOGGLE_SETTLE_FRAMES:-90}"
@@ -1315,6 +1320,10 @@ dlight-shadow|dlight-shadow-lifecycle)
         for shot in "$DLS_ON_A" "$DLS_ON_B" "$DLS_OFF_A" "$DLS_NO_LIGHT"; do
             [ -s "$shot" ] || { echo >&2 "  dlight-shadow: FAIL — missing screenshot $shot"; return 1; }
         done
+        if [ "$MODE" = "dlight-shadow-lifecycle" ] && [ ! -s "$DLS_K1" ]; then
+            echo >&2 "  dlight-shadow-lifecycle: FAIL — missing K=1 comparison screenshot $DLS_K1"
+            return 1
+        fi
         return 0
     }
 
@@ -1334,7 +1343,22 @@ dlight-shadow|dlight-shadow-lifecycle)
             echo "  dlight-shadow-lifecycle: FAIL — on→off resource rebuild did not complete"
             FAIL=1
         else
-            echo "  dlight-shadow-lifecycle: K=4/24-pass producer + bounded atlas + live on→off rebuild + post-toggle screenshots -> OK"
+            tile_lums "$onA" > "$VRF_TMP/vrf-dls-k4a.txt"
+            tile_lums "$onB" > "$VRF_TMP/vrf-dls-k4b.txt"
+            tile_lums "$DLS_K1" > "$VRF_TMP/vrf-dls-k1.txt"
+            read -r extraMax extraTiles k4Noise <<EOF
+$(paste "$VRF_TMP/vrf-dls-k4a.txt" "$VRF_TMP/vrf-dls-k4b.txt" "$VRF_TMP/vrf-dls-k1.txt" | awk '
+  BEGIN{m=0;n=0;noise=0}
+  {d=$6-$4;if(d>m)m=d;if(d>=1.5)n++;j=$2-$4;if(j<0)j=-j;if(j>noise)noise=j}
+  END{printf "%.2f %d %.2f",m,n,noise}')
+EOF
+            if ! awk -v m="$extraMax" -v n="$extraTiles" -v noise="$k4Noise" \
+                    'BEGIN{exit !(m>=1.5 && n>=2 && noise<=3.0)}'; then
+                echo "  dlight-shadow-lifecycle: FAIL — K=4 did not isolate multiple stable additional cast shadows (max=$extraMax tiles=$extraTiles noise=$k4Noise)"
+                FAIL=1
+            else
+                echo "  dlight-shadow-lifecycle: K=4/24-pass producer + distinct additional shadows (max=$extraMax tiles=$extraTiles) + bounded atlas + live on→off rebuild -> OK"
+            fi
         fi
     elif [ "$FAIL" = 0 ]; then
         # per-tile luma for each capture

@@ -62,9 +62,24 @@ struct AtmFrame
     uint gridSize;
     uint atmType;
     float _distance;
-    float invResX;
-    float invResY;
-    float depthValid;
+    float computePad0;
+    float computePad1;
+    float computePad2;
+    float4 windGust;
+    float4 precipitation;
+    float dustAsh;
+    float indoorExposure;
+    uint climateSeed;
+    uint climatePad;
+    float4 climate;
+    float4 surfaceClimate;
+    float4 sun;
+    float4 moon;
+    float4 ambientCloud;
+    float4 cloudMedia;
+    float4 effectMeta;
+    float4 effectWorkloads[48];
+    float4 renderParams;
 };
 
 struct AtmParticle
@@ -90,13 +105,13 @@ struct Pool
 
 struct spvDescriptorSetBuffer0
 {
-    constant AtmFrame* m_44 [[id(0)]];
-    const device Pool* m_71 [[id(1)]];
+    constant AtmFrame* m_46 [[id(0)]];
+    const device Pool* m_83 [[id(1)]];
 };
 
-constant spvUnsafeArray<float, 6> _100 = spvUnsafeArray<float, 6>({ -1.0, -1.0, 1.0, 1.0, -1.0, 1.0 });
-constant spvUnsafeArray<float, 6> _107 = spvUnsafeArray<float, 6>({ 1.0, -1.0, 1.0, 1.0, -1.0, -1.0 });
-constant spvUnsafeArray<float2, 6> _180 = spvUnsafeArray<float2, 6>({ float2(0.0), float2(0.0, 1.0), float2(1.0, 0.0), float2(1.0, 0.0), float2(0.0, 1.0), float2(1.0) });
+constant spvUnsafeArray<float, 6> _112 = spvUnsafeArray<float, 6>({ -1.0, -1.0, 1.0, 1.0, -1.0, 1.0 });
+constant spvUnsafeArray<float, 6> _119 = spvUnsafeArray<float, 6>({ 1.0, -1.0, 1.0, 1.0, -1.0, -1.0 });
+constant spvUnsafeArray<float2, 6> _394 = spvUnsafeArray<float2, 6>({ float2(0.0), float2(0.0, 1.0), float2(1.0, 0.0), float2(1.0, 0.0), float2(0.0, 1.0), float2(1.0) });
 
 struct main0_out
 {
@@ -118,49 +133,109 @@ vertex main0_out main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [
     main0_out out = {};
     uint idx = uint(int(gl_InstanceIndex));
     uint vertInQuad = uint(int(gl_VertexIndex)) % 6u;
-    bool _49 = idx >= (*spvDescriptorSet0.m_44).poolSize;
-    bool _58;
-    if (!_49)
+    bool _51 = idx >= (*spvDescriptorSet0.m_46).poolSize;
+    bool _70;
+    if (!_51)
     {
-        _58 = (*spvDescriptorSet0.m_44).atmType == 0u;
+        bool _59 = (*spvDescriptorSet0.m_46).atmType == 0u;
+        bool _69;
+        if (_59)
+        {
+            _69 = idx < uint((*spvDescriptorSet0.m_46).effectMeta.x);
+        }
+        else
+        {
+            _69 = _59;
+        }
+        _70 = _69;
     }
     else
     {
-        _58 = _49;
+        _70 = _51;
     }
-    if (_58)
+    if (_70)
     {
         emitDegenerate(out.gl_Position, out.fragUV, out.fragColor);
         return out;
     }
     AtmParticle p;
-    p.pos = float3((*spvDescriptorSet0.m_71).particles[idx].pos);
-    p.seed = (*spvDescriptorSet0.m_71).particles[idx].seed;
-    p.vel = float3((*spvDescriptorSet0.m_71).particles[idx].vel);
-    p.flags = (*spvDescriptorSet0.m_71).particles[idx].flags;
+    p.pos = float3((*spvDescriptorSet0.m_83).particles[idx].pos);
+    p.seed = (*spvDescriptorSet0.m_83).particles[idx].seed;
+    p.vel = float3((*spvDescriptorSet0.m_83).particles[idx].vel);
+    p.flags = (*spvDescriptorSet0.m_83).particles[idx].flags;
     if (p.flags < 0.5)
     {
         emitDegenerate(out.gl_Position, out.fragUV, out.fragColor);
         return out;
     }
-    float sx = _100[vertInQuad];
-    float uy = _107[vertInQuad];
+    float sx = _112[vertInQuad];
+    float uy = _119[vertInQuad];
+    uint family = uint(p.flags + 0.5);
     float3 worldPos;
     float4 color;
-    if ((*spvDescriptorSet0.m_44).atmType == 1u)
+    if (family >= 16u)
     {
-        float3 right = (*spvDescriptorSet0.m_44).viewLeft.xyz * (sx * 0.60000002384185791015625);
-        float3 down = (float3(0.0, 0.0, 1.0) * ((uy * 0.5) - 0.5)) * 18.0;
-        worldPos = (p.pos + right) + down;
-        color = float4(0.5, 0.5, 0.550000011920928955078125, 0.5);
+        uint effect = family - 16u;
+        if (effect >= min(uint((*spvDescriptorSet0.m_46).effectMeta.y), 8u))
+        {
+            emitDegenerate(out.gl_Position, out.fragUV, out.fragColor);
+            return out;
+        }
+        uint base = effect * 6u;
+        float lifetime = fast::max(0.0500000007450580596923828125, (*spvDescriptorSet0.m_46).effectWorkloads[base + 5u].x + (*spvDescriptorSet0.m_46).effectWorkloads[base + 5u].y);
+        float age = 1.0 - fast::clamp(p.seed / lifetime, 0.0, 1.0);
+        float size = mix((*spvDescriptorSet0.m_46).effectWorkloads[base + 4u].z, (*spvDescriptorSet0.m_46).effectWorkloads[base + 4u].w, age);
+        worldPos = (p.pos + ((*spvDescriptorSet0.m_46).viewLeft.xyz * (sx * size))) + ((*spvDescriptorSet0.m_46).viewUp.xyz * (uy * size));
+        color = (*spvDescriptorSet0.m_46).effectWorkloads[base + 2u];
+        color.w *= (*spvDescriptorSet0.m_46).effectWorkloads[base + 1u].w;
     }
     else
     {
-        worldPos = (p.pos + ((*spvDescriptorSet0.m_44).viewLeft.xyz * (sx * 1.5))) + ((*spvDescriptorSet0.m_44).viewUp.xyz * (uy * 1.5));
-        color = float4(1.0, 1.0, 1.0, 0.800000011920928955078125);
+        if ((family == 1u) || (family == 3u))
+        {
+            float3 right = (*spvDescriptorSet0.m_46).viewLeft.xyz * (sx * 0.60000002384185791015625);
+            float _length = (family == 1u) ? 18.0 : 9.8999996185302734375;
+            float3 down = (float3(0.0, 0.0, 1.0) * ((uy * 0.5) - 0.5)) * _length;
+            worldPos = (p.pos + right) + down;
+            color = select(float4(0.7200000286102294921875, 0.7599999904632568359375, 0.800000011920928955078125, 0.64999997615814208984375), float4(0.5, 0.5, 0.550000011920928955078125, 0.5), bool4(family == 1u));
+        }
+        else
+        {
+            float _273;
+            if (family == 4u)
+            {
+                _273 = 0.800000011920928955078125;
+            }
+            else
+            {
+                _273 = (family == 5u) ? 1.2000000476837158203125 : 1.5;
+            }
+            float size_1 = _273;
+            worldPos = (p.pos + ((*spvDescriptorSet0.m_46).viewLeft.xyz * (sx * size_1))) + ((*spvDescriptorSet0.m_46).viewUp.xyz * (uy * size_1));
+            float4 _303;
+            if (family == 4u)
+            {
+                _303 = float4(0.819999992847442626953125, 0.87999999523162841796875, 0.920000016689300537109375, 0.85000002384185791015625);
+            }
+            else
+            {
+                _303 = select(float4(1.0, 1.0, 1.0, 0.800000011920928955078125), float4(0.4799999892711639404296875, 0.4199999868869781494140625, 0.3400000035762786865234375, 0.449999988079071044921875), bool4(family == 5u));
+            }
+            color = _303;
+        }
     }
-    out.gl_Position = (*spvDescriptorSet0.m_44).mvp * float4(worldPos, 1.0);
-    out.fragUV = _180[vertInQuad];
+    float cloudTransmission = 1.0 - fast::clamp((*spvDescriptorSet0.m_46).ambientCloud.w * (*spvDescriptorSet0.m_46).cloudMedia.x, 0.0, 1.0);
+    float3 weatherLight = (((*spvDescriptorSet0.m_46).ambientCloud.xyz + float3(fast::max((*spvDescriptorSet0.m_46).sun.w, 0.0) * cloudTransmission)) + float3(fast::max((*spvDescriptorSet0.m_46).moon.w, 0.0) * 0.20000000298023223876953125)) + float3(fast::max((*spvDescriptorSet0.m_46).cloudMedia.y, 0.0));
+    if (dot(weatherLight, weatherLight) > 9.9999999392252902907785028219223e-09)
+    {
+        float4 _371 = color;
+        float3 _373 = _371.xyz * fast::clamp(weatherLight, float3(0.039999999105930328369140625), float3(4.0));
+        color.x = _373.x;
+        color.y = _373.y;
+        color.z = _373.z;
+    }
+    out.gl_Position = (*spvDescriptorSet0.m_46).mvp * float4(worldPos, 1.0);
+    out.fragUV = _394[vertInQuad];
     out.fragColor = color;
     return out;
 }

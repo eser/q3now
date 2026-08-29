@@ -11,7 +11,7 @@ try {
   const runtime=await createRalWebGpuBrowserModule({moduleFactory:createEmscriptenModule,
     gpu:navigator.gpu,canvas,generation:7,canvasIdentity:0x7000});
   let poll=1;
-  for(let i=0;i<240 && poll===1;++i){poll=runtime.module._RalWebGpu_BrowserModulePoll();if(poll===1)await new Promise(resolve=>setTimeout(resolve,16));}
+  for(let i=0;i<240 && poll===1;++i){poll=runtime.rendererPoll();if(poll===1)await new Promise(resolve=>setTimeout(resolve,16));}
   const state=runtime.capability();
   if(state.status==="unsupported") publish("UNSUPPORTED",{...state,userAgent:navigator.userAgent});
   else if(poll===2 && state.status==="ready" && canvas.width===1280 && canvas.height===720){
@@ -25,7 +25,7 @@ try {
       for(let i=0;i<240&&rendererSmoke===1;++i){rendererSmoke=runtime.module._WiredWebGpu_RendererSmokePoll();
         if(rendererSmoke===1)await new Promise(resolve=>setTimeout(resolve,16));}}
     if(smoke===2&&rendererSmoke===2)publish("PASS",{schemaVersion:1,generation:state.generation,width:canvas.width,height:canvas.height,
-      pollStatus:poll,smokeStatus:smoke,rendererSmoke,transaction:["resource-write","wgsl-pipeline","indexed-draw","submit","present"],
+      pollStatus:poll,smokeStatus:smoke,rendererSmoke,transaction:["resource-write","atmosphere-uniform","froxel-storage-arena","compute-bind-group","wgsl-compute-pipeline","four-dispatch-atmosphere","temporal-integrate","weather-ping-pong-pool","weather-compute-dispatch","weather-instanced-draw","wgsl-fragment-composite","indexed-draw","submit","present"],
       rendererModule:["GetRefAPI","BeginRegistration","world-ui-submission","ProductRender","async-present","reverse-shutdown"],
       userAgent:navigator.userAgent});
     else publish("FAIL",{poll,state,smokeStarted,smoke,width:canvas.width,height:canvas.height,

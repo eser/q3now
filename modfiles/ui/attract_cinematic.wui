@@ -11,7 +11,7 @@
 menuDef {
 	name "attract_cinematic"
 	layer "bg_attract"
-	rect 0 0 1.0 1.0
+	width FIXED 1.0 height FIXED 1.0
 	fullScreen 1
 	visible 0
 	style 5

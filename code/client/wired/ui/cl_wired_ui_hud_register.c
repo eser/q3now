@@ -391,7 +391,7 @@ qboolean WiredHud_SE_Visible( int vflags ) {
 	   (every element, regardless of SE_* flags) — the Wired-UI equivalent of the
 	   legacy 2D suppress. Pushed by cgame each frame, so the HUD returns on
 	   scene-end automatically. */
-	if ( wiredHud->sceneHudHidden ) return qfalse;
+	if ( wiredHud->hud2DHidden || wiredHud->sceneHudHidden ) return qfalse;
 
 	is_dead         = wiredHud->predictedPlayerState.pm_type == PM_DEAD;
 	is_intermission = wiredHud->predictedPlayerState.pm_type == PM_INTERMISSION;
@@ -433,6 +433,32 @@ typedef struct {
 	void   *legacyContext;
 } wuiHudEnvelope_t;
 
+/* Rect-less native WiredUI authoring gets its geometry from Clay, not from the
+ * legacy parser backfill.  Preserve an explicitly-authored `rect` for old
+ * ModernHUD-compatible files, but seed a missing rect from the resolved custom
+ * command before the element's create callback builds its cached draw context.
+ * cfg->rect is already in the physical-pixel coordinate space consumed by the
+ * ModernHUD draw helpers. */
+static void wui_hud_apply_resolved_rect( const wuiCustomDrawConfig_t *cfg,
+                                         modernhudConfig_t *hudCfg )
+{
+	if ( !cfg || !hudCfg || hudCfg->rect.isSet ) return;
+	hudCfg->rect.isSet = qtrue;
+	hudCfg->rect.value[ 0 ] = cfg->rect[ 0 ];
+	hudCfg->rect.value[ 1 ] = cfg->rect[ 1 ];
+	hudCfg->rect.value[ 2 ] = cfg->rect[ 2 ];
+	hudCfg->rect.value[ 3 ] = cfg->rect[ 3 ];
+	/* ModernHUD text contexts derive their anchor from alignH, while WUI
+	 * authoring exposes textalign.  Legacy rect literals encoded the anchor
+	 * directly in x, but a Clay bounding box encodes its left edge.  For native
+	 * flex leaves, map the authored text alignment onto the corresponding point
+	 * inside the resolved box so right/center-aligned text remains inside it. */
+	if ( !hudCfg->alignH.isSet && hudCfg->textAlign.isSet ) {
+		hudCfg->alignH.isSet = qtrue;
+		hudCfg->alignH.value = hudCfg->textAlign.value;
+	}
+}
+
 // Generic create adapter for direct (non-indexed) entries. Re-resolves
 // the legacy def by name (cfg->unprefixedName), then converts the source
 // wiredItemDef_t into the legacy modernhudConfig_t, then invokes the
@@ -449,6 +475,7 @@ static void *wui_hud_unified_create( const wuiCustomDrawConfig_t *cfg )
 
 	memset( &hudCfg, 0, sizeof( hudCfg ) );
 	WiredHud_ItemToConfig( cfg->item, &hudCfg );
+	wui_hud_apply_resolved_rect( cfg, &hudCfg );
 
 	env = (wuiHudEnvelope_t *) WiredHud_ArenaAlloc( (int) sizeof( *env ) );
 	if ( !env ) return NULL;
@@ -484,6 +511,7 @@ static void *wui_hud_unified_create_family( const wuiCustomDrawConfig_t *cfg )
 
 	memset( &hudCfg, 0, sizeof( hudCfg ) );
 	WiredHud_ItemToConfig( cfg->item, &hudCfg );
+	wui_hud_apply_resolved_rect( cfg, &hudCfg );
 
 	env = (wuiHudEnvelope_t *) WiredHud_ArenaAlloc( (int) sizeof( *env ) );
 	if ( !env ) return NULL;

@@ -14,12 +14,16 @@
 itemDef {
 	name "hud_active_warmup_root"
 	type container
+	direction row
+	width PERCENT 1
+	height 4vh
+	alignX center
 	decoration
 	visible 1
 
-	itemDef { hudElement "warmupinfo"
-		anchor TOP_CENTER
-		rect 0.500 0.340 0 0
+	itemDef { name "hud_warmup" hudElement "warmupinfo"
+		width PERCENT 1
+		height PERCENT 1
 		font $font_sans
 		fontsize 26 32
 		textalign 1

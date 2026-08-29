@@ -30,7 +30,7 @@ menuDef {
 		itemDef {
 			name "addbots_root"
 			type container
-			rect 0 0 0.4 0.7
+			width FIXED 0.4 height FIXED 0.7
 			direction column
 			padding $popup_padding
 			gap $spacing_md
@@ -46,7 +46,7 @@ menuDef {
 			itemDef {
 				name "form_content"
 				type container
-				rect 0 0 1 0.6
+				width FIXED 1 height FIXED 0.6
 				direction column
 				gap $spacing_sm
 				grow 1
@@ -58,7 +58,7 @@ menuDef {
 				itemDef {
 					name "quick_row_1"
 					type container
-					rect 0 0 1 0.05
+					width FIXED 1 height FIXED 0.05
 					direction row
 					gap $spacing_sm
 					height FIT
@@ -70,7 +70,7 @@ menuDef {
 				itemDef { name "cat_custom_label" type 0 height FIT text "CUSTOM ADD" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
 				itemDef { name "row_profile" type 12 height FIXED 38px width PERCENT 1 text "Profile" textalign 0 font $font_sans 13 forecolor $bone cvar "ui_botProfile" populateCallback "bot_profiles" visible 1 grow 0 action { botprofileselected } }
 				itemDef { name "row_name" type 4 height FIXED 38px width PERCENT 1 text "Name" textalign 0 font $font_sans 13 forecolor $bone cvar "ui_botName" maxChars 31 visible 1 grow 0 }
-				itemDef { name "row_skill" type 12 height FIXED 38px width PERCENT 1 text "Skill" textalign 0 font $font_sans 13 forecolor $bone cvar "ui_botSkill" cvarFloatList { "Beginner" 1 "Casual" 2 "Competitive" 3 "Pro" 4 "Nightmare" 5 } visible 1 grow 0 }
+				itemDef { name "row_skill" type 12 height FIXED 38px width PERCENT 1 text "Skill" textalign 0 font $font_sans 13 forecolor $bone cvar "g_skill" cvarFloatList { "Beginner" 1 "Casual" 2 "Competitive" 3 "Pro" 4 "Nightmare" 5 } visible 1 grow 0 }
 				itemDef { name "row_team" type 12 height FIXED 38px width PERCENT 1 text "Team" textalign 0 font $font_sans 13 forecolor $bone cvar "ui_botTeam" cvarStrList { Free free Red red Blue blue } visible 1 grow 0 }
 				QW_BUTTON("btn_add_custom", "Add Custom Bot", $accent, { addcustombot }, 0.35)
 			}
@@ -78,7 +78,7 @@ menuDef {
 			itemDef {
 				name "popup_footer"
 				type container
-				rect 0 0 1 0.05
+				width FIXED 1 height FIXED 0.05
 				direction row
 				gap $spacing_md
 				alignX end

@@ -43,6 +43,7 @@ struct UBO
     float4 worldLightParams;
     float4 advancedFogColorDensity;
     float4 advancedFogTypeFarEnabled;
+    float4 emissionRadiance;
 };
 
 constant int tex_domain_tmp [[function_constant(4)]];
@@ -52,18 +53,19 @@ constant int lightmap_slot = is_function_constant_defined(lightmap_slot_tmp) ? l
 constant bool _459 = (alpha_test_func == 1);
 constant bool _469 = (alpha_test_func == 2);
 constant bool _479 = (alpha_test_func == 3);
+constant bool _489 = (lightmap_slot != 0);
 constant int acff_tmp [[function_constant(10)]];
 constant int acff = is_function_constant_defined(acff_tmp) ? acff_tmp : 0;
-constant bool _495 = (acff == 1);
-constant bool _510 = (acff == 2);
-constant bool _518 = (acff == 3);
-constant bool _543 = (acff == 1);
-constant bool _559 = (acff == 2);
-constant bool _568 = (acff == 3);
+constant bool _563 = (acff == 1);
+constant bool _578 = (acff == 2);
+constant bool _586 = (acff == 3);
+constant bool _611 = (acff == 1);
+constant bool _627 = (acff == 2);
+constant bool _636 = (acff == 3);
 constant int discard_mode_tmp [[function_constant(7)]];
 constant int discard_mode = is_function_constant_defined(discard_mode_tmp) ? discard_mode_tmp : 0;
-constant bool _590 = (discard_mode == 1);
-constant bool _600 = (discard_mode == 2);
+constant bool _658 = (discard_mode == 1);
+constant bool _668 = (discard_mode == 2);
 constant int alpha_to_coverage_tmp [[function_constant(3)]];
 constant int alpha_to_coverage = is_function_constant_defined(alpha_to_coverage_tmp) ? alpha_to_coverage_tmp : 0;
 
@@ -338,59 +340,80 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
         }
     }
     base = color0;
+    if (_489)
+    {
+        float wetness = fast::clamp((*spvDescriptorSet0.m_269).worldLightParams.y, 0.0, 1.0);
+        float frost = fast::clamp((*spvDescriptorSet0.m_269).worldLightParams.z, 0.0, 1.0);
+        float luminance = dot(base.xyz, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+        float4 _511 = base;
+        float3 _513 = _511.xyz * mix(1.0, 0.819999992847442626953125, wetness);
+        base.x = _513.x;
+        base.y = _513.y;
+        base.z = _513.z;
+        float4 _520 = base;
+        float3 _534 = mix(_520.xyz, float3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), float3(frost * 0.550000011920928955078125));
+        base.x = _534.x;
+        base.y = _534.y;
+        base.z = _534.z;
+    }
+    float4 _548 = base;
+    float3 _550 = _548.xyz + (color0.xyz * (*spvDescriptorSet0.m_269).emissionRadiance.xyz);
+    base.x = _550.x;
+    base.y = _550.y;
+    base.z = _550.z;
     if (wired_advanced_fog_enabled((*spvDescriptorSet0.m_269)))
     {
         float fogAmount = wired_advanced_fog_amount((*spvDescriptorSet0.m_269), gl_FragCoord);
-        if (_495)
+        if (_563)
         {
-            float4 _500 = base;
-            float3 _502 = _500.xyz * (1.0 - fogAmount);
-            base.x = _502.x;
-            base.y = _502.y;
-            base.z = _502.z;
+            float4 _568 = base;
+            float3 _570 = _568.xyz * (1.0 - fogAmount);
+            base.x = _570.x;
+            base.y = _570.y;
+            base.z = _570.z;
         }
         else
         {
-            if (_510)
+            if (_578)
             {
                 base *= (1.0 - fogAmount);
             }
             else
             {
-                if (_518)
+                if (_586)
                 {
                     base.w *= (1.0 - fogAmount);
                 }
                 else
                 {
-                    float4 _528 = base;
-                    float3 _535 = mix(_528.xyz, (*spvDescriptorSet0.m_269).advancedFogColorDensity.xyz, float3(fogAmount));
-                    base.x = _535.x;
-                    base.y = _535.y;
-                    base.z = _535.z;
+                    float4 _596 = base;
+                    float3 _603 = mix(_596.xyz, (*spvDescriptorSet0.m_269).advancedFogColorDensity.xyz, float3(fogAmount));
+                    base.x = _603.x;
+                    base.y = _603.y;
+                    base.z = _603.z;
                 }
             }
         }
     }
     else
     {
-        if (_543)
+        if (_611)
         {
-            float4 _546 = base;
-            float3 _551 = _546.xyz * (1.0 - fog.w);
-            base.x = _551.x;
-            base.y = _551.y;
-            base.z = _551.z;
+            float4 _614 = base;
+            float3 _619 = _614.xyz * (1.0 - fog.w);
+            base.x = _619.x;
+            base.y = _619.y;
+            base.z = _619.z;
         }
         else
         {
-            if (_559)
+            if (_627)
             {
                 base *= (1.0 - fog.w);
             }
             else
             {
-                if (_568)
+                if (_636)
                 {
                     base.w *= (1.0 - fog.w);
                 }
@@ -401,7 +424,7 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
             }
         }
     }
-    if (_590)
+    if (_658)
     {
         if (base.w == 0.0)
         {
@@ -410,7 +433,7 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
     }
     else
     {
-        if (_600)
+        if (_668)
         {
             if (dot(base.xyz, base.xyz) == 0.0)
             {

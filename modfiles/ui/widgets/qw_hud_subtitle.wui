@@ -7,13 +7,13 @@
 // screen. The draw routine anchors itself to the viewport bottom-center and gates
 // on the active-caption state + fade, so the rect here is only a walk anchor.
 //
-// `position absolute` (zero-rect floating leaf) matches the crosshair pattern so
+// A zero-rect floating leaf matches the crosshair pattern so
 // the emit renders correctly rather than being pruned as a zero-size flex child.
 itemDef {
 	name "hud_active_subtitle"
 	hudElement "subtitle"
-	anchor BOTTOM_CENTER
-	rect 0.5 0.88 0 0
+	width FIXED 1px
+	height FIXED 1px
 	decoration
 	visible 1
 }

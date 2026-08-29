@@ -33,7 +33,6 @@ menuDef {
 		itemDef {
 			name "scoreboard_root"
 			type container
-			rect 0.05 0.05 0.9 0.9
 			direction column
 			gap $spacing_md
 			padding $spacing_md $spacing_md
@@ -55,7 +54,7 @@ menuDef {
 			itemDef {
 				name "split_pane"
 				type container
-				rect 0 0 1 0.82
+				width FIXED 1 height FIXED 0.82
 				direction row
 				gap $spacing_md
 				grow 1
@@ -65,7 +64,7 @@ menuDef {
 				itemDef {
 					name "red_panel"
 					type container
-					rect 0 0 0.5 1.0
+					width FIXED 0.5 height FIXED 1.0
 					direction column
 					grow 1
 					height PERCENT 1.0
@@ -86,7 +85,7 @@ menuDef {
 				itemDef {
 					name "blue_panel"
 					type container
-					rect 0 0 0.5 1.0
+					width FIXED 0.5 height FIXED 1.0
 					direction column
 					grow 1
 					height PERCENT 1.0

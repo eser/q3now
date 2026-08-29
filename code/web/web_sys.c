@@ -4,6 +4,7 @@
 #include "web_sys.h"
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qcommon.h"
+#include "../client/keycodes.h"
 
 #include <stdarg.h>
 #include <dirent.h>
@@ -300,8 +301,36 @@ void Sys_UnloadLibrary( void *handle ) { if ( handle ) dlclose( handle ); }
 
 void Nav_Frame( void ) {}
 
+void WiredWebUi_Pointer( float x, float y, int down );
+void WiredWebUi_Wheel( float deltaY );
+
 EMSCRIPTEN_KEEPALIVE void WiredWeb_InputKey( int key, int down ) {
 	Sys_QueEvent( (uint64_t)Sys_NanoTime(), SE_KEY, key, down ? 1 : 0, 0, NULL );
+}
+
+EMSCRIPTEN_KEEPALIVE void WiredWeb_InputBrowserKey( int browserKey, int down ) {
+	int key = browserKey;
+	switch ( browserKey ) {
+	case 16: key = K_SHIFT; break;
+	case 17: key = K_CTRL; break;
+	case 18: key = K_ALT; break;
+	case 33: key = K_PGUP; break;
+	case 34: key = K_PGDN; break;
+	case 35: key = K_END; break;
+	case 36: key = K_HOME; break;
+	case 37: key = K_LEFTARROW; break;
+	case 38: key = K_UPARROW; break;
+	case 39: key = K_RIGHTARROW; break;
+	case 40: key = K_DOWNARROW; break;
+	case 45: key = K_INS; break;
+	case 46: key = K_DEL; break;
+	case 192: key = K_CONSOLE; break;
+	default:
+		if ( browserKey >= 112 && browserKey <= 123 ) key = K_F1 + browserKey - 112;
+		else if ( browserKey >= 'A' && browserKey <= 'Z' ) key = browserKey - 'A' + 'a';
+		break;
+	}
+	WiredWeb_InputKey( key, down );
 }
 
 EMSCRIPTEN_KEEPALIVE void WiredWeb_InputChar( int codepoint ) {
@@ -312,4 +341,12 @@ EMSCRIPTEN_KEEPALIVE void WiredWeb_InputChar( int codepoint ) {
 EMSCRIPTEN_KEEPALIVE void WiredWeb_InputMouse( float dx, float dy ) {
 	Sys_QueEvent( (uint64_t)Sys_NanoTime(), SE_MOUSE,
 		SE_MouseEnc( dx ), SE_MouseEnc( dy ), 0, NULL );
+}
+
+EMSCRIPTEN_KEEPALIVE void WiredWeb_InputPointer( float x, float y, int down ) {
+	WiredWebUi_Pointer( x, y, down );
+}
+
+EMSCRIPTEN_KEEPALIVE void WiredWeb_InputWheel( float deltaY ) {
+	WiredWebUi_Wheel( deltaY );
 }

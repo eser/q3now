@@ -30,7 +30,7 @@ foreach(NATIVE "VkDescriptor" "VkPipeline" "vulkan.h" "spirv_cross" "child_proce
 		message(FATAL_ERROR "Metal catalog consumer leaked runtime/native concept: ${NATIVE}")
 	endif()
 endforeach()
-foreach(NEEDLE "moduleCount, 294" "color_vert_spv" "hdr_histogram_comp_spv" "stale MSL artifact")
+foreach(NEEDLE "moduleCount, 299" "color_vert_spv" "hdr_histogram_comp_spv" "stale MSL artifact")
 	require_text(HOST "${NEEDLE}" "Metal catalog mutation host")
 endforeach()
 

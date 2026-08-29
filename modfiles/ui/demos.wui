@@ -22,22 +22,22 @@ menuDef {
 		itemDef {
 			name "top_bar"
 			type container
-			rect 0 0 1 $top_bar_height
+			width FIXED 1 height FIXED $top_bar_height
 			direction row
 			padding 0.005 0.02
 			alignY center
 			background $panel
 			borderY 1px $line
 
-			itemDef { name "brand" type 0 rect 0 0 0.22 0.04 height FIT text "q3now / Demos" textalign 0 font $font_sans_bold 14 forecolor $accent decoration visible 1 grow 0 }
+			itemDef { name "brand" type 0 width FIXED 0.22 height FIXED 0.04 height FIT text "q3now / Demos" textalign 0 font $font_sans_bold 14 forecolor $accent decoration visible 1 grow 0 }
 			itemDef { name "top_bar_spacer" type container grow 1 }
-			itemDef { name "hint" type 0 rect 0 0 0.2 0.04 height FIT text "double-click to play" textalign 2 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+			itemDef { name "hint" type 0 width FIXED 0.2 height FIXED 0.04 height FIT text "double-click to play" textalign 2 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
 		}
 
 		itemDef {
 			name "browser_content"
 			type container
-			rect 0 0 1 0.83
+			width FIXED 1 height FIXED 0.83
 			direction column
 			padding $content_padding_y $content_padding_x
 			gap $spacing_md
@@ -50,7 +50,7 @@ menuDef {
 			itemDef {
 				name "list_header"
 				type container
-				rect 0 0 1 0.04
+				width FIXED 1 height FIXED 0.04
 				direction row
 				gap $spacing_xs
 				height FIT
@@ -64,7 +64,7 @@ menuDef {
 			itemDef {
 				name "demolist"
 				type 6
-				rect 0 0 1 0.6
+				width FIXED 1 height FIXED 0.6
 				width PERCENT 1.0
 				height GROW
 				font $font_sans 12
@@ -81,7 +81,7 @@ menuDef {
 			itemDef {
 				name "browser_footer"
 				type container
-				rect 0 0 1 0.05
+				width FIXED 1 height FIXED 0.05
 				direction row
 				gap $spacing_md
 				alignX end
@@ -97,14 +97,14 @@ menuDef {
 		itemDef {
 			name "bottom_bar"
 			type container
-			rect 0 0 1 $bottom_bar_height
+			width FIXED 1 height FIXED $bottom_bar_height
 			direction row
 			padding 0 0.02
 			alignY center
 			alignX end
 			gap $spacing_md
 
-			itemDef { name "hint_back" type 0 rect 0 0 0.1 0.025 height FIT text "ESC back" textalign 2 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+			itemDef { name "hint_back" type 0 width FIXED 0.1 height FIXED 0.025 height FIT text "ESC back" textalign 2 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
 		}
 	}
 

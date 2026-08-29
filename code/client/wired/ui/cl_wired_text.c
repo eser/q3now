@@ -11,7 +11,7 @@ cl_wired_text.c — Unified text rendering implementation
 #include "cl_wired_msdf.h"
 #include "cl_wired_fonts.h"
 
-#if FEAT_WIRED_UI
+#if FEAT_WIRED_UI || defined(WIRED_WEB_UI_TEXT)
 
 /* ── letter spacing state ──────────────────────────────────────────── */
 
@@ -251,4 +251,4 @@ void Text_DrawChar( int ch, float x, float y, int fontId,
 	MSDF_DrawChar( face->atlas, x, y, size, color, ch );
 }
 
-#endif /* FEAT_WIRED_UI */
+#endif /* FEAT_WIRED_UI || WIRED_WEB_UI_TEXT */

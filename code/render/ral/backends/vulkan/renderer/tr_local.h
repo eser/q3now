@@ -33,6 +33,7 @@
 #include "../../../../../qcommon/qfiles.h"
 #include "../../../../../qcommon/qcommon.h"
 #include "../../../../frontend/tr_public.h"
+#include "../../../core/ral_lighting.h"
 #include "tr_common.h"
 #include "tr_temporal_entity_cache.h"
 #include "../../../../frontend/tr_screenshot.h"
@@ -131,6 +132,9 @@ typedef struct {
 	vec3_t		ambientLight;	// color normalized to 0-255
 	int			ambientLightInt;	// 32 bit rgba packed
 	vec3_t		directedLight;
+	qboolean	hasLocalIrradiance;
+	int32_t		localShQ16[4][3];
+	uint64_t	localIrradianceHash;
 #ifdef USE_PMLIGHT
 	vec3_t		shadowLightDir;	// normalized direction towards light
 #endif
@@ -191,14 +195,12 @@ typedef enum {
 
 } genFunc_t;
 
-#if FEAT_FOG_SYSTEM
 typedef enum {
 	FT_NONE,
 	FT_LINEAR,
 	FT_EXP,
 	FT_EXP2
 } fogType_t;
-#endif
 
 
 typedef enum {
@@ -432,11 +434,9 @@ typedef struct {
 typedef struct {
 	vec3_t	color;
 	float	depthForOpaque;
-#if FEAT_FOG_SYSTEM
 	fogType_t	type;		// FT_NONE means "use Q3 volume fog only"
 	float		density;	// used for FT_EXP, FT_EXP2
 	float		farClip;	// used for FT_LINEAR clamping
-#endif
 } fogParms_t;
 
 typedef struct shader_s {
@@ -479,6 +479,9 @@ typedef struct shader_s {
 	// whiten the preceding diffuse stages instead, so r_lightmap 1 still yields a
 	// lightmap-only view. Detected at FinishShader after collapse.
 	qboolean	separateLightmapPass;
+	// Backend projection of the backend-neutral wiredLighting authority. Values
+	// are linear radiance; only the first world base-pass stage consumes them.
+	vec3_t		emissionRadiance;
 
 	cullType_t	cullType;				// CT_FRONT_SIDED, CT_BACK_SIDED, or CT_TWO_SIDED
 	qboolean	polygonOffset;			// set for decals and other items that must be offset
@@ -1261,6 +1264,9 @@ typedef struct {
 	int		c_dlightSurfacesCulled;
 	int		c_particleEmitters;
 	int		c_particleParticles;
+	int		c_particleSpawnRequests;
+	int		c_particleDroppedRequests;
+	int		c_particleDroppedParticles;
 #ifdef USE_PMLIGHT
 	int		c_light_cull_out;
 	int		c_light_cull_in;
@@ -1300,6 +1306,11 @@ typedef struct glstatic_s {
 
 typedef struct {
 	int		c_surfaces, c_shaders, c_vertexes, c_indexes, c_totalIndexes;
+	/* TASK-89: exact projection-2D batch attribution.  c_2dLastClass is
+	 * per-frame scratch (0 none, 1 white, 2 MSDF, 3 other) used to count
+	 * only white<->MSDF alternations; the entire struct is cleared at frame end. */
+	int		c_2dShaders, c_2dWhiteShaders, c_2dMsdfShaders, c_2dOtherShaders;
+	int		c_2dWhiteMsdfTransitions, c_2dLastClass;
 	float	c_overDraw;
 
 	int		c_dlightVertexes;
@@ -1310,6 +1321,20 @@ typedef struct {
 	int		c_flareRenders;
 	int		c_particleComputes;
 	int		c_particleDraws;
+	int		c_particleChildEvents;
+	int		c_particleChildParticles;
+	int		c_particleChildDroppedEvents;
+	int		c_particleChildDroppedParticles;
+	int		c_atmosphereParticles;
+	int		c_atmosphereComputes;
+	int		c_atmosphereDraws;
+	int		c_atmosphereFroxels;
+	int		c_atmosphereDispatches;
+	int		c_atmosphereClouds;
+	int		c_atmosphereHeightgrid;
+	int		c_atmosphereDepth;
+	int		c_atmosphereTemporalReuse;
+	int		c_atmosphereTemporalReject;
 
 	int		msec;			// total msec for backend run
 #ifdef USE_PMLIGHT
@@ -1341,7 +1366,7 @@ typedef struct videoFrameCommand_s {
 // pass after the scene has been gamma-encoded onto the swapchain image.
 #define MAX_OVERLAY_QUADS  256
 typedef struct {
-	float		x, y, w, h;
+	float		positions[4][2];
 	float		s1, t1, s2, t2;
 	color4ub_t	color;
 	shader_t	*shader;
@@ -1547,7 +1572,6 @@ typedef struct {
 	float					msdfShadowOffset[2];	// shadow pixel offset (0,0 = disabled)
 	float					msdfShadowColor[4];		// shadow color (a=0 = disabled)
 
-#if FEAT_FOG_SYSTEM
 	int						globalFog;
 	fogType_t				globalFogType;
 	vec3_t					globalFogColor;
@@ -1555,7 +1579,6 @@ typedef struct {
 	float					globalFogDensity;
 	qboolean				fogEnabled;
 	fogType_t				fogTypeCurrent;
-#endif
 
 #if FEAT_HALO
 	int						haloShader;
@@ -1726,6 +1749,7 @@ extern	cvar_t	*r_speeds;				// various levels of information display
 extern	cvar_t	*r_gpuSpeeds;			// per-pass GPU timestamp report
 extern	cvar_t	*r_profileMarkers;		// semantic RAL dynamic-rendering GPU labels
 extern	cvar_t	*r_ralEffectsSmoke;		// default-off procedural-effects RAL native smoke
+extern	cvar_t	*r_lightingReferenceFixture;	// stable canonical lighting-reference atmosphere
 extern	cvar_t	*r_temporalInputTest;		// default-off projection-jitter diagnostic consumer
 extern	cvar_t	*r_vkDebugTiming;		// 200-frame Vulkan host-side timing averages
 extern	cvar_t	*r_frameSpikeUs;		// per-frame host-side stage-timing spike report
@@ -1756,6 +1780,8 @@ extern	cvar_t	*r_entitySSBO;					// per-entity matrices via frame-wide storage b
 extern	cvar_t	*r_vertexLight;					// vertex lighting mode for better performance
 
 extern	cvar_t	*r_showTris;					// enables wireframe rendering of the world
+extern	cvar_t	*r_showIrradianceProbes;
+extern	cvar_t	*r_showEmissiveLights;
 extern	cvar_t	*r_showSky;						// forces sky in front of all surfaces
 extern	cvar_t	*r_showNormals;					// draws wireframe normals
 extern	cvar_t	*r_clear;						// force screen clear every frame
@@ -1768,11 +1794,9 @@ extern	cvar_t	*r_flares;						// light flares
 extern	cvar_t	*r_lens;						// depth-sampled lens occlusion oracle (replaces the dot-probe)
 extern	cvar_t	*r_halos;						// direction-independent halo glows, independent of r_flares
 
-#if FEAT_FOG_SYSTEM
 extern	cvar_t	*r_useGlFog;
 extern	cvar_t	*r_defaultFogParmsType;
 extern	cvar_t	*r_globalLinearFogDrawSky;
-#endif
 
 extern	cvar_t	*r_intensity;
 
@@ -2093,6 +2117,8 @@ void RB_StageIteratorSky( void );
 void RB_AddQuadStamp( const vec3_t origin, const vec3_t left, const vec3_t up, color4ub_t color );
 void RB_AddQuadStampExt( const vec3_t origin, const vec3_t left, const vec3_t up, color4ub_t color, float s1, float t1, float s2, float t2 );
 void RB_AddQuadStamp2( float x, float y, float w, float h, float s1, float t1, float s2, float t2, color4ub_t color );
+void RB_AddQuadStamp2D( const float positions[4][2], float s1, float t1,
+	float s2, float t2, color4ub_t color );
 
 void RB_ShowImages( void );
 
@@ -2229,6 +2255,8 @@ void RE_ClearScene( void );
 void RE_AddRefEntityToScene( const refEntity_t *ent, qboolean intShaderTime );
 void RE_AddRefEntityToSceneTemporal( const refEntity_t *ent,
 	const refEntityMotion_t *motion );
+qboolean RE_SetRefEntityLocalIrradiance( uint32_t sceneEntityIndex,
+	const int32_t coefficientsQ16[4][3], uint64_t coefficientHash );
 void RE_AddPolyToScene( qhandle_t hShader , int numVerts, const polyVert_t *verts, int num );
 void RE_AddLightToScene( const vec3_t org, float intensity, float r, float g, float b );
 void RE_AddAdditiveLightToScene( const vec3_t org, float intensity, float r, float g, float b );
@@ -2238,6 +2266,9 @@ void RE_AddBeamToScene( const beamDesc_t *desc );
 void RE_AddRailRibbonToScene( const railRibbonDesc_t *desc );
 void RE_AddSpriteToScene( const spriteDesc_t *desc );
 void RE_EmitParticles( const emitterDesc_t *desc );
+void RE_EmitAtmosphereProfile( const atmosphereEmitter_t *emitter,
+	const atmosphereEffectProfile_t *profile );
+void RE_ResetAtmosphereEffectRuntime( void );
 void RE_AddDecalToScene( const decalDesc_t *desc );
 void RE_AddLensSourceToScene( const lensSourceDesc_t *desc );
 qboolean RE_GetLensVisibility( int id, float *outVis );
@@ -2302,8 +2333,10 @@ void vk_particle_set_class_image( int handle, struct image_s *image );
 void vk_particle_set_frame_image( int frameSlot, struct image_s *image );
 qboolean vk_particle_shadow_get_class( uint32_t classIndex,
 	const particleClassGPU_t **outClass );
-qboolean vk_particle_shadow_write_emission( uint32_t poolIndex,
-	uint32_t slot, const particleGPU_t *particle );
+qboolean vk_particle_shadow_write_spawn( uint32_t requestIndex,
+	const particleSpawnGPU_t *request );
+qboolean vk_particle_shadow_write_atmosphere_profile( uint32_t profileIndex,
+	const atmosphereEffectProfile_t *profile );
 qboolean vk_particle_shadow_write_class( uint32_t classIndex,
 	const particleClassGPU_t *particleClass );
 
@@ -2330,7 +2363,6 @@ void R_ClearHalos( void );
 #endif
 
 void *R_GetCommandBuffer( int bytes );
-#if FEAT_FOG_SYSTEM
 void RE_GetGlobalFog( refFogType_t *type, vec3_t color, float *depthForOpaque, float *density );
 void RE_GetViewFog( const vec3_t origin, refFogType_t *type, vec3_t color,
 	float *depthForOpaque, float *density, qboolean *useColorArray );
@@ -2339,7 +2371,6 @@ void R_FogOff( void );
 void RB_FogOn( void );
 int  R_BoundsFogNum( const vec3_t mins, const vec3_t maxs );
 qboolean R_IsGlobalFog( int fogNum );
-#endif
 
 void RE_RenderScene( const refdef_t *fd, int worldIndex );
 void RE_SetLightstylePattern( int style, const char *pattern );
@@ -2522,6 +2553,7 @@ typedef struct {
 	float	w, h;
 	float	s1, t1;
 	float	s2, t2;
+	float	positions[4][2];
 } stretchPicCommand_t;
 
 // WiredUI SCENE procedural backdrop (menubg.frag). Records a blended full-viewport
@@ -2542,6 +2574,7 @@ typedef struct {
 	float	x1, y1;
 	float	x2, y2;
 	float	width;
+	float	positions[4][2];
 } drawLineCommand_t;
 
 typedef struct drawSurfsCommand_s {
@@ -2591,6 +2624,7 @@ typedef struct {
 	float	s1, t1;
 	float	s2, t2;
 	float	angle;
+	float	positions[4][2];
 } rotatedPicCommand_t;
 
 typedef struct {
@@ -2664,6 +2698,8 @@ qboolean R_AddDrawSurfCmd( drawSurf_t *drawSurfs, int numDrawSurfs );
 
 void RE_SetColor( const float *rgba );
 void RE_SetClipRegion( const float *region );
+void RE_SetUiTransform( const refUiTransform_t *transform );
+void RE_TransformUiPoint( float *x, float *y );
 void RE_SetMSDFOutline( float outlineWidth, const float *outlineColor,
                          float glowWidth, const float *glowColor );
 void RE_SetMSDFShadow( float offsetX, float offsetY, const float *color );

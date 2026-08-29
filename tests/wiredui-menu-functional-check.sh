@@ -8,9 +8,8 @@
 #   2. main -> Host -> Start Server -> a feeder-selected real map -> the first
 #      active gameplay frame.
 #
-# No user config or install is modified.  The current pax21 is copied into an
-# isolated home while licensed base content is mounted read-only via
-# fs_basepath.
+# No user config or install is modified. Immutable VFS archives are symlinked
+# read-only into isolated homes through the shared harness helper.
 #
 # Usage: bash tests/wiredui-menu-functional-check.sh --self-test
 #        WIRED_CONTENT_ROOT=/installed/q3now-preview \
@@ -20,8 +19,10 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 TIMEOUT_RUNNER="$SCRIPT_DIR/run-with-timeout.py"
 EXPECTED_MAP="${EXPECTED_MAP:-arena17}"
+. "$REPO_ROOT/tests/lib/wired_paths.sh"
 
 analyze_contract() {
     python3 - "$1" "$2" "$3" "$4" "$5" <<'PYEOF'
@@ -401,28 +402,15 @@ case "$EXPECTED_MAP" in
     ''|*[!A-Za-z0-9_.-]*) echo "FAIL: EXPECTED_MAP contains unsafe characters: $EXPECTED_MAP"; exit 1 ;;
 esac
 
-PACK_ROOT=""
-for candidate in "$WIRED_DIR" "$WIRED_DIR/../Resources" "$WIRED_DIR/../../.."; do
-    if [ -f "$candidate/base/pax21.sw3z" ]; then
-        PACK_ROOT="$(cd "$candidate" && pwd)"
-        break
-    fi
-done
+PACK_ROOT="$(wired_find_archive_root "$WIRED_DIR" "$WIRED_DIR/../Resources" "$WIRED_DIR/../../.." 2>/dev/null || true)"
 if [ -z "$PACK_ROOT" ]; then
-    echo "SKIP: no current base/pax21.sw3z found beside bundle/build for $WIRED"
+    echo "SKIP: no current VFS archive found beside bundle/build for $WIRED"
     exit 77
 fi
 
-CONTENT_ROOT=""
-for candidate in "${WIRED_CONTENT_ROOT:-}" "$PACK_ROOT"; do
-    [ -n "$candidate" ] || continue
-    if [ -f "$candidate/base/pax01.sw3z" ] || [ -f "$candidate/base/pak0.pk3" ]; then
-        CONTENT_ROOT="$(cd "$candidate" && pwd)"
-        break
-    fi
-done
+CONTENT_ROOT="$(wired_find_archive_root "${WIRED_CONTENT_ROOT:-}" "$WIRED_HOME" "$PACK_ROOT" 2>/dev/null || true)"
 if [ -z "$CONTENT_ROOT" ]; then
-    echo "SKIP: licensed base content missing; set WIRED_CONTENT_ROOT to a root containing base/pax01.sw3z or base/pak0.pk3"
+    echo "SKIP: base content missing; set WIRED_CONTENT_ROOT to a root containing base VFS archives"
     exit 77
 fi
 
@@ -432,30 +420,9 @@ INV_PARENT="$RUN_ROOT/inventory"
 GAME_PARENT="$RUN_ROOT/gameplay"
 INV_HOME="$INV_PARENT/$PRODUCT_DIRNAME"
 GAME_HOME="$GAME_PARENT/$PRODUCT_DIRNAME"
-mkdir -p "$INV_HOME/base" "$GAME_HOME/base"
-if ! cp "$PACK_ROOT/base/pax21.sw3z" "$INV_HOME/base/pax21.sw3z" ||
-   ! cp "$PACK_ROOT/base/pax21.sw3z" "$GAME_HOME/base/pax21.sw3z"; then
-    echo "FAIL: could not stage current pax21.sw3z into isolated homes"
-    exit 1
-fi
-
-# Launcher installs do not expose pax01/pak0 to a foreign fs_homepath merely
-# through fs_basepath.  Stage every licensed base archive into both isolated
-# homes (copy only; source remains read-only), then let current pax21 shadow the
-# product UI in the same directory.  This mirrors fps-perf-gate's proven mount
-# model and makes maps_list[] see the real arena roster.
-BASE_ARCHIVE_COUNT=0
-for content_archive in "$CONTENT_ROOT"/base/pax0*.sw3z "$CONTENT_ROOT"/base/pak*.pk3; do
-    [ -f "$content_archive" ] || continue
-    if ! cp "$content_archive" "$INV_HOME/base/" ||
-       ! cp "$content_archive" "$GAME_HOME/base/"; then
-        echo "FAIL: could not stage licensed base archive: $content_archive"
-        exit 1
-    fi
-    BASE_ARCHIVE_COUNT=$((BASE_ARCHIVE_COUNT + 1))
-done
-if [ "$BASE_ARCHIVE_COUNT" -eq 0 ]; then
-    echo "FAIL: no pax0*.sw3z or pak*.pk3 archives were staged from $CONTENT_ROOT/base"
+if ! wired_link_content_into_home "$INV_HOME" "$CONTENT_ROOT/base" "$WIRED_BASE" "$PACK_ROOT/base" ||
+   ! wired_link_content_into_home "$GAME_HOME" "$CONTENT_ROOT/base" "$WIRED_BASE" "$PACK_ROOT/base"; then
+    echo "FAIL: could not link VFS archives into isolated homes"
     exit 1
 fi
 case "$(uname -s)" in
@@ -686,7 +653,7 @@ wui_menu_nav focus maplist
 set r_layoutDump 1
 wait 2
 set r_layoutDump 0
-// Item storage starts with listSelectedRow 0.  Canonical pax01's filtered FFA
+// Item storage starts with listSelectedRow 0. The canonical base-content FFA
 // roster begins arena1, arena13, arena17, so two real Down events must invoke
 // the feeder callback twice and leave ui_selectedMap on arena17.
 wui_menu_nav down
@@ -715,7 +682,6 @@ run_phase() {
         --cwd "$phase_parent" \
         --stdout "$phase_stdout" \
         -- "$WIRED" \
-        +set fs_basepath "$CONTENT_ROOT" \
         +set fs_homepath "$phase_home" \
         +set com_automated 1 \
         +set com_noHardReboot 1 \
@@ -729,8 +695,8 @@ run_phase() {
 }
 
 echo "    binary       : $WIRED"
-echo "    current pack  : $PACK_ROOT/base/pax21.sw3z"
-echo "    base content  : $CONTENT_ROOT/base (read-only)"
+echo "    current VFS    : $PACK_ROOT/base (read-only links)"
+echo "    base content   : $CONTENT_ROOT/base (read-only links)"
 echo "    expected map  : $EXPECTED_MAP"
 
 run_phase inventory "$INV_PARENT" "$INV_HOME_NATIVE" "$INV_CFG" "$INV_STDOUT" 180

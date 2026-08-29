@@ -56,8 +56,9 @@ Offhand_Grapple_Fire
 */
 void Offhand_Grapple_Fire(gentity_t *ent)
 {
-    AngleVectors(ent->client->ps.viewangles, forward, right, up);
+	G_WeaponAimVectors( ent, forward, right, up );
     CalcMuzzlePoint(ent, forward, right, up, muzzle);
+	G_ClampWeaponMuzzle( ent, ent->s.pos.trBase, muzzle );
 
     if (!ent->client->fireHeld && !ent->client->hook)
         fire_grapple(ent, muzzle, forward);

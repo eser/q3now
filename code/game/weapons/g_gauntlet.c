@@ -31,9 +31,10 @@ qboolean CheckGauntletAttack( gentity_t *ent ) {
 	}
 
 	// set aiming directions
-	AngleVectors (ent->client->ps.viewangles, forward, right, up);
+	G_WeaponAimVectors( ent, forward, right, up );
 
 	CalcMuzzlePoint ( ent, forward, right, up, muzzle );
+	G_ClampWeaponMuzzle( ent, ent->s.pos.trBase, muzzle );
 
 	VectorMA (muzzle, 32, forward, end);
 
@@ -107,8 +108,9 @@ void Attack_Gauntlet_Lunge( gentity_t *ent ) {
 	}
 
 	// set aiming directions
-	AngleVectors( ent->client->ps.viewangles, forward, right, up );
+	G_WeaponAimVectors( ent, forward, right, up );
 	CalcMuzzlePoint( ent, forward, right, up, muzzle );
+	G_ClampWeaponMuzzle( ent, ent->s.pos.trBase, muzzle );
 
 	// extended trace range: 80 units (vs 32 for primary gauntlet)
 	VectorMA( muzzle, 80, forward, end );

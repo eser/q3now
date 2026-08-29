@@ -1036,7 +1036,13 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 	case EV_MISSILE_MISS:
 		DEBUGNAME("EV_MISSILE_MISS");
 		ByteToDir( es->eventParm, dir );
-		CG_MissileHitWall( es->pType, 0, position, dir, IMPACTSOUND_DEFAULT, es->number );
+		if ( es->pType == PROJ_ROCKET
+				&& ( es->generic1 & WIRED_MISSILE_EVENT_FREE_AIR ) )
+			CG_WiredFx_RocketExplosion( position, dir, IMPACTSOUND_DEFAULT,
+				qtrue, qfalse );
+		else
+			CG_MissileHitWall( es->pType, 0, position, dir,
+				IMPACTSOUND_DEFAULT, es->number );
 		break;
 
 	case EV_MISSILE_MISS_METAL:
@@ -1086,12 +1092,14 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 	case EV_BULLET_HIT_WALL:
 		DEBUGNAME("EV_BULLET_HIT_WALL");
 		ByteToDir( es->eventParm, dir );
-		CG_Bullet( es->pos.trBase, es->otherEntityNum, dir, qfalse, ENTITYNUM_WORLD );
+		CG_Bullet( es->pos.trBase, es->otherEntityNum, dir, qfalse, ENTITYNUM_WORLD,
+				   (hitscanImpactMaterial_t)es->generic1 );
 		break;
 
 	case EV_BULLET_HIT_FLESH:
 		DEBUGNAME("EV_BULLET_HIT_FLESH");
-		CG_Bullet( es->pos.trBase, es->otherEntityNum, dir, qtrue, es->eventParm );
+		CG_Bullet( es->pos.trBase, es->otherEntityNum, dir, qtrue, es->eventParm,
+				   HITSCAN_IMPACT_DEFAULT );
 		break;
 
 	case EV_SHOTGUN:

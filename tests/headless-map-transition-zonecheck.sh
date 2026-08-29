@@ -717,20 +717,21 @@ HOME_DIR="$ROOT/home/q3now-preview"
 cleanup(){ local status=$?; trap - EXIT INT TERM; [ "${WIRED_KEEP_ARTIFACTS:-0}" = 1 ] || rm -rf "$ROOT"; exit "$status"; }
 trap cleanup EXIT; trap 'exit 130' INT; trap 'exit 143' TERM
 
-# No scratch home, and nothing copied. The engine's own defaults already
-# resolve BOTH content layers — install Resources plus ~/wired/<app>/base — so a
-# run that overrides nothing mounts everything (measured: 2228 files in 2 paks,
-# arena1 loads). Redirecting fs_homepath was what broke that: the content layer
-# resolves relative to it, so a scratch home silently lost the downloaded pak,
-# and the copying below existed only to put it back — which in turn forced this
-# script to know which archive held the maps.
-#
-# The one thing that genuinely needed isolating is the LOG, so each map gets its
-# own artefact instead of appending to the user's. That is now a narrow knob:
-# log_file_path names an absolute destination and leaves the filesystem alone.
-# A headless run does not write config.cfg (measured: hash unchanged), so there
-# is nothing else here worth isolating.
-mkdir -p "$HOME_DIR"
+# Assemble the two content layers into one disposable root: launcher-managed
+# data supplies BSPs while the current build supplies pax21/default.cfg and the
+# freshly built game module. Copy every archive from the data root instead of
+# baking an archive name into the contract; copy the build product last so a
+# stale installed pax21 can never shadow the tree under test.
+CONTENT_ROOT="${WIRED_CONTENT_ROOT:-$HOME/wired/q3now-preview}"
+mkdir -p "$HOME_DIR/base"
+CONTENT_ARCHIVES=0
+for archive in "$CONTENT_ROOT/base/"*.sw3z "$CONTENT_ROOT/base/"*.pk3; do
+    [ -f "$archive" ] || continue
+    cp "$archive" "$HOME_DIR/base/"
+    CONTENT_ARCHIVES=$((CONTENT_ARCHIVES + 1))
+done
+[ "$CONTENT_ARCHIVES" -gt 0 ] || { echo "SKIP: no launcher content archives under $CONTENT_ROOT/base"; exit 77; }
+cp "$PACK/base/pax21.sw3z" "$HOME_DIR/base/pax21.sw3z"
 
 if [ "$FLAG_INVENTORY" = 1 ]; then
     shift || true
@@ -834,13 +835,16 @@ fi
 
 echo "==> headless map-transition zonecheck (#96): $MAP_CHAIN"
 echo "    binary : $HEADLESS"
-echo "    content: engine defaults (install + $HOME/wired/<app>)"
+echo "    content: scratch assembly (build pax21 + launcher archives)"
 echo "    repeats: $REPEAT"
 
 # com_noHardReboot 1 keeps the watchdog from RELAUNCHING on a crash and masking
 # it (code/unix/unix_main.c:1087-1098). +wait, not +waitForMap (client-only).
+LOG="$ROOT/qconsole.jsonl"
 LAUNCH_ARGS=(
+    +set fs_basepath "$HOME_DIR"
     +set fs_homepath "$HOME_DIR"
+    +set log_file_path "$LOG"
     +set com_automated 1
     +set com_noHardReboot 1
     +set sv_pure 0
@@ -850,8 +854,6 @@ LAUNCH_ARGS=(
 )
 for m in $MAP_CHAIN; do LAUNCH_ARGS+=( +map "$m" +wait 250 ); done
 LAUNCH_ARGS+=( +quit )
-
-LOG="$HOME_DIR/qconsole.jsonl"
 PASSES=0
 FAILED_ITERS=""
 

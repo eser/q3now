@@ -27,6 +27,8 @@ layout(binding = 2, std430) buffer ExposureBlock
     float sunScreenY;
     float sunrayIntensity;
     float sunrayDecay;
+    float shadowExponent;
+    float shadowPivot;
 } _68;
 
 layout(std140, binding = 3) uniform Push

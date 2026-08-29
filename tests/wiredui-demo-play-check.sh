@@ -7,6 +7,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/lib/wired_paths.sh"
 TIMEOUT_RUNNER="$SCRIPT_DIR/run-with-timeout.py"
 PROTOCOL=74
 
@@ -77,7 +78,7 @@ ordered(cm, [
  ("validated queue",r"queued validated demo playback name=q0_target\b"),
  ("close all",r"close all postcondition depth=0 active=none catcher_ui=0 paused=0"),
  ("Play Enter",r"wui_menu_nav: K_ENTER dispatched"),
- ("exact file",r"Demo file: demos/q0_target\.dm_74\b"),
+ ("exact file",r"Demo file: demos/q0_target\.dm_75\b"),
  ("playback FIRST",r"FIRST GAMEPLAY FRAME mapname=(?:maps/)?arena7(?:\.bsp)?.*numEntities=[1-9][0-9]*"),
 ])
 
@@ -92,7 +93,7 @@ if any(re.search(r"focused item 'menu_demos'",m) for m in cm[:demos_pushes[0]]):
     raise SystemExit("FAIL route: named menu_demos focus bypassed the authored keyboard route")
 
 traces=[]
-rx=re.compile(r"demo playback trace state=8 demoplaying=1 name=q0_target\.dm_74 sequence=([0-9]+) serverTime=([0-9]+)")
+rx=re.compile(r"demo playback trace state=8 demoplaying=1 name=q0_target\.dm_75 sequence=([0-9]+) serverTime=([0-9]+)")
 for i,m in enumerate(cm):
     q=rx.search(m)
     if q: traces.append((i,int(q.group(1)),int(q.group(2))))
@@ -363,10 +364,10 @@ ordered([
  ("queue",r"queued validated demo playback name=match\.final\.q0\b"),
  ("close",r"close all postcondition depth=0 active=none catcher_ui=0 paused=0"),
  ("play enter",r"wui_menu_nav: K_ENTER dispatched"),
- ("file",r"Demo file: demos/match\.final\.q0\.dm_74\s*$"),
+ ("file",r"Demo file: demos/match\.final\.q0\.dm_75\s*$"),
  ("first",r"FIRST GAMEPLAY FRAME mapname=maps/arena7\.bsp .*numEntities=[1-9][0-9]*"),
- ("trace1",r"WiredUI: demo playback trace state=8 demoplaying=1 name=match\.final\.q0\.dm_74 sequence=([0-9]+) serverTime=([0-9]+)"),
- ("trace2",r"WiredUI: demo playback trace state=8 demoplaying=1 name=match\.final\.q0\.dm_74 sequence=([0-9]+) serverTime=([0-9]+)"),
+ ("trace1",r"WiredUI: demo playback trace state=8 demoplaying=1 name=match\.final\.q0\.dm_75 sequence=([0-9]+) serverTime=([0-9]+)"),
+ ("trace2",r"WiredUI: demo playback trace state=8 demoplaying=1 name=match\.final\.q0\.dm_75 sequence=([0-9]+) serverTime=([0-9]+)"),
  ("eof",r"CL_NextDemo: exec q0-hot-demo-done\.cfg"),
  ("done",r"Q0_HOT_DEMO_COMPLETED"),
 ])
@@ -395,7 +396,7 @@ for forbidden in ("QUIC client: TLV ACCEPT","SV_OnPlayerConnect:"):
 traces=[]
 for m in messages:
     if "demo playback trace" not in m: continue
-    x=re.search(r"demo playback trace state=8 demoplaying=1 name=match\.final\.q0\.dm_74 sequence=([0-9]+) serverTime=([0-9]+)",m)
+    x=re.search(r"demo playback trace state=8 demoplaying=1 name=match\.final\.q0\.dm_75 sequence=([0-9]+) serverTime=([0-9]+)",m)
     if not x: raise SystemExit(f"FAIL hot playback: wrong trace identity {m!r}")
     traces.append((int(x.group(1)),int(x.group(2))))
 if len(traces)!=2 or not (traces[1][0]>traces[0][0] and traces[1][1]>traces[0][1]):
@@ -494,8 +495,8 @@ msgs=[
  "WiredUI: demo feeder selection row=0 name=match.final.q0 generation=3\n","wui_menu_nav focus: focused item 'demolist'","wui_menu_nav: K_DOWNARROW dispatched",
  "wui_menu_nav focus: focused item 'btn_play_demo'","WiredUI: queued validated demo playback name=match.final.q0",
  "WiredUI: close all postcondition depth=0 active=none catcher_ui=0 paused=0","wui_menu_nav: K_ENTER dispatched",
- "Demo file: demos/match.final.q0.dm_74","FIRST GAMEPLAY FRAME mapname=maps/arena7.bsp numEntities=12",
- "WiredUI: demo playback trace state=8 demoplaying=1 name=match.final.q0.dm_74 sequence=10 serverTime=100","WiredUI: demo playback trace state=8 demoplaying=1 name=match.final.q0.dm_74 sequence=20 serverTime=200",
+ "Demo file: demos/match.final.q0.dm_75","FIRST GAMEPLAY FRAME mapname=maps/arena7.bsp numEntities=12",
+ "WiredUI: demo playback trace state=8 demoplaying=1 name=match.final.q0.dm_75 sequence=10 serverTime=100","WiredUI: demo playback trace state=8 demoplaying=1 name=match.final.q0.dm_75 sequence=20 serverTime=200",
  "CL_NextDemo: exec q0-hot-demo-done.cfg","Q0_HOT_DEMO_COMPLETED"]
 product=[rec(m,"WARN" if m=="WiredUI: no demo selected\n" else "DEBUG") for m in msgs]
 def frame(menu,n,item): return [{"menu":menu,"kind":"item","region":item,"frame":n,"focused":1},{"menu":menu,"kind":"item","region":item,"frame":n+1,"focused":1}]
@@ -513,10 +514,10 @@ elif mode=="stale-generation": replace("count=1 generation=3","count=1 generatio
 elif mode=="collapsed-name": replace("name=match.final.q0","name=match",0)
 elif mode=="stale-selection": replace("selection row=0 name=match.final.q0 generation=3","selection row=0 name=match.final.q0 generation=2")
 elif mode=="wrong-queue": replace("queued validated demo playback name=match.final.q0","queued validated demo playback name=match")
-elif mode=="wrong-file": replace("demos/match.final.q0.dm_74","demos/match.dm_74")
-elif mode=="file-suffix": replace("demos/match.final.q0.dm_74","demos/match.final.q0.dm_74.bak")
+elif mode=="wrong-file": replace("demos/match.final.q0.dm_75","demos/match.dm_75")
+elif mode=="file-suffix": replace("demos/match.final.q0.dm_75","demos/match.final.q0.dm_75.bak")
 elif mode=="wrong-map": replace("mapname=maps/arena7.bsp","mapname=maps/arena1.bsp")
-elif mode=="wrong-trace-name": replace("name=match.final.q0.dm_74 sequence=10","name=other.dm_74 sequence=10")
+elif mode=="wrong-trace-name": replace("name=match.final.q0.dm_75 sequence=10","name=other.dm_75 sequence=10")
 elif mode=="wrong-trace-state": replace("state=8 demoplaying=1","state=1 demoplaying=0")
 elif mode=="extra-main-down": product.insert(4,rec("wui_menu_nav: K_DOWNARROW dispatched"))
 elif mode=="network": product.insert(-1,rec("QUIC client: TLV ACCEPT received","INFO","network"))
@@ -561,10 +562,10 @@ cons_msgs=[
     "WiredUI: queued validated demo playback name=q0_target\n",
     "WiredUI: close all postcondition depth=0 active=none catcher_ui=0 paused=0",
     "wui_menu_nav: K_ENTER dispatched",
-    "Demo file: demos/q0_target.dm_74\n",
+    "Demo file: demos/q0_target.dm_75\n",
     "cls.state: -> CA_ACTIVE (FIRST GAMEPLAY FRAME mapname=maps/arena7.bsp serverTime=200 numEntities=4 framecount=2)",
-    "WiredUI: demo playback trace state=8 demoplaying=1 name=q0_target.dm_74 sequence=10 serverTime=220\n",
-    "WiredUI: demo playback trace state=8 demoplaying=1 name=q0_target.dm_74 sequence=14 serverTime=300\n",
+    "WiredUI: demo playback trace state=8 demoplaying=1 name=q0_target.dm_75 sequence=10 serverTime=220\n",
+    "WiredUI: demo playback trace state=8 demoplaying=1 name=q0_target.dm_75 sequence=14 serverTime=300\n",
     "CL_NextDemo: exec q0-demo-done.cfg\n",
     "Q0_DEMO_COMPLETED",
 ]
@@ -667,22 +668,22 @@ if [ "${1:-}" = "--self-test" ]; then
     ROOT="$(mktemp -d -t wired-demoplay-self-XXXXXX 2>/dev/null || mktemp -d)"; trap 'rm -rf "$ROOT"' EXIT
     write_empty_fixture clean "$ROOT/e.jsonl" "$ROOT/el.jsonl"
     analyze_empty_contract "$ROOT/e.jsonl" "$ROOT/el.jsonl" >/dev/null || { echo "FAIL: clean empty fixture rejected"; exit 1; }
-    write_hot_fixture clean "$ROOT/h.jsonl" "$ROOT/hl.jsonl" "$ROOT/h-source.dm_74" "$ROOT/h-copy.dm_74"
-    analyze_hot_contract "$ROOT/h.jsonl" "$ROOT/hl.jsonl" "$ROOT/h-source.dm_74" "$ROOT/h-copy.dm_74" >/dev/null || { echo "FAIL: clean hot fixture rejected"; exit 1; }
-    write_fixture clean "$ROOT/p.jsonl" "$ROOT/c.jsonl" "$ROOT/l.jsonl" "$ROOT/a.dm_74" "$ROOT/q.dm_74"
-    analyze_contract "$ROOT/p.jsonl" "$ROOT/c.jsonl" "$ROOT/l.jsonl" "$ROOT/a.dm_74" "$ROOT/q.dm_74" >/dev/null || { echo "FAIL: clean fixture rejected"; exit 1; }
+    write_hot_fixture clean "$ROOT/h.jsonl" "$ROOT/hl.jsonl" "$ROOT/h-source.dm_75" "$ROOT/h-copy.dm_75"
+    analyze_hot_contract "$ROOT/h.jsonl" "$ROOT/hl.jsonl" "$ROOT/h-source.dm_75" "$ROOT/h-copy.dm_75" >/dev/null || { echo "FAIL: clean hot fixture rejected"; exit 1; }
+    write_fixture clean "$ROOT/p.jsonl" "$ROOT/c.jsonl" "$ROOT/l.jsonl" "$ROOT/a.dm_75" "$ROOT/q.dm_75"
+    analyze_contract "$ROOT/p.jsonl" "$ROOT/c.jsonl" "$ROOT/l.jsonl" "$ROOT/a.dm_75" "$ROOT/q.dm_75" >/dev/null || { echo "FAIL: clean fixture rejected"; exit 1; }
     rc=0
     for defect in missing-empty nonempty-row empty-queue missing-escape bad-pop missing-back stale-generation missing-third-open named-focus network first unexpected-warn missing-escape-return-focus missing-back-return-focus duplicate-focus malformed-json; do
         write_empty_fixture "$defect" "$ROOT/e-$defect.jsonl" "$ROOT/el-$defect.jsonl"
         if analyze_empty_contract "$ROOT/e-$defect.jsonl" "$ROOT/el-$defect.jsonl" >/dev/null 2>&1; then echo "FAIL: accepted empty defect $defect"; rc=1; else echo "  PASS rejected empty $defect"; fi
     done
     for defect in missing-ready early-row additive-stale-row additive-stale-selection bad-count stale-generation collapsed-name stale-selection wrong-queue wrong-file file-suffix wrong-map wrong-trace-name wrong-trace-state extra-main-down network missing-return-focus duplicate-row no-first stale-trace bad-copy; do
-        write_hot_fixture "$defect" "$ROOT/h-$defect.jsonl" "$ROOT/hl-$defect.jsonl" "$ROOT/hs-$defect.dm_74" "$ROOT/hc-$defect.dm_74"
-        if analyze_hot_contract "$ROOT/h-$defect.jsonl" "$ROOT/hl-$defect.jsonl" "$ROOT/hs-$defect.dm_74" "$ROOT/hc-$defect.dm_74" >/dev/null 2>&1; then echo "FAIL: accepted hot defect $defect"; rc=1; else echo "  PASS rejected hot $defect"; fi
+        write_hot_fixture "$defect" "$ROOT/h-$defect.jsonl" "$ROOT/hl-$defect.jsonl" "$ROOT/hs-$defect.dm_75" "$ROOT/hc-$defect.dm_75"
+        if analyze_hot_contract "$ROOT/h-$defect.jsonl" "$ROOT/hl-$defect.jsonl" "$ROOT/hs-$defect.dm_75" "$ROOT/hc-$defect.dm_75" >/dev/null 2>&1; then echo "FAIL: accepted hot defect $defect"; rc=1; else echo "  PASS rejected hot $defect"; fi
     done
     for defect in missing-record missing-stop wrong-count wrong-row missing-demo-down missing-main-down extra-main-down named-main-focus missing-main-enter early-main-enter wrong-demos-depth wrong-main-focus duplicate-main-focus duplicate-demos-focus missing-main-row bad-main-height main-overlap main-overflow footer-overlap missing-queue bad-close wrong-file no-first zero-entities one-trace stale-trace early-eof network ui-warn renderer-error missing-layout malformed-json bad-demo; do
-        write_fixture "$defect" "$ROOT/p-$defect.jsonl" "$ROOT/c-$defect.jsonl" "$ROOT/l-$defect.jsonl" "$ROOT/a-$defect.dm_74" "$ROOT/q-$defect.dm_74"
-        if analyze_contract "$ROOT/p-$defect.jsonl" "$ROOT/c-$defect.jsonl" "$ROOT/l-$defect.jsonl" "$ROOT/a-$defect.dm_74" "$ROOT/q-$defect.dm_74" >/dev/null 2>&1; then echo "FAIL: accepted defect $defect"; rc=1; else echo "  PASS rejected $defect"; fi
+        write_fixture "$defect" "$ROOT/p-$defect.jsonl" "$ROOT/c-$defect.jsonl" "$ROOT/l-$defect.jsonl" "$ROOT/a-$defect.dm_75" "$ROOT/q-$defect.dm_75"
+        if analyze_contract "$ROOT/p-$defect.jsonl" "$ROOT/c-$defect.jsonl" "$ROOT/l-$defect.jsonl" "$ROOT/a-$defect.dm_75" "$ROOT/q-$defect.dm_75" >/dev/null 2>&1; then echo "FAIL: accepted defect $defect"; rc=1; else echo "  PASS rejected $defect"; fi
     done
     [ "$rc" -eq 0 ] && echo "==> SELF-TEST PASS: empty+hot+playback clean accepted; seventy defects rejected"
     exit "$rc"
@@ -704,13 +705,11 @@ if [ -z "$HEADLESS" ]; then
 fi
 [ -n "$HEADLESS" ] && [ -x "$HEADLESS" ] || { echo "SKIP: sibling wired-headless unavailable"; exit 77; }
 HEADLESS="$(cd "$(dirname "$HEADLESS")" && pwd)/$(basename "$HEADLESS")"
-PACK_ROOT=""
-for candidate in "$WIRED_DIR" "$WIRED_DIR/../Resources" "$WIRED_DIR/../../.."; do [ -f "$candidate/base/pax21.sw3z" ] && { PACK_ROOT="$(cd "$candidate" && pwd)"; break; }; done
-[ -n "$PACK_ROOT" ] || { echo "SKIP: current pax21 not found"; exit 77; }
-CONTENT_ROOT=""
-for candidate in "${WIRED_CONTENT_ROOT:-}" "$PACK_ROOT"; do [ -n "$candidate" ] || continue; if [ -f "$candidate/base/pax01.sw3z" ] || [ -f "$candidate/base/pak0.pk3" ]; then CONTENT_ROOT="$(cd "$candidate" && pwd)"; break; fi; done
+PACK_ROOT="$(wired_find_archive_root "$WIRED_DIR" "$WIRED_DIR/../Resources" "$WIRED_DIR/../../.." 2>/dev/null || true)"
+[ -n "$PACK_ROOT" ] || { echo "SKIP: current VFS archives not found"; exit 77; }
+CONTENT_ROOT="$(wired_find_archive_root "${WIRED_CONTENT_ROOT:-}" "$WIRED_HOME" "$PACK_ROOT" 2>/dev/null || true)"
 [ -n "$CONTENT_ROOT" ] || { echo "SKIP: set WIRED_CONTENT_ROOT"; exit 77; }
-if [ -f "$CONTENT_ROOT/base/pax01.sw3z" ]; then BASE_ARCHIVE="$CONTENT_ROOT/base/pax01.sw3z"; else BASE_ARCHIVE="$CONTENT_ROOT/base/pak0.pk3"; fi
+CURRENT_ARCHIVE="$(wired_first_archive "$PACK_ROOT/base")"; BASE_ARCHIVE="$(wired_first_archive "$CONTENT_ROOT/base")"
 
 RUN_ROOT="$(mktemp -d -t wired-demoplay-XXXXXX 2>/dev/null || mktemp -d)"; EMPTY="$RUN_ROOT/empty/q3now-preview"; HOT="$RUN_ROOT/hot/q3now-preview"; PRODUCER="$RUN_ROOT/producer/q3now-preview"; CONSUMER="$RUN_ROOT/consumer/q3now-preview"; SERVER="$RUN_ROOT/server/q3now-preview"
 mkdir -p "$EMPTY/base" "$HOT/base" "$PRODUCER/base" "$CONSUMER/base" "$SERVER/base"
@@ -721,7 +720,7 @@ stop_server(){
     [ "$SERVER_OPEN" -eq 1 ] && { exec 9>&-; SERVER_OPEN=0; }; SERVER_PID=""
 }
 cleanup(){ stop_server; if [ "${WIRED_KEEP_ARTIFACTS:-0}" = 1 ]; then echo "    kept artifacts: $RUN_ROOT"; else rm -rf "$RUN_ROOT"; fi; }; trap cleanup EXIT INT TERM
-for home in "$EMPTY" "$HOT" "$PRODUCER" "$CONSUMER" "$SERVER"; do cp "$BASE_ARCHIVE" "$home/base/" || exit 1; cp "$PACK_ROOT/base/pax21.sw3z" "$home/base/pax21.sw3z" || exit 1; done
+for home in "$EMPTY" "$HOT" "$PRODUCER" "$CONSUMER" "$SERVER"; do wired_link_content_into_home "$home" "$CONTENT_ROOT/base" "$PACK_ROOT/base" || exit 1; done
 PORT="$(python3 - <<'PYEOF'
 import socket
 s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()
@@ -990,9 +989,9 @@ PLOG="$PRODUCER/qconsole.jsonl"; CLOG="$CONSUMER/qconsole.jsonl"; LAYOUT="$RUN_R
 for f in "$PLOG" "$CLOG" "$LAYOUT"; do [ -s "$f" ] || { echo "FAIL: missing evidence $f"; exit 1; }; done
 cmp -s "$TARGET" "$CONSUMER/base/demos/q0_target.dm_$PROTOCOL" || { echo "FAIL: target changed between phases"; exit 1; }
 analyze_contract "$PLOG" "$CLOG" "$LAYOUT" "$CONSUMER/base/demos/a0_decoy.dm_$PROTOCOL" "$CONSUMER/base/demos/q0_target.dm_$PROTOCOL" || exit 1
-python3 - "$WIRED" "$PACK_ROOT/base/pax21.sw3z" "$BASE_ARCHIVE" "$TARGET" "$0" <<'PYEOF'
+python3 - "$WIRED" "$CURRENT_ARCHIVE" "$BASE_ARCHIVE" "$TARGET" "$0" <<'PYEOF'
 import hashlib,sys
-for label,path in zip(("binary","pax21","base","demo","harness"),sys.argv[1:]):
+for label,path in zip(("binary","product-archive","base-archive","demo","harness"),sys.argv[1:]):
     print(f"    {label}_sha256={hashlib.sha256(open(path,'rb').read()).hexdigest()}")
 PYEOF
 echo "==> WiredUI Demo Play gate: PASS"

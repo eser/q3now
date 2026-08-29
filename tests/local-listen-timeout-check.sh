@@ -6,6 +6,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/lib/wired_paths.sh"
 TIMEOUT_RUNNER="$SCRIPT_DIR/run-with-timeout.py"
 
 analyze_contract() {
@@ -116,7 +117,7 @@ for number,line in enumerate(open(manifest_path,encoding="utf-8",errors="strict"
  manifest.append(item)
 scenario={"kind":"scenario","schema":1,"name":"local-listen-timeout","map":"arena7","cl_timeout_seconds":1,"pause_wait_ms":2500,"progress_wait_ms":500}
 if not manifest or manifest[0]!=scenario:raise SystemExit("FAIL local-timeout scenario")
-if [x.get("role") for x in manifest[1:-1]] != ["gui","pax21","base","harness","active-cfg","bootstrap-cfg"]:raise SystemExit("FAIL local-timeout provenance roles")
+if [x.get("role") for x in manifest[1:-1]] != ["gui","current-archive","content-archive","harness","active-cfg","bootstrap-cfg"]:raise SystemExit("FAIL local-timeout provenance roles")
 for item in manifest[1:-1]:
  if set(item)!={"kind","role","path","bytes","sha256"} or item.get("kind")!="provenance" or not isinstance(item.get("bytes"),int) or item["bytes"]<=0 or re.fullmatch(r"[0-9a-f]{64}",str(item.get("sha256",""))) is None:raise SystemExit("FAIL local-timeout provenance schema")
  data=open(item["path"],"rb").read()
@@ -182,7 +183,7 @@ with open(log_path,"w") as out:
  for item in R:out.write(json.dumps(item)+"\n")
 with open(game_path,"w") as out:
  for item in G:out.write(item+"\n")
-roles=("gui","pax21","base","harness","active-cfg","bootstrap-cfg")
+roles=("gui","current-archive","content-archive","harness","active-cfg","bootstrap-cfg")
 M=[{"kind":"scenario","schema":1,"name":"local-listen-timeout","map":"arena7","cl_timeout_seconds":1,"pause_wait_ms":2500,"progress_wait_ms":500}]
 for role in roles:
  path=manifest_path+"."+role;data=("fixture-"+role).encode();open(path,"wb").write(data);M.append({"kind":"provenance","role":role,"path":os.path.abspath(path),"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()})
@@ -209,11 +210,13 @@ fi
 WIRED="${1:-}";[ -n "$WIRED" ] && [ -x "$WIRED" ] || { echo "usage: $0 /absolute/path/to/wired";exit 64; }
 [ -f "$TIMEOUT_RUNNER" ] || { echo "SKIP: missing timeout runner";exit 77; }
 WIRED="$(cd "$(dirname "$WIRED")" && pwd)/$(basename "$WIRED")";WD="$(dirname "$WIRED")"
-PACK="";for candidate in "$WD" "$WD/../Resources" "$WD/../../..";do [ -f "$candidate/base/pax21.sw3z" ] && PACK="$(cd "$candidate" && pwd)" && break;done;[ -n "$PACK" ] || { echo "SKIP: current pax21 unavailable";exit 77; }
-CONTENT="${WIRED_CONTENT_ROOT:-$PACK}";if [ -f "$CONTENT/base/pax01.sw3z" ];then BASE="$CONTENT/base/pax01.sw3z";elif [ -f "$CONTENT/base/pak0.pk3" ];then BASE="$CONTENT/base/pak0.pk3";else echo "SKIP: set WIRED_CONTENT_ROOT";exit 77;fi
+PACK="$(wired_find_archive_root "$WD" "$WD/../Resources" "$WD/../../.." 2>/dev/null || true)";[ -n "$PACK" ] || { echo "SKIP: current VFS archives unavailable";exit 77; }
+CONTENT="$(wired_find_archive_root "${WIRED_CONTENT_ROOT:-}" "$WIRED_HOME" "$PACK" 2>/dev/null || true)";[ -n "$CONTENT" ] || { echo "SKIP: set WIRED_CONTENT_ROOT";exit 77; }
+CURRENT_ARCHIVE="$(wired_first_archive "$PACK/base")" || exit 77
+CONTENT_ARCHIVE="$(wired_first_archive "$CONTENT/base")" || exit 77
 ROOT="$(mktemp -d -t local-listen-timeout-XXXXXX 2>/dev/null || mktemp -d)";HOME_DIR="$ROOT/home/q3now-preview";FORCED=0
 cleanup(){ local status=$?;trap - EXIT INT TERM;[ "${WIRED_KEEP_ARTIFACTS:-0}" = 1 ] || rm -rf "$ROOT";exit "$status";};trap cleanup EXIT;trap 'exit 130' INT;trap 'exit 143' TERM
-mkdir -p "$HOME_DIR/base";cp "$PACK/base/pax21.sw3z" "$HOME_DIR/base/" || exit 1;cp "$BASE" "$HOME_DIR/base/" || exit 1
+mkdir -p "$HOME_DIR/base";wired_link_content_into_home "$HOME_DIR" "$CONTENT/base" "$PACK/base" || exit 1
 PORT="$(python3 - <<'PYEOF'
 import socket
 s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()
@@ -252,11 +255,11 @@ cat >"$BOOT" <<'CFG'
 set activeAction "exec local-listen-timeout-active.cfg"
 map arena7
 CFG
-MANIFEST="$ROOT/manifest.jsonl";python3 - "$MANIFEST" "$WIRED" "$PACK/base/pax21.sw3z" "$BASE" "$0" "$ACTIVE" "$BOOT" <<'PYEOF'
+MANIFEST="$ROOT/manifest.jsonl";python3 - "$MANIFEST" "$WIRED" "$CURRENT_ARCHIVE" "$CONTENT_ARCHIVE" "$0" "$ACTIVE" "$BOOT" <<'PYEOF'
 import hashlib,json,os,sys
 with open(sys.argv[1],"w") as out:
  out.write(json.dumps({"kind":"scenario","schema":1,"name":"local-listen-timeout","map":"arena7","cl_timeout_seconds":1,"pause_wait_ms":2500,"progress_wait_ms":500},sort_keys=True)+"\n")
- for role,path in zip(("gui","pax21","base","harness","active-cfg","bootstrap-cfg"),sys.argv[2:]):
+ for role,path in zip(("gui","current-archive","content-archive","harness","active-cfg","bootstrap-cfg"),sys.argv[2:]):
   data=open(path,"rb").read();out.write(json.dumps({"kind":"provenance","role":role,"path":os.path.abspath(path),"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()},sort_keys=True)+"\n")
 PYEOF
 LOG="$HOME_DIR/qconsole.jsonl";GAMELOG="$HOME_DIR/base/games.log";STDOUT="$ROOT/stdout";case "$(uname -s)" in Darwin) PLATFORM=(-ApplePersistenceIgnoreState YES);;*) PLATFORM=();;esac

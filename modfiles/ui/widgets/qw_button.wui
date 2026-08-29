@@ -20,7 +20,7 @@
 //   QW_BUTTON(name, label, resting-forecolor, action, width)
 
 #define QW_BUTTON(NAME, LABEL, COLOR, ACT, W) \
-	itemDef { name NAME type 1 rect 0 0 W 0 height FIXED 32px alignX center alignY center padding 0 $spacing_md text LABEL textalign 1 font $font_sans 13 forecolor COLOR forecolor.active $accent backcolor $panelDeep backcolor.active $accentWash border 1px $line bordercolor.active $accent radius $radius_md grow 0 visible 1 action ACT }
+	itemDef { name NAME type 1 width FIXED W height FIXED 0 height FIXED 32px alignX center alignY center padding 0 $spacing_md text LABEL textalign 1 font $font_sans 13 forecolor COLOR forecolor.active $accent backcolor $panelDeep backcolor.active $accentWash border 1px $line bordercolor.active $accent radius $radius_md grow 0 visible 1 action ACT }
 
 // Full-width variant for stacked button columns (e.g. the ESC menu action
 // stack): width PERCENT 1 so each pill fills its container column cross-axis

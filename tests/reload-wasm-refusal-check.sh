@@ -5,6 +5,7 @@
 
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/lib/wired_paths.sh"
 TIMEOUT_RUNNER="$SCRIPT_DIR/run-with-timeout.py"
 
 analyze_contract() {
@@ -87,7 +88,7 @@ for number,line in enumerate(open(manifest_path,encoding="utf-8",errors="strict"
  if not isinstance(item,dict):raise SystemExit("FAIL reload-wasm manifest schema")
  manifest.append(item)
 if not manifest or manifest[0]!={"kind":"scenario","schema":1,"name":"reload-wasm-refusal","map":"arena7"}:raise SystemExit("FAIL reload-wasm scenario")
-if [x.get("role") for x in manifest[1:-1]] != ["gui","headless","pax21","base","harness"]:raise SystemExit("FAIL reload-wasm provenance roles")
+if [x.get("role") for x in manifest[1:-1]] != ["gui","headless","current-archive","content-archive","harness"]:raise SystemExit("FAIL reload-wasm provenance roles")
 for item in manifest[1:-1]:
  if set(item)!={"kind","role","path","bytes","sha256"} or item.get("kind")!="provenance" or not isinstance(item.get("bytes"),int) or item["bytes"]<=0 or re.fullmatch(r"[0-9a-f]{64}",str(item.get("sha256",""))) is None:raise SystemExit("FAIL reload-wasm provenance schema")
  data=open(item["path"],"rb").read()
@@ -141,7 +142,7 @@ for path,rows in ((no_path,no),(head_path,head),(gui_path,gui)):
  with open(path,"w") as out:
   for item in rows:out.write(json.dumps(item)+"\n")
 items=[{"kind":"scenario","schema":1,"name":"reload-wasm-refusal","map":"arena7"}]
-for role in ("gui","headless","pax21","base","harness"):
+for role in ("gui","headless","current-archive","content-archive","harness"):
  path=manifest_path+"."+role;data=("fixture-"+role).encode();open(path,"wb").write(data);items.append({"kind":"provenance","role":role,"path":os.path.abspath(path),"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()})
 items.append({"kind":"result","no_live_rc":0,"headless_rc":0,"gui_rc":0,"headless_pid":101,"gui_controller_pid":102,"timeout":False,"forced":False})
 if mode=="manifest":items[2]["sha256"]="0"*64
@@ -168,16 +169,18 @@ WIRED="${1:-}";[ -n "$WIRED" ] && [ -x "$WIRED" ] || { echo "usage: $0 /absolute
 WIRED="$(cd "$(dirname "$WIRED")" && pwd)/$(basename "$WIRED")";WD="$(dirname "$WIRED")"
 HEADLESS="${WIRED_BINARY_HEADLESS:-}";if [ -z "$HEADLESS" ];then suffix="$(basename "$WIRED")";suffix="${suffix#wired}";for candidate in "$WD/wired-headless$suffix" "$WD/wired-headless.arm64" "$WD/wired-headless.x86_64" "$WD/../../../wired-headless$suffix";do [ -x "$candidate" ] && HEADLESS="$candidate" && break;done;fi
 [ -n "$HEADLESS" ] && [ -x "$HEADLESS" ] || { echo "SKIP: sibling wired-headless unavailable";exit 77; };HEADLESS="$(cd "$(dirname "$HEADLESS")" && pwd)/$(basename "$HEADLESS")"
-PACK="";for candidate in "$WD" "$WD/../Resources" "$WD/../../..";do [ -f "$candidate/base/pax21.sw3z" ] && PACK="$(cd "$candidate" && pwd)" && break;done;[ -n "$PACK" ] || { echo "SKIP: current pax21 unavailable";exit 77; }
-CONTENT="${WIRED_CONTENT_ROOT:-$PACK}";if [ -f "$CONTENT/base/pax01.sw3z" ];then BASE="$CONTENT/base/pax01.sw3z";elif [ -f "$CONTENT/base/pak0.pk3" ];then BASE="$CONTENT/base/pak0.pk3";else echo "SKIP: set WIRED_CONTENT_ROOT";exit 77;fi
+PACK="$(wired_find_archive_root "$WD" "$WD/../Resources" "$WD/../../.." 2>/dev/null || true)";[ -n "$PACK" ] || { echo "SKIP: current VFS archives unavailable";exit 77; }
+CONTENT="$(wired_find_archive_root "${WIRED_CONTENT_ROOT:-}" "$WIRED_HOME" "$PACK" 2>/dev/null || true)";[ -n "$CONTENT" ] || { echo "SKIP: set WIRED_CONTENT_ROOT";exit 77; }
+CURRENT_ARCHIVE="$(wired_first_archive "$PACK/base")" || exit 77
+CONTENT_ARCHIVE="$(wired_first_archive "$CONTENT/base")" || exit 77
 ROOT="$(mktemp -d -t reload-wasm-XXXXXX 2>/dev/null || mktemp -d)";NO_HOME="$ROOT/no/q3now-preview";HEAD_HOME="$ROOT/head/q3now-preview";GUI_HOME="$ROOT/gui/q3now-preview";PID="";OPEN=0;FORCED=0
 cleanup(){ local status=$?;trap - EXIT INT TERM;[ "$OPEN" -eq 1 ] && exec 9>&- || true;[ -n "$PID" ] && kill -TERM "$PID" 2>/dev/null || true;[ -n "$PID" ] && wait "$PID" 2>/dev/null || true;[ "${WIRED_KEEP_ARTIFACTS:-0}" = 1 ] || rm -rf "$ROOT";exit "$status"; };trap cleanup EXIT;trap 'exit 130' INT;trap 'exit 143' TERM
-for home in "$NO_HOME" "$HEAD_HOME" "$GUI_HOME";do mkdir -p "$home/base";cp "$PACK/base/pax21.sw3z" "$home/base/" || exit 1;cp "$BASE" "$home/base/" || exit 1;done
-MANIFEST="$ROOT/manifest.jsonl";python3 - "$MANIFEST" "$WIRED" "$HEADLESS" "$PACK/base/pax21.sw3z" "$BASE" "$0" <<'PYEOF'
+for home in "$NO_HOME" "$HEAD_HOME" "$GUI_HOME";do mkdir -p "$home/base";wired_link_content_into_home "$home" "$CONTENT/base" "$PACK/base" || exit 1;done
+MANIFEST="$ROOT/manifest.jsonl";python3 - "$MANIFEST" "$WIRED" "$HEADLESS" "$CURRENT_ARCHIVE" "$CONTENT_ARCHIVE" "$0" <<'PYEOF'
 import hashlib,json,os,sys
 with open(sys.argv[1],"w") as out:
  out.write(json.dumps({"kind":"scenario","schema":1,"name":"reload-wasm-refusal","map":"arena7"},sort_keys=True)+"\n")
- for role,path in zip(("gui","headless","pax21","base","harness"),sys.argv[2:]):
+ for role,path in zip(("gui","headless","current-archive","content-archive","harness"),sys.argv[2:]):
   data=open(path,"rb").read();out.write(json.dumps({"kind":"provenance","role":role,"path":os.path.abspath(path),"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()},sort_keys=True)+"\n")
 PYEOF
 printf 'echo Q0_RELOAD_WASM_NO_LIVE_ONE_REQUESTED\nreload_wasm\necho Q0_RELOAD_WASM_NO_LIVE_ONE_COMPLETE\necho Q0_RELOAD_WASM_NO_LIVE_TWO_REQUESTED\nreload_wasm\necho Q0_RELOAD_WASM_NO_LIVE_TWO_COMPLETE\necho Q0_RELOAD_WASM_NO_LIVE_DONE\nquit\n' >"$NO_HOME/base/no-live.cfg"

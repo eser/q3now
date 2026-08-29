@@ -491,8 +491,10 @@ static void CG_Missile( centity_t *cent ) {
 	}
 #endif
 
-	// add trails
-	if ( weapon->missileTrailFunc )
+	// pType-owned projectiles (Q1 spike/laser/lavaball) use their own trail
+	// catalog even though their wire weapon is WP_NONE. Do not let WP_NONE's
+	// grapple cable handler claim them.
+	if ( !CG_Q1_MaybeEmitMissileTrail( cent ) && weapon->missileTrailFunc )
 	{
 		weapon->missileTrailFunc( cent, weapon );
 	}
@@ -1188,6 +1190,10 @@ void CG_AddPacketEntities( void ) {
 	// generate and add the entity from the playerstate
 	ps = &cg.predictedPlayerState;
 	BG_PlayerStateToEntityState( ps, &cg.predictedPlayerEntity.currentState, qfalse );
+	if ( cg.thirdPersonCenterAimActive ) {
+		VectorCopy( cg.thirdPersonCenterAimAngles,
+			cg.predictedPlayerEntity.currentState.apos.trBase );
+	}
 	CG_AddCEntity( &cg.predictedPlayerEntity );
 
 	// lerp the non-predicted value for lightning gun origins

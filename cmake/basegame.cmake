@@ -56,6 +56,7 @@ set(CGAME_BINARY_SOURCES ${SOURCE_DIR}/cgame/cg_syscalls.c)
 set(GAME_SOURCES
     ${SOURCE_DIR}/game/g_main.c
     ${SOURCE_DIR}/game/g_objectives.c
+	${SOURCE_DIR}/game/g_entity_metadata.c
     ${SOURCE_DIR}/game/g_save.c
     ${SOURCE_DIR}/game/g_save_registry.c
     ${SOURCE_DIR}/game/g_save_codec.c
@@ -131,6 +132,8 @@ set(GAME_MODULE_SHARED_SOURCES
     ${SOURCE_DIR}/qcommon/q_math.c
     ${SOURCE_DIR}/qcommon/q_shared.c
     ${SOURCE_DIR}/qcommon/q_string.c
+	${SOURCE_DIR}/qcommon/wired/entity/metadata.c
+	${SOURCE_DIR}/qcommon/wired/entity/event.c
     # util/ functions extracted from q_shared.c — must ship with every game module
     ${SOURCE_DIR}/qcommon/util/math.c
     ${SOURCE_DIR}/qcommon/util/hash.c

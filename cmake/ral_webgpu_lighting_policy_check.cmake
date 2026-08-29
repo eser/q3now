@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Wired Engine contributors
+file(READ "${ROOT}/code/render/ral/backends/webgpu/ral_webgpu_lighting.h" HEADER)
+file(READ "${ROOT}/code/render/ral/backends/webgpu/ral_webgpu_lighting.c" SOURCE)
+file(READ "${ROOT}/tests/ral_webgpu_resource_test.c" TEST)
+foreach(needle IN ITEMS "RalWebGpu_CreateTexture" "RalWebGpu_WriteTexture" "RalWebGpu_DestroyResource" "Ral_LightingRuntimePlanExact")
+	string(FIND "${SOURCE}" "${needle}" at)
+	if(at EQUAL -1)
+		message(FATAL_ERROR "WebGPU lighting policy: missing ${needle}")
+	endif()
+endforeach()
+foreach(needle IN ITEMS "RAL_FORMAT_E5B9G9R9_UFLOAT" "RalWebGpu_LightingUpload" "RalWebGpu_LightingDestroy")
+	string(FIND "${TEST}" "${needle}" at)
+	if(at EQUAL -1)
+		message(FATAL_ERROR "WebGPU lighting policy: missing test evidence ${needle}")
+	endif()
+endforeach()
+message(STATUS "ral WebGPU lighting source policy: PASS")

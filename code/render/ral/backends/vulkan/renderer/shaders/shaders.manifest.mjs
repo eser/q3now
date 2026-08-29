@@ -396,4 +396,12 @@ export default [
 	// append-only placement preserves every established shader ordinal.
 	{ stage: 'vert', source: 'ral_opengl_product.vert', output: 'ral_opengl_product_vert_spv' },
 	{ stage: 'frag', source: 'ral_opengl_product.frag', output: 'ral_opengl_product_frag_spv' },
+
+	// Unified-atmosphere froxel chain; append-only placement preserves every
+	// established shader ordinal and portable artifact identity.
+	{ stage: 'comp', source: 'atmosphere_froxel_inject.comp', output: 'atmosphere_froxel_inject_comp_spv' },
+	{ stage: 'comp', source: 'atmosphere_froxel_light.comp', output: 'atmosphere_froxel_light_comp_spv' },
+	{ stage: 'comp', source: 'atmosphere_froxel_integrate.comp', output: 'atmosphere_froxel_integrate_comp_spv' },
+	{ stage: 'comp', source: 'atmosphere_composite.comp', output: 'atmosphere_composite_comp_spv' },
+	{ stage: 'comp', source: 'atmosphere_froxel_cloud.comp', output: 'atmosphere_froxel_cloud_comp_spv' },
 ];

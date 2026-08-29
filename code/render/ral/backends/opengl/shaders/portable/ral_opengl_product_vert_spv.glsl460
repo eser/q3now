@@ -8,6 +8,13 @@ layout(std140, binding = 0) uniform ProductDraw
     vec4 viewUp;
     vec4 projectionLightmap;
     vec4 viewportAlpha;
+    vec4 atmosphereEyeDensity;
+    vec4 atmosphereColorVisibility;
+    vec4 atmosphereHeightCloud;
+    uvec4 atmosphereFroxelGrid;
+    vec4 localSh[4];
+    uvec4 staticLighting;
+    vec4 emissiveRadiance;
 } productDraw;
 
 layout(location = 0) in vec3 in_position;
@@ -17,6 +24,9 @@ layout(location = 1) out vec2 lightmapCoord;
 layout(location = 2) in vec2 in_lightmap_coord;
 layout(location = 2) out vec4 color;
 layout(location = 3) in vec4 in_color;
+layout(location = 3) out vec3 worldPosition;
+layout(location = 4) out vec3 worldNormal;
+layout(location = 4) in vec3 in_normal;
 
 void main()
 {
@@ -33,5 +43,7 @@ void main()
     texCoord = in_tex_coord;
     lightmapCoord = in_lightmap_coord;
     color = in_color;
+    worldPosition = in_position;
+    worldNormal = normalize(in_normal);
 }
 
