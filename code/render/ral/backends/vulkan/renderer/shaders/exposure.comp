@@ -77,11 +77,13 @@ layout(std430, set = 0, binding = 2) buffer ExposureBlock {
 	float brightness;
 	// Sunray sun-screen params — folded into the shared block for buffer-size parity
 	// with the host vk_exposure_block_t + tonemap.frag. The reduce compute does not
-	// read these; declared so the std430 block size matches the 56-byte buffer.
+	// read these; declared so the std430 block matches the host/fragment ABI.
 	float sunScreenX;
 	float sunScreenY;
 	float sunrayIntensity;
 	float sunrayDecay;
+	float shadowExponent;
+	float shadowPivot;
 };
 
 layout(push_constant) uniform Push {

@@ -16,25 +16,33 @@
 // menus are HUD-state-toggled; out of this 0-LoC scope).
 // Tokens: $accent $line (frame); the widget self-colours its content.
 itemDef {
-	name "hud_active_scoreboard_overlay"
+	name "hud_active_scoreboard_overlay_stage"
 	type container
-	position absolute
-	top 15.56vh
-	left 18.75vw
-	width 62.5vw
-	height 42vh
+	width PERCENT 1
+	height PERCENT 1
 	direction column
-	background $hud_panel_bg
-	border 1px $accent
+	padding 15.56vh 18.75vw 0 18.75vw
+	grow 1
 
 	itemDef {
-		name "hud_active_scorelist"
-		type scorelist_widget
-		width PERCENT 1.0
-		height PERCENT 1.0
-		feeder "scoreboard"
-		forecolor $bone
-		decoration
-		visible 1
+		name "hud_active_scoreboard_overlay"
+		type container
+		width PERCENT 1
+		height 42vh
+		direction column
+		background $hud_panel_bg
+		border 1px $accent
+		grow 0
+
+		itemDef {
+			name "hud_active_scorelist"
+			type scorelist_widget
+			width PERCENT 1.0
+			height PERCENT 1.0
+			feeder "scoreboard"
+			forecolor $bone
+			decoration
+			visible 1
+		}
 	}
 }

@@ -6,6 +6,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/lib/wired_paths.sh"
 WATCHER="$SCRIPT_DIR/wiredui-demo-disappeared-watcher.py"
 CFG_SOURCE="$SCRIPT_DIR/fixtures/wiredui-demo-disappeared.cfg"
 TIMEOUT_RUNNER="$SCRIPT_DIR/run-with-timeout.py"
@@ -77,7 +78,7 @@ queue=exact("WiredUI: queued validated demo playback ",
  "WiredUI: queued validated demo playback name=stale.loose","DEBUG","ui","queue")
 close=exact("WiredUI: close all postcondition ",
  "WiredUI: close all postcondition depth=0 active=none catcher_ui=0 paused=0","DEBUG","ui","close")
-not_found=exact("Not found: demos/","Not found: demos/stale.loose.dm_74","INFO","client","filesystem miss")
+not_found=exact("Not found: demos/","Not found: demos/stale.loose.dm_75","INFO","client","filesystem miss")
 reject=exact("Demo playback open rejected ",
  "Demo playback open rejected origin=demo-ui stage=probe continuation=0 disconnect=0","INFO","client","open rejection")
 error=exact("Error: The selected demo ",
@@ -111,9 +112,11 @@ if [x[2] for x in state_rows] != ['"com_errorMessage" is:"The selected demo is n
  raise SystemExit("FAIL disappeared error state")
 if any(str(x[1].get("sev","")).upper()!="INFO" or str(x[1].get("cat","")).lower()!="system" for x in state_rows):
  raise SystemExit("FAIL disappeared error state metadata")
-retry_rows=[(i,rows[i],vals[i]) for i in range(len(rows)) if vals[i].startswith('"ui_errorRetry" is:')]
-if [x[2] for x in retry_rows] != ['"ui_errorRetry" is:"0"']:raise SystemExit("FAIL disappeared retry state")
-if any(str(x[1].get("sev","")).upper()!="INFO" or str(x[1].get("cat","")).lower()!="system" for x in retry_rows):
+retry_rows=[]
+for i,value in enumerate(vals[:-1]):
+ if value=="  key:   ui_errorRetry":retry_rows.append((i,rows[i],rows[i+1],vals[i+1]))
+if [x[3] for x in retry_rows] != ['  text:  "0"']:raise SystemExit("FAIL disappeared retry state")
+if any(str(row.get("sev","")).upper()!="INFO" or str(row.get("cat","")).lower()!="client" for x in retry_rows for row in x[1:3]):
  raise SystemExit("FAIL disappeared retry state metadata")
 nextdemo_rows=[(i,rows[i],vals[i]) for i in range(len(rows)) if vals[i].startswith('"nextdemo" is:')]
 if [x[2] for x in nextdemo_rows] != ['"nextdemo" is:""']:raise SystemExit("FAIL disappeared continuation state")
@@ -146,7 +149,7 @@ for i,event in enumerate(events):
  if not isinstance(event.get("elapsed_ms"),int) or event["elapsed_ms"]<0:raise SystemExit("FAIL disappeared watcher time")
  if i and event["elapsed_ms"]<events[i-1]["elapsed_ms"]:raise SystemExit("FAIL disappeared watcher chronology")
 for event in (events[0],events[2]):
- if event.get("basename")!="stale.loose.dm_74" or event.get("bytes")!=16 or event.get("sha256")!=wanted_sha:
+ if event.get("basename")!="stale.loose.dm_75" or event.get("bytes")!=16 or event.get("sha256")!=wanted_sha:
   raise SystemExit("FAIL disappeared watcher file authority")
 if (events[1].get("marker")!="Q0_DEMO_DISAPPEAR_ARMED"
  or events[1].get("selection_name")!="stale.loose" or events[1].get("selection_generation")!=2
@@ -194,7 +197,7 @@ add("DEBUG","ui","wui_menu_nav focus: focused item 'btn_play_demo' (top index -1
 add("DEBUG","ui","WiredUI: queued validated demo playback name=stale.loose")
 add("DEBUG","ui","WiredUI: close all postcondition depth=0 active=none catcher_ui=0 paused=0")
 add("DEBUG","ui","wui_menu_nav: K_ENTER dispatched")
-add("INFO","client","Not found: demos/stale.loose.dm_74")
+add("INFO","client","Not found: demos/stale.loose.dm_75")
 add("INFO","client","Demo playback open rejected origin=demo-ui stage=probe continuation=0 disconnect=0")
 add("ERROR","system","Error: The selected demo is no longer available.")
 add("DEBUG","ui","WiredUI: push menu 'main' (depth 1)")
@@ -203,7 +206,8 @@ add("DEBUG","ui","WiredUI: demos loaded protocol=74 count=0 generation=3")
 add("DEBUG","ui","WiredUI: push menu 'error_popup' (depth 3)")
 add("INFO","client","Demo playback open recovery origin=demo-ui stage=probe depth=3 popup=1")
 add("INFO","system",'"com_errorMessage" is:"The selected demo is no longer available."')
-add("INFO","system",'"ui_errorRetry" is:"0"')
+add("INFO","client","  key:   ui_errorRetry")
+add("INFO","client",'  text:  "0"')
 add("INFO","system",'"nextdemo" is:""')
 add("DEBUG","ui","wui_menu_nav focus: focused item 'btn_back' (top index -1)")
 add("DEBUG","ui","WiredUI: pop menu (depth 2)")
@@ -214,18 +218,18 @@ add("WARN","ui","WiredUI: no demo selected")
 add("DEBUG","ui","wui_menu_nav: K_ENTER dispatched")
 add("INFO","system","Q0_DEMO_DISAPPEAR_COMPLETE")
 def find(text):return next(i for i,r in enumerate(rows) if text in r["msg"])
-events=[{"kind":"ready","basename":"stale.loose.dm_74","bytes":16,"sha256":sha,"elapsed_ms":0},
+events=[{"kind":"ready","basename":"stale.loose.dm_75","bytes":16,"sha256":sha,"elapsed_ms":0},
  {"kind":"marker","marker":"Q0_DEMO_DISAPPEAR_ARMED","marker_line":find("Q0_DEMO_DISAPPEAR_ARMED")+1,"selection_line":find("demo feeder selection")+1,"selection_name":"stale.loose","selection_generation":2,"elapsed_ms":10},
- {"kind":"removed","basename":"stale.loose.dm_74","bytes":16,"sha256":sha,"exists_after":False,"queue_seen_before_remove":False,"elapsed_ms":11},
+ {"kind":"removed","basename":"stale.loose.dm_75","bytes":16,"sha256":sha,"exists_after":False,"queue_seen_before_remove":False,"elapsed_ms":11},
  {"kind":"stopped","reason":"complete","elapsed_ms":12}]
 if mode=="missing-reject":rows.pop(find("open rejected"))
-elif mode=="path-error":rows[find("Error: The selected")]["msg"]="Error: couldn't open demos/stale.loose.dm_74\n"
+elif mode=="path-error":rows[find("Error: The selected")]["msg"]="Error: couldn't open demos/stale.loose.dm_75\n"
 elif mode=="disconnect":rows[find("disconnect=0")]["msg"]=rows[find("disconnect=0")]["msg"].replace("disconnect=0","disconnect=1")
 elif mode=="direct-origin":rows[find("origin=demo-ui")]["msg"]=rows[find("origin=demo-ui")]["msg"].replace("origin=demo-ui","origin=direct")
 elif mode=="nextdemo":rows.insert(find("open rejected"),{"sev":"DEBUG","cat":"client","msg":"CL_NextDemo: exec successor.cfg\n"})
 elif mode=="missing-zero":rows[find("count=0 generation=3")]["msg"]=rows[find("count=0 generation=3")]["msg"].replace("count=0","count=1")
 elif mode=="stale-row":rows.insert(find("error_popup"),{"sev":"DEBUG","cat":"ui","msg":"WiredUI: demo feeder row=0 name=stale.loose generation=3\n"})
-elif mode=="retry":rows[find("ui_errorRetry")]["msg"]='"ui_errorRetry" is:"1"\n'
+elif mode=="retry":rows[find('text:  "0"')]["msg"]='  text:  "1"\n'
 elif mode=="missing-popup":rows.pop(find("error_popup"))
 elif mode=="wrong-stage":rows[find("open rejected")]["msg"]=rows[find("open rejected")]["msg"].replace("stage=probe","stage=playback")
 elif mode=="duplicate-recovery":
@@ -240,7 +244,7 @@ elif mode=="watch-hash":events[2]["sha256"]="0"*64
 elif mode=="watch-after-queue":events[2]["queue_seen_before_remove"]=True
 elif mode=="missing-complete":rows.pop(find("Q0_DEMO_DISAPPEAR_COMPLETE"))
 elif mode=="watch-exists":events[2]["exists_after"]=True
-elif mode=="not-found":rows[find("Not found:")]["msg"]="Not found: demos/other.dm_74\n"
+elif mode=="not-found":rows[find("Not found:")]["msg"]="Not found: demos/other.dm_75\n"
 elif mode=="not-found-metadata":rows[find("Not found:")]["sev"]="WARN"
 elif mode=="play-enter-order":
  i=find("Not found:"); enter=max(j for j,r in enumerate(rows[:i]) if r["msg"]=="wui_menu_nav: K_ENTER dispatched\n"); rows.insert(i+1,rows.pop(enter))
@@ -278,13 +282,15 @@ fi
 
 WIRED="${1:-}"; [ -n "$WIRED" ] && [ -x "$WIRED" ] || { echo "usage: $0 /absolute/path/to/wired"; exit 64; }
 WIRED="$(cd "$(dirname "$WIRED")" && pwd)/$(basename "$WIRED")"; WD="$(dirname "$WIRED")"
-PACK=""; for candidate in "$WD" "$WD/../Resources"; do [ -f "$candidate/base/pax21.sw3z" ] && PACK="$candidate" && break; done
-[ -n "$PACK" ] || { echo "SKIP: current pax21 unavailable"; exit 77; }
-CONTENT="${WIRED_CONTENT_ROOT:-$PACK}"; if [ -f "$CONTENT/base/pax01.sw3z" ]; then BASE="$CONTENT/base/pax01.sw3z"; elif [ -f "$CONTENT/base/pak0.pk3" ]; then BASE="$CONTENT/base/pak0.pk3"; else echo "SKIP: set WIRED_CONTENT_ROOT"; exit 77; fi
+PACK="$(wired_find_archive_root "$WD" "$WD/../Resources" 2>/dev/null || true)"
+[ -n "$PACK" ] || { echo "SKIP: current VFS archives unavailable"; exit 77; }
+CONTENT="$(wired_find_archive_root "${WIRED_CONTENT_ROOT:-}" "$WIRED_HOME" "$PACK" 2>/dev/null || true)"
+[ -n "$CONTENT" ] || { echo "SKIP: set WIRED_CONTENT_ROOT"; exit 77; }
+CURRENT_ARCHIVE="$(wired_first_archive "$PACK/base")"; BASE="$(wired_first_archive "$CONTENT/base")"
 ROOT="$(mktemp -d -t wired-demo-disappeared-XXXXXX 2>/dev/null || mktemp -d)"; HOME_DIR="$ROOT/home/q3now-preview"; RUN="$ROOT/run"; EVENTS="$ROOT/watcher.jsonl"; WPID=""
 cleanup(){ [ -n "$WPID" ] && kill -TERM "$WPID" 2>/dev/null || true; [ -n "$WPID" ] && wait "$WPID" 2>/dev/null || true; [ "${WIRED_KEEP_ARTIFACTS:-0}" = 1 ] || rm -rf "$ROOT"; }; trap cleanup EXIT INT TERM
-mkdir -p "$HOME_DIR/base/demos" "$RUN"; cp "$PACK/base/pax21.sw3z" "$HOME_DIR/base/" || exit 1; cp "$BASE" "$HOME_DIR/base/" || exit 1; cp "$CFG_SOURCE" "$HOME_DIR/base/" || exit 1
-python3 - "$ROOT/manifest.jsonl" "$WIRED" "$PACK/base/pax21.sw3z" "$BASE" "$0" "$WATCHER" "$CFG_SOURCE" "$TIMEOUT_RUNNER" <<'PYEOF'
+mkdir -p "$HOME_DIR/base/demos" "$RUN"; wired_link_content_into_home "$HOME_DIR" "$CONTENT/base" "$PACK/base" || exit 1; LIVE_CFG="wiredui-demo-disappeared-live.cfg"; cp "$CFG_SOURCE" "$HOME_DIR/base/$LIVE_CFG" || exit 1
+python3 - "$ROOT/manifest.jsonl" "$WIRED" "$CURRENT_ARCHIVE" "$BASE" "$0" "$WATCHER" "$CFG_SOURCE" "$TIMEOUT_RUNNER" <<'PYEOF'
 import hashlib,json,os,sys
 out,*paths=sys.argv[1:]
 with open(out,"w",encoding="utf-8") as sink:
@@ -296,15 +302,15 @@ with open(out,"w",encoding="utf-8") as sink:
    "path":os.path.abspath(path),"bytes":os.path.getsize(path),
    "sha256":digest.hexdigest()},sort_keys=True)+"\n")
 PYEOF
-python3 - "$HOME_DIR/base/demos/stale.loose.dm_74" "$DEMO_HEX" <<'PYEOF'
+python3 - "$HOME_DIR/base/demos/stale.loose.dm_75" "$DEMO_HEX" <<'PYEOF'
 import sys
 open(sys.argv[1],"wb").write(bytes.fromhex(sys.argv[2]))
 PYEOF
-python3 "$WATCHER" --log "$HOME_DIR/qconsole.jsonl" --file "$HOME_DIR/base/demos/stale.loose.dm_74" --events "$EVENTS" --marker Q0_DEMO_DISAPPEAR_ARMED & WPID=$!
+python3 "$WATCHER" --log "$HOME_DIR/qconsole.jsonl" --file "$HOME_DIR/base/demos/stale.loose.dm_75" --events "$EVENTS" --marker Q0_DEMO_DISAPPEAR_ARMED & WPID=$!
 for _ in $(seq 1 100); do [ -s "$EVENTS" ] && break; sleep .02; done
 case "$(uname -s)" in Darwin) PLATFORM_ARGS=(-ApplePersistenceIgnoreState YES);; *) PLATFORM_ARGS=();; esac
-python3 "$TIMEOUT_RUNNER" --timeout 90 --kill-after 10 --cwd "$RUN" --stdout "$ROOT/wired.stdout" -- "$WIRED" "${PLATFORM_ARGS[@]}" +set fs_homepath "$HOME_DIR" +set com_automated 1 +set com_noHardReboot 1 +set s_initsound 0 +set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set log_severity DEBUG +set log_file_severity DEBUG +set log_file_mode overwrite_synced +exec wiredui-demo-disappeared.cfg || exit 1
+python3 "$TIMEOUT_RUNNER" --timeout 90 --kill-after 10 --cwd "$RUN" --stdout "$ROOT/wired.stdout" -- "$WIRED" "${PLATFORM_ARGS[@]}" +set fs_homepath "$HOME_DIR" +set com_automated 1 +set com_noHardReboot 1 +set s_initsound 0 +set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set log_severity DEBUG +set log_file_severity DEBUG +set log_file_mode overwrite_synced +exec "$LIVE_CFG" || exit 1
 wait "$WPID" || { echo "FAIL watcher"; exit 1; }; WPID=""
-[ ! -e "$HOME_DIR/base/demos/stale.loose.dm_74" ] || { echo "FAIL loose demo remains"; exit 1; }
+[ ! -e "$HOME_DIR/base/demos/stale.loose.dm_75" ] || { echo "FAIL loose demo remains"; exit 1; }
 analyze_contract "$HOME_DIR/qconsole.jsonl" "$EVENTS"
 echo "PASS WiredUI disappeared loose-demo gate"

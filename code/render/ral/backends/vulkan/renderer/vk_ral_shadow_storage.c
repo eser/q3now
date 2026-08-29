@@ -30,6 +30,8 @@ static qboolean ConfigValid( const vkRalShadowStorageConfig_t *config,
 			|| config->elementSize == 0u || config->elementCount == 0u
 			|| config->elementCount > VK_RAL_SHADOW_STORAGE_MAX_ELEMENTS )
 		return qfalse;
+	if ( ( (uint32_t)config->extraUsage & ~RAL_BUFFER_TRANSFER_SRC ) != 0u )
+		return qfalse;
 	if ( requireDebugName == qtrue
 			&& ( !config->debugName || !config->debugName[0] ) ) return qfalse;
 	byteSize = (uint64_t)config->elementSize * config->elementCount;
@@ -94,6 +96,7 @@ static qboolean OwnerValid( const vkRalShadowStorageOwner_t *owner ) {
 	config.bufferCount = owner->bufferCount;
 	config.elementSize = owner->elementSize;
 	config.elementCount = owner->elementCount;
+	config.extraUsage = owner->extraUsage;
 	if ( !ConfigValid( &config, qfalse, &byteSize )
 			|| byteSize != owner->byteSize ) return qfalse;
 	for ( i = 0u; i < VK_RAL_SHADOW_STORAGE_MAX_BUFFERS; i++ ) {
@@ -255,7 +258,8 @@ qboolean VK_RalShadowStorageEnsure( vkRalShadowStorageOwner_t *owner,
 		&& owner->backend == backend && owner->byteSize == byteSize
 		&& owner->bufferCount == config->bufferCount
 		&& owner->elementSize == config->elementSize
-		&& owner->elementCount == config->elementCount;
+		&& owner->elementCount == config->elementCount
+		&& owner->extraUsage == config->extraUsage;
 	if ( VK_RalShadowStorageHasLive( owner )
 			|| owner->ownerGeneration >= UINT64_MAX - 1u ) return qfalse;
 	for ( i = 0u; i < config->bufferCount; i++ )
@@ -266,9 +270,13 @@ qboolean VK_RalShadowStorageEnsure( vkRalShadowStorageOwner_t *owner,
 	candidate.bufferCount = config->bufferCount;
 	candidate.elementSize = config->elementSize;
 	candidate.elementCount = config->elementCount;
+	candidate.extraUsage = config->extraUsage;
 	memset( &createInfo, 0, sizeof( createInfo ) );
 	createInfo.size = byteSize;
-	createInfo.usage = RAL_BUFFER_STORAGE | RAL_BUFFER_TRANSFER_DST;
+	createInfo.usage = RAL_BUFFER_STORAGE | RAL_BUFFER_TRANSFER_DST
+		| RAL_BUFFER_INDIRECT;
+	createInfo.usage = (ralBufferUsage_t)( createInfo.usage
+		| config->extraUsage );
 	createInfo.memory = RAL_MEMORY_HOST_COHERENT;
 	createInfo.debugName = config->debugName;
 	for ( i = 0u; i < config->bufferCount; i++ ) {

@@ -32,6 +32,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 W="${WIDTH:-1440}"
 H="${HEIGHT:-900}"
+PNG2RAW="${PNG2RAW:-$WIRED_SOURCE/tools/png2raw/png2raw}"
 
 # ── analyzer ────────────────────────────────────────────────────────────────
 # Pure function of two PNGs, so it is testable without an engine or a display.
@@ -45,31 +46,54 @@ PY
 }
 
 png_distinct() {  # -> distinct colours over a FIXED-SIZE sample
-    python3 - "$1" <<'PY'
-import zlib,struct,sys
-d=open(sys.argv[1],'rb').read()
-idat=b''; i=8
-while i < len(d):
-    ln=struct.unpack('>I',d[i:i+4])[0]; t=d[i+4:i+8]
-    if t==b'IDAT': idat+=d[i+8:i+8+ln]
-    i+=12+ln
-raw=zlib.decompress(idat)
-# Take the SAME NUMBER of samples from both images, not the same stride.
-#
-# A fixed stride samples a 2880x1800 frame four times as often as a 1440x900
-# one, so the larger image reports ~4x the colours purely as an artifact. That
-# very artifact was briefly misread here as "the supersample path draws a poorer
-# frame" (measured 44 vs 174, a 3.95x ratio that is entirely explained by the
-# 4x pixel count). Normalising by sample count makes the comparison mean what
-# it claims to.
-SAMPLES = 20000
-step = max(3, len(raw)//SAMPLES)
-print(len({raw[j:j+3] for j in range(0, len(raw), step)}))
+    "$PNG2RAW" "$1" | python3 -c '
+import sys
+raw=sys.stdin.buffer.read()
+samples=20000
+pixels=len(raw)//3
+step=max(1,pixels//samples)
+print(len({raw[i*3:i*3+3] for i in range(0,pixels,step)}))'
+}
+
+analyze_menu_geometry() {
+    python3 - "$1" "$2" "$PNG2RAW" <<'PY'
+import struct,subprocess,sys
+
+def load(path, decoder):
+    data=open(path,'rb').read(24)
+    w,h=struct.unpack('>II',data[16:24])
+    raw=subprocess.check_output([decoder,path])
+    return w,h,raw
+
+def authored_fill_box(image):
+    w,h,raw=image
+    target=(58,50,42)
+    xs=[]; ys=[]
+    for y in range(h//10, h*9//10):
+        row=y*w*3
+        # The authored pause panel occupies the central third.  Restricting the
+        # probe to it prevents similarly coloured world texels outside the
+        # opaque panel from widening the measured bounding box.
+        for x in range(w//3, w*2//3):
+            i=row+x*3
+            if max(abs(raw[i+j]-target[j]) for j in range(3)) <= 5:
+                xs.append(x); ys.append(y)
+    if len(xs) < 1000:
+        raise SystemExit(f"FAIL: authored menu fill not measurable ({len(xs)} pixels)")
+    return (min(xs),min(ys),max(xs),max(ys),len(xs))
+
+a=authored_fill_box(load(sys.argv[1],sys.argv[3]))
+b=authored_fill_box(load(sys.argv[2],sys.argv[3]))
+edge_delta=max(abs(a[i]-b[i]) for i in range(4))
+count_delta=abs(a[4]-b[4])/max(a[4],b[4])
+if edge_delta > 4 or count_delta > .05:
+    raise SystemExit(f"FAIL: supersample changed menu geometry: ss={a} noss={b}")
+print(f"    menu authored-fill geometry: ss={a} noss={b}")
 PY
 }
 
 analyze_parity() {
-    local ss="$1" noss="$2" want="$3" rc=0
+    local ss="$1" noss="$2" want="$3" mode="${4:-generic}" rc=0
     echo "==> supersample parity"
 
     for f in "$ss" "$noss"; do
@@ -81,13 +105,15 @@ analyze_parity() {
     echo "    supersample=1 : $dss"
     echo "    supersample=0 : $dnoss"
 
-    # 1. The supersampled capture is the display-independent one; it must be
-    #    exactly the requested size on every machine.
-    if [ "$dss" != "$want" ]; then
-        echo "  FAIL: supersample capture is $dss, expected $want"
-        echo "        (vk.capture.image is sized by gls.captureWidth/Height —"
-        echo "         tr_init.c:693-709. A mismatch means r_renderScale/"
-        echo "         r_renderWidth/Height did not take, or r_fbo is off.)"
+    # 1. Both paths are presentation artifacts. They must use the same output
+    #    extent, which may be an integer HiDPI multiple of the logical window.
+    local got_w got_h want_w want_h
+    got_w="${dss%x*}"; got_h="${dss#*x}"
+    want_w="${want%x*}"; want_h="${want#*x}"
+    if [ "$dss" != "$dnoss" ] || [ $((got_w % want_w)) -ne 0 ] \
+       || [ $((got_h % want_h)) -ne 0 ] \
+       || [ $((got_w / want_w)) -ne $((got_h / want_h)) ]; then
+        echo "  FAIL: capture extents ss=$dss noss=$dnoss are not one shared presentation multiple of $want"
         rc=1
     fi
 
@@ -119,7 +145,11 @@ analyze_parity() {
         fi
     fi
 
-    [ "$rc" = 0 ] && echo "  PASS: both paths populated, supersample capture is $want"
+    if [ "$mode" = menu ] && ! analyze_menu_geometry "$ss" "$noss"; then
+        rc=1
+    fi
+
+    [ "$rc" = 0 ] && echo "  PASS: both paths populated at shared presentation extent $dss"
     return "$rc"
 }
 
@@ -144,9 +174,9 @@ def png(path,w,h,mode):
         b'\x89PNG\r\n\x1a\n'
         +chunk(b'IHDR',struct.pack('>IIBBBBB',w,h,8,2,0,0,0))
         +chunk(b'IDAT',zlib.compress(rows))+chunk(b'IEND',b''))
-for n,w,h,m in [('good_ss.png',64,40,'rich'),('good_noss.png',96,60,'rich'),
-                ('blank_ss.png',64,40,'blank'),('blank_noss.png',96,60,'blank'),
-                ('small_ss.png',32,20,'rich'),('poor_noss.png',96,60,'poor')]:
+for n,w,h,m in [('good_ss.png',64,40,'rich'),('good_noss.png',64,40,'rich'),
+                ('blank_ss.png',64,40,'blank'),('blank_noss.png',64,40,'blank'),
+                ('small_ss.png',32,20,'rich'),('poor_noss.png',64,40,'poor')]:
     png(n,w,h,m)
 PY
     n=0; fails=0
@@ -176,11 +206,19 @@ fi
 # WIRED_KEEP_ARTIFACTS=1 keeps the two captures and prints where they are, the
 # same affordance the ral-*-check.sh gates offer. A size/richness verdict tells
 # you THAT two frames differ; investigating WHY needs the frames themselves.
-OUT="$(mktemp -d)"
+# Never write archived cvars or screenshots into the player's real home.  Stage
+# the currently selected game's paks into an isolated home and pass it to the
+# engine explicitly; merely changing cwd does not change fs_homepath.
+RUN_ROOT="$(mktemp -d "$WIRED_TMP/q3now-supersample-ui-XXXXXX")"
+WIRED_TMP="$RUN_ROOT"
+WIRED_HOME="$(wired_isolated_home supersample-ui)"
+WIRED_BASE="$WIRED_HOME/base"
+OUT="$RUN_ROOT/evidence"
+mkdir -p "$OUT"
 if [ "${WIRED_KEEP_ARTIFACTS:-0}" = 1 ]; then
     trap 'echo "  retained: $OUT"' EXIT
 else
-    trap 'rm -rf "$OUT"' EXIT
+    trap 'rm -rf "$RUN_ROOT"' EXIT
 fi
 
 # SCENE selects what is on screen when the shot is taken.
@@ -219,7 +257,7 @@ capture_at() {  # $1 = supersample 0|1, $2 = destination png
     local ss="$1" dest="$2"
     local shots="$WIRED_BASE/screenshots"
     mkdir -p "$shots"
-    local before; before="$(ls -t "$shots" 2>/dev/null | head -1 || echo "")"
+    local marker; marker="$(wired_shot_marker)"
 
     local scene_cmds
     case "$SCENE" in
@@ -230,8 +268,13 @@ capture_at() {  # $1 = supersample 0|1, $2 = destination png
             scene_cmds=$'map arena1\nwait 40\nscreenshot\nwait 200\nquit' ;;
         attract)
             scene_cmds=$'set attract_delay 0\nattract_restart\nwait 200\nwui_test_keydown 32\nwait 400\nscreenshot\nwait 200\nquit' ;;
+        menu)
+            # Stable in-game menu: unlike the attract reel this has no
+            # phase-dependent panel transition, so off/on captures prove UI
+            # geometry rather than accidentally sampling two animation times.
+            scene_cmds=$'map arena1\nwaitForMap\nwait 90\nwui_push ingame\nwait 90\nscreenshot\nwait 30\nquit' ;;
         *)
-            echo "unknown SCENE '$SCENE' (want attract|loading)" >&2; return 1 ;;
+            echo "unknown SCENE '$SCENE' (want attract|loading|menu)" >&2; return 1 ;;
     esac
 
     # RENDER_W/H default to the window size, which is what the parity check
@@ -254,15 +297,17 @@ vid_restart
 wait 300
 $scene_cmds
 EOF
-    ( cd "$WIRED_BASE/.." && "$WIRED_BINARY" +exec "$(basename "$cfg")" ) >/dev/null 2>&1 || true
+    ( cd "$WIRED_BASE/.." && "$WIRED_BINARY" \
+        +set fs_homepath "$WIRED_HOME" \
+        +set fs_installpath "$WIRED_INSTALL" \
+        +exec "$(basename "$cfg")" ) >/dev/null 2>&1 || true
 
-    local new; new="$(ls -t "$shots" 2>/dev/null | grep -v "^${before}\$" | head -1)"
-    [ -n "$new" ] || return 1
-    cp "$shots/$new" "$dest"
+    local new; new="$(wired_newest_shot "$marker" "$shots")" || return 1
+    cp "$new" "$dest"
 }
 
 capture_at 1 "$OUT/ss.png"   || { echo "SKIP: no screenshot with supersample on";  exit 77; }
 capture_at 0 "$OUT/noss.png" || { echo "SKIP: no screenshot with supersample off"; exit 77; }
 
-analyze_parity "$OUT/ss.png" "$OUT/noss.png" "${W}x${H}" || exit 1
+analyze_parity "$OUT/ss.png" "$OUT/noss.png" "${W}x${H}" "$SCENE" || exit 1
 exit 0

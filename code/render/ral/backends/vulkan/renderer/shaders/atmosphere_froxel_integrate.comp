@@ -1,0 +1,44 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Wired Engine contributors
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(set=0,binding=0) uniform Params {
+	uvec4 gridHistory;
+	vec4 depthRangeTemporal; // near, far, historyWeight, rejection
+} p;
+layout(std430,set=0,binding=1) readonly buffer LitMedia { vec4 source[]; };
+layout(std430,set=0,binding=2) readonly buffer History { vec4 previous[]; };
+layout(std430,set=0,binding=3) writeonly buffer Integrated { vec4 integrated[]; };
+layout(std430,set=0,binding=4) writeonly buffer NextHistory { vec4 nextHistory[]; };
+
+void main() {
+	uvec2 c = gl_GlobalInvocationID.xy;
+	if (any(greaterThanEqual(c, p.gridHistory.xy))) return;
+	uint sliceStride = p.gridHistory.x * p.gridHistory.y;
+	float transmittance = 1.0;
+	vec3 radiance = vec3(0.0);
+	float nearZ = max(p.depthRangeTemporal.x, 0.01);
+	float farZ = max(p.depthRangeTemporal.y, nearZ + 0.01);
+	float previousZ = nearZ;
+	for (uint z = 0u; z < p.gridHistory.z; ++z) {
+		uint index = z * sliceStride + c.y * p.gridHistory.x + c.x;
+		float slice = (float(z) + 1.0) / float(p.gridHistory.z);
+		float currentZ = nearZ * pow(farZ / nearZ, slice);
+		float stepLength = currentZ - previousZ;
+		vec4 m = source[index];
+		float stepT = exp(-max(m.a, 0.0) * stepLength);
+		radiance += transmittance * m.rgb * (1.0 - stepT)
+			/ max(m.a, 1e-5);
+		transmittance *= stepT;
+		vec4 current = vec4(radiance, transmittance);
+		if (p.gridHistory.w != 0u) {
+			float weight = clamp(p.depthRangeTemporal.z, 0.0, 0.98)
+				* (1.0 - clamp(p.depthRangeTemporal.w, 0.0, 1.0));
+			current = mix(current, previous[index], weight);
+		}
+		integrated[index] = current;
+		nextHistory[index] = current;
+		previousZ = currentZ;
+	}
+}

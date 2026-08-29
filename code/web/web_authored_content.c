@@ -88,14 +88,16 @@ static int EventType( const char *verb ) {
 int WiredWebAuthored_Decode( const char *bytes, size_t size,
 		wiredWebAuthoredCatalog_t *out, char *error, size_t errorSize ) {
 	size_t offset = 0;
-	int sawHeader = 0, sawMenu = 0, sawScene = 0, sawEnd = 0;
+	int sawHeader = 0, sawPalette = 0, sawMenu = 0, sawServer = 0;
+	int sawConsole = 0, sawLoading = 0, sawHud = 0, sawScene = 0, sawEnd = 0;
+	int decodedServerColumns = 0;
 	int curveType = WCURVE_CATMULLROM, boundary = WCURVE_BT_FREE;
 	if ( !bytes || !size || !out || size > 131072u ) {
 		SetError( error, errorSize, "invalid authored catalog extent" ); return 0;
 	}
 	memset( out, 0, sizeof( *out ) );
 	while ( offset < size ) {
-		char line[1024], *cursor, *kind;
+		char line[4096], *cursor, *kind;
 		size_t start = offset, length;
 		while ( offset < size && bytes[offset] != '\n' ) ++offset;
 		length = offset - start;
@@ -110,6 +112,24 @@ int WiredWebAuthored_Decode( const char *bytes, size_t size,
 			if ( sawHeader || !digest || strlen( digest ) != 64u ) { SetError( error, errorSize, "invalid authored catalog header" ); return 0; }
 			for ( i = 0; i < 64u; ++i ) if ( HexNibble( digest[i] ) < 0 ) { SetError( error, errorSize, "invalid authored source digest" ); return 0; }
 			memcpy( out->sourceDigest, digest, 65u ); out->schemaVersion = WIRED_WEB_AUTHORED_SCHEMA_VERSION; sawHeader = 1;
+		} else if ( !strcmp( kind, "PALETTE" ) ) {
+			vec4_t *colors[] = { &out->palette.ink, &out->palette.panel,
+				&out->palette.line, &out->palette.bone, &out->palette.boneDim,
+				&out->palette.accent, &out->palette.accentDim,
+				&out->palette.accentSoft };
+			int i, channel;
+			if ( !sawHeader || sawPalette ) {
+				SetError( error, errorSize, "invalid authored palette record" ); return 0;
+			}
+			for ( i = 0; i < 8; ++i ) {
+				for ( channel = 0; channel < 4; ++channel ) {
+					if ( !FloatField( &cursor, &( *colors[i] )[channel] )
+							|| ( *colors[i] )[channel] < 0.0f || ( *colors[i] )[channel] > 1.0f ) {
+						SetError( error, errorSize, "invalid authored palette color" ); return 0;
+					}
+				}
+			}
+			sawPalette = 1;
 		} else if ( !strcmp( kind, "MENU" ) ) {
 			char *name = Field( &cursor );
 			if ( !sawHeader || sawMenu || !DecodeHex( name, out->menuName, sizeof( out->menuName ) )
@@ -125,9 +145,129 @@ int WiredWebAuthored_Decode( const char *bytes, size_t size,
 			item = &out->items[out->itemCount++];
 			if ( !DecodeHex( Field( &cursor ), item->id, sizeof( item->id ) )
 				|| !DecodeHex( Field( &cursor ), item->label, sizeof( item->label ) )
-				|| !DecodeHex( Field( &cursor ), item->subtitle, sizeof( item->subtitle ) ) ) {
+				|| !DecodeHex( Field( &cursor ), item->subtitle, sizeof( item->subtitle ) )
+				|| !IntField( &cursor, &item->actionKind )
+				|| item->actionKind < WIRED_WEB_AUTHORED_ACTION_OPEN
+				|| item->actionKind > WIRED_WEB_AUTHORED_ACTION_EXEC
+				|| !DecodeHex( Field( &cursor ), item->action, sizeof( item->action ) )
+				|| !item->action[0] ) {
 				SetError( error, errorSize, "invalid authored menu item" ); return 0;
 			}
+		} else if ( !strcmp( kind, "CARD" ) ) {
+			wiredWebAuthoredCard_t *card;
+			int declaredLines, i;
+			if ( !sawMenu || out->cardCount >= WIRED_WEB_AUTHORED_MAX_CARDS ) {
+				SetError( error, errorSize, "invalid authored card count" ); return 0;
+			}
+			card = &out->cards[out->cardCount++];
+			if ( !DecodeHex( Field( &cursor ), card->id, sizeof( card->id ) )
+					|| !FloatField( &cursor, &card->heightPercent )
+					|| !IntField( &cursor, &declaredLines ) || card->heightPercent <= 0.0f
+					|| declaredLines < 1 || declaredLines > WIRED_WEB_AUTHORED_MAX_CARD_LINES ) {
+				SetError( error, errorSize, "invalid authored card" ); return 0;
+			}
+			for ( i = 0; i < declaredLines; ++i ) {
+				if ( !DecodeHex( Field( &cursor ), card->lines[i], sizeof( card->lines[i] ) )
+						|| !DecodeHex( Field( &cursor ), card->lineBindings[i],
+							sizeof( card->lineBindings[i] ) ) ) {
+					SetError( error, errorSize, "invalid authored card line" ); return 0;
+				}
+			}
+			card->lineCount = declaredLines;
+		} else if ( !strcmp( kind, "SERVER" ) ) {
+			wiredWebAuthoredServerBrowser_t *server = &out->serverBrowser;
+			int declaredColumns;
+			if ( sawServer || !DecodeHex( Field( &cursor ), server->menuName,
+					sizeof( server->menuName ) )
+					|| !FloatField( &cursor, &server->rowHeight )
+					|| !IntField( &cursor, &declaredColumns )
+					|| server->rowHeight <= 0.0f || declaredColumns < 1
+					|| declaredColumns > WIRED_WEB_AUTHORED_MAX_SERVER_COLUMNS ) {
+				SetError( error, errorSize, "invalid authored server browser" ); return 0;
+			}
+			server->columnCount = declaredColumns;
+			sawServer = 1;
+		} else if ( !strcmp( kind, "SCOL" ) ) {
+			wiredWebAuthoredServerBrowser_t *server = &out->serverBrowser;
+			wiredWebAuthoredServerColumn_t *column;
+			if ( !sawServer || decodedServerColumns >= server->columnCount ) {
+				SetError( error, errorSize, "invalid authored server column count" ); return 0;
+			}
+			column = &server->columns[decodedServerColumns++];
+			if ( !DecodeHex( Field( &cursor ), column->title, sizeof( column->title ) )
+					|| !FloatField( &cursor, &column->widthPercent )
+					|| column->widthPercent <= 0.0f || column->widthPercent > 100.0f ) {
+				SetError( error, errorSize, "invalid authored server column" ); return 0;
+			}
+		} else if ( !strcmp( kind, "CONSOLE" ) ) {
+			wiredWebAuthoredConsole_t *console = &out->console;
+			if ( sawConsole || !DecodeHex( Field( &cursor ), console->menuName,
+					sizeof( console->menuName ) )
+					|| !FloatField( &cursor, &console->heightPercent )
+					|| console->heightPercent <= 0.0f || console->heightPercent > 100.0f ) {
+				SetError( error, errorSize, "invalid authored console panel" ); return 0;
+			}
+			sawConsole = 1;
+		} else if ( !strcmp( kind, "LOADING" ) ) {
+			wiredWebAuthoredLoading_t *loading = &out->loading;
+			if ( sawLoading || !DecodeHex( Field( &cursor ), loading->menuName,
+					sizeof( loading->menuName ) )
+					|| !FloatField( &cursor, &loading->topBarHeightPercent )
+					|| !FloatField( &cursor, &loading->leftWidthPercent )
+					|| !FloatField( &cursor, &loading->dividerWidthPercent )
+					|| !FloatField( &cursor, &loading->bottomHeightPercent )
+					|| !FloatField( &cursor, &loading->phaseHeightPercent )
+					|| !FloatField( &cursor, &loading->overallBarHeightPercent )
+					|| !DecodeHex( Field( &cursor ), loading->footerText,
+						sizeof( loading->footerText ) )
+					|| loading->topBarHeightPercent <= 0.0f
+					|| loading->leftWidthPercent <= 0.0f || loading->leftWidthPercent >= 100.0f
+					|| loading->dividerWidthPercent <= 0.0f
+					|| loading->bottomHeightPercent <= 0.0f
+					|| loading->phaseHeightPercent <= 0.0f
+					|| loading->overallBarHeightPercent <= 0.0f
+					|| !loading->footerText[0] ) {
+				SetError( error, errorSize, "invalid authored loading screen" ); return 0;
+			}
+			sawLoading = 1;
+		} else if ( !strcmp( kind, "SOURCE" ) ) {
+			char *sourcePath;
+			int i;
+			if ( out->sourceCount >= WIRED_WEB_AUTHORED_MAX_SOURCES ) {
+				SetError( error, errorSize, "too many authored source paths" ); return 0;
+			}
+			sourcePath = out->sourcePaths[out->sourceCount];
+			if ( !DecodeHex( Field( &cursor ), sourcePath, sizeof( out->sourcePaths[0] ) )
+					|| !sourcePath[0] ) {
+				SetError( error, errorSize, "invalid authored source path" ); return 0;
+			}
+			for ( i = 0; i < out->sourceCount; ++i ) {
+				if ( !strcmp( out->sourcePaths[i], sourcePath ) ) {
+					SetError( error, errorSize, "duplicate authored source path" ); return 0;
+				}
+			}
+			++out->sourceCount;
+		} else if ( !strcmp( kind, "ROOT" ) ) {
+			wiredWebAuthoredRoot_t *root;
+			int i;
+			if ( out->rootCount >= WIRED_WEB_AUTHORED_MAX_ROOTS ) {
+				SetError( error, errorSize, "too many authored MENU/POPUP roots" ); return 0;
+			}
+			root = &out->roots[out->rootCount];
+			if ( !DecodeHex( Field( &cursor ), root->sourcePath, sizeof( root->sourcePath ) )
+					|| !DecodeHex( Field( &cursor ), root->menuName, sizeof( root->menuName ) )
+					|| !IntField( &cursor, &root->layer )
+					|| !root->sourcePath[0] || !root->menuName[0]
+					|| ( root->layer != WIRED_WEB_AUTHORED_ROOT_MENU
+						&& root->layer != WIRED_WEB_AUTHORED_ROOT_POPUP ) ) {
+				SetError( error, errorSize, "invalid authored MENU/POPUP root" ); return 0;
+			}
+			for ( i = 0; i < out->rootCount; ++i ) {
+				if ( !strcmp( out->roots[i].menuName, root->menuName ) ) {
+					SetError( error, errorSize, "duplicate authored MENU/POPUP root" ); return 0;
+				}
+			}
+			++out->rootCount;
 		} else if ( !strcmp( kind, "L10N" ) ) {
 			wiredWebAuthoredL10nEntry_t *entry;
 			if ( out->l10nCount >= WIRED_WEB_AUTHORED_MAX_L10N ) { SetError( error, errorSize, "too many authored translations" ); return 0; }
@@ -135,6 +275,42 @@ int WiredWebAuthored_Decode( const char *bytes, size_t size,
 			if ( !DecodeHex( Field( &cursor ), entry->key, sizeof( entry->key ) )
 				|| !DecodeHex( Field( &cursor ), entry->value, sizeof( entry->value ) ) ) {
 				SetError( error, errorSize, "invalid authored translation" ); return 0;
+			}
+		} else if ( !strcmp( kind, "HUD" ) ) {
+			wiredWebAuthoredHud_t *hud = &out->hud;
+			if ( sawHud || !FloatField( &cursor, &hud->leftInsetPercent )
+				|| !FloatField( &cursor, &hud->rightInsetPercent )
+				|| !FloatField( &cursor, &hud->bottomInsetPercent )
+				|| !FloatField( &cursor, &hud->healthWidthPercent )
+				|| !FloatField( &cursor, &hud->armorWidthPercent )
+				|| !FloatField( &cursor, &hud->ammoWidthPercent )
+				|| !FloatField( &cursor, &hud->panelHeightPercent ) ) {
+				SetError( error, errorSize, "invalid authored HUD record" ); return 0;
+			}
+			sawHud = 1;
+		} else if ( !strcmp( kind, "XHAIR" ) ) {
+			wiredWebAuthoredCrosshair_t *crosshair;
+			if ( out->crosshairCount >= WIRED_WEB_AUTHORED_MAX_CROSSHAIRS ) {
+				SetError( error, errorSize, "too many authored crosshairs" ); return 0;
+			}
+			crosshair = &out->crosshairs[out->crosshairCount++];
+			if ( !IntField( &cursor, &crosshair->weapon )
+				|| !IntField( &cursor, &crosshair->dynamicKind )
+				|| !FloatField( &cursor, &crosshair->color[0] )
+				|| !FloatField( &cursor, &crosshair->color[1] )
+				|| !FloatField( &cursor, &crosshair->color[2] )
+				|| !FloatField( &cursor, &crosshair->color[3] )
+				|| !FloatField( &cursor, &crosshair->gap )
+				|| !FloatField( &cursor, &crosshair->armLength )
+				|| !FloatField( &cursor, &crosshair->armThickness )
+				|| !IntField( &cursor, &crosshair->dotEnabled )
+				|| !FloatField( &cursor, &crosshair->dotRadius )
+				|| !IntField( &cursor, &crosshair->ringEnabled )
+				|| !FloatField( &cursor, &crosshair->ringRadius )
+				|| !FloatField( &cursor, &crosshair->ringThickness )
+				|| !FloatField( &cursor, &crosshair->outlineThickness )
+				|| !FloatField( &cursor, &crosshair->outlineAlpha ) ) {
+				SetError( error, errorSize, "invalid authored crosshair record" ); return 0;
 			}
 		} else if ( !strcmp( kind, "SCENE" ) ) {
 			char *name = Field( &cursor ); int space;
@@ -172,9 +348,25 @@ int WiredWebAuthored_Decode( const char *bytes, size_t size,
 		} else if ( !strcmp( kind, "END" ) ) sawEnd = 1;
 		else { SetError( error, errorSize, "unknown authored catalog record" ); return 0; }
 	}
-	if ( !sawHeader || !sawMenu || out->itemCount < 1 || out->l10nCount < 1
+	if ( !sawHeader || !sawPalette || !sawMenu || !sawServer || !sawConsole || !sawLoading
+		|| decodedServerColumns != out->serverBrowser.columnCount
+		|| !sawHud || out->crosshairCount < 1
+		|| out->itemCount < 1 || out->cardCount != WIRED_WEB_AUTHORED_MAX_CARDS
+		|| out->sourceCount < 1 || out->rootCount < 1 || out->l10nCount < 1
 		|| !sawScene || out->scene.eyePath.numKnots < 2 || !sawEnd ) {
 		SetError( error, errorSize, "incomplete authored catalog" ); return 0;
+	}
+	{
+		int rootIndex, sourceIndex;
+		for ( rootIndex = 0; rootIndex < out->rootCount; ++rootIndex ) {
+			for ( sourceIndex = 0; sourceIndex < out->sourceCount; ++sourceIndex ) {
+				if ( !strcmp( out->roots[rootIndex].sourcePath,
+						out->sourcePaths[sourceIndex] ) ) break;
+			}
+			if ( sourceIndex == out->sourceCount ) {
+				SetError( error, errorSize, "authored root source is absent from manifest" ); return 0;
+			}
+		}
 	}
 	return 1;
 }

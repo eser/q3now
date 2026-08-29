@@ -1,293 +1,149 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+// loading_screen.wui — compositor-owned, rect-free loading presentation.
 //
-// loading_screen.wmenu — Phase 3b2 C-14 declarative loading screen.
-//
-// Pairs with cl_loading_ui.c's CL_DrawLoadingScreen via double-dispatch:
-// the legacy SCR path still renders the loading screen pixel-for-pixel;
-// this wmenu drives the compositor's parallel emission tagged for the
-// LOADING layer (which auto-activates at CA_CONNECTING/CHALLENGING/
-// CONNECTED/LOADING/PRIMED). Both paths produce identical render
-// commands; the legacy path retires in Phase 3c C-15.
-//
-// 3 stateless custom-draws back the genuinely-dynamic regions (BSP
-// wireframe, streaming rows, stats grid) — registered by
-// WiredLoadingCustomDraws_RegisterAll in cl_loading_ui.c. The overall
-// progress bar uses the declarative bindwidth keyword shipping with
-// C-14 (sub-step 5) bound to the `loading.overall` store key that
-// CL_DrawLoadingScreen publishes each frame.
-//
-// Coordinates are normalised against the viewport. Reference values
-// from cl_loading_ui.c::Loading_Draw* helpers — kept in sync manually
-// during the transition cycle.
+// Geometry is one flex tree: top bar, two-column body and footer. Dynamic
+// regions remain stateless custom draws, but every helper receives its actual
+// Clay box rather than a duplicate viewport-coordinate table.
 
 menuDef {
 	name "loading_screen"
+	width PERCENT 1
+	height PERCENT 1
 	fullScreen 1
 	visible 1
 	style 1
-	// backcolor transparent: the SCENE background (bgLayerFlags on
-	// loading_backdrop_root, zIndex −10) is the loading backdrop now — an
-	// opaque menu backcolor would cover it. Alpha 0 lets the parallax scene
-	// show; content items back their own text where legibility needs it.
 	backcolor 0.04 0.06 0.10 0
 	layer "loading"
 
-	// ── TopBar group (dark strip + gametype/archetype label) ────────
-	// Addressable identity for the topbar band: dark backfill + the
-	// custom-draw helper that delegates to the legacy
-	// Loading_DrawTopBar at vpH*0.058. The leaves preserve their
-	// absolute rects so the SCR double-dispatch path renders
-	// pixel-for-pixel; the wrapper exists for future "hide topbar"
-	// authoring toggles.
 	itemDef {
-		name "loading_topbar_root"
+		name "loading_root"
 		type container
 		direction column
+		width PERCENT 1
+		height PERCENT 1
 		decoration
 		visible 1
-
-		itemDef {
-			name "loading_topbar_bg"
-			rect 0 0 1 0.058
-			backcolor 0.05 0.05 0.08 0.80
-			decoration
-			visible 1
-		}
+		custom "loading_backdrop"
 
 		itemDef {
 			name "loading_topbar"
-			rect 0 0 1 0.058
+			width PERCENT 1
+			height 5.8vh
+			grow 0
 			decoration
 			visible 1
 			custom "loading_topbar"
 		}
-	}
-
-	// ── Map title block (C-14b parameterized custom-draw) ───────────
-	// Right panel below topbar: map title (progressive font tiers) +
-	// author/year + flavor quote (word-wrapped 1-2 lines with 2px left
-	// border accent). Composition + wrap stay in Loading_DrawMapInfo.
-	// Rect matches legacy Loading_DrawMapInfo right-panel coords
-	// (vpW*0.542, vpH*0.1, vpW*0.436, ~vpH*0.25 safe padding for
-	// dynamic title/author/quote with word-wrap). 7.30 originally
-	// authored this on the left panel (rect 0 0.06 0.519 0.22) — the
-	// custom-draw ignored the rect so the latent drift was invisible;
-	// C-14b parameterizes the helper, so the rect must be trusted.
-	itemDef {
-		name "loading_maptitle_root"
-		type container
-		direction column
-		decoration
-		visible 1
 
 		itemDef {
-			name "loading_maptitle_block"
-			rect 0.542 0.1 0.436 0.25
+			name "loading_body"
+			type container
+			direction row
+			width PERCENT 1
+			grow 1
 			decoration
 			visible 1
-			custom "loading_maptitle_block"
-		}
-	}
 
-	// ── Background grid lines (L-B restoration) ─────────────────────
-	// Horizontal accent lines at ~4% viewport-height spacing, restored
-	// from the deleted Loading_DrawBackground (C-15 target #9). 1-px
-	// thin slate strips across the full viewport, faint enough to read
-	// as backdrop texture.
-	// ── Backdrop group (grid lines + glow washes + divider) ─────────
-	// Addressable identity for the deleted Loading_DrawBackground
-	// visual restoration: 23 horizontal structural rules, two low-alpha
-	// accent glow washes, and the tri-segment vertical divider at
-	// x≈0.519. The leaves preserve their absolute rects verbatim —
-	// rect-direct render is mandatory because the SCR legacy path
-	// at cl_loading_ui.c renders pixel-for-pixel against the same
-	// coordinates during the double-dispatch transition cycle.
-	itemDef {
-		name "loading_backdrop_root"
-		type container
-		direction column
-		decoration
-		visible 1
-		// F5: this root owns the background (bgLayerFlags != 0 → the compositor
-		// emit gate fires) and the LOADING layer resolves SCENE, so
-		// WUI_DrawBackgroundScene paints the parallax DemoBackdrop as the floating
-		// attach-to-root backdrop BEFORE these children — the loading content
-		// composes on top. Authored effects are ignored under SCENE; kept minimal.
-		background "layered" effects "vignette"
+			itemDef {
+				name "loading_left_panel"
+				type container
+				direction column
+				width 51.9vw
+				height PERCENT 1
+				grow 0
+				padding 1.7vh 0 1vh 0
+				decoration
+				visible 1
 
-		itemDef { name "loading_grid_y04" rect 0 0.04  1 0.0015 backcolor $loading_grid_line decoration visible 1 }
-		itemDef { name "loading_grid_y08" rect 0 0.08  1 0.0015 backcolor $loading_grid_line decoration visible 1 }
-		itemDef { name "loading_grid_y12" rect 0 0.12  1 0.0015 backcolor $loading_grid_line decoration visible 1 }
-		itemDef { name "loading_grid_y16" rect 0 0.16  1 0.0015 backcolor $loading_grid_line decoration visible 1 }
-		itemDef { name "loading_grid_y20" rect 0 0.20  1 0.0015 backcolor $loading_grid_line decoration visible 1 }
-		itemDef { name "loading_grid_y24" rect 0 0.24  1 0.0015 backcolor $loading_grid_line decoration visible 1 }
-		itemDef { name "loading_grid_y28" rect 0 0.28  1 0.0015 backcolor $loading_grid_line decoration visible 1 }
-		itemDef { name "loading_grid_y32" rect 0 0.32  1 0.0015 backcolor $loading_grid_line decoration visible 1 }
-		itemDef { name "loading_grid_y36" rect 0 0.36  1 0.0015 backcolor $loading_grid_line decoration visible 1 }
-		itemDef { name "loading_grid_y40" rect 0 0.40  1 0.0015 backcolor $loading_grid_line decoration visible 1 }
-		itemDef { name "loading_grid_y44" rect 0 0.44  1 0.0015 backcolor $loading_grid_line decoration visible 1 }
-		itemDef { name "loading_grid_y48" rect 0 0.48  1 0.0015 backcolor $loading_grid_line decoration visible 1 }
-		itemDef { name "loading_grid_y52" rect 0 0.52  1 0.0015 backcolor $loading_grid_line decoration visible 1 }
-		itemDef { name "loading_grid_y56" rect 0 0.56  1 0.0015 backcolor $loading_grid_line decoration visible 1 }
-		itemDef { name "loading_grid_y60" rect 0 0.60  1 0.0015 backcolor $loading_grid_line decoration visible 1 }
-		itemDef { name "loading_grid_y64" rect 0 0.64  1 0.0015 backcolor $loading_grid_line decoration visible 1 }
-		itemDef { name "loading_grid_y68" rect 0 0.68  1 0.0015 backcolor $loading_grid_line decoration visible 1 }
-		itemDef { name "loading_grid_y72" rect 0 0.72  1 0.0015 backcolor $loading_grid_line decoration visible 1 }
-		itemDef { name "loading_grid_y76" rect 0 0.76  1 0.0015 backcolor $loading_grid_line decoration visible 1 }
-		itemDef { name "loading_grid_y80" rect 0 0.80  1 0.0015 backcolor $loading_grid_line decoration visible 1 }
-		itemDef { name "loading_grid_y84" rect 0 0.84  1 0.0015 backcolor $loading_grid_line decoration visible 1 }
-		itemDef { name "loading_grid_y88" rect 0 0.88  1 0.0015 backcolor $loading_grid_line decoration visible 1 }
-		itemDef { name "loading_grid_y92" rect 0 0.92  1 0.0015 backcolor $loading_grid_line decoration visible 1 }
+				itemDef {
+					name "loading_wireframe"
+					width PERCENT 1
+					grow 1
+					decoration
+					visible 1
+					custom "loading_wireframe"
+				}
+			}
 
-		itemDef { name "loading_glow_left"  rect 0.10 0.30 0.40 0.40 backcolor $loading_glow decoration visible 1 }
-		itemDef { name "loading_glow_right" rect 0.50 0.30 0.40 0.40 backcolor $loading_glow decoration visible 1 }
+			itemDef {
+				name "loading_divider"
+				type container
+				direction column
+				width 0.3vw
+				height PERCENT 1
+				grow 0
+				padding 1.7vh 0 6vh 0
+				alignX center
+				decoration
+				visible 1
+				itemDef { name "loading_divider_top" width 1px height 35vh grow 0 backcolor $loading_divider decoration visible 1 }
+				itemDef { name "loading_divider_accent" width PERCENT 1 height 15vh grow 0 backcolor $loading_divider_hi decoration visible 1 }
+				itemDef { name "loading_divider_bottom" width 1px grow 1 backcolor $loading_divider decoration visible 1 }
+			}
 
-		itemDef {
-			name "loading_divider_top"
-			rect 0.519 0.075 0.001 0.350
-			backcolor $loading_divider
-			decoration
-			visible 1
-		}
-		itemDef {
-			name "loading_divider_accent"
-			rect 0.518 0.425 0.003 0.150
-			backcolor $loading_divider_hi
-			decoration
-			visible 1
-		}
-		itemDef {
-			name "loading_divider_bottom"
-			rect 0.519 0.575 0.001 0.325
-			backcolor $loading_divider
-			decoration
-			visible 1
-		}
-	}
+			itemDef {
+				name "loading_right_panel"
+				type container
+				direction column
+				height PERCENT 1
+				grow 1
+				padding 4.2vh 2.2vw 0 2vw
+				decoration
+				visible 1
 
-	// ── Left panel (BSP wireframe with rotation + float anim) ───────
-	itemDef {
-		name "loading_left_panel_root"
-		type container
-		direction column
-		decoration
-		visible 1
-
-		itemDef {
-			name "loading_wireframe"
-			rect 0 0.075 0.519 0.875
-			decoration
-			visible 1
-			custom "loading_wireframe"
-		}
-	}
-
-	// ── Right panel content (mapinfo + streaming + phase + bar +
-	//    server-info + vulkan badge) ───────────────────────────────
-	// Single addressable identity for the right-half of the loading
-	// screen below the maptitle block. Each leaf preserves its
-	// absolute rect verbatim — the SCR double-dispatch path in
-	// cl_loading_ui.c renders pixel-for-pixel against the same
-	// coordinates, so this wrapper is grouping only.
-	itemDef {
-		name "loading_right_panel_root"
-		type container
-		direction column
-		decoration
-		visible 1
-
-		// MapInfo stats grid (3-cell PLAYERS / WEAPON / ITEMS).
-		itemDef {
-			name "loading_mapinfo_stats"
-			rect 0.542 0.2958 0.436 0.1
-			decoration
-			visible 1
-			custom "loading_mapinfo_stats"
+				itemDef { name "loading_maptitle_block" width PERCENT 1 height 19.58vh grow 0 decoration visible 1 custom "loading_maptitle_block" }
+				itemDef { name "loading_mapinfo_stats" width PERCENT 1 height 10vh grow 0 decoration visible 1 custom "loading_mapinfo_stats" }
+				itemDef { name "loading_right_gap" type container width PERCENT 1 height 5.42vh grow 0 decoration }
+				itemDef { name "loading_streaming_rows" width PERCENT 1 height 18vh grow 0 decoration visible 1 custom "loading_streaming_rows" }
+				itemDef { name "loading_server_info_strip" width PERCENT 1 height 11vh grow 0 decoration visible 1 custom "loading_server_info_strip" }
+				itemDef {
+					name "loading_phase_text"
+					width PERCENT 1
+					height 2.5vh
+					grow 0
+					font $font_sans 14
+					forecolor $boneDim
+					text ""
+					bind "loading.phase"
+					decoration
+					visible 1
+				}
+				itemDef {
+					name "loading_overall_bar"
+					type container
+					direction row
+					width PERCENT 1
+					height 0.4vh
+					grow 0
+					backcolor $loading_bar_track
+					decoration
+					visible 1
+					itemDef { name "loading_overall_bar_fill" width PERCENT 1 height PERCENT 1 grow 0 backcolor $loading_bar_fill bindwidth "loading.overall" decoration visible 1 }
+				}
+				itemDef { name "loading_vulkan_badge" width PERCENT 1 height 2vh grow 0 decoration visible 1 custom "loading_vulkan_badge" }
+			}
 		}
 
-		// StreamingRows (4 progress rows; geometry / textures /
-		// audio / download).
 		itemDef {
-			name "loading_streaming_rows"
-			rect 0.542 0.45 0.436 0.25
+			name "loading_bottom_strip"
+			type container
+			direction column
+			width PERCENT 1
+			height 4vh
+			grow 0
+			justify center
 			decoration
 			visible 1
-			custom "loading_streaming_rows"
-		}
-
-		// ServerInfoStrip (hostname + PURE badge + MOTD; skip on
-		// localhost handled inside the helper).
-		itemDef {
-			name "loading_server_info_strip"
-			rect 0.542 0.63 0.436 0.13
-			decoration
-			visible 1
-			custom "loading_server_info_strip"
-		}
-
-		// Loading-stage label ABOVE the overall bar (bind
-		// "loading.phase" — the cgame state name like "Loading
-		// textures…"; unrelated to dispatch milestones).
-		itemDef {
-			name "loading_phase_text"
-			rect 0.542 0.74 0.436 0.025
-			font $font_sans 14
-			forecolor $boneDim
-			text ""
-			bind "loading.phase"
-			decoration
-			visible 1
-		}
-
-		// OverallBar bg + fill (declarative bindwidth against
-		// loading.overall).
-		itemDef {
-			name "loading_overall_bar_bg"
-			rect 0.542 0.7708 0.436 0.004
-			backcolor $loading_bar_track
-			decoration
-			visible 1
-		}
-		itemDef {
-			name "loading_overall_bar_fill"
-			rect 0.542 0.7708 0.436 0.004
-			backcolor $loading_bar_fill
-			bindwidth "loading.overall"
-			decoration
-			visible 1
-		}
-
-		// Vulkan badge (bottom-right cyan dot + GPU label).
-		itemDef {
-			name "loading_vulkan_badge"
-			rect 0.542 0.833 0.436 0.02
-			decoration
-			visible 1
-			custom "loading_vulkan_badge"
-		}
-	}
-
-	// ── Bottom strip (full-width status label) ──────────────────────
-	// Static placeholder label for now; storeBind plumbing for server
-	// name + ping is a follow-up while the legacy SCR path still
-	// renders the real strip via Loading_DrawServerInfoStrip.
-	itemDef {
-		name "loading_bottom_strip_root"
-		type container
-		direction column
-		decoration
-		visible 1
-
-		itemDef {
-			name "loading_server_strip_label"
-			rect 0 0.96 1 0.03
-			textalign 1
-			font $font_sans 10
-			forecolor $boneDim
-			text "loading..."
-			decoration
-			visible 1
+			itemDef {
+				name "loading_server_strip_label"
+				width PERCENT 1
+				height 2vh
+				textalign 1
+				font $font_sans 10
+				forecolor $boneDim
+				text "loading..."
+				decoration
+				visible 1
+			}
 		}
 	}
 }

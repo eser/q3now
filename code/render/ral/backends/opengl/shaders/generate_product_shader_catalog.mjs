@@ -13,6 +13,13 @@ const DEFAULT_OUTPUT = join(HERE, '..', 'ral_opengl_product_shader_catalog.inc')
 const MODULES = [
 	{ symbol: 'ral_opengl_product_vert_spv', name: 'Vertex' },
 	{ symbol: 'ral_opengl_product_frag_spv', name: 'Fragment' },
+	{ symbol: 'atmosphere_froxel_inject_comp_spv', name: 'AtmosphereInject' },
+	{ symbol: 'atmosphere_froxel_light_comp_spv', name: 'AtmosphereLight' },
+	{ symbol: 'atmosphere_froxel_cloud_comp_spv', name: 'AtmosphereCloud' },
+	{ symbol: 'atmosphere_froxel_integrate_comp_spv', name: 'AtmosphereIntegrate' },
+	{ symbol: 'atmospheric_integrate_comp_spv', name: 'WeatherIntegrate' },
+	{ symbol: 'atmospheric_vert_spv', name: 'WeatherVertex' },
+	{ symbol: 'atmospheric_frag_spv', name: 'WeatherFragment' },
 ];
 
 function parseArgs(argv) {
@@ -44,7 +51,7 @@ function render(portable) {
 	const catalog = JSON.parse(readFileSync(join(portable, 'translation_catalog.json'), 'utf8'));
 	if (catalog.schemaVersion !== 2
 			|| JSON.stringify(catalog.requiredTargets) !== JSON.stringify(['glsl460'])
-			|| !Array.isArray(catalog.entries) || catalog.entries.length !== 294)
+			|| !Array.isArray(catalog.entries) || catalog.entries.length !== 299)
 		throw new Error('OpenGL GLSL 4.60 catalog is not the exact canonical corpus');
 	const rendered = [];
 	for (const module of MODULES) {

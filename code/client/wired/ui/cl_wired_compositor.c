@@ -229,10 +229,12 @@ void WiredUI_CompositorFrame( int realtimeMs )
 #include "cl_wired_ui.h"
 #include "cl_wired_customdraw.h"   /* dev cmd register/unregister */
 #include "../store/cl_wired_store.h"
+#ifndef WIRED_WEB_UI_NATIVE
 #include "../../../qcommon/wired/core/scripting/wired_scripting.h"
 #include "../../../qcommon/wired/core/scripting/user_vm.h"
 #include <lua.h>
 #include <lauxlib.h>
+#endif
 #include <math.h>
 
 /* ───────────────────────────────────────────────────────────────────
@@ -548,6 +550,8 @@ void Anim_FrameUpdate( int nowMs )
  * omitted. Errors logged once via SEV_WARN.
  * ─────────────────────────────────────────────────────────────────── */
 
+#ifndef WIRED_WEB_UI_NATIVE
+
 static int wui_lua_anim_tween( lua_State *L )
 {
 	const char *storeKey = luaL_checkstring( L, 1 );
@@ -608,6 +612,12 @@ void WiredAnimLua_Init( void )
 	WiredScript_RegisterBindings( wui_anim_register_for_lua );
 	UserVM_RegisterBindings     ( wui_anim_register_for_lua );
 }
+
+#else
+
+void WiredAnimLua_Init( void ) {}
+
+#endif /* WIRED_WEB_UI_NATIVE */
 
 /* ───────────────────────────────────────────────────────────────────
  * dev commands — kept in tree as engineering utilities

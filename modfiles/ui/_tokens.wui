@@ -186,6 +186,17 @@ token hud_panel_bg          "rgba(10,5,2,0.34)"
 //    the …60 name for continuity.) Re-tune here, not per-widget.
 token hud_panel_bg60        "rgba(12,10,9,0.50)"
 
+// Perspective HUD — cool, glass-like chrome inspired by helmet-display
+// readability rather than the warm menu palette. These are separate tokens so
+// the selectable theme can evolve without changing classic's authored look.
+token hud_perspective_bg       "rgba(3,11,16,0.66)"
+token hud_perspective_line     "rgba(124,205,224,0.62)"
+token hud_perspective_caption  "#9fc9d2"
+token hud_perspective_health   "#4f91ff"
+token hud_perspective_armor    "#3bd77e"
+token hud_perspective_ammo     "#d9f4ff"
+token hud_perspective_inward   "-0.20"
+
 // Mode tokens — DemoBackdrop scene (arena ruin atmosphere)
 token demoBg                "#0a0403"
 token demoSky1              "#3a1808"

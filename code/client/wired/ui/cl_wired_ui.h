@@ -692,6 +692,14 @@ typedef struct wiredItemDef_s {
 	float               cornerRadius;          /* uniform fallback */
 	float               cornerRadius4[ 4 ];    /* TL, TR, BR, BL (spec order) */
 
+	/* CSS-like paint-only perspective for flex containers. The signed,
+	 * normalized value controls which vertical edge recedes: negative = left,
+	 * positive = right. Layout, descendants and hit testing keep Clay's
+	 * authoritative axis-aligned box; only the container background/border is
+	 * projected. This keeps authored flex composition deterministic while
+	 * allowing diegetic HUD chrome such as mirrored cockpit panels. */
+	float               perspective;
+
 	/* 6-layered background extension. Parser
 	 * sets bgLayerFlags via `background "layered" effects "<flags>"`
 	 * keyword; compositor emit dispatches to WUI_DrawBackgroundLayered
@@ -841,11 +849,10 @@ typedef struct wiredMenuDef_s {
 	/* ── Path A / Path B classification ──────────────────────
 	 * qtrue when the panel uses any wuiFlexContainer feature Clay v0.14
 	 * does NOT natively support: wrap, shrink > 1.0, or justify
-	 * space-between. Such panels stay on the CLAY_FLOATING +
-	 * resolvedRect pinning strategy (Path B); the converter handles them
-	 * via WUI_LayoutFlex's resolved rects. A later wired-
-	 * side polyfill pre-resolution pass migrates them to native
-	 * Clay declarations. */
+	 * space-between. This is a narrow compatibility classification for
+	 * explicitly authored floating roots; it never invokes a second layout
+	 * engine. Unsupported flex details remain parser-visible/no-op with a
+	 * warning until a Clay-side polyfill is implemented. */
 	qboolean          pathBKind;
 
 	/* ── layer assignment ───────────────────────────
@@ -1112,12 +1119,12 @@ void     WiredUI_LuaInit( void );
 // (WiredUI-internal — called only by WiredUI_LuaInit, defined in cl_wired_parse.c)
 void     WiredUI_MenuLuaInit( void );
 // Execute scripts/menus.lua to populate the menu pool.
-void     WiredUI_LoadMenusFromLua( void );
+qboolean WiredUI_LoadMenusFromLua( void );
 // Load the system menus that live OUTSIDE menus.lua (loading_screen +
 // overlay). Must run after every WiredUI_LoadMenusFromLua — both WiredUI_Init
 // and WiredUI_SafeReload call it so these menus survive reloads (the LOADING
 // by-path lookup needs them present in the registry).
-void     WiredUI_LoadExplicitMenus( void );
+qboolean WiredUI_LoadExplicitMenus( void );
 // Read g_maprotation cvar into caller-supplied buffer.
 void     WiredUI_GetMapRotation( char *buf, int size );
 

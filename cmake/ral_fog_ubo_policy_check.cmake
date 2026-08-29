@@ -50,27 +50,16 @@ FOREACH(NEEDLE IN ITEMS
 	"#define WIRED_ADVANCED_FOG_UBO_SIZE    32u"
 	"vec4_t advancedFogColorDensity;"
 	"vec4_t advancedFogTypeFarEnabled;"
-	"sizeof( vkUniform_t ) == 640"
+	"sizeof( vkUniform_t ) == 656"
 	"void vk_update_fog_uniform(")
 	REQUIRE_TEXT("${VKH}" "${NEEDLE}" "enhanced-fog host UBO ABI missing")
 ENDFOREACH()
 
-FOREACH(NEEDLE IN ITEMS
-	"OPTION(USE_FOG_SYSTEM \"Compile the enhanced linear/exp/exp2 fog path (default OFF until TASK-85 activation)\" OFF)"
-	"IF(USE_FOG_SYSTEM)"
-	"ADD_COMPILE_DEFINITIONS(FEAT_FOG_SYSTEM=1)"
-	"ADD_COMPILE_DEFINITIONS(FEAT_FOG_SYSTEM=0)")
-	REQUIRE_TEXT("${BUILD}" "${NEEDLE}" "enhanced-fog build permutation missing")
-ENDFOREACH()
-REQUIRE_TEXT("${FEATURES}" "#ifndef FEAT_FOG_SYSTEM\n#define FEAT_FOG_SYSTEM                   0"
-	"enhanced-fog header default is not override-safe")
-FOREACH(NEEDLE IN ITEMS
-	"USE_FOG_SYSTEM ?= 0"
-	"CMAKE_FOG_FLAG := -DUSE_FOG_SYSTEM=ON"
-	"CMAKE_FOG_FLAG := -DUSE_FOG_SYSTEM=OFF"
-	"$(CMAKE_WASM_FLAG) $(CMAKE_FOG_FLAG)")
-	REQUIRE_TEXT("${MAKEFILE}" "${NEEDLE}" "canonical build fog permutation missing")
-ENDFOREACH()
+FORBID_TEXT("${BUILD}" "USE_FOG_SYSTEM" "retired enhanced-fog CMake option")
+FORBID_TEXT("${BUILD}" "FEAT_FOG_SYSTEM" "retired enhanced-fog CMake definition")
+FORBID_TEXT("${MAKEFILE}" "USE_FOG_SYSTEM" "retired enhanced-fog Make option")
+FORBID_TEXT("${MAKEFILE}" "CMAKE_FOG_FLAG" "retired enhanced-fog Make plumbing")
+FORBID_TEXT("${FEATURES}" "FEAT_FOG_SYSTEM" "retired enhanced-fog feature fence")
 
 FOREACH(NEEDLE IN ITEMS
 	"->advancedFogColorDensity,"
@@ -243,7 +232,7 @@ FOREACH(NEEDLE IN ITEMS
 ENDFOREACH()
 FOREACH(NEEDLE IN ITEMS
 	"test-advanced-fog-runtime: copy-all $(PNG2RAW_BIN)"
-	"DEV=1 USE_FOG_SYSTEM=1 make test-advanced-fog-runtime")
+	"DEV=1 make test-advanced-fog-runtime")
 	REQUIRE_TEXT("${MAKEFILE}" "${NEEDLE}"
 		"canonical advanced-fog runtime target missing")
 ENDFOREACH()
@@ -263,8 +252,8 @@ IF(NOT BACKEND_FOG_RESET_COUNT EQUAL 3)
 		"generic/PMLIGHT/Forward+ must own exactly three list-end fog resets")
 ENDIF()
 FOREACH(NEEDLE IN ITEMS
-	"RB_EndSurface();\n\t\t\t}\n#if FEAT_FOG_SYSTEM\n\t\t\tRB_Fog( fogNum );\n#endif\n\t\t\tRB_BeginSurface( shader, fogNum );"
-	"if ( oldShader != NULL )\n\t\t\t\tRB_EndSurface();\n#if FEAT_FOG_SYSTEM\n\t\t\tRB_Fog( fogNum );\n#endif\n\t\t\tRB_BeginSurface( shader, fogNum );")
+	"RB_EndSurface();\n\t\t\t}\n\t\t\tRB_Fog( fogNum );\n\t\t\tRB_BeginSurface( shader, fogNum );"
+	"if ( oldShader != NULL )\n\t\t\t\tRB_EndSurface();\n\t\t\tRB_Fog( fogNum );\n\t\t\tRB_BeginSurface( shader, fogNum );")
 	REQUIRE_TEXT("${BACKEND}" "${NEEDLE}"
 		"lit/Forward+ fog publication is not ordered after the old batch flush")
 ENDFOREACH()
@@ -272,11 +261,15 @@ REQUIRE_TEXT("${BACKEND}"
 	"same-sort fast path deliberately keeps it unchanged.\n\t\t\tRB_Fog( fogNum );"
 	"generic fog publication/fast-path authority missing")
 FOREACH(NEEDLE IN ITEMS
-	"if ( oldShader != NULL ) {\n\t\tRB_EndSurface();\n\t}\n#if FEAT_FOG_SYSTEM\n\tR_FogOff();\n#endif"
-	"if ( oldShader != NULL )\n\t\tRB_EndSurface();\n#if FEAT_FOG_SYSTEM\n\tR_FogOff();\n#endif")
+	"if ( oldShader != NULL ) {\n\t\tRB_EndSurface();\n\t}\n\tR_FogOff();"
+	"if ( oldShader != NULL )\n\t\tRB_EndSurface();\n\tR_FogOff();")
 	REQUIRE_TEXT("${BACKEND}" "${NEEDLE}"
 		"fog reset must occur after the draw list's final batch flush")
 ENDFOREACH()
+SET(PERMANENT_FOG_SURFACE
+	"${VKH}\n${VKC}\n${VK_MAP}\n${VK_SHADER}\n${SPEARMINT}\n${BACKEND}\n${VK_INIT}")
+FORBID_TEXT("${PERMANENT_FOG_SURFACE}" "FEAT_FOG_SYSTEM"
+	"canonical advanced fog must not retain a compile fence")
 
 SET(RENDERER_FOG "${VKH}\n${VKC}\n${SHADE}\n${SPEARMINT}\n${TEMPORAL_FACTORY}\n${TEMPORAL_COHORT}")
 FOREACH(FORBIDDEN IN ITEMS

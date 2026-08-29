@@ -13,6 +13,8 @@ struct ExposureBlock {
     sunScreenY: f32,
     sunrayIntensity: f32,
     sunrayDecay: f32,
+    shadowExponent: f32,
+    shadowPivot: f32,
 }
 
 @id(19) override cg_tint_r: f32 = 1f;
@@ -41,18 +43,18 @@ fn applyColorGrading_u0028_vf3_u003b(color: ptr<function, vec3<f32>>) -> vec3<f3
     colorGradeTint[0u] = cg_tint_r;
     colorGradeTint[1u] = cg_tint_g;
     colorGradeTint[2u] = cg_tint_b;
-    let _e33 = colorGradeTint;
-    let _e34 = (*color);
-    (*color) = (_e34 * _e33);
-    let _e36 = (*color);
-    luma = dot(_e36, vec3<f32>(0.2126f, 0.7152f, 0.0722f));
-    let _e38 = luma;
-    let _e40 = (*color);
-    (*color) = mix(vec3(_e38), _e40, vec3(cg_saturation));
+    let _e36 = colorGradeTint;
+    let _e37 = (*color);
+    (*color) = (_e37 * _e36);
+    let _e39 = (*color);
+    luma = dot(_e39, vec3<f32>(0.2126f, 0.7152f, 0.0722f));
+    let _e41 = luma;
     let _e43 = (*color);
-    (*color) = (((_e43 - vec3(0.5f)) * cg_contrast) + vec3(0.5f));
-    let _e49 = (*color);
-    return clamp(_e49, vec3(0f), vec3(1f));
+    (*color) = mix(vec3(_e41), _e43, vec3(cg_saturation));
+    let _e46 = (*color);
+    (*color) = (((_e46 - vec3(0.5f)) * cg_contrast) + vec3(0.5f));
+    let _e52 = (*color);
+    return clamp(_e52, vec3(0f), vec3(1f));
 }
 
 fn sampleChromatic_u0028_vf2_u003b(uv: ptr<function, vec2<f32>>) -> vec3<f32> {
@@ -63,65 +65,94 @@ fn sampleChromatic_u0028_vf2_u003b(uv: ptr<function, vec2<f32>>) -> vec3<f32> {
     var g: f32;
     var b: f32;
 
-    let _e34 = (*uv);
-    dir = (_e34 - vec2<f32>(0.5f, 0.5f));
-    let _e36 = dir;
-    radial = length(_e36);
-    let _e38 = dir;
-    let _e39 = radial;
-    offset = (_e38 * ((chromatic_strength * _e39) * 0.015f));
-    let _e43 = (*uv);
-    let _e44 = offset;
-    let _e49 = textureSample(texture0_, texture0_sampler, clamp((_e43 + _e44), vec2(0f), vec2(1f)));
-    r = _e49.x;
-    let _e51 = (*uv);
-    let _e52 = textureSample(texture0_, texture0_sampler, _e51);
-    g = _e52.y;
+    let _e37 = (*uv);
+    dir = (_e37 - vec2<f32>(0.5f, 0.5f));
+    let _e39 = dir;
+    radial = length(_e39);
+    let _e41 = dir;
+    let _e42 = radial;
+    offset = (_e41 * ((chromatic_strength * _e42) * 0.015f));
+    let _e46 = (*uv);
+    let _e47 = offset;
+    let _e52 = textureSample(texture0_, texture0_sampler, clamp((_e46 + _e47), vec2(0f), vec2(1f)));
+    r = _e52.x;
     let _e54 = (*uv);
-    let _e55 = offset;
-    let _e60 = textureSample(texture0_, texture0_sampler, clamp((_e54 - _e55), vec2(0f), vec2(1f)));
-    b = _e60.z;
-    let _e62 = r;
-    let _e63 = g;
-    let _e64 = b;
-    return vec3<f32>(_e62, _e63, _e64);
+    let _e55 = textureSample(texture0_, texture0_sampler, _e54);
+    g = _e55.y;
+    let _e57 = (*uv);
+    let _e58 = offset;
+    let _e63 = textureSample(texture0_, texture0_sampler, clamp((_e57 - _e58), vec2(0f), vec2(1f)));
+    b = _e63.z;
+    let _e65 = r;
+    let _e66 = g;
+    let _e67 = b;
+    return vec3<f32>(_e65, _e66, _e67);
 }
 
 fn main_1() {
     var base: vec3<f32>;
     var local: vec3<f32>;
     var param: vec2<f32>;
+    var shadowLuma: f32;
+    var normalized: f32;
+    var curved: f32;
     var param_1: vec3<f32>;
     var luma_1: vec3<f32>;
+    var phi_160_: bool;
 
     if (chromatic_strength > 0f) {
-        let _e33 = frag_tex_coord_1;
-        param = _e33;
-        let _e34 = sampleChromatic_u0028_vf2_u003b((&param));
-        local = _e34;
+        let _e39 = frag_tex_coord_1;
+        param = _e39;
+        let _e40 = sampleChromatic_u0028_vf2_u003b((&param));
+        local = _e40;
     } else {
-        let _e35 = frag_tex_coord_1;
-        let _e36 = textureSample(texture0_, texture0_sampler, _e35);
-        local = _e36.xyz;
+        let _e41 = frag_tex_coord_1;
+        let _e42 = textureSample(texture0_, texture0_sampler, _e41);
+        local = _e42.xyz;
     }
-    let _e38 = local;
-    base = _e38;
-    let _e40 = eb.exposure_bias;
-    let _e41 = base;
-    base = (_e41 * _e40);
-    let _e43 = base;
-    param_1 = _e43;
-    let _e44 = applyColorGrading_u0028_vf3_u003b((&param_1));
+    let _e44 = local;
     base = _e44;
-    if (saturation != 1f) {
-        let _e46 = base;
-        luma_1 = vec3(dot(_e46, vec3<f32>(0.2126f, 0.7152f, 0.0722f)));
-        let _e49 = luma_1;
-        let _e50 = base;
-        base = mix(_e49, _e50, vec3(saturation));
+    let _e46 = eb.exposure_bias;
+    let _e47 = base;
+    base = (_e47 * _e46);
+    let _e49 = base;
+    shadowLuma = dot(max(_e49, vec3<f32>(0f, 0f, 0f)), vec3<f32>(0.2126f, 0.7152f, 0.0722f));
+    let _e53 = eb.shadowExponent;
+    let _e55 = shadowLuma;
+    let _e57 = ((_e53 != 1f) && (_e55 > 0f));
+    phi_160_ = _e57;
+    if _e57 {
+        let _e58 = shadowLuma;
+        let _e60 = eb.shadowPivot;
+        phi_160_ = (_e58 < _e60);
     }
-    let _e53 = base;
-    out_color = vec4<f32>(_e53.x, _e53.y, _e53.z, 1f);
+    let _e63 = phi_160_;
+    if _e63 {
+        let _e64 = shadowLuma;
+        let _e66 = eb.shadowPivot;
+        normalized = (_e64 / _e66);
+        let _e68 = normalized;
+        let _e70 = eb.shadowExponent;
+        let _e73 = eb.shadowPivot;
+        curved = (pow(_e68, _e70) * _e73);
+        let _e75 = curved;
+        let _e76 = shadowLuma;
+        let _e78 = base;
+        base = (_e78 * (_e75 / _e76));
+    }
+    let _e80 = base;
+    param_1 = _e80;
+    let _e81 = applyColorGrading_u0028_vf3_u003b((&param_1));
+    base = _e81;
+    if (saturation != 1f) {
+        let _e83 = base;
+        luma_1 = vec3(dot(_e83, vec3<f32>(0.2126f, 0.7152f, 0.0722f)));
+        let _e86 = luma_1;
+        let _e87 = base;
+        base = mix(_e86, _e87, vec3(saturation));
+    }
+    let _e90 = base;
+    out_color = vec4<f32>(_e90.x, _e90.y, _e90.z, 1f);
     return;
 }
 

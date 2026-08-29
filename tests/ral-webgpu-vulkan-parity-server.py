@@ -26,7 +26,9 @@ class CaptureHandler(SimpleHTTPRequestHandler):
         prefix = "/__wired_parity__/webgpu/"
         name = self.path.removeprefix(prefix)
         if not self.path.startswith(prefix) or name not in {
-            "arena17.png", "arena17.meta.json"
+            "arena17.png", "arena17.meta.json", "menu.png", "menu.meta.json",
+            "servers.png", "servers.meta.json", "loading.png", "loading.meta.json",
+            "console.png", "console.meta.json"
         }:
             self.send_error(404)
             return
@@ -52,11 +54,12 @@ class CaptureHandler(SimpleHTTPRequestHandler):
             except (UnicodeDecodeError, json.JSONDecodeError):
                 self.send_error(400)
                 return
+            stem = name.removesuffix(".meta.json")
             metadata.update({
                 "source_sha256": self.server.source_sha,
                 "emscripten": self.server.emscripten,
                 "capture_sha256": hashlib.sha256(
-                    (self.server.output / "webgpu" / "arena17.png").read_bytes()
+                    (self.server.output / "webgpu" / f"{stem}.png").read_bytes()
                 ).hexdigest(),
             })
             target.write_text(json.dumps(metadata, sort_keys=True) + "\n", encoding="utf-8")

@@ -14,6 +14,7 @@ re.DrawLine for the ring). No texture/material — the old static-PNG blit is go
 #include "../../../client.h"
 #include "cl_wired_ui_hud_compat.h"
 #include "cl_wired_ui_hud_private.h"
+#include "../cl_wired_compositor.h"
 /* cl_wired_crosshair.h lives in code/client/wired/hud/ (the procedural-
  * crosshair Lua pipeline stays there); resolved via the -I .../wired/hud
  * include dir. Was "../cl_wired_crosshair.h" when this file lived in
@@ -120,13 +121,19 @@ void CG_ModernHUDElementCrosshairRoutine( void *context ) {
 
 	cx = cls.glconfig.vidWidth  * 0.5f;
 	cy = cls.glconfig.vidHeight * 0.5f;
-	/* WA-1: apply the cgame-staged world-anchored offset (real pixels, from
-	 * center). 0,0 in first person → unchanged center; non-zero in third person →
-	 * the reticle sits at the bullet-impact point. All arms/dot/ring/corner draws
-	 * below are relative to (cx,cy), so they shift with the offset automatically. */
+	/* The reticle origin is always screen center. The staged fields remain in the
+	 * HUD ABI for compatibility, but TASK-64.1 publishes the canonical 0,0; aim
+	 * convergence belongs to gameplay, not presentation. */
 	cx += wiredHud->crosshair.x;
 	cy += wiredHud->crosshair.y;
-	s  = ( spec.scale > 0.0f ) ? spec.scale : 1.0f;
+	/* Script geometry is authored in logical pixels. Preserve that size on
+	 * HiDPI outputs and honor the long-standing cg_crosshairSize control that
+	 * cgame already publishes in wiredHud->crosshair.size. A value of 48 is the
+	 * authored identity used by the shipped cvar/default scripts. */
+	s = ( spec.scale > 0.0f ) ? spec.scale : 1.0f;
+	s *= WiredUI_GetDpiScale();
+	if ( wiredHud->crosshair.size > 0.0f )
+		s *= wiredHud->crosshair.size / 48.0f;
 	gap = spec.gap * s;
 	ol  = spec.outline.thickness * s;
 	olA = spec.outline.alpha;

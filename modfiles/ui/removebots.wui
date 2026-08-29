@@ -29,7 +29,7 @@ menuDef {
 		itemDef {
 			name "removebots_root"
 			type container
-			rect 0 0 0.4 0.6
+			width FIXED 0.4 height FIXED 0.6
 			direction column
 			padding $popup_padding
 			gap $spacing_md
@@ -48,7 +48,7 @@ menuDef {
 			itemDef {
 				name "botlist"
 				type 6
-				rect 0 0 1 0.6
+				width FIXED 1 height FIXED 0.6
 				width PERCENT 1.0
 				height GROW
 				font $font_sans 12
@@ -65,7 +65,7 @@ menuDef {
 			itemDef {
 				name "popup_footer"
 				type container
-				rect 0 0 1 0.05
+				width FIXED 1 height FIXED 0.05
 				direction row
 				gap $spacing_md
 				alignX end

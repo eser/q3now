@@ -34,7 +34,12 @@ typedef struct {
 typedef struct { uint32_t vertex[3]; } neutralIqmTriangle_t;
 typedef struct { uint32_t type, flags, format, size, offset; } neutralIqmVertexArray_t;
 
-enum { NEUTRAL_IQM_POSITION = 0, NEUTRAL_IQM_TEXCOORD = 1, NEUTRAL_IQM_FLOAT = 7 };
+enum {
+	NEUTRAL_IQM_POSITION = 0,
+	NEUTRAL_IQM_TEXCOORD = 1,
+	NEUTRAL_IQM_NORMAL = 2,
+	NEUTRAL_IQM_FLOAT = 7
+};
 
 static uint64_t ModelHash( uint64_t digest, const void *data, size_t size ) {
 	const byte *bytes = (const byte *)data;
@@ -59,35 +64,48 @@ static qboolean ModelFinite( const float *values, size_t count ) {
 static void FreeSnapshot( renderModelSnapshot_t *snapshot ) {
 	if ( !snapshot ) return;
 	free( (void *)snapshot->positions );
+	free( (void *)snapshot->normals );
 	free( (void *)snapshot->texCoords );
 	free( (void *)snapshot->indices );
 	free( (void *)snapshot->batches );
+	free( (void *)snapshot->tags );
 	memset( snapshot, 0, sizeof( *snapshot ) );
 }
 
 static uint64_t SnapshotBytes( const renderModelSnapshot_t *snapshot ) {
 	return (uint64_t)snapshot->frameCount * snapshot->vertexCount * 3u * sizeof( float )
+		+ (uint64_t)snapshot->frameCount * snapshot->vertexCount * 3u * sizeof( float )
 		+ (uint64_t)snapshot->vertexCount * 2u * sizeof( float )
 		+ (uint64_t)snapshot->indexCount * sizeof( uint32_t )
-		+ (uint64_t)snapshot->batchCount * sizeof( renderModelBatch_t );
+		+ (uint64_t)snapshot->batchCount * sizeof( renderModelBatch_t )
+		+ (uint64_t)snapshot->frameCount * snapshot->tagCount
+			* sizeof( renderModelTag_t );
 }
 
 static uint64_t SnapshotDigest( const char *name,
 		const renderModelSnapshot_t *snapshot ) {
 	uint64_t digest = ModelHash( MODEL_FNV_OFFSET, name, strlen( name ) + 1u );
 	const uint32_t facts[] = { (uint32_t)snapshot->format, snapshot->frameCount,
-		snapshot->vertexCount, snapshot->indexCount, snapshot->batchCount };
+		snapshot->vertexCount, snapshot->indexCount, snapshot->batchCount,
+		snapshot->tagCount };
 	digest = ModelHash( digest, facts, sizeof( facts ) );
 	digest = ModelHash( digest, snapshot->positions,
+		(size_t)snapshot->frameCount * snapshot->vertexCount * 3u * sizeof( float ) );
+	digest = ModelHash( digest, snapshot->normals,
 		(size_t)snapshot->frameCount * snapshot->vertexCount * 3u * sizeof( float ) );
 	digest = ModelHash( digest, snapshot->texCoords,
 		(size_t)snapshot->vertexCount * 2u * sizeof( float ) );
 	digest = ModelHash( digest, snapshot->indices,
 		(size_t)snapshot->indexCount * sizeof( uint32_t ) );
+	digest = ModelHash( digest, snapshot->tags,
+		(size_t)snapshot->frameCount * snapshot->tagCount
+			* sizeof( renderModelTag_t ) );
 	for ( uint32_t i = 0u; i < snapshot->batchCount; ++i ) {
 		const renderModelBatch_t *batch = &snapshot->batches[i];
 		digest = ModelHash( digest, batch, offsetof( renderModelBatch_t, material ) );
 		digest = ModelHash( digest, &batch->material, sizeof( batch->material ) );
+		digest = ModelHash( digest, batch->surfaceName,
+			strlen( batch->surfaceName ) + 1u );
 		digest = ModelHash( digest, batch->materialName,
 			strlen( batch->materialName ) + 1u );
 	}
@@ -117,18 +135,46 @@ static qboolean DecodeMd3( const void *fileBytes, uint32_t byteCount,
 	memcpy( &header, bytes, sizeof( header ) );
 	header.ident = LittleLong( header.ident ); header.version = LittleLong( header.version );
 	header.numFrames = LittleLong( header.numFrames );
+	header.numTags = LittleLong( header.numTags );
 	header.numSurfaces = LittleLong( header.numSurfaces );
+	header.ofsTags = LittleLong( header.ofsTags );
 	header.ofsSurfaces = LittleLong( header.ofsSurfaces );
 	header.ofsEnd = LittleLong( header.ofsEnd );
 	if ( header.ident != MD3_IDENT || header.version != MD3_VERSION
 			|| header.numFrames <= 0
 			|| (uint32_t)header.numFrames > RENDER_SUBMISSION_MAX_MODEL_FRAMES
+			|| header.numTags < 0 || header.numTags > MD3_MAX_TAGS
 			|| header.numSurfaces < 0
 			|| header.numSurfaces > (int32_t)RENDER_SUBMISSION_MAX_MODEL_BATCHES
-			|| header.ofsEnd > byteCount || header.ofsSurfaces > header.ofsEnd ) return qfalse;
+			|| header.ofsEnd > byteCount || header.ofsSurfaces > header.ofsEnd
+			|| ( header.numTags && !ModelRange( header.ofsEnd, header.ofsTags,
+				(uint32_t)header.numFrames * (uint32_t)header.numTags,
+				sizeof( md3Tag_t ) ) ) ) return qfalse;
+	out->format = RENDER_MODEL_MD3;
+	out->frameCount = (uint32_t)header.numFrames;
+	out->tagCount = (uint32_t)header.numTags;
+	if ( out->tagCount ) {
+		out->tags = (renderModelTag_t *)calloc(
+			(size_t)out->frameCount * out->tagCount, sizeof( renderModelTag_t ) );
+		if ( !out->tags ) return qfalse;
+		for ( uint32_t i = 0u; i < out->frameCount * out->tagCount; ++i ) {
+			md3Tag_t source;
+			renderModelTag_t *target = &((renderModelTag_t *)out->tags)[i];
+			memcpy( &source, bytes + header.ofsTags + (size_t)i * sizeof( source ),
+				sizeof( source ) );
+			(void)snprintf( target->name, sizeof( target->name ), "%.*s",
+				(int)sizeof( source.name ), source.name );
+			for ( uint32_t axis = 0u; axis < 3u; ++axis ) {
+				target->origin[axis] = LittleFloat( source.origin[axis] );
+				for ( uint32_t component = 0u; component < 3u; ++component )
+					target->axis[axis][component] =
+						LittleFloat( source.axis[axis][component] );
+			}
+			if ( !ModelFinite( target->origin, 3u )
+					|| !ModelFinite( &target->axis[0][0], 9u ) ) return qfalse;
+		}
+	}
 	if ( header.numSurfaces == 0 ) {
-		out->format = RENDER_MODEL_MD3;
-		out->frameCount = (uint32_t)header.numFrames;
 		return qtrue;
 	}
 	offset = header.ofsSurfaces;
@@ -172,16 +218,18 @@ static qboolean DecodeMd3( const void *fileBytes, uint32_t byteCount,
 		totalIndices += (uint32_t)surface.numTriangles * 3u;
 		offset = end;
 	}
-	out->format = RENDER_MODEL_MD3; out->frameCount = (uint32_t)header.numFrames;
 	out->vertexCount = totalVertices; out->indexCount = totalIndices;
 	out->batchCount = (uint32_t)header.numSurfaces;
 	out->positions = (float *)calloc( (size_t)out->frameCount * totalVertices * 3u,
+		sizeof( float ) );
+	out->normals = (float *)calloc( (size_t)out->frameCount * totalVertices * 3u,
 		sizeof( float ) );
 	out->texCoords = (float *)calloc( (size_t)totalVertices * 2u, sizeof( float ) );
 	out->indices = (uint32_t *)calloc( totalIndices, sizeof( uint32_t ) );
 	out->batches = (renderModelBatch_t *)calloc( out->batchCount,
 		sizeof( renderModelBatch_t ) );
-	if ( !out->positions || !out->texCoords || !out->indices || !out->batches ) return qfalse;
+	if ( !out->positions || !out->normals || !out->texCoords
+			|| !out->indices || !out->batches ) return qfalse;
 	offset = header.ofsSurfaces;
 	uint32_t vertexBase = 0u, indexBase = 0u;
 	for ( uint32_t i = 0u; i < out->batchCount; ++i ) {
@@ -199,6 +247,10 @@ static qboolean DecodeMd3( const void *fileBytes, uint32_t byteCount,
 		batch->firstVertex = vertexBase; batch->vertexCount = (uint32_t)surface.numVerts;
 		batch->firstIndex = indexBase;
 		batch->indexCount = (uint32_t)surface.numTriangles * 3u;
+		(void)snprintf( batch->surfaceName, sizeof( batch->surfaceName ), "%.*s",
+			(int)sizeof( surface.name ), surface.name );
+		for ( char *cursor = batch->surfaceName; *cursor; ++cursor )
+			if ( *cursor >= 'A' && *cursor <= 'Z' ) *cursor += 'a' - 'A';
 		if ( surface.numShaders ) {
 			const md3Shader_t *shader = (const md3Shader_t *)( bytes + offset
 				+ surface.ofsShaders );
@@ -220,6 +272,18 @@ static qboolean DecodeMd3( const void *fileBytes, uint32_t byteCount,
 					((float *)out->positions)[((size_t)frame * totalVertices
 						+ vertexBase + vertex ) * 3u + axis]
 						= (float)(int16_t)LittleShort( xyz.xyz[axis] ) * (float)MD3_XYZ_SCALE;
+				{
+					const uint16_t packed = (uint16_t)LittleShort( xyz.normal );
+					const float latitude = (float)( ( packed >> 8u ) & 0xffu )
+						* ( 2.0f * (float)M_PI / 255.0f );
+					const float longitude = (float)( packed & 0xffu )
+						* ( 2.0f * (float)M_PI / 255.0f );
+					float *normal = (float *)out->normals + ( (size_t)frame
+						* totalVertices + vertexBase + vertex ) * 3u;
+					normal[0] = cosf( latitude ) * sinf( longitude );
+					normal[1] = sinf( latitude ) * sinf( longitude );
+					normal[2] = cosf( longitude );
+				}
 			}
 		}
 		for ( uint32_t triangle = 0u; triangle < (uint32_t)surface.numTriangles; ++triangle ) {
@@ -237,7 +301,44 @@ static qboolean DecodeMd3( const void *fileBytes, uint32_t byteCount,
 	}
 	return ModelFinite( out->positions,
 		(size_t)out->frameCount * out->vertexCount * 3u )
+		&& ModelFinite( out->normals,
+			(size_t)out->frameCount * out->vertexCount * 3u )
 		&& ModelFinite( out->texCoords, (size_t)out->vertexCount * 2u );
+}
+
+static qboolean GenerateNormals( renderModelSnapshot_t *out ) {
+	float *normals;
+	if ( !out || !out->positions || !out->indices || !out->normals ) return qfalse;
+	normals = (float *)out->normals;
+	for ( uint32_t triangle = 0u; triangle + 2u < out->indexCount; triangle += 3u ) {
+		const uint32_t ia = out->indices[triangle + 0u];
+		const uint32_t ib = out->indices[triangle + 1u];
+		const uint32_t ic = out->indices[triangle + 2u];
+		const float *a = out->positions + (size_t)ia * 3u;
+		const float *b = out->positions + (size_t)ib * 3u;
+		const float *c = out->positions + (size_t)ic * 3u;
+		const float ab[3] = { b[0] - a[0], b[1] - a[1], b[2] - a[2] };
+		const float ac[3] = { c[0] - a[0], c[1] - a[1], c[2] - a[2] };
+		const float face[3] = {
+			ab[1] * ac[2] - ab[2] * ac[1],
+			ab[2] * ac[0] - ab[0] * ac[2],
+			ab[0] * ac[1] - ab[1] * ac[0]
+		};
+		for ( uint32_t axis = 0u; axis < 3u; ++axis ) {
+			normals[(size_t)ia * 3u + axis] += face[axis];
+			normals[(size_t)ib * 3u + axis] += face[axis];
+			normals[(size_t)ic * 3u + axis] += face[axis];
+		}
+	}
+	for ( uint32_t vertex = 0u; vertex < out->vertexCount; ++vertex ) {
+		float *normal = normals + (size_t)vertex * 3u;
+		const float length = sqrtf( normal[0] * normal[0]
+			+ normal[1] * normal[1] + normal[2] * normal[2] );
+		if ( length > 0.000001f ) for ( uint32_t axis = 0u; axis < 3u; ++axis )
+			normal[axis] /= length;
+		else normal[2] = 1.0f;
+	}
+	return qtrue;
 }
 
 static qboolean DecodeIqm( const void *fileBytes, uint32_t byteCount,
@@ -245,7 +346,7 @@ static qboolean DecodeIqm( const void *fileBytes, uint32_t byteCount,
 	static const char magic[16] = "INTERQUAKEMODEL";
 	const byte *bytes = (const byte *)fileBytes;
 	neutralIqmHeader_t header;
-	const float *positions = NULL, *texCoords = NULL;
+	const float *positions = NULL, *normals = NULL, *texCoords = NULL;
 	if ( byteCount < sizeof( header ) ) return qfalse;
 	memcpy( &header, bytes, sizeof( header ) );
 	if ( memcmp( header.magic, magic, sizeof( magic ) ) ) return qfalse;
@@ -279,17 +380,23 @@ static qboolean DecodeIqm( const void *fileBytes, uint32_t byteCount,
 				&& array.size == 2u && ModelRange( header.filesize, array.offset,
 					header.numVertexes, 2u * sizeof( float ) ) ) texCoords =
 					(const float *)( bytes + array.offset );
+		if ( array.type == NEUTRAL_IQM_NORMAL && array.format == NEUTRAL_IQM_FLOAT
+				&& array.size == 3u && ModelRange( header.filesize, array.offset,
+					header.numVertexes, 3u * sizeof( float ) ) ) normals =
+					(const float *)( bytes + array.offset );
 	}
 	if ( !positions ) return qfalse;
 	out->format = RENDER_MODEL_IQM; out->frameCount = 1u;
 	out->vertexCount = header.numVertexes; out->indexCount = header.numTriangles * 3u;
 	out->batchCount = header.numMeshes;
 	out->positions = (float *)calloc( (size_t)out->vertexCount * 3u, sizeof( float ) );
+	out->normals = (float *)calloc( (size_t)out->vertexCount * 3u, sizeof( float ) );
 	out->texCoords = (float *)calloc( (size_t)out->vertexCount * 2u, sizeof( float ) );
 	out->indices = (uint32_t *)calloc( out->indexCount, sizeof( uint32_t ) );
 	out->batches = (renderModelBatch_t *)calloc( out->batchCount,
 		sizeof( renderModelBatch_t ) );
-	if ( !out->positions || !out->texCoords || !out->indices || !out->batches ) return qfalse;
+	if ( !out->positions || !out->normals || !out->texCoords
+			|| !out->indices || !out->batches ) return qfalse;
 	for ( uint32_t vertex = 0u; vertex < out->vertexCount; ++vertex ) {
 		for ( uint32_t axis = 0u; axis < 3u; ++axis )
 			((float *)out->positions)[vertex * 3u + axis] =
@@ -297,6 +404,9 @@ static qboolean DecodeIqm( const void *fileBytes, uint32_t byteCount,
 		if ( texCoords ) for ( uint32_t axis = 0u; axis < 2u; ++axis )
 			((float *)out->texCoords)[vertex * 2u + axis] =
 				LittleFloat( texCoords[vertex * 2u + axis] );
+		if ( normals ) for ( uint32_t axis = 0u; axis < 3u; ++axis )
+			((float *)out->normals)[vertex * 3u + axis] =
+				LittleFloat( normals[vertex * 3u + axis] );
 	}
 	for ( uint32_t triangle = 0u; triangle < header.numTriangles; ++triangle ) {
 		neutralIqmTriangle_t tri; memcpy( &tri, bytes + header.ofsTriangles
@@ -333,7 +443,9 @@ static qboolean DecodeIqm( const void *fileBytes, uint32_t byteCount,
 		if ( !batch->materialName[0] )
 			(void)snprintf( batch->materialName, sizeof( batch->materialName ), "*white" );
 	}
+	if ( !normals && !GenerateNormals( out ) ) return qfalse;
 	return ModelFinite( out->positions, (size_t)out->vertexCount * 3u )
+		&& ModelFinite( out->normals, (size_t)out->vertexCount * 3u )
 		&& ModelFinite( out->texCoords, (size_t)out->vertexCount * 2u );
 }
 
@@ -407,16 +519,20 @@ qhandle_t RenderSubmission_RegisterInlineModel( renderSubmissionState_t *state,
 	candidate.batchCount = batchCount;
 	candidate.positions = (float *)calloc( (size_t)candidate.vertexCount * 3u,
 		sizeof( float ) );
+	candidate.normals = (float *)calloc( (size_t)candidate.vertexCount * 3u,
+		sizeof( float ) );
 	candidate.texCoords = (float *)calloc( (size_t)candidate.vertexCount * 2u,
 		sizeof( float ) );
 	candidate.indices = (uint32_t *)calloc( indexCount, sizeof( uint32_t ) );
 	candidate.batches = (renderModelBatch_t *)calloc( batchCount,
 		sizeof( renderModelBatch_t ) );
-	if ( !candidate.positions || !candidate.texCoords || !candidate.indices
+	if ( !candidate.positions || !candidate.normals || !candidate.texCoords || !candidate.indices
 			|| !candidate.batches ) { FreeSnapshot( &candidate ); return 0; }
 	for ( uint32_t vertex = 0u; vertex < candidate.vertexCount; ++vertex ) {
 		memcpy( (float *)candidate.positions + (size_t)vertex * 3u,
 			world->vertices[vertex].position, 3u * sizeof( float ) );
+		memcpy( (float *)candidate.normals + (size_t)vertex * 3u,
+			world->vertices[vertex].normal, 3u * sizeof( float ) );
 		memcpy( (float *)candidate.texCoords + (size_t)vertex * 2u,
 			world->vertices[vertex].texCoord, 2u * sizeof( float ) );
 	}
@@ -481,6 +597,54 @@ qboolean RenderSubmission_ModelSnapshot( const renderSubmissionState_t *state,
 	return qfalse;
 }
 
+int RenderSubmission_LerpTag( const renderSubmissionState_t *state,
+		orientation_t *tag, qhandle_t model, int startFrame, int endFrame,
+		float fraction, const char *name ) {
+	renderModelSnapshot_t snapshot;
+	const renderModelTag_t *start = NULL, *end = NULL;
+	if ( tag ) {
+		memset( tag, 0, sizeof( *tag ) );
+		tag->axis[0][0] = tag->axis[1][1] = tag->axis[2][2] = 1.0f;
+	}
+	if ( !tag || !name || !name[0] || !isfinite( fraction )
+			|| !RenderSubmission_ModelSnapshot( state, model, &snapshot )
+			|| snapshot.format != RENDER_MODEL_MD3 || !snapshot.tags
+			|| !snapshot.tagCount || !snapshot.frameCount ) return 0;
+	if ( startFrame < 0 ) startFrame = 0;
+	if ( endFrame < 0 ) endFrame = 0;
+	if ( (uint32_t)startFrame >= snapshot.frameCount )
+		startFrame = (int)snapshot.frameCount - 1;
+	if ( (uint32_t)endFrame >= snapshot.frameCount )
+		endFrame = (int)snapshot.frameCount - 1;
+	for ( uint32_t i = 0u; i < snapshot.tagCount; ++i ) {
+		const renderModelTag_t *candidate =
+			&snapshot.tags[(size_t)startFrame * snapshot.tagCount + i];
+		if ( !strcmp( candidate->name, name ) ) { start = candidate; break; }
+	}
+	for ( uint32_t i = 0u; i < snapshot.tagCount; ++i ) {
+		const renderModelTag_t *candidate =
+			&snapshot.tags[(size_t)endFrame * snapshot.tagCount + i];
+		if ( !strcmp( candidate->name, name ) ) { end = candidate; break; }
+	}
+	if ( !start || !end ) return 0;
+	for ( uint32_t axis = 0u; axis < 3u; ++axis ) {
+		tag->origin[axis] = start->origin[axis] * ( 1.0f - fraction )
+			+ end->origin[axis] * fraction;
+		for ( uint32_t component = 0u; component < 3u; ++component )
+			tag->axis[axis][component] = start->axis[axis][component]
+				* ( 1.0f - fraction ) + end->axis[axis][component] * fraction;
+		{
+			const float length = sqrtf( tag->axis[axis][0] * tag->axis[axis][0]
+				+ tag->axis[axis][1] * tag->axis[axis][1]
+				+ tag->axis[axis][2] * tag->axis[axis][2] );
+			if ( length > 0.000001f )
+				for ( uint32_t component = 0u; component < 3u; ++component )
+					tag->axis[axis][component] /= length;
+		}
+	}
+	return 1;
+}
+
 const renderEntityCommand_t *RenderSubmission_EntityCommands(
 		const renderSubmissionState_t *state, uint32_t *outCount ) {
 	if ( outCount ) *outCount = 0u;
@@ -489,4 +653,29 @@ const renderEntityCommand_t *RenderSubmission_EntityCommands(
 			|| !state->entityCount ) return NULL;
 	*outCount = state->entityCount;
 	return state->entities;
+}
+
+qhandle_t RenderSubmission_EntityBatchMaterial(
+		const renderSubmissionState_t *state, const renderEntityCommand_t *command,
+		const renderModelBatch_t *batch ) {
+	if ( !command || !batch ) return 0;
+	if ( command->entity.customShader > 0 ) return command->entity.customShader;
+	if ( state && command->entity.characterSkin ) {
+		const cmSkin_t *skin = NULL;
+		for ( uint32_t i = 0u; i < state->characterSkinCount; ++i )
+			if ( state->characterSkins[i].handle == command->entity.characterSkin ) {
+				skin = &state->characterSkins[i].skin; break;
+			}
+		if ( !skin ) return batch->material;
+		if ( skin->singlePath )
+			return skin->fallbackShader > 0 ? skin->fallbackShader : batch->material;
+		const unsigned int hash = Q_HashSurfaceName( batch->surfaceName );
+		for ( int i = 0; i < skin->overrideCount && i < CM_MAX_SURFACE_OVERRIDES; ++i )
+			if ( skin->overrides[i].surfaceNameHash == hash
+					&& !strcmp( skin->overrides[i].surfaceName, batch->surfaceName ) )
+				return skin->overrides[i].shader > 0
+					? skin->overrides[i].shader : batch->material;
+		if ( skin->defaultShader > 0 ) return skin->defaultShader;
+	}
+	return batch->material;
 }

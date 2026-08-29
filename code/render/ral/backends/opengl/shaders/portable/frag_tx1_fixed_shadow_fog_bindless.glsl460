@@ -13,16 +13,17 @@ layout(constant_id = 9) const float identity_alpha = 1.0;
 layout(constant_id = 6) const int tex_mode = 0;
 const bool _680 = (tex_mode == 1);
 const bool _705 = (tex_mode == 2);
+const bool _766 = (lightmap_slot != 0);
 layout(constant_id = 10) const int acff = 0;
-const bool _772 = (acff == 1);
-const bool _787 = (acff == 2);
-const bool _795 = (acff == 3);
-const bool _820 = (acff == 1);
-const bool _836 = (acff == 2);
-const bool _845 = (acff == 3);
+const bool _840 = (acff == 1);
+const bool _855 = (acff == 2);
+const bool _863 = (acff == 3);
+const bool _888 = (acff == 1);
+const bool _904 = (acff == 2);
+const bool _913 = (acff == 3);
 layout(constant_id = 7) const int discard_mode = 0;
-const bool _867 = (discard_mode == 1);
-const bool _877 = (discard_mode == 2);
+const bool _935 = (discard_mode == 1);
+const bool _945 = (discard_mode == 2);
 layout(constant_id = 3) const int alpha_to_coverage = 0;
 
 layout(binding = 0, std140) uniform UBO
@@ -43,6 +44,7 @@ layout(binding = 0, std140) uniform UBO
     vec4 worldLightParams;
     vec4 advancedFogColorDensity;
     vec4 advancedFogTypeFarEnabled;
+    vec4 emissionRadiance;
 } _102;
 
 layout(binding = 0) uniform texture2D wired_bindless_images[64];
@@ -316,59 +318,80 @@ void main()
     base.x = _759.x;
     base.y = _759.y;
     base.z = _759.z;
+    if (_766)
+    {
+        float wetness = clamp(_102.worldLightParams.y, 0.0, 1.0);
+        float frost = clamp(_102.worldLightParams.z, 0.0, 1.0);
+        float luminance = dot(base.xyz, vec3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+        vec4 _788 = base;
+        vec3 _790 = _788.xyz * mix(1.0, 0.819999992847442626953125, wetness);
+        base.x = _790.x;
+        base.y = _790.y;
+        base.z = _790.z;
+        vec4 _797 = base;
+        vec3 _811 = mix(_797.xyz, vec3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), vec3(frost * 0.550000011920928955078125));
+        base.x = _811.x;
+        base.y = _811.y;
+        base.z = _811.z;
+    }
+    vec4 _825 = base;
+    vec3 _827 = _825.xyz + (color0.xyz * _102.emissionRadiance.xyz);
+    base.x = _827.x;
+    base.y = _827.y;
+    base.z = _827.z;
     if (wired_advanced_fog_enabled())
     {
         float fogAmount = wired_advanced_fog_amount();
-        if (_772)
+        if (_840)
         {
-            vec4 _777 = base;
-            vec3 _779 = _777.xyz * (1.0 - fogAmount);
-            base.x = _779.x;
-            base.y = _779.y;
-            base.z = _779.z;
+            vec4 _845 = base;
+            vec3 _847 = _845.xyz * (1.0 - fogAmount);
+            base.x = _847.x;
+            base.y = _847.y;
+            base.z = _847.z;
         }
         else
         {
-            if (_787)
+            if (_855)
             {
                 base *= (1.0 - fogAmount);
             }
             else
             {
-                if (_795)
+                if (_863)
                 {
                     base.w *= (1.0 - fogAmount);
                 }
                 else
                 {
-                    vec4 _805 = base;
-                    vec3 _812 = mix(_805.xyz, _102.advancedFogColorDensity.xyz, vec3(fogAmount));
-                    base.x = _812.x;
-                    base.y = _812.y;
-                    base.z = _812.z;
+                    vec4 _873 = base;
+                    vec3 _880 = mix(_873.xyz, _102.advancedFogColorDensity.xyz, vec3(fogAmount));
+                    base.x = _880.x;
+                    base.y = _880.y;
+                    base.z = _880.z;
                 }
             }
         }
     }
     else
     {
-        if (_820)
+        if (_888)
         {
-            vec4 _823 = base;
-            vec3 _828 = _823.xyz * (1.0 - fog.w);
-            base.x = _828.x;
-            base.y = _828.y;
-            base.z = _828.z;
+            vec4 _891 = base;
+            vec3 _896 = _891.xyz * (1.0 - fog.w);
+            base.x = _896.x;
+            base.y = _896.y;
+            base.z = _896.z;
         }
         else
         {
-            if (_836)
+            if (_904)
             {
                 base *= (1.0 - fog.w);
             }
             else
             {
-                if (_845)
+                if (_913)
                 {
                     base.w *= (1.0 - fog.w);
                 }
@@ -379,7 +402,7 @@ void main()
             }
         }
     }
-    if (_867)
+    if (_935)
     {
         if (base.w == 0.0)
         {
@@ -388,7 +411,7 @@ void main()
     }
     else
     {
-        if (_877)
+        if (_945)
         {
             if (dot(base.xyz, base.xyz) == 0.0)
             {

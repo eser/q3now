@@ -92,9 +92,6 @@
 #define FEAT_IQM                          1   // IQM (Inter-Quake Model) skeletal mesh format
 
 // ── renderer ───────────────────────────────────────────────────────────
-#ifndef FEAT_FOG_SYSTEM
-#define FEAT_FOG_SYSTEM                   0   // Enhanced fog types (linear, exp, exp2); CMake owns verification ON/OFF.
-#endif
 #define FEAT_HALO                         1   // Halo/lens flare entities via flare pipeline
 #define FEAT_HEADLESS_RENDERER            0   // Dedicated server renderer stub (sv_ref.c)
 #define FEAT_DEPTH_CLAMP                  1   // disable near-plane vertex clipping at high FOV

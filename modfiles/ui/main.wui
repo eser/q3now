@@ -31,29 +31,32 @@ menuDef {
 
 		#include "ui/widgets/qw_title_bar.wui"
 
-		// -- LEFT region -----------------------------------
-		// Dispatch 5.5/5.8: canonical mockup declarations
-		// (qw-variants.jsx:86 `position:absolute; left:72; top:96;
-		// width:600` against 1440×900 viewport-baseline).
-		// Dispatch 5.12: removed main_content intermediate wrapper
-		// (not in mockup) + corrected `width <Nvw>` syntax (no PERCENT
-		// keyword when using vw unit).
+		// Main content is one horizontal flex row. Its padding encodes the
+		// authored viewport gutters; the growing middle spacer keeps the hero
+		// and card rail on opposite sides without floating either subtree.
 		itemDef {
+			name "main_content"
+			type container
+			direction row
+			width PERCENT 1
+			align stretch
+			grow 1
+			padding 3.5vh 3.9vw 2.6vh 5vw
+
+			// -- LEFT region -----------------------------------
+			itemDef {
 			name "left_region"
 			type container
-			position absolute
-			top 10.67vh
-			bottom 6vh
-			left 5vw
 			width 41.7vw
 			direction column
 			gap $spacing_none
+			padding 2.67vh 0 0 0
 			grow 0
 
 			itemDef {
 				name "hero_quake"
 				type 0
-				rect 0 0 1 14vh
+				width FIXED 1 height FIXED 14vh
 				height FIT
 				width PERCENT 1
 				text "QUAKE"
@@ -67,7 +70,7 @@ menuDef {
 			itemDef {
 				name "hero_wired"
 				type 0
-				rect 0 0 1 14vh
+				width FIXED 1 height FIXED 14vh
 				height FIT
 				width PERCENT 1
 				text "WIRED"
@@ -82,7 +85,7 @@ menuDef {
 			itemDef {
 				name "action_menu_spacer"
 				type container
-				rect 0 0 1 5.33vh
+				width FIXED 1 height FIXED 5.33vh
 				height FIT
 				grow 0
 				decoration
@@ -92,7 +95,7 @@ menuDef {
 			itemDef {
 				name "action_menu"
 				type container
-				rect 0 0 1 48vh
+				width FIXED 1 height FIXED 48vh
 				height FIT
 				direction column
 				gap $spacing_xxs
@@ -114,7 +117,7 @@ menuDef {
 			itemDef {
 				name "left_footer_row"
 				type container
-				rect 0 0 1 2vh
+				width FIXED 1 height FIXED 2vh
 				height FIT
 				width PERCENT 1
 				direction row
@@ -124,7 +127,7 @@ menuDef {
 				itemDef {
 					name "left_footer"
 					type 0
-					rect 0 0 1 2vh
+					width FIXED 1 height FIXED 2vh
 					height FIT
 					width PERCENT 1
 					text "v0.1.0 · build mmxxvi"
@@ -136,20 +139,14 @@ menuDef {
 					grow 1
 				}
 			}
-		}
+			}
 
-		// -- RIGHT region: 4-card rail ---------------------
-		// Dispatch 5.5/5.8: canonical mockup (qw-variants.jsx:134
-		// `position:absolute; right:56; top:72; bottom:72; width:360`).
-		// Dispatch 5.12: `width <Nvw>` syntax fix + flattened from
-		// main_content intermediate.
-		itemDef {
+			itemDef { name "main_rail_spacer" type container grow 1 decoration visible 1 }
+
+			// -- RIGHT region: 4-card rail ---------------------
+			itemDef {
 			name "right_region"
 			type container
-			position absolute
-			top 8vh
-			right 3.9vw
-			bottom 8vh
 			width 25vw
 			direction column
 			gap $spacing_card_gap
@@ -159,6 +156,7 @@ menuDef {
 			#include "ui/widgets/qw_last_match_card.wui"
 			#include "ui/widgets/qw_global_feed_card.wui"
 			#include "ui/widgets/qw_arena_of_day_card.wui"
+			}
 		}
 
 		#include "ui/widgets/qw_bottom_hint_bar.wui"

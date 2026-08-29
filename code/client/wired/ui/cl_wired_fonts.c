@@ -10,7 +10,7 @@ cl_wired_fonts.c -- Wired UI font system (migrated from cg_moderntext.c)
 #include "cl_wired_draw.h"
 LOG_DECLARE_CHANNEL( ch_ui, "ui" );
 
-#if FEAT_WIRED_UI
+#if FEAT_WIRED_UI || defined(WIRED_WEB_UI_TEXT)
 
 /* ── Font family registration table ───────────────────────────────── */
 
@@ -321,4 +321,4 @@ int WiredFont_ToTextFlags( int dsFlags )
 }
 
 
-#endif // FEAT_WIRED_UI
+#endif // FEAT_WIRED_UI || WIRED_WEB_UI_TEXT

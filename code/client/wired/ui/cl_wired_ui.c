@@ -9,6 +9,7 @@ cl_wired_ui.c — Wired UI: unified menu/HUD system implementation
 #include "cl_wired_ui.h"
 #include "cl_wired_widget_core.h"
 #include "cl_wired_compositor.h"
+#include "cl_wired_lua_test.h"
 #include "cl_wired_customdraw.h"
 #include "cl_wired_attract.h"
 #include "cl_wired_ui_hud_state.h"
@@ -46,8 +47,10 @@ extern void WiredDebugOverlay_RegisterAll( void );
 #include "../../../qcommon/menudef.h"
 
 #include <stdio.h>   /* sscanf for token colour parsing */
+#ifndef WIRED_WEB_UI_NATIVE
 #include <lua.h>
 #include "../../../qcommon/wired/core/scripting/wired_scripting.h"
+#endif
 LOG_DECLARE_CHANNEL( ch_ui, "ui" );
 
 #if FEAT_WIRED_UI
@@ -165,6 +168,15 @@ static const wiredUiStateDefault_t wui_uiStateDefaults[] = {
 	{ "ui_favoriteMaps", "" },
 	{ "ui_selectedDemo", "" },
 	{ "ui_selectedMod", "" },
+	{ "ui_errorTitle", "Error" },
+	{ "ui_errorRetry", "0" },
+	{ "ui_selectedPlayerNum", "0" },
+	{ "ui_selectedTeamPlayerNum", "0" },
+	{ "ui_mapSortKey", "0" },
+	{ "ui_mapSortDir", "0" },
+	{ "ui_serverSortKey", "0" },
+	{ "ui_serverSortDir", "0" },
+	{ "ui_password_server_name", "" },
 	{ "ui_confirmText", "" },
 	{ "ui_confirmAction", "" },
 	/* Whether a real menu is up over the attract reel. Published by the engine
@@ -183,10 +195,24 @@ static const wiredUiStateDefault_t wui_uiStateDefaults[] = {
 	{ "ui_botCount", "0" },
 	{ "ui_botProfile", "visor" },
 	{ "ui_botName", "" },
-	{ "ui_botSkill", "3" },
 	{ "ui_botTeam", "free" },
 	{ "ui_hostListed", "0" },
 	{ "ui_netGameType", "0" },
+	/* Host-form state is persistent UI intent. Runtime server cvars are written
+	 * once, immediately before launch; they are not the menu's backing store. */
+	{ "ui_hostName", "noname" },
+	{ "ui_hostMaxClients", "8" },
+	{ "ui_hostScoreLimit", "20" },
+	{ "ui_hostTimeLimit", "0" },
+	{ "ui_hostPure", "1" },
+	{ "ui_hostAllowDownload", "1" },
+	{ "ui_hostFriendlyFire", "0" },
+	{ "ui_hostTeamForceBalance", "0" },
+	{ "ui_hostAllowVote", "1" },
+	{ "ui_hostTeamPref", "0" },
+	{ "ui_hostAutoBots", "0" },
+	{ "ui_hostMinPlayers", "0" },
+	{ "ui_hostMapRotation", "" },
 	{ "ui_globalpreset", "0" },
 	{ "ui_mousePitch", "0" },
 	{ "ui_lastRefreshDate", "" },
@@ -245,7 +271,16 @@ static qboolean WiredUI_IsPersistedStateKey( const char *key ) {
 	if ( !Q_stricmp( key, "ui_selectedServerAddr" )
 	  || !Q_stricmp( key, "ui_selectedServerName" )
 	  || !Q_stricmp( key, "ui_selectedDemo" )
-	  || !Q_stricmp( key, "ui_joinPasswordError" ) ) {
+	  || !Q_stricmp( key, "ui_joinPasswordError" )
+	  || !Q_stricmp( key, "ui_errorTitle" )
+	  || !Q_stricmp( key, "ui_errorRetry" )
+	  || !Q_stricmp( key, "ui_selectedPlayerNum" )
+	  || !Q_stricmp( key, "ui_selectedTeamPlayerNum" )
+	  || !Q_stricmp( key, "ui_mapSortKey" )
+	  || !Q_stricmp( key, "ui_mapSortDir" )
+	  || !Q_stricmp( key, "ui_serverSortKey" )
+	  || !Q_stricmp( key, "ui_serverSortDir" )
+	  || !Q_stricmp( key, "ui_password_server_name" ) ) {
 		return qfalse;
 	}
 	if ( !Q_stricmp( key, "ui_menuUp" ) ) {
@@ -454,6 +489,10 @@ void WiredUI_LoadState( void ) {
 }
 
 static qboolean WiredUI_CallLuaStoreFunction( const char *functionName ) {
+#ifdef WIRED_WEB_UI_NATIVE
+	(void)functionName;
+	return qfalse;
+#else
 	if ( !functionName || !functionName[0] ) {
 		return qfalse;
 	}
@@ -486,6 +525,7 @@ static qboolean WiredUI_CallLuaStoreFunction( const char *functionName ) {
 
 	lua_pop( L, 1 );
 	return qtrue;
+#endif
 }
 
 static const char *WiredUI_StateDefaultValue( const char *key ) {
@@ -531,6 +571,57 @@ int WiredUI_StateGetInt( const char *key ) {
 	char buf[256];
 	WiredUI_StateGetString( key, buf, sizeof( buf ) );
 	return atoi( buf );
+}
+
+/* Keybind labels are rendered every frame, but the binding table changes only
+ * on bind/unbind. Cache the first two matching keynums per item and invalidate
+ * all entries through the key system's mutation generation. */
+#define WUI_BIND_LABEL_CACHE_SIZE 64
+typedef struct {
+	const wiredItemDef_t *item;
+	char command[64];
+	unsigned int generation;
+	int key1;
+	int key2;
+} wiredBindLabelCache_t;
+
+static wiredBindLabelCache_t wui_bindLabelCache[WUI_BIND_LABEL_CACHE_SIZE];
+static int wui_bindLabelCacheReplace;
+
+static const wiredBindLabelCache_t *WiredUI_BindLabelCache( const wiredItemDef_t *item ) {
+	wiredBindLabelCache_t *entry = NULL;
+	unsigned int generation = Key_GetBindingGeneration();
+	int i;
+
+	for ( i = 0; i < WUI_BIND_LABEL_CACHE_SIZE; i++ ) {
+		if ( wui_bindLabelCache[i].item == item
+		  && !Q_stricmp( wui_bindLabelCache[i].command, item->cvar ) ) {
+			entry = &wui_bindLabelCache[i];
+			break;
+		}
+		if ( !entry && !wui_bindLabelCache[i].item ) {
+			entry = &wui_bindLabelCache[i];
+		}
+	}
+	if ( !entry ) {
+		entry = &wui_bindLabelCache[wui_bindLabelCacheReplace++ % WUI_BIND_LABEL_CACHE_SIZE];
+	}
+	if ( entry->item != item || Q_stricmp( entry->command, item->cvar )
+	  || entry->generation != generation ) {
+		entry->item = item;
+		Q_strncpyz( entry->command, item->cvar, sizeof( entry->command ) );
+		entry->generation = generation;
+		entry->key1 = -1;
+		entry->key2 = -1;
+		for ( i = 0; i < MAX_KEYS; i++ ) {
+			const char *binding = Key_GetBinding( i );
+			if ( binding && !Q_stricmp( binding, item->cvar ) ) {
+				if ( entry->key1 < 0 ) entry->key1 = i;
+				else { entry->key2 = i; break; }
+			}
+		}
+	}
+	return entry;
 }
 
 /* value-text resolution for cvar-bound items. Mirrors the legacy
@@ -846,19 +937,14 @@ const char *WiredUI_BoundValueText( const wiredItemDef_t *item, char *out, int o
 			return out;
 		}
 		{
-			const char *key1 = NULL, *key2 = NULL;
-			int k;
-			for ( k = 0; k < MAX_KEYS; k++ ) {
-				const char *b = Key_GetBinding( k );
-				if ( b && !Q_stricmp( b, item->cvar ) ) {
-					if ( !key1 ) key1 = Key_KeynumToString( k );
-					else if ( !key2 ) { key2 = Key_KeynumToString( k ); break; }
-				}
-			}
-			if ( key1 && key2 ) {
-				Com_sprintf( out, outSize, "%s ^7or %s", key1, key2 );
-			} else if ( key1 ) {
-				Q_strncpyz( out, key1, outSize );
+			const wiredBindLabelCache_t *binding = WiredUI_BindLabelCache( item );
+			if ( binding->key1 >= 0 && binding->key2 >= 0 ) {
+				char key1[32];
+				Q_strncpyz( key1, Key_KeynumToString( binding->key1 ), sizeof( key1 ) );
+				Com_sprintf( out, outSize, "%s ^7or %s", key1,
+					Key_KeynumToString( binding->key2 ) );
+			} else if ( binding->key1 >= 0 ) {
+				Q_strncpyz( out, Key_KeynumToString( binding->key1 ), outSize );
 			} else {
 				Q_strncpyz( out, "---", outSize );
 			}
@@ -1463,7 +1549,7 @@ wiredAssetGlobals_t *WiredUI_GetAssetGlobals( void ) {
 }
 
 void WiredUI_GetMapRotation( char *buf, int size ) {
-	Cvar_VariableStringBuffer( "g_maprotation", buf, size );
+	WiredUI_StateGetString( "ui_hostMapRotation", buf, size );
 }
 
 void WiredUI_ResetAssetGlobalsDefaults( void ) {
@@ -2035,15 +2121,15 @@ static qboolean WiredUI_GetMultiDropdownRect( wiredMenuDef_t *menu, wiredItemDef
 	 * HiDPI the box is ~half as wide as the 2× glyphs and long labels
 	 * ("Capture the Flag") overflow the popup. */
 	widest *= WiredUI_GetDpiScale();
-	/* Anchor rect: prefer the ACTUAL Clay-rendered rect over the legacy
-	 * WUI_LayoutMenu resolvedRect. Settings rows inside a flexbox panel are
+	/* Anchor rect: prefer the ACTUAL Clay-rendered rect over the synchronized
+	 * compatibility snapshot. Settings rows inside a flexbox panel are
 	 * flex-positioned by Clay (emit uses CLAY_ATTACH_TO_NONE + CLAY_SIZING_GROW,
 	 * cl_wired_clay.c ~2528/2537), so their true on-screen rect — where the
 	 * right-aligned value actually draws — is Clay's layout, NOT resolvedRect.
 	 * resolvedRect for these rows is both offset AND narrower than the visible
 	 * row (measured: resolvedRect x=1494 w=396 vs Clay x=1700 w=645), which
 	 * anchored the popup a quarter-box left of the value. Fall back to
-	 * resolvedRect for legacy ATTACH_TO_ROOT rows Clay hasn't laid out. */
+	 * resolvedRect only before Clay has produced the first frame. */
 	wuiPixelRect_t anchor;
 	if ( WiredUI_ClayItemRenderedRect( menu, item, &anchor ) ) {
 		/* Clay coords are absolute screen px already; the vertical scroll of the
@@ -2301,7 +2387,7 @@ static int     wui_lastReloadCheck = 0;
 static cvar_t *wired_debug_layout = NULL;
 
 // ── hud cvar — selects which .wui file to load ────────────────────────
-static cvar_t *wired_hud = NULL;                            // basename only, e.g. "hud_default" → ui/hud_default.wui
+static cvar_t *wired_hud = NULL;                          // basename only; legacy "default" aliases to "classic"
 static char    wui_hud_lastLoaded[MAX_CVAR_VALUE_STRING]; // last value we actually loaded — string diff drives reloads
 
 /*
@@ -2356,11 +2442,20 @@ static void WiredUI_RegisterAssets( void ) {
 }
 
 // ── hud cvar helper ───────────────────────────────────────────────────
-// Loads ui/<hud>.wui when the 'hud' cvar is non-empty.
+// Loads ui/<hud>.wui when the 'hud' cvar is non-empty.  The former
+// ui/default.wui layout was superseded by classic; keep the archived
+// `hud default` value working as a compatibility alias without retaining a
+// second selectable HUD implementation.
 static void WiredUI_LoadHudFromCvar( void ) {
+	const char *hudName;
+
 	if ( !wired_hud || !wired_hud->string[0] ) return;
+	hudName = wired_hud->string;
+	if ( !Q_stricmp( hudName, "default" ) || !Q_stricmp( hudName, "hud_default" ) ) {
+		hudName = "classic";
+	}
 	char path[MAX_QPATH];
-	Com_sprintf( path, sizeof(path), "ui/%s.wui", wired_hud->string );
+	Com_sprintf( path, sizeof(path), "ui/%s.wui", hudName );
 	WiredUI_LoadMenuFile( path );
 }
 
@@ -2835,6 +2930,37 @@ static void WiredUI_PushMenu_f( void ) {
 		}
 	}
 	WiredUI_PushMenu( Cmd_Argv( 1 ) );
+}
+
+/* Test/modder entry point for a named popup. `wui_push` intentionally targets
+ * the menu stack, while POPUP-layer panels are selected from the popup queue;
+ * using the wrong primitive produces a valid-looking command with no rendered
+ * popup. This command exposes the existing queue operation without adding a
+ * second presentation path, allowing the widescreen screenshot matrix to
+ * exercise every authored popup through its production compositor route. */
+static void WiredUI_PushPopup_f( void ) {
+	wiredMenuDef_t *menu;
+	if ( Cmd_Argc() < 2 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_ui), "usage: wui_popup <menu_name|dismiss>\n" );
+		return;
+	}
+	if ( !Q_stricmp( Cmd_Argv( 1 ), "dismiss" ) ) {
+		WiredUI_DismissPopup();
+		return;
+	}
+	menu = WiredUI_FindMenu( Cmd_Argv( 1 ) );
+	if ( !menu ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_ui),
+			"wui_popup: menu '%s' not found\n", Cmd_Argv( 1 ) );
+		return;
+	}
+	if ( menu->layer != WUI_LAYER_POPUP ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_ui),
+			"wui_popup: menu '%s' is layer %d, expected popup\n",
+			menu->name, (int) menu->layer );
+		return;
+	}
+	WiredUI_PushPopup( menu->name );
 }
 
 /* enter the keybind capture state programmatically.
@@ -3676,6 +3802,7 @@ static void WiredUI_TestDumpClay_f( void ) {
 void WiredUI_LuaInit( void ) {
 	WiredUI_MenuLuaInit();    /* registers load_menu() global  */
 	WiredAttract_LuaInit();   /* registers attract.* global    */
+	WiredUITest_LuaInit();    /* registers native automation queue */
 }
 
 static void WiredUI_DropdownTest_f( void );   /* defined after WiredUI_FindItemByName */
@@ -3703,27 +3830,29 @@ WiredUI_ParseMenu stamps menu->sourcePath verbatim from this filename and
 WiredUI_FindMenuByPath matches it Q_stricmp-exact.
 =================
 */
-void WiredUI_LoadExplicitMenus( void ) {
+qboolean WiredUI_LoadExplicitMenus( void ) {
+	qboolean ok = qtrue;
 	// load the system loading screen menu. menus.lua may
 	// or may not include it depending on theme; load explicitly here so
 	// the compositor's LOADING layer finds it by path-identity. Idempotent
 	// if menus.lua already loaded it (parser appends, latest wins).
-	WiredUI_LoadMenuFile( "ui/loading_screen.wui" );
+	ok = WiredUI_LoadMenuFile( "ui/loading_screen.wui" ) && ok;
 
 	/* load the cursor + tooltip overlay menu explicitly so it
 	 * exists in the registry on the WUI_LAYER_OVERLAY layer regardless of
 	 * what menus.lua opts in for. menus.lua intentionally omits this file
 	 * — the parser does not dedupe by name, so a duplicate load_menu
 	 * entry there would register two copies. */
-	WiredUI_LoadMenuFile( "ui/overlay.wui" );
+	ok = WiredUI_LoadMenuFile( "ui/overlay.wui" ) && ok;
 
 	/* (debug-overlay-migration): the debug-overlay panels live
 	 * outside menus.lua for the same reason as overlay.wui — they must exist
 	 * in the registry on the WUI_LAYER_DEBUG_OVERLAY layer regardless of theme
 	 * and survive WiredUI_SafeReload. The layer is gated on wired_ui_debug, so
 	 * loading the panels unconditionally is harmless when the gate is off. */
-	WiredUI_LoadMenuFile( "ui/debug_graph.wui" );
-	WiredUI_LoadMenuFile( "ui/debug_netstats.wui" );
+	ok = WiredUI_LoadMenuFile( "ui/debug_graph.wui" ) && ok;
+	ok = WiredUI_LoadMenuFile( "ui/debug_netstats.wui" ) && ok;
+	return ok;
 }
 
 qboolean WiredUI_Init( qboolean inGameUI ) {
@@ -3784,8 +3913,7 @@ qboolean WiredUI_Init( qboolean inGameUI ) {
 	WiredUI_ResetListboxDoubleClick( "init" );
 	wui_compositorPointerDown = qfalse;
 	Q_SecureZeroMemory( &wui_passwordPrompt, sizeof( wui_passwordPrompt ) );
-	Cvar_Get( "ui_password_server_name", "", CVAR_TEMP );
-	Cvar_Set( "ui_password_server_name", "" );
+	WiredUI_StateSetString( "ui_password_server_name", "" );
 	WiredUI_StateSetString( "ui_joinPasswordError", "" );
 	wui_numSymbols = 0;
 	wui_numElements = 0;
@@ -3798,9 +3926,8 @@ qboolean WiredUI_Init( qboolean inGameUI ) {
 	WiredUI_ResetAssetGlobalsDefaults();
 
 	// register 'hud' cvar before menu load so WiredUI_LoadHudFromCvar is safe to call
-	// "classic" (ui/classic.wui) is the V2 HUD and what the game opens with.
-	// ui/default.wui is the older competitive layout, still selectable with
-	// `hud default` for anyone who prefers it.
+	// "classic" remains the default HUD; `perspective` is an explicit alternate.
+	// Archived `hud default` / `hud hud_default` configs resolve to classic.
 	wired_hud = Cvar_Get( "hud", "classic", CVAR_ARCHIVE );
 	Q_strncpyz( wui_hud_lastLoaded, wired_hud->string, sizeof( wui_hud_lastLoaded ) );
 
@@ -3817,11 +3944,11 @@ qboolean WiredUI_Init( qboolean inGameUI ) {
 	WiredOwnerDraw_RegisterAll();
 	WiredHud_RegisterElements();
 
-	// register the 3 loading-screen custom-draws
-	// (loading_wireframe, loading_streaming_rows, loading_mapinfo_stats)
+	// register the loading-screen custom-draws (rect-free flex geometry passes
+	// each routine the authoritative Clay box)
 	// before menus parse loading_screen.wmenu, so the parser's `custom`
 	// sigil-rewrite path has registry entries to match against. Retires
-	// alongside cl_loading_ui.c's whole-file deletion.
+	// before the explicit loading menu is parsed.
 	WiredLoadingCustomDraws_RegisterAll();
 
 	/* cursor + tooltip overlay custom-draws — registered before
@@ -3884,6 +4011,8 @@ qboolean WiredUI_Init( qboolean inGameUI ) {
 	// hot reload commands
 	Cmd_AddCommand( "hud_reload", WiredUI_ReloadHud );
 	Cmd_AddCommand( "menu_reload", WiredUI_ReloadMenus );
+	WUI_InspectorInit();
+	WiredUITest_Init();
 
 	// dev: cycle through all menus for visual verification
 	Cmd_AddCommand( "ui_testall", WiredUI_TestAll_f );
@@ -3923,6 +4052,7 @@ qboolean WiredUI_Init( qboolean inGameUI ) {
 	// `wui_push` exposes the same primitive for headless smokes + ad-hoc
 	// menu navigation without editing main.wui.
 	Cmd_AddCommand( "wui_push", WiredUI_PushMenu_f );
+	Cmd_AddCommand( "wui_popup", WiredUI_PushPopup_f );
 	Cmd_AddCommand( "wui_server_ping_tick", WiredUI_ServerPingTick_f );
 	Cmd_AddCommand( "wui_ingame_trace", WiredUI_IngameTrace_f );
 
@@ -4131,7 +4261,7 @@ qboolean WiredUI_Init( qboolean inGameUI ) {
 void WiredUI_Shutdown( void ) {
 	Q_SecureZeroMemory( &wui_passwordPrompt, sizeof( wui_passwordPrompt ) );
 	WiredUI_StateSetString( "ui_joinPasswordError", "" );
-	Cvar_Set( "ui_password_server_name", "" );
+	WiredUI_StateSetString( "ui_password_server_name", "" );
 	if ( !wui_initialized ) {
 		return;
 	}
@@ -4168,6 +4298,8 @@ void WiredUI_Shutdown( void ) {
 	WiredHud_DestroyAllElements();
 	Cmd_RemoveCommand( "hud_reload" );
 	Cmd_RemoveCommand( "menu_reload" );
+	WUI_InspectorShutdown();
+	WiredUITest_Shutdown();
 	Cmd_RemoveCommand( "ui_testall" );
 	Cmd_RemoveCommand( "wired_recover" );
 	Cmd_RemoveCommand( "wui_server_ping_tick" );
@@ -4243,6 +4375,7 @@ void WiredUI_TickFrame( int realtime ) {
 
 	// Layer 5: hot-reload check (dev mode)
 	WiredUI_CheckHotReload( realtime );
+	WiredUITest_Tick();
 
 	/* wuiAnim per-frame tick. Walks active anims and writes
 	 * eased values into per-item scalar fields (offsets / alpha) which
@@ -4450,6 +4583,11 @@ static void WiredScript_SetState( wiredMenuDef_t *menu, wiredItemDef_t *item, in
 	if ( numArgs < 2 || !args[0][0] ) {
 		return;
 	}
+	if ( !WiredUI_IsStoreStateKey( args[0] ) ) {
+		COM_WARN( LOG_CH(ch_ui),
+			"WiredUI: setstate rejected unregistered store key '%s'\n", args[0] );
+		return;
+	}
 
 	entry = WiredStore_Set( args[0] );
 	if ( !entry ) {
@@ -4487,6 +4625,39 @@ static void WiredScript_Exec( wiredMenuDef_t *menu, wiredItemDef_t *item, int nu
 	if ( numArgs >= 1 ) {
 		Cbuf_ExecuteText( EXEC_APPEND, va( "%s\n", args[0] ) );
 	}
+}
+
+/* Narrow parameter-vote bridge. UI state is intentionally not expanded in
+ * arbitrary `exec` strings: that would turn every authored command into a
+ * substitution surface. The two numeric vote settings instead pass through
+ * this allowlisted verb and are clamped to their authored spinner ranges. */
+static void WiredScript_CallVoteState( wiredMenuDef_t *menu, wiredItemDef_t *item,
+		int numArgs, const char **args ) {
+	const char *vote;
+	const char *key;
+	int value, minValue, maxValue;
+	(void)menu;
+	(void)item;
+
+	if ( numArgs < 2 ) return;
+	vote = args[0];
+	key = args[1];
+	if ( !Q_stricmp( vote, "g_timelimit" ) && !Q_stricmp( key, "ui_voteTimelimit" ) ) {
+		minValue = 5;
+		maxValue = 30;
+	} else if ( !Q_stricmp( vote, "g_scorelimit" ) && !Q_stricmp( key, "ui_voteScorelimit" ) ) {
+		minValue = 10;
+		maxValue = 100;
+	} else {
+		COM_WARN( LOG_CH(ch_ui),
+			"WiredUI: callvotestate rejected vote/key pair '%s'/'%s'\n", vote, key );
+		return;
+	}
+
+	value = WiredUI_StateGetInt( key );
+	if ( value < minValue ) value = minValue;
+	if ( value > maxValue ) value = maxValue;
+	Cbuf_ExecuteText( EXEC_APPEND, va( "callvote %s %d\n", vote, value ) );
 }
 
 /* Quick-add buttons are authored with a character directory, but should not
@@ -4586,6 +4757,7 @@ static void WiredScript_BotProfileSelected( wiredMenuDef_t *menu, wiredItemDef_t
 static void WiredScript_AddQuickBot( wiredMenuDef_t *menu, wiredItemDef_t *item,
 	int numArgs, const char **args ) {
 	const clCharacterEntry_t *entry;
+	int skill;
 
 	(void)menu;
 	(void)item;
@@ -4604,11 +4776,18 @@ static void WiredScript_AddQuickBot( wiredMenuDef_t *menu, wiredItemDef_t *item,
 		COM_WARN( LOG_CH(ch_ui), "WiredUI: quick bot add rejected invalid or ineligible profile\n" );
 		return;
 	}
+	skill = Cvar_VariableIntegerValue( "g_skill" );
+	if ( skill < 1 || skill > 5 ) {
+		COM_WARN( LOG_CH(ch_ui),
+			"WiredUI: quick bot add rejected invalid global g_skill\n" );
+		return;
+	}
 
 	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
-		"WiredUI: queued validated quick bot add profile=%s skill=3 team=free\n",
-		entry->dirname );
-	Cbuf_ExecuteText( EXEC_INSERT, va( "addbot \"%s\" 3 free\n", entry->dirname ) );
+		"WiredUI: queued validated quick bot add profile=%s skill=%d team=free\n",
+		entry->dirname, skill );
+	Cbuf_ExecuteText( EXEC_INSERT,
+		va( "addbot \"%s\" %d free\n", entry->dirname, skill ) );
 }
 
 static void WiredScript_AddCustomBot( wiredMenuDef_t *menu, wiredItemDef_t *item,
@@ -4618,10 +4797,8 @@ static void WiredScript_AddCustomBot( wiredMenuDef_t *menu, wiredItemDef_t *item
 	 * contract.  A form-sized destination would silently accept an unsafe or
 	 * overlong persisted value after Q_strncpyz truncation. */
 	char name[ sizeof( ((wuiStoreEntry_t *)0)->text ) ];
-	char skillText[ 16 ];
 	char team[ 16 ];
-	char *skillEnd = NULL;
-	long skill;
+	int skill;
 	const char *canonicalTeam;
 	const clCharacterEntry_t *entry;
 
@@ -4638,8 +4815,8 @@ static void WiredScript_AddCustomBot( wiredMenuDef_t *menu, wiredItemDef_t *item
 
 	WiredUI_StateGetString( "ui_botProfile", profile, sizeof( profile ) );
 	WiredUI_StateGetString( "ui_botName", name, sizeof( name ) );
-	WiredUI_StateGetString( "ui_botSkill", skillText, sizeof( skillText ) );
 	WiredUI_StateGetString( "ui_botTeam", team, sizeof( team ) );
+	skill = Cvar_VariableIntegerValue( "g_skill" );
 
 	if ( !wui_botProfileSelection.valid
 	  || wui_botProfileSelection.generation != CL_Characters_Generation()
@@ -4658,9 +4835,9 @@ static void WiredScript_AddCustomBot( wiredMenuDef_t *menu, wiredItemDef_t *item
 			"WiredUI: custom bot add rejected invalid display name\n" );
 		return;
 	}
-	skill = strtol( skillText, &skillEnd, 10 );
-	if ( skillEnd == skillText || *skillEnd != '\0' || skill < 1 || skill > 5 ) {
-		COM_WARN( LOG_CH(ch_ui), "WiredUI: custom bot add rejected invalid skill\n" );
+	if ( skill < 1 || skill > 5 ) {
+		COM_WARN( LOG_CH(ch_ui),
+			"WiredUI: custom bot add rejected invalid global g_skill\n" );
 		return;
 	}
 	if ( !Q_stricmp( team, "free" ) ) canonicalTeam = "free";
@@ -4672,10 +4849,10 @@ static void WiredScript_AddCustomBot( wiredMenuDef_t *menu, wiredItemDef_t *item
 	}
 
 	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
-		"WiredUI: queued validated custom bot add profile=%s name=%s skill=%ld team=%s\n",
+		"WiredUI: queued validated custom bot add profile=%s name=%s skill=%d team=%s\n",
 		entry->dirname, name, skill, canonicalTeam );
 	Cbuf_ExecuteText( EXEC_INSERT,
-		va( "addbot \"%s\" %ld %s 0 \"%s\"\n", entry->dirname, skill, canonicalTeam, name ) );
+		va( "addbot \"%s\" %d %s 0 \"%s\"\n", entry->dirname, skill, canonicalTeam, name ) );
 	WiredUI_PopMenu();
 }
 
@@ -4756,37 +4933,35 @@ static void WiredScript_SetFocus( wiredMenuDef_t *menu, wiredItemDef_t *item, in
 // forward declaration (non-static — also called from cl_wui_feeders.c)
 void WiredUI_UpdateMapPoolButton( void );
 
-// ── per-gametype cvar persistence ─────────────────────────────────────
-// Saves/restores scorelimit, timelimit, friendlyfire when
-// switching game types — same pattern as q3_ui's ServerOptions_Cache.
+// ── per-gametype host-form persistence ────────────────────────────────
+// The menu owns persistent intent in WiredStore. Runtime cvars are launch
+// parameters, populated one-way by WiredScript_StartServer.
 
 int wui_lastSavedGameType = -1;
 
 typedef struct {
-	const char *name;
+	const char *stateKey;
+	const char *runtimeCvar;
 	qboolean teamOnly;
-} wiredGameTypePersistField_t;
+} wiredHostSettingField_t;
 
-static const wiredGameTypePersistField_t wui_gameTypePersistCvars[] = {
-	{ "g_scorelimit", qfalse },
-	{ "g_timelimit", qfalse },
-	{ "sv_maxclients", qfalse },
-	{ "sv_pure", qfalse },
-	{ "sv_allowDownload", qfalse },
-	{ "g_skill", qfalse },
-	{ "g_autoBots", qfalse },
-	{ "g_minPlayers", qfalse },
-	{ "g_friendlyfire", qtrue },
-	{ "g_teamForceBalance", qtrue },
-	{ "g_allowvote", qtrue },
-	{ "g_localTeamPref", qtrue },
-	{ NULL, qfalse }
-};
-
-static const wiredGameTypePersistField_t wui_gameTypePersistStateKeys[] = {
-	{ "ui_botCount", qfalse },
-	{ "ui_hostListed", qfalse },
-	{ NULL, qfalse }
+static const wiredHostSettingField_t wui_hostSettings[] = {
+	{ "ui_hostName", "sv_hostname", qfalse },
+	{ "ui_hostMaxClients", "sv_maxclients", qfalse },
+	{ "ui_hostScoreLimit", "g_scorelimit", qfalse },
+	{ "ui_hostTimeLimit", "g_timelimit", qfalse },
+	{ "ui_hostPure", "sv_pure", qfalse },
+	{ "ui_hostAllowDownload", "sv_allowDownload", qfalse },
+	{ "ui_hostAutoBots", "g_autoBots", qfalse },
+	{ "ui_hostMinPlayers", "g_minPlayers", qfalse },
+	{ "ui_hostFriendlyFire", "g_friendlyfire", qtrue },
+	{ "ui_hostTeamForceBalance", "g_teamForceBalance", qtrue },
+	{ "ui_hostAllowVote", "g_allowvote", qtrue },
+	{ "ui_hostTeamPref", "g_localTeamPref", qtrue },
+	{ "ui_hostMapRotation", "g_maprotation", qfalse },
+	{ "ui_botCount", NULL, qfalse },
+	{ "ui_hostListed", NULL, qfalse },
+	{ NULL, NULL, qfalse }
 };
 
 static const char *WiredUI_GameTypeProfilePrefix( int gt ) {
@@ -4837,44 +5012,28 @@ static void WiredUI_ProfileSetString( const char *key, const char *value ) {
 
 static void WiredUI_SaveGameTypeSettingsFor( int gt ) {
 	const char *prefix;
-	const wiredGameTypePersistField_t *it;
+	const wiredHostSettingField_t *it;
 	char key[128];
+	char value[1024];
 
 	prefix = WiredUI_GameTypeProfilePrefix( gt );
 	if ( !prefix ) {
 		return;
 	}
 
-	for ( it = wui_gameTypePersistCvars; it->name; it++ ) {
+	for ( it = wui_hostSettings; it->stateKey; it++ ) {
 		if ( it->teamOnly && gt < 4 ) {
 			continue;
 		}
-		Com_sprintf( key, sizeof( key ), "%s_%s", prefix, it->name );
-		WiredUI_ProfileSetString( key, Cvar_VariableString( it->name ) );
-	}
-
-	for ( it = wui_gameTypePersistStateKeys; it->name; it++ ) {
-		char value[128];
-		if ( it->teamOnly && gt < 4 ) {
-			continue;
-		}
-		Com_sprintf( key, sizeof( key ), "%s_state_%s", prefix, it->name );
-		WiredUI_StateGetString( it->name, value, sizeof( value ) );
+		Com_sprintf( key, sizeof( key ), "%s_state_%s", prefix, it->stateKey );
+		WiredUI_StateGetString( it->stateKey, value, sizeof( value ) );
 		WiredUI_ProfileSetString( key, value );
-	}
-
-	// save map rotation per gametype
-	{
-		char saveBuf[1024];
-		Com_sprintf( key, sizeof( key ), "%s_g_maprotation", prefix );
-		WiredUI_GetMapRotation( saveBuf, sizeof( saveBuf ) );
-		WiredUI_ProfileSetString( key, saveBuf );
 	}
 }
 
 static void WiredUI_LoadGameTypeSettingsFor( int gt ) {
 	const char *prefix;
-	const wiredGameTypePersistField_t *it;
+	const wiredHostSettingField_t *it;
 	char key[128];
 	char buf[1024];
 
@@ -4883,34 +5042,22 @@ static void WiredUI_LoadGameTypeSettingsFor( int gt ) {
 		return;
 	}
 
-	for ( it = wui_gameTypePersistCvars; it->name; it++ ) {
+	for ( it = wui_hostSettings; it->stateKey; it++ ) {
 		if ( it->teamOnly && gt < 4 ) {
 			continue;
 		}
-		Com_sprintf( key, sizeof( key ), "%s_%s", prefix, it->name );
-		if ( WiredUI_ProfileGetString( key, buf, sizeof( buf ) ) ) {
-			Cvar_Set( it->name, buf );
+		buf[0] = '\0';
+		Com_sprintf( key, sizeof( key ), "%s_state_%s", prefix, it->stateKey );
+		if ( !WiredUI_ProfileGetString( key, buf, sizeof( buf ) ) && it->runtimeCvar ) {
+			/* One-time compatibility read for profiles written before TASK-57.
+			 * The next save emits only the canonical Store-backed key. */
+			Com_sprintf( key, sizeof( key ), "%s_%s", prefix, it->runtimeCvar );
+			WiredUI_ProfileGetString( key, buf, sizeof( buf ) );
+		}
+		if ( buf[0] ) {
+			WiredUI_StateSetString( it->stateKey, buf );
 		}
 	}
-
-	for ( it = wui_gameTypePersistStateKeys; it->name; it++ ) {
-		if ( it->teamOnly && gt < 4 ) {
-			continue;
-		}
-		Com_sprintf( key, sizeof( key ), "%s_state_%s", prefix, it->name );
-		if ( WiredUI_ProfileGetString( key, buf, sizeof( buf ) ) ) {
-			WiredUI_StateSetString( it->name, buf );
-		}
-	}
-
-	// restore map rotation for this gametype (missing profile -> empty rotation)
-	Com_sprintf( key, sizeof( key ), "%s_g_maprotation", prefix );
-	if ( WiredUI_ProfileGetString( key, buf, sizeof( buf ) ) ) {
-		Cvar_Set( "g_maprotation", buf );
-	} else {
-		Cvar_Set( "g_maprotation", "" );
-	}
-	Cvar_Set( "g_maprotationIndex", "0" );
 }
 
 // Called from uiScript: uiScript UpdateGameType
@@ -5004,15 +5151,13 @@ static void WiredScript_ToggleMapPool( wiredMenuDef_t *menu, wiredItemDef_t *ite
 		Q_strncpyz( newRotation + len, mapName, sizeof(newRotation) - len );
 	}
 
-	Cvar_Set( "g_maprotation", newRotation );
-	Cvar_Set( "g_maprotationIndex", "0" );
+	WiredUI_StateSetString( "ui_hostMapRotation", newRotation );
 
 	WiredUI_UpdateMapPoolButton();
 }
 
 static void WiredScript_ClearMapPool( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
-	Cvar_Set( "g_maprotation", "" );
-	Cvar_Set( "g_maprotationIndex", "0" );
+	WiredUI_StateSetString( "ui_hostMapRotation", "" );
 	WiredUI_UpdateMapPoolButton();
 }
 
@@ -5136,14 +5281,26 @@ void WiredUI_UpdateFavoriteButton( void ) {
 }
 
 // ── game action handlers ──────────────────────────────────────────────
-// These read cvars set by feeder selection callbacks and execute real game actions.
+// These translate persistent UI intent into runtime commands/cvars at the
+// explicit launch boundary.
+
+static int WiredUI_ClampInt( int value, int minimum, int maximum ) {
+	if ( value < minimum ) return minimum;
+	if ( value > maximum ) return maximum;
+	return value;
+}
 
 static void WiredScript_StartServer( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
 	char mapName[MAX_QPATH];
+	char rotation[1024];
+	char hostName[MAX_CVAR_VALUE_STRING];
+	int gameType;
+	int maxClients;
+	int minPlayers;
+	int teamPref;
 
 	// use first map from rotation pool if set, otherwise selected map
 	{
-		char rotation[1024];
 		WiredUI_GetMapRotation( rotation, sizeof( rotation ) );
 		if ( rotation[0] ) {
 			// extract first map from rotation for initial launch
@@ -5168,29 +5325,37 @@ static void WiredScript_StartServer( wiredMenuDef_t *menu, wiredItemDef_t *item,
 		WiredUI_SaveState();
 	}
 
-	// apply server cvars from menu selections
-	// cvar-bound items (scorelimit, timelimit, sv_maxclients,
-	// sv_pure, sv_allowDownload, g_minPlayers, g_friendlyfire,
-	// g_teamForceBalance, g_allowvote) are set directly by menu items
-	{
-		char uiGameType[64];
-		WiredUI_StateGetString( "ui_netGameType", uiGameType, sizeof( uiGameType ) );
-		Cvar_Set( "g_gametype", uiGameType );
-	}
+	/* One-way launch handoff. WiredStore remains the owner of form state; server
+	 * cvars receive a validated snapshot only when the user commits to launch. */
+	gameType = WiredUI_ClampInt( WiredUI_StateGetInt( "ui_netGameType" ), 0, 6 );
+	maxClients = WiredUI_ClampInt( WiredUI_StateGetInt( "ui_hostMaxClients" ), 2, MAX_CLIENTS );
+	minPlayers = WiredUI_ClampInt( WiredUI_StateGetInt( "ui_hostMinPlayers" ), 0, maxClients );
+	teamPref = WiredUI_ClampInt( WiredUI_StateGetInt( "ui_hostTeamPref" ), 0, 2 );
+	WiredUI_StateGetString( "ui_hostName", hostName, sizeof( hostName ) );
+
+	Cvar_SetIntegerValue( "g_gametype", gameType );
+	Cvar_Set( "sv_hostname", hostName );
+	Cvar_SetIntegerValue( "sv_maxclients", maxClients );
+	Cvar_SetIntegerValue( "g_scorelimit", WiredUI_ClampInt( WiredUI_StateGetInt( "ui_hostScoreLimit" ), 0, 100 ) );
+	Cvar_SetIntegerValue( "g_timelimit", WiredUI_ClampInt( WiredUI_StateGetInt( "ui_hostTimeLimit" ), 0, 30 ) );
+	Cvar_SetIntegerValue( "sv_pure", WiredUI_StateGetInt( "ui_hostPure" ) ? 1 : 0 );
+	Cvar_SetIntegerValue( "sv_allowDownload", WiredUI_StateGetInt( "ui_hostAllowDownload" ) ? 1 : 0 );
+	Cvar_SetIntegerValue( "g_autoBots", WiredUI_StateGetInt( "ui_hostAutoBots" ) ? 1 : 0 );
+	Cvar_SetIntegerValue( "g_minPlayers", minPlayers );
+	Cvar_SetIntegerValue( "g_friendlyfire", WiredUI_StateGetInt( "ui_hostFriendlyFire" ) ? 1 : 0 );
+	Cvar_SetIntegerValue( "g_teamForceBalance", WiredUI_StateGetInt( "ui_hostTeamForceBalance" ) ? 1 : 0 );
+	Cvar_SetIntegerValue( "g_allowvote", WiredUI_StateGetInt( "ui_hostAllowVote" ) ? 1 : 0 );
+	Cvar_SetIntegerValue( "g_localTeamPref", teamPref );
+	Cvar_Set( "g_maprotation", rotation );
+	Cvar_SetIntegerValue( "g_maprotationIndex", 0 );
 
 	// server listing policy: private (unlisted) vs public (announced to masters).
 	// The server always runs in-process (the 'map' command below starts it);
 	// the only choice is whether it advertises itself.
-	Cvar_Set( "sv_hostListed", WiredUI_StateGetInt( "ui_hostListed" ) ? "1" : "0" );
-
-	// ensure sv_maxclients can accommodate g_minPlayers
-	{
-		int minPlayers = Cvar_VariableIntegerValue( "g_minPlayers" );
-		int maxclients = Cvar_VariableIntegerValue( "sv_maxclients" );
-		if ( maxclients < minPlayers ) {
-			Cvar_SetIntegerValue( "sv_maxclients", minPlayers );
-		}
-	}
+	Cvar_SetIntegerValue( "sv_hostListed", WiredUI_StateGetInt( "ui_hostListed" ) ? 1 : 0 );
+	Com_Log( SEV_INFO, LOG_CH(ch_ui),
+		"WiredUI: host launch handoff gt=%d clients=%d minPlayers=%d listed=%d\n",
+		gameType, maxClients, minPlayers, WiredUI_StateGetInt( "ui_hostListed" ) ? 1 : 0 );
 
 	WiredUI_CloseAllMenus();
 
@@ -5199,9 +5364,7 @@ static void WiredScript_StartServer( wiredMenuDef_t *menu, wiredItemDef_t *item,
 
 	// team preference for human player in team modes
 	{
-		int gt = WiredUI_StateGetInt( "ui_netGameType" );
-		int teamPref = Cvar_VariableIntegerValue( "g_localTeamPref" );
-		if ( gt >= 4 && teamPref > 0 ) {
+		if ( gameType >= 4 && teamPref > 0 ) {
 			const char *team = ( teamPref == 1 ) ? "red" : "blue";
 			Cbuf_ExecuteText( EXEC_APPEND, va( "wait 5 ; team %s\n", team ) );
 		}
@@ -5267,6 +5430,11 @@ static void WiredScript_JoinServer( wiredMenuDef_t *menu, wiredItemDef_t *item, 
 			"WiredUI: password required origin=browser address=%s selection_generation=%d\n",
 			normalized, selectionGeneration );
 		WiredUI_PushMenu( "password" );
+		{
+			wiredMenuDef_t *passwordMenu = WiredUI_FindMenu( "password" );
+			wiredItemDef_t *passwordItem = WiredUI_FindItemByName( passwordMenu, "row_password" );
+			if ( passwordItem ) wui_set_focused( passwordMenu, passwordItem );
+		}
 		return;
 	}
 	if ( passwordSubmit ) {
@@ -5354,6 +5522,11 @@ qboolean CL_WiredUI_ShowJoinPasswordRetry( const char *target,
 	WiredUI_StateSetString( "ui_joinPasswordError",
 		"Authentication failed. Enter the server password again." );
 	WiredUI_PushMenu( "password" );
+	{
+		wiredMenuDef_t *passwordMenu = WiredUI_FindMenu( "password" );
+		wiredItemDef_t *passwordItem = WiredUI_FindItemByName( passwordMenu, "row_password" );
+		if ( passwordItem ) wui_set_focused( passwordMenu, passwordItem );
+	}
 	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
 		"WiredUI: authentication retry opened address=%s selection_generation=%d\n",
 		normalized, selectionGeneration );
@@ -5835,6 +6008,7 @@ static const wiredScriptCommand_t wiredScriptCommands[] = {
 	{ "savestate",        WiredScript_SaveState },
 	{ "loadstate",        WiredScript_LoadState },
 	{ "exec",             WiredScript_Exec },
+	{ "callvotestate",    WiredScript_CallVoteState },
 	{ "addquickbot",      WiredScript_AddQuickBot },
 	{ "botprofileinit",   WiredScript_BotProfileInit },
 	{ "botprofileselected", WiredScript_BotProfileSelected },
@@ -6563,7 +6737,7 @@ static wiredItemDef_t *wui_find_item_at_cursor_recursive(
 }
 
 static wiredItemDef_t *WiredUI_FindItemAtCursor( wiredMenuDef_t *menu, float cx, float cy ) {
-	// Layout is already resolved by the render loop (WUI_LayoutMenu called each frame)
+	// Clay layout is synchronized into resolvedRect after each rendered frame.
 	float menuH = menu->resolvedRect.h;
 	float oy = menu->resolvedRect.y;
 	float sy = menu->scrollOffset;
@@ -7254,14 +7428,13 @@ password_edit_pointer_fallthrough:
 				int   clickedRow;
 				int   total = WiredUI_FeederCount( (int)focusedItem->feeder );
 
-				/* Prefer the ACTUAL Clay-rendered rect over the legacy
-				 * WUI_LayoutMenu resolvedRect. The listbox is emitted by
+				/* Prefer the ACTUAL Clay-rendered rect over the compatibility
+				 * resolvedRect snapshot. The listbox is emitted by
 				 * Clay flex (cl_wired_clay.c wui_clay_emit_listbox, ATTACH_TO_NONE
 				 * inside a flex parent), so its true on-screen origin is Clay's
 				 * layout, NOT resolvedRect — rows draw at clayRect.y + k*rowH.
-				 * Using the legacy rect.y/x mapped clicks to the wrong/no row
-				 * (same legacy-vs-Clay divergence as the multidropdown-anchor
-				 * fix). Fall back to resolvedRect for the pre-Clay layout case. */
+				 * Using a stale rect.y/x mapped clicks to the wrong/no row.
+				 * Fall back to resolvedRect only before the first Clay frame. */
 				wuiPixelRect_t clayLB;
 				qboolean       haveClay = WiredUI_ClayItemRenderedRect( menu, focusedItem, &clayLB );
 

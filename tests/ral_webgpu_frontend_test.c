@@ -11,12 +11,39 @@
 #define CHECK(x) do { if ( !(x) ) { fprintf( stderr, "FAIL %s:%d: %s\n", \
 	__FILE__, __LINE__, #x ); return 1; } } while ( 0 )
 
+static ralIrradianceEntitySampleReceipt_t LocalIrradiance( uint64_t generation,
+		uint64_t entityId ) {
+	ralIrradianceEntitySampleReceipt_t r;
+	memset( &r, 0, sizeof( r ) );
+	r.schemaVersion = RAL_IRRADIANCE_ENTITY_RECEIPT_SCHEMA_VERSION;
+	r.queryGeneration = generation; r.entityId = entityId;
+	r.volumeId = 7u; r.layoutHash = 8u;
+	r.probes.schemaVersion = RAL_IRRADIANCE_RECEIPT_SCHEMA_VERSION;
+	r.probes.queryGeneration = generation; r.probes.productGeneration = 9u;
+	r.probes.fallback = RAL_IRRADIANCE_FALLBACK_LIGHTGRID;
+	r.probes.usedFallback = qtrue; r.probes.ready = qtrue;
+	r.blendedCoefficientsQ16[0][0] = 32768;
+	r.blendedCoefficientsQ16[0][1] = 65536;
+	r.blendedCoefficientsQ16[0][2] = 131072;
+	r.diffuseIrradianceQ16[0] = 32768;
+	r.diffuseIrradianceQ16[1] = 65536;
+	r.diffuseIrradianceQ16[2] = 131072;
+	r.contributorHash = 10u;
+	r.coefficientHash = Ral_IrradianceCoefficientHash( r.blendedCoefficientsQ16 );
+	r.usedFallback = qtrue; r.ready = qtrue;
+	return r;
+}
+
 typedef struct {
 	uintptr_t nextIdentity;
 	uint32_t resourcesCreated, resourcesDestroyed;
 	uint32_t bufferWrites, textureWrites, draws;
-	uint32_t effectDraws, uiDraws;
+	uint32_t effectDraws, uiDraws, entityLightingDraws;
 	uintptr_t worldPipeline, effectPipeline, uiPipeline, msdfPipeline;
+	uintptr_t entityLightingBuffer;
+	uintptr_t worldMaterialBuffer;
+	float entityLightingFirst[16];
+	float worldMaterialFirst[4];
 	uintptr_t submissionIdentity;
 	uint64_t submissionGeneration;
 	qboolean failDraw;
@@ -60,6 +87,10 @@ static void DestroyResource( void *u, ralWebGpuResourceKind_t k, uintptr_t i ) {
 static qboolean WriteBuffer( void *u, uintptr_t q, uintptr_t b, uint64_t o,
 	const void *p, uint64_t n ) {
 	if ( q != 0x4000u || !b || ( o & 3u ) || !p || !n ) return qfalse;
+	if ( b == ((fakeHost_t *)u)->entityLightingBuffer && n >= 16u * sizeof( float ) )
+		memcpy( ((fakeHost_t *)u)->entityLightingFirst, p, 16u * sizeof( float ) );
+	if ( b == ((fakeHost_t *)u)->worldMaterialBuffer && n >= 4u * sizeof( float ) )
+		memcpy( ((fakeHost_t *)u)->worldMaterialFirst, p, 4u * sizeof( float ) );
 	((fakeHost_t *)u)->bufferWrites++; return qtrue;
 }
 static qboolean WriteTexture( void *u, uintptr_t q, uintptr_t t, const void *b, uint64_t n, uint32_t r, uint32_t i ) {
@@ -105,8 +136,17 @@ static qboolean RecordDraw( void *u, uintptr_t p, const ralWebGpuIndexedDraw_t *
 				&& d->pipelineIdentity != ( host->uiDraws % 2u == 0u
 					? host->uiPipeline : host->msdfPipeline ) ) ) return qfalse;
 	if ( d->kind == RAL_WEBGPU_DRAW_EFFECT ) host->effectDraws++;
+	if ( d->kind == RAL_WEBGPU_DRAW_ENTITY ) {
+		if ( d->bindGroupCount != 2u || d->bindGroupIdentities[1] != 0x9004u
+				|| d->firstInstance != host->entityLightingDraws % 3u ) return qfalse;
+		host->entityLightingDraws++;
+	}
 	if ( d->kind == RAL_WEBGPU_DRAW_UI ) host->uiDraws++;
 	host->draws++; return qtrue;
+}
+static qboolean RecordDispatch( void *u, uintptr_t p,
+		const ralWebGpuComputeDispatch_t *d ) {
+	(void)u; (void)p; (void)d; return qfalse;
 }
 static qboolean EndPass( void *u, uintptr_t p ) { (void)u; return p ? qtrue : qfalse; }
 static qboolean FinishEncoder( void *u, uintptr_t e, uintptr_t *o ) {
@@ -196,6 +236,7 @@ static ralWebGpuRuntimeCreateInfo_t RuntimeInfo( fakeHost_t *host ) {
 	info.resources.host.releaseOperation = ReleaseOperation;
 	info.command.userData = host; info.command.host.beginEncoder = BeginEncoder;
 	info.command.host.beginPass = BeginPass; info.command.host.recordIndexedDraw = RecordDraw;
+	info.command.host.recordComputeDispatch = RecordDispatch;
 	info.command.host.endPass = EndPass;
 	info.command.host.finishEncoder = FinishEncoder; info.command.host.submit = Submit;
 	info.command.host.pollSubmission = PollSubmission; info.command.host.releaseObject = ReleaseCommand;
@@ -231,6 +272,8 @@ int main( void ) {
 	ralWebGpuPipelineReceipt_t effectPipelineReceipt, uiPipelineReceipt;
 	ralWebGpuPipelineReceipt_t msdfPipelineReceipt;
 	ralWebGpuProduct_t *product = NULL;
+	uintptr_t entityLightingIdentity, worldMaterialIdentity;
+	uint64_t entityLightingBytes, worldMaterialBytes;
 	ralWebGpuProductFrameReceipt_t productReceipt, productExact, productOutput;
 	renderSubmissionState_t frontend;
 	renderSubmissionReceipt_t submission, staleSubmission;
@@ -239,6 +282,7 @@ int main( void ) {
 	int indices[3] = { 0, 1, 2 }; dshader_t shader; refdef_t view;
 	refEntity_t modelEntity, spriteEntity, beamEntity; refEntityMotion_t motion;
 	qhandle_t material, lightmap, msdf, model; char lightmapName[MAX_QPATH];
+	renderMaterialLighting_t materialLighting;
 	const byte rgba[16] = { 0u, 255u, 0u, 255u, 0u, 255u, 0u, 255u,
 		0u, 255u, 0u, 255u, 0u, 255u, 0u, 255u };
 	CHECK( RalWebGpu_RuntimeBegin( &runtimeInfo, &runtime ) );
@@ -304,12 +348,26 @@ int main( void ) {
 	host.msdfPipeline = msdfPipelineReceipt.pipelineIdentity;
 	CHECK( RalWebGpu_ProductCreate( runtime, &runtimeReceipt, &pipelineReceipt,
 		42u, &product ) );
+	CHECK( RalWebGpu_ProductGetWorldMaterialBuffer( product, &runtimeReceipt,
+		&worldMaterialIdentity, &worldMaterialBytes )
+		&& worldMaterialIdentity && worldMaterialBytes >= 4u * sizeof( float ) );
+	host.worldMaterialBuffer = worldMaterialIdentity;
+	CHECK( RalWebGpu_ProductSetWorldMaterialBindGroup( product, &runtimeReceipt,
+		0x9005u ) );
 	CHECK( RalWebGpu_ProductSetEntityPipeline( product, &runtimeReceipt,
 		&pipelineReceipt ) );
+	CHECK( RalWebGpu_ProductGetEntityLightingBuffer( product, &runtimeReceipt,
+		&entityLightingIdentity, &entityLightingBytes )
+		&& entityLightingIdentity && entityLightingBytes >= 16u * sizeof( float ) );
+	host.entityLightingBuffer = entityLightingIdentity;
+	CHECK( RalWebGpu_ProductSetEntityLightingBindGroup( product, &runtimeReceipt,
+		0x9004u ) );
 	CHECK( RalWebGpu_ProductSetEffectPipeline( product, &runtimeReceipt,
 		&effectPipelineReceipt ) );
 	CHECK( RalWebGpu_ProductSetUiPipelines( product, &runtimeReceipt,
 		&uiPipelineReceipt, &msdfPipelineReceipt ) );
+	CHECK( RalWebGpu_ProductSetAtmosphereBindGroups( product, &runtimeReceipt,
+		0x9001u, 0x9002u, 0x9003u ) );
 	CHECK( !RalWebGpu_ProductSetViewport( product, &runtimeReceipt, 0u, 720u ) );
 	CHECK( RalWebGpu_ProductSetViewport( product, &runtimeReceipt, 1280u, 720u ) );
 	CHECK( RenderSubmission_Init( &frontend, 71u ) );
@@ -318,6 +376,21 @@ int main( void ) {
 	msdf = RenderSubmission_RegisterMaterialImage( &frontend, RENDER_ASSET_MSDF,
 		"fonts/webgpu", qtrue, rgba, 2u, 2u );
 	CHECK( material > 0 && msdf > material );
+	memset( &materialLighting, 0, sizeof( materialLighting ) );
+	materialLighting.schemaVersion = RENDER_MATERIAL_LIGHTING_SCHEMA_VERSION;
+	materialLighting.sourceGeneration = 1u;
+	materialLighting.provenanceHash = 2u;
+	materialLighting.diffuseReflectanceQ16[0] = RENDER_MATERIAL_LIGHTING_Q16_ONE;
+	materialLighting.diffuseReflectanceQ16[1] = RENDER_MATERIAL_LIGHTING_Q16_ONE;
+	materialLighting.diffuseReflectanceQ16[2] = RENDER_MATERIAL_LIGHTING_Q16_ONE;
+	materialLighting.emissionRadianceQ16[0] = RENDER_MATERIAL_LIGHTING_Q16_ONE * 2;
+	materialLighting.emissiveMobility = RAL_LIGHT_MOBILITY_STATIC;
+	materialLighting.emissiveInfluenceRangeQ16 = RAL_LIGHT_Q16_ONE * 8;
+	materialLighting.emissiveRequestedProxyCount = 0u;
+	materialLighting.emissiveExplicitProxyAuthority = qtrue;
+	materialLighting.ready = qtrue;
+	CHECK( RenderSubmission_SetMaterialLighting( &frontend, material,
+		&materialLighting ) );
 	memset( &map, 0, sizeof( map ) ); memset( surfaces, 0, sizeof( surfaces ) );
 	memset( vertices, 0, sizeof( vertices ) ); memset( &shader, 0, sizeof( shader ) );
 	strcpy( map.name, "maps/webgpu-plan.bsp" ); map.checksum = 0x12345678;
@@ -354,6 +427,10 @@ int main( void ) {
 	motion.version = REF_ENTITY_MOTION_VERSION; motion.ownerId = 1u; motion.generation = 75u;
 	motion.role = REF_ENTITY_MOTION_ROLE_PLAYER_BODY;
 	CHECK( RenderSubmission_AddEntity( &frontend, &modelEntity, &motion ) );
+	{
+		ralIrradianceEntitySampleReceipt_t local = LocalIrradiance( 75u, 1u );
+		CHECK( RenderSubmission_AttachEntityIrradiance( &frontend, 0u, &local ) );
+	}
 	memset( &spriteEntity, 0, sizeof( spriteEntity ) ); spriteEntity.reType = RT_SPRITE;
 	spriteEntity.radius = 1.0f; spriteEntity.customShader = material;
 	memset( spriteEntity.shader.rgba, 255, 4u );
@@ -376,6 +453,7 @@ int main( void ) {
 	CHECK( RalWebGpu_FrontendPlanBuild( runtime, &runtimeReceipt, &frontend,
 		&submission, 76u, &plan ) );
 	CHECK( plan.materialCount == 3u && plan.worldBatchCount == 2u
+		&& plan.localIrradianceEntityCount == 1u
 		&& plan.patchBatchCount == 1u && plan.lightmappedWorldBatchCount == 1u
 		&& plan.modelEntityCount == 1u && plan.primitiveEntityCount == 2u
 		&& plan.temporalEntityCount == 1u && plan.polygonCount == 1u
@@ -396,15 +474,29 @@ int main( void ) {
 	CHECK( productReceipt.uploadedMaterialCount == 3u
 		&& productReceipt.reusedMaterialCount == 0u
 		&& productReceipt.worldDrawCount == 2u
+		&& productReceipt.worldEmissiveDrawCount == 2u
 		&& productReceipt.modelEntityCount == 1u
 		&& productReceipt.primitiveEntityCount == 2u
 		&& productReceipt.temporalEntityCount == 1u
 		&& productReceipt.entityDrawCount == 3u
+		&& productReceipt.localIrradianceEntityCount == 1u
+		&& productReceipt.localIrradianceDrawCount == 1u
 		&& productReceipt.polygonDrawCount == 1u
 		&& productReceipt.lightDrawCount == 1u
 		&& productReceipt.uiDrawCount == 2u
+		&& productReceipt.weather.zeroWork == qtrue
+		&& productReceipt.weatherDrawCount == 0u
 		&& productReceipt.deferredNonWorldDrawCount == 0u
-		&& host.textureWrites == 3u && host.bufferWrites == 6u
+		&& host.textureWrites == 3u && host.bufferWrites == 8u
+		&& host.worldMaterialFirst[0] == 2.0f
+		&& host.worldMaterialFirst[1] == 0.0f
+		&& host.entityLightingFirst[0] == 0.5f
+		&& host.entityLightingFirst[1] == 1.0f
+		&& host.entityLightingFirst[2] == 2.0f
+		&& host.entityLightingFirst[3] == 1.0f
+		&& host.entityLightingFirst[4] == 0.0f
+		&& host.entityLightingFirst[8] == 0.0f
+		&& host.entityLightingFirst[12] == 0.0f
 		&& host.draws == 9u );
 	productExact = productReceipt;
 	CHECK( RalWebGpu_ProductFrameReceiptExact( &productReceipt, &productExact ) );
@@ -413,7 +505,7 @@ int main( void ) {
 		&submission, 0x8001u, 79u, &productReceipt ) );
 	CHECK( productReceipt.uploadedMaterialCount == 0u
 		&& productReceipt.reusedMaterialCount == 3u
-		&& host.textureWrites == 3u && host.bufferWrites == 12u
+		&& host.textureWrites == 3u && host.bufferWrites == 16u
 		&& host.draws == 18u );
 	CHECK( RalWebGpu_ProductPoll( product, &productReceipt ) == RAL_WEBGPU_ASYNC_READY );
 	CHECK( frontend.materials[0].snapshot.handle == material );
@@ -440,7 +532,9 @@ int main( void ) {
 		&submission, 0x8002u, 81u, &productReceipt ) );
 	CHECK( productReceipt.uploadedMaterialCount == 1u
 		&& productReceipt.reusedMaterialCount == 2u
-		&& host.textureWrites == 4u && host.bufferWrites == 18u
+		&& productReceipt.localIrradianceEntityCount == 0u
+		&& productReceipt.localIrradianceDrawCount == 0u
+		&& host.textureWrites == 4u && host.bufferWrites == 24u
 		&& host.draws == 27u );
 	CHECK( RalWebGpu_ProductPoll( product, &productReceipt ) == RAL_WEBGPU_ASYNC_READY );
 	memset( &productOutput, 0xa5, sizeof( productOutput ) ); productExact = productOutput;

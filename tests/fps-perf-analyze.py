@@ -64,7 +64,13 @@ RE_RENDER_EXTENT = re.compile(
     r"^RENDER: (\d+) x (\d+), MODE: -?\d+, (\d+) x (\d+) (?:windowed|fullscreen) hz:"
 )
 RE_PARTICLE_RUNTIME = re.compile(
-    r"^particle emitters:(\d+) particles:(\d+) computes:(\d+) draws:(\d+)$"
+    r"^particle emitters:(\d+) particles:(\d+) requests:(\d+) "
+    r"dropped:(\d+)/(\d+) computes:(\d+) draws:(\d+)$"
+)
+RE_ATMOSPHERE_RUNTIME = re.compile(
+    r"^atmosphere particles:(\d+) computes:(\d+) draws:(\d+) froxels:(\d+) "
+    r"dispatches:(\d+) clouds:(\d+) heightgrid:(\d+) depth:(\d+) "
+    r"temporal:(\d+)/(\d+) surface-milli:(\d+)/(\d+)/(\d+)/(\d+)$"
 )
 
 VK_PERF_V2_KEYS = {
@@ -193,8 +199,22 @@ def analyze(path: Path, contract: Contract, *, emit: bool = True) -> dict:
     render_observations: list[tuple[int, int, int, int]] = []
     particle_emitters = 0
     particle_emitted = 0
+    particle_requests = 0
+    particle_dropped_requests = 0
+    particle_dropped_particles = 0
     particle_computes = 0
     particle_draws = 0
+    atmosphere_particles = 0
+    atmosphere_computes = 0
+    atmosphere_draws = 0
+    atmosphere_froxels = 0
+    atmosphere_dispatches = 0
+    atmosphere_clouds = 0
+    atmosphere_heightgrid = 0
+    atmosphere_depth = 0
+    atmosphere_temporal_reuse = 0
+    atmosphere_temporal_reject = 0
+    atmosphere_surface_milli = (0, 0, 0, 0)
 
     with path.open(encoding="utf-8", errors="replace") as stream:
         for line_number, raw_line in enumerate(stream, 1):
@@ -272,8 +292,27 @@ def analyze(path: Path, contract: Contract, *, emit: bool = True) -> dict:
             if particle_runtime:
                 particle_emitters = max(particle_emitters, int(particle_runtime.group(1)))
                 particle_emitted = max(particle_emitted, int(particle_runtime.group(2)))
-                particle_computes = max(particle_computes, int(particle_runtime.group(3)))
-                particle_draws = max(particle_draws, int(particle_runtime.group(4)))
+                particle_requests = max(particle_requests, int(particle_runtime.group(3)))
+                particle_dropped_requests = max(particle_dropped_requests, int(particle_runtime.group(4)))
+                particle_dropped_particles = max(particle_dropped_particles, int(particle_runtime.group(5)))
+                particle_computes = max(particle_computes, int(particle_runtime.group(6)))
+                particle_draws = max(particle_draws, int(particle_runtime.group(7)))
+            atmosphere_runtime = RE_ATMOSPHERE_RUNTIME.fullmatch(msg) if category == "renderer.cmd" else None
+            if atmosphere_runtime:
+                values = tuple(int(atmosphere_runtime.group(i)) for i in range(1, 15))
+                atmosphere_particles = max(atmosphere_particles, values[0])
+                atmosphere_computes = max(atmosphere_computes, values[1])
+                atmosphere_draws = max(atmosphere_draws, values[2])
+                atmosphere_froxels = max(atmosphere_froxels, values[3])
+                atmosphere_dispatches = max(atmosphere_dispatches, values[4])
+                atmosphere_clouds = max(atmosphere_clouds, values[5])
+                atmosphere_heightgrid = max(atmosphere_heightgrid, values[6])
+                atmosphere_depth = max(atmosphere_depth, values[7])
+                atmosphere_temporal_reuse = max(atmosphere_temporal_reuse, values[8])
+                atmosphere_temporal_reject = max(atmosphere_temporal_reject, values[9])
+                atmosphere_surface_milli = tuple(
+                    max(atmosphere_surface_milli[i], values[10 + i]) for i in range(4)
+                )
 
             if category == "system" and msg == "FPS_GATE_SCENE_BEGIN":
                 scene_begin_markers += 1
@@ -539,11 +578,17 @@ def analyze(path: Path, contract: Contract, *, emit: bool = True) -> dict:
         and contract.particle_mad >= contract.particle_control_mad + 0.1
         and contract.particle_mad >= contract.particle_control_mad * 1.25
     )
-    if min(particle_emitters, particle_emitted, particle_computes, particle_draws) < 1:
+    particle_workload = (
+        particle_emitters >= 1 and particle_emitted >= 1
+    ) or atmosphere_particles >= 1
+    if not particle_workload or max(particle_computes, atmosphere_computes) < 1 \
+            or max(particle_draws, atmosphere_draws) < 1:
         failures.append(
             "particle runtime contract missing "
             f"(emitters={particle_emitters}, particles={particle_emitted}, "
-            f"computes={particle_computes}, draws={particle_draws})"
+            f"computes={particle_computes}, draws={particle_draws}, "
+            f"weather-particles={atmosphere_particles}, "
+            f"weather-computes={atmosphere_computes}, weather-draws={atmosphere_draws})"
         )
     expected_render = (contract.render_width, contract.render_height)
     render_observed = render_observations[-1] if render_observations else None
@@ -741,8 +786,22 @@ def analyze(path: Path, contract: Contract, *, emit: bool = True) -> dict:
         "particle_visual_above_noise": particle_causal,
         "particle_emitters": particle_emitters,
         "particle_emitted": particle_emitted,
+        "particle_requests": particle_requests,
+        "particle_dropped_requests": particle_dropped_requests,
+        "particle_dropped_particles": particle_dropped_particles,
         "particle_computes": particle_computes,
         "particle_draws": particle_draws,
+        "atmosphere_particles": atmosphere_particles,
+        "atmosphere_computes": atmosphere_computes,
+        "atmosphere_draws": atmosphere_draws,
+        "atmosphere_froxels": atmosphere_froxels,
+        "atmosphere_dispatches": atmosphere_dispatches,
+        "atmosphere_clouds": atmosphere_clouds,
+        "atmosphere_heightgrid": atmosphere_heightgrid,
+        "atmosphere_depth": atmosphere_depth,
+        "atmosphere_temporal_reuse": atmosphere_temporal_reuse,
+        "atmosphere_temporal_reject": atmosphere_temporal_reject,
+        "atmosphere_surface_milli": list(atmosphere_surface_milli),
         "weather_rain": weather_rain,
         "frames": len(alls),
         "frame_pacing_blocks": len(raw_frame_pacing),
@@ -798,7 +857,7 @@ def analyze(path: Path, contract: Contract, *, emit: bool = True) -> dict:
         print(f"\n=== FPS-PERF-GATE RESULT [{contract.tag}] ===")
         print(f"  scene contract          : {contract.render_width}x{contract.render_height} map={gameplay_maps} camera={camera_observed} bots={bots_entered}")
         print(f"  bot visibility          : placements={bot_placements} md3={pre_visible}->{post_visible}")
-        print(f"  dlight/weather/particles: surfaces={dlight_frames} shadow_passes={dlight_profile_passes} candidates={dlight_candidates} rain={weather_rain} particles={particles_enabled} runtime={particle_emitters}/{particle_emitted}/{particle_computes}/{particle_draws}")
+        print(f"  dlight/weather/particles: surfaces={dlight_frames} shadow_passes={dlight_profile_passes} candidates={dlight_candidates} rain={weather_rain} particles={particles_enabled} runtime={particle_emitters}/{particle_emitted}/{particle_computes}/{particle_draws} atmosphere={atmosphere_particles}/{atmosphere_computes}/{atmosphere_draws}")
         print(f"  threshold frame samples : {len(alls)} (p95={p95_all}ms p99={p99_all}ms)")
         print(
             f"  full-frame CPU aggregate: blocks={len(raw_frame_pacing)} "
@@ -853,7 +912,7 @@ def synthetic_fixture(samples: int = 650) -> list[str]:
             record(base.isoformat(), "(md3) 2 sin 1 sclip  4 sout 0 bin 0 bclip 0 bout", "renderer.cmd"),
             record(base.isoformat(), "FPS_GATE_BOT_VIS_PRE_END"),
             record(base.isoformat(), "bot_teleport: Visor placed at (989 1575 69) yaw=295", "game"),
-            record(base.isoformat(), "particle emitters:1 particles:18 computes:1 draws:2", "renderer.cmd"),
+            record(base.isoformat(), "particle emitters:1 particles:18 requests:1 dropped:0/0 computes:1 draws:2", "renderer.cmd"),
             record(base.isoformat(), "FPS_GATE_BOT_VIS_POST_BEGIN"),
             record(base.isoformat(), "(md3) 3 sin 2 sclip  4 sout 0 bin 0 bclip 0 bout", "renderer.cmd"),
             record(base.isoformat(), "FPS_GATE_BOT_VIS_POST_END"),

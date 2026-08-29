@@ -28,7 +28,7 @@ LOG_DECLARE_CHANNEL( ch_scripting, "scripting" );
 /* Engine-side control block for the LuaJIT runtime.  Lives in a persistent
    arena so it shows up in /meminfo and outlives Hunk_ClearLevel(). */
 
-#define MAX_BINDING_REGISTRARS 8
+#define MAX_BINDING_REGISTRARS 16
 #define WIREDSCRIPT_ARENA_SIZE (16 * 1024)  /* 16 KB — header + registrar table */
 
 typedef struct {
@@ -433,19 +433,19 @@ void WiredScript_EnumerateGlobalsAndMembers(
 
 /* ---- File execution --------------------------------------------------- */
 
-void WiredScript_ExecFile( const char *filename ) {
+qboolean WiredScript_TryExecFile( const char *filename ) {
 	fileHandle_t f;
 	int len;
 	char *buf;
 	int status;
 
-	if ( !s_ws || !s_ws->lua ) return;
+	if ( !s_ws || !s_ws->lua ) return qfalse;
 
 	{
 		const char *ext = strrchr( filename, '.' );
 		if ( !ext || Q_stricmp( ext, ".lua" ) != 0 ) {
 			COM_WARN( LOG_CH(ch_scripting), "WiredCore/Scripting: only .lua files supported\n" );
-			return;
+			return qfalse;
 		}
 	}
 
@@ -454,7 +454,7 @@ void WiredScript_ExecFile( const char *filename ) {
 		if ( Q_stricmp( filename, "autoexec.lua" ) != 0 ) {
 			COM_WARN( LOG_CH(ch_scripting), "WiredCore/Scripting: file not found '%s'\n", filename );
 		}
-		return;
+		return qfalse;
 	}
 
 	buf = Z_Malloc( len + 1 );
@@ -473,7 +473,7 @@ void WiredScript_ExecFile( const char *filename ) {
 		const char *err = lua_tostring( s_ws->lua, -1 );
 		COM_ERROR( LOG_CH(ch_scripting), "Lua load error (%s): %s\n", filename, err ? err : "unknown" );
 		lua_pop( s_ws->lua, 1 );
-		return;
+		return qfalse;
 	}
 
 	status = lua_pcall( s_ws->lua, 0, 0, 0 );
@@ -481,10 +481,15 @@ void WiredScript_ExecFile( const char *filename ) {
 		const char *err = lua_tostring( s_ws->lua, -1 );
 		COM_ERROR( LOG_CH(ch_scripting), "Lua exec error (%s): %s\n", filename, err ? err : "unknown" );
 		lua_pop( s_ws->lua, 1 );
-		return;
+		return qfalse;
 	}
 
 	Com_Log( SEV_INFO, LOG_CH(ch_scripting), "WiredCore/Scripting: executed '%s'\n", filename );
+	return qtrue;
+}
+
+void WiredScript_ExecFile( const char *filename ) {
+	(void) WiredScript_TryExecFile( filename );
 }
 
 /* ---- Binding registration --------------------------------------------- */

@@ -67,7 +67,7 @@ require_text(VKH "VK_TEMPORAL_PIPELINE_PRESERVE = 0" "append-only preserve slot"
 require_text(VKH "VK_TEMPORAL_PIPELINE_WRITE" "reserved write slot")
 require_text(VKH "VK_TEMPORAL_PIPELINE_INVALIDATE" "reserved invalidate slot")
 require_text(VKH "ral_temporal_handle[ VK_TEMPORAL_PIPELINE_COHORT_COUNT ]" "distinct cohort ownership")
-require_text(VKH "vec4_t advancedFogColorDensity;                   // offset 608, 16 B\n\tvec4_t advancedFogTypeFarEnabled;                 // offset 624, 16 B\n} vkUniform_t;" "intentional 640-byte draw-uniform fog tail")
+require_text(VKH "vec4_t advancedFogColorDensity;                   // offset 608, 16 B\n\tvec4_t advancedFogTypeFarEnabled;                 // offset 624, 16 B\n\tvec4_t emissionRadiance;                          // offset 640, 16 B\n} vkUniform_t;" "intentional 656-byte draw-uniform lighting tail")
 forbid_text(VKH "temporalCurrentMvp" "unconditional temporal uniform payload")
 forbid_text(VKH "temporalPreviousMvp" "unconditional temporal uniform payload")
 require_text(VKC "VK_TemporalPreservePipelineCreate( backend, base, layout," "shipping wrapper delegates to tested factory")

@@ -10,9 +10,10 @@ layout(constant_id = 26) const int lightmap_slot = 0;
 const bool _437 = (alpha_test_func == 1);
 const bool _447 = (alpha_test_func == 2);
 const bool _457 = (alpha_test_func == 3);
+const bool _467 = (lightmap_slot != 0);
 layout(constant_id = 7) const int discard_mode = 0;
-const bool _488 = (discard_mode == 1);
-const bool _498 = (discard_mode == 2);
+const bool _556 = (discard_mode == 1);
+const bool _566 = (discard_mode == 2);
 layout(constant_id = 3) const int alpha_to_coverage = 0;
 
 layout(binding = 0, std140) uniform UBO
@@ -30,6 +31,7 @@ layout(binding = 0, std140) uniform UBO
     vec4 worldLightParams;
     vec4 advancedFogColorDensity;
     vec4 advancedFogTypeFarEnabled;
+    vec4 emissionRadiance;
 } _269;
 
 layout(binding = 0) uniform texture2D wired_bindless_images[64];
@@ -275,16 +277,37 @@ void main()
         }
     }
     base = color0;
+    if (_467)
+    {
+        float wetness = clamp(_269.worldLightParams.y, 0.0, 1.0);
+        float frost = clamp(_269.worldLightParams.z, 0.0, 1.0);
+        float luminance = dot(base.xyz, vec3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+        vec4 _489 = base;
+        vec3 _491 = _489.xyz * mix(1.0, 0.819999992847442626953125, wetness);
+        base.x = _491.x;
+        base.y = _491.y;
+        base.z = _491.z;
+        vec4 _498 = base;
+        vec3 _512 = mix(_498.xyz, vec3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), vec3(frost * 0.550000011920928955078125));
+        base.x = _512.x;
+        base.y = _512.y;
+        base.z = _512.z;
+    }
+    vec4 _527 = base;
+    vec3 _529 = _527.xyz + (color0.xyz * _269.emissionRadiance.xyz);
+    base.x = _529.x;
+    base.y = _529.y;
+    base.z = _529.z;
     if (wired_advanced_fog_enabled())
     {
         float fogAmount = wired_advanced_fog_amount();
-        vec4 _472 = base;
-        vec3 _480 = mix(_472.xyz, _269.advancedFogColorDensity.xyz, vec3(fogAmount));
-        base.x = _480.x;
-        base.y = _480.y;
-        base.z = _480.z;
+        vec4 _541 = base;
+        vec3 _548 = mix(_541.xyz, _269.advancedFogColorDensity.xyz, vec3(fogAmount));
+        base.x = _548.x;
+        base.y = _548.y;
+        base.z = _548.z;
     }
-    if (_488)
+    if (_556)
     {
         if (base.w == 0.0)
         {
@@ -293,7 +316,7 @@ void main()
     }
     else
     {
-        if (_498)
+        if (_566)
         {
             if (dot(base.xyz, base.xyz) == 0.0)
             {

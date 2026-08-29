@@ -34,7 +34,6 @@ menuDef {
 		itemDef {
 			name "scoreboard_root"
 			type container
-			rect 0.1 0.05 0.8 0.9
 			direction column
 			gap $spacing_md
 			padding $spacing_md $spacing_md
@@ -44,7 +43,7 @@ menuDef {
 			itemDef {
 				name "scorelist"
 				type scorelist_widget
-				rect 0 0 1 0.92
+				width FIXED 1 height FIXED 0.92
 				width PERCENT 1.0
 				height GROW
 				feeder "scoreboard"

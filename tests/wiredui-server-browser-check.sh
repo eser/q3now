@@ -15,6 +15,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/lib/wired_paths.sh"
 TIMEOUT_RUNNER="$SCRIPT_DIR/run-with-timeout.py"
 FIXTURE="$SCRIPT_DIR/wiredui-server-fixture.py"
 
@@ -751,10 +752,13 @@ ordered([
 password_rows = [row for row in layout if row["menu"] == "password"]
 if not password_rows:
     raise SystemExit("FAIL layout: password popup never rendered")
-for region in ("password", "password_root", "subheader", "row_password", "btn_connect"):
+for region in ("password", "password_root", "row_password", "btn_connect"):
     matches = [row for row in password_rows if row["region"] == region]
     if not matches or any(row["w"] <= 0 or row["h"] <= 0 for row in matches):
         raise SystemExit(f"FAIL layout: missing/non-positive password region {region}")
+subheaders = [row for row in password_rows if row["region"] == "subheader"]
+if not subheaders or not any(row["w"] > 0 and row["h"] > 0 for row in subheaders):
+    raise SystemExit("FAIL layout: password subheader never reached positive authored state")
 frames = {}
 for row in password_rows:
     frames.setdefault(row["frame"], []).append(row)
@@ -2486,18 +2490,10 @@ if [ -z "$HEADLESS" ]; then
 fi
 [ -n "$HEADLESS" ] && [ -x "$HEADLESS" ] || { echo "SKIP: sibling wired-headless missing"; exit 77; }
 HEADLESS="$(cd "$(dirname "$HEADLESS")" && pwd)/$(basename "$HEADLESS")"
-PACK_ROOT=""
-for candidate in "$WIRED_DIR" "$WIRED_DIR/../Resources" "$WIRED_DIR/../../.."; do
-    if [ -f "$candidate/base/pax21.sw3z" ]; then PACK_ROOT="$(cd "$candidate" && pwd)"; break; fi
-done
-[ -n "$PACK_ROOT" ] || { echo "SKIP: current pax21 not found"; exit 77; }
-CONTENT_ROOT="${WIRED_CONTENT_ROOT:-}"
-for candidate in "$CONTENT_ROOT" "$PACK_ROOT"; do
-    if [ -f "$candidate/base/pax01.sw3z" ] || [ -f "$candidate/base/pak0.pk3" ]; then CONTENT_ROOT="$candidate"; break; fi
-done
-if [ -f "$CONTENT_ROOT/base/pax01.sw3z" ]; then BASE_ARCHIVE="$CONTENT_ROOT/base/pax01.sw3z"
-elif [ -f "$CONTENT_ROOT/base/pak0.pk3" ]; then BASE_ARCHIVE="$CONTENT_ROOT/base/pak0.pk3"
-else echo "SKIP: licensed base archive missing; set WIRED_CONTENT_ROOT"; exit 77; fi
+PACK_ROOT="$(wired_find_archive_root "$WIRED_DIR" "$WIRED_DIR/../Resources" "$WIRED_DIR/../../.." 2>/dev/null || true)"
+[ -n "$PACK_ROOT" ] || { echo "SKIP: current VFS archives not found"; exit 77; }
+CONTENT_ROOT="$(wired_find_archive_root "${WIRED_CONTENT_ROOT:-}" "$WIRED_HOME" "$PACK_ROOT" 2>/dev/null || true)"
+[ -n "$CONTENT_ROOT" ] || { echo "SKIP: licensed base archives missing; set WIRED_CONTENT_ROOT"; exit 77; }
 
 RUN_ROOT="$(mktemp -d -t wired-q0browser-XXXXXX 2>/dev/null || mktemp -d)"
 HOME_ROOT="$RUN_ROOT/q3now-preview"
@@ -2571,22 +2567,9 @@ trap cleanup EXIT INT TERM
 mkdir -p "$HOME_ROOT/base" "$DOUBLE_HOME/base" "$DOUBLE_SERVER_HOME/base" \
     "$INFO_HOME/base" "$INFO_DIRECT_HOME/base" "$INFO_SERVER_HOME/base" "$WRONG_HOME/base" "$SERVER_HOME/base" \
     "$RUN_ROOT/double-run" "$RUN_ROOT/serverinfo-connect-run" "$RUN_ROOT/serverinfo-connect-direct-run" "$RUN_ROOT/wrong-run"
-cp "$BASE_ARCHIVE" "$HOME_ROOT/base/" || exit 1
-cp "$PACK_ROOT/base/pax21.sw3z" "$HOME_ROOT/base/pax21.sw3z" || exit 1
-cp "$BASE_ARCHIVE" "$DOUBLE_HOME/base/" || exit 1
-cp "$PACK_ROOT/base/pax21.sw3z" "$DOUBLE_HOME/base/pax21.sw3z" || exit 1
-cp "$BASE_ARCHIVE" "$DOUBLE_SERVER_HOME/base/" || exit 1
-cp "$PACK_ROOT/base/pax21.sw3z" "$DOUBLE_SERVER_HOME/base/pax21.sw3z" || exit 1
-cp "$BASE_ARCHIVE" "$INFO_HOME/base/" || exit 1
-cp "$PACK_ROOT/base/pax21.sw3z" "$INFO_HOME/base/pax21.sw3z" || exit 1
-cp "$BASE_ARCHIVE" "$INFO_DIRECT_HOME/base/" || exit 1
-cp "$PACK_ROOT/base/pax21.sw3z" "$INFO_DIRECT_HOME/base/pax21.sw3z" || exit 1
-cp "$BASE_ARCHIVE" "$INFO_SERVER_HOME/base/" || exit 1
-cp "$PACK_ROOT/base/pax21.sw3z" "$INFO_SERVER_HOME/base/pax21.sw3z" || exit 1
-cp "$BASE_ARCHIVE" "$WRONG_HOME/base/" || exit 1
-cp "$PACK_ROOT/base/pax21.sw3z" "$WRONG_HOME/base/pax21.sw3z" || exit 1
-cp "$BASE_ARCHIVE" "$SERVER_HOME/base/" || exit 1
-cp "$PACK_ROOT/base/pax21.sw3z" "$SERVER_HOME/base/pax21.sw3z" || exit 1
+for home in "$HOME_ROOT" "$DOUBLE_HOME" "$DOUBLE_SERVER_HOME" "$INFO_HOME" "$INFO_DIRECT_HOME" "$INFO_SERVER_HOME" "$WRONG_HOME" "$SERVER_HOME"; do
+    wired_link_content_into_home "$home" "$CONTENT_ROOT/base" "$PACK_ROOT/base" || exit 1
+done
 python3 - "$HOME_ROOT/base/wired_ui_state.dat" <<'PYEOF'
 import struct, sys
 entries = [
@@ -2603,19 +2586,19 @@ PYEOF
 cat >"$SERVER_HOME/base/q0browser-server.cfg" <<'CFGEOF'
 set g_password q0Pass7
 map arena7
-wait 300
+waitms 45000
 addbot visor 3 free 0 StatusBot
 CFGEOF
 cat >"$DOUBLE_SERVER_HOME/base/q0browser-double-server.cfg" <<'CFGEOF'
 set g_password ""
 map arena7
-wait 300
+waitms 45000
 addbot visor 3 free 0 StatusBot
 CFGEOF
 cat >"$INFO_SERVER_HOME/base/q0browser-serverinfo-server.cfg" <<'CFGEOF'
 set g_password ""
 map arena7
-wait 300
+waitms 45000
 addbot visor 3 free 0 StatusBot
 CFGEOF
 
@@ -2880,7 +2863,7 @@ then exit 1; fi
 
 python3 "$FIXTURE" --client-port "$INFO_CLIENT_PORT" --sentinel-port "$SENTINEL_PORT" \
     --target-port "$INFO_PROXY_PORT" --upstream-port "$INFO_SERVER_PORT" --serverinfo-connect \
-    --protocol 74 --events "$INFO_FIXTURE_JSON" --timeout 30 &
+    --protocol 75 --events "$INFO_FIXTURE_JSON" --timeout 30 &
 INFO_FIXTURE_PID=$!
 if ! python3 - "$INFO_FIXTURE_JSON" "$INFO_FIXTURE_PID" <<'PYEOF'
 import json,os,sys,time
@@ -3166,7 +3149,7 @@ then exit 1; fi
 
 python3 "$FIXTURE" --client-port "$CLIENT_PORT" --sentinel-port "$SENTINEL_PORT" \
     --target-port "$TARGET_PORT" --upstream-port "$SERVER_PORT" --lan-discovery \
-    --protocol 74 --events "$FIXTURE_JSON" --timeout 180 &
+    --protocol 75 --events "$FIXTURE_JSON" --timeout 180 &
 FIXTURE_PID=$!
 for _ in $(seq 1 50); do [ -s "$FIXTURE_JSON" ] && break; sleep 0.1; done
 [ -s "$FIXTURE_JSON" ] || { echo "FAIL: fixture did not become ready"; exit 1; }

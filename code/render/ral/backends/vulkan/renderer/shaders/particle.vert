@@ -267,6 +267,10 @@ void main() {
 	// classes.
 	if (!parmIsUnset(c.alphaParm))
 		color.a = parmEval(c.alphaParm, p.age, p.sizeJitterPick);
+	// pad5 carries the GPU-spawned semantic emitter tint as packed RGBA8.
+	// Child stages selectively inherit its RGB/intensity lanes without
+	// expanding the 64-byte particle pool stride.
+	color *= unpackUnorm4x8(p.pad5);
 
 	// Size: lerp (sizeStart + sizeJitterPick) → sizeEnd over lifetime.
 	// sizeJitterPick was picked at emit time as crandom() * cls.sizeJitter

@@ -1107,6 +1107,12 @@ void ClientThink_real( gentity_t *ent ) {
 	else {
 		BG_PlayerStateToEntityState( &ent->client->ps, &ent->s, qtrue );
 	}
+	{
+		vec3_t weaponAimAngles;
+		if ( G_ResolveWeaponAimAngles( ent, weaponAimAngles ) ) {
+			VectorCopy( weaponAimAngles, ent->s.apos.trBase );
+		}
+	}
 	SendPendingPredictableEvents( &ent->client->ps );
 
     // eser - offhand grapple

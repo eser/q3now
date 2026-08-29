@@ -19,9 +19,6 @@
 itemDef {
 	name "hud_active_scoreboard_bar"
 	type container
-	position absolute
-	top 2vh
-	left 33.33vw
 	width 33.33vw
 	height 4.9vh
 	direction row
@@ -39,14 +36,14 @@ itemDef {
 	itemDef {
 		name "sb_leader_cell"
 		type container
-		rect 0 0 1 4.9vh
+		width FIXED 1 height FIXED 4.9vh
 		direction row
 		alignY center
 		grow 1
 		padding 0.9vh 0 0.9vh 1.11vw
 		itemDef { type container grow 1 decoration visible 1 }
-		itemDef { type 0 rect 0 0 10vw 2.5vh height FIT width PERCENT 10vw bind "game.scores.0.name"  text "" textalign 2 font $font_mono 11 forecolor $accent decoration visible 1 grow 0 }
-		itemDef { type 0 rect 0 0 2.6vw 3vh height FIT width PERCENT 2.6vw bind "game.scores.0.score" text "" textalign 2 font $font_sans 22 forecolor $accent decoration visible 1 grow 0 }
+		itemDef { type 0 width FIXED 10vw height FIXED 2.5vh height FIT width PERCENT 10vw bind "game.scores.0.name"  text "" textalign 2 font $font_mono 11 forecolor $accent decoration visible 1 grow 0 }
+		itemDef { type 0 width FIXED 2.6vw height FIXED 3vh height FIT width PERCENT 2.6vw bind "game.scores.0.score" text "" textalign 2 font $font_sans 22 forecolor $accent decoration visible 1 grow 0 }
 	}
 
 	// TIMER cell (FIXED center gap; gametime hudElement self-centers on screen
@@ -56,10 +53,10 @@ itemDef {
 	itemDef {
 		name "sb_timer_cell"
 		type container
-		rect 0 0 7vw 4.9vh
+		width FIXED 7vw height FIXED 4.9vh
 		width PERCENT 7vw
 		grow 0
-		itemDef { hudElement "gametime" anchor TOP_CENTER rect 0.5 0.038 0 0 font $font_sans fontsize 20 22 textalign 1 forecolor $bone decoration visible 1 }
+		itemDef { name "hud_gametime" hudElement "gametime" width PERCENT 1 height PERCENT 1 font $font_sans fontsize 20 22 textalign 1 forecolor $bone decoration visible 1 }
 	}
 
 	// RUNNER-UP cell (game.scores.1): score + name BOTH hug the centre (left side
@@ -72,13 +69,13 @@ itemDef {
 	itemDef {
 		name "sb_runnerup_cell"
 		type container
-		rect 0 0 1 4.9vh
+		width FIXED 1 height FIXED 4.9vh
 		direction row
 		alignY center
 		grow 1
 		padding 0.9vh 1.11vw 0.9vh 0
-		itemDef { type 0 rect 0 0 2.6vw 3vh height FIT width PERCENT 2.6vw bind "game.scores.1.score" text "" textalign 0 font $font_sans 22 forecolor $bone decoration visible 1 grow 0 }
-		itemDef { type 0 rect 0 0 10vw 2.5vh height FIT width PERCENT 10vw bind "game.scores.1.name"  text "" textalign 0 font $font_mono 11 forecolor $bone decoration visible 1 grow 0 }
+		itemDef { type 0 width FIXED 2.6vw height FIXED 3vh height FIT width PERCENT 2.6vw bind "game.scores.1.score" text "" textalign 0 font $font_sans 22 forecolor $bone decoration visible 1 grow 0 }
+		itemDef { type 0 width FIXED 10vw height FIXED 2.5vh height FIT width PERCENT 10vw bind "game.scores.1.name"  text "" textalign 0 font $font_mono 11 forecolor $bone decoration visible 1 grow 0 }
 		itemDef { type container grow 1 decoration visible 1 }
 	}
 }

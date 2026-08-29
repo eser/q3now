@@ -166,6 +166,7 @@ void MSDF_SetOutline( float outlineWidth, const float *outlineColor,
  */
 void MSDF_ReregisterShaders( void );
 int  MSDF_GetFontCount( void );
+int  MSDF_GetRenderableFontCount( void );
 
 #endif /* FEAT_WIRED_UI */
 #endif /* CL_WIRED_MSDF_H */

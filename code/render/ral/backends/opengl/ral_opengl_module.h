@@ -5,13 +5,14 @@
 #define WIRED_RAL_OPENGL_MODULE_H
 
 #include "ral_opengl_product.h"
+#include "ral_atmosphere.h"
 #include "render_submission.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define RAL_OPENGL_MODULE_SCHEMA_VERSION 1u
+#define RAL_OPENGL_MODULE_SCHEMA_VERSION 2u
 
 typedef struct {
 	uint32_t schemaVersion;
@@ -22,6 +23,7 @@ typedef struct {
 	ralOpenGlCoreReceipt_t core;
 	renderSubmissionReceipt_t frontend;
 	ralOpenGlProductFrameReceipt_t product;
+	ralAtmospherePlanReceipt_t atmosphere;
 	qboolean ready;
 } ralOpenGlModuleFrameReceipt_t;
 

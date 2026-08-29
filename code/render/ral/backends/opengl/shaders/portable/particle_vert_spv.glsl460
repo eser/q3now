@@ -73,7 +73,7 @@ struct ParticleClassGPU
 layout(constant_id = 0) const uint PIPELINE_BLEND_MASK = 0u;
 const float _606[6] = float[](1.0, 1.0, -1.0, -1.0, 1.0, -1.0);
 const float _613[6] = float[](-1.0, 1.0, -1.0, -1.0, 1.0, 1.0);
-const vec2 _725[6] = vec2[](vec2(0.0, 1.0), vec2(0.0), vec2(1.0), vec2(1.0), vec2(0.0), vec2(1.0, 0.0));
+const vec2 _730[6] = vec2[](vec2(0.0, 1.0), vec2(0.0), vec2(1.0), vec2(1.0), vec2(0.0), vec2(1.0, 0.0));
 
 layout(binding = 0, std140) uniform ParticleFrame
 {
@@ -383,6 +383,7 @@ void main()
         float _658 = parmEval(param_1, param_2, param_3);
         color.w = _658;
     }
+    color *= unpackUnorm4x8(p.pad5);
     float effectiveStart = c.sizeStart + p.sizeJitterPick;
     float size = mix(effectiveStart, c.sizeEnd, p.age);
     ParticleParm param_4 = c.sizeParm;
@@ -391,12 +392,12 @@ void main()
         ParticleParm param_5 = c.sizeParm;
         float param_6 = p.age;
         float param_7 = p.sizeJitterPick;
-        float _690 = parmEval(param_5, param_6, param_7);
-        size = _690;
+        float _695 = parmEval(param_5, param_6, param_7);
+        size = _695;
     }
     vec3 worldPos = (p.pos + (_195.viewLeft.xyz * (sx * size))) + (_195.viewUp.xyz * (uy * size));
     gl_Position = _195.mvp * vec4(worldPos, 1.0);
-    fragUV = _725[vertInQuad];
+    fragUV = _730[vertInQuad];
     fragColor = color;
     particleClassHandle = p.classHandle | (c.colorDomain << 31u);
     if (c.frameCount > 1u)
@@ -407,16 +408,16 @@ void main()
         uint frame1 = min((frame0 + 1u), last);
         frameSlot0 = c.frameSlots[frame0];
         frameSlot1 = c.frameSlots[frame1];
-        float _777;
+        float _782;
         if (c.frameBlend != 0u)
         {
-            _777 = fract(fr);
+            _782 = fract(fr);
         }
         else
         {
-            _777 = 0.0;
+            _782 = 0.0;
         }
-        frameBlend = _777;
+        frameBlend = _782;
     }
     else
     {

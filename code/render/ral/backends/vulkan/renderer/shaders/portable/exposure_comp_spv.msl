@@ -31,6 +31,8 @@ struct ExposureBlock
     float sunScreenY;
     float sunrayIntensity;
     float sunrayDecay;
+    float shadowExponent;
+    float shadowPivot;
 };
 
 struct Push

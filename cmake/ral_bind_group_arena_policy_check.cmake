@@ -799,7 +799,7 @@ foreach(NEEDLE IN ITEMS
 	"values[0].type = RAL_BIND_UNIFORM_BUFFER;"
 	"values[0].buffer = frameReceipt.buffers[i];"
 	"values[1].type = RAL_BIND_STORAGE_BUFFER;"
-	"values[1].buffer = poolReceipt.buffers[i];"
+	"values[1].buffer = poolReceipt.buffers[pool];"
 	"values[2].buffer = poolReceipt.buffers[writePool];"
 	"values[3].buffer = classReceipt.buffers[0];"
 	"values[0].bufferRange = frameBytes;"
@@ -807,11 +807,12 @@ foreach(NEEDLE IN ITEMS
 	"values[3].bufferRange = classBytes;"
 	"createInfo.arena = vk.ral_descriptor_arena;"
 	"createInfo.arenaReceipt = &vk.ral_descriptor_arena_receipt;"
-	"candidates[i] = Ral_CreateBindGroup( backend, &createInfo );"
-	"rawCandidates[i] = Ral_GetBindGroupHandle( candidates[i] );"
-	"vk.particle.ral_compute_descriptor[i] = candidates[i];"
-	"vk.particle.compute_descriptor[i] = rawCandidates[i];"
-	"if ( candidates[i] ) Ral_DestroyBindGroup( candidates[i] );")
+	"values[6].buffer = eventReceipt.buffers[pool];"
+	"candidates[i][pool] = Ral_CreateBindGroup( backend, &createInfo );"
+	"rawCandidates[i][pool] = Ral_GetBindGroupHandle("
+	"vk.particle.ral_compute_descriptor[i][pool] = candidates[i][pool];"
+	"vk.particle.compute_descriptor[i][pool] = rawCandidates[i][pool];"
+	"if ( candidates[i][pool] )")
 	require_text(PARTICLE_GROUP "${NEEDLE}"
 		"particle compute direct RAL bind group")
 endforeach()
@@ -918,7 +919,7 @@ foreach(NEEDLE IN ITEMS
 		"atmospheric arena-reset raw mirror retirement")
 endforeach()
 require_text(PRODUCT
-	"+ 8 /* vk.atm heightgrid + scene-depth samplers"
+	"+ 12 /* atmosphere heightgrid + scene-depth + particle collision-heightgrid allocations"
 	"atmospheric combined-sampler arena capacity")
 foreach(RETIRED IN ITEMS
 	"Ral_AdoptBindGroup(\n\t\t\tvk_ral_get_backend(), vk.atm.compute_descriptor"

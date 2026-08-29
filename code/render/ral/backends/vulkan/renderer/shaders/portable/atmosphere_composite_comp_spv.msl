@@ -1,0 +1,66 @@
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct Params
+{
+    uint4 outputGrid;
+    float4 depthRange;
+};
+
+struct Integrated
+{
+    float4 media[1];
+};
+
+constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(8u, 8u, 1u);
+
+struct spvDescriptorSetBuffer0
+{
+    constant Params* p [[id(0)]];
+    texture2d<float> sceneDepth [[id(1)]];
+    sampler sceneDepthSmplr [[id(2)]];
+    const device Integrated* m_134 [[id(3)]];
+    texture2d<float> sceneHdr [[id(4)]];
+    sampler sceneHdrSmplr [[id(5)]];
+    texture2d<float, access::write> composedHdr [[id(6)]];
+};
+
+kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+{
+    uint2 pixel = gl_GlobalInvocationID.xy;
+    if (any(pixel >= (*spvDescriptorSet0.p).outputGrid.xy))
+    {
+        return;
+    }
+    float2 uv = (float2(pixel) + float2(0.5)) / float2((*spvDescriptorSet0.p).outputGrid.xy);
+    float _56;
+    if ((*spvDescriptorSet0.p).depthRange.z > 0.5)
+    {
+        _56 = spvDescriptorSet0.sceneDepth.sample(spvDescriptorSet0.sceneDepthSmplr, uv, level(0.0)).x;
+    }
+    else
+    {
+        _56 = 0.0;
+    }
+    float depth = _56;
+    float _74;
+    if (depth <= 0.0)
+    {
+        _74 = 1.0;
+    }
+    else
+    {
+        _74 = fast::clamp(1.0 - depth, 0.0, 1.0);
+    }
+    float linearFraction = _74;
+    uint2 froxelXY = min(uint2(uv * float2((*spvDescriptorSet0.p).outputGrid.zw)), ((*spvDescriptorSet0.p).outputGrid.zw - uint2(1u)));
+    uint slices = uint(fast::max((*spvDescriptorSet0.p).depthRange.w, 1.0));
+    uint z = min(uint(linearFraction * float(slices)), (slices - 1u));
+    uint index = (((z * (*spvDescriptorSet0.p).outputGrid.w) + froxelXY.y) * (*spvDescriptorSet0.p).outputGrid.z) + froxelXY.x;
+    float4 atmosphere = (*spvDescriptorSet0.m_134).media[index];
+    float3 scene = spvDescriptorSet0.sceneHdr.sample(spvDescriptorSet0.sceneHdrSmplr, uv, level(0.0)).xyz;
+    spvDescriptorSet0.composedHdr.write(float4((scene * atmosphere.w) + atmosphere.xyz, 1.0), uint2(int2(pixel)));
+}
+

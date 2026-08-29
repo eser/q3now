@@ -19,6 +19,7 @@ static struct ralBuffer_s buffers[2];
 static ralAllocationReceipt_t allocations[2];
 static unsigned char gpuBytes[2][256];
 static uint64_t createdSizes[2], writeOffsets[32], writeSizes[32];
+static ralBufferUsage_t createdUsage[2];
 static unsigned creates, destroys, writes;
 static unsigned failCreate, failAllocation, failWrite, aliasSecond;
 static char destroyOrder[4];
@@ -56,11 +57,15 @@ ralBuffer_t *Ral_CreateBuffer( ralBackend_t *backend,
 	unsigned index = creates++;
 	if ( !backend || !info || index >= 2u || failCreate == index + 1u
 			|| info->size == 0u || info->size > sizeof( gpuBytes[index] )
-			|| info->usage != ( RAL_BUFFER_STORAGE | RAL_BUFFER_TRANSFER_DST )
+			|| ( info->usage != ( RAL_BUFFER_STORAGE | RAL_BUFFER_TRANSFER_DST
+				| RAL_BUFFER_INDIRECT )
+				&& info->usage != ( RAL_BUFFER_STORAGE | RAL_BUFFER_TRANSFER_DST
+					| RAL_BUFFER_INDIRECT | RAL_BUFFER_TRANSFER_SRC ) )
 			|| info->memory != RAL_MEMORY_HOST_COHERENT
 			|| !info->debugName || !info->debugName[0] ) return NULL;
 	if ( index == 1u && aliasSecond ) return &buffers[0];
 	createdSizes[index] = info->size;
+	createdUsage[index] = info->usage;
 	buffers[index].id = (int)index + 1;
 	return &buffers[index];
 }
@@ -120,6 +125,7 @@ static void ResetMocks( void ) {
 	creates = destroys = writes = 0u;
 	failCreate = failAllocation = failWrite = aliasSecond = 0u;
 	memset( createdSizes, 0, sizeof( createdSizes ) );
+	memset( createdUsage, 0, sizeof( createdUsage ) );
 	memset( gpuBytes, 0x7c, sizeof( gpuBytes ) );
 	memset( writeOffsets, 0, sizeof( writeOffsets ) );
 	memset( writeSizes, 0, sizeof( writeSizes ) );
@@ -146,8 +152,8 @@ static int FailureMatrix( ralBackend_t *backend,
 
 int main( void ) {
 	struct ralBackend_s backend = { 1 }, backend2 = { 2 };
-	vkRalShadowStorageConfig_t pair = { 2u, 16u, 8u, "shadow-pair" };
-	vkRalShadowStorageConfig_t single = { 1u, 8u, 4u, "shadow-single" };
+	vkRalShadowStorageConfig_t pair = { 2u, 16u, 8u, "shadow-pair", 0 };
+	vkRalShadowStorageConfig_t single = { 1u, 8u, 4u, "shadow-single", 0 };
 	vkRalShadowStorageConfig_t bad;
 	vkRalShadowStorageOwner_t owner, before;
 	vkRalShadowStorageResourcesReceipt_t resources, badResources;
@@ -170,6 +176,8 @@ int main( void ) {
 	bad = pair; bad.elementSize = VK_RAL_SHADOW_STORAGE_MAX_BYTES;
 	CHECK( !VK_RalShadowStorageEnsure( &owner, &backend, &bad ) );
 	bad = pair; bad.debugName = NULL;
+	CHECK( !VK_RalShadowStorageEnsure( &owner, &backend, &bad ) );
+	bad = pair; bad.extraUsage = RAL_BUFFER_VERTEX;
 	CHECK( !VK_RalShadowStorageEnsure( &owner, &backend, &bad ) );
 
 	ResetMocks();
@@ -267,6 +275,16 @@ int main( void ) {
 	VK_RalShadowStorageRelease( &owner );
 	CHECK( destroys == 2u && destroyOrder[0] == '1'
 		&& destroyOrder[1] == '0' && !VK_RalShadowStorageHasLive( &owner ) );
+
+	// Readback-capable owners opt into transfer-source usage explicitly.
+	ResetMocks();
+	VK_RalShadowStorageInit( &owner );
+	bad = pair; bad.extraUsage = RAL_BUFFER_TRANSFER_SRC;
+	CHECK( VK_RalShadowStorageEnsure( &owner, &backend, &bad ) );
+	CHECK( owner.extraUsage == RAL_BUFFER_TRANSFER_SRC
+		&& ( createdUsage[0] & RAL_BUFFER_TRANSFER_SRC ) != 0
+		&& ( createdUsage[1] & RAL_BUFFER_TRANSFER_SRC ) != 0 );
+	VK_RalShadowStorageRelease( &owner );
 
 	ResetMocks();
 	VK_RalShadowStorageInit( &owner );

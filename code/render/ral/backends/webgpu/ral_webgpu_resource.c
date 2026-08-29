@@ -24,6 +24,8 @@ struct ralWebGpuResource_s {
 	uint32_t width;
 	uint32_t height;
 	uint32_t depth;
+	uint32_t bytesPerTexel;
+	ralFormat_t format;
 	ralAllocationReceipt_t allocation;
 	qboolean live;
 };
@@ -227,9 +229,16 @@ qboolean RalWebGpu_CreateTexture( ralWebGpuResourceLayer_t *layer,
 		ralWebGpuResourceReceipt_t *outReceipt ) {
 	uintptr_t identity = (uintptr_t)0;
 	uint64_t texels, byteSize;
+	uint32_t expectedBytes = desc && desc->format == RAL_FORMAT_R8_UNORM ? 1u
+		: desc && desc->format == RAL_FORMAT_R8G8_UNORM ? 2u
+		: desc && ( desc->format == RAL_FORMAT_R8G8B8A8_UNORM
+			|| desc->format == RAL_FORMAT_R8G8B8A8_SRGB
+			|| desc->format == RAL_FORMAT_E5B9G9R9_UFLOAT
+			|| desc->format == RAL_FORMAT_R16G16_SNORM ) ? 4u
+		: desc && desc->format == RAL_FORMAT_R16G16B16A16_SFLOAT ? 8u : 0u;
 	if ( !LayerReady( layer ) || !desc || !outResource || !outReceipt
 			|| !desc->width || !desc->height || !desc->depth
-			|| desc->bytesPerTexel != 4u
+			|| !expectedBytes || desc->bytesPerTexel != expectedBytes
 			|| desc->width > layer->coreReceipt.caps.maxTextureDimension2D
 			|| desc->height > layer->coreReceipt.caps.maxTextureDimension2D
 			|| desc->depth > layer->coreReceipt.caps.maxTextureDimension3D
@@ -252,6 +261,8 @@ qboolean RalWebGpu_CreateTexture( ralWebGpuResourceLayer_t *layer,
 	( *outResource )->width = desc->width;
 	( *outResource )->height = desc->height;
 	( *outResource )->depth = desc->depth;
+	( *outResource )->bytesPerTexel = desc->bytesPerTexel;
+	( *outResource )->format = desc->format;
 	return qtrue;
 }
 
@@ -349,11 +360,11 @@ qboolean RalWebGpu_WriteTexture( ralWebGpuResourceLayer_t *layer,
 			|| authority->resourceIdentity != resource->identity || !bytes
 			|| !byteSize || !bytesPerRow
 			|| !rowsPerImage || rowsPerImage != resource->height
-			|| resource->depth != 1u || !resource->width
-			|| resource->width > UINT32_MAX / 4u
+			|| !resource->depth || !resource->width || !resource->bytesPerTexel
+			|| resource->width > UINT32_MAX / resource->bytesPerTexel
 			|| !outReceipt || layer->writeGeneration == UINT64_MAX ) return qfalse;
-	minimumRow = (uint64_t)resource->width * 4u;
-	requiredBytes = (uint64_t)bytesPerRow * rowsPerImage;
+	minimumRow = (uint64_t)resource->width * resource->bytesPerTexel;
+	requiredBytes = (uint64_t)bytesPerRow * rowsPerImage * resource->depth;
 	if ( bytesPerRow < minimumRow || ( rowsPerImage > 1u && ( bytesPerRow & 255u ) )
 			|| requiredBytes != byteSize ) return qfalse;
 	if ( !layer->host.writeTexture( layer->userData,
@@ -462,7 +473,8 @@ qboolean RalWebGpu_OffscreenConformanceBegin(
 	readbackDesc.memoryClass = RAL_ALLOCATION_READBACK;
 	memset( &textureDesc, 0, sizeof( textureDesc ) );
 	textureDesc.width = 4u; textureDesc.height = 4u;
-	textureDesc.depth = 1u; textureDesc.bytesPerTexel = 4u;
+	textureDesc.depth = 1u; textureDesc.format = RAL_FORMAT_R8G8B8A8_UNORM;
+	textureDesc.bytesPerTexel = 4u;
 	memset( &samplerDesc, 0, sizeof( samplerDesc ) );
 	samplerDesc.linearMinification = qtrue;
 	samplerDesc.linearMagnification = qtrue;

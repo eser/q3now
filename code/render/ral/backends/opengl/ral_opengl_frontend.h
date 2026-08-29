@@ -32,6 +32,7 @@ typedef struct {
 	uint32_t loweredModelEntityCount;
 	uint32_t loweredPrimitiveEntityCount;
 	uint32_t loweredTemporalEntityCount;
+	uint32_t loweredLocalIrradianceEntityCount;
 	uint32_t loweredEntityIndexCount;
 	uint32_t loweredEntityBatchCount;
 	uint32_t loweredUiPrimitiveCount;

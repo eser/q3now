@@ -2,6 +2,8 @@
 
 import assert from "node:assert/strict";
 import { createWiredWebClient } from "../code/web/wired_web_client_module.mjs";
+import { RAL_WEBGPU_BROWSER_ABI_SCHEMA_VERSION } from
+  "../code/render/ral/backends/webgpu/ral_webgpu_browser_dispatch.mjs";
 
 const memory = new WebAssembly.Memory({ initial: 2 });
 const canvas = { width: 0, height: 0, style: {}, getContext() { return null; } };
@@ -23,7 +25,8 @@ const events = [];
 const factory = async () => ({ wasmMemory: memory,
   _RalWebGpu_BrowserModuleStart(generation) {
     const request = new DataView(memory.buffer, 0x1000, 24);
-    request.setUint32(0, 1, true); request.setUint32(4, 1, true);
+    request.setUint32(0, RAL_WEBGPU_BROWSER_ABI_SCHEMA_VERSION, true);
+    request.setUint32(4, 1, true);
     request.setUint32(8, 24, true); request.setBigUint64(16, BigInt(generation), true);
     globalThis.wiredRalWebGpuDispatch(1, 0x1000, 24, 0x2000, 24); return 1;
   },
@@ -35,6 +38,7 @@ const factory = async () => ({ wasmMemory: memory,
   _WiredWeb_ClientStart() { events.push("client-start"); return 1; },
   _WiredWeb_ClientFrame(time) { events.push(["frame", time]); return 1; },
   _WiredWeb_ClientShutdown() { events.push("client-stop"); },
+  _WiredWeb_ClientPresentationChanged() { events.push("presentation-changed"); return 1; },
   _WiredWeb_InputKey(key, down) { events.push(["key", key, down]); },
   _WiredWeb_InputChar(code) { events.push(["char", code]); },
   _WiredWeb_InputMouse(x, y) { events.push(["mouse", x, y]); },
@@ -45,6 +49,8 @@ const client = await createWiredWebClient({ moduleFactory: factory, gpu: undefin
   statusElement, requestAnimationFrame: raf, cancelAnimationFrame: caf, eventTarget });
 assert.equal(canvas.width, 1280); assert.equal(canvas.height, 720);
 await step(1);
+for (let frame = 2; client.state() === "starting" && frame <= 8; ++frame)
+  await step(frame);
 assert.equal(client.state(), "failed");
 assert.equal(client.resize({ width: 1600, height: 900 }), false);
 assert.match(statusElement.textContent, /WebGPU is unavailable/);

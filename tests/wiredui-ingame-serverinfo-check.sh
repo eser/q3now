@@ -5,6 +5,7 @@
 
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/lib/wired_paths.sh"
 FIXTURE="$SCRIPT_DIR/wiredui-ingame-serverinfo-fixture.py"
 TIMEOUT_RUNNER="$SCRIPT_DIR/run-with-timeout.py"
 
@@ -55,8 +56,8 @@ push=exact("WiredUI: push menu '",[r"WiredUI: push menu 'servers' \(depth 1\)",r
 fixture_install=exact("WiredUI: server fixture installed ",[rf"WiredUI: server fixture installed sentinel=127\.0\.0\.1:[1-9][0-9]* target={re.escape(stale)} raw_order=target,sentinel"])
 selection=exact("WiredUI: server selection ",[rf"WiredUI: server selection display_row=0 raw=1 source=0 list_generation=([1-9][0-9]*) selection_generation=([1-9][0-9]*) address=127\.0\.0\.1:[1-9][0-9]* name=A0 WIRED Q0 SENTINEL map=arena1",rf"WiredUI: server selection display_row=1 raw=0 source=0 list_generation=([1-9][0-9]*) selection_generation=([1-9][0-9]*) address={re.escape(stale)} name=Z0 WIRED Q0 TARGET map=arena7"])
 pop=exact("WiredUI: pop menu ",[r"WiredUI: pop menu \(depth 0\)"]*2)
-exact("wui_menu_nav focus:",[r"wui_menu_nav focus: focused item 'serverlist' \(top index -1\)"])
-nav=exact("wui_menu_nav: K_",[r"wui_menu_nav: K_DOWNARROW dispatched",r"wui_menu_nav: K_ESCAPE dispatched"]+[r"wui_menu_nav: K_DOWNARROW dispatched"]*10+[r"wui_menu_nav: K_ENTER dispatched"]+[r"wui_menu_nav: K_UPARROW dispatched"]*9+[r"wui_menu_nav: K_ENTER dispatched"])
+exact("wui_menu_nav focus:",[r"wui_menu_nav focus: focused item 'serverlist' \(top index -1\)",r"wui_menu_nav focus: focused item 'btn_serverinfo' \(top index -1\)",r"wui_menu_nav focus: focused item 'btn_resume' \(top index -1\)"])
+nav=exact("wui_menu_nav: K_",[r"wui_menu_nav: K_DOWNARROW dispatched",r"wui_menu_nav: K_ESCAPE dispatched",r"wui_menu_nav: K_ENTER dispatched",r"wui_menu_nav: K_ENTER dispatched"])
 hidden=exact("wui_pointer_item:",[r"wui_pointer_item: 'btn_back' is not an interactive item",r"wui_pointer_item: 'btn_connect' is not an interactive item"],"WARN","ui")
 pointer=exact("WiredUI: pointer phase=",[r"WiredUI: pointer phase=release reason=reload was_down=0 pointer_down=0",r"WiredUI: pointer phase=release reason=shutdown was_down=0 pointer_down=0",r"WiredUI: pointer phase=release reason=reload was_down=0 pointer_down=0",r"WiredUI: pointer phase=release reason=push was_down=0 pointer_down=0",r"WiredUI: pointer phase=release reason=pop was_down=0 pointer_down=0",r"WiredUI: pointer phase=release reason=push was_down=0 pointer_down=0",r"WiredUI: pointer phase=moved ingress=CL_MouseEvent menu=serverinfo item=btn_retry x=([0-9]+) y=([0-9]+)",r"WiredUI: pointer phase=click ingress=CL_KeyEvent key=K_MOUSE1 x=([0-9]+) y=([0-9]+)",r"WiredUI: pointer phase=moved ingress=CL_MouseEvent menu=serverinfo item=btn_close x=([0-9]+) y=([0-9]+)",r"WiredUI: pointer phase=click ingress=CL_KeyEvent key=K_MOUSE1 x=([0-9]+) y=([0-9]+)",r"WiredUI: pointer phase=release reason=pop was_down=1 pointer_down=0",r"WiredUI: pointer phase=release reason=pop was_down=0 pointer_down=0",r"WiredUI: pointer phase=release reason=shutdown was_down=0 pointer_down=0"])
 for moved,clicked in ((pointer[6],pointer[7]),(pointer[8],pointer[9])):
@@ -113,12 +114,12 @@ add("WiredUI: server status cancelled generation=1 rows=0");add("WiredUI: pointe
 def state(t,top,depth,focus,catch=1,pause=1):add(f"WiredUI: ingame state active=1 demo=0 catcher_ui={catch} paused={pause} connection_present=1 address={a} server_time={t} top={top} depth={depth} focused={focus}")
 state(110,"ingame",0,"none")
 add("WiredUI: server fixture installed sentinel=127.0.0.1:30103 target="+st+" raw_order=target,sentinel");add("WiredUI: pointer phase=release reason=push was_down=0 pointer_down=0");add("WiredUI: push menu 'servers' (depth 1)");add("WiredUI: server status cancelled generation=4 rows=0");add("WiredUI: server selection display_row=0 raw=1 source=0 list_generation=3 selection_generation=3 address=127.0.0.1:30103 name=A0 WIRED Q0 SENTINEL map=arena1");add("wui_menu_nav focus: focused item 'serverlist' (top index -1)");add("WiredUI: server status cancelled generation=5 rows=0");add("WiredUI: server selection display_row=1 raw=0 source=0 list_generation=3 selection_generation=4 address="+st+" name=Z0 WIRED Q0 TARGET map=arena7");add("wui_menu_nav: K_DOWNARROW dispatched");add("WiredUI: pointer phase=release reason=pop was_down=0 pointer_down=0");add("WiredUI: pop menu (depth 0)");add("wui_menu_nav: K_ESCAPE dispatched")
-for _ in range(10):add("wui_menu_nav: K_DOWNARROW dispatched")
+add("wui_menu_nav focus: focused item 'btn_serverinfo' (top index -1)")
 status_values=["Address value="+a,"Server value=ACTIVE B","Map value=arena7","Players value=1/8","Game type value=0","Game value=q3now","Protocol value=74","Version value=test","Player 1 value=Human — score 0, ping 0"]
 def emit_rows():
  for i,x in enumerate(status_values):add(f"WiredUI: server status row={i} key={x}")
 state(120,"ingame",0,"btn_serverinfo");add("WiredUI: connected server status open owner_generation=1 address="+a);add("WiredUI: connected server status request generation=6 owner_generation=1 address="+a);add("WiredUI: connected server status state=pending generation=6 owner_generation=1 address="+a+" rows=1");add("WiredUI: connected server status controls back=0 connect=0 retry=1 close=1");add("WiredUI: pointer phase=release reason=push was_down=0 pointer_down=0");add("WiredUI: push menu 'serverinfo' (depth 1)");add("wui_menu_nav: K_ENTER dispatched");add("WiredUI: server status loaded generation=6 selection_generation=-1 address="+a+" rows=9");emit_rows();add("WiredUI: connected server status ready generation=6 owner_generation=1 address="+a+" rows=9");add("wui_pointer_item: 'btn_back' is not an interactive item","WARN","ui");add("wui_pointer_item: 'btn_connect' is not an interactive item","WARN","ui");add("WiredUI: pointer phase=moved ingress=CL_MouseEvent menu=serverinfo item=btn_retry x=500 y=650");add("WiredUI: pointer phase=click ingress=CL_KeyEvent key=K_MOUSE1 x=500 y=650");add("WiredUI: connected server status retry owner_generation=1 prior_generation=6 address="+a);add("WiredUI: connected server status request generation=7 owner_generation=1 address="+a);add("WiredUI: connected server status state=pending generation=7 owner_generation=1 address="+a+" rows=1");add("WiredUI: server status loaded generation=7 selection_generation=-1 address="+a+" rows=9");emit_rows();add("WiredUI: connected server status ready generation=7 owner_generation=1 address="+a+" rows=9");state(130,"serverinfo",1,"btn_retry");add("WiredUI: pointer phase=moved ingress=CL_MouseEvent menu=serverinfo item=btn_close x=700 y=650");add("WiredUI: pointer phase=click ingress=CL_KeyEvent key=K_MOUSE1 x=700 y=650");add("WiredUI: connected server status cancel owner_generation=1 generation=7 address="+a);add("WiredUI: server status cancelled generation=8 rows=0");add("WiredUI: pointer phase=release reason=pop was_down=1 pointer_down=0");add("WiredUI: pop menu (depth 0)");state(140,"ingame",0,"btn_serverinfo")
-for _ in range(9):add("wui_menu_nav: K_UPARROW dispatched")
+add("wui_menu_nav focus: focused item 'btn_resume' (top index -1)")
 state(150,"ingame",0,"btn_resume");add("WiredUI: pointer phase=release reason=pop was_down=0 pointer_down=0");add("wui_menu_nav: K_ENTER dispatched");state(150,"none",0,"none",0,0);state(180,"none",0,"none",0,0);add("WiredUI: server status cancelled generation=9 rows=0");add("WiredUI: server status cancelled generation=10 rows=0");add("WiredUI: pointer phase=release reason=shutdown was_down=0 pointer_down=0")
 S=[{"sev":"INFO","cat":"network","msg":"WiredNet: listening on port 30102 (IPv4), ALPN: q3now"},{"sev":"INFO","cat":"server","msg":"Server: arena7"},{"sev":"DEBUG","cat":"server","msg":"SV_OnPlayerConnect: conn=1"},{"sev":"INFO","cat":"game","msg":"ClientConnect: 1"},{"sev":"DEBUG","cat":"server","msg":"SV_OnPlayerConnect: slot 1 assigned to conn=1 ()"},{"sev":"INFO","cat":"game","msg":"ClientBegin: 1"},{"sev":"INFO","cat":"system","msg":"Q0_INGAME_INFO_PHASE_COMPLETE"},{"sev":"INFO","cat":"system","msg":"Q0_INGAME_INFO_QUIT_REQUESTED"},{"sev":"INFO","cat":"server","msg":"----- Server Shutdown (Server quit) -----"},{"sev":"INFO","cat":"network","msg":"QUIC transport shut down."}]
 F=[{"kind":"ready","elapsed_ms":0,"address":st,"port":30101},{"kind":"stopped","elapsed_ms":50,"reason":"signal"}]
@@ -178,12 +179,13 @@ command -v python3 >/dev/null 2>&1 && [ -f "$FIXTURE" ] && [ -f "$TIMEOUT_RUNNER
 WIRED="${1:-}"; [ -n "$WIRED" ] && [ -x "$WIRED" ] || { echo "SKIP: assembled GUI binary required"; exit 77; }
 WIRED="$(cd "$(dirname "$WIRED")" && pwd)/$(basename "$WIRED")"; WD="$(dirname "$WIRED")"
 HEADLESS="${WIRED_BINARY_HEADLESS:-}"; [ -n "$HEADLESS" ] || HEADLESS="$WD/wired-headless.arm64"; [ -x "$HEADLESS" ] || { echo "SKIP: sibling wired-headless required"; exit 77; }
-PACK=""; for c in "$WD" "$WD/../Resources"; do [ -f "$c/base/pax21.sw3z" ] && PACK="$c" && break; done; [ -n "$PACK" ] || { echo "SKIP: current pax21 unavailable"; exit 77; }
-CONTENT="${WIRED_CONTENT_ROOT:-$PACK}"; if [ -f "$CONTENT/base/pax01.sw3z" ]; then BASE="$CONTENT/base/pax01.sw3z"; elif [ -f "$CONTENT/base/pak0.pk3" ]; then BASE="$CONTENT/base/pak0.pk3"; else echo "SKIP: set WIRED_CONTENT_ROOT"; exit 77; fi
+PACK="$(wired_find_archive_root "$WD" "$WD/../Resources" 2>/dev/null || true)"; [ -n "$PACK" ] || { echo "SKIP: current VFS archives unavailable"; exit 77; }
+CONTENT="$(wired_find_archive_root "${WIRED_CONTENT_ROOT:-}" "$WIRED_HOME" "$PACK" 2>/dev/null || true)"; [ -n "$CONTENT" ] || { echo "SKIP: set WIRED_CONTENT_ROOT"; exit 77; }
+CURRENT_ARCHIVE="$(wired_first_archive "$PACK/base")"; BASE="$(wired_first_archive "$CONTENT/base")"
 ROOT="$(mktemp -d -t wired-ingame-info-XXXXXX 2>/dev/null || mktemp -d)"; GUI_HOME="$ROOT/gui/q3now-preview"; SERVER_HOME="$ROOT/server/q3now-preview"; RUN="$ROOT/run"; EVENTS="$ROOT/stale.jsonl"; LAYOUT="$RUN/layoutdump.jsonl"; SERVER_CONTROL="$ROOT/server-control.fifo"; SPID=""; FPID=""; SERVER_CONTROL_OPEN=0
 cleanup(){ [ "$SERVER_CONTROL_OPEN" -eq 1 ] && exec 8>&- || true; [ -n "$FPID" ] && kill -TERM "$FPID" 2>/dev/null || true; [ -n "$SPID" ] && kill -TERM "$SPID" 2>/dev/null || true; [ -n "$FPID" ] && wait "$FPID" 2>/dev/null || true; [ -n "$SPID" ] && wait "$SPID" 2>/dev/null || true; [ "${WIRED_KEEP_ARTIFACTS:-0}" = 1 ] || rm -rf "$ROOT"; }; trap cleanup EXIT INT TERM
-mkdir -p "$GUI_HOME/base" "$SERVER_HOME/base" "$RUN"; for h in "$GUI_HOME" "$SERVER_HOME"; do cp "$PACK/base/pax21.sw3z" "$h/base/" || exit 1; cp "$BASE" "$h/base/" || exit 1; done
-python3 - "$ROOT/manifest.jsonl" "$WIRED" "$HEADLESS" "$PACK/base/pax21.sw3z" "$BASE" "$0" "$FIXTURE" "$TIMEOUT_RUNNER" <<'PY'
+mkdir -p "$RUN"; for h in "$GUI_HOME" "$SERVER_HOME"; do wired_link_content_into_home "$h" "$CONTENT/base" "$PACK/base" || exit 1; done
+python3 - "$ROOT/manifest.jsonl" "$WIRED" "$HEADLESS" "$CURRENT_ARCHIVE" "$BASE" "$0" "$FIXTURE" "$TIMEOUT_RUNNER" <<'PY'
 import hashlib,json,os,sys
 out,*paths=sys.argv[1:]
 with open(out,"w",encoding="utf-8") as f:
@@ -226,7 +228,7 @@ wui_menu_nav focus serverlist
 wui_menu_nav down
 wui_menu_nav back
 wait 5
-$(printf 'wui_menu_nav down\n%.0s' {1..10})
+wui_menu_nav focus btn_serverinfo
 wui_ingame_trace
 wui_menu_nav enter
 wait 180
@@ -243,7 +245,7 @@ wui_pointer_item btn_close
 wait 2
 wui_pointer_click
 wui_ingame_trace
-$(printf 'wui_menu_nav up\n%.0s' {1..9})
+wui_menu_nav focus btn_resume
 wui_ingame_trace
 wui_menu_nav enter
 wui_ingame_trace

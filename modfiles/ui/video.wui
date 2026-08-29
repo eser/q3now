@@ -43,7 +43,7 @@ menuDef {
 		itemDef {
 			name "settings_content"
 			type container
-			rect 0 0 1 0.83
+			width FIXED 1 height FIXED 0.83
 			direction row
 			padding $content_padding_y $content_padding_x
 			gap $spacing_lg
@@ -54,14 +54,14 @@ menuDef {
 			itemDef {
 				name "settings_nav"
 				type container
-				rect 0 0 0.30 1
+				width FIXED 0.30 height FIXED 1
 				direction column
 				gap $spacing_sm
 
 				itemDef {
 					name "nav_label"
 					type 0
-					rect 0 0 1 0.025
+					width FIXED 1 height FIXED 0.025
 					height FIT
 					text "CATEGORIES"
 					textalign 0
@@ -91,7 +91,7 @@ menuDef {
 			itemDef {
 				name "settings_panel"
 				type container
-				rect 0 0 0.70 1
+				width FIXED 0.70 height FIXED 1
 				direction column
 				padding $card_padding
 				gap $card_gap_internal
@@ -105,7 +105,7 @@ menuDef {
 				itemDef {
 					name "panel_content"
 					type container
-					rect 0 0 1 0.7
+					width FIXED 1 height FIXED 0.7
 					direction column
 					gap $spacing_md
 					grow 1
@@ -140,9 +140,9 @@ menuDef {
 						background $panelDeep
 						border 1px $line
 						radius $radius_md
-						itemDef { name "grp_hdr_display_mode" type containervh height FIT direction row alignY center gap 0.006
-							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
-							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "DISPLAY MODE" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
+						itemDef { name "grp_hdr_display_mode" type container height FIT direction row alignY center gap 0.006
+							itemDef { type 0 width FIXED 1.2vw height FIXED 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
+							itemDef { type 0 width FIXED 20vw height FIXED 2vh height FIT width PERCENT 20vw text "DISPLAY MODE" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
 						itemDef {
 							name "row_output"
 							type 12
@@ -276,9 +276,9 @@ menuDef {
 						background $panelDeep
 						border 1px $line
 						radius $radius_md
-						itemDef { name "grp_hdr_quality" type containervh height FIT direction row alignY center gap 0.006
-							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
-							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "QUALITY" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
+						itemDef { name "grp_hdr_quality" type container height FIT direction row alignY center gap 0.006
+							itemDef { type 0 width FIXED 1.2vw height FIXED 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
+							itemDef { type 0 width FIXED 20vw height FIXED 2vh height FIT width PERCENT 20vw text "QUALITY" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
 						itemDef {
 							name "row_tex_filter"
 							type segmented
@@ -363,9 +363,9 @@ menuDef {
 						background $panelDeep
 						border 1px $line
 						radius $radius_md
-						itemDef { name "grp_hdr_lighting" type containervh height FIT direction row alignY center gap 0.006
-							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
-							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "LIGHTING" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
+						itemDef { name "grp_hdr_lighting" type container height FIT direction row alignY center gap 0.006
+							itemDef { type 0 width FIXED 1.2vw height FIXED 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
+							itemDef { type 0 width FIXED 20vw height FIXED 2vh height FIT width PERCENT 20vw text "LIGHTING" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
 						itemDef {
 							name "row_global_preset"
 							type segmented
@@ -430,7 +430,7 @@ menuDef {
 				itemDef {
 					name "panel_footer"
 					type container
-					rect 0 0 1 0.05
+					width FIXED 1 height FIXED 0.05
 					direction row
 					gap $spacing_md
 					alignY center

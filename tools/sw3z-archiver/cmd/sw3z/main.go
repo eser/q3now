@@ -6,6 +6,8 @@
 //	sw3z l <archive.sw3z>
 //	sw3z t <archive.sw3z>
 //	sw3z x <archive.sw3z> [output-dir]
+//	sw3z manifest create [flags]
+//	sw3z manifest validate <manifest.json>...
 //
 // Subcommands:
 //
@@ -115,6 +117,11 @@ func main() {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
 		}
+	case "manifest":
+		if err := manifestCommand(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", os.Args[1])
 		usage()
@@ -136,6 +143,10 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "      test archive integrity\n")
 	fmt.Fprintf(os.Stderr, "  x <archive.sw3z> [output-dir]\n")
 	fmt.Fprintf(os.Stderr, "      extract archive to disk (default: current directory)\n")
+	fmt.Fprintf(os.Stderr, "  manifest create [flags]\n")
+	fmt.Fprintf(os.Stderr, "      generate a canonical package manifest from a staging directory\n")
+	fmt.Fprintf(os.Stderr, "  manifest validate <manifest.json>...\n")
+	fmt.Fprintf(os.Stderr, "      validate one manifest or a dependency set\n")
 }
 
 func archive(outputPath, inputDir string, excludes []string, mode compressionMode) error {
@@ -192,7 +203,11 @@ func archive(outputPath, inputDir string, excludes []string, mode compressionMod
 
 		compression := chooseCompression(data, mode)
 
-		if err := w.AddFile(relPath, data, compression); err != nil {
+		var entryFlags uint8
+		if info.Mode().Perm()&0o111 != 0 {
+			entryFlags |= sw3z.FlagExecutable
+		}
+		if err := w.AddFileWithFlags(relPath, data, compression, entryFlags); err != nil {
 			return fmt.Errorf("add %s: %w", relPath, err)
 		}
 

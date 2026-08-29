@@ -21,13 +21,15 @@ itemDef {
 	name "hud_active_overlay_messages_root"
 	type container
 	direction column
+	width PERCENT 1
+	height 29vh
 	decoration
 	visible 1
+	itemDef { name "hud_overlay_top_gap" type container height 12vh grow 0 }
 
 	// call-vote line — top-left, just below the top edge
-	itemDef { hudElement "votemessageworld"
-		anchor TOP_LEFT
-		rect 0.018 0.150 0 0
+	itemDef { name "hud_vote_message" hudElement "votemessageworld"
+		width PERCENT 1 height 3.5vh grow 0
 		font $font_sans
 		fontsize 16 20
 		textalign 0
@@ -36,9 +38,8 @@ itemDef {
 		visible 1
 	}
 	// team-vote line — directly under the call-vote line
-	itemDef { hudElement "teamvotemessageworld"
-		anchor TOP_LEFT
-		rect 0.018 0.185 0 0
+	itemDef { name "hud_team_vote_message" hudElement "teamvotemessageworld"
+		width PERCENT 1 height 3.5vh grow 0
 		font $font_sans
 		fontsize 16 20
 		textalign 0
@@ -47,9 +48,8 @@ itemDef {
 		visible 1
 	}
 	// "Following <name>" — under the vote lines
-	itemDef { hudElement "followmessage"
-		anchor TOP_LEFT
-		rect 0.018 0.230 0 0
+	itemDef { name "hud_follow_message" hudElement "followmessage"
+		width PERCENT 1 height 4.5vh grow 0
 		font $font_sans
 		fontsize 16 20
 		textalign 0
@@ -58,9 +58,8 @@ itemDef {
 		visible 1
 	}
 	// "SPECTATOR" — under the follow line, red accent (engine text already has ^1)
-	itemDef { hudElement "specmessage"
-		anchor TOP_LEFT
-		rect 0.018 0.275 0 0
+	itemDef { name "hud_spec_message" hudElement "specmessage"
+		width PERCENT 1 height 4.5vh grow 0
 		font $font_sans
 		fontsize 18 22
 		textalign 0

@@ -106,6 +106,13 @@ typedef struct behaviorState_s {
 	int      scriptChangeTime; /* level.time the cursor last advanced (wait timing)    */
 	int      scriptAccum[SCRIPT_ACCUM_SLOTS]; /* accum-verb slots for branching        */
 	int      sceneStartTime;   /* level.time the last playscene fired (waitscene timing) */
+
+	/* Server-global difficulty snapshot.  All bots and monsters share g_skill;
+	 * a monster resolves it once at spawn so the hot behavior loop never polls a
+	 * cvar.  3 preserves the authored/default timings exactly.  This trailing
+	 * POD field is savegame-safe and is the carrier for later per-character
+	 * attribute bands. */
+	int      difficultySkill;  /* clamped g_skill, 1..5 */
 } behaviorState_t;
 
 #endif /* FEAT_MONSTER_AI */

@@ -99,6 +99,7 @@ void CG_WiredHudPushState( void ) {
 		  ( cg.snap->ps.pm_flags & PMF_SCOREBOARD ) ) );
 	state.demoPlayback  = cg.demoPlayback;
 	state.intermission  = ( cg.snap->ps.pm_type == PM_INTERMISSION );
+	state.hud2DHidden   = (qboolean)( cg_draw2D.integer == 0 );
 	// cinematic director: hide the entire game HUD while a scene is playing with
 	// its HUD flag off (the default). Client-view-only — re-derived each frame,
 	// so the HUD returns automatically on scene-end (a 'hud' event can opt it back
@@ -212,40 +213,11 @@ void CG_WiredHudPushState( void ) {
 		}
 		state.crosshair.size = w;
 
-		/* WA-1: stage the crosshair's world-anchored screen OFFSET (from center,
-		 * real pixels) so the Wired UI element draws it where bullets land. cgame
-		 * computes WHERE; Wired UI draws WHAT (inversion of control). First-person:
-		 * camera-forward trace (impact projects to centre → offset 0,0 →
-		 * byte-identical). Third-person: muzzle-trace along ps.viewangles (the
-		 * bullet aim, not the camera) → offset to the real impact point. The trace
-		 * passes the local clientNum so the player's own body isn't hit. The
-		 * world→pixels conversion (640x480 virtual → real) lives in
-		 * CG_WorldToScreenPixels; here we subtract screen centre for the offset.
-		 * Behind-camera (aiming back at own camera in 3rd-person) → centre fallback. */
-		{
-			vec3_t  traceStart, traceDir, traceEnd;
-			trace_t tr;
-			float   xPx, yPx;
-
-			if ( cg.renderingThirdPerson ) {
-				CG_CalcMuzzlePoint( cg.snap->ps.clientNum, traceStart );
-				AngleVectors( cg.snap->ps.viewangles, traceDir, NULL, NULL );
-			} else {
-				VectorCopy( cg.refdef.vieworg, traceStart );
-				VectorCopy( cg.refdef.viewaxis[0], traceDir );
-			}
-			VectorMA( traceStart, 8192.0f, traceDir, traceEnd );
-			CG_Trace( &tr, traceStart, NULL, NULL, traceEnd,
-				cg.snap->ps.clientNum, MASK_SHOT );
-
-			if ( CG_WorldToScreenPixels( tr.endpos, &xPx, &yPx ) ) {
-				state.crosshair.x = xPx - (float)cgs.glconfig.vidWidth  * 0.5f;
-				state.crosshair.y = yPx - (float)cgs.glconfig.vidHeight * 0.5f;
-			} else {
-				state.crosshair.x = 0.0f;
-				state.crosshair.y = 0.0f;
-			}
-		}
+		/* TASK-64.1: reticle position is a screen-space invariant. Third-person
+		 * ballistics converge muzzle-to-camera-target; presentation never chases
+		 * the projected impact point. */
+		state.crosshair.x = 0.0f;
+		state.crosshair.y = 0.0f;
 	}
 
 	// ── player extras ────────────────────────────────────────────────

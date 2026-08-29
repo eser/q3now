@@ -586,6 +586,12 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 		return;
 	}
 
+#if FEAT_WIRED_UI
+	/* Push before the cg_draw2D early-return so the client receives the live
+	 * hud2DHidden bit instead of rendering its last visible state forever. */
+	CG_WiredHudPushState();
+#endif
+
 	if ( cg_draw2D.integer == 0 ) {
 		return;
 	}
@@ -620,10 +626,7 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 	}
 */
 #if FEAT_WIRED_UI
-	// Wired UI: always push game state to client (carries state.sceneHudHidden so
-	// the client hides the HUD during a cutscene — push must run even when the
-	// legacy 2D draws are suppressed above, or the client keeps the stale HUD).
-	CG_WiredHudPushState();
+	// State was pushed before the cg_draw2D visibility gate above.
 	CG_ScanForCrosshairEntity();  // updates crosshairClientNum for state bridge
 	// crosshair + crosshair names drawn by Wired UI elements
 	// (cl_wired_hud_elem_crosshair.c, cl_wired_hud_elem_target_name.c)

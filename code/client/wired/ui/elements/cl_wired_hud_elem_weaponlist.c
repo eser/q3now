@@ -63,6 +63,16 @@ void* CG_ModernHUDElementWeaponListCreate(const modernhudConfig_t* config)
 	element->y = element->config.rect.value[1];
 	element->w = element->config.rect.value[2];
 	element->h = element->config.rect.value[3];
+	/* Rectless WiredUI leaves receive a true Clay bounding box and mark alignH
+	 * in the adapter.  The legacy format encoded the horizontal anchor directly
+	 * in rect.x, so preserve that path when alignH is absent; otherwise derive
+	 * the carousel anchor from the resolved box. */
+	if ( element->config.alignH.isSet ) {
+		if ( element->config.alignH.value == MODERNHUD_ALIGNH_CENTER )
+			element->x += element->w * 0.5f;
+		else if ( element->config.alignH.value == MODERNHUD_ALIGNH_RIGHT )
+			element->x += element->w;
+	}
 
 	CG_ModernHUDTextMakeContext(&element->tmp_config, &element->ammoCount[0]);
 

@@ -18,7 +18,7 @@ typedef struct {
 	uintptr_t submissionIdentity;
 	qboolean failFinish;
 	qboolean failDraw;
-	uint32_t drawCount;
+	uint32_t drawCount, dispatchCount;
 } fakeHost_t;
 
 static qboolean BeginAdapter( void *user, uint64_t generation ) {
@@ -71,8 +71,10 @@ static qboolean BeginEncoder( void *user, uintptr_t device, uintptr_t *out ) {
 static qboolean BeginPass( void *user, uintptr_t encoder,
 		ralWebGpuPassKind_t kind, uintptr_t target, uintptr_t *out ) {
 	fakeHost_t *host = (fakeHost_t *)user;
-	if ( !encoder || !target || kind < RAL_WEBGPU_PASS_RENDER
-			|| kind > RAL_WEBGPU_PASS_COMPUTE ) return qfalse;
+	if ( !encoder || kind < RAL_WEBGPU_PASS_RENDER
+			|| kind > RAL_WEBGPU_PASS_COMPUTE
+			|| ( kind == RAL_WEBGPU_PASS_RENDER && !target )
+			|| ( kind == RAL_WEBGPU_PASS_COMPUTE && target ) ) return qfalse;
 	*out = NewIdentity( host, RAL_WEBGPU_COMMAND_OBJECT_PASS ); return qtrue;
 }
 static qboolean RecordDraw( void *user, uintptr_t pass,
@@ -80,6 +82,12 @@ static qboolean RecordDraw( void *user, uintptr_t pass,
 	fakeHost_t *host = (fakeHost_t *)user;
 	if ( !pass || !draw || host->failDraw ) return qfalse;
 	host->drawCount++; return qtrue;
+}
+static qboolean RecordDispatch( void *user, uintptr_t pass,
+		const ralWebGpuComputeDispatch_t *dispatch ) {
+	fakeHost_t *host = (fakeHost_t *)user;
+	if ( !pass || !dispatch ) return qfalse;
+	host->dispatchCount++; return qtrue;
 }
 static qboolean EndPass( void *user, uintptr_t pass ) {
 	(void)user; return pass ? qtrue : qfalse;
@@ -158,6 +166,7 @@ static ralWebGpuCommandCreateInfo_t CommandInfo( fakeHost_t *host ) {
 	memset( &info, 0, sizeof( info ) ); info.userData = host;
 	info.host.beginEncoder = BeginEncoder; info.host.beginPass = BeginPass;
 	info.host.recordIndexedDraw = RecordDraw;
+	info.host.recordComputeDispatch = RecordDispatch;
 	info.host.endPass = EndPass; info.host.finishEncoder = FinishEncoder;
 	info.host.submit = Submit; info.host.pollSubmission = PollSubmission;
 	info.host.releaseObject = ReleaseCommandObject; return info;
@@ -195,6 +204,7 @@ int main( void ) {
 	ralWebGpuCommandReceipt_t recording, updatedRecording, unchangedRecording;
 	ralWebGpuCommandReceipt_t executable, staleCommand;
 	ralWebGpuIndexedDraw_t draw;
+	ralWebGpuComputeDispatch_t dispatch;
 	ralWebGpuSubmissionReceipt_t submission;
 	ralMemoryFailureEvent_t lossEvent;
 	ralMemoryFailureReceipt_t loss;
@@ -244,7 +254,17 @@ int main( void ) {
 	CHECK( RalWebGpu_CommandPoll( command, &submission ) == RAL_WEBGPU_ASYNC_READY );
 
 	CHECK( RalWebGpu_CommandBegin( command, RAL_WEBGPU_PASS_COMPUTE,
-		0x7777u, &recording ) );
+		0u, &recording ) );
+	memset( &dispatch, 0, sizeof( dispatch ) );
+	dispatch.pipelineIdentity = 0xb001u;
+	dispatch.bindGroupIdentities[0] = 0xb002u;
+	dispatch.bindGroupCount = 1u; dispatch.groupCountX = 4u;
+	dispatch.groupCountY = 2u; dispatch.groupCountZ = 1u;
+	dispatch.contentDigest = 0xb003u;
+	CHECK( RalWebGpu_CommandRecordComputeDispatch( command, &recording,
+		&dispatch, &updatedRecording ) );
+	CHECK( updatedRecording.dispatchCount == 1u && host.dispatchCount == 1u );
+	recording = updatedRecording;
 	CHECK( RalWebGpu_CommandEnd( command, &recording, &executable ) );
 	CHECK( RalWebGpu_CommandSubmit( command, &executable, &submission ) );
 	CHECK( RalWebGpu_CommandPoll( command, &submission ) == RAL_WEBGPU_ASYNC_READY );

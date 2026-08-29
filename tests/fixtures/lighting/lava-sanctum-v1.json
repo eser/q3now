@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "lava-sanctum",
+  "logicalResolution": { "width": 1280, "height": 720 },
+  "scene": {
+    "map": "arena7",
+    "camera": { "origin": [650, -500, -250], "yaw": 225, "pitch": 10 },
+    "pinShaderTime": 1.0,
+    "pinFrameTime": 1.0,
+    "requiredAuthoredRoles": [
+      "emissive-lava",
+      "emissive-fire",
+      "emissive-signage",
+      "warm-bounce-receiver",
+      "cool-sky-fill",
+      "moving-entity",
+      "representative-occluder"
+    ],
+    "roleEvidence": {
+      "emissive-lava": { "material": "textures/liquids/lavahelldark", "worldBounds": [[-6, -1096, -400], [554, -502, -400]], "sourceLight": 150 },
+      "emissive-fire": { "material": "textures/sfx/flame1", "representativeOrigin": [1030, -276, -125], "sourceLight": 7500 },
+      "emissive-signage": { "materialFamily": "textures/eerie/pentagramfloor", "blend": "additive" },
+      "warm-bounce-receiver": { "materialFamily": "textures/gothic_block", "cameraRegion": "shadow-side-form" },
+      "cool-sky-fill": { "material": "textures/skies/stars_arena7", "sourceSunRgb": [0.6, 0.6, 0.6], "fixtureAuthority": "r_lightingReferenceFixture", "linearAmbientRgb": [0.035, 0.055, 0.1] },
+      "moving-entity": { "model": "models/weapons2/grenadel/grenadel.md3", "path": [[576, -576, -320], [640, -512, -256]], "lighting": "local-sh-l1" },
+      "representative-occluder": { "kind": "bsp-world-and-misc-model", "cameraRegion": "shadow-side-form" }
+    }
+  },
+  "captures": [
+    { "id": "emissive-only", "terms": ["emissive"], "authority": "pinned-emissive-temporal-difference" },
+    { "id": "direct-only", "terms": ["dynamic-direct"], "authority": "synthetic-dlight-on-off-difference" },
+    { "id": "indirect-only", "terms": ["static-indirect"], "authority": "r_lightmap" },
+    { "id": "probe-only", "terms": ["local-diffuse-probe"], "authority": "local-sh-model-on-off-difference" },
+    { "id": "shadow-contact", "terms": ["cast-shadow", "contact-occlusion"], "authority": "shadow-on-off-difference-with-gtao" },
+    { "id": "atmosphere-only", "terms": ["participating-media"], "authority": "stable-media-on-off-difference" },
+    { "id": "final", "terms": ["emissive", "dynamic-direct", "static-indirect", "local-diffuse-probe", "specular-ibl", "cast-shadow", "contact-occlusion", "participating-media", "post"], "authority": "final-composition" }
+  ],
+  "regions": [
+    { "id": "lava-detail", "normalizedRect": [0.28, 0.53, 0.59, 0.46], "assertions": ["highlight-not-clipped", "animated-detail-retained"] },
+    { "id": "shadow-side-form", "normalizedRect": [0.10, 0.08, 0.35, 0.62], "assertions": ["non-black-form", "localized-cast-shadow"] },
+    { "id": "warm-cool-separation", "normalizedRect": [0.12, 0.04, 0.75, 0.72], "assertions": ["warm-key", "cool-fill", "no-global-orange-tint"] },
+    { "id": "moving-entity", "normalizedRect": [0.43, 0.32, 0.18, 0.34], "assertions": ["probe-gradient", "stable-direct-light"] }
+  ],
+  "exposureGate": { "sampleFrames": 3, "maximumMeanLumaDelta": 3.0, "maximumClippedPixelRatio": 0.01 },
+  "performanceGate": { "build": "Release", "runs": 3, "minimumFps": 250, "maximumFrameMilliseconds": 4.0, "requirePerPassGpuTimings": true },
+  "shadowBudget": {
+    "enabledByDefault": true,
+    "candidates": [1, 2, 3, 4],
+    "measuredGpuMilliseconds": { "off": 0.0035, "k1": 0.175, "k2": 0.2935, "k3": 0.43, "k4": 0.5355 },
+    "selectedK": 1,
+    "decision": {
+      "policy": "enabled-default-k1",
+      "rationale": "FPS-first shipping baseline: localized cast-shadow benefit is gated, K=1 costs 0.175 ms median; K=2..4 remain explicit quality choices until distinct multi-light fixture evidence passes."
+    }
+  },
+  "backends": ["vulkan", "metal", "opengl46", "webgpu"],
+  "unsupportedHostPolicy": "explicit-skip"
+}

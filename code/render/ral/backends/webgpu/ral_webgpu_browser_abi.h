@@ -6,7 +6,7 @@
 
 #include <stdint.h>
 
-#define RAL_WEBGPU_BROWSER_ABI_SCHEMA_VERSION 1u
+#define RAL_WEBGPU_BROWSER_ABI_SCHEMA_VERSION 3u
 #define RAL_WEBGPU_BROWSER_ABI_NAME_BYTES 128u
 #define RAL_WEBGPU_BROWSER_ABI_REASON_BYTES 192u
 
@@ -43,7 +43,10 @@ typedef enum {
 	RAL_WEBGPU_BROWSER_OP_FINISH_ENCODER,
 	RAL_WEBGPU_BROWSER_OP_SUBMIT,
 	RAL_WEBGPU_BROWSER_OP_POLL_SUBMISSION,
-	RAL_WEBGPU_BROWSER_OP_RELEASE_COMMAND_OBJECT
+	RAL_WEBGPU_BROWSER_OP_RELEASE_COMMAND_OBJECT,
+	RAL_WEBGPU_BROWSER_OP_CREATE_BIND_GROUP,
+	RAL_WEBGPU_BROWSER_OP_RELEASE_BIND_GROUP,
+	RAL_WEBGPU_BROWSER_OP_RECORD_COMPUTE_DISPATCH
 } ralWebGpuBrowserOpcode_t;
 
 #pragma pack(push, 1)
@@ -191,6 +194,8 @@ typedef struct {
 	uint32_t height;
 	uint32_t depth;
 	uint32_t bytesPerTexel;
+	uint32_t format;
+	uint32_t reserved;
 } ralWebGpuBrowserCreateTextureRequest_t;
 
 typedef struct {
@@ -289,6 +294,29 @@ typedef struct {
 	uint32_t group;
 	uint32_t entryCount;
 } ralWebGpuBrowserBindGroupLayoutRequest_t;
+
+typedef enum {
+	RAL_WEBGPU_BROWSER_BIND_RESOURCE_BUFFER = 1,
+	RAL_WEBGPU_BROWSER_BIND_RESOURCE_TEXTURE,
+	RAL_WEBGPU_BROWSER_BIND_RESOURCE_SAMPLER
+} ralWebGpuBrowserBindResourceKind_t;
+
+typedef struct {
+	uint32_t binding;
+	uint32_t kind;
+	uint64_t resourceIdentity;
+	uint64_t offset;
+	uint64_t byteSize;
+} ralWebGpuBrowserBindResourceAbi_t;
+
+typedef struct {
+	ralWebGpuBrowserAbiHeader_t header;
+	uint64_t deviceIdentity;
+	uint64_t layoutIdentity;
+	uint64_t entriesOffset;
+	uint32_t entryCount;
+	uint32_t reserved;
+} ralWebGpuBrowserBindGroupRequest_t;
 
 typedef struct {
 	ralWebGpuBrowserAbiHeader_t header;
@@ -406,8 +434,22 @@ typedef struct {
 	uint32_t firstIndex;
 	uint32_t indexCount;
 	uint32_t instanceCount;
-	uint32_t reserved;
+	uint32_t firstInstance;
+	uint32_t bindGroupCount;
+	uint64_t bindGroupIdentities[8];
 } ralWebGpuBrowserIndexedDrawRequest_t;
+
+typedef struct {
+	ralWebGpuBrowserAbiHeader_t header;
+	uint64_t passIdentity;
+	uint64_t pipelineIdentity;
+	uint64_t bindGroupIdentities[8];
+	uint64_t contentDigest;
+	uint32_t groupCountX;
+	uint32_t groupCountY;
+	uint32_t groupCountZ;
+	uint32_t bindGroupCount;
+} ralWebGpuBrowserComputeDispatchRequest_t;
 
 typedef struct {
 	ralWebGpuBrowserAbiHeader_t header;

@@ -110,7 +110,10 @@ static int WiredPC_ReadToken( int handle, pc_token_t *token ) {
 		*token = wui_pendingTokens[ --wui_pendingTokenCount ];
 		return 1;
 	}
-	return botlib_export->PC_ReadTokenHandle( handle, token );
+	/* .wui/.whud quoted strings are command arguments, not C source literals.
+	 * Keep botlib's traditional concatenation for bot scripts while asking its
+	 * dedicated UI-facing entry point for one lexical string token at a time. */
+	return botlib_export->PC_ReadTokenHandleNoConcat( handle, token );
 }
 
 static void WiredPC_UnreadToken( pc_token_t *token ) {
@@ -335,9 +338,10 @@ const char *WiredToken_Find( const char *name )
  * not present in the table may be added (base load) vs the mod-override
  * path that must reject new entries. Returns qtrue when the value was
  * stored, qfalse when rejected (mod-overlay new key OR registry full).
- * The return value lets the self-test confirm the gate fires
- * without log-line scraping. */
-static qboolean WiredToken_Set( const char *name, const char *value, qboolean allowNew )
+ * The return value lets the self-test confirm the gate without manufacturing
+ * a production-shaped warning on every Debug UI initialization. */
+static qboolean WiredToken_Set( const char *name, const char *value,
+	qboolean allowNew, qboolean reportRejected )
 {
 	int i;
 	if ( !name || !*name || !value ) return qfalse;
@@ -349,9 +353,10 @@ static qboolean WiredToken_Set( const char *name, const char *value, qboolean al
 		}
 	}
 	if ( !allowNew ) {
-		Com_Log( SEV_WARN, LOG_CH(ch_ui),
-			"WiredUI/tokens: mod added new token '%s' — modders may only "
-			"override base tokens, not introduce new ones (ignored)\n", name );
+		if ( reportRejected )
+			Com_Log( SEV_WARN, LOG_CH(ch_ui),
+				"WiredUI/tokens: mod added new token '%s' — modders may only "
+				"override base tokens, not introduce new ones (ignored)\n", name );
 		return qfalse;
 	}
 	if ( s_wuiTokenCount >= WIRED_TOKEN_MAX ) {
@@ -460,7 +465,7 @@ static void WiredUI_LoadTokensIfNeeded( const char *requesterPath )
 		int      before = s_wuiTokenCount;
 		qboolean ok     = WiredToken_Set(
 			"__wui_modgate_test_should_reject", "ignored",
-			qfalse /* allowNew */ );
+			qfalse /* allowNew */, qfalse /* reportRejected */ );
 		if ( ok || s_wuiTokenCount != before ) {
 			Com_Log( SEV_ERROR, LOG_CH(ch_ui),
 				"WiredUI/tokens: SELF-TEST FAIL — mod-override gate "
@@ -468,8 +473,7 @@ static void WiredUI_LoadTokensIfNeeded( const char *requesterPath )
 				before, s_wuiTokenCount );
 		} else {
 			Com_Log( SEV_INFO, LOG_CH(ch_ui),
-				"WiredUI/tokens: mod-override gate self-test OK "
-				"(SEV_WARN above is intentional Phase 2b verification)\n" );
+				"WiredUI/tokens: mod-override gate self-test OK\n" );
 		}
 	}
 #endif
@@ -1202,6 +1206,9 @@ static const wuiPropDef_t s_itemProps[] = {
 	WP_F( "model_fovy",       wiredItemDef_t, modelFovY        ),
 	WP_F( "model_rotation",   wiredItemDef_t, modelRotation    ),
 	WP_F( "model_angle",      wiredItemDef_t, modelAngle       ),
+	/* Paint-only flex-container projection. Signed normalized amount:
+	 * negative recedes the left edge, positive recedes the right edge. */
+	WP_F( "perspective",      wiredItemDef_t, perspective      ),
 	/* colors */
 	WP_C( "forecolor",        wiredItemDef_t, forecolor        ),
 	WP_C( "backcolor",        wiredItemDef_t, backcolor        ),
@@ -1863,7 +1870,7 @@ static qboolean WiredUI_ParseItemProperties( int handle,
 		else if ( !Q_stricmp( token.string, "direction" ) ) {
 			/* `direction` is shared between two
 			 * semantics: legacy HUD widget direction (R/L/T/B for statusbar
-			 * bar fill direction, see modfiles/ui/default.wui:145-156) and
+* bar fill direction, see modfiles/ui/classic.wui) and
 			 * the modern flex container axis (row/column, see WiredPC_ParseFlexProps).
 			 * The legacy handler used to fire first and silently swallowed
 			 * `direction column`, leaving flexContainer.direction at NONE —
@@ -2841,6 +2848,41 @@ static qboolean WiredUI_ParseMenu( int handle ) {
 		else if ( !Q_stricmp( token.string, "rect" ) ) {
 			WiredPC_ParseRectInto( handle, &menu->wuiRect, &menu->rect );
 		}
+		else if ( !Q_stricmp( token.string, "width" ) || !Q_stricmp( token.string, "height" ) ) {
+			/* Menu roots use the same axis vocabulary as itemDefs.  This is the
+			 * canonical replacement for the legacy four-value `rect` declaration:
+			 * fullscreen menus normally author PERCENT/FIXED 1, while popup menus
+			 * may use an explicit fraction.  Menus are not flex children, so GROW
+			 * has the same fill-available meaning as AUTO here. */
+			qboolean isWidth = !Q_stricmp( token.string, "width" );
+			pc_token_t mode;
+			wuiValue_t value = { 0.0f, UNIT_NORM };
+			if ( WiredPC_ReadTokenEval( handle, &mode ) ) {
+				if ( !Q_stricmp( mode.string, "FIT" ) || !Q_stricmp( mode.string, "GROW" ) ) {
+					value.unit = UNIT_AUTO;
+				} else if ( !Q_stricmp( mode.string, "PERCENT" ) || !Q_stricmp( mode.string, "FIXED" ) ) {
+					value = WiredPC_ParseValue( handle );
+				} else {
+					char c = mode.string[ 0 ];
+					if ( ( c >= '0' && c <= '9' ) || c == '.' || c == '-' ) {
+						WiredPC_UnreadToken( &mode );
+						value = WiredPC_ParseValue( handle );
+					} else {
+						Com_Log( SEV_WARN, LOG_CH(ch_ui),
+							"WiredUI: unknown menu %s mode '%s' (FIT/GROW/PERCENT/FIXED) — '%s'\n",
+							isWidth ? "width" : "height", mode.string,
+							s_wui_parse_file ? s_wui_parse_file : "?" );
+					}
+				}
+				if ( isWidth ) {
+					menu->wuiRect.w = value;
+					menu->rect.w = WUI_BackfillToScreen( value, (float)cls.glconfig.vidWidth );
+				} else {
+					menu->wuiRect.h = value;
+					menu->rect.h = WUI_BackfillToScreen( value, (float)cls.glconfig.vidHeight );
+				}
+			}
+		}
 		else if ( !Q_stricmp( token.string, "onOpen" ) ||
 		          !Q_stricmp( token.string, "onClose" ) ||
 		          !Q_stricmp( token.string, "onESC" ) ) {
@@ -3040,6 +3082,7 @@ static qboolean WiredUI_ParseMenu( int handle ) {
 qboolean WiredUI_LoadMenuFile( const char *filename ) {
 	pc_token_t  token;
 	const char *ext;
+	qboolean    ok = qtrue;
 
 	/* .wui is the unified extension; .wmenu / .whud are retired. */
 	ext = filename ? strrchr( filename, '.' ) : NULL;
@@ -3080,7 +3123,9 @@ qboolean WiredUI_LoadMenuFile( const char *filename ) {
 		}
 
 		if ( !Q_stricmp( token.string, "menuDef" ) ) {
-			WiredUI_ParseMenu( handle );
+			if ( !WiredUI_ParseMenu( handle ) ) {
+				ok = qfalse;
+			}
 		}
 		else if ( !Q_stricmp( token.string, "token" ) ) {
 			/* top-level `token <name> <value>`
@@ -3165,7 +3210,8 @@ qboolean WiredUI_LoadMenuFile( const char *filename ) {
 			 * load-order proxy is sufficient because: (a) the FIRST load
 			 * is always the canonical set in practice, and (b) any
 			 * SECOND load is by definition an explicit overlay. */
-			WiredToken_Set( nameTok.string, vbuf, !s_wuiTokensBaseLoaded );
+			WiredToken_Set( nameTok.string, vbuf, !s_wuiTokensBaseLoaded,
+				qtrue /* reportRejected */ );
 		}
 		else if ( !Q_stricmp( token.string, "assetGlobalDef" ) ) {
 			wiredAssetGlobals_t *ag = WiredUI_GetAssetGlobals();
@@ -3224,7 +3270,7 @@ qboolean WiredUI_LoadMenuFile( const char *filename ) {
 	s_wui_parse_menu   = NULL;
 	s_wui_parse_item   = NULL;
 
-	return qtrue;
+	return ok;
 }
 
 // menus.txt parser removed — menus are now loaded exclusively from
@@ -3267,38 +3313,50 @@ wiredMenuDef_t *WiredUI_FindMenuByPath( const char *path ) {
 	return NULL;
 }
 
-/* release Lua chunk refs before the menu pool's bulk memset.
- * Dispatches through the menu's VM (System or User) so vm "user" panels
- * release into the User VM registry that compiled them — symmetric with
- * the parser refactor that routes parse-time compiles via the
- * dispatcher. */
+/* Release every Lua chunk reachable from an authored item tree before the
+ * menu pool is reused. Nested flex/if/repeat items are not guaranteed to be
+ * present in menu->items[], so the walk must be recursive. */
+static void WiredUI_PurgeItemChunks( const wiredMenuDef_t *menu, wiredItemDef_t *item ) {
+	int i;
+
+	if ( !item ) return;
+	if ( item->luaBindChunk != WIRED_CHUNK_NOREF ) {
+		WiredUI_CompositorReleaseChunkForMenu( menu, item->luaBindChunk );
+		item->luaBindChunk = WIRED_CHUNK_NOREF;
+	}
+	if ( item->luaVisibleChunk != WIRED_CHUNK_NOREF ) {
+		WiredUI_CompositorReleaseChunkForMenu( menu, item->luaVisibleChunk );
+		item->luaVisibleChunk = WIRED_CHUNK_NOREF;
+	}
+	if ( item->repeatBlock ) {
+		if ( item->repeatBlock->sourceLuaChunk != WIRED_CHUNK_NOREF ) {
+			WiredUI_CompositorReleaseChunkForMenu( menu, item->repeatBlock->sourceLuaChunk );
+			item->repeatBlock->sourceLuaChunk = WIRED_CHUNK_NOREF;
+		}
+		WiredUI_PurgeItemChunks( menu, item->repeatBlock->templateItem );
+	}
+	if ( item->ifBlock ) {
+		if ( item->ifBlock->testLuaChunk != WIRED_CHUNK_NOREF ) {
+			WiredUI_CompositorReleaseChunkForMenu( menu, item->ifBlock->testLuaChunk );
+			item->ifBlock->testLuaChunk = WIRED_CHUNK_NOREF;
+		}
+		for ( i = 0; i < item->ifBlock->childCount; i++ ) {
+			WiredUI_PurgeItemChunks( menu, item->ifBlock->children[ i ] );
+		}
+	}
+	for ( i = 0; i < item->childCount; i++ ) {
+		WiredUI_PurgeItemChunks( menu, item->children[ i ] );
+	}
+}
+
 static void WiredUI_PurgeMenuChunks( void ) {
 	int m, i;
 
 	for ( m = 0; m < wui_menuCount; m++ ) {
 		wiredMenuDef_t *menu = wui_menus[ m ];
 		if ( !menu ) continue;
-
 		for ( i = 0; i < menu->itemCount; i++ ) {
-			wiredItemDef_t *item = menu->items[ i ];
-			if ( !item ) continue;
-
-			if ( item->luaBindChunk != WIRED_CHUNK_NOREF ) {
-				WiredUI_CompositorReleaseChunkForMenu( menu, item->luaBindChunk );
-				item->luaBindChunk = WIRED_CHUNK_NOREF;
-			}
-			if ( item->luaVisibleChunk != WIRED_CHUNK_NOREF ) {
-				WiredUI_CompositorReleaseChunkForMenu( menu, item->luaVisibleChunk );
-				item->luaVisibleChunk = WIRED_CHUNK_NOREF;
-			}
-			if ( item->repeatBlock && item->repeatBlock->sourceLuaChunk != WIRED_CHUNK_NOREF ) {
-				WiredUI_CompositorReleaseChunkForMenu( menu, item->repeatBlock->sourceLuaChunk );
-				item->repeatBlock->sourceLuaChunk = WIRED_CHUNK_NOREF;
-			}
-			if ( item->ifBlock && item->ifBlock->testLuaChunk != WIRED_CHUNK_NOREF ) {
-				WiredUI_CompositorReleaseChunkForMenu( menu, item->ifBlock->testLuaChunk );
-				item->ifBlock->testLuaChunk = WIRED_CHUNK_NOREF;
-			}
+			WiredUI_PurgeItemChunks( menu, menu->items[ i ] );
 		}
 	}
 }
@@ -3323,14 +3381,102 @@ void WiredUI_ClearMenus( void ) {
 // become active. If parsing fails, the old menus are restored.
 
 typedef struct {
+	char             vm[16];
+	int              ref;
+} wiredChunkBackup_t;
+
+#define WIRED_MAX_BACKUP_CHUNKS (WIRED_MAX_MENUS * WIRED_MAX_ITEMS_PER_MENU * 4)
+
+typedef struct {
 	char             pool[WIRED_MENU_POOL_SIZE];
 	int              poolUsed;
 	wiredMenuDef_t  *menus[WIRED_MAX_MENUS];
 	int              menuCount;
 	wiredAssetGlobals_t assetGlobals;
+	wiredChunkBackup_t chunks[WIRED_MAX_BACKUP_CHUNKS];
+	int              chunkCount;
 } wiredMenuBackup_t;
 
 static wiredMenuBackup_t *wired_backup = NULL;  // heap-allocated on demand
+
+static void WiredUI_BackupChunkRef( const wiredMenuDef_t *menu, int ref ) {
+	wiredChunkBackup_t *chunk;
+
+	if ( ref == WIRED_CHUNK_NOREF ) return;
+	if ( wired_backup->chunkCount >= WIRED_MAX_BACKUP_CHUNKS ) {
+		COM_WARN( LOG_CH(ch_ui), "WiredUI: reload chunk backup full (%d)\n",
+			WIRED_MAX_BACKUP_CHUNKS );
+		return;
+	}
+	chunk = &wired_backup->chunks[ wired_backup->chunkCount++ ];
+	Q_strncpyz( chunk->vm, menu ? menu->vm : "", sizeof( chunk->vm ) );
+	chunk->ref = ref;
+}
+
+static void WiredUI_BackupItemChunks( const wiredMenuDef_t *menu, const wiredItemDef_t *item ) {
+	int i;
+
+	if ( !item ) return;
+	WiredUI_BackupChunkRef( menu, item->luaBindChunk );
+	WiredUI_BackupChunkRef( menu, item->luaVisibleChunk );
+	if ( item->repeatBlock ) {
+		WiredUI_BackupChunkRef( menu, item->repeatBlock->sourceLuaChunk );
+		WiredUI_BackupItemChunks( menu, item->repeatBlock->templateItem );
+	}
+	if ( item->ifBlock ) {
+		WiredUI_BackupChunkRef( menu, item->ifBlock->testLuaChunk );
+		for ( i = 0; i < item->ifBlock->childCount; i++ ) {
+			WiredUI_BackupItemChunks( menu, item->ifBlock->children[ i ] );
+		}
+	}
+	for ( i = 0; i < item->childCount; i++ ) {
+		WiredUI_BackupItemChunks( menu, item->children[ i ] );
+	}
+}
+
+static void WiredUI_BackupMenuChunks( void ) {
+	int m, i;
+
+	wired_backup->chunkCount = 0;
+	for ( m = 0; m < wui_menuCount; m++ ) {
+		wiredMenuDef_t *menu = wui_menus[ m ];
+		if ( !menu ) continue;
+		for ( i = 0; i < menu->itemCount; i++ ) {
+			WiredUI_BackupItemChunks( menu, menu->items[ i ] );
+		}
+	}
+}
+
+static void WiredUI_ReleaseBackupChunks( void ) {
+	int i;
+	wiredMenuDef_t menu;
+
+	memset( &menu, 0, sizeof( menu ) );
+	for ( i = 0; i < wired_backup->chunkCount; i++ ) {
+		Q_strncpyz( menu.vm, wired_backup->chunks[ i ].vm, sizeof( menu.vm ) );
+		WiredUI_CompositorReleaseChunkForMenu( &menu, wired_backup->chunks[ i ].ref );
+	}
+	wired_backup->chunkCount = 0;
+}
+
+static void WiredUI_InvalidateRestoredItemRuntime( wiredItemDef_t *item ) {
+	int i;
+
+	if ( !item ) return;
+	item->customDrawContext = NULL;
+	item->animationId = 0;
+	if ( item->repeatBlock ) {
+		WiredUI_InvalidateRestoredItemRuntime( item->repeatBlock->templateItem );
+	}
+	if ( item->ifBlock ) {
+		for ( i = 0; i < item->ifBlock->childCount; i++ ) {
+			WiredUI_InvalidateRestoredItemRuntime( item->ifBlock->children[ i ] );
+		}
+	}
+	for ( i = 0; i < item->childCount; i++ ) {
+		WiredUI_InvalidateRestoredItemRuntime( item->children[ i ] );
+	}
+}
 
 qboolean WiredUI_SafeReload( void ) {
 	// allocate backup on first use (WIRED_MENU_POOL_SIZE-scaled —
@@ -3348,22 +3494,28 @@ qboolean WiredUI_SafeReload( void ) {
 	memcpy( wired_backup->menus, wui_menus, sizeof( wui_menus[0] ) * wui_menuCount );
 	wired_backup->menuCount = wui_menuCount;
 	wired_backup->assetGlobals = *WiredUI_GetAssetGlobals();
+	WiredUI_BackupMenuChunks();
 
-	// phase 2: clear and reparse from menus.lua
+	/* Stage the replacement while keeping old Lua refs alive. Releasing them
+	 * before validation made the nominal last-good rollback lose bind/visible/
+	 * repeat/if behavior even though its geometry was restored. */
 	WiredUI_ResetAssetGlobalsDefaults();
-	WiredUI_ClearMenus();
-	WiredUI_LoadMenusFromLua();
+	WUI_AnimStopAll();
+	wui_menuCount = 0;
+	WiredUI_ResetPool();
+	qboolean ok = WiredUI_LoadMenusFromLua();
 	// Re-run the explicit post-manifest loads (loading_screen + overlay) that
 	// live outside menus.lua — otherwise this reload permanently drops them
 	// from the registry, so the LOADING by-path lookup (13-30) returns NULL
 	// and the loading screen / cursor-tooltip go blank. ClearMenus above
 	// already wiped the prior copies, so this is a clean rebuild, not a
 	// duplicate append. Counted in the `ok` success test below.
-	WiredUI_LoadExplicitMenus();
-	qboolean ok = ( wui_menuCount > 0 );
+	ok = WiredUI_LoadExplicitMenus() && ok;
 
 	if ( !ok ) {
-		// parse failed — restore old menus
+		/* Release only the failed staged tree, then restore the byte-identical
+		 * last-good tree. Its Lua refs remain valid because they were retained. */
+		WiredUI_PurgeMenuChunks();
 		COM_WARN( LOG_CH(ch_ui), "Menu reload failed — keeping old menus.\n" );
 		memcpy( wui_menuPool, wired_backup->pool, wired_backup->poolUsed );
 		wui_menuPoolUsed = wired_backup->poolUsed;
@@ -3372,47 +3524,64 @@ qboolean WiredUI_SafeReload( void ) {
 		wui_menuCount = wired_backup->menuCount;
 		*WiredUI_GetAssetGlobals() = wired_backup->assetGlobals;
 
-		// the backup pool was snapshotted BEFORE phase-2 teardown, so
-		// every restored itemDef still caches resources that the teardown has
-		// since reclaimed:
-		//   • customDrawContext → memory inside s_hudArena, which the caller's
-		//     WiredHud_DestroyAllElements reset (Arena_Reset) before we ran.
-		//     The compositor's lazy-create guard keys on this being NULL, so a
-		//     stale non-NULL pointer is never regenerated → use-after-free on
-		//     the next draw.
-		//   • luaBindChunk / luaVisibleChunk / repeatBlock.sourceLuaChunk /
-		//     ifBlock.testLuaChunk → registry refs that WiredUI_ClearMenus
-		//     (phase 2) already released; the integer ref is now dangling.
-		// Invalidate them on the restored items so the lazy-create path
-		// rebuilds the custom-draw context against the fresh arena and the
-		// dispatcher skips the released chunk refs (NOREF). The kept-old-menus
-		// fallback loses Lua bind/visible eval until the next successful
-		// reload — an acceptable degradation versus a crash.
+		/* Runtime arenas were reset by reload teardown, so stateful custom draw
+		 * contexts and animation slots are recreated lazily. */
 		for ( int m = 0; m < wui_menuCount; m++ ) {
 			wiredMenuDef_t *menu = wui_menus[ m ];
 			if ( !menu ) continue;
 			for ( int i = 0; i < menu->itemCount; i++ ) {
-				wiredItemDef_t *item = menu->items[ i ];
-				if ( !item ) continue;
-				item->customDrawContext = NULL;
-				item->luaBindChunk      = WIRED_CHUNK_NOREF;
-				item->luaVisibleChunk   = WIRED_CHUNK_NOREF;
-				if ( item->repeatBlock )
-					item->repeatBlock->sourceLuaChunk = WIRED_CHUNK_NOREF;
-				if ( item->ifBlock )
-					item->ifBlock->testLuaChunk = WIRED_CHUNK_NOREF;
+				WiredUI_InvalidateRestoredItemRuntime( menu->items[ i ] );
 			}
 		}
+		wired_backup->chunkCount = 0;
 		return qfalse;
 	}
 
-	// parse succeeded — new menus are now active
+	/* The staged tree is authoritative; retire the old tree's now-unreachable
+	 * Lua programs exactly once. */
+	WiredUI_ReleaseBackupChunks();
 	return qtrue;
 }
 
 // ── menus.lua support ─────────────────────────────────────────────────
 // load_menu(path) Lua binding. Registered before WiredScript_PostInit so
 // it is available when scripts/menus.lua executes during WiredUI_Init.
+
+#ifdef WIRED_WEB_UI_NATIVE
+
+#include "../../../web/web_authored_content.h"
+
+void WiredUI_MenuLuaInit( void ) {}
+
+qboolean WiredUI_LoadMenusFromLua( void ) {
+	const wiredWebAuthoredCatalog_t *catalog;
+	wiredScene_t sceneProbe;
+	int i, totalItems = 0;
+	qboolean ok = qtrue;
+
+	if ( !WiredWebAuthored_EnsureLoaded() ) return qfalse;
+	catalog = WiredWebAuthored_Catalog();
+	if ( !catalog || catalog->sourceCount <= 0 ) return qfalse;
+	for ( i = 0; i < catalog->sourceCount; ++i ) {
+		if ( !WiredUI_LoadMenuFile( catalog->sourcePaths[i] ) ) {
+			COM_WARN( LOG_CH(ch_ui),
+				"WiredUI: AOT manifest failed to parse '%s'\n",
+				catalog->sourcePaths[i] );
+			ok = qfalse;
+			break;
+		}
+	}
+	for ( i = 0; i < wui_menuCount; ++i )
+		totalItems += wui_menus[i] ? wui_menus[i]->itemCount : 0;
+	Com_Log( SEV_INFO, LOG_CH(ch_ui),
+		"WiredUI: AOT manifest loaded %d sources, %d menus (%d items total)\n",
+		catalog->sourceCount, wui_menuCount, totalItems );
+	if ( ok ) (void)WiredWebAuthored_LoadScene( &sceneProbe,
+		"scripts/scene/arena1.lua" );
+	return ok && wui_menuCount > 0;
+}
+
+#else
 
 #include <lua.h>
 #include <lualib.h>
@@ -3424,7 +3593,9 @@ static int WiredMenuLua_LoadMenu( lua_State *L ) {
 	if ( path[0] == '\0' || strlen( path ) >= MAX_QPATH ) {
 		return luaL_error( L, "load_menu: invalid path" );
 	}
-	WiredUI_LoadMenuFile( path );
+	if ( !WiredUI_LoadMenuFile( path ) ) {
+		return luaL_error( L, "load_menu: failed to parse '%s'", path );
+	}
 	return 0;
 }
 
@@ -3442,14 +3613,25 @@ void WiredUI_MenuLuaInit( void ) {
 	WiredScript_RegisterBindings( WiredMenuLua_Register );
 }
 
-/* Execute scripts/menus.lua to populate the menu pool. */
-void WiredUI_LoadMenusFromLua( void ) {
-	WiredScript_ExecFile( "scripts/menus.lua" );
+/* Execute the selected Lua manifest to populate the menu pool. The default is
+ * the packaged product manifest. A distinct loose path lets an authoring
+ * session participate in VFS precedence without attempting to shadow an
+ * archive entry (archives intentionally outrank loose directories). */
+qboolean WiredUI_LoadMenusFromLua( void ) {
+	cvar_t *manifest = Cvar_Get( "wired_ui_manifest", "scripts/menus.lua", CVAR_TEMP );
+	const char *path = manifest && manifest->string[0]
+		? manifest->string : "scripts/menus.lua";
+	qboolean ok = WiredScript_TryExecFile( path );
 
 	int totalItems = 0;
 	for ( int i = 0; i < wui_menuCount; i++ )
 		totalItems += wui_menus[i] ? wui_menus[i]->itemCount : 0;
-	Com_Log( SEV_INFO, LOG_CH(ch_ui), "WiredUI: loaded %d menus (%d items total)\n", wui_menuCount, totalItems );
+	Com_Log( SEV_INFO, LOG_CH(ch_ui),
+		"WiredUI: manifest '%s' loaded %d menus (%d items total)\n",
+		path, wui_menuCount, totalItems );
+	return ok && wui_menuCount > 0;
 }
+
+#endif /* WIRED_WEB_UI_NATIVE */
 
 #endif // FEAT_WIRED_UI

@@ -105,13 +105,14 @@ foreach(needle IN ITEMS
 	"ral-storage-clear schema=1 map=%s family=%s bytes=%llu visibility=transfer-to-compute"
 	"vk_storage_clear_smoke_receipt( 0u, \"cull\", sizeof( uint32_t ) )"
 	"vk_storage_clear_smoke_receipt( 1u, \"forward-plus\""
-	"vk_storage_clear_smoke_receipt( 2u, \"hdr-histogram\"")
+	"vk_storage_clear_smoke_receipt( 2u, \"hdr-histogram\""
+	"vk_storage_clear_smoke_receipt( 3u, \"particle-child-budgets\"")
 	require_text("${PRODUCT}" "${needle}" "native storage-clear receipt")
 endforeach()
 foreach(needle IN ITEMS
-	"family=(cull|forward-plus|hdr-histogram)"
+	"family=(cull|forward-plus|hdr-histogram|particle-child-budgets)"
 	"visibility=transfer-to-compute"
-	"len(clear_found)!=6"
+	"len(clear_found) not in (6,8)"
 	"family=hdr-exposure bytes=4 bits=0x3f800000 transfer=completed graphics-visible=1"
 	"len(seed_found)!=2"
 	"+set r_customwidth 1280 +set r_customheight 720"

@@ -28,13 +28,13 @@ itemDef {
 	itemDef {
 		name "card_map_header_row"
 		type container
-		rect 0 0 1 2vh
+		width FIXED 1 height FIXED 2vh
 		height FIT
 		direction row
 		alignY center
 		gap 0.006
-		itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
-		itemDef { type 0 rect 0 0 14vw 2vh height FIT width PERCENT 14vw text "MAP" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 }
+		itemDef { type 0 width FIXED 1.2vw height FIXED 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
+		itemDef { type 0 width FIXED 14vw height FIXED 2vh height FIT width PERCENT 14vw text "MAP" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 }
 	}
 
 	// Levelshot preview — the existing net_map_preview ownerdraw. It draws the
@@ -56,18 +56,18 @@ itemDef {
 	// live state value via `bind` (storeBind → clay-emit text path); the `cvar`
 	// keyword is for interactive controls, not label display, so `bind` is the
 	// right binding here. `text "—"` is the fallback until the store populates.
-	itemDef { type 0vh height FIT width PERCENT 1 bind "ui_selectedMap" text "—" textalign 0 font $font_sans 16 forecolor $bone decoration visible 1 grow 0 }
+	itemDef { type 0 height FIT width PERCENT 1 bind "ui_selectedMap" text "—" textalign 0 font $font_sans 16 forecolor $bone decoration visible 1 grow 0 }
 
 	// Meta line: gametype + pool status (both real feeder state).
 	itemDef {
 		name "card_map_meta_row"
 		type container
-		rect 0 0 1 1.8vh
+		width FIXED 1 height FIXED 1.8vh
 		height FIT
 		direction row
 		alignY center
 		gap $spacing_sm
-		itemDef { type 0 rect 0 0 20vw 1.8vh height FIT width PERCENT 20vw bind "ui_netGameType"   text "" textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
-		itemDef { type 0 rect 0 0 24vw 1.8vh height FIT width PERCENT 24vw bind "ui_mapPoolStatus"  text "" textalign 2 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 1 }
+		itemDef { type 0 width FIXED 20vw height FIXED 1.8vh height FIT width PERCENT 20vw bind "ui_netGameType"   text "" textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+		itemDef { type 0 width FIXED 24vw height FIXED 1.8vh height FIT width PERCENT 24vw bind "ui_mapPoolStatus"  text "" textalign 2 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 1 }
 	}
 }

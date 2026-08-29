@@ -34,8 +34,8 @@ layout(location = 0) in vec2 frag_tex_coord;
 layout(location = 0) out vec4 out_color;
 
 // Per-frame scene-exposure block (set 2). Mirrors vk_exposure_block_t and the
-// std430 block in exposure.comp: all 14 fields are 4-byte scalars, so std140 packs
-// them tightly at offsets 0..55 with no padding. exposure_bias arrives here from the
+// std430 block in exposure.comp: all 16 fields are 4-byte scalars, so std140 packs
+// them tightly at offsets 0..63. exposure_bias arrives here from the
 // auto-exposure compute (or r_brightness when auto is off), so it is read from the
 // UBO rather than baked as a specialization constant. Declared unconditionally
 // because every tonemap variant links the same set-2 layout; the sunray fields are
@@ -55,6 +55,8 @@ layout(set = 2, binding = 0) uniform ExposureBlock {
 	float sunScreenY;
 	float sunrayIntensity;
 	float sunrayDecay;
+	float shadowExponent;
+	float shadowPivot;
 } eb;
 
 // Spec constant IDs match the host-side spec_entries[] in vk.c.
@@ -405,6 +407,19 @@ void main() {
 	// adapted value the reduce compute wrote into the UBO; with auto off it is
 	// r_brightness. Default 1.0 = no boost (linear identity).
 	base *= eb.exposure_bias;
+
+	// User shadow visibility is a display transform, not ambient light. Remap
+	// luminance only below the fixed pivot and rescale RGB uniformly: hue/chroma,
+	// mathematical black, the pivot, reference white and highlights stay stable.
+	// exponent 1.0 (r_brightness 1) is exact identity.
+	float shadowLuma = dot( max( base, vec3( 0.0 ) ),
+		vec3( 0.2126, 0.7152, 0.0722 ) );
+	if ( eb.shadowExponent != 1.0 && shadowLuma > 0.0
+			&& shadowLuma < eb.shadowPivot ) {
+		float normalized = shadowLuma / eb.shadowPivot;
+		float curved = pow( normalized, eb.shadowExponent ) * eb.shadowPivot;
+		base *= curved / shadowLuma;
+	}
 
 	// Legacy per-pixel SSAO fully retired: the modern GTAO (gen_frag.tmpl,
 	// screen-space visibility applied to the IBL-specular indirect term) is the

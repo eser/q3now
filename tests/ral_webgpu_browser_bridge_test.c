@@ -408,7 +408,8 @@ int main( void ) {
 	CHECK( RalWebGpu_WriteBuffer( resources, index, &indexReceipt, 0u,
 		indexBytes, sizeof( indexBytes ), &writeReceipt ) );
 	memset( &textureDesc, 0, sizeof( textureDesc ) ); textureDesc.width = 64u;
-	textureDesc.height = 1u; textureDesc.depth = 1u; textureDesc.bytesPerTexel = 4u;
+	textureDesc.height = 1u; textureDesc.depth = 1u;
+	textureDesc.format = RAL_FORMAT_R8G8B8A8_UNORM; textureDesc.bytesPerTexel = 4u;
 	CHECK( RalWebGpu_CreateTexture( resources, &textureDesc, &texture, &textureReceipt ) );
 	CHECK( RalWebGpu_WriteTexture( resources, texture, &textureReceipt, textureBytes,
 		sizeof( textureBytes ), 256u, 1u, &writeReceipt ) );

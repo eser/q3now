@@ -4,16 +4,10 @@
 /*
 cg_q1_particles.c — Q1 projectile particle trail emission.
 
-Called from CG_General() for ET_GENERAL entities whose model path matches
-a known Q1 MDL projectile.  Uses CG_SmokePuff / CG_BubbleTrail (declared
-in cg_local.h) because the Q3 weapon trail functions are translation-unit
-static and cannot be called from here.
-
-PREREQUISITE GAP:
-Q1 projectile entities (progs/missile.mdl, progs/spike.mdl, etc.) are not
-yet created by the game DLL — g_spawn.c only remaps Q1 item/weapon pickups
-to Q3 equivalents.  CG_Q1_MaybeEmitTrail will be a no-op until game-side
-projectile entity creation is implemented.
+Supports both ET_GENERAL compatibility entities selected by Q1 MDL path and
+ET_MISSILE entities selected by pType. Historical puffs are sampled on a
+fixed time grid in the same visual trajectory space as the rendered missile,
+so prediction/nudging and high render rates cannot detach or suppress trails.
 
 Lightning bolt (progs/bolt.mdl, bolt2.mdl, bolt3.mdl) is deferred: it
 requires a beam primitive, not smoke puffs.
@@ -21,84 +15,70 @@ requires a beam primitive, not smoke puffs.
 
 #include "cg_local.h"
 
+static void CG_Q1_PuffTrail( centity_t *cent, int maxStep, float radius,
+	const vec4_t color, int lifetime ) {
+	const vec3_t up = { 0, 0, 0 };
+	int step = CG_ProjectileTrailStepForSpacing( cent, 12.0f, maxStep );
+	int t;
+	int lastBoundary = cent->trailTime;
+
+	if ( cg_noProjectileTrail.integer ) return;
+	if ( cent->trailTime > cg.time ) cent->trailTime = cg.time;
+
+	// Preserve the sub-step remainder: resetting trailTime every render frame
+	// makes a 25-60 ms trail emit nothing at modern frame rates. Each puff is
+	// evaluated at its actual fixed-time boundary in the projectile's rendered
+	// visual space, instead of stacking every historical puff at lerpOrigin.
+	t = step * ( ( cent->trailTime + step ) / step );
+	for ( ; t <= cg.time; t += step ) {
+		vec3_t origin;
+		CG_EvaluateVisualTrajectory( cent, t, origin );
+		CG_SmokePuff( origin, up, radius,
+			color[0], color[1], color[2], color[3] * (float)step / (float)maxStep,
+			lifetime, t, 0, 0, cgs.media.smokePuffShader );
+		lastBoundary = t;
+	}
+	cent->trailTime = lastBoundary;
+}
+
 /* ---------- nail trail -------------------------------------------------- */
 #define Q1_NAIL_STEP    30      /* ms between puffs */
 
 static void CG_Q1_NailTrail( centity_t *cent ) {
-    const vec3_t up = { 0, 0, 0 };
-    int t;
-
-    if ( cg_noProjectileTrail.integer ) return;
-    if ( cent->trailTime > cg.time ) cent->trailTime = cg.time;
-
-    for ( t = cent->trailTime + Q1_NAIL_STEP; t <= cg.time; t += Q1_NAIL_STEP ) {
-        CG_SmokePuff( cent->lerpOrigin, up,
-                      4.0f,
-                      0.8f, 0.8f, 0.8f, 0.25f,
-                      400, t, 0, 0,
-                      cgs.media.smokePuffShader );
-    }
-    cent->trailTime = cg.time;
+	const vec4_t color = { 0.8f, 0.8f, 0.8f, 0.25f };
+	CG_Q1_PuffTrail( cent, Q1_NAIL_STEP, 4.0f, color, 400 );
 }
 
 /* ---------- rocket trail ----------------------------------------------- */
 #define Q1_ROCKET_STEP  50
 
 static void CG_Q1_RocketTrail( centity_t *cent ) {
-    const vec3_t up = { 0, 0, 0 };
-    int t;
-
-    if ( cg_noProjectileTrail.integer ) return;
-    if ( cent->trailTime > cg.time ) cent->trailTime = cg.time;
-
-    for ( t = cent->trailTime + Q1_ROCKET_STEP; t <= cg.time; t += Q1_ROCKET_STEP ) {
-        CG_SmokePuff( cent->lerpOrigin, up,
-                      14.0f,
-                      1.0f, 1.0f, 1.0f, 0.33f,
-                      900, t, 0, 0,
-                      cgs.media.smokePuffShader );
-    }
-    cent->trailTime = cg.time;
+	const vec4_t color = { 1.0f, 1.0f, 1.0f, 0.33f };
+	CG_Q1_PuffTrail( cent, Q1_ROCKET_STEP, 14.0f, color, 900 );
 }
 
 /* ---------- grenade trail ---------------------------------------------- */
 #define Q1_GRENADE_STEP 60
 
 static void CG_Q1_GrenadeTrail( centity_t *cent ) {
-    const vec3_t up = { 0, 0, 0 };
-    int t;
-
-    if ( cg_noProjectileTrail.integer ) return;
-    if ( cent->trailTime > cg.time ) cent->trailTime = cg.time;
-
-    for ( t = cent->trailTime + Q1_GRENADE_STEP; t <= cg.time; t += Q1_GRENADE_STEP ) {
-        CG_SmokePuff( cent->lerpOrigin, up,
-                      10.0f,
-                      0.9f, 0.9f, 0.7f, 0.28f,
-                      700, t, 0, 0,
-                      cgs.media.smokePuffShader );
-    }
-    cent->trailTime = cg.time;
+	const vec4_t color = { 0.9f, 0.9f, 0.7f, 0.28f };
+	CG_Q1_PuffTrail( cent, Q1_GRENADE_STEP, 10.0f, color, 700 );
 }
 
 /* ---------- laser trail ------------------------------------------------- */
 #define Q1_LASER_STEP   25
 
 static void CG_Q1_LaserTrail( centity_t *cent ) {
-    const vec3_t up = { 0, 0, 0 };
-    int t;
+	const vec4_t color = { 1.0f, 0.8f, 0.1f, 0.35f };
+	CG_Q1_PuffTrail( cent, Q1_LASER_STEP, 3.0f, color, 250 );
+}
 
-    if ( cg_noProjectileTrail.integer ) return;
-    if ( cent->trailTime > cg.time ) cent->trailTime = cg.time;
+/* ---------- lavaball trail --------------------------------------------- */
+#define Q1_LAVABALL_STEP 40
 
-    for ( t = cent->trailTime + Q1_LASER_STEP; t <= cg.time; t += Q1_LASER_STEP ) {
-        CG_SmokePuff( cent->lerpOrigin, up,
-                      3.0f,
-                      1.0f, 0.8f, 0.1f, 0.35f,   /* yellow-orange */
-                      250, t, 0, 0,
-                      cgs.media.smokePuffShader );
-    }
-    cent->trailTime = cg.time;
+static void CG_Q1_LavaballTrail( centity_t *cent ) {
+	const vec4_t color = { 1.0f, 0.35f, 0.05f, 0.40f };
+	CG_Q1_PuffTrail( cent, Q1_LAVABALL_STEP, 8.0f, color, 500 );
 }
 
 /* ---------- dispatch table --------------------------------------------- */
@@ -142,4 +122,26 @@ void CG_Q1_MaybeEmitTrail( centity_t *cent ) {
             return;
         }
     }
+}
+
+/*
+CG_Q1_MaybeEmitMissileTrail
+============================
+Q1 monster/trap projectiles are ET_MISSILE with WP_NONE and identify their
+visual behavior through pType. Claim them before WP_NONE's grapple handler.
+*/
+qboolean CG_Q1_MaybeEmitMissileTrail( centity_t *cent ) {
+	switch ( cent->currentState.pType ) {
+	case PROJ_SPIKE:
+		CG_Q1_NailTrail( cent );
+		return qtrue;
+	case PROJ_LASER:
+		CG_Q1_LaserTrail( cent );
+		return qtrue;
+	case PROJ_LAVABALL:
+		CG_Q1_LavaballTrail( cent );
+		return qtrue;
+	default:
+		return qfalse;
+	}
 }

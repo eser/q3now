@@ -3,8 +3,7 @@
 // Centered popup; manual IP entry then connect. Phase 5a §7.2 pattern:
 // a popup-style modal with editfield input + Connect/Cancel button row.
 // Differs from the full-viewport settings panels of Phase 4 — it's a
-// floating overlay anchored to the viewport center via position
-// absolute + rect coords. Used by the servers.wui browser footer
+// flex overlay centred by its parent. Used by the servers.wui browser footer
 // (Specify... button) and standalone via wui_push.
 
 menuDef {
@@ -25,7 +24,6 @@ menuDef {
 		itemDef {
 			name "specify_root"
 			type container
-			rect 0.3 0.35 0.4 0.3
 			direction column
 			padding $popup_padding
 			gap $spacing_md
@@ -38,7 +36,7 @@ menuDef {
 			itemDef {
 				name "popup_header"
 				type 0
-				rect 0 0 1 0.06
+				width FIXED 1 height FIXED 0.06
 				height FIT
 				text "Specify Server"
 				textalign 0
@@ -52,7 +50,7 @@ menuDef {
 			itemDef {
 				name "popup_subheader"
 				type 0
-				rect 0 0 1 0.03
+				width FIXED 1 height FIXED 0.03
 				height FIT
 				text "Enter address:port for the server you want to join."
 				textalign 0
@@ -82,7 +80,7 @@ menuDef {
 			itemDef {
 				name "popup_footer"
 				type container
-				rect 0 0 1 0.05
+				width FIXED 1 height FIXED 0.05
 				direction row
 				gap $spacing_md
 				alignX end
@@ -91,7 +89,7 @@ menuDef {
 				itemDef {
 					name "btn_cancel"
 					type 1
-					rect 0 0 0.30 0.04
+					width FIXED 0.30 height FIXED 0.04
 					height FIT
 					text "Cancel"
 					textalign 1
@@ -105,7 +103,7 @@ menuDef {
 				itemDef {
 					name "btn_connect"
 					type 1
-					rect 0 0 0.30 0.04
+					width FIXED 0.30 height FIXED 0.04
 					height FIT
 					text "Connect"
 					textalign 1

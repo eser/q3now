@@ -5,6 +5,7 @@
 #define WIRED_RAL_METAL_MODULE_H
 
 #include "ral_frame_shell.h"
+#include "ral_atmosphere.h"
 #include "ral_presentation_host.h"
 #include "ral_presentation_policy.h"
 #include "ral_color_output.h"
@@ -15,7 +16,7 @@
 extern "C" {
 #endif
 
-#define RAL_METAL_MODULE_SCHEMA_VERSION 2u
+#define RAL_METAL_MODULE_SCHEMA_VERSION 3u
 
 typedef struct {
 	uint32_t schemaVersion;
@@ -28,6 +29,7 @@ typedef struct {
 	ralMetalDrawableReceipt_t drawable;
 	ralMetalPresentReceipt_t presentation;
 	renderSubmissionReceipt_t frontend;
+	ralAtmospherePlanReceipt_t atmosphere;
 	qboolean ready;
 } ralMetalModuleFrameReceipt_t;
 

@@ -11,6 +11,8 @@ extern "C" {
 void WiredWeb_InputKey( int key, int down );
 void WiredWeb_InputChar( int codepoint );
 void WiredWeb_InputMouse( float dx, float dy );
+void WiredWeb_InputPointer( float x, float y, int down );
+void WiredWeb_InputWheel( float deltaY );
 
 #ifdef __cplusplus
 }

@@ -8,6 +8,7 @@ cl_wired_attract.c — Wired Attract scheduler
 #include "../../client.h"
 #include "cl_wired_ui.h"
 #include "cl_wired_attract.h"
+#include "cl_wired_attract_policy.h"
 #include "../../../qcommon/wired/core/scripting/wired_scripting.h"
 LOG_DECLARE_CHANNEL( ch_ui, "ui" );
 
@@ -42,6 +43,7 @@ static struct {
 	qboolean              shuffle;
 	int                   transitionMs;
 	qboolean              ownsDemo;
+	wiredAttractSuspendCause_t suspendCause;
 	char                  pushedPanel[MAX_QPATH];
 	cvar_t               *cvEnabled;
 	cvar_t               *cvDelay;
@@ -52,6 +54,12 @@ static struct {
 static void Attract_Teardown( void );
 static void Attract_Advance( void );
 static void Attract_DispatchCurrent( void );
+
+static void Attract_Suspend( wiredAttractSuspendCause_t cause ) {
+	Attract_Teardown();
+	wui_attract.suspendCause = cause;
+	wui_attract.state = ATTRACT_STATE_STOPPED;
+}
 
 /* ── security: validate playlist source before use in commands ───────── */
 static qboolean Attract_ValidateSource( int kind, const char *src ) {
@@ -221,6 +229,7 @@ static void Attract_Advance( void ) {
 		if ( wui_attract.loop ) {
 			wui_attract.currentIndex = 0;
 		} else {
+			wui_attract.suspendCause = WIRED_ATTRACT_SUSPEND_PLAYLIST;
 			wui_attract.state = ATTRACT_STATE_STOPPED;
 			return;
 		}
@@ -264,6 +273,8 @@ static void Attract_Status_f( void ) {
 	            wui_attract.cvVolume ? wui_attract.cvVolume->value : 0.0f );
 	Com_Log( SEV_INFO, LOG_CH(ch_ui), "  ownsDemo      : %d (demoplaying=%d)\n",
 	            wui_attract.ownsDemo, clientActiveApp->clc.demoplaying );
+	Com_Log( SEV_INFO, LOG_CH(ch_ui), "  suspendCause  : %d\n",
+	            (int)wui_attract.suspendCause );
 	Com_Log( SEV_INFO, LOG_CH(ch_ui), "  pushedPanel   : %s\n",
 	            wui_attract.pushedPanel[0] != '\0' ? wui_attract.pushedPanel : "none" );
 	Com_Log( SEV_INFO, LOG_CH(ch_ui), "  wiredHealthy  : %d\n", WiredUI_IsHealthy() );
@@ -422,12 +433,14 @@ void WiredAttract_Frame( int msec ) {
 	if ( wui_attract.prevClientState == CA_ACTIVE && clientActiveApp->state < CA_ACTIVE ) {
 		/* Just disconnected — start idle timer */
 		wui_attract.disconnectTime = cls.realtime;
-		if ( wui_attract.state != ATTRACT_STATE_STOPPED ) {
+		if ( WiredAttract_ShouldResumeAfterDisconnect( wui_attract.suspendCause ) ) {
+			wui_attract.suspendCause = WIRED_ATTRACT_SUSPEND_NONE;
 			wui_attract.state = ATTRACT_STATE_WAITING;
 		}
 	} else if ( wui_attract.prevClientState < CA_ACTIVE && clientActiveApp->state == CA_ACTIVE ) {
-		/* Just connected — stop attract */
-		WiredAttract_Stop();
+		/* A running game temporarily owns presentation. This is not the user's
+		 * durable attract_stop command and must be reversible on disconnect. */
+		Attract_Suspend( WIRED_ATTRACT_SUSPEND_SESSION );
 	}
 	wui_attract.prevClientState = clientActiveApp->state;
 
@@ -579,13 +592,13 @@ void WiredAttract_Start( void ) {
 	}
 	wui_attract.currentIndex  = 0;
 	wui_attract.lastInputTime = cls.realtime;
+	wui_attract.suspendCause  = WIRED_ATTRACT_SUSPEND_NONE;
 	wui_attract.state         = ATTRACT_STATE_STARTING;
 }
 
 void WiredAttract_Stop( void ) {
 	if ( !wui_attract.initialized ) return;
-	Attract_Teardown();
-	wui_attract.state = ATTRACT_STATE_STOPPED;
+	Attract_Suspend( WIRED_ATTRACT_SUSPEND_USER );
 }
 
 void WiredAttract_Skip( void ) {

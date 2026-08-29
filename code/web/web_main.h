@@ -43,10 +43,24 @@ int WiredWeb_ClientStart( void );
 int WiredWeb_ClientFrame( double frameTimeMs );
 void WiredWeb_ClientShutdown( void );
 int WiredWeb_ClientStatus( void );
+int WiredWeb_ClientPresentationChanged( void );
 int WiredWeb_ClientReceipt( wiredWebClientReceipt_t *outReceipt );
 uint32_t WiredWeb_ContentProbe( void );
 uint32_t WiredWeb_ArenaReceiptProbe( void );
 uint32_t WiredWeb_AuthoredReceiptProbe( void );
+uint32_t WiredWeb_UiTextReceiptProbe( void );
+uint32_t WiredWeb_UiMenuReceiptProbe( void );
+uint32_t WiredWeb_UiHudReceiptProbe( void );
+uint32_t WiredWeb_UiHudExtentProbe( void );
+void WiredWeb_UiEnableServerFixture( int count );
+uint32_t WiredWeb_UiServerReceiptProbe( void );
+uint32_t WiredWeb_UiServerRowCenterProbe( void );
+uint32_t WiredWeb_UiServerP99MicrosProbe( void );
+uint32_t WiredWeb_UiLayerReceiptProbe( void );
+void WiredWeb_UiActivateLayerFixture( int kind );
+int WiredWeb_UiRootCount( void );
+int WiredWeb_UiActivateRoot( int index );
+uint32_t WiredWeb_UiRootReceiptProbe( int index );
 
 #ifdef __cplusplus
 }

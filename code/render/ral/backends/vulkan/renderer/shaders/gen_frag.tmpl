@@ -54,15 +54,15 @@ layout(set = 0, binding = 0) uniform UBO {
 	// filled by the host packing loop; 8..11 are reserved capacity. See
 	// vkUniform_t::packed_indices and WIRED_BINDLESS_PACK in vk.h.
 	uvec4 packed_indices[3];      // offset 544, 48 bytes
-	// World-lighting globals (vkUniform_t::worldLightParams). .x = r_lightmapBoost,
-	// the linear-domain lightmap overbright the modulate branches apply below. Live —
-	// the host stamps it into every ring item each frame, so a cvar change shows next
-	// frame with no pipeline rebuild. Appended at the end so all offsets above hold.
+	// World/material globals (vkUniform_t::worldLightParams). .x = r_lightmapBoost;
+	// .yzw = wetness/frost/snow. The host folds melt into wetness and stamps all
+	// channels into every ring item, so climate changes are live without a pipeline
+	// rebuild. Appended at the end so all offsets above hold.
 	vec4 worldLightParams;        // offset 592, 16 bytes
-	// Enhanced fog state is always part of the UBO ABI; FEAT_FOG_SYSTEM controls
-	// host publication/consumer activation, not the layout shape.
+	// Enhanced fog state is a permanent part of the portable UBO ABI.
 	vec4 advancedFogColorDensity; // offset 608: rgb + density
 	vec4 advancedFogTypeFarEnabled; // offset 624: type + farClip + enabled + pad
+	vec4 emissionRadiance;        // offset 640: typed linear surface emission
 };
 
 // gen_frag is bindless-only. 2D texture slots route through set 1 (image array
@@ -332,6 +332,10 @@ float CorrectAlpha(float threshold, float alpha, vec2 tc)
 // Runtime-gated FT_LINEAR / FT_EXP / FT_EXP2 model. The same source is
 // included by the additive-light and Forward+ paths for backend parity.
 #include "advanced_fog.glsl"
+
+// Exact-once term arithmetic and directional-static normal response. Resource
+// authority is selected by the backend-neutral RAL lighting composition receipt.
+#include "lighting_composition.glsl"
 
 #ifdef USE_IBL
 // Split-sum image-based-lighting ambient assembly (binding-agnostic — the
@@ -882,6 +886,31 @@ frag_color.w = identity_alpha;
 	base.rgb = wired_apply_sun_shadow_operand( base.rgb );
 #endif
 
+	// Global surface-climate response is intentionally arithmetic-only: no extra
+	// texture, descriptor, branch or per-pixel tile scan on the base path. OFF is
+	// exact identity because all three channels are zero. Wetness darkens porous
+	// diffuse response; frost cools/desaturates it. Snow is slope-gated below only
+	// where a world-space material normal already exists, avoiding wall coverage.
+	if ( lightmap_slot != 0 ) {
+		float wetness = clamp( worldLightParams.y, 0.0, 1.0 );
+		float frost = clamp( worldLightParams.z, 0.0, 1.0 );
+		float luminance = dot( base.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
+		base.rgb *= mix( 1.0, 0.82, wetness );
+		base.rgb = mix( base.rgb, vec3( luminance * 0.88,
+			luminance * 0.94, luminance ), frost * 0.55 );
+#ifdef USE_IBL
+		float upward = smoothstep( 0.35, 0.85, normalize( ibl_N ).z );
+		float snowCoverage = clamp( worldLightParams.w, 0.0, 1.0 ) * upward;
+		base.rgb = mix( base.rgb, vec3( 0.82, 0.86, 0.90 ), snowCoverage * 0.82 );
+#endif
+	}
+
+	// Exact typed wiredLighting emission. The host emits a nonzero value only for
+	// stage zero of world surfaces, so multi-stage materials cannot double-add it.
+	// color0 is the linear diffuse/albedo sample; atmosphere and HDR bloom remain
+	// downstream consumers of this single radiance source.
+	base.rgb += color0.rgb * emissionRadiance.rgb;
+
 #ifdef USE_IBL
 	// Always-on image-based-lighting ambient for a pbrMap worldspawn surface.
 	// Light-INDEPENDENT (no dynamic light needed) — the analytic-sky probe cubes
@@ -897,7 +926,11 @@ frag_color.w = identity_alpha;
 		// B = metalness (linear; fetched raw).
 		vec3  orm       = wired_tex_raw( WIRED_BINDLESS_PBRMAP_ROLE, frag_tex_coord0 ).rgb;
 		float ao        = orm.r;
-		float roughness = clamp( orm.g, 0.04, 1.0 );
+		// Wet films narrow the specular lobe; frost/snow roughen it. This changes
+		// only the already-admitted PBR cohort and adds no resource lookup.
+		float roughness = clamp( orm.g - 0.35 * worldLightParams.y
+			+ 0.30 * worldLightParams.z + 0.40 * worldLightParams.w,
+			0.04, 1.0 );
 		float metalness = orm.b;
 		// IBL specular reflection only. The lightmap (base.rgb above) already
 		// carries baked diffuse ambient + direct + radiosity fused as a

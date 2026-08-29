@@ -19,6 +19,21 @@ gfx/ui/glow_radial
 	}
 }
 
+// Compact projectile-bound hot core used by the layered rocket trail. It
+// deliberately reuses the shipped soft radial image while giving the particle
+// registry a world-effect material name and an explicit additive contract.
+rocketExhaustGlow
+{
+	sort additive
+	nopicmip
+	{
+		clampmap gfx/ui/glow_radial.png
+		blendfunc GL_SRC_ALPHA GL_ONE
+		rgbGen vertex
+		alphaGen vertex
+	}
+}
+
 // ── crosshair shaders (fix: rgbGen exactVertex enables SetColor tinting) ──
 // Q3 vanilla uses rgbGen identity which ignores SetColor → crosshair always white.
 // q3now fixed this with rgbGen exactVertex. We override all 10 crosshairs here.
@@ -663,4 +678,3 @@ textures/pbr_test/pbr_test
 		pbrMap textures/pbr_test/orm.png
 	}
 }
-

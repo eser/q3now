@@ -37,7 +37,6 @@
 #   DEV                debug build              (default: 0; 1 = debug build)
 #   VM                 VM game modules           (default: 0; 1=VM + sv_pure 1)
 #   USE_WASM           VM backend via WAMR       (0=off, 1=on; default: 1)
-#   USE_FOG_SYSTEM     enhanced fog compile gate (0=off, 1=on; default: 0)
 #   CHANNEL            release channel           (default: preview; "public" omits suffix)
 #   CODESIGN_IDENTITY  signing identity         (default: - = ad-hoc)
 #   UPSTREAM_REF       fork point for diff-api  (default: ecd5fa41)
@@ -174,7 +173,6 @@ endif
 
 # VM backend toggle: 1 = enable WAMR, 0 = legacy QVM only
 USE_WASM ?= 1
-USE_FOG_SYSTEM ?= 0
 
 ifeq ($(USE_WASM),1)
   CMAKE_WASM_FLAG := -DUSE_WASM=ON
@@ -186,16 +184,10 @@ else
   CMAKE_WASM_FLAG := -DUSE_WASM=OFF
 endif
 
-ifeq ($(USE_FOG_SYSTEM),1)
-  CMAKE_FOG_FLAG := -DUSE_FOG_SYSTEM=ON
-else
-  CMAKE_FOG_FLAG := -DUSE_FOG_SYSTEM=OFF
-endif
-
 CMAKE_EXTRA_FLAGS ?=
 CMAKE_CHANNEL_FLAG := -DCHANNEL_SUFFIX="$(CHANNEL_SUFFIX)"
 CMAKE_PRODUCT_FLAG := -DPRODUCT_NAME="$(PRODUCT_NAME)"
-CMAKE_CONFIGURE    := cmake -S . -B $(BUILD_DIR) $(GENERATOR) -DCMAKE_BUILD_TYPE=$(BUILD_CFG) -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DBUILD_TESTING=ON -DBUILD_GAME_LIBRARIES=ON $(CMAKE_WASM_FLAG) $(CMAKE_FOG_FLAG) $(CMAKE_CHANNEL_FLAG) $(CMAKE_PRODUCT_FLAG) $(CMAKE_EXTRA_FLAGS)
+CMAKE_CONFIGURE    := cmake -S . -B $(BUILD_DIR) $(GENERATOR) -DCMAKE_BUILD_TYPE=$(BUILD_CFG) -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DBUILD_TESTING=ON -DBUILD_GAME_LIBRARIES=ON $(CMAKE_WASM_FLAG) $(CMAKE_CHANNEL_FLAG) $(CMAKE_PRODUCT_FLAG) $(CMAKE_EXTRA_FLAGS)
 CMAKE_BUILD        := cmake --build $(BUILD_DIR) --parallel $(JOBS)
 
 # Code signing identity (default: ad-hoc).
@@ -255,6 +247,7 @@ WAILS_TAGS   ?=
 # SW3Z archiver
 SW3Z_DIR := tools/sw3z-archiver
 SW3Z_BIN := $(SW3Z_DIR)/cmd/sw3z/sw3z
+SW3Z_SRC := $(shell find $(SW3Z_DIR) -name '*.go' -o -name 'go.mod' -o -name 'go.sum')
 
 # VM backend toggle (moved to top, before ifeq)
 # USE_WASM is defined near other cmake flags above
@@ -262,6 +255,15 @@ SW3Z_BIN := $(SW3Z_DIR)/cmd/sw3z/sw3z
 # Pak output (always from Release build — VM modules are always Release)
 PAK_STAGING := $(BUILD_DIR)/pak-staging
 PAK_OUT := $(BUILD_DIR)/base/pax21.sw3z
+PAK_MANIFEST := $(PAK_OUT).manifest.json
+CONTENT_TOOL_ID ?= wired.q3map2
+CONTENT_TOOL_VERSION ?= $(SOURCE_VERSION)
+CONTENT_TOOL_TARGET_OS ?= $(shell uname -s | tr '[:upper:]' '[:lower:]')
+CONTENT_TOOL_TARGET_ARCH ?= $(GAME_ARCH)
+CONTENT_TOOL_ABI ?= wired-bsp-v1
+CONTENT_TOOL_FILE ?=
+CONTENT_TOOL_OUT := $(BUILD_DIR)/tool-packages/$(CONTENT_TOOL_ID)-$(CONTENT_TOOL_VERSION)-$(CONTENT_TOOL_TARGET_OS)-$(CONTENT_TOOL_TARGET_ARCH).sw3z
+CONTENT_TOOL_MANIFEST := $(CONTENT_TOOL_OUT).manifest.json
 WEB_CONTENT_OUT := $(BUILD_DIR)/browser-content
 WEB_BASE_CONTENT ?= $(HOME)/wired/$(APP_NAME)/base/pax01.sw3z
 WEB_VISOR_ANIMATION := code/web/content/characters/visor/models/animation.cfg
@@ -278,7 +280,7 @@ SENTRY_HANDLER_BIN := $(BUILD_DIR)/src/libs/sentry-native/sentry-crash$(EXEEXT)
 .PHONY: all configure build build-webgpu-browser test-webgpu-browser-module \
 		build-web-client test-web-client \
         _build-stamp clean clean-launcher clean-all rebuild shaders \
-        create-launcher create-packs build-fonts \
+		create-launcher create-packs package-content-tool build-fonts \
         _wails-build \
         copy-libs copy-build copy-packs copy-all \
         bundle-codesign bundle-dmg bundle-tar bundle-zip bundle-docker \
@@ -295,7 +297,8 @@ SENTRY_HANDLER_BIN := $(BUILD_DIR)/src/libs/sentry-native/sentry-crash$(EXEEXT)
         test-vmi-bytecode-gui test-vmi-bytecode-gui-self \
 	test-reload-wasm-refusal test-reload-wasm-refusal-self \
 	test-vmi-pack-runtime test-vmi-pack-runtime-self \
-	test-dlight-shadow-gpu-budget test-dlight-shadow-gpu-budget-self \
+		test-dlight-shadow-gpu-budget test-dlight-shadow-gpu-budget-self \
+		test-lighting-reference-contract test-lighting-reference-visual test-lighting-reference-performance \
         test-wiredui-demo-semantic-continuation test-wiredui-demo-semantic-continuation-self \
         test-directed-ping-queue test-directed-ping-queue-self \
 		test-ping-owner-browser test-ping-owner-browser-self \
@@ -303,10 +306,11 @@ SENTRY_HANDLER_BIN := $(BUILD_DIR)/src/libs/sentry-native/sentry-crash$(EXEEXT)
 		test-ping-owner-expired-offscreen test-ping-owner-expired-offscreen-self \
 		test-ping-owner-capacity test-ping-owner-capacity-self \
         test-lan-discovery-timeout test-lan-discovery-timeout-self \
-		test-ral-readback-runtime test-ral-auto-exposure-runtime test-ral-metal-runtime \
+		test-ral-readback-runtime test-ral-auto-exposure-runtime \
+		test-ral-brightness-scalar-sweep test-ral-metal-runtime \
 		test-ral-opengl-runtime test-ral-opengl-vulkan-visual-parity \
-		test-ral-metal-vulkan-visual-parity test-ral-metal-vulkan-performance \
-        test-vm test-quic-game test-fs-dedup bench diff-api lint help
+		test-ral-metal-vulkan-visual-parity test-renderer-switch-ui test-loading-ui test-player-settings-ui test-wiredui-scoreboard-authority test-wiredui-layout-authority test-wiredui-source-catalog test-wiredui-perspective-hud test-wiredui-inspector-hot-reload test-wiredui-inspector-hot-reload-runtime test-wiredui-lua-harness test-wiredui-screenshot-matrix test-wiredui-layout-performance test-wiredui-2d-batches test-ral-metal-vulkan-performance \
+		test-vm test-quic-game test-fs-dedup test-sw3z-lifecycle bench diff-api lint help
 
 # Default target: a CONSISTENT DEPLOYABLE WORLD, not just compiled objects.
 # `build` compiles the engine + native game DLLs + the WASM VM modules (the
@@ -350,8 +354,20 @@ build-web-client: create-packs
 	node tools/web-authored-compiler.mjs \
 		--output "$(abspath $(WEB_AUTHORED_CONTENT))" \
 		--menu "$(abspath modfiles/ui/main.wui)" \
+		--servers "$(abspath modfiles/ui/servers.wui)" \
+		--console "$(abspath modfiles/ui/console_panel.wui)" \
+		--loading "$(abspath modfiles/ui/loading_screen.wui)" \
+		--ui-dir "$(abspath modfiles/ui)" \
+		--menu-manifest "$(abspath modfiles/scripts/menus.lua)" \
+		--hud "$(abspath modfiles/ui/classic.wui)" \
+		--crosshair "$(abspath modfiles/scripts/crosshair/default.lua)" \
+		--crosshair-machinegun "$(abspath modfiles/weapons/machinegun/crosshair.lua)" \
+		--crosshair-lightning "$(abspath modfiles/weapons/lightning/crosshair.lua)" \
 		--l10n "$(abspath modfiles/scripts/l10n/en.lua)" \
-		--scene "$(abspath modfiles/scripts/scene/arena1.lua)"
+		--scene "$(abspath modfiles/scripts/scene/arena1.lua)" \
+		--tokens "$(abspath modfiles/ui/_tokens.wui)" \
+		--theme-mode "$(abspath modfiles/ui/themes/dark/_tokens.wui)" \
+		--theme-accent "$(abspath modfiles/ui/themes/amber/_tokens.wui)"
 	cmake -DOUT_DIR="$(abspath $(WEB_CONTENT_OUT))" \
 		-DPAX01="$(abspath $(WEB_BASE_CONTENT))" \
 		-DPAX21="$(abspath $(PAK_OUT))" \
@@ -360,6 +376,8 @@ build-web-client: create-packs
 		-DCONFIG="$(abspath $(PAK_STAGING))/default.cfg" \
 		-DVISOR_ANIMATION="$(abspath $(WEB_VISOR_ANIMATION))" \
 		-DAUTHORED_CONTENT="$(abspath $(WEB_AUTHORED_CONTENT))" \
+		-DFONT_DIR="$(abspath $(PAK_STAGING))/fonts" \
+		-DUI_DIR="$(abspath modfiles/ui)" \
 		-P cmake/wired_web_content_manifest.cmake
 
 test-web-client: build-web-client
@@ -505,7 +523,7 @@ _wails-build:
 # "pax21" sorts after pak0–pak8, ensuring highest override priority.
 # VM modules here override the stock 1999 bytecode in the base pack.
 
-$(SW3Z_BIN):
+$(SW3Z_BIN): $(SW3Z_SRC)
 	cd $(SW3Z_DIR) && go build -o $(CURDIR)/$(SW3Z_BIN) ./cmd/sw3z
 
 # The VM modules the pak SHIPS.  Keying $(PAK_OUT) on these files (not on the
@@ -543,13 +561,51 @@ $(PAK_OUT): Makefile $(PAK_VM_MODULES) $(PAK_CONTENT_SRC) $(SW3Z_BIN)
 	$(SW3Z_BIN) a -x "**/.DS_Store" -x ".DS_Store" "$(PAK_OUT)" $(PAK_STAGING)
 	@echo "==> $(PAK_OUT) ready"
 
+# Sidecar lifecycle manifest. It inventories the exact staging working set and
+# is validated by the same package used by the launcher. Keeping it beside the
+# archive lets install/update/remove be planned before opening the archive.
+$(PAK_MANIFEST): $(PAK_OUT) $(SW3Z_BIN)
+	$(SW3Z_BIN) manifest create \
+		--id q3now.content.core \
+		--version "$(SOURCE_VERSION)" \
+		--owner q3now \
+		--role runtime \
+		--os any --arch any --abi wired-content-v1 \
+		--provides q3now.content \
+		--file "pax21.sw3z=$(PAK_OUT)" \
+		--out "$(PAK_MANIFEST)"
+	$(SW3Z_BIN) manifest validate "$(PAK_MANIFEST)"
+
 # create-packs — public alias for "produce a fresh deployable pak".  Depends on
 # `build` (so the VM modules are compiled first) and on the $(PAK_OUT) file target
 # (which repacks iff the modules/content changed).  Because build's own recipe
 # already brings $(PAK_OUT) current, the pak is up-to-date by the time Make
 # evaluates it here, so this adds no second repack.
-create-packs: build $(PAK_OUT)
+create-packs: build $(PAK_OUT) $(PAK_MANIFEST)
 	@:
+
+# Package q3map2 or another content compiler as a lifecycle-distinct toolchain
+# artifact. Callers provide the built binary explicitly; runtime and toolchain
+# archives can therefore never acquire the same owner/role by accident.
+# Example:
+#   make package-content-tool CONTENT_TOOL_FILE=/path/to/q3map2 \
+#     CONTENT_TOOL_ID=wired.q3map2 CONTENT_TOOL_VERSION=0.80.42
+package-content-tool: $(SW3Z_BIN)
+	@test -n "$(CONTENT_TOOL_FILE)" -a -f "$(CONTENT_TOOL_FILE)" || { \
+		echo "ERROR: CONTENT_TOOL_FILE must name a built content tool"; exit 1; }
+	@rm -rf "$(BUILD_DIR)/tool-package-staging"
+	@mkdir -p "$(BUILD_DIR)/tool-package-staging/bin" "$(BUILD_DIR)/tool-packages"
+	cp "$(CONTENT_TOOL_FILE)" "$(BUILD_DIR)/tool-package-staging/bin/$(notdir $(CONTENT_TOOL_FILE))"
+	$(SW3Z_BIN) a "$(CONTENT_TOOL_OUT)" "$(BUILD_DIR)/tool-package-staging"
+	$(SW3Z_BIN) manifest create \
+		--id "$(CONTENT_TOOL_ID)" --version "$(CONTENT_TOOL_VERSION)" \
+		--owner wired --role toolchain \
+		--os "$(CONTENT_TOOL_TARGET_OS)" --arch "$(CONTENT_TOOL_TARGET_ARCH)" \
+		--abi "$(CONTENT_TOOL_ABI)" --provides wired.content-compiler \
+		--file "$(notdir $(CONTENT_TOOL_OUT))=$(CONTENT_TOOL_OUT)" \
+		--out "$(CONTENT_TOOL_MANIFEST)"
+	$(SW3Z_BIN) manifest validate "$(CONTENT_TOOL_MANIFEST)"
+	@echo "==> $(CONTENT_TOOL_OUT) + manifest ready"
 
 # ── build-fonts ───────────────────────────────────────────────────────────────
 # Build MSDF font atlases from TTF sources using msdf-atlas-gen.
@@ -820,6 +876,7 @@ define install_pack
 	@echo "==> Installing mod pack into $(1) ..."
 	@mkdir -p "$(1)"
 	cp "$(PAK_OUT)" "$(1)/"
+	cp "$(PAK_MANIFEST)" "$(1)/"
 endef
 
 # ── copy-build ───────────────────────────────────────────────────────────────
@@ -1163,7 +1220,7 @@ test-process: build copy-all
 # release flow; bundle-codesign itself errors if signing fails.
 # SKIP_HOST_TESTS=1: CI's Windows job sets this — its host-test coverage
 # moved to the windows-test lane (cross-built exes run on a bare runner).
-check: create-packs $(if $(SKIP_HOST_TESTS),,test-host)
+check: create-packs test-sw3z-lifecycle $(if $(SKIP_HOST_TESTS),,test-host)
 	@fail=0; \
 	echo "==> Verifying build..."; \
 	if ls $(MODULE_DIR)/vm/gamecl.wasm  > /dev/null 2>&1; then echo "  gamecl VM:    OK"; else echo "  gamecl VM:    MISSING (wasi-sdk not found?)"; fail=1; fi; \
@@ -1177,6 +1234,12 @@ check: create-packs $(if $(SKIP_HOST_TESTS),,test-host)
 	fi; \
 	if [ $$fail -ne 0 ]; then echo "==> Verification FAILED"; exit 1; fi; \
 	echo "==> All checks passed."
+
+# Canonical lifecycle contract: archiver/release and launcher compile against
+# one validator and exercise dependency, ownership, dry-run and rollback gates.
+test-sw3z-lifecycle:
+	cd $(SW3Z_DIR) && go test ./...
+	cd $(LAUNCHER_DIR) && go test ./internal/manifest ./internal/subcommands
 
 # ── smoke ────────────────────────────────────────────────────────────────────
 # Headless gameplay smoke test. Requires Q3DIR with base game pack.
@@ -1234,13 +1297,29 @@ else
 	@exit 77
 endif
 
+# Release-only continuous user-brightness acceptance. The harness sweeps live
+# fractional values in one explicit 1280x720 Vulkan window, measures a fixed
+# shadow cohort, highlight clipping and two GPU timing windows per scalar.
+test-ral-brightness-scalar-sweep: copy-all $(PNG2RAW_BIN)
+ifeq ($(UNAME_S),Darwin)
+	@if [ "$(DEV)" = "1" ]; then \
+		echo "FAIL: use make test-ral-brightness-scalar-sweep (Release)"; exit 2; \
+	fi
+	@WIRED_CONTENT_ROOT="$${WIRED_CONTENT_ROOT:-$(HOME)/wired/$(APP_NAME)}" \
+	bash tests/ral-brightness-scalar-sweep.sh \
+		"$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)"
+else
+	@echo "SKIP: brightness scalar visual/performance gate requires macOS Vulkan"
+	@exit 77
+endif
+
 # Real-map advanced-fog acceptance. This deliberately uses the canonical
 # build/ tree and an explicit 1280x720 window; the harness creates isolated
 # homes and never writes the player's config or licensed pax01 archive.
 test-advanced-fog-runtime: copy-all $(PNG2RAW_BIN)
 ifeq ($(UNAME_S),Darwin)
-	@if [ "$(DEV)" != "1" ] || [ "$(USE_FOG_SYSTEM)" != "1" ]; then \
-		echo "FAIL: use DEV=1 USE_FOG_SYSTEM=1 make test-advanced-fog-runtime"; exit 2; \
+	@if [ "$(DEV)" != "1" ]; then \
+		echo "FAIL: use DEV=1 make test-advanced-fog-runtime"; exit 2; \
 	fi
 	@WIRED_CONTENT_ROOT="$${WIRED_CONTENT_ROOT:-$(HOME)/wired/$(APP_NAME)}" \
 	bash tests/advanced-fog-runtime-check.sh \
@@ -1307,6 +1386,122 @@ ifeq ($(UNAME_S),Darwin)
 	  "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)"
 else
 	@echo "SKIP: native Metal/Vulkan visual parity requires macOS"
+	@exit 77
+endif
+
+# Same-process backend restart regression for gameplay HUD/crosshair, console
+# and pause-menu presentation.  This specifically catches stale UI extents and
+# backend-specific colour/texture state that a one-backend-per-process parity
+# run cannot observe.
+test-renderer-switch-ui: bundle-codesign png2raw
+ifeq ($(UNAME_S),Darwin)
+	@Q3DIR="$(Q3DIR)" \
+	PNG2RAW="$(abspath $(PNG2RAW_BIN))" \
+	bash tests/renderer-switch-ui-check.sh \
+	  "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)"
+else
+	@echo "SKIP: Metal -> Vulkan UI restart gate requires macOS"
+	@exit 77
+endif
+
+# Real CA_PRIMED loading-frame geometry/content gate across the runtime-capable
+# macOS RAL backends (Metal + Vulkan). OpenGL 4.6 has no macOS context.
+test-loading-ui: bundle-codesign png2raw
+ifeq ($(UNAME_S),Darwin)
+	@Q3DIR="$(Q3DIR)" \
+	PNG2RAW="$(abspath $(PNG2RAW_BIN))" \
+	bash tests/loading-ui-check.sh \
+	  "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)"
+else
+	@echo "SKIP: Metal/Vulkan loading UI matrix requires macOS"
+	@exit 77
+endif
+
+# Real Player Settings composition and listbox-containment gate across Metal
+# and Vulkan. Captures screenshots and compares Clay-authoritative geometry.
+test-player-settings-ui: bundle-codesign png2raw
+ifeq ($(UNAME_S),Darwin)
+	@Q3DIR="$(Q3DIR)" \
+	PNG2RAW="$(abspath $(PNG2RAW_BIN))" \
+	bash tests/wiredui-player-settings-check.sh \
+	  "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)"
+else
+	@echo "SKIP: Metal/Vulkan Player Settings matrix requires macOS"
+	@exit 77
+endif
+
+# Static authority contract: the authored .wui scoreboard menus are primary;
+# direct C scorelist drawing is permitted only as missing-menu recovery.
+test-wiredui-scoreboard-authority:
+	@node tests/wiredui-scoreboard-authority-test.mjs
+
+test-wiredui-layout-authority:
+	@node tests/wiredui-layout-authority-test.mjs
+
+test-wiredui-source-catalog:
+	@node tests/wiredui-source-catalog-test.mjs >/dev/null
+
+test-wiredui-perspective-hud: bundle-codesign png2raw
+ifeq ($(UNAME_S),Darwin)
+	@node tests/wiredui-perspective-hud-test.mjs
+	@Q3DIR="$(Q3DIR)" \
+	PNG2RAW="$(abspath $(PNG2RAW_BIN))" \
+	bash tests/wiredui-perspective-hud-check.sh \
+	  "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)"
+else
+	@echo "SKIP: Metal/Vulkan perspective HUD matrix requires macOS"
+	@exit 77
+endif
+
+test-wiredui-inspector-hot-reload:
+	@node tests/wiredui-inspector-hot-reload-test.mjs
+
+test-wiredui-inspector-hot-reload-runtime: bundle-codesign png2raw
+ifeq ($(UNAME_S),Darwin)
+	@Q3DIR="$(Q3DIR)" \
+	PNG2RAW="$(abspath $(PNG2RAW_BIN))" \
+	bash tests/wiredui-inspector-hot-reload-runtime.sh \
+	  "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)"
+else
+	@echo "SKIP: Metal/Vulkan inspector matrix requires macOS"
+	@exit 77
+endif
+
+test-wiredui-lua-harness: bundle-codesign png2raw
+ifeq ($(UNAME_S),Darwin)
+	@Q3DIR="$(Q3DIR)" \
+	PNG2RAW="$(abspath $(PNG2RAW_BIN))" \
+	bash tests/wiredui-lua-harness-check.sh \
+	  "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)"
+else
+	@echo "SKIP: Metal/Vulkan Lua UI matrix requires macOS"
+	@exit 77
+endif
+
+# Every independently reachable MENU/POPUP surface is captured on Metal and
+# Vulkan at 1280x720. Stateful layers remain owned by their dedicated runtime
+# gates; the source catalog proves that no authored file is left unclassified.
+test-wiredui-screenshot-matrix: bundle-codesign png2raw
+ifeq ($(UNAME_S),Darwin)
+	@Q3DIR="$(Q3DIR)" \
+	PNG2RAW="$(abspath $(PNG2RAW_BIN))" \
+	bash tests/wiredui-screenshot-matrix-check.sh \
+	  "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)"
+else
+	@echo "SKIP: Metal/Vulkan WiredUI screenshot matrix requires macOS"
+	@exit 77
+endif
+
+test-wiredui-layout-performance: configure
+	@cmake --build "$(BUILD_DIR)" --target wiredui_clay_layout_benchmark
+	@ctest --test-dir "$(BUILD_DIR)" -R '^wiredui_clay_layout_performance$$' --output-on-failure
+
+test-wiredui-2d-batches: bundle-codesign
+ifeq ($(UNAME_S),Darwin)
+	@Q3DIR="$(Q3DIR)" bash tests/wiredui-2d-batch-measure.sh \
+	  "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)"
+else
+	@echo "SKIP: current TASK-89 product measurement uses the macOS Vulkan lane"
 	@exit 77
 endif
 
@@ -1483,7 +1678,37 @@ test-dlight-shadow-gpu-budget:
 test-dlight-shadow-gpu-budget-self:
 	@bash tests/dlight-shadow-gpu-budget-check.sh --self-test
 
-.PHONY: test-dlight-shadow-gpu-budget test-dlight-shadow-gpu-budget-self
+test-lighting-reference-contract: $(BUILD_DIR)/CMakeCache.txt
+	@ctest --test-dir "$(BUILD_DIR)" -R '^lighting_reference_contract$$' --output-on-failure
+
+test-lighting-reference-visual: copy-all png2raw
+	@test -n "$${WIRED:-}" || { echo "ERROR: WIRED=<assembled-gui-binary> is required"; exit 2; }
+	@bash tests/lava-sanctum-lighting-check.sh "$${WIRED}"
+
+test-lighting-reference-backend-matrix: copy-all png2raw
+	@test -n "$${WIRED:-}" || { echo "ERROR: WIRED=<assembled-gui-binary> is required"; exit 2; }
+	@bash tests/lava-sanctum-lighting-backend-matrix.sh "$${WIRED}"
+
+test-lighting-reference-performance: copy-all
+	@test -z "$(DEV)" || { echo "FAIL: lighting performance gate requires Release (omit DEV=1)"; exit 2; }
+	@test -n "$${WIRED:-}" || { echo "ERROR: WIRED=<assembled-gui-binary> is required"; exit 2; }
+	@bash tests/lava-sanctum-lighting-performance.sh "$${WIRED}"
+
+test-irradiance-probe-performance: test-lighting-reference-performance
+	@cmake --build "$(BUILD_DIR)" --target ral_irradiance_runtime_test --parallel "$(JOBS)"
+	@python3 tests/irradiance-probe-performance-analyze.py \
+		"$(BUILD_DIR)/ral_irradiance_runtime_test" \
+		"$(BUILD_DIR)/lava-sanctum-lighting-performance/summary.json" \
+		"$(BUILD_DIR)/irradiance-probe-performance.json"
+
+test-emissive-authority-visual: copy-all png2raw
+	@test -n "$${WIRED:-}" || { echo "ERROR: WIRED=<assembled-gui-binary> is required"; exit 2; }
+	@bash tests/emissive-authority-visual-check.sh "$${WIRED}"
+
+.PHONY: test-dlight-shadow-gpu-budget test-dlight-shadow-gpu-budget-self \
+	test-lighting-reference-contract test-lighting-reference-visual \
+	test-lighting-reference-backend-matrix test-lighting-reference-performance \
+	test-irradiance-probe-performance test-emissive-authority-visual
 
 test-wiredui-demo-semantic-continuation:
 	@test -n "$${WIRED}" || { echo "usage: make $@ WIRED=/absolute/path/to/wired"; exit 64; }
@@ -1592,6 +1817,15 @@ test-ral-profile-renderdoc-self:
 	@bash tests/ral-profile-renderdoc-check.sh --self-test
 
 .PHONY: test-ral-profile-renderdoc test-ral-profile-renderdoc-self
+
+test-ral-profile-metal-capture:
+	@test -n "$${WIRED}" || { echo "usage: make test-ral-profile-metal-capture WIRED=/absolute/path/to/wired [WIRED_CONTENT_ROOT=/absolute/content-root]"; exit 64; }
+	@bash tests/ral-profile-metal-capture-check.sh "$${WIRED}"
+
+test-ral-profile-metal-capture-self:
+	@bash tests/ral-profile-metal-capture-check.sh --self-test
+
+.PHONY: test-ral-profile-metal-capture test-ral-profile-metal-capture-self
 
 test-ral-profile-layout:
 	@test -n "$${WIRED}" || { echo "usage: make test-ral-profile-layout WIRED=/absolute/path/to/wired"; exit 64; }
@@ -2002,7 +2236,20 @@ visual-chromatic: $(_RUN_GAME_DEP) $(PNG2RAW_BIN)
 	@bash tests/visual-render-features.sh --mode chromatic \
 		--engine "$(BUILD_DIR)/$(CMAKE_APP_NAME)$(BINEXT)$(EXEEXT)"
 
-.PHONY: visual-gtao visual-fwdplus visual-viewport visual-selftest visual-shadow-atest visual-scene visual-chromatic sync-cgame-run-dir
+#   visual-dlight-shadow : one-light localized cast-shadow pixel/golden gate.
+#   visual-dlight-shadow-lifecycle : four-light/24-pass live K/rebuild/VUID gate.
+# Both launch one explicit 1280x720 window and reuse the product build tree.
+visual-dlight-shadow: $(_RUN_GAME_DEP) $(PNG2RAW_BIN)
+	@SMOKE_UPDATE_GOLDEN=1 bash tests/visual-render-features.sh --mode dlight-shadow \
+		--engine "$(Q3BINDIR)/$(INSTALLED_ENGINE)"
+	@bash tests/visual-render-features.sh --mode dlight-shadow \
+		--engine "$(Q3BINDIR)/$(INSTALLED_ENGINE)"
+
+visual-dlight-shadow-lifecycle: $(_RUN_GAME_DEP) $(PNG2RAW_BIN)
+	@bash tests/visual-render-features.sh --mode dlight-shadow-lifecycle \
+		--engine "$(Q3BINDIR)/$(INSTALLED_ENGINE)"
+
+.PHONY: visual-gtao visual-fwdplus visual-viewport visual-selftest visual-shadow-atest visual-scene visual-chromatic visual-dlight-shadow visual-dlight-shadow-lifecycle sync-cgame-run-dir
 
 # ── bench ────────────────────────────────────────────────────────────────────
 # Timedemo benchmark. Requires a demo at Q3DATADIR/demos/<DEMO>.dm_68.

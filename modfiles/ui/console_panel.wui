@@ -35,7 +35,7 @@ menuDef {
 		itemDef {
 			name "console_view"
 			type console_view
-			rect 0 0 1 0.5
+			width FIXED 1 height FIXED 0.5
 			decoration
 		}
 	}

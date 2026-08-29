@@ -6,19 +6,26 @@ extern "C" {
 }
 #include "render_submission_material.h"
 
-#import <CoreGraphics/CoreGraphics.h>
-#import <ImageIO/ImageIO.h>
-
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
 
+extern "C" {
+void R_LoadPNG( const char *name, byte **pic, int *width, int *height );
+void R_LoadJPG( const char *name, byte **pic, int *width, int *height );
+void R_LoadTGA( const char *name, byte **pic, int *width, int *height );
+void R_LoadBMP( const char *name, byte **pic, int *width, int *height );
+}
+
+typedef void (*imageLoader_t)( const char *, byte **, int *, int * );
 typedef struct {
 	const char *extension;
+	imageLoader_t loader;
 } imageExtension_t;
 
 static const imageExtension_t s_extensions[] = {
-	{ "png" }, { "jpg" }, { "jpeg" }, { "tga" }, { "bmp" }
+	{ "tga", R_LoadTGA }, { "png", R_LoadPNG }, { "jpg", R_LoadJPG },
+	{ "jpeg", R_LoadJPG }, { "bmp", R_LoadBMP }
 };
 
 static const char *Extension( const char *path ) {
@@ -27,70 +34,31 @@ static const char *Extension( const char *path ) {
 	return ( dot && ( !slash || dot > slash ) && dot[1] ) ? dot + 1 : "";
 }
 
-static qboolean DecodePath( const char *path, byte **outPixels,
+static qboolean DecodePath( const char *path, imageLoader_t loader,
+		byte **outPixels,
 		uint32_t *outWidth, uint32_t *outHeight,
 		char outResolved[MAX_QPATH] ) {
-	void *fileBytes = NULL;
-	int fileLength = ri.FS_ReadFile( path, &fileBytes );
-	CFDataRef data = NULL;
-	CGImageSourceRef source = NULL;
-	CGImageRef image = NULL;
-	CGColorSpaceRef colorSpace = NULL;
-	CGContextRef context = NULL;
 	byte *pixels = NULL;
-	size_t width, height, rowBytes, byteCount;
-	qboolean result = qfalse;
-	if ( fileLength <= 0 || !fileBytes ) return qfalse;
-	data = CFDataCreate( kCFAllocatorDefault, (const UInt8 *)fileBytes,
-		(CFIndex)fileLength );
-	ri.FS_FreeFile( fileBytes ); fileBytes = NULL;
-	if ( !data ) goto cleanup;
-	source = CGImageSourceCreateWithData( data, NULL );
-	if ( !source ) goto cleanup;
-	image = CGImageSourceCreateImageAtIndex( source, 0u, NULL );
-	if ( !image ) goto cleanup;
-	width = CGImageGetWidth( image ); height = CGImageGetHeight( image );
-	if ( !width || !height || width > RENDER_SUBMISSION_MAX_IMAGE_DIMENSION
-			|| height > RENDER_SUBMISSION_MAX_IMAGE_DIMENSION
-			|| width > SIZE_MAX / 4u ) goto cleanup;
-	rowBytes = width * 4u;
-	if ( height > SIZE_MAX / rowBytes
-			|| rowBytes * height > RENDER_SUBMISSION_MAX_MATERIAL_BYTES ) goto cleanup;
-	byteCount = rowBytes * height;
-	pixels = (byte *)ri.Malloc( byteCount );
-	if ( !pixels ) goto cleanup;
-	colorSpace = CGColorSpaceCreateWithName( kCGColorSpaceSRGB );
-	if ( !colorSpace ) goto cleanup;
-	context = CGBitmapContextCreate( pixels, width, height, 8u, rowBytes,
-		colorSpace, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big );
-	if ( !context ) goto cleanup;
-	CGContextTranslateCTM( context, 0.0, (CGFloat)height );
-	CGContextScaleCTM( context, 1.0, -1.0 );
-	CGContextSetBlendMode( context, kCGBlendModeCopy );
-	CGContextDrawImage( context, CGRectMake( 0.0, 0.0, (CGFloat)width,
-		(CGFloat)height ), image );
-	for ( size_t offset = 0u; offset < byteCount; offset += 4u ) {
-		const uint32_t alpha = pixels[offset + 3u];
-		if ( alpha != 0u && alpha != 255u ) {
-			for ( size_t channel = 0u; channel < 3u; ++channel ) {
-				uint32_t straight = ( (uint32_t)pixels[offset + channel] * 255u
-					+ alpha / 2u ) / alpha;
-				pixels[offset + channel] = (byte)( straight > 255u ? 255u : straight );
-			}
-		}
+	int width = 0, height = 0;
+	uint64_t byteCount;
+	loader( path, &pixels, &width, &height );
+	if ( !pixels ) return qfalse;
+	byteCount = width > 0 && height > 0
+		? (uint64_t)width * (uint64_t)height * 4u : 0u;
+	if ( width <= 0 || height <= 0
+			|| (uint32_t)width > RENDER_SUBMISSION_MAX_IMAGE_DIMENSION
+			|| (uint32_t)height > RENDER_SUBMISSION_MAX_IMAGE_DIMENSION
+			|| byteCount > RENDER_SUBMISSION_MAX_MATERIAL_BYTES ) {
+		ri.Free( pixels );
+		return qfalse;
 	}
-	*outPixels = pixels; pixels = NULL;
+	/* The shared Q3 loaders publish straight RGBA8 and preserve RGB under a
+	 * fully-zero legacy alpha plane.  ImageIO/CoreGraphics premultiplied those
+	 * pixels to black, making skull_door_* geometry Metal-only invisible. */
+	*outPixels = pixels;
 	*outWidth = (uint32_t)width; *outHeight = (uint32_t)height;
 	(void)snprintf( outResolved, MAX_QPATH, "%s", path );
-	result = qtrue;
-cleanup:
-	if ( pixels ) ri.Free( pixels );
-	if ( context ) CGContextRelease( context );
-	if ( colorSpace ) CGColorSpaceRelease( colorSpace );
-	if ( image ) CGImageRelease( image );
-	if ( source ) CFRelease( source );
-	if ( data ) CFRelease( data );
-	return result;
+	return qtrue;
 }
 
 extern "C" qboolean RenderImage_DecodeRgba8( const char *name,
@@ -107,7 +75,8 @@ extern "C" qboolean RenderImage_DecodeRgba8( const char *name,
 	if ( extension[0] ) {
 		for ( i = 0u; i < ARRAY_LEN( s_extensions ); ++i ) {
 			if ( !strcasecmp( extension, s_extensions[i].extension )
-					&& DecodePath( name, outPixels, outWidth, outHeight,
+					&& DecodePath( name, s_extensions[i].loader,
+						outPixels, outWidth, outHeight,
 						outResolved ) ) return qtrue;
 		}
 	}
@@ -123,7 +92,8 @@ extern "C" qboolean RenderImage_DecodeRgba8( const char *name,
 		written = snprintf( candidate, sizeof( candidate ), "%s.%s", stem,
 			s_extensions[i].extension );
 		if ( written < 0 || (size_t)written >= sizeof( candidate ) ) continue;
-		if ( DecodePath( candidate, outPixels, outWidth, outHeight,
+		if ( DecodePath( candidate, s_extensions[i].loader,
+				outPixels, outWidth, outHeight,
 				outResolved ) ) return qtrue;
 	}
 	return qfalse;

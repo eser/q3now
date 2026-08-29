@@ -8,6 +8,7 @@
       "regions": [
         {"name": "sky", "rect": [0.00, 0.10, 1.00, 0.36], "mae": 0.11, "p90": 0.29, "changed64": 0.11},
         {"name": "world", "rect": [0.06, 0.30, 0.94, 0.78], "mae": 0.11, "p90": 0.29, "changed64": 0.11},
+        {"name": "legacy-zero-alpha-arch", "rect": [0.56, 0.12, 0.99, 0.76], "mae": 0.03, "p90": 0.08, "changed64": 0.008},
         {"name": "wired-ui", "rect": [0.00, 0.78, 1.00, 1.00], "mae": 0.13, "p90": 0.34, "changed64": 0.15}
       ]
     },

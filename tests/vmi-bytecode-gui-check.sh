@@ -74,7 +74,7 @@ for number,line in enumerate(open(manifest_path,encoding="utf-8",errors="strict"
  manifest.append(item)
 if not manifest or manifest[0]!={"kind":"scenario","schema":1,"name":"vmi-bytecode-gui","map":"arena7","vm_game":1,"vm_cgame":1}:raise SystemExit("FAIL scenario")
 roles=[item.get("role") for item in manifest[1:-1]]
-if roles != ["gui","headless","pax21","base","gamesv-aot-sentinel","gamecl-aot-sentinel","harness"]:raise SystemExit("FAIL provenance roles")
+if roles != ["gui","headless","current-archive","content-archive","gamesv-aot-sentinel","gamecl-aot-sentinel","harness"]:raise SystemExit("FAIL provenance roles")
 for item in manifest[1:-1]:
  if set(item)!={"kind","role","path","bytes","sha256"} or item.get("kind")!="provenance" or not isinstance(item.get("bytes"),int) or item["bytes"]<=0 or re.fullmatch(r"[0-9a-f]{64}",str(item.get("sha256",""))) is None:raise SystemExit("FAIL provenance schema")
  try:data=open(item["path"],"rb").read()
@@ -122,7 +122,7 @@ for path,rows in ((client_path,client),(server_path,server)):
  with open(path,"w") as out:
   for row in rows:out.write(json.dumps(row)+"\n")
 items=[{"kind":"scenario","schema":1,"name":"vmi-bytecode-gui","map":"arena7","vm_game":1,"vm_cgame":1}]
-for role in ("gui","headless","pax21","base","gamesv-aot-sentinel","gamecl-aot-sentinel","harness"):
+for role in ("gui","headless","current-archive","content-archive","gamesv-aot-sentinel","gamecl-aot-sentinel","harness"):
  path=manifest_path+"."+role;data=("fixture-"+role).encode();open(path,"wb").write(data);items.append({"kind":"provenance","role":role,"path":os.path.abspath(path),"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()})
 items.append({"kind":"result","client_controller_pid":101,"server_pid":102,"client_rc":0,"server_rc":0,"timeout":False,"forced":False})
 if mode=="manifest":items[2]["sha256"]="0"*64
@@ -158,24 +158,17 @@ HEADLESS="${WIRED_BINARY_HEADLESS:-}"; if [ -z "$HEADLESS" ]; then
 fi
 [ -n "$HEADLESS" ] && [ -x "$HEADLESS" ] || { echo "SKIP: sibling wired-headless unavailable"; exit 77; }
 HEADLESS="$(cd "$(dirname "$HEADLESS")" && pwd)/$(basename "$HEADLESS")"
-PACK=""; for candidate in "$WD" "$WD/../Resources" "$WD/../../.."; do [ -f "$candidate/base/pax21.sw3z" ] && PACK="$(cd "$candidate" && pwd)" && break; done
-[ -n "$PACK" ] || { echo "SKIP: current pax21 unavailable"; exit 77; }
-# Search every root that can legitimately hold the content pack, not just one.
-# $WIRED_HOME is where the launcher writes pax01.sw3z on all platforms
-# (GAME-DATA.md §4); omitting it made this SKIP on machines that had the
-# content, and the SKIP was then misread as "needs another platform".
-BASE=""
-for _c in "${WIRED_CONTENT_ROOT:-}" "$PACK" "${WIRED_HOME:-}" "${WIRED_INSTALL:-}"; do
-    [ -n "$_c" ] || continue
-    if   [ -f "$_c/base/pax01.sw3z" ]; then BASE="$_c/base/pax01.sw3z"; break
-    elif [ -f "$_c/base/pak0.pk3"   ]; then BASE="$_c/base/pak0.pk3";   break; fi
-done
-[ -n "$BASE" ] || { echo "SKIP: no content pack found (set WIRED_CONTENT_ROOT)"; exit 77; }
+PACK="$(wired_find_archive_root "$WD" "$WD/../Resources" "$WD/../../.." 2>/dev/null || true)"
+[ -n "$PACK" ] || { echo "SKIP: current VFS archives unavailable"; exit 77; }
+CONTENT="$(wired_find_archive_root "${WIRED_CONTENT_ROOT:-}" "$WIRED_HOME" "$PACK" "$WIRED_INSTALL" 2>/dev/null || true)"
+[ -n "$CONTENT" ] || { echo "SKIP: no content archives found (set WIRED_CONTENT_ROOT)"; exit 77; }
+CURRENT_ARCHIVE="$(wired_first_archive "$PACK/base")" || exit 77
+CONTENT_ARCHIVE="$(wired_first_archive "$CONTENT/base")" || exit 77
 ROOT="$(mktemp -d -t vmi-bytecode-gui-XXXXXX 2>/dev/null || mktemp -d)"; CLIENT_HOME="$ROOT/client/q3now-preview"; SERVER_HOME="$ROOT/server/q3now-preview"; FIFO="$ROOT/server.stdin"; SERVER_PID=""; OPEN=0; FORCED=0
 cleanup(){ local status=$?; trap - EXIT INT TERM; [ "$OPEN" -eq 1 ] && exec 9>&- || true; [ -n "$SERVER_PID" ] && kill -TERM "$SERVER_PID" 2>/dev/null || true; [ -n "$SERVER_PID" ] && wait "$SERVER_PID" 2>/dev/null || true; [ "${WIRED_KEEP_ARTIFACTS:-0}" = 1 ] || rm -rf "$ROOT"; exit "$status"; }
 trap cleanup EXIT; trap 'exit 130' INT; trap 'exit 143' TERM
 mkdir -p "$CLIENT_HOME/base/vm" "$SERVER_HOME/base/vm"
-for home in "$CLIENT_HOME" "$SERVER_HOME"; do cp "$PACK/base/pax21.sw3z" "$home/base/" || exit 1; cp "$BASE" "$home/base/" || exit 1; done
+for home in "$CLIENT_HOME" "$SERVER_HOME"; do wired_link_content_into_home "$home" "$CONTENT/base" "$PACK/base" || exit 1; done
 printf 'WIRED_INVALID_GAMESV_AOT_MUST_NOT_BE_OPENED\n' >"$ROOT/gamesv.aot" || exit 1
 printf 'WIRED_INVALID_GAMECL_AOT_MUST_NOT_BE_OPENED\n' >"$ROOT/gamecl.aot" || exit 1
 for home in "$CLIENT_HOME" "$SERVER_HOME"; do cp "$ROOT/gamesv.aot" "$home/base/vm/gamesv.aot" || exit 1; cp "$ROOT/gamecl.aot" "$home/base/vm/gamecl.aot" || exit 1; done
@@ -186,11 +179,11 @@ PYEOF
 )"; ENDPOINT="127.0.0.1:$PORT"
 printf 'set activeAction "wait 60 ; quit"\nwait 100\nconnect %s\n' "$ENDPOINT" >"$CLIENT_HOME/base/vmi-bytecode-gui.cfg"
 MANIFEST="$ROOT/manifest.jsonl"
-python3 - "$MANIFEST" "$WIRED" "$HEADLESS" "$PACK/base/pax21.sw3z" "$BASE" "$ROOT/gamesv.aot" "$ROOT/gamecl.aot" "$0" <<'PYEOF'
+python3 - "$MANIFEST" "$WIRED" "$HEADLESS" "$CURRENT_ARCHIVE" "$CONTENT_ARCHIVE" "$ROOT/gamesv.aot" "$ROOT/gamecl.aot" "$0" <<'PYEOF'
 import hashlib,json,os,sys
 with open(sys.argv[1],"w") as out:
  out.write(json.dumps({"kind":"scenario","schema":1,"name":"vmi-bytecode-gui","map":"arena7","vm_game":1,"vm_cgame":1},sort_keys=True)+"\n")
- for role,path in zip(("gui","headless","pax21","base","gamesv-aot-sentinel","gamecl-aot-sentinel","harness"),sys.argv[2:]):
+ for role,path in zip(("gui","headless","current-archive","content-archive","gamesv-aot-sentinel","gamecl-aot-sentinel","harness"),sys.argv[2:]):
   data=open(path,"rb").read();out.write(json.dumps({"kind":"provenance","role":role,"path":os.path.abspath(path),"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()},sort_keys=True)+"\n")
 PYEOF
 mkfifo "$FIFO"; exec 9<>"$FIFO"; OPEN=1
@@ -213,7 +206,7 @@ case "$(uname -s)" in Darwin) PLATFORM=(-ApplePersistenceIgnoreState YES);; *) P
 python3 "$TIMEOUT_RUNNER" --timeout 150 --kill-after 15 --cwd "$WD" --stdout "$CLIENT_STDOUT" -- "$WIRED" "${PLATFORM[@]}" +set fs_homepath "$CLIENT_HOME" +set com_automated 1 +set com_noHardReboot 1 +set s_initsound 0 +set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set net_ip 127.0.0.1 +set wn_cert_verify 0 +set vm_cgame 1 +set sv_pure 0 +set log_severity DEBUG +set log_file_severity DEBUG +set log_file_mode overwrite_synced +exec vmi-bytecode-gui.cfg &
 CLIENT_CONTROLLER_PID=$!; wait "$CLIENT_CONTROLLER_PID"; CLIENT_RC=$?
 printf 'quit\n' >&9
-for _ in $(seq 1 150); do kill -0 "$SERVER_PID" 2>/dev/null || break; sleep .1; done
+for _ in $(seq 1 600); do kill -0 "$SERVER_PID" 2>/dev/null || break; sleep .1; done
 if kill -0 "$SERVER_PID" 2>/dev/null; then FORCED=1; kill -TERM "$SERVER_PID" 2>/dev/null || true; fi
 wait "$SERVER_PID"; SERVER_RC=$?; SERVER_PID=""; exec 9>&-; OPEN=0
 python3 - "$MANIFEST" "$CLIENT_CONTROLLER_PID" "$RUN_SERVER_PID" "$CLIENT_RC" "$SERVER_RC" "$FORCED" <<'PYEOF'

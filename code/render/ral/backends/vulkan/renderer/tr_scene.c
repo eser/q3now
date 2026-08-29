@@ -4,6 +4,7 @@
 
 #include "tr_local.h"
 #include "../../../../frontend/r_log.h"  // rilog-channel-mechanism Turn B — renderer.cmd
+#include "../../../../frontend/render_submission_effects.h"
 
 R_LOG_DECLARE_CHANNEL( rch_cmd, "renderer.cmd" );
 
@@ -32,7 +33,6 @@ static void R_InjectRalEffectsSmoke( const refdef_t *fd ) {
 	railRibbonDesc_t rail;
 	beamDesc_t beam;
 	spriteDesc_t sprite;
-	atmosphericDesc_t atmosphere;
 	qhandle_t shader;
 	vec3_t center;
 	int i;
@@ -92,26 +92,6 @@ static void R_InjectRalEffectsSmoke( const refdef_t *fd ) {
 	sprite.rgba[0] = 1.0f; sprite.rgba[1] = 0.25f;
 	sprite.rgba[2] = 0.1f; sprite.rgba[3] = 1.0f;
 	RE_AddSpriteToScene( &sprite );
-
-	// Arm one bounded rain volume for the RAL atmospheric command proof. The
-	// test-only cvar is off by default; production weather remains cgame-owned.
-	// The heightgrid image is already layout-valid at renderer init. Its sampled
-	// values are deliberately outside this command-path receipt's visual scope.
-	memset( &atmosphere, 0, sizeof( atmosphere ) );
-	atmosphere.type = 1;
-	atmosphere.distance = 512.0f;
-	atmosphere.bounds[0] = center[0] - 128.0f;
-	atmosphere.bounds[1] = center[1] - 128.0f;
-	atmosphere.bounds[2] = center[2] - 128.0f;
-	atmosphere.bounds[3] = center[0] + 128.0f;
-	atmosphere.bounds[4] = center[1] + 128.0f;
-	atmosphere.bounds[5] = center[2] + 128.0f;
-	atmosphere.worldMins[0] = atmosphere.bounds[0];
-	atmosphere.worldMins[1] = atmosphere.bounds[1];
-	atmosphere.worldMaxs[0] = atmosphere.bounds[3];
-	atmosphere.worldMaxs[1] = atmosphere.bounds[4];
-	atmosphere.gridSize = 256;
-	RE_SetAtmosphere( &atmosphere );
 
 	Q_strncpyz( s_ralEffectsSmokeMap, tr.world->baseName,
 		sizeof( s_ralEffectsSmokeMap ) );
@@ -340,9 +320,38 @@ void RE_AddRefEntityToScene( const refEntity_t *ent, qboolean intShaderTime ) {
 	memset( &backEndData->entities[r_numentities].temporalReceipt, 0,
 		sizeof( backEndData->entities[r_numentities].temporalReceipt ) );
 	backEndData->entities[r_numentities].lightingCalculated = qfalse;
+	backEndData->entities[r_numentities].hasLocalIrradiance = qfalse;
+	memset( backEndData->entities[r_numentities].localShQ16, 0,
+		sizeof( backEndData->entities[r_numentities].localShQ16 ) );
+	backEndData->entities[r_numentities].localIrradianceHash = 0u;
 	backEndData->entities[r_numentities].intShaderTime = intShaderTime;
 
 	r_numentities++;
+}
+
+qboolean RE_SetRefEntityLocalIrradiance( uint32_t sceneEntityIndex,
+		const int32_t coefficientsQ16[4][3], uint64_t coefficientHash ) {
+	trRefEntity_t *entity;
+	uint32_t channel, localAxis;
+	if ( !coefficientsQ16 || !coefficientHash ||
+		sceneEntityIndex >= (uint32_t)( r_numentities - r_firstSceneEntity ) ) return qfalse;
+	entity = &backEndData->entities[r_firstSceneEntity + sceneEntityIndex];
+	memcpy( entity->localShQ16[0], coefficientsQ16[0], sizeof( entity->localShQ16[0] ) );
+	for ( localAxis = 0u; localAxis < 3u; ++localAxis ) {
+		vec3_t worldAxis;
+		VectorNormalize2( entity->e.axis[localAxis], worldAxis );
+		for ( channel = 0u; channel < 3u; ++channel ) {
+			double value = (double)coefficientsQ16[1][channel] * worldAxis[0] +
+				(double)coefficientsQ16[2][channel] * worldAxis[1] +
+				(double)coefficientsQ16[3][channel] * worldAxis[2];
+			if ( value < (double)INT32_MIN || value > (double)INT32_MAX ) return qfalse;
+			entity->localShQ16[localAxis + 1u][channel] =
+				(int32_t)( value < 0.0 ? value - 0.5 : value + 0.5 );
+		}
+	}
+	entity->localIrradianceHash = coefficientHash;
+	entity->hasLocalIrradiance = qtrue;
+	return qtrue;
 }
 
 void RE_AddRefEntityToSceneTemporal( const refEntity_t *ent,
@@ -734,251 +743,236 @@ void RE_AddSpriteToScene( const spriteDesc_t *desc ) {
 	vk.sprite.numThisFrame += 1;
 }
 
-// ── particle emit helpers ────────────────────────────────────────
-//
-// File-local scatter / velocity helpers. Each scatter helper writes
-// a per-axis offset into out_offset; caller adds that to a base
-// position. Each velocity helper writes a velocity into out_vel.
-// random() / crandom() come from q_shared.h ([0, 1) and [-1, +1]
-// respectively); PerpendicularVector and CrossProduct are q_math.
+static uint32_t R_QueueParticleEmitter( const emitterDesc_t *desc,
+		uint32_t deterministicSeed, uint32_t profileHandle,
+		uint32_t stageIndex, uint32_t stageFlags ) {
+	particleSpawnGPU_t request;
+	uint32_t count, groups, requested, remaining;
 
-static void Particle_ScatterNone( vec3_t out_offset ) {
-	VectorClear( out_offset );
-}
+	if ( !vk.particle.available ) return 0u;
+	if ( desc == NULL ) return 0u;
+	if ( desc->cls < 1
+	  || (uint32_t)desc->cls > vk.particle.numClasses ) return 0u;
+	if ( desc->count <= 0 ) return 0u;
+	if ( vk.particle.spawnRequestCount >= PARTICLE_SPAWN_REQUEST_MAX ) {
+		tr.pc.c_particleDroppedRequests++;
+		tr.pc.c_particleDroppedParticles += desc->count;
+		return 0u;
+	}
 
-static void Particle_ScatterCube( float mag, vec3_t out_offset ) {
-	out_offset[0] = crandom() * mag;
-	out_offset[1] = crandom() * mag;
-	out_offset[2] = crandom() * mag;
-}
+	requested = (uint32_t)desc->count;
+	remaining = PARTICLES_PER_POOL - vk.particle.spawnParticleCount;
+	if ( remaining == 0u ) {
+		tr.pc.c_particleDroppedRequests++;
+		tr.pc.c_particleDroppedParticles += desc->count;
+		return 0u;
+	}
+	count = requested;
+	if ( count > remaining ) {
+		count = remaining;
+		tr.pc.c_particleDroppedParticles += (int)( requested - count );
+	}
+	memset( &request, 0, sizeof( request ) );
+	VectorCopy( desc->origin, request.origin );
+	VectorCopy( desc->axis, request.axis );
+	VectorCopy( desc->end, request.end );
+	Vector4Copy( desc->colorTint, request.colorTint );
+	request.classHandle = (uint32_t)desc->cls;
+	request.count = count;
+	request.firstSlot = vk.particle.nextSlot;
+	request.profileHandle = profileHandle;
+	request.stageIndex = stageIndex;
+	request.stageFlags = stageFlags;
+	if ( deterministicSeed != 0u ) {
+		request.seed = deterministicSeed;
+	} else {
+		vk.particle.spawnSeed++;
+		if ( vk.particle.spawnSeed == 0u ) vk.particle.spawnSeed = 1u;
+		request.seed = vk.particle.spawnSeed;
+	}
+	if ( !vk_particle_shadow_write_spawn( vk.particle.spawnRequestCount,
+			&request ) ) return 0u;
+	vk.particle.spawnRequestCount++;
+	vk.particle.spawnParticleCount += count;
+	groups = ( count + 63u ) / 64u;
+	if ( groups > vk.particle.spawnMaxGroups )
+		vk.particle.spawnMaxGroups = groups;
+	vk.particle.nextSlot = ( vk.particle.nextSlot + count ) % PARTICLES_PER_POOL;
 
-static void Particle_ScatterSphere( float mag, vec3_t out_offset ) {
-	vec3_t v;
-	// Rejection sampling for uniform point in unit sphere. Average
-	// ~1.91 iterations per call; tighter than Marsaglia for vec3.
-	do {
-		v[0] = crandom();
-		v[1] = crandom();
-		v[2] = crandom();
-	} while ( DotProduct( v, v ) > 1.0f );
-	VectorScale( v, mag, out_offset );
-}
-
-static void Particle_ScatterPerpDisc( float mag, const vec3_t axis, vec3_t out_offset ) {
-	vec3_t right, up;
-	float u, v;
-
-	PerpendicularVector( right, axis );
-	CrossProduct( axis, right, up );
-	VectorNormalize( right );
-	VectorNormalize( up );
-
-	// Rejection in unit disc, then scale.
-	do {
-		u = crandom();
-		v = crandom();
-	} while ( u * u + v * v > 1.0f );
-
-	VectorScale( right, u * mag, out_offset );
-	VectorMA( out_offset, v * mag, up, out_offset );
-}
-
-static void Particle_VelocityAxial( const vec3_t axis, float axialSpeed, vec3_t out_vel ) {
-	VectorScale( axis, axialSpeed, out_vel );
-}
-
-static void Particle_VelocityAxialPlusCube( const vec3_t axis, float axialSpeed,
-                                            float cubeJitter, vec3_t out_vel ) {
-	VectorScale( axis, axialSpeed, out_vel );
-	out_vel[0] += crandom() * cubeJitter;
-	out_vel[1] += crandom() * cubeJitter;
-	out_vel[2] += crandom() * cubeJitter;
-}
-
-static void Particle_VelocityCone( const vec3_t axis, float axialSpeed,
-                                   float coneHalfAngle, vec3_t out_vel ) {
-	float cosHalf = cosf( coneHalfAngle );
-	float z       = cosHalf + ( 1.0f - cosHalf ) * random();
-	float phi     = random() * 2.0f * (float)M_PI;
-	float r       = sqrtf( 1.0f - z * z );
-	vec3_t right, up;
-
-	PerpendicularVector( right, axis );
-	CrossProduct( axis, right, up );
-	VectorNormalize( right );
-	VectorNormalize( up );
-
-	// Uniform on spherical cap of half-angle coneHalfAngle around
-	// axis; magnitude = axialSpeed.
-	VectorScale( axis,                  z * axialSpeed,           out_vel );
-	VectorMA  ( out_vel, r * cosf( phi ) * axialSpeed, right, out_vel );
-	VectorMA  ( out_vel, r * sinf( phi ) * axialSpeed, up,    out_vel );
-}
-
-static void Particle_VelocityPureCube( float cubeJitter, vec3_t out_vel ) {
-	out_vel[0] = crandom() * cubeJitter;
-	out_vel[1] = crandom() * cubeJitter;
-	out_vel[2] = crandom() * cubeJitter;
+	tr.pc.c_particleEmitters++;
+	tr.pc.c_particleParticles += (int)count;
+	tr.pc.c_particleSpawnRequests++;
+	return count;
 }
 
 void RE_EmitParticles( const emitterDesc_t *desc ) {
-	const particleClassGPU_t *cls;
-	int            i;
-	uint32_t       pingRead;
+	R_QueueParticleEmitter( desc, 0u, 0u, 0u, 0u );
+}
 
-	if ( !vk.particle.available ) return;
-	if ( desc == NULL ) return;
-	if ( desc->cls < 1
-	  || (uint32_t)desc->cls > vk.particle.numClasses ) return;
-	if ( desc->count <= 0 ) return;
+#define ATMOSPHERE_EFFECT_RUNTIME_MAX 256u
 
-	tr.pc.c_particleEmitters++;
-	tr.pc.c_particleParticles += desc->count;
+typedef struct {
+	uint32_t id;
+	uint32_t profile;
+	uint32_t seed;
+	uint32_t emitted[ATMOSPHERE_EFFECT_MAX_STAGES];
+	uint32_t pending[ATMOSPHERE_EFFECT_MAX_STAGES];
+	float rateCarry[ATMOSPHERE_EFFECT_MAX_STAGES];
+	uint32_t startedMask;
+	uint32_t totalEmitted;
+	float startTimeline;
+	float lastTimeline;
+	qboolean active;
+} atmosphereEffectRuntime_t;
 
-	if ( !vk_particle_shadow_get_class( (uint32_t)desc->cls - 1u, &cls ) )
+static atmosphereEffectRuntime_t s_atmosphereEffectRuntime[
+	ATMOSPHERE_EFFECT_RUNTIME_MAX];
+
+void RE_ResetAtmosphereEffectRuntime( void ) {
+	memset( s_atmosphereEffectRuntime, 0,
+		sizeof( s_atmosphereEffectRuntime ) );
+}
+
+static atmosphereEffectRuntime_t *R_AtmosphereEffectRuntime(
+		const atmosphereEmitter_t *emitter ) {
+	atmosphereEffectRuntime_t *freeSlot = NULL;
+	atmosphereEffectRuntime_t *oldest = NULL;
+	uint32_t i;
+	for ( i = 0u; i < ATMOSPHERE_EFFECT_RUNTIME_MAX; ++i ) {
+		atmosphereEffectRuntime_t *runtime = &s_atmosphereEffectRuntime[i];
+		if ( runtime->active && runtime->id == emitter->id ) {
+			if ( runtime->profile != emitter->profile
+					|| runtime->seed != emitter->seed
+					|| vk.atm.timelineSeconds < runtime->lastTimeline ) {
+				memset( runtime, 0, sizeof( *runtime ) );
+				break;
+			}
+			return runtime;
+		}
+		if ( !runtime->active && freeSlot == NULL ) freeSlot = runtime;
+		if ( runtime->active && ( oldest == NULL
+				|| runtime->lastTimeline < oldest->lastTimeline ) ) oldest = runtime;
+	}
+	if ( i < ATMOSPHERE_EFFECT_RUNTIME_MAX )
+		freeSlot = &s_atmosphereEffectRuntime[i];
+	if ( freeSlot == NULL ) freeSlot = oldest;
+	if ( freeSlot == NULL ) return NULL;
+	memset( freeSlot, 0, sizeof( *freeSlot ) );
+	freeSlot->id = emitter->id;
+	freeSlot->profile = emitter->profile;
+	freeSlot->seed = emitter->seed;
+	freeSlot->startTimeline = vk.atm.timelineSeconds;
+	freeSlot->lastTimeline = vk.atm.timelineSeconds;
+	freeSlot->active = qtrue;
+	return freeSlot;
+}
+
+// Lower persistent semantic atmosphere intent to bounded ROOT stage requests.
+// Scheduling cost is O(emitters * stages), while every particle instance is
+// expanded and simulated on GPU. Cumulative fractional rates make bursts and
+// continuous emission frame-rate independent and prevent frame-local resubmission from
+// replaying the emitter's whole lifetime. Collision/death child stages remain
+// GPU event work; they are deliberately not guessed on the host.
+static float R_AtmosphereStageActiveTime( float elapsed,
+		const atmosphereEmitter_t *emitter,
+		const atmosphereEffectProfile_t *profile,
+		const atmosphereEffectStage_t *stage ) {
+	float active = elapsed - stage->delay;
+	if ( active < 0.0f ) active = 0.0f;
+	if ( active > stage->duration ) active = stage->duration;
+	if ( emitter->lifetime > 0.0f && active > emitter->lifetime )
+		active = emitter->lifetime;
+	if ( profile->duration > 0.0f && active > profile->duration )
+		active = profile->duration;
+	return active;
+}
+
+void RE_EmitAtmosphereProfile( const atmosphereEmitter_t *emitter,
+		const atmosphereEffectProfile_t *profile ) {
+	atmosphereEffectRuntime_t *runtime;
+	float elapsed, previousElapsed, effectiveIntensity;
+	uint32_t i;
+	if ( !emitter || !profile ) return;
+	effectiveIntensity = RenderSubmission_AtmosphereEmitterIntensity(
+		&vk.atm.state, emitter );
+	runtime = R_AtmosphereEffectRuntime( emitter );
+	if ( runtime == NULL ) return;
+	elapsed = vk.atm.timelineSeconds - runtime->startTimeline;
+	previousElapsed = runtime->lastTimeline - runtime->startTimeline;
+	if ( elapsed < 0.0f ) elapsed = 0.0f;
+	if ( previousElapsed < 0.0f || previousElapsed > elapsed )
+		previousElapsed = elapsed;
+	if ( effectiveIntensity <= 0.0f ) {
+		runtime->lastTimeline = vk.atm.timelineSeconds;
 		return;
-
-	// Emit happens during cgame sim, BEFORE vk_begin_frame's
-	// compute dispatch + flip. At emit time, pingPongRead points to
-	// the buffer last frame's compute wrote; this frame's compute
-	// will read it (integrating these new particles by one frame
-	// before the first render), then write to 1-pingPongRead.
-	pingRead = vk.particle.pingPongRead;
-
-	for ( i = 0; i < desc->count; i++ ) {
-		particleGPU_t p;
-		vec3_t        basePos, scatterOff, vel;
-		float         lifetime, lifetimeInv;
-		uint32_t      slot;
-
-		memset( &p, 0, sizeof( p ) );
-
-		// Position: emit mode picks the base point along the
-		// origin→end path (or just origin), scatter shape adds
-		// an offset from there.
-		if ( cls->emitMode == EMIT_POINT ) {
-			VectorCopy( desc->origin, basePos );
-		} else {  // EMIT_PATH — stratified: one particle at the CENTRE of each equal
-		          // slice (deterministic, even spacing). The prior `(i + random())/count`
-		          // degenerated to plain random() at count==1 (the dominant high-fps case:
-		          // ~1 puff per 50ms grid-step), so consecutive single-puff frames landed
-		          // randomly in their ~50u segments and bunched ("2 close, gap, 2 close").
-		          // Slice-centre placement makes consecutive frames evenly ~50u apart at
-		          // count==1 AND keeps count>=2 evenly spaced within-segment + across the
-		          // frame boundary. No jitter → a perfect grid; clumping is impossible.
-			float t = ( (float)i + 0.5f ) / (float)desc->count;   // centre of the i-th slice
-			basePos[0] = desc->origin[0] + t * ( desc->end[0] - desc->origin[0] );
-			basePos[1] = desc->origin[1] + t * ( desc->end[1] - desc->origin[1] );
-			basePos[2] = desc->origin[2] + t * ( desc->end[2] - desc->origin[2] );
+	}
+	for ( i = 0u; i < profile->stageCount; ++i ) {
+		const atmosphereEffectStage_t *stage = &profile->stages[i];
+		emitterDesc_t desc;
+		float activeSeconds, previousActive, generated;
+		uint32_t count, remaining, stageRemaining;
+		if ( ( stage->trigger != ATMOSPHERE_STAGE_EMISSION
+				&& stage->trigger != ATMOSPHERE_STAGE_CONTINUOUS )
+				|| stage->parentStage != UINT32_MAX || elapsed < stage->delay ) continue;
+		if ( stage->lodFar > 0.0f ) {
+			vec3_t delta;
+			VectorSubtract( emitter->origin, tr.refdef.vieworg, delta );
+			if ( DotProduct( delta, delta ) > stage->lodFar * stage->lodFar ) continue;
 		}
-
-		switch ( cls->scatterShape ) {
-			case SCATTER_NONE:
-				Particle_ScatterNone( scatterOff );
-				break;
-			case SCATTER_CUBE:
-				Particle_ScatterCube( cls->scatterMagnitude, scatterOff );
-				break;
-			case SCATTER_SPHERE:
-				Particle_ScatterSphere( cls->scatterMagnitude, scatterOff );
-				break;
-			case SCATTER_PERP_DISC:
-				Particle_ScatterPerpDisc( cls->scatterMagnitude,
-				                          desc->axis, scatterOff );
-				break;
-			default:
-				VectorClear( scatterOff );
-				break;
+		activeSeconds = R_AtmosphereStageActiveTime( elapsed,
+			emitter, profile, stage );
+		previousActive = R_AtmosphereStageActiveTime( previousElapsed,
+			emitter, profile, stage );
+		if ( ( runtime->startedMask & ( 1u << i ) ) == 0u ) {
+			generated = ceilf( (float)stage->burstCount * effectiveIntensity
+				* stage->intensityScale );
+			if ( generated > (float)UINT32_MAX ) generated = (float)UINT32_MAX;
+			runtime->pending[i] = (uint32_t)generated;
+			runtime->startedMask |= 1u << i;
 		}
-
-		VectorAdd( basePos, scatterOff, p.pos );
-
-		// Per-particle effective axial speed. speedJitter defaults to
-		// zero, in which case effectiveAxialSpeed == axialSpeed and
-		// pre-extension behavior is byte-identical. Picked once per
-		// particle so the shape helpers themselves remain stateless.
-		// VEL_PURE_CUBE has no axial component, so the pick is wasted
-		// for that shape — cheap enough to compute unconditionally
-		// and avoid a switch on shape just to skip the rand call.
-		{
-			float effectiveAxialSpeed = cls->axialSpeed
-			                          + crandom() * cls->speedJitter;
-
-			switch ( cls->velocityShape ) {
-				case VEL_AXIAL:
-					Particle_VelocityAxial( desc->axis, effectiveAxialSpeed, vel );
-					break;
-				case VEL_AXIAL_PLUS_CUBE:
-					Particle_VelocityAxialPlusCube( desc->axis, effectiveAxialSpeed,
-					                                cls->cubeJitter, vel );
-					break;
-				case VEL_CONE:
-					Particle_VelocityCone( desc->axis, effectiveAxialSpeed,
-					                       cls->coneHalfAngle, vel );
-					break;
-				case VEL_PURE_CUBE:
-					Particle_VelocityPureCube( cls->cubeJitter, vel );
-					break;
-				default:
-					VectorClear( vel );
-					break;
+		if ( activeSeconds > previousActive && stage->spawnRate > 0.0f ) {
+			runtime->rateCarry[i] += stage->spawnRate
+				* ( activeSeconds - previousActive )
+				* effectiveIntensity * stage->intensityScale;
+			generated = floorf( runtime->rateCarry[i] );
+			if ( generated > 0.0f ) {
+				const uint32_t whole = generated > (float)UINT32_MAX
+					? UINT32_MAX : (uint32_t)generated;
+				const uint64_t pending = (uint64_t)runtime->pending[i] + whole;
+				runtime->pending[i] = pending > UINT32_MAX
+					? UINT32_MAX : (uint32_t)pending;
+				runtime->rateCarry[i] -= (float)whole;
 			}
 		}
-
-		// Post-shape velocity bias + per-axis symmetric jitter. Both
-		// default to zero (memset-zeroed in the GPU mirror when the
-		// class doesn't populate them), so existing classes are
-		// untouched. Asymmetric ranges express via midpoint+halfwidth:
-		// CPU's "vel.z += [0, 100]" → bias=(0,0,50), jitter=(0,0,50).
-		vel[0] += cls->velocityBias[0]
-		        + crandom() * cls->velocityBiasJitter[0];
-		vel[1] += cls->velocityBias[1]
-		        + crandom() * cls->velocityBiasJitter[1];
-		vel[2] += cls->velocityBias[2]
-		        + crandom() * cls->velocityBiasJitter[2];
-
-		VectorCopy( vel, p.vel );
-
-		// Per-particle sizeStart offset, picked once at emit. Vertex
-		// shader reads p.sizeJitterPick each frame and adds it to
-		// c.sizeStart inside the size lerp. Classes with sizeJitter
-		// == 0 store 0 here, so the lerp degenerates to the existing
-		// mix(c.sizeStart, c.sizeEnd, p.age).
-		p.sizeJitterPick = crandom() * cls->sizeJitter;
-
-		// Lifetime: mean ± jitter, signed. Clamp at 1ms to avoid
-		// divide-by-zero in lifetimeInv (the compute shader also
-		// guards against age >= 1.0 each frame, so a pathologically
-		// short lifetime just means the particle dies in 1-2 frames).
-		lifetime = cls->lifetimeMean + crandom() * cls->lifetimeJitter;
-		if ( lifetime < 0.001f ) lifetime = 0.001f;
-		lifetimeInv = 1.0f / lifetime;
-
-		p.age         = 0.0f;
-		p.lifetimeInv = lifetimeInv;
-		p.classHandle = (uint32_t)desc->cls;
-
-		// Per-particle palette index. Random pick in
-		// [0, paletteCount). Class's paletteCount is clamped to
-		// >= 1 by RE_RegisterParticleClass; the > 1 branch
-		// documents intent and avoids a no-op modulo on
-		// single-palette classes.
-		if ( cls->paletteCount > 1 ) {
-			p.paletteIndex = (uint32_t)( rand() % (int)cls->paletteCount );
-		} else {
-			p.paletteIndex = 0;
+		if ( runtime->emitted[i] >= stage->maxParticles
+				|| runtime->totalEmitted >= profile->maxParticles ) {
+			runtime->pending[i] = 0u;
+			runtime->rateCarry[i] = 0.0f;
+			continue;
 		}
-		// p.pad1..pad2 stay zero from the memset.
-
-		// Round-robin slot allocation. Wrap-around overwrites the
-		// oldest particle (which is either dead or near-end-of-life
-		// given pool size 16384 and typical emit rates).
-		slot                  = vk.particle.nextSlot;
-		vk.particle.nextSlot  = ( slot + 1 ) % PARTICLES_PER_POOL;
-
-		if ( !vk_particle_shadow_write_emission( pingRead, slot, &p ) )
-			return;
+		stageRemaining = stage->maxParticles - runtime->emitted[i];
+		count = runtime->pending[i];
+		if ( count > stageRemaining ) count = stageRemaining;
+		remaining = profile->maxParticles - runtime->totalEmitted;
+		if ( count > remaining ) count = remaining;
+		if ( count == 0u ) continue;
+		memset( &desc, 0, sizeof( desc ) );
+		desc.cls = (particleClassHandle_t)stage->particleClass;
+		desc.count = (int)count;
+		VectorCopy( emitter->origin, desc.origin );
+		VectorCopy( emitter->direction, desc.axis );
+		VectorMA( emitter->origin, emitter->radius, emitter->direction, desc.end );
+		Vector4Set( desc.colorTint, 1.0f, 1.0f, 1.0f, effectiveIntensity );
+		count = R_QueueParticleEmitter( &desc,
+			( emitter->seed ^ profile->seed
+				^ ( 0x9e3779b9u * ( i + 1u ) )
+				^ runtime->emitted[i] ) | 1u,
+			emitter->profile, i, stage->flags );
+		runtime->emitted[i] += count;
+		runtime->totalEmitted += count;
+		runtime->pending[i] -= count;
 	}
+	runtime->lastTimeline = vk.atm.timelineSeconds;
 }
 
 // Resolve a decal shader qhandle to a slot in the projector's texture registry
@@ -1457,7 +1451,6 @@ void RE_RenderScene( const refdef_t *fd, int worldIndex ) {
 	if ( r_norefresh->integer ) {
 		return;
 	}
-
 	startTime = ri.Milliseconds();
 	if ( fd->rdflags & RDF_HYPERSPACE ) {
 		R_TemporalMarkCameraCut( worldIndex );
@@ -1614,7 +1607,13 @@ void RE_RenderScene( const refdef_t *fd, int worldIndex ) {
 	//
 	memset( &parms, 0, sizeof( parms ) );
 	parms.viewportX = tr.refdef.x;
-	parms.viewportY = glConfig.vidHeight - ( tr.refdef.y + tr.refdef.height );
+	/* Every refdef rectangle is published in presentation pixels.  Keep the GL
+	 * top-left -> bottom-left conversion in that same domain; the Vulkan command
+	 * path scales the complete rectangle into the independent scene attachment.
+	 * Mixing the 720p render height with a 1440p Retina refdef produced a negative
+	 * viewport origin and clipped half of the world after vid_restart. */
+	parms.viewportY = gls.windowHeight
+		- ( tr.refdef.y + tr.refdef.height );
 	parms.viewportWidth = tr.refdef.width;
 	parms.viewportHeight = tr.refdef.height;
 

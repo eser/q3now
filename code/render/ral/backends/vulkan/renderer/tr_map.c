@@ -2794,14 +2794,12 @@ static void R_LoadFogs( const mapFile_t *bsp ) {
 
 		out->parms = shader->fogParms;
 
-#if FEAT_FOG_SYSTEM
 		if ( out->parms.type != FT_NONE ) {
 			R_LOG( rch_assets, SEV_INFO,
 				"Advanced fog volume: shader=%s type=%d density=%g farClip=%g depthForOpaque=%g\n",
 				fogs->shader, (int)out->parms.type, out->parms.density,
 				out->parms.farClip, out->parms.depthForOpaque );
 		}
-#endif
 
 		/* dropped `* tr.identityLight` halving from
 		 * fog vertex-color bake. Linear pipeline. */

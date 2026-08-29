@@ -7,7 +7,7 @@
 itemDef {
 	name "top_bar"
 	type container
-	rect 0 0 1 4.5vh
+	width FIXED 1 height FIXED 4.5vh
 	height FIT
 	direction row
 	alignY center
@@ -17,7 +17,7 @@ itemDef {
 	itemDef {
 		name "top_sigil"
 		type 0
-		rect 0 0 1.8vw 3vh
+		width FIXED 1.8vw height FIXED 3vh
 		height FIT
 		width PERCENT 1.8vw
 		iconText "qw_sigil"
@@ -31,7 +31,7 @@ itemDef {
 	itemDef {
 		name "top_brand"
 		type 0
-		rect 0 0 22vw 2.5vh
+		width FIXED 22vw height FIXED 2.5vh
 		height FIT
 		width PERCENT 22vw
 		text "QUAKEWIRED · MMXXVI"

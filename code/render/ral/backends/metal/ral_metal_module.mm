@@ -2,8 +2,12 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "ral_metal_module.h"
+#include "ral_metal_lighting.h"
 #include "maps/map_format_registry.h"
+#include "maps/meta.h"
 #include "render_image_decode.h"
+#include "render_lighting_project_cook.h"
+#include "render_lighting_sidecar.h"
 #include "render_material_script.h"
 #include "tr_public.h"
 #include "tr_screenshot.h"
@@ -13,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 typedef struct {
 	refimport_t imports;
@@ -29,12 +34,18 @@ typedef struct {
 	ralMetalModuleFrameReceipt_t published;
 	renderSubmissionState_t frontend;
 	renderMaterialScriptCatalog_t materialScripts;
+	renderLightingSidecarReceipt_t lightingSidecar;
+	renderIrradianceSidecarReceipt_t irradianceSidecar;
+	ralMetalLighting_t *directionalLighting;
+	ralMetalLightingReceipt_t directionalLightingReceipt;
 	const mapFile_t *loadedWorld;
+	const char *entityParsePoint;
 	glconfig_t config;
 	uint64_t moduleGeneration;
 	uint64_t nextGeneration;
 	uint64_t lastLoggedWorldDigest;
 	qboolean loggedCompleteContentReceipt;
+	qboolean loggedIrradianceReceipt;
 	char screenshotName[MAX_OSPATH];
 	int initLogChannel;
 	qboolean loaded;
@@ -45,6 +56,32 @@ typedef struct {
 	qboolean screenshotPending;
 	qboolean screenshotSilent;
 	qboolean loggedInvalidEntityDrop;
+	qboolean loggedInvalidUiDrop;
+	uint32_t unresolvedMaterialLogCount;
+	cvar_t *brightness;
+	cvar_t brightnessFallback;
+	cvar_t *lightmapBoost;
+	cvar_t lightmapBoostFallback;
+	cvar_t *shaderTimeOverride;
+	cvar_t shaderTimeOverrideFallback;
+	cvar_t *toneMap;
+	cvar_t toneMapFallback;
+	cvar_t *toneMapExposure;
+	cvar_t toneMapExposureFallback;
+	cvar_t *lottesContrast;
+	cvar_t lottesContrastFallback;
+	cvar_t *lottesShoulder;
+	cvar_t lottesShoulderFallback;
+	cvar_t *lottesMidIn;
+	cvar_t lottesMidInFallback;
+	cvar_t *lottesMidOut;
+	cvar_t lottesMidOutFallback;
+	cvar_t *lottesHdrMax;
+	cvar_t lottesHdrMaxFallback;
+	cvar_t *ambientScale;
+	cvar_t ambientScaleFallback;
+	cvar_t *directedScale;
+	cvar_t directedScaleFallback;
 } wiredMetalModuleState_t;
 
 #ifdef __cplusplus
@@ -56,6 +93,50 @@ typedef struct {
 static wiredMetalModuleState_t s_module;
 static uint64_t s_moduleCounter;
 refimport_t ri;
+
+static qboolean PlanAtmosphere( uint64_t frameGeneration,
+		ralAtmospherePlanReceipt_t *outReceipt ) {
+	renderAtmosphereSnapshot_t snapshot;
+	renderAtmosphereMediaSnapshot_t media;
+	ralAtmospherePlanRequest_t request;
+	const atmosphereEmitter_t *emitters;
+	const atmosphereMediaVolume_t *volumes;
+	if ( !RenderSubmission_AtmosphereSnapshot( &s_module.frontend,
+			&snapshot, &emitters ) ) return qfalse;
+	(void)emitters;
+	if ( !RenderSubmission_AtmosphereMediaSnapshot( &s_module.frontend,
+			&media, &volumes ) ) return qfalse;
+	(void)volumes;
+	memset( &request, 0, sizeof( request ) );
+	request.schemaVersion = RAL_ATMOSPHERE_PLAN_SCHEMA_VERSION;
+	request.backendType = RAL_BACKEND_METAL;
+	request.frameGeneration = frameGeneration;
+	request.width = (uint32_t)s_module.config.vidWidth;
+	request.height = (uint32_t)s_module.config.vidHeight;
+	request.requestedTier = snapshot.active
+		? (ralAtmosphereTier_t)snapshot.state.qualityTier
+		: RAL_ATMOSPHERE_TIER_OFF;
+	request.localVolumeCount = media.count;
+	request.maxFroxelCount = 262144u;
+	request.maxLocalVolumes = RAL_ATMOSPHERE_MAX_VOLUMES;
+	request.maxLights = RAL_ATMOSPHERE_MAX_LIGHTS;
+	request.maxShadowedLights = RAL_ATMOSPHERE_MAX_SHADOWED_LIGHTS;
+	request.mediaActive = snapshot.active
+		&& ( snapshot.state.mediaDensity > 0.0f
+			|| snapshot.state.visibility > 0.0f || media.count > 0u );
+	request.skyLightingActive = snapshot.active;
+	request.cloudsRequested = snapshot.active
+		&& snapshot.state.cloudCover > 0.0f;
+	/* Metal owns the bounded flat-storage froxel executor and native fragment
+	 * consumer. Volumetric shadows remain disabled until a measured native
+	 * shadow-injection path lands. */
+	request.capabilities.analyticComposite = qtrue;
+	request.capabilities.compute = qtrue;
+	request.capabilities.storageBuffers = qtrue;
+	request.capabilities.temporalHistory = qtrue;
+	request.capabilities.fullClouds = qtrue;
+	return Ral_AtmospherePlan( &request, outReceipt );
+}
 
 static qboolean ModuleReceiptValid( const ralMetalModuleFrameReceipt_t *receipt ) {
 	return ( receipt && receipt->schemaVersion == RAL_METAL_MODULE_SCHEMA_VERSION
@@ -75,8 +156,11 @@ static qboolean ModuleReceiptValid( const ralMetalModuleFrameReceipt_t *receipt 
 			&receipt->presentation )
 		&& RenderSubmission_ReceiptExact( &receipt->frontend,
 			&receipt->frontend )
+		&& Ral_AtmospherePlanReceiptExact( &receipt->atmosphere,
+			&receipt->atmosphere )
 		&& receipt->frontend.ownerGeneration == receipt->moduleGeneration
 		&& receipt->frontend.frameGeneration == receipt->frameGeneration
+		&& receipt->atmosphere.frameGeneration == receipt->frameGeneration
 		&& receipt->host.backendType == receipt->backendType
 		&& receipt->surface.backendType == receipt->backendType
 		&& receipt->surface.ownerGeneration == receipt->host.ownerGeneration
@@ -104,6 +188,7 @@ WIRED_METAL_MODULE_EXPORT qboolean RalMetal_ModuleFrameReceiptExact(
 		&& RalMetal_DrawableReceiptExact( &a->drawable, &b->drawable )
 		&& RalMetal_PresentReceiptExact( &a->presentation, &b->presentation )
 		&& RenderSubmission_ReceiptExact( &a->frontend, &b->frontend )
+		&& Ral_AtmospherePlanReceiptExact( &a->atmosphere, &b->atmosphere )
 		&& a->ready == b->ready ) ? qtrue : qfalse;
 }
 
@@ -157,8 +242,11 @@ static qboolean CompleteScreenshot( void ) {
 	uint32_t width, height, outputWidth, outputHeight;
 	if ( !s_module.screenshotPending ) return qtrue;
 	rgb = RalMetal_PresentCaptureRgb( s_module.presentation, &width, &height );
-	outputWidth = s_module.hostReceipt.logicalWidth;
-	outputHeight = s_module.hostReceipt.logicalHeight;
+	/* Screenshot/readback is a display-referred presentation artifact. Keep its
+	 * native backing extent, matching the drawable and the other RAL backends;
+	 * logical points are a UI layout domain, not an image-storage contract. */
+	outputWidth = s_module.hostReceipt.pixelWidth;
+	outputHeight = s_module.hostReceipt.pixelHeight;
 	if ( rgb && outputWidth && outputHeight
 			&& ( outputWidth != width || outputHeight != height ) ) {
 		uint64_t bytes = (uint64_t)outputWidth * outputHeight * 3u;
@@ -202,8 +290,181 @@ static qboolean CompleteScreenshot( void ) {
 static qhandle_t RegisterAsset( renderAssetKind_t kind, const char *name ) {
 	return RenderSubmission_RegisterAsset( &s_module.frontend, kind, name );
 }
-static qhandle_t RegisterMaterialImageSource( renderAssetKind_t kind,
-		const char *name, const char *imageName, qboolean clampToEdge ) {
+
+static qhandle_t RegisterScriptedSecondaryImage( renderAssetKind_t kind,
+		const renderMaterialScriptEntry_t *scripted ) {
+	static const byte white[4] = { 255u, 255u, 255u, 255u };
+	byte *pixels = NULL;
+	uint32_t width = 0u, height = 0u;
+	char resolved[MAX_QPATH];
+	qhandle_t handle;
+	if ( !scripted || !scripted->secondaryImageName[0] ) return 0;
+	if ( RenderImage_DecodeRgba8( scripted->secondaryImageName, &pixels,
+			&width, &height, resolved ) ) {
+		handle = RenderSubmission_RegisterMaterialImage( &s_module.frontend,
+			kind, scripted->secondaryImageName, scripted->secondaryClampToEdge,
+			pixels, width, height );
+		ri.Free( pixels );
+		if ( handle ) return handle;
+	}
+	/* A missing optional layer must not make the owning sky or model vanish.
+	 * Keep the stage ready with a deterministic neutral texel when capacity
+	 * permits; the primary stage remains renderable if the bounded catalog is
+	 * already full. */
+	return RenderSubmission_RegisterMaterialImage( &s_module.frontend, kind,
+		scripted->secondaryImageName, qtrue, white, 1u, 1u );
+}
+
+static qhandle_t RegisterScriptedStageImage( renderAssetKind_t kind,
+		const renderMaterialScriptEntry_t *scripted,
+		const renderMaterialScriptStage_t *stage, qhandle_t owner ) {
+	static const byte white[4] = { 255u, 255u, 255u, 255u };
+	byte *pixels = NULL;
+	uint32_t width = 0u, height = 0u;
+	char resolved[MAX_QPATH];
+	qhandle_t handle;
+	if ( !scripted || !stage || stage->imageSource != RENDER_MATERIAL_STAGE_IMAGE )
+		return 0;
+	if ( stage->imageName[0] && scripted->imageName[0]
+			&& !strcasecmp( stage->imageName, scripted->imageName ) ) return owner;
+	if ( stage->imageName[0] && RenderImage_DecodeRgba8( stage->imageName,
+			&pixels, &width, &height, resolved ) ) {
+		handle = RenderSubmission_RegisterMaterialImage( &s_module.frontend,
+			kind, stage->imageName, stage->clampToEdge, pixels, width, height );
+		ri.Free( pixels );
+		if ( handle ) return handle;
+	}
+	return RenderSubmission_RegisterMaterialImage( &s_module.frontend, kind,
+		stage->imageName[0] ? stage->imageName : "*white", qtrue,
+		white, 1u, 1u );
+}
+
+static qboolean ApplyScriptedMaterial( renderAssetKind_t kind, const char *name,
+		qhandle_t handle, const renderMaterialScriptEntry_t *scripted ) {
+	qhandle_t secondary;
+	renderMaterialStageSnapshot_t stages[RENDER_MATERIAL_MAX_STAGES];
+	if ( !handle || !scripted || !scripted->name[0] ) return handle > 0;
+	if ( !RenderSubmission_SetMaterialRasterPolicy( &s_module.frontend, handle,
+			scripted->alphaMode, scripted->alphaCutoff,
+			scripted->depthWrite )
+			|| !RenderSubmission_SetMaterialSort( &s_module.frontend, handle,
+				scripted->sort )
+			|| !RenderSubmission_SetMaterialCullMode( &s_module.frontend, handle,
+				scripted->cullMode )
+			|| !RenderSubmission_SetMaterialSky( &s_module.frontend, handle,
+				scripted->sky )
+			|| !RenderSubmission_SetMaterialSkyBox( &s_module.frontend, handle,
+				scripted->skyBoxPrefix[0] ? qtrue : qfalse )
+			|| !RenderSubmission_SetMaterialSkyCloudHeight( &s_module.frontend,
+				handle, scripted->skyCloudHeight )
+			|| !RenderSubmission_SetMaterialNoDraw( &s_module.frontend, handle,
+				scripted->noDraw ) ) return qfalse;
+	if ( ( scripted->sky || scripted->hasTcTransform )
+			&& !RenderSubmission_SetMaterialSkyProjection(
+			&s_module.frontend, handle, scripted->skyScale,
+			scripted->skyScroll ) ) return qfalse;
+	/* The current secondary-stage contract is the two-layer sky contract.  A
+	 * generic Q3 material stage also needs its own tcGen/rgbGen/depth/blend
+	 * semantics; treating it as a sky overlay corrupts ordinary model skins. */
+	secondary = scripted->sky
+		? RegisterScriptedSecondaryImage( kind, scripted ) : 0;
+	if ( secondary && !RenderSubmission_SetMaterialSkySecondary(
+			&s_module.frontend, handle, secondary, scripted->secondaryAlphaMode,
+			scripted->secondarySkyScale, scripted->secondarySkyScroll ) )
+		return qfalse;
+	/* Ordinary Q3 materials are an ordered stage program, not a single image.
+	 * Publish the bounded program once so every native backend can lower the same
+	 * authored texture/lightmap blend chain without consulting shader text. */
+	if ( !scripted->sky && scripted->stageCount ) {
+		memset( stages, 0, sizeof( stages ) );
+		for ( uint32_t stageIndex = 0u;
+				stageIndex < scripted->stageCount; ++stageIndex ) {
+			const renderMaterialScriptStage_t *source =
+				&scripted->stages[stageIndex];
+			renderMaterialStageSnapshot_t *target = &stages[stageIndex];
+			target->imageSource = (uint32_t)source->imageSource;
+			target->tcGen = (uint32_t)source->tcGen;
+			target->sourceBlend = (uint32_t)source->sourceBlend;
+			target->destinationBlend = (uint32_t)source->destinationBlend;
+			target->alphaTest = source->alphaTest ? 1u : 0u;
+			target->alphaCutoff = source->alphaCutoff;
+			target->scaleScroll[0] = source->scale[0];
+			target->scaleScroll[1] = source->scale[1];
+			target->scaleScroll[2] = source->scroll[0];
+			target->scaleScroll[3] = source->scroll[1];
+			target->rotateDegrees = source->rotateDegrees;
+			memcpy( target->turbulence, source->turbulence,
+				sizeof( target->turbulence ) );
+			memcpy( target->stretch, source->stretch,
+				sizeof( target->stretch ) );
+			target->hasTurbulence = source->hasTurbulence;
+			target->hasStretch = source->hasStretch;
+			if ( source->imageSource == RENDER_MATERIAL_STAGE_IMAGE ) {
+				target->material = RegisterScriptedStageImage( kind, scripted,
+					source, handle );
+				if ( target->material <= 0 ) return qfalse;
+			}
+		}
+		if ( !RenderSubmission_SetMaterialStages( &s_module.frontend, handle,
+				stages, scripted->stageCount ) ) return qfalse;
+	}
+	if ( scripted->hasLighting
+			&& !RenderMaterialScript_ApplyLighting( &s_module.materialScripts,
+				name, &s_module.frontend, handle ) ) return qfalse;
+	return qtrue;
+}
+
+static qboolean DecodeSkyAtlas( const char *prefix, byte **outPixels,
+		uint32_t *outWidth, uint32_t *outHeight ) {
+	static const char *suffixes[6] = { "rt", "bk", "lf", "ft", "up", "dn" };
+	byte *faces[6] = { NULL, NULL, NULL, NULL, NULL, NULL };
+	byte *atlas = NULL;
+	uint32_t faceWidth = 0u, faceHeight = 0u;
+	qboolean result = qfalse;
+	if ( !prefix || !prefix[0] || !outPixels || !outWidth || !outHeight )
+		return qfalse;
+	for ( uint32_t face = 0u; face < 6u; ++face ) {
+		char path[MAX_QPATH], resolved[MAX_QPATH];
+		uint32_t width = 0u, height = 0u;
+		int bytes = snprintf( path, sizeof( path ), "%s_%s", prefix,
+			suffixes[face] );
+		if ( bytes <= 0 || bytes >= (int)sizeof( path )
+				|| !RenderImage_DecodeRgba8( path, &faces[face], &width,
+					&height, resolved ) ) goto cleanup;
+		if ( face == 0u ) { faceWidth = width; faceHeight = height; }
+		else if ( width != faceWidth || height != faceHeight ) goto cleanup;
+	}
+	if ( !faceWidth || !faceHeight || faceWidth > UINT32_MAX / 3u
+			|| faceHeight > UINT32_MAX / 2u ) goto cleanup;
+	{
+		const uint32_t atlasWidth = faceWidth * 3u;
+		const uint32_t atlasHeight = faceHeight * 2u;
+		const uint64_t atlasBytes = (uint64_t)atlasWidth * atlasHeight * 4u;
+		if ( atlasBytes > RENDER_SUBMISSION_MAX_MATERIAL_BYTES
+				|| atlasBytes > INT_MAX ) goto cleanup;
+		atlas = (byte *)ri.Malloc( (int)atlasBytes );
+		if ( !atlas ) goto cleanup;
+		for ( uint32_t face = 0u; face < 6u; ++face ) {
+			const uint32_t cellX = face % 3u, cellY = face / 3u;
+			for ( uint32_t row = 0u; row < faceHeight; ++row )
+				memcpy( atlas + ( (size_t)( cellY * faceHeight + row )
+						* atlasWidth + cellX * faceWidth ) * 4u,
+					faces[face] + (size_t)row * faceWidth * 4u,
+					(size_t)faceWidth * 4u );
+		}
+		*outPixels = atlas; *outWidth = atlasWidth; *outHeight = atlasHeight;
+		atlas = NULL; result = qtrue;
+	}
+cleanup:
+	for ( uint32_t face = 0u; face < 6u; ++face )
+		if ( faces[face] ) ri.Free( faces[face] );
+	if ( atlas ) ri.Free( atlas );
+	return result;
+}
+
+static qhandle_t RegisterMaterialImageSourceInternal( renderAssetKind_t kind,
+		const char *name, const char *imageName, qboolean clampToEdge,
+		qboolean allowRemap ) {
 	static const byte white[4] = { 255u, 255u, 255u, 255u };
 	renderMaterialScriptEntry_t scripted;
 	byte *pixels = NULL;
@@ -219,28 +480,78 @@ static qhandle_t RegisterMaterialImageSource( renderAssetKind_t kind,
 	if ( name && ( !strcmp( name, "*white" ) || !strcmp( name, "white" ) ) )
 		return RenderSubmission_RegisterMaterialImage( &s_module.frontend,
 			kind, name, qtrue, white, 1u, 1u );
+	if ( scripted.skyBoxPrefix[0]
+			&& DecodeSkyAtlas( scripted.skyBoxPrefix, &pixels, &width, &height ) ) {
+		handle = RenderSubmission_RegisterMaterialImage( &s_module.frontend,
+			kind, name, qtrue, pixels, width, height );
+		ri.Free( pixels );
+		if ( !handle ) handle = RenderSubmission_RegisterMaterialImage(
+			&s_module.frontend, kind, name, qtrue, white, 1u, 1u );
+		if ( !ApplyScriptedMaterial( kind, name, handle, &scripted ) ) return 0;
+		return handle;
+	}
 	if ( imageName && imageName[0] != '*'
 			&& RenderImage_DecodeRgba8( imageName, &pixels, &width, &height, resolved ) ) {
 		handle = RenderSubmission_RegisterMaterialImage( &s_module.frontend,
 			kind, name, clampToEdge, pixels, width, height );
 		ri.Free( pixels );
-		if ( handle && scripted.name[0]
-				&& !RenderSubmission_SetMaterialRasterPolicy( &s_module.frontend,
-					handle, scripted.alphaMode, scripted.alphaCutoff,
-					scripted.depthWrite ) ) return 0;
+		/* Keep valid geometry renderable when the bounded CPU material snapshot
+		 * budget is exhausted. The unresolved image path already uses a neutral
+		 * material; use the same deterministic policy for decoded images that do
+		 * not fit rather than rejecting the owning model. */
+		if ( !handle )
+			handle = RenderSubmission_RegisterMaterialImage( &s_module.frontend,
+				kind, name, qtrue, white, 1u, 1u );
+		if ( !ApplyScriptedMaterial( kind, name, handle, &scripted ) ) return 0;
+		return handle;
+	}
+	if ( allowRemap && name && s_module.imports.MetaRemap_Lookup ) {
+		const char *remapped = s_module.imports.MetaRemap_Lookup(
+			(int)REMAP_KIND_SHADER, name );
+		if ( remapped && remapped[0] && strcasecmp( remapped, name ) )
+			return RegisterMaterialImageSourceInternal( kind, remapped,
+				remapped, clampToEdge, qfalse );
+	}
+	if ( imageName && imageName[0] != '*' && s_module.imports.LogCh
+			&& s_module.initLogChannel >= 0
+			&& s_module.unresolvedMaterialLogCount < 64u ) {
+		s_module.imports.LogCh( s_module.initLogChannel, SEV_WARN,
+			"Wired native Metal RAL: unresolved material name=%s image=%s scripted=%u sky=%u noDraw=%u\n",
+			name ? name : "(null)", imageName, scripted.name[0] ? 1u : 0u,
+			scripted.sky ? 1u : 0u, scripted.noDraw ? 1u : 0u );
+		s_module.unresolvedMaterialLogCount++;
+	}
+	/* Match Vulkan's R_FindShader/FinishShader contract exactly: a missing,
+	 * scriptless image produces a zero-pass default shader.  Register a stable
+	 * material identity for receipts, then mark the owning batches invisible so
+	 * this placeholder cannot occlude valid geometry behind it. */
+	if ( !scripted.name[0] ) {
+		handle = RenderSubmission_RegisterMaterialImage( &s_module.frontend,
+			kind, name, clampToEdge, NULL, 0u, 0u );
+		if ( !handle || !RenderSubmission_SetMaterialNoDraw(
+				&s_module.frontend, handle, qtrue ) ) return 0;
 		return handle;
 	}
 	handle = RenderSubmission_RegisterMaterialImage( &s_module.frontend,
-		kind, name, clampToEdge, NULL, 0u, 0u );
-	if ( handle && scripted.name[0]
-			&& !RenderSubmission_SetMaterialRasterPolicy( &s_module.frontend,
-				handle, scripted.alphaMode, scripted.alphaCutoff,
-				scripted.depthWrite ) ) return 0;
+		kind, name, clampToEdge, scripted.noDraw ? NULL : white,
+		scripted.noDraw ? 0u : 1u, scripted.noDraw ? 0u : 1u );
+	if ( !ApplyScriptedMaterial( kind, name, handle, &scripted ) ) return 0;
 	return handle;
+}
+static qhandle_t RegisterMaterialImageSource( renderAssetKind_t kind,
+		const char *name, const char *imageName, qboolean clampToEdge ) {
+	return RegisterMaterialImageSourceInternal( kind, name, imageName,
+		clampToEdge, qtrue );
 }
 static qhandle_t RegisterMaterialImage( renderAssetKind_t kind, const char *name,
 		qboolean clampToEdge ) {
 	return RegisterMaterialImageSource( kind, name, name, clampToEdge );
+}
+static void LogModelReject( const char *name, const char *stage ) {
+	if ( s_module.imports.LogCh && s_module.initLogChannel >= 0 )
+		s_module.imports.LogCh( s_module.initLogChannel, SEV_WARN,
+			"Wired native Metal RAL: model rejected path=%s stage=%s\n",
+			name ? name : "(null)", stage ? stage : "unknown" );
 }
 static qhandle_t RegisterModel( const char *name ) {
 	void *bytes = NULL;
@@ -269,14 +580,19 @@ static qhandle_t RegisterModel( const char *name ) {
 		bytes, (uint32_t)byteCount );
 	ri.FS_FreeFile( bytes );
 	if ( !handle ) {
+		LogModelReject( name, "decode" );
 		return 0;
 	}
-	if ( !RenderSubmission_ModelSnapshot( &s_module.frontend, handle, &model ) ) return 0;
+	if ( !RenderSubmission_ModelSnapshot( &s_module.frontend, handle, &model ) ) {
+		LogModelReject( name, "snapshot" ); return 0;
+	}
 	for ( uint32_t batch = 0u; batch < model.batchCount; ++batch ) {
 		qhandle_t material = RegisterMaterialImage( RENDER_ASSET_MATERIAL,
 			model.batches[batch].materialName, qfalse );
 		if ( !material || !RenderSubmission_SetModelBatchMaterial(
-				&s_module.frontend, handle, batch, material ) ) return 0;
+				&s_module.frontend, handle, batch, material ) ) {
+			LogModelReject( name, "material" ); return 0;
+		}
 	}
 	return handle;
 }
@@ -352,14 +668,67 @@ static qboolean PrepareWorldMaterials( const mapFile_t *bsp ) {
 	ri.Free( rgba );
 	return qtrue;
 }
+static void DestroyDirectionalLighting( void ) {
+	if ( s_module.presentation )
+		(void)RalMetal_PresentSetDirectionalLighting( s_module.presentation, NULL );
+	if ( s_module.directionalLighting && s_module.core )
+		(void)RalMetal_LightingDestroy( s_module.core, &s_module.coreReceipt,
+			s_module.directionalLighting, &s_module.directionalLightingReceipt );
+	s_module.directionalLighting = NULL;
+	memset( &s_module.directionalLightingReceipt, 0,
+		sizeof( s_module.directionalLightingReceipt ) );
+}
+static qboolean UploadDirectionalLighting( void ) {
+	const renderDirectionalLightingRecord_t *record;
+	ralLightingRuntimePlan_t plan;
+	ralStaticLightingCapabilities_t capabilities = { qtrue, qtrue, qtrue, qtrue };
+	uint64_t digest;
+	DestroyDirectionalLighting();
+	if ( s_module.lightingSidecar.status ==
+			RENDER_LIGHTING_SIDECAR_MISSING_COMPATIBILITY ) return qtrue;
+	if ( !RenderSubmission_DirectionalLightingSnapshot( &s_module.frontend,
+			&record, &digest ) || !record || !digest
+			|| !Ral_LightingRuntimePlanBuild( RAL_BACKEND_METAL,
+				NextGeneration(), record->ownedArtifactBytes,
+				record->artifactByteLength, &record->artifact, &capabilities,
+				&plan ) ) return qfalse;
+	if ( !RalMetal_LightingUpload( s_module.core, &s_module.coreReceipt,
+		record->ownedArtifactBytes, record->artifactByteLength, &plan,
+		&s_module.directionalLighting, &s_module.directionalLightingReceipt )
+			|| !RalMetal_PresentSetDirectionalLighting( s_module.presentation,
+				&s_module.directionalLightingReceipt ) ) {
+		DestroyDirectionalLighting();
+		return qfalse;
+	}
+	return qtrue;
+}
 static void NoopHandle( qhandle_t handle ) { (void)handle; }
 static void NoopVoid( void ) {}
 static void NoopBool( qboolean value ) { (void)value; }
 static void SubmitWorld( const mapFile_t *bsp, int worldIndex ) {
 	if ( !PrepareWorldMaterials( bsp )
-			|| !RenderSubmission_LoadWorld( &s_module.frontend, bsp, worldIndex ) )
+			|| !RenderSubmission_LoadWorld( &s_module.frontend, bsp, worldIndex )
+			|| !RenderLightingSidecar_LoadDirectional( &s_module.frontend,
+				&s_module.imports, bsp->name, &s_module.lightingSidecar )
+			|| !RenderLightingSidecar_LoadIrradiance( &s_module.frontend,
+				&s_module.imports, bsp->name, &s_module.irradianceSidecar )
+			|| !UploadDirectionalLighting() )
 		MarkFailed( "frontend-world" );
-	else s_module.loadedWorld = bsp;
+	else {
+		s_module.loadedWorld = bsp;
+		s_module.entityParsePoint = bsp ? bsp->entityString : NULL;
+	}
+}
+static qboolean CookLightingProject( const char *derivedRoot ) {
+	renderLightingProjectCookRequest_t request;
+	renderLightingProjectCookReceipt_t receipt;
+	char worldStem[RENDER_LIGHTING_PROJECT_WORLD_STEM_CAPACITY];
+	return s_module.loadedWorld
+		&& RenderLightingProjectCook_DefaultRequest( s_module.loadedWorld,
+			derivedRoot, &request, worldStem )
+		&& RenderLightingProjectCook_Execute( &s_module.frontend,
+			s_module.loadedWorld, &s_module.imports, &request, &receipt )
+		&& RenderLightingProjectCook_ReceiptValid( &receipt );
 }
 static void NoopBytes( const byte *bytes ) { (void)bytes; }
 static void SubmitClearScene( void ) {
@@ -392,19 +761,46 @@ static qboolean EntityIngressValid( const refEntity_t *entity,
 	return qtrue;
 }
 
+static void AttachEntityLighting( uint32_t entityIndex ) {
+	const ralLightVec3Q16_t normal = { 0, 0, RAL_LIGHT_Q16_ONE };
+	const int32_t fallback[3] = { RAL_LIGHT_Q16_ONE,
+		RAL_LIGHT_Q16_ONE, RAL_LIGHT_Q16_ONE };
+	if ( entityIndex >= s_module.frontend.entityCount
+			|| ( s_module.frontend.entities[entityIndex].entity.renderfx
+				& RF_THIRD_PERSON ) ) return;
+	if ( s_module.frontend.irradianceVolumeCount
+			&& RenderSubmission_AttachConfiguredEntityIrradiance(
+				&s_module.frontend, entityIndex, &normal, fallback ) ) return;
+	(void)RenderSubmission_AttachLegacyLightGridEntityIrradiance(
+		&s_module.frontend, entityIndex, s_module.ambientScale->value,
+		s_module.directedScale->value );
+}
+
 static void SubmitEntity( const refEntity_t *entity, qboolean shaderTime ) {
+	const cmSkin_t *skin = NULL;
+	uint32_t entityIndex;
 	(void)shaderTime;
 	if ( !s_module.frameOpen ) return;
 	if ( !EntityIngressValid( entity, NULL ) ) return;
-	if ( !RenderSubmission_AddEntity( &s_module.frontend, entity, NULL ) )
+	if ( entity->characterSkin && s_module.imports.GetCharacterSkin )
+		skin = s_module.imports.GetCharacterSkin( entity->characterSkin );
+	entityIndex = s_module.frontend.entityCount;
+	if ( !RenderSubmission_AddEntitySkinned( &s_module.frontend, entity, NULL, skin ) )
 		MarkFailed( "frontend-entity" );
+	else AttachEntityLighting( entityIndex );
 }
 static void SubmitEntityTemporal( const refEntity_t *entity,
 		const refEntityMotion_t *motion ) {
+	const cmSkin_t *skin = NULL;
+	uint32_t entityIndex;
 	if ( !s_module.frameOpen ) return;
 	if ( !EntityIngressValid( entity, motion ) ) return;
-	if ( !RenderSubmission_AddEntity( &s_module.frontend, entity, motion ) )
+	if ( entity->characterSkin && s_module.imports.GetCharacterSkin )
+		skin = s_module.imports.GetCharacterSkin( entity->characterSkin );
+	entityIndex = s_module.frontend.entityCount;
+	if ( !RenderSubmission_AddEntitySkinned( &s_module.frontend, entity, motion, skin ) )
 		MarkFailed( "frontend-temporal-entity" );
+	else AttachEntityLighting( entityIndex );
 }
 static void SubmitPoly( qhandle_t shader, int vertices,
 		const polyVert_t *data, int count ) {
@@ -431,15 +827,56 @@ static void NoopLinearLight( const vec3_t start, const vec3_t end, float intensi
 	if ( !RenderSubmission_AddLight( &s_module.frontend, start, end,
 			intensity, red, green, blue ) ) MarkFailed( "frontend-linear-light" );
 }
-static void NoopRibbon( const ribbonDesc_t *desc ) { (void)desc; }
+static void SubmitRibbon( const ribbonDesc_t *desc ) {
+	if ( !RenderSubmission_AddEffectRibbon( &s_module.frontend, desc ) )
+		MarkFailed( "frontend-effect-ribbon" );
+}
 static void NoopRailRibbon( const railRibbonDesc_t *desc ) { (void)desc; }
 static void NoopBeam( const beamDesc_t *desc ) { (void)desc; }
-static void NoopSprite( const spriteDesc_t *desc ) { (void)desc; }
-static void NoopEmitter( const emitterDesc_t *desc ) { (void)desc; }
-static void NoopDecal( const decalDesc_t *desc ) { (void)desc; }
-static void NoopParticleClass( particleClassHandle_t handle,
-		const particleClass_t *particleClass ) { (void)handle; (void)particleClass; }
-static void NoopAtmosphere( const atmosphericDesc_t *desc ) { (void)desc; }
+static void SubmitSprite( const spriteDesc_t *desc ) {
+	if ( !RenderSubmission_AddEffectSprite( &s_module.frontend, desc ) )
+		MarkFailed( "frontend-effect-sprite" );
+}
+static void SubmitEmitter( const emitterDesc_t *desc ) {
+	if ( !RenderSubmission_AddEffectEmitter( &s_module.frontend, desc ) )
+		MarkFailed( "frontend-effect-emitter" );
+}
+static void SubmitDecal( const decalDesc_t *desc ) {
+	if ( !RenderSubmission_AddEffectDecal( &s_module.frontend, desc ) )
+		MarkFailed( "frontend-effect-decal" );
+}
+static void SubmitParticleClass( particleClassHandle_t handle,
+		const particleClass_t *particleClass ) {
+	if ( !RenderSubmission_RegisterParticleClass(
+			&s_module.frontend, handle, particleClass ) )
+		MarkFailed( "frontend-particle-class" );
+}
+static void SubmitAtmosphere( const atmosphericDesc_t *desc ) {
+	if ( !RenderSubmission_SetAtmosphere( &s_module.frontend, desc ) )
+		MarkFailed( "frontend-atmosphere-state" );
+}
+static void SubmitAtmosphereEmitter( const atmosphereEmitter_t *emitter ) {
+	if ( !RenderSubmission_AddAtmosphereEmitter( &s_module.frontend, emitter ) )
+		MarkFailed( "frontend-atmosphere-emitter" );
+}
+static void SubmitAtmosphereEffectProfile( uint32_t handle,
+		const atmosphereEffectProfile_t *profile ) {
+	if ( !RenderSubmission_RegisterAtmosphereEffectProfile(
+			&s_module.frontend, handle, profile ) )
+		MarkFailed( "frontend-atmosphere-effect-profile" );
+}
+static void SubmitAtmosphereSurfaceEvent(
+		const atmosphereSurfaceEvent_t *event ) {
+	if ( !RenderSubmission_AddAtmosphereSurfaceEvent(
+			&s_module.frontend, event ) )
+		MarkFailed( "frontend-atmosphere-surface-event" );
+}
+static void SubmitAtmosphereMediaVolume(
+		const atmosphereMediaVolume_t *volume ) {
+	if ( !RenderSubmission_AddAtmosphereMediaVolume(
+			&s_module.frontend, volume ) )
+		MarkFailed( "frontend-atmosphere-media-volume" );
+}
 static void NoopHeightgrid( const float *grid, int count ) { (void)grid; (void)count; }
 static void NoopLens( const lensSourceDesc_t *desc ) { (void)desc; }
 static qboolean NoLensVisibility( int id, float *visibility ) {
@@ -454,6 +891,10 @@ static void SubmitColor( const float *color ) {
 	if ( !RenderSubmission_SetColor( &s_module.frontend, color ) )
 		MarkFailed( "frontend-color" );
 }
+static void SubmitUiTransform( const refUiTransform_t *transform ) {
+	if ( !RenderSubmission_SetUiTransform( &s_module.frontend, transform ) )
+		MarkFailed( "frontend-ui-transform" );
+}
 static void NoopClip( const float *region ) { (void)region; }
 static void NoopMsdfOutline( float width, const float *color,
 		float glowWidth, const float *glowColor ) {
@@ -462,30 +903,41 @@ static void NoopMsdfOutline( float width, const float *color,
 static void NoopMsdfShadow( float x, float y, const float *color ) {
 	(void)x; (void)y; (void)color;
 }
+static void DropInvalidUiSubmission( void ) {
+	/* UI is authored content.  An invalid material or a frame that exhausts the
+	 * portable primitive budget is dropped just like a malformed refEntity; it
+	 * must not poison the renderer lifecycle or suppress the gameplay frame. */
+	if ( !s_module.loggedInvalidUiDrop && s_module.imports.LogCh
+			&& s_module.initLogChannel >= 0 ) {
+		s_module.imports.LogCh( s_module.initLogChannel, SEV_WARN,
+			"Wired native Metal RAL: dropped invalid/budget-exhausted UI submission\n" );
+		s_module.loggedInvalidUiDrop = qtrue;
+	}
+}
 static void NoopPic( float x, float y, float width, float height,
 		float s1, float t1, float s2, float t2, qhandle_t shader ) {
 	if ( !s_module.frameOpen ) return;
 	if ( !RenderSubmission_AddUiQuad( &s_module.frontend, x, y, width, height,
-			s1, t1, s2, t2, 0.0f, shader ) ) MarkFailed( "frontend-ui-quad" );
+			s1, t1, s2, t2, 0.0f, shader ) ) DropInvalidUiSubmission();
 }
 static void NoopBackdrop( float x, float y, float width, float height,
 		float time, float mouseX, float mouseY, float transition ) {
 	if ( !s_module.frameOpen ) return;
 	if ( !RenderSubmission_AddUiQuad( &s_module.frontend, x, y, width, height,
 			time, mouseX, mouseY, transition, 0.0f, INT_MAX ) )
-		MarkFailed( "frontend-ui-backdrop" );
+		DropInvalidUiSubmission();
 }
 static void NoopRotatedPic( float x, float y, float width, float height,
 		float s1, float t1, float s2, float t2, float angle, qhandle_t shader ) {
 	if ( !s_module.frameOpen ) return;
 	if ( !RenderSubmission_AddUiQuad( &s_module.frontend, x, y, width, height,
-			s1, t1, s2, t2, angle, shader ) ) MarkFailed( "frontend-ui-rotated" );
+			s1, t1, s2, t2, angle, shader ) ) DropInvalidUiSubmission();
 }
 static void NoopLine( float x1, float y1, float x2, float y2,
 		float width, qhandle_t shader ) {
 	if ( !s_module.frameOpen ) return;
 	if ( !RenderSubmission_AddUiLine( &s_module.frontend, x1, y1, x2, y2,
-			width, shader ) ) MarkFailed( "frontend-ui-line" );
+			width, shader ) ) DropInvalidUiSubmission();
 }
 static void NoopRaw( int x, int y, int width, int height, int columns, int rows,
 		byte *data, int client, qboolean dirty ) {
@@ -531,12 +983,12 @@ static qboolean BuildColorOutputReceipt(
 	memset( &request, 0, sizeof( request ) );
 	request.schemaVersion = RAL_COLOR_OUTPUT_SCHEMA_VERSION;
 	request.presentationGeneration = presentation->selected.generation;
-	request.sceneFormat = hdr ? RAL_FORMAT_R16G16B16A16_SFLOAT
-		: RAL_FORMAT_R8G8B8A8_UNORM;
+	request.sceneFormat = RAL_FORMAT_R16G16B16A16_SFLOAT;
 	request.requestHdrOutput = hdr;
 	request.selectedOutput.format = presentation->selected.format;
 	request.selectedOutput.colorSpace = presentation->selected.colorSpace;
-	request.toneMapOperator = RAL_TONEMAP_PBR_NEUTRAL;
+	request.toneMapOperator = (ralToneMapOperator_t)( s_module.toneMap
+		? s_module.toneMap->integer : 3 );
 	request.lutEnabled = qfalse;
 	request.hdrPeakNits = 1000.0f;
 	request.hdrMinNits = 0.01f;
@@ -632,6 +1084,25 @@ fail:
 	return qfalse;
 }
 
+static cvar_t *RegisterMetalRenderCvar( const char *name,
+		const char *defaultValue, const char *minimum, const char *maximum,
+		qboolean integral, const char *description, cvar_t *fallback ) {
+	cvar_t *value;
+	if ( !ri.Cvar_Get || !ri.Cvar_CheckRange ) {
+		memset( fallback, 0, sizeof( *fallback ) );
+		fallback->value = (float)atof( defaultValue );
+		fallback->integer = atoi( defaultValue );
+		return fallback;
+	}
+	value = ri.Cvar_Get( name, defaultValue, CVAR_ARCHIVE | CVAR_NODEFAULT );
+	if ( !value ) return NULL;
+	ri.Cvar_CheckRange( value, minimum, maximum,
+		integral ? CV_INTEGER : CV_FLOAT );
+	if ( ri.Cvar_SetDescription ) ri.Cvar_SetDescription( value, description );
+	if ( ri.Cvar_SetGroup ) ri.Cvar_SetGroup( value, CVG_RENDERER );
+	return value;
+}
+
 static void BeginRegistration( glconfig_t *config ) {
 	qboolean initializedNow;
 	if ( !config || !s_module.loaded || s_module.frameOpen ) {
@@ -641,6 +1112,108 @@ static void BeginRegistration( glconfig_t *config ) {
 	if ( initializedNow && !InitializeOwners() ) {
 		MarkFailed( "owner-initialization" ); return;
 	}
+	if ( !s_module.brightness ) {
+		if ( !ri.Cvar_Get || !ri.Cvar_CheckRange ) {
+			memset( &s_module.brightnessFallback, 0,
+				sizeof( s_module.brightnessFallback ) );
+			s_module.brightnessFallback.value = 1.0f;
+			s_module.brightnessFallback.integer = 1;
+			s_module.brightness = &s_module.brightnessFallback;
+		} else {
+			s_module.brightness = ri.Cvar_Get( "r_brightness", "1",
+				CVAR_ARCHIVE | CVAR_NODEFAULT );
+			if ( !s_module.brightness ) {
+				MarkFailed( "display-visibility-cvar" ); return;
+			}
+			ri.Cvar_CheckRange( s_module.brightness, "0", "32", CV_FLOAT );
+			if ( ri.Cvar_SetDescription ) ri.Cvar_SetDescription( s_module.brightness,
+				"Continuous display visibility scalar; 1.0 is authored identity, fractional values are preserved." );
+			if ( ri.Cvar_SetGroup ) ri.Cvar_SetGroup( s_module.brightness, CVG_RENDERER );
+		}
+	}
+	if ( !s_module.lightmapBoost ) {
+		if ( !ri.Cvar_Get || !ri.Cvar_CheckRange ) {
+			memset( &s_module.lightmapBoostFallback, 0,
+				sizeof( s_module.lightmapBoostFallback ) );
+			s_module.lightmapBoostFallback.value = 4.6f;
+			s_module.lightmapBoostFallback.integer = 4;
+			s_module.lightmapBoost = &s_module.lightmapBoostFallback;
+		} else {
+			s_module.lightmapBoost = ri.Cvar_Get( "r_lightmapBoost", "4.6",
+				CVAR_ARCHIVE | CVAR_NODEFAULT );
+			if ( !s_module.lightmapBoost ) {
+				MarkFailed( "lightmap-boost-cvar" ); return;
+			}
+			ri.Cvar_CheckRange( s_module.lightmapBoost, "1", "24", CV_FLOAT );
+			if ( ri.Cvar_SetDescription ) ri.Cvar_SetDescription(
+				s_module.lightmapBoost,
+				"World-lightmap overbright applied after sRGB-to-linear decode." );
+			if ( ri.Cvar_SetGroup ) ri.Cvar_SetGroup( s_module.lightmapBoost,
+				CVG_RENDERER );
+		}
+	}
+	if ( !s_module.shaderTimeOverride ) {
+		if ( !ri.Cvar_Get || !ri.Cvar_CheckRange ) {
+			memset( &s_module.shaderTimeOverrideFallback, 0,
+				sizeof( s_module.shaderTimeOverrideFallback ) );
+			s_module.shaderTimeOverride = &s_module.shaderTimeOverrideFallback;
+		} else {
+			s_module.shaderTimeOverride = ri.Cvar_Get( "r_pinShaderTime", "0",
+				CVAR_CHEAT | CVAR_NODEFAULT );
+			if ( !s_module.shaderTimeOverride ) {
+				MarkFailed( "shader-time-cvar" ); return;
+			}
+			ri.Cvar_CheckRange( s_module.shaderTimeOverride, "0", "86400", CV_FLOAT );
+			if ( ri.Cvar_SetDescription ) ri.Cvar_SetDescription(
+				s_module.shaderTimeOverride,
+				"Pins material and sky shader time for deterministic visual captures; 0 uses scene time." );
+			if ( ri.Cvar_SetGroup ) ri.Cvar_SetGroup( s_module.shaderTimeOverride,
+				CVG_RENDERER );
+		}
+	}
+	if ( !s_module.toneMap ) {
+		s_module.toneMap = RegisterMetalRenderCvar( "r_tonemap", "3", "0", "4",
+			qtrue, "HDR tone mapping operator: 0 identity, 1 PBR Neutral, 2 AgX, 3 Lottes, 4 Reinhard.",
+			&s_module.toneMapFallback );
+		s_module.toneMapExposure = RegisterMetalRenderCvar( "r_tonemapExposure",
+			"1", "0.1", "8", qfalse,
+			"Linear pre-tonemap exposure multiplier.",
+			&s_module.toneMapExposureFallback );
+		s_module.lottesContrast = RegisterMetalRenderCvar( "r_lottes_contrast",
+			"1.6", "0.5", "3", qfalse, "Lottes tonemap contrast.",
+			&s_module.lottesContrastFallback );
+		s_module.lottesShoulder = RegisterMetalRenderCvar( "r_lottes_shoulder",
+			"0.977", "0.5", "1", qfalse, "Lottes highlight shoulder.",
+			&s_module.lottesShoulderFallback );
+		s_module.lottesMidIn = RegisterMetalRenderCvar( "r_lottes_mid_in",
+			"0.18", "0", "1", qfalse, "Lottes input midpoint.",
+			&s_module.lottesMidInFallback );
+		s_module.lottesMidOut = RegisterMetalRenderCvar( "r_lottes_mid_out",
+			"0.267", "0", "1", qfalse, "Lottes output midpoint.",
+			&s_module.lottesMidOutFallback );
+		s_module.lottesHdrMax = RegisterMetalRenderCvar( "r_lottes_hdr_max",
+			"8", "1", "64", qfalse, "Lottes HDR white point.",
+			&s_module.lottesHdrMaxFallback );
+		if ( !s_module.toneMap || !s_module.toneMapExposure
+				|| !s_module.lottesContrast || !s_module.lottesShoulder
+				|| !s_module.lottesMidIn || !s_module.lottesMidOut
+				|| !s_module.lottesHdrMax ) {
+			MarkFailed( "tonemap-cvars" ); return;
+		}
+	}
+	if ( !s_module.ambientScale ) {
+		s_module.ambientScale = RegisterMetalRenderCvar( "r_ambientScale",
+			"0.6", "0", "4", qfalse,
+			"Light-grid ambient scaling on entity models.",
+			&s_module.ambientScaleFallback );
+		s_module.directedScale = RegisterMetalRenderCvar( "r_directedScale",
+			"1", "0", "4", qfalse,
+			"Light-grid directional scaling on entity models.",
+			&s_module.directedScaleFallback );
+		if ( !s_module.ambientScale || !s_module.directedScale ) {
+			MarkFailed( "entity-light-grid-cvars" ); return;
+		}
+	}
 	if ( !s_module.frontend.initialized
 			&& !RenderSubmission_Init( &s_module.frontend,
 				s_module.moduleGeneration ) ) {
@@ -649,6 +1222,10 @@ static void BeginRegistration( glconfig_t *config ) {
 	if ( !s_module.materialScripts.ready
 			&& !RenderMaterialScript_Load( &s_module.materialScripts, &ri ) ) {
 		MarkFailed( "material-script-catalog" ); return;
+	}
+	if ( !BuildColorOutputReceipt( &s_module.presentationReceipt,
+			&s_module.colorOutputReceipt ) ) {
+		MarkFailed( "color-output-contract" ); return;
 	}
 	s_module.registered = qtrue;
 	s_module.registrationFramePublished = qfalse;
@@ -753,9 +1330,10 @@ static void EndFrame( int *frontEndMsec, int *backEndMsec ) {
 	ralFrameShellReceipt_t completed, canceled;
 	uint64_t acquireGeneration = NextGeneration();
 	uint64_t presentGeneration = NextGeneration();
-	float clearColor[4] = { 0.0625f, 0.125f, 0.25f, 1.0f };
+	float clearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
 	uint64_t contentDigest;
 	qboolean completeContent, worldChanged, logContent;
+	ralDisplayVisibilityPlan_t visibility;
 	if ( frontEndMsec ) *frontEndMsec = 0;
 	if ( backEndMsec ) *backEndMsec = 0;
 	if ( !s_module.frameOpen || !acquireGeneration || !presentGeneration ) {
@@ -766,9 +1344,6 @@ static void EndFrame( int *frontEndMsec, int *backEndMsec ) {
 		RenderSubmission_CancelFrame( &s_module.frontend );
 		MarkFailed( "frontend-frame-digest" ); return;
 	}
-	clearColor[0] = (float)( ( contentDigest >> 0u ) & 0xffu ) / 1020.0f + 0.05f;
-	clearColor[1] = (float)( ( contentDigest >> 8u ) & 0xffu ) / 1020.0f + 0.05f;
-	clearColor[2] = (float)( ( contentDigest >> 16u ) & 0xffu ) / 1020.0f + 0.05f;
 	if ( !RefreshPresentation() ) {
 		if ( Ral_FrameShellCancel( &s_module.frameShell, &s_module.frameReceipt,
 				&canceled ) ) s_module.frameReceipt = canceled;
@@ -782,6 +1357,33 @@ static void EndFrame( int *frontEndMsec, int *backEndMsec ) {
 	published.frameGeneration = s_module.frameReceipt.frameGeneration;
 	published.host = s_module.hostReceipt;
 	published.surface = s_module.surfaceBorrow;
+	if ( !s_module.brightness
+			|| !Ral_DisplayVisibilityPlanBuild( s_module.brightness->value, &visibility )
+			|| !RalMetal_PresentSetDisplayVisibility( s_module.presentation,
+				&visibility )
+			|| !s_module.lightmapBoost
+			|| !RalMetal_PresentSetLightmapBoost( s_module.presentation,
+				s_module.lightmapBoost->value )
+			|| !s_module.shaderTimeOverride
+			|| !RalMetal_PresentSetShaderTimeOverride( s_module.presentation,
+				s_module.shaderTimeOverride->value )
+			|| !s_module.toneMap || !s_module.toneMapExposure
+			|| !s_module.lottesContrast || !s_module.lottesShoulder
+			|| !s_module.lottesMidIn || !s_module.lottesMidOut
+			|| !s_module.lottesHdrMax
+			|| !RalMetal_PresentSetToneMap( s_module.presentation,
+				(uint32_t)s_module.toneMap->integer,
+				s_module.toneMapExposure->value,
+				s_module.lottesContrast->value,
+				s_module.lottesShoulder->value,
+				s_module.lottesMidIn->value,
+				s_module.lottesMidOut->value,
+				s_module.lottesHdrMax->value ) ) {
+		if ( Ral_FrameShellCancel( &s_module.frameShell, &s_module.frameReceipt,
+				&canceled ) ) s_module.frameReceipt = canceled;
+		RenderSubmission_CancelFrame( &s_module.frontend );
+		s_module.frameOpen = qfalse; MarkFailed( "display-visibility" ); return;
+	}
 	if ( !RalMetal_PresentAcquire( s_module.presentation, &s_module.coreReceipt,
 			&s_module.presentationReceipt, acquireGeneration,
 			&published.drawable ) ) {
@@ -813,6 +1415,9 @@ static void EndFrame( int *frontEndMsec, int *backEndMsec ) {
 			completed.frameGeneration, &published.frontend ) ) {
 		s_module.frameOpen = qfalse; MarkFailed( "frontend-frame-complete" ); return;
 	}
+	if ( !PlanAtmosphere( published.frameGeneration, &published.atmosphere ) ) {
+		s_module.frameOpen = qfalse; MarkFailed( "atmosphere-plan" ); return;
+	}
 	published.frame = completed; published.ready = qtrue;
 	s_module.frameReceipt = completed; s_module.frameOpen = qfalse;
 	if ( !ModuleReceiptValid( &published ) ) {
@@ -831,7 +1436,10 @@ static void EndFrame( int *frontEndMsec, int *backEndMsec ) {
 		&& published.presentation.unresolvedEntityCount == 0u ) ? qtrue : qfalse;
 	worldChanged = ( published.frontend.worldDigest
 		!= s_module.lastLoggedWorldDigest ) ? qtrue : qfalse;
-	if ( worldChanged ) s_module.loggedCompleteContentReceipt = qfalse;
+	if ( worldChanged ) {
+		s_module.loggedCompleteContentReceipt = qfalse;
+		s_module.loggedIrradianceReceipt = qfalse;
+	}
 	logContent = ( worldChanged || ( completeContent
 		&& !s_module.loggedCompleteContentReceipt ) ) ? qtrue : qfalse;
 	if ( published.frontend.worldLoaded == qtrue
@@ -839,7 +1447,7 @@ static void EndFrame( int *frontEndMsec, int *backEndMsec ) {
 			&& logContent
 			&& s_module.imports.LogCh && s_module.initLogChannel >= 0 ) {
 		s_module.imports.LogCh( s_module.initLogChannel, SEV_INFO,
-			"Wired native Metal RAL: content receipt asset=%016llx world=%016llx frame=%016llx readback=%016llx bytes=%u readbackXY=%u,%u surfaces=%u vertices=%u indices=%u assets=%u materials=%u resolvedMaterials=%u materialBytes=%u models=%u modelBytes=%u entities=%u temporalEntities=%u ui=%u loweredWorld=%u worldBatches=%u texturedWorld=%u lightmappedWorld=%u patchWorld=%u maskedWorld=%u blendedWorld=%u depthWriteWorld=%u loweredEntity=%u entityBatches=%u modelEntities=%u primitiveEntities=%u unresolvedEntities=%u loweredUi=%u texturedUi=%u msdfUi=%u\n",
+			"Wired native Metal RAL: content receipt asset=%016llx world=%016llx frame=%016llx readback=%016llx bytes=%u readbackXY=%u,%u surfaces=%u vertices=%u indices=%u assets=%u materials=%u resolvedMaterials=%u materialBytes=%u models=%u modelBytes=%u entities=%u temporalEntities=%u localIrradianceEntities=%u irradianceVolumes=%u ui=%u loweredWorld=%u worldBatches=%u texturedWorld=%u lightmappedWorld=%u patchWorld=%u maskedWorld=%u blendedWorld=%u depthWriteWorld=%u loweredEntity=%u entityBatches=%u modelEntities=%u primitiveEntities=%u unresolvedEntities=%u loweredUi=%u texturedUi=%u msdfUi=%u\n",
 			(unsigned long long)published.frontend.assetDigest,
 			(unsigned long long)published.frontend.worldDigest,
 			(unsigned long long)published.frontend.frameDigest,
@@ -858,6 +1466,8 @@ static void EndFrame( int *frontEndMsec, int *backEndMsec ) {
 			published.frontend.modelBytes,
 			published.frontend.entityCount,
 			published.frontend.temporalEntityCount,
+			published.frontend.localIrradianceEntityCount,
+			published.frontend.irradianceVolumeCount,
 			published.frontend.uiPrimitiveCount,
 			published.presentation.loweredWorldIndexCount,
 			published.presentation.loweredWorldBatchCount,
@@ -878,6 +1488,17 @@ static void EndFrame( int *frontEndMsec, int *backEndMsec ) {
 		s_module.lastLoggedWorldDigest = published.frontend.worldDigest;
 		if ( completeContent ) s_module.loggedCompleteContentReceipt = qtrue;
 	}
+	if ( published.frontend.irradianceVolumeCount > 0u
+			&& published.frontend.localIrradianceEntityCount > 0u
+			&& !s_module.loggedIrradianceReceipt
+			&& s_module.imports.LogCh && s_module.initLogChannel >= 0 ) {
+		s_module.imports.LogCh( s_module.initLogChannel, SEV_INFO,
+			"Wired native Metal RAL: irradiance receipt volumes=%u entities=%u draws=%u\n",
+			published.frontend.irradianceVolumeCount,
+			published.frontend.localIrradianceEntityCount,
+			published.presentation.localIrradianceDrawCount );
+		s_module.loggedIrradianceReceipt = qtrue;
+	}
 	if ( !s_module.registrationFramePublished && s_module.imports.LogCh
 			&& s_module.initLogChannel >= 0 ) {
 		s_module.imports.LogCh( s_module.initLogChannel, SEV_INFO,
@@ -897,10 +1518,15 @@ static void Shutdown( refShutdownCode_t code ) {
 		s_module.frameReceipt = canceled; s_module.frameOpen = qfalse;
 	}
 	RenderSubmission_CancelFrame( &s_module.frontend );
+	DestroyDirectionalLighting();
 	/* Loading UI frames remain legal between level teardown and the next
 	 * BeginRegistration.  Keep the live registration and presentation owners
 	 * across REF_LEVEL_ONLY, matching the engine's map-transition contract. */
-	if ( code == REF_LEVEL_ONLY ) { s_module.loadedWorld = NULL; return; }
+	if ( code == REF_LEVEL_ONLY ) {
+		s_module.loadedWorld = NULL;
+		s_module.entityParsePoint = NULL;
+		return;
+	}
 	s_module.registered = qfalse;
 	if ( s_module.screenshotCommandsRegistered ) {
 		R_ScreenshotUnregisterCommands();
@@ -940,10 +1566,10 @@ static int NoFragments( int numPoints, const vec3_t *points, const vec3_t projec
 	(void)numPoints; (void)points; (void)projection; (void)maxPoints;
 	(void)pointBuffer; (void)maxFragments; (void)fragmentBuffer; return 0;
 }
-static int NoTag( orientation_t *tag, qhandle_t model, int startFrame, int endFrame,
+static int SubmitTag( orientation_t *tag, qhandle_t model, int startFrame, int endFrame,
 		float fraction, const char *name ) {
-	(void)tag; (void)model; (void)startFrame; (void)endFrame;
-	(void)fraction; (void)name; return 0;
+	return RenderSubmission_LerpTag( &s_module.frontend, tag, model,
+		startFrame, endFrame, fraction, name );
 }
 static void NoBounds( qhandle_t model, vec3_t mins, vec3_t maxs ) {
 	(void)model; if ( mins ) memset( mins, 0, sizeof( vec3_t ) );
@@ -955,8 +1581,42 @@ static void NoFont( const char *name, int size, fontInfo_t *font ) {
 static void NoRemap( const char *oldName, const char *newName, const char *offset ) {
 	(void)oldName; (void)newName; (void)offset;
 }
-static qboolean NoToken( char *buffer, int size ) {
-	if ( buffer && size > 0 ) buffer[0] = '\0'; return qfalse;
+static qboolean GetEntityToken( char *buffer, int size ) {
+	const char *cursor, *start;
+	size_t length;
+	if ( !buffer || size <= 0 ) return qfalse;
+	buffer[0] = '\0';
+	if ( !s_module.loadedWorld || !s_module.loadedWorld->entityString )
+		return qfalse;
+	cursor = s_module.entityParsePoint;
+	if ( !cursor ) cursor = s_module.loadedWorld->entityString;
+	while ( *cursor && (unsigned char)*cursor <= ' ' ) cursor++;
+	if ( !*cursor ) {
+		s_module.entityParsePoint = s_module.loadedWorld->entityString;
+		return qfalse;
+	}
+	if ( *cursor == '{' || *cursor == '}' ) {
+		buffer[0] = *cursor++;
+		buffer[1] = '\0';
+		s_module.entityParsePoint = cursor;
+		return qtrue;
+	}
+	if ( *cursor == '"' ) {
+		start = ++cursor;
+		while ( *cursor && *cursor != '"' ) cursor++;
+		length = (size_t)( cursor - start );
+		if ( *cursor == '"' ) cursor++;
+	} else {
+		start = cursor;
+		while ( *cursor && (unsigned char)*cursor > ' '
+				&& *cursor != '{' && *cursor != '}' ) cursor++;
+		length = (size_t)( cursor - start );
+	}
+	if ( length >= (size_t)size ) length = (size_t)size - 1u;
+	memcpy( buffer, start, length );
+	buffer[length] = '\0';
+	s_module.entityParsePoint = cursor;
+	return qtrue;
 }
 static qboolean NoPvs( const vec3_t a, const vec3_t b ) { (void)a; (void)b; return qfalse; }
 static void NoVideo( int height, int width, byte *capture, byte *encode,
@@ -973,7 +1633,6 @@ static qboolean GetMemoryBudget( uint64_t *deviceUsed, uint64_t *deviceBudget,
 	if ( hostUsed ) *hostUsed = 0u; if ( hostBudget ) *hostBudget = 0u;
 	if ( pressure ) *pressure = 0; return qfalse;
 }
-#if FEAT_FOG_SYSTEM
 static void NoFog( refFogType_t *type, vec3_t color, float *depth, float *density ) {
 	if ( type ) *type = REF_FT_NONE; if ( color ) memset( color, 0, sizeof( vec3_t ) );
 	if ( depth ) *depth = 0.0f; if ( density ) *density = 0.0f;
@@ -983,7 +1642,6 @@ static void NoViewFog( const vec3_t origin, refFogType_t *type, vec3_t color,
 	(void)origin; NoFog( type, color, depth, density );
 	if ( useColor ) *useColor = qfalse;
 }
-#endif
 #if FEAT_HALO
 static void NoHalo( const vec3_t origin, float red, float green, float blue,
 		float scale, int id, qboolean visible ) {
@@ -1022,29 +1680,28 @@ static void FillExports( refexport_t *exports ) {
 	exports->AddRefEntityToScene = SubmitEntity; exports->AddPolyToScene = SubmitPoly;
 	exports->LightForPoint = NoLight; exports->AddLightToScene = NoopLight;
 	exports->AddAdditiveLightToScene = NoopLight; exports->AddLinearLightToScene = NoopLinearLight;
-	exports->AddRibbonToScene = NoopRibbon; exports->AddBeamToScene = NoopBeam;
-	exports->AddSpriteToScene = NoopSprite; exports->EmitParticles = NoopEmitter;
-	exports->AddDecalToScene = NoopDecal; exports->RegisterParticleClass = NoopParticleClass;
-	exports->SetAtmosphere = NoopAtmosphere; exports->SetAtmosphereHeightgrid = NoopHeightgrid;
+	exports->AddRibbonToScene = SubmitRibbon; exports->AddBeamToScene = NoopBeam;
+	exports->AddSpriteToScene = SubmitSprite; exports->EmitParticles = SubmitEmitter;
+	exports->AddDecalToScene = SubmitDecal; exports->RegisterParticleClass = SubmitParticleClass;
+	exports->SetAtmosphere = SubmitAtmosphere; exports->SetAtmosphereHeightgrid = NoopHeightgrid;
 	exports->AddLensSourceToScene = NoopLens; exports->GetLensVisibility = NoLensVisibility;
 	exports->RenderScene = SubmitScene; exports->SetColor = SubmitColor;
 	exports->SetMSDFOutline = NoopMsdfOutline; exports->SetMSDFShadow = NoopMsdfShadow;
-	exports->SetClipRegion = NoopClip; exports->DrawStretchPic = NoopPic;
+	exports->SetClipRegion = NoopClip; exports->SetUiTransform = SubmitUiTransform;
+	exports->DrawStretchPic = NoopPic;
 	exports->DrawMenuBackdrop = NoopBackdrop; exports->DrawStretchPicOverlay = NoopPic;
 	exports->DrawRotatedPic = NoopRotatedPic; exports->DrawLine = NoopLine;
 	exports->DrawStretchRaw = NoopRaw; exports->UploadCinematic = NoopUpload;
 	exports->BeginFrame = BeginFrame; exports->EndFrame = EndFrame;
-	exports->MarkFragments = NoFragments; exports->LerpTag = NoTag;
+	exports->MarkFragments = NoFragments; exports->LerpTag = SubmitTag;
 	exports->ModelBounds = NoBounds; exports->RegisterFont = NoFont;
-	exports->RemapShader = NoRemap; exports->GetEntityToken = NoToken;
+	exports->RemapShader = NoRemap; exports->GetEntityToken = GetEntityToken;
 	exports->inPVS = NoPvs; exports->TakeVideoFrame = NoVideo;
 	exports->ThrottleBackend = NoopVoid; exports->FinishBloom = NoopVoid;
 	exports->SetColorMappings = NoopVoid; exports->CanMinimize = CanMinimize;
 	exports->GetConfig = GetConfig; exports->GetMemoryBudget = GetMemoryBudget;
 	exports->VertexLighting = NoopBool; exports->SyncRender = NoopVoid;
-#if FEAT_FOG_SYSTEM
 	exports->GetGlobalFog = NoFog; exports->GetViewFog = NoViewFog;
-#endif
 #if FEAT_HALO
 	exports->AddHaloToScene = NoHalo;
 #endif
@@ -1057,6 +1714,11 @@ static void FillExports( refexport_t *exports ) {
 	exports->GetGpuProfileSample = NoGpuProfile;
 	exports->AddRefEntityToSceneTemporal = SubmitEntityTemporal;
 	exports->PresentationChanged = PresentationChanged;
+	exports->AddAtmosphereEmitter = SubmitAtmosphereEmitter;
+	exports->RegisterAtmosphereEffectProfile = SubmitAtmosphereEffectProfile;
+	exports->AddAtmosphereSurfaceEvent = SubmitAtmosphereSurfaceEvent;
+	exports->AddAtmosphereMediaVolume = SubmitAtmosphereMediaVolume;
+	exports->CookLightingProject = CookLightingProject;
 }
 
 WIRED_METAL_MODULE_EXPORT refexport_t *QDECL GetRefAPI( int apiVersion,

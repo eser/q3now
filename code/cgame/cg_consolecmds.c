@@ -406,6 +406,25 @@ static void CG_StartOrbit_f( void ) {
 	}
 }
 
+/* Exercises the production semantic cgame -> client WiredFX path without
+ * duplicating any recipe choreography in the harness. */
+static void CG_WiredFxTestRocket_f( void ) {
+	vec3_t origin;
+	vec3_t normal;
+	impactSound_t material = IMPACTSOUND_DEFAULT;
+	qboolean freeAir = qfalse;
+	qboolean underwater = qfalse;
+	const char *argument = CG_Argv( 1 );
+
+	if ( !Q_stricmp( argument, "metal" ) ) material = IMPACTSOUND_METAL;
+	else if ( !Q_stricmp( argument, "flesh" ) ) material = IMPACTSOUND_FLESH;
+	else if ( !Q_stricmp( argument, "air" ) ) freeAir = qtrue;
+	else if ( !Q_stricmp( argument, "water" ) ) underwater = qtrue;
+	VectorMA( cg.refdef.vieworg, 192.0f, cg.refdef.viewaxis[0], origin );
+	VectorScale( cg.refdef.viewaxis[0], -1.0f, normal );
+	CG_WiredFx_RocketExplosion( origin, normal, material, freeAir, underwater );
+}
+
 /*
 static void CG_Camera_f( void ) {
 	char name[1024];
@@ -475,7 +494,8 @@ static consoleCommand_t	commands[] = {
 #endif
     { "spWin", CG_spWin_f },
     { "spLose", CG_spLose_f },
-    { "startOrbit", CG_StartOrbit_f },
+	{ "startOrbit", CG_StartOrbit_f },
+	{ "wiredFxTestRocket", CG_WiredFxTestRocket_f },
 	//{ "camera", CG_Camera_f },
 	{ "loaddeferred", CG_LoadDeferredPlayers },
 #if FEAT_CHAT_FILTER

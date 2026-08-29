@@ -440,6 +440,7 @@ static void WiredOD_PlayerModel( float x, float y, float w, float h, vec4_t item
 
 	// legs / lower — the root part, stands at the origin
 	memset( &legs, 0, sizeof( legs ) );
+	memset( legs.shader.rgba, 255, sizeof( legs.shader.rgba ) );
 	legs.reType        = RT_MODEL;
 	legs.hModel        = wui_previewLower;
 	legs.characterSkin = wui_previewSkinHandle;
@@ -460,6 +461,7 @@ static void WiredOD_PlayerModel( float x, float y, float w, float h, vec4_t item
 	// orientation (plus the legs' spin), matching CG_PlayerAngles, which sets
 	// legs/torso/head axes up front.
 	memset( &torso, 0, sizeof( torso ) );
+	memset( torso.shader.rgba, 255, sizeof( torso.shader.rgba ) );
 	torso.reType        = RT_MODEL;
 	torso.hModel        = wui_previewUpper;
 	torso.characterSkin = wui_previewSkinHandle;
@@ -474,6 +476,7 @@ static void WiredOD_PlayerModel( float x, float y, float w, float h, vec4_t item
 
 	// head — attached to torso's tag_head (head has no animation of its own)
 	memset( &head, 0, sizeof( head ) );
+	memset( head.shader.rgba, 255, sizeof( head.shader.rgba ) );
 	head.reType        = RT_MODEL;
 	head.hModel        = wui_previewHead;
 	head.characterSkin = wui_previewSkinHandle;

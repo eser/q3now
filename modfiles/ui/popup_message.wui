@@ -7,10 +7,8 @@
 //   - sizing + visual keywords (background / border / radius)
 //   - flex layout (direction / padding / gap)
 //
-// Position absolute on the root container is a charter-§UI-declarative-
-// format-unification "justified absolute override" — the popup layer
-// expects viewport-anchored placement, so this is the documented
-// exception to the flexbox-first authoring rule.
+// The popup is centred by the menu's flex alignment; it has no special
+// viewport-coordinate exception.
 //
 // Phase 3a (2026-05-26) restored the Cancel button next to OK (it was
 // dropped during the Phase 2b refine pass); the canonical 7-item
@@ -21,15 +19,19 @@
 menuDef {
 	name "popup_message"
 	layer "popup"
-	rect 0 0 1 1
+	width FIXED 1 height FIXED 1
 	fullScreen 0
 	visible 1
 	popup
 	modal
+	layout column
+	alignX center
+	alignY center
 
 	itemDef {
 		name "popup_root"
-		rect 0.25 0.39 $popup_width 0.22
+		width FIXED $popup_width
+		height FIXED 0.22
 		type container
 		direction column
 		padding $popup_padding
@@ -41,7 +43,7 @@ menuDef {
 		itemDef {
 			name "popup_title"
 			type 0
-			rect 0 0 1 0.04
+			width FIXED 1 height FIXED 0.04
 			text "Wired UI Phase 3a canary"
 			textalign 1
 			font $font_sans_bold 16
@@ -54,7 +56,7 @@ menuDef {
 		itemDef {
 			name "popup_body"
 			type 0
-			rect 0 0 1 0.06
+			width FIXED 1 height FIXED 0.06
 			text "Canonical popup pattern — OK + Cancel button row."
 			textalign 1
 			font $font_sans 12
@@ -67,7 +69,7 @@ menuDef {
 		itemDef {
 			name "popup_buttons"
 			type container
-			rect 0 0 1.0 0.05
+			width FIXED 1.0 height FIXED 0.05
 			direction row
 			gap $popup_button_gap
 			alignX end
@@ -75,7 +77,7 @@ menuDef {
 			itemDef {
 				name "popup_ok"
 				type 1
-				rect 0 0 0.12 0.04
+				width FIXED 0.12 height FIXED 0.04
 				text "OK"
 				textalign 1
 				font $font_sans 12
@@ -90,7 +92,7 @@ menuDef {
 			itemDef {
 				name "popup_cancel"
 				type 1
-				rect 0 0 0.12 0.04
+				width FIXED 0.12 height FIXED 0.04
 				text "Cancel"
 				textalign 1
 				font $font_sans 12

@@ -1,0 +1,115 @@
+// perspective — a selectable helmet-display HUD (`hud perspective`).
+//
+// Visual intent: compact, mirrored lower-corner instruments whose inner edges
+// recede toward screen centre. The `perspective` property preserves ordinary
+// Clay layout and hit testing, then projects the complete painted subtree --
+// chrome, text, icons, segmented bars and fills -- onto one coherent HUD plane.
+menuDef {
+	name "perspective"
+	width PERCENT 1 height PERCENT 1
+	fullScreen 0
+	visible 1
+	layer "hud"
+	composite overlay
+
+	itemDef {
+		name "hud_perspective_grid"
+		type container
+		direction column
+		width PERCENT 1
+		height PERCENT 1
+		padding 2vh 2vw 3.2vh 2vw
+
+		itemDef { name "hud_perspective_top" type container direction row width PERCENT 1 height 31vh grow 0
+			itemDef { name "hud_perspective_top_left" type container direction column height PERCENT 1 grow 1
+				#include "ui/widgets/qw_hud_overlay_messages.wui"
+				#include "ui/widgets/qw_hud_objectives.wui"
+			}
+			itemDef { name "hud_perspective_top_center" type container direction column width 33vw height PERCENT 1 alignX center grow 0
+				#include "ui/widgets/qw_hud_scoreboard_bar.wui"
+				itemDef { type container height 6vh grow 0 }
+				#include "ui/widgets/qw_hud_msgqueue.wui"
+				#include "ui/widgets/qw_hud_rewards.wui"
+				#include "ui/widgets/qw_hud_warmup.wui"
+			}
+			itemDef { name "hud_perspective_top_right" type container direction column height PERCENT 1 gap $spacing_sm grow 1 alignX end
+				#include "ui/widgets/qw_hud_telemetry.wui"
+				#include "ui/widgets/qw_hud_kill_feed.wui"
+			}
+		}
+
+		itemDef { name "hud_perspective_middle" type container direction row width PERCENT 1 grow 1 alignY center
+			itemDef { type container grow 1 }
+			#include "ui/widgets/qw_hud_crosshair.wui"
+			itemDef { name "hud_perspective_mid_right" type container direction column height PERCENT 1 padding 2vh 0 0 0 gap 1.2vh grow 1 alignX end
+				#include "ui/widgets/qw_hud_powerups.wui"
+				#include "ui/widgets/qw_hud_holdables_strip.wui"
+			}
+		}
+
+		itemDef { name "hud_perspective_bottom" type container direction row width PERCENT 1 height 17vh grow 0 alignY end
+			// Left instrument: outer edge stays full-depth; the inner/right edge
+			// recedes. Health and armor share one scan-friendly block.
+			itemDef {
+				name "hud_perspective_status"
+				type container
+				direction column
+				perspective 0.20
+				width 20vw height 12.5vh
+				padding 1.1vh 1.35vw
+				gap 0.65vh
+				grow 0
+				background $hud_perspective_bg
+				border 1
+				bordersize 1
+				bordercolor $hud_perspective_line
+
+				itemDef { name "hud_perspective_armor_row" type container direction row width PERCENT 1 height 4.4vh gap 0.6vw alignY center grow 0
+					itemDef { hudElement "statusbar_icon" bind "armor" width 1.5vw height 2.6vh grow 0 decoration visible 1 }
+					itemDef { type 0 width 3.2vw height FIT text "ARMOR" font $font_mono 10 forecolor $hud_perspective_caption decoration visible 1 grow 0 }
+					itemDef { hudElement "statusbar_value" bind "armor" width 3.6vw height 3.2vh grow 0 font $font_sans fontsize 30 34 textalign 2 forecolor $hud_perspective_armor decoration visible 1 }
+					itemDef { hudElement "statusbar_bar" bind "armor" width 7vw height 0.55vh grow 0 direction R forecolor $hud_perspective_armor decoration visible 1 }
+				}
+				itemDef { name "hud_perspective_health_row" type container direction row width PERCENT 1 height 4.4vh gap 0.6vw alignY center grow 0
+					itemDef { hudElement "statusbar_icon" bind "health" width 1.5vw height 2.6vh grow 0 decoration visible 1 }
+					itemDef { type 0 width 3.2vw height FIT text "HEALTH" font $font_mono 10 forecolor $hud_perspective_caption decoration visible 1 grow 0 }
+					itemDef { hudElement "statusbar_value" bind "health" width 3.6vw height 3.2vh grow 0 font $font_sans fontsize 30 34 textalign 2 forecolor $hud_perspective_health decoration visible 1 }
+					itemDef { hudElement "statusbar_bar" bind "health" width 7vw height 0.55vh grow 0 direction R forecolor $hud_perspective_health decoration visible 1 }
+				}
+			}
+
+			itemDef { name "hud_perspective_bottom_center" type container direction column height PERCENT 1 padding 7vh 0 0 0 grow 1 alignX center
+				#include "ui/widgets/qw_hud_weapon_carousel.wui"
+			}
+
+			// Right instrument mirrors the status panel: its inner/left edge
+			// recedes while the outside edge remains visually anchored.
+			itemDef {
+				name "hud_perspective_ammo"
+				type container
+				direction column
+				perspective $hud_perspective_inward
+				width 20vw height 12.5vh
+				padding 1.1vh 1.35vw
+				gap 0.6vh
+				alignX end
+				grow 0
+				background $hud_perspective_bg
+				border 1
+				bordersize 1
+				bordercolor $hud_perspective_line
+
+				itemDef { type 0 width PERCENT 1 height FIT bind "player.weapon.shortname" text "WPN" textalign 2 font $font_mono 11 forecolor $hud_perspective_caption decoration visible 1 grow 0 }
+				itemDef { name "hud_perspective_ammo_row" type container direction row width PERCENT 1 height 5.4vh gap 0.75vw alignX end alignY center grow 0
+					itemDef { hudElement "statusbar_bar" bind "ammo" width 8vw height 0.65vh grow 0 direction L forecolor $hud_perspective_ammo decoration visible 1 }
+					itemDef { hudElement "statusbar_value" bind "ammo" width 4.5vw height 4.2vh grow 0 font $font_sans fontsize 36 42 textalign 2 forecolor $hud_perspective_ammo decoration visible 1 }
+					itemDef { hudElement "statusbar_icon" bind "ammo" width 1.8vw height 3.2vh grow 0 decoration visible 1 }
+				}
+				itemDef { type 0 width PERCENT 1 height FIT text "AMMUNITION" textalign 2 font $font_mono 9 forecolor $hud_perspective_caption decoration visible 1 grow 0 }
+			}
+		}
+	}
+
+	#include "ui/widgets/qw_hud_markers.wui"
+	#include "ui/widgets/qw_hud_subtitle.wui"
+}

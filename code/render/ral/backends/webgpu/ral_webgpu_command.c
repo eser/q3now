@@ -23,6 +23,7 @@ struct ralWebGpuCommand_s {
 	uint64_t commandGeneration;
 	uint64_t operationDigest;
 	uint32_t drawCount;
+	uint32_t dispatchCount;
 	ralWebGpuPassKind_t passKind;
 	uintptr_t targetIdentity;
 	qboolean active;
@@ -53,7 +54,9 @@ static qboolean CommandValid( const ralWebGpuCommandReceipt_t *receipt ) {
 		&& receipt->backendGeneration && receipt->backendGeneration != UINT64_MAX
 		&& receipt->passKind >= RAL_WEBGPU_PASS_RENDER
 		&& receipt->passKind <= RAL_WEBGPU_PASS_COMPUTE
-		&& receipt->targetIdentity && receipt->operationDigest
+		&& ( receipt->passKind == RAL_WEBGPU_PASS_RENDER
+			? receipt->targetIdentity != 0u : receipt->targetIdentity == 0u )
+		&& receipt->operationDigest
 		&& Ral_CommandReceiptValid( &receipt->command )
 		&& receipt->ready == qtrue;
 }
@@ -77,6 +80,7 @@ static void BuildCommandReceipt( const ralWebGpuCommand_t *command,
 	out->targetIdentity = command->targetIdentity;
 	out->operationDigest = command->operationDigest;
 	out->drawCount = command->drawCount;
+	out->dispatchCount = command->dispatchCount;
 	out->command = *shared; out->ready = qtrue;
 }
 
@@ -89,6 +93,7 @@ qboolean RalWebGpu_CommandCreate( ralWebGpuCore_t *core,
 			|| !RalWebGpu_CoreMatchesReceipt( core, coreReceipt )
 			|| !createInfo->host.beginEncoder || !createInfo->host.beginPass
 			|| !createInfo->host.recordIndexedDraw
+			|| !createInfo->host.recordComputeDispatch
 			|| !createInfo->host.endPass || !createInfo->host.finishEncoder
 			|| !createInfo->host.submit || !createInfo->host.pollSubmission
 			|| !createInfo->host.releaseObject ) return qfalse;
@@ -116,7 +121,9 @@ qboolean RalWebGpu_CommandBegin( ralWebGpuCommand_t *command,
 	if ( !command || !outRecording || command->active || command->encoderIdentity
 			|| !RalWebGpu_CoreMatchesReceipt( command->core, &command->coreReceipt )
 			|| kind < RAL_WEBGPU_PASS_RENDER || kind > RAL_WEBGPU_PASS_COMPUTE
-			|| !targetIdentity || command->commandToken == UINT64_MAX ) return qfalse;
+			|| ( kind == RAL_WEBGPU_PASS_RENDER && !targetIdentity )
+			|| ( kind == RAL_WEBGPU_PASS_COMPUTE && targetIdentity )
+			|| command->commandToken == UINT64_MAX ) return qfalse;
 	if ( !command->host.beginEncoder( command->userData,
 			command->coreReceipt.deviceIdentity, &encoder ) || !encoder ) return qfalse;
 	if ( !command->host.beginPass( command->userData, encoder, kind,
@@ -145,8 +152,46 @@ qboolean RalWebGpu_CommandBegin( ralWebGpuCommand_t *command,
 	command->operationDigest *= UINT64_C(1099511628211);
 	if ( !command->operationDigest ) command->operationDigest = 1u;
 	command->drawCount = 0u;
+	command->dispatchCount = 0u;
 	command->active = qtrue;
 	BuildCommandReceipt( command, &recording, outRecording ); return qtrue;
+}
+
+qboolean RalWebGpu_CommandRecordComputeDispatch( ralWebGpuCommand_t *command,
+		const ralWebGpuCommandReceipt_t *recording,
+		const ralWebGpuComputeDispatch_t *dispatch,
+		ralWebGpuCommandReceipt_t *outRecording ) {
+	uint64_t digest;
+	if ( !command || !recording || !dispatch || !outRecording || !command->active
+			|| command->passKind != RAL_WEBGPU_PASS_COMPUTE
+			|| !RalWebGpu_CommandReceiptExact( recording, recording )
+			|| recording->command.state != RAL_COMMAND_RECORDING
+			|| recording->operationDigest != command->operationDigest
+			|| recording->drawCount != command->drawCount
+			|| recording->dispatchCount != command->dispatchCount
+			|| !dispatch->pipelineIdentity || !dispatch->groupCountX
+			|| !dispatch->groupCountY || !dispatch->groupCountZ
+			|| !dispatch->contentDigest
+			|| dispatch->bindGroupCount > RAL_SHADER_ABI_MAX_BIND_GROUPS
+			|| command->dispatchCount == UINT32_MAX ) return qfalse;
+	for ( uint32_t i = 0u; i < dispatch->bindGroupCount; ++i )
+		if ( !dispatch->bindGroupIdentities[i] ) return qfalse;
+	digest = command->operationDigest;
+	digest ^= dispatch->pipelineIdentity; digest *= UINT64_C(1099511628211);
+	for ( uint32_t i = 0u; i < dispatch->bindGroupCount; ++i ) {
+		digest ^= dispatch->bindGroupIdentities[i];
+		digest *= UINT64_C(1099511628211);
+	}
+	digest ^= ( (uint64_t)dispatch->groupCountX << 42u )
+		^ ( (uint64_t)dispatch->groupCountY << 21u ) ^ dispatch->groupCountZ;
+	digest *= UINT64_C(1099511628211); digest ^= dispatch->contentDigest;
+	digest *= UINT64_C(1099511628211); digest ^= dispatch->bindGroupCount;
+	if ( !digest ) digest = 1u;
+	if ( !command->host.recordComputeDispatch( command->userData,
+			command->passIdentity, dispatch ) ) return qfalse;
+	command->operationDigest = digest; command->dispatchCount++;
+	BuildCommandReceipt( command, &recording->command, outRecording );
+	return qtrue;
 }
 
 qboolean RalWebGpu_CommandRecordIndexedDraw( ralWebGpuCommand_t *command,
@@ -161,6 +206,7 @@ qboolean RalWebGpu_CommandRecordIndexedDraw( ralWebGpuCommand_t *command,
 				&& recording->command.state != RAL_COMMAND_EXECUTABLE )
 			|| recording->operationDigest != command->operationDigest
 			|| recording->drawCount != command->drawCount
+			|| recording->dispatchCount != command->dispatchCount
 			|| draw->kind < RAL_WEBGPU_DRAW_WORLD || draw->kind > RAL_WEBGPU_DRAW_UI
 			|| !draw->pipelineIdentity || !draw->vertexBufferIdentity
 			|| !draw->indexBufferIdentity
@@ -173,7 +219,10 @@ qboolean RalWebGpu_CommandRecordIndexedDraw( ralWebGpuCommand_t *command,
 			|| ( !draw->textured && draw->kind != RAL_WEBGPU_DRAW_EFFECT )
 			|| !draw->indexCount || !draw->instanceCount
 			|| draw->firstIndex > UINT32_MAX - draw->indexCount
+			|| draw->bindGroupCount > RAL_SHADER_ABI_MAX_BIND_GROUPS
 			|| !draw->contentDigest || command->drawCount == UINT32_MAX ) return qfalse;
+	for ( uint32_t i = 0u; i < draw->bindGroupCount; ++i )
+		if ( !draw->bindGroupIdentities[i] ) return qfalse;
 	digest = command->operationDigest;
 	digest ^= (uint64_t)draw->kind; digest *= UINT64_C(1099511628211);
 	digest ^= draw->pipelineIdentity; digest *= UINT64_C(1099511628211);
@@ -184,7 +233,14 @@ qboolean RalWebGpu_CommandRecordIndexedDraw( ralWebGpuCommand_t *command,
 	digest ^= draw->samplerIdentity; digest *= UINT64_C(1099511628211);
 	digest ^= (uint64_t)draw->textured; digest *= UINT64_C(1099511628211);
 	digest ^= ( (uint64_t)draw->firstIndex << 32u ) | draw->indexCount;
+	digest *= UINT64_C(1099511628211); digest ^= draw->instanceCount;
+	digest *= UINT64_C(1099511628211); digest ^= draw->firstInstance;
 	digest *= UINT64_C(1099511628211); digest ^= draw->contentDigest;
+	for ( uint32_t i = 0u; i < draw->bindGroupCount; ++i ) {
+		digest *= UINT64_C(1099511628211);
+		digest ^= draw->bindGroupIdentities[i];
+	}
+	digest *= UINT64_C(1099511628211); digest ^= draw->bindGroupCount;
 	digest *= UINT64_C(1099511628211); if ( !digest ) digest = 1u;
 	if ( !command->host.recordIndexedDraw( command->userData,
 			command->passIdentity, draw ) ) return qfalse;
@@ -200,9 +256,11 @@ qboolean RalWebGpu_CommandCancel( ralWebGpuCommand_t *command,
 			|| recording->command.state != RAL_COMMAND_RECORDING
 			|| recording->operationDigest != command->operationDigest
 			|| recording->drawCount != command->drawCount ) return qfalse;
+	if ( recording->dispatchCount != command->dispatchCount ) return qfalse;
 	ReleaseNative( command ); command->active = qfalse;
 	memset( &command->lifecycle, 0, sizeof( command->lifecycle ) );
 	command->drawCount = 0u; command->operationDigest = 0u;
+	command->dispatchCount = 0u;
 	return qtrue;
 }
 
@@ -216,6 +274,8 @@ qboolean RalWebGpu_CommandEnd( ralWebGpuCommand_t *command,
 			|| !RalWebGpu_CommandReceiptExact( recording, recording )
 			|| recording->backendGeneration != command->coreReceipt.generation
 			|| recording->operationDigest != command->operationDigest
+			|| recording->drawCount != command->drawCount
+			|| recording->dispatchCount != command->dispatchCount
 			|| recording->command.state != RAL_COMMAND_RECORDING ) return qfalse;
 	if ( !command->host.endPass( command->userData, command->passIdentity )
 			|| !command->host.finishEncoder( command->userData,
@@ -297,6 +357,7 @@ qboolean RalWebGpu_CommandReceiptExact( const ralWebGpuCommandReceipt_t *a,
 		&& a->passKind == b->passKind && a->targetIdentity == b->targetIdentity
 		&& a->operationDigest == b->operationDigest
 		&& a->drawCount == b->drawCount
+		&& a->dispatchCount == b->dispatchCount
 		&& Ral_CommandReceiptExact( &a->command, &b->command );
 }
 

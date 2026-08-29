@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
-# Dynamic UI rendering is a RAL-owned color-only pass.  Legacy Vulkan
+# Dynamic UI rendering is a RAL-owned color/depth pass. Legacy Vulkan
 # VkRenderPass/VkFramebuffer compatibility objects must not return.
 
 IF(NOT DEFINED SOURCE_ROOT OR NOT IS_DIRECTORY "${SOURCE_ROOT}")
@@ -82,47 +82,57 @@ FOREACH(NEEDLE IN ITEMS "VkRenderPass ui" "VkRenderPass ui_clear"
 	FORBID_TEXT("${VK_H}" "${NEEDLE}" "legacy UI native object storage")
 ENDFOREACH()
 
-# Pin the exact color-only dynamic recipe and its state publication.  CLEAR and
+# Pin the exact dynamic recipe and its state publication. CLEAR and
 # LOAD remain one branch of the same RAL pass instead of separate native
-# compatibility objects.
+# compatibility objects. The UI-owned depth/stencil attachment supports 3D
+# subviews while normal HUD pipelines leave it untouched.
 FOREACH(NEEDLE IN ITEMS
 	"if ( !vk.fboActive )"
 	"if ( clear )"
 	"vk_end_render_pass();"
-	"memset( &ri, 0, sizeof( ri ) );"
-	"ri.colorAttachments[0] = vk.ral_tonemapped_image;"
-	"ri.colorLoadOps[0]     = clear ? RAL_LOAD_OP_CLEAR : RAL_LOAD_OP_LOAD;"
-	"ri.colorStoreOps[0]    = RAL_STORE_OP_STORE;"
-	"ri.numColorAttachments = 1;"
-	"Ral_BeginRendering( vk.cmd->ral_cmd, &ri );"
+	"memset( &renderingInfo, 0, sizeof( renderingInfo ) );"
+	"renderingInfo.colorAttachments[0] = vk.ral_ui_image;"
+	"renderingInfo.colorLoadOps[0]     = clear ? RAL_LOAD_OP_CLEAR : RAL_LOAD_OP_LOAD;"
+	"renderingInfo.colorStoreOps[0]    = RAL_STORE_OP_STORE;"
+	"renderingInfo.numColorAttachments = 1;"
+	"renderingInfo.depthAttachment     = vk.ral_ui_depth_image;"
+	"renderingInfo.depthLoadOp         = RAL_LOAD_OP_CLEAR;"
+	"renderingInfo.depthStoreOp        = RAL_STORE_OP_DONT_CARE;"
+	"renderingInfo.stencilLoadOp       = glConfig.stencilBits > 0"
+	"? RAL_LOAD_OP_CLEAR : RAL_LOAD_OP_DONT_CARE;"
+	"renderingInfo.stencilStoreOp      = RAL_STORE_OP_DONT_CARE;"
+	"Ral_BeginRendering( vk.cmd->ral_cmd, &renderingInfo );"
+	"vk.ral_ui_image_initialized = qtrue;"
 	"vk.cmd->open_dynamic_pass = VK_DYN_PASS_UI;"
 	"vk.renderPassIndex = RENDER_PASS_MAIN;")
 	REQUIRE_TEXT("${UI_PASS}" "${NEEDLE}" "RAL dynamic UI recipe")
 ENDFOREACH()
 REQUIRE_COUNT("${UI_PASS}" "Ral_BeginRendering[(]" 1
 	"RAL dynamic UI begin inventory")
-REQUIRE_COUNT("${UI_PASS}" "RAL_LOAD_OP_CLEAR" 1
-	"RAL dynamic UI CLEAR branch")
+REQUIRE_COUNT("${UI_PASS}" "RAL_LOAD_OP_CLEAR" 3
+	"RAL dynamic UI color/depth/stencil CLEAR inventory")
 REQUIRE_COUNT("${UI_PASS}" "RAL_LOAD_OP_LOAD" 1
 	"RAL dynamic UI LOAD branch")
 REQUIRE_ORDER("${UI_PASS}" "if ( clear )" "vk_end_render_pass();"
 	"pure-2D prior-pass close")
 REQUIRE_ORDER("${UI_PASS}" "vk_end_render_pass();"
-	"ri.colorAttachments[0] = vk.ral_tonemapped_image;"
+	"renderingInfo.colorAttachments[0] = vk.ral_ui_image;"
 	"UI target publication")
 REQUIRE_ORDER("${UI_PASS}"
-	"ri.colorAttachments[0] = vk.ral_tonemapped_image;"
-	"ri.colorLoadOps[0]     = clear ? RAL_LOAD_OP_CLEAR : RAL_LOAD_OP_LOAD;"
+	"renderingInfo.colorAttachments[0] = vk.ral_ui_image;"
+	"renderingInfo.colorLoadOps[0]     = clear ? RAL_LOAD_OP_CLEAR : RAL_LOAD_OP_LOAD;"
 	"UI target before load policy")
-REQUIRE_ORDER("${UI_PASS}" "ri.colorStoreOps[0]    = RAL_STORE_OP_STORE;"
-	"Ral_BeginRendering( vk.cmd->ral_cmd, &ri );"
+REQUIRE_ORDER("${UI_PASS}" "renderingInfo.colorStoreOps[0]    = RAL_STORE_OP_STORE;"
+	"Ral_BeginRendering( vk.cmd->ral_cmd, &renderingInfo );"
 	"UI recipe before emission")
-REQUIRE_ORDER("${UI_PASS}" "Ral_BeginRendering( vk.cmd->ral_cmd, &ri );"
+REQUIRE_ORDER("${UI_PASS}" "Ral_BeginRendering( vk.cmd->ral_cmd, &renderingInfo );"
+	"vk.ral_ui_image_initialized = qtrue;"
+	"UI emission before image state publication")
+REQUIRE_ORDER("${UI_PASS}" "vk.ral_ui_image_initialized = qtrue;"
 	"vk.cmd->open_dynamic_pass = VK_DYN_PASS_UI;"
-	"UI emission before state publication")
-FOREACH(NEEDLE IN ITEMS "qvk" "VkRenderPass" "VkFramebuffer"
-	"depthAttachment" "vk.depth_image")
-	FORBID_TEXT("${UI_PASS}" "${NEEDLE}" "RAL color-only UI command span")
+	"UI image state before command state publication")
+FOREACH(NEEDLE IN ITEMS "qvk" "VkRenderPass" "VkFramebuffer" "vk.depth_image")
+	FORBID_TEXT("${UI_PASS}" "${NEEDLE}" "RAL-owned UI command span")
 ENDFOREACH()
 
 MESSAGE(STATUS

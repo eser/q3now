@@ -5,6 +5,7 @@
 #define WIRED_RAL_WEBGPU_COMMAND_H
 
 #include "ral_command_lifecycle.h"
+#include "ral_shader_abi.h"
 #include "ral_webgpu_core.h"
 
 #ifdef __cplusplus
@@ -52,10 +53,24 @@ typedef struct {
 	uint32_t firstIndex;
 	uint32_t indexCount;
 	uint32_t instanceCount;
+	uint32_t firstInstance;
 	uint64_t contentDigest;
+	uintptr_t bindGroupIdentities[RAL_SHADER_ABI_MAX_BIND_GROUPS];
+	uint32_t bindGroupCount;
 } ralWebGpuIndexedDraw_t;
 typedef qboolean ( *ralWebGpuRecordIndexedDrawFn )( void *userData,
 	uintptr_t passIdentity, const ralWebGpuIndexedDraw_t *draw );
+typedef struct {
+	uintptr_t pipelineIdentity;
+	uintptr_t bindGroupIdentities[RAL_SHADER_ABI_MAX_BIND_GROUPS];
+	uint32_t bindGroupCount;
+	uint32_t groupCountX;
+	uint32_t groupCountY;
+	uint32_t groupCountZ;
+	uint64_t contentDigest;
+} ralWebGpuComputeDispatch_t;
+typedef qboolean ( *ralWebGpuRecordComputeDispatchFn )( void *userData,
+	uintptr_t passIdentity, const ralWebGpuComputeDispatch_t *dispatch );
 typedef qboolean ( *ralWebGpuFinishEncoderFn )( void *userData,
 	uintptr_t encoderIdentity, uintptr_t *outCommandBufferIdentity );
 typedef qboolean ( *ralWebGpuSubmitCommandFn )( void *userData,
@@ -71,6 +86,7 @@ typedef struct {
 	ralWebGpuBeginEncoderFn beginEncoder;
 	ralWebGpuBeginPassFn beginPass;
 	ralWebGpuRecordIndexedDrawFn recordIndexedDraw;
+	ralWebGpuRecordComputeDispatchFn recordComputeDispatch;
 	ralWebGpuEndPassFn endPass;
 	ralWebGpuFinishEncoderFn finishEncoder;
 	ralWebGpuSubmitCommandFn submit;
@@ -91,6 +107,7 @@ typedef struct {
 	uintptr_t targetIdentity;
 	uint64_t operationDigest;
 	uint32_t drawCount;
+	uint32_t dispatchCount;
 	ralCommandReceipt_t command;
 	qboolean ready;
 } ralWebGpuCommandReceipt_t;
@@ -118,6 +135,10 @@ qboolean RalWebGpu_CommandEnd( ralWebGpuCommand_t *command,
 qboolean RalWebGpu_CommandRecordIndexedDraw( ralWebGpuCommand_t *command,
 	const ralWebGpuCommandReceipt_t *recording,
 	const ralWebGpuIndexedDraw_t *draw,
+	ralWebGpuCommandReceipt_t *outRecording );
+qboolean RalWebGpu_CommandRecordComputeDispatch( ralWebGpuCommand_t *command,
+	const ralWebGpuCommandReceipt_t *recording,
+	const ralWebGpuComputeDispatch_t *dispatch,
 	ralWebGpuCommandReceipt_t *outRecording );
 qboolean RalWebGpu_CommandCancel( ralWebGpuCommand_t *command,
 	const ralWebGpuCommandReceipt_t *recording );

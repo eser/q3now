@@ -1,0 +1,122 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct MediaVolume
+{
+    float4 originRadius;
+    float4 extentShape;
+    float4 albedoAnisotropy;
+    float4 emissiveIntensity;
+    float4 media;
+};
+
+struct Params
+{
+    float4x4 invViewProjection;
+    float4 eyeNear;
+    float4 farGlobalDensity;
+    float4 globalAlbedoAnisotropy;
+    uint4 gridVolumeCount;
+    float4 timelineSeed;
+};
+
+struct MediaVolume_1
+{
+    float4 originRadius;
+    float4 extentShape;
+    float4 albedoAnisotropy;
+    float4 emissiveIntensity;
+    float4 media;
+};
+
+struct Volumes
+{
+    MediaVolume_1 v[1];
+};
+
+struct Media
+{
+    float4 scatteringExtinction[1];
+};
+
+constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(4u);
+
+struct spvDescriptorSetBuffer0
+{
+    constant Params* p [[id(0)]];
+    device Volumes* m_305 [[id(1)]];
+    device Media* m_359 [[id(2)]];
+};
+
+static inline __attribute__((always_inline))
+float hash13(thread float3& q)
+{
+    q = fract(q * 0.103100001811981201171875);
+    q += float3(dot(q, q.yzx + float3(33.3300018310546875)));
+    return fract((q.x + q.y) * q.z);
+}
+
+static inline __attribute__((always_inline))
+float volumeWeight(thread const MediaVolume& m, thread const float3& world, constant Params& p)
+{
+    float3 local = world - m.originRadius.xyz;
+    float shape = m.extentShape.w;
+    float _70;
+    if (shape < 1.5)
+    {
+        _70 = 1.0 - smoothstep(m.originRadius.w * 0.85000002384185791015625, m.originRadius.w, length(local));
+    }
+    else
+    {
+        _70 = 1.0 - smoothstep(0.85000002384185791015625, 1.0, fast::max(fast::max(abs(local.x) / m.extentShape.x, abs(local.y) / m.extentShape.y), abs(local.z) / m.extentShape.z));
+    }
+    float weight = _70;
+    if (m.media.z > 0.0)
+    {
+        float3 param = (world / float3(m.media.z)) + float3(p.timelineSeed.x, p.timelineSeed.y, p.timelineSeed.w);
+        float _137 = hash13(param);
+        weight *= mix(0.550000011920928955078125, 1.0, _137);
+    }
+    return fast::max(weight, 0.0) * exp((-fast::max(m.media.y, 0.0)) * fast::max(world.z - m.originRadius.z, 0.0));
+}
+
+kernel void main0(device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+{
+    uint3 c = gl_GlobalInvocationID;
+    uint3 dims = (*spvDescriptorSet0.p).gridVolumeCount.xyz;
+    if (any(c >= dims))
+    {
+        return;
+    }
+    uint index = (((c.z * dims.y) + c.y) * dims.x) + c.x;
+    float2 uv = (float2(c.xy) + float2(0.5)) / float2(dims.xy);
+    float slice = (float(c.z) + 0.5) / float(dims.z);
+    float nearZ = fast::max((*spvDescriptorSet0.p).eyeNear.w, 0.00999999977648258209228515625);
+    float farZ = fast::max((*spvDescriptorSet0.p).farGlobalDensity.x, nearZ + 0.00999999977648258209228515625);
+    float distanceZ = nearZ * powr(farZ / nearZ, slice);
+    float4 worldH = (*spvDescriptorSet0.p).invViewProjection * float4((uv * 2.0) - float2(1.0), 1.0 - (nearZ / distanceZ), 1.0);
+    float3 world = worldH.xyz / float3(fast::max(abs(worldH.w), 9.9999999747524270787835121154785e-07));
+    float extinction = fast::max((*spvDescriptorSet0.p).farGlobalDensity.y, 0.0) * exp((-fast::max((*spvDescriptorSet0.p).farGlobalDensity.z, 0.0)) * fast::max(world.z, 0.0));
+    float3 scattering = (*spvDescriptorSet0.p).globalAlbedoAnisotropy.xyz * extinction;
+    uint count = min((*spvDescriptorSet0.p).gridVolumeCount.w, 64u);
+    MediaVolume param;
+    for (uint i = 0u; i < count; i++)
+    {
+        param.originRadius = (*spvDescriptorSet0.m_305).v[i].originRadius;
+        param.extentShape = (*spvDescriptorSet0.m_305).v[i].extentShape;
+        param.albedoAnisotropy = (*spvDescriptorSet0.m_305).v[i].albedoAnisotropy;
+        param.emissiveIntensity = (*spvDescriptorSet0.m_305).v[i].emissiveIntensity;
+        param.media = (*spvDescriptorSet0.m_305).v[i].media;
+        float3 param_1 = world;
+        float weight = volumeWeight(param, param_1, (*spvDescriptorSet0.p));
+        float localExtinction = fast::max(((device float*)&(*spvDescriptorSet0.m_305).v[i].media)[0u], 0.0) * weight;
+        extinction += localExtinction;
+        scattering += (((*spvDescriptorSet0.m_305).v[i].albedoAnisotropy.xyz * localExtinction) + (((*spvDescriptorSet0.m_305).v[i].emissiveIntensity.xyz * fast::max(((device float*)&(*spvDescriptorSet0.m_305).v[i].emissiveIntensity)[3u], 0.0)) * weight));
+    }
+    (*spvDescriptorSet0.m_359).scatteringExtinction[index] = float4(scattering, extinction);
+}
+

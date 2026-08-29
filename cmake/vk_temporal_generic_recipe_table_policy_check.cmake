@@ -139,7 +139,7 @@ foreach(token IN ITEMS "PipelineFactoryEnsure" "Ral_CreateGraphicsPipeline"
 		"Ral_Cmd" "PayloadAppendAt" "PayloadGetBindGroup" "Cvar")
 	forbid_text(CORE "${token}" "GPU/runtime authority in recipe core")
 endforeach()
-require_text(VKH "_Static_assert( sizeof( vkUniform_t ) == 640" "ordinary draw UBO size")
+require_text(VKH "_Static_assert( sizeof( vkUniform_t ) == 656" "ordinary draw UBO size")
 forbid_text(VKH "vkTemporalGenericRecipeTable" "recipe owner in VK_Pipeline/vk state")
 
 # Only the owner implementation/header and the single vk.c product adapter may

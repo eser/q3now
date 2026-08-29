@@ -1,0 +1,151 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct Params
+{
+    float4x4 invViewProjection;
+    float4 eyeNear;
+    float4 farTimeCoverageShadow;
+    float4 windDensity;
+    float4 layerErosion;
+    float4 sunDirectionIntensity;
+    float4 sunColorLightning;
+    float4 ambientColor;
+    uint4 grid;
+};
+
+struct LitMedia
+{
+    float4 sourceRadianceExtinction[1];
+};
+
+struct CloudMedia
+{
+    float4 cloudRadianceExtinction[1];
+};
+
+constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(4u);
+
+struct spvDescriptorSetBuffer0
+{
+    constant Params* p [[id(0)]];
+    device LitMedia* m_192 [[id(1)]];
+    device CloudMedia* m_211 [[id(2)]];
+};
+
+static inline __attribute__((always_inline))
+float hash13(thread float3& q)
+{
+    q = fract(q * 0.103100001811981201171875);
+    q += float3(dot(q, q.yzx + float3(33.3300018310546875)));
+    return fract((q.x + q.y) * q.z);
+}
+
+static inline __attribute__((always_inline))
+float valueNoise(thread const float3& x)
+{
+    float3 cell = floor(x);
+    float3 f = fract(x);
+    f = (f * f) * (float3(3.0) - (f * 2.0));
+    float3 param = cell + float3(0.0);
+    float _68 = hash13(param);
+    float n000 = _68;
+    float3 param_1 = cell + float3(1.0, 0.0, 0.0);
+    float _75 = hash13(param_1);
+    float n100 = _75;
+    float3 param_2 = cell + float3(0.0, 1.0, 0.0);
+    float _81 = hash13(param_2);
+    float n010 = _81;
+    float3 param_3 = cell + float3(1.0, 1.0, 0.0);
+    float _87 = hash13(param_3);
+    float n110 = _87;
+    float3 param_4 = cell + float3(0.0, 0.0, 1.0);
+    float _93 = hash13(param_4);
+    float n001 = _93;
+    float3 param_5 = cell + float3(1.0, 0.0, 1.0);
+    float _99 = hash13(param_5);
+    float n101 = _99;
+    float3 param_6 = cell + float3(0.0, 1.0, 1.0);
+    float _105 = hash13(param_6);
+    float n011 = _105;
+    float3 param_7 = cell + float3(1.0);
+    float _111 = hash13(param_7);
+    float n111 = _111;
+    return mix(mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y), mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y), f.z);
+}
+
+kernel void main0(device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+{
+    uint3 c = gl_GlobalInvocationID;
+    uint3 dims = (*spvDescriptorSet0.p).grid.xyz;
+    if (any(c >= dims))
+    {
+        return;
+    }
+    uint index = (((c.z * dims.y) + c.y) * dims.x) + c.x;
+    float4 source = (*spvDescriptorSet0.m_192).sourceRadianceExtinction[index];
+    float cover = fast::clamp((*spvDescriptorSet0.p).farTimeCoverageShadow.z, 0.0, 1.0);
+    if (cover <= 0.0)
+    {
+        (*spvDescriptorSet0.m_211).cloudRadianceExtinction[index] = source;
+        return;
+    }
+    float2 uv = (float2(c.xy) + float2(0.5)) / float2(dims.xy);
+    float slice = (float(c.z) + 0.5) / float(dims.z);
+    float nearZ = fast::max((*spvDescriptorSet0.p).eyeNear.w, 0.00999999977648258209228515625);
+    float farZ = fast::max((*spvDescriptorSet0.p).farTimeCoverageShadow.x, nearZ + 0.00999999977648258209228515625);
+    float distanceZ = nearZ * powr(farZ / nearZ, slice);
+    float4 worldH = (*spvDescriptorSet0.p).invViewProjection * float4((uv * 2.0) - float2(1.0), 1.0 - (nearZ / distanceZ), 1.0);
+    float3 world = worldH.xyz / float3(fast::max(abs(worldH.w), 9.9999999747524270787835121154785e-07));
+    float base = (*spvDescriptorSet0.p).layerErosion.x;
+    float top = fast::max((*spvDescriptorSet0.p).layerErosion.y, base + 1.0);
+    float edge = fast::max((top - base) * fast::clamp((*spvDescriptorSet0.p).layerErosion.z, 0.0199999995529651641845703125, 0.449999988079071044921875), 1.0);
+    float envelope = smoothstep(base, base + edge, world.z) * (1.0 - smoothstep(top - edge, top, world.z));
+    if (envelope <= 0.0)
+    {
+        (*spvDescriptorSet0.m_211).cloudRadianceExtinction[index] = source;
+        return;
+    }
+    float3 advected = world + ((*spvDescriptorSet0.p).windDensity.xyz * (*spvDescriptorSet0.p).farTimeCoverageShadow.y);
+    float scale = fast::max((top - base) * 0.319999992847442626953125, 48.0);
+    float3 param = advected / float3(scale);
+    float shape = valueNoise(param);
+    float threshold = mix(0.819999992847442626953125, 0.300000011920928955078125, cover);
+    float density = smoothstep(threshold, fast::min(threshold + fast::max((*spvDescriptorSet0.p).layerErosion.w, 0.07999999821186065673828125), 1.0), shape) * envelope;
+    float extinction = density * fast::max((*spvDescriptorSet0.p).windDensity.w, 0.0);
+    float3 viewVector = world - (*spvDescriptorSet0.p).eyeNear.xyz;
+    float viewLength = length(viewVector);
+    float3 _394;
+    if (viewLength > 9.9999997473787516355514526367188e-06)
+    {
+        _394 = viewVector / float3(viewLength);
+    }
+    else
+    {
+        _394 = float3(0.0, 0.0, 1.0);
+    }
+    float3 viewDir = _394;
+    float3 sunVector = (*spvDescriptorSet0.p).sunDirectionIntensity.xyz;
+    float sunLength = length(sunVector);
+    float3 _414;
+    if (sunLength > 9.9999997473787516355514526367188e-06)
+    {
+        _414 = sunVector / float3(sunLength);
+    }
+    else
+    {
+        _414 = float3(0.0, 0.0, 1.0);
+    }
+    float3 sunDir = _414;
+    float forward = powr(fast::max(dot(viewDir, sunDir), 0.0), 4.0);
+    float selfShadow = exp(((-extinction) * (top - base)) * 0.180000007152557373046875);
+    float3 illumination = (*spvDescriptorSet0.p).ambientColor.xyz + (((((*spvDescriptorSet0.p).sunColorLightning.xyz * (*spvDescriptorSet0.p).sunDirectionIntensity.w) * selfShadow) * mix(0.3499999940395355224609375, 1.0, forward)) * (1.0 - fast::clamp((*spvDescriptorSet0.p).farTimeCoverageShadow.w, 0.0, 1.0)));
+    illumination += (*spvDescriptorSet0.p).sunColorLightning.www;
+    float3 cloudRadiance = (float3(0.920000016689300537109375, 0.949999988079071044921875, 1.0) * extinction) * illumination;
+    (*spvDescriptorSet0.m_211).cloudRadianceExtinction[index] = source + float4(cloudRadiance, extinction);
+}
+

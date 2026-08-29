@@ -5,6 +5,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/lib/wired_paths.sh"
 TIMEOUT_RUNNER="$SCRIPT_DIR/run-with-timeout.py"
 CFG_SOURCE="$SCRIPT_DIR/fixtures/wiredui-demo-io-fault.cfg"
 DEMO_HEX="0100000005000000aabfaa9200ffffffffffffffff"
@@ -100,7 +101,7 @@ close=exact("WiredUI: close all postcondition ",
 arm=exact("Demo read fault armed ","Demo read fault armed after_bytes=6","DEBUG","client","fault arm")
 injected=exact("Demo read fault injected ",
  "Demo read fault injected after_bytes=6 requested=2","DEBUG","client","fault injection")
-file_index=exact("Demo file: demos/","Demo file: demos/io.fault.dm_74","INFO","client","demo file")
+file_index=exact("Demo file: demos/","Demo file: demos/io.fault.dm_75","INFO","client","demo file")
 reject=exact("Demo playback rejected ",
  "Demo playback rejected reason=io-error continuation=0","INFO","client","typed rejection")
 error=exact("Error: The demo ","Error: The demo could not be read.","ERROR","system","controlled error")
@@ -126,8 +127,13 @@ if str(pops[0][1].get("sev","")).upper()!="DEBUG" or str(pops[0][1].get("cat",""
 system_values=[normalized(m) for m in messages if normalized(m).startswith('"com_errorMessage" is:')]
 if system_values!=['"com_errorMessage" is:"The demo could not be read."','"com_errorMessage" is:""']:
     raise SystemExit("FAIL io-fault: error state lifecycle")
-retry=[normalized(m) for m in messages if normalized(m).startswith('"ui_errorRetry" is:')]
-if retry!=['"ui_errorRetry" is:"0"']: raise SystemExit("FAIL io-fault: retry state")
+retry=[]
+for i,message in enumerate(messages[:-1]):
+ if normalized(message)=="  key:   ui_errorRetry":
+  retry.append((rows[i],rows[i+1],normalized(messages[i+1])))
+if len(retry)!=1 or retry[0][2]!='  text:  "0"': raise SystemExit("FAIL io-fault: retry state")
+if any(str(row.get("sev","")).upper()!="INFO" or str(row.get("cat","")).lower()!="client" for row in retry[0][:2]):
+ raise SystemExit("FAIL io-fault: retry metadata")
 
 ordered_indices=[loads[0][0],feeder[0][0],main[0][0],demos[0][0],loads[1][0],feeder[1][0],nav[3][0],
                  selection,focus[0][0],focus[1][0],arm,queue,close,
@@ -184,7 +190,7 @@ add("DEBUG","client","Demo read fault armed after_bytes=6")
 add("DEBUG","ui","WiredUI: queued validated demo playback name=io.fault")
 add("DEBUG","ui","WiredUI: close all postcondition depth=0 active=none catcher_ui=0 paused=0")
 add("DEBUG","ui","wui_menu_nav: K_ENTER dispatched")
-add("INFO","client","Demo file: demos/io.fault.dm_74")
+add("INFO","client","Demo file: demos/io.fault.dm_75")
 add("DEBUG","client","Demo read fault injected after_bytes=6 requested=2")
 add("INFO","client","Demo playback rejected reason=io-error continuation=0")
 add("ERROR","system","Error: The demo could not be read.")
@@ -195,7 +201,8 @@ add("DEBUG","ui","WiredUI: demo feeder row=0 name=io.fault generation=3")
 add("DEBUG","ui","WiredUI: push menu 'error_popup' (depth 3)")
 add("INFO","client","Demo playback recovery reason=io-error depth=3 popup=1 automated=0")
 add("INFO","system",'"com_errorMessage" is:"The demo could not be read."')
-add("INFO","system",'"ui_errorRetry" is:"0"')
+add("INFO","client","  key:   ui_errorRetry")
+add("INFO","client",'  text:  "0"')
 add("DEBUG","ui","wui_menu_nav focus: focused item 'btn_back' (top index -1)")
 add("DEBUG","ui","WiredUI: pop menu (depth 2)")
 add("DEBUG","ui","wui_menu_nav: K_ENTER dispatched")
@@ -208,7 +215,7 @@ PYEOF
 }
 
 if [ "${1:-}" = "--analyze" ]; then
-    [ "$#" -eq 3 ] || { echo "usage: $0 --analyze qconsole.jsonl demo.dm_74"; exit 64; }
+    [ "$#" -eq 3 ] || { echo "usage: $0 --analyze qconsole.jsonl demo.dm_75"; exit 64; }
     analyze_contract "$2" "$3"
     exit $?
 fi
@@ -216,8 +223,8 @@ fi
 if [ "${1:-}" = "--self-test" ]; then
     ROOT="$(mktemp -d -t wired-demo-io-self-XXXXXX 2>/dev/null || mktemp -d)"
     trap 'rm -rf "$ROOT"' EXIT
-    write_clean "$ROOT/clean.jsonl" "$ROOT/io.fault.dm_74"
-    analyze_contract "$ROOT/clean.jsonl" "$ROOT/io.fault.dm_74" >/dev/null || exit 1
+    write_clean "$ROOT/clean.jsonl" "$ROOT/io.fault.dm_75"
+    analyze_contract "$ROOT/clean.jsonl" "$ROOT/io.fault.dm_75" >/dev/null || exit 1
     defects=(missing-arm duplicate-arm wrong-budget missing-injection duplicate-injection wrong-request wrong-injected-budget injection-category injection-suffix injection-cr-smuggle additive-fault wrong-reason structural-reason missing-error wrong-error second-error missing-popup wrong-recovery missing-clear retry-visible missing-complete semantic-marker generic-error snapshot-publication truncated-log first-frame accept admission wrong-selection wrong-queue wrong-file extra-enter extra-focus extra-push wrong-pop invalid-command refusal-command bad-fixture)
     for defect in "${defects[@]}"; do
         cp "$ROOT/clean.jsonl" "$ROOT/$defect.jsonl"
@@ -247,7 +254,7 @@ elif mode=="second-error": rows.append({"sev":"ERROR","cat":"system","msg":"unre
 elif mode=="missing-popup": rows.pop(find("error_popup"))
 elif mode=="wrong-recovery": rows[find("playback recovery")]["msg"]="Demo playback recovery reason=io-error depth=2 popup=1 automated=0\n"
 elif mode=="missing-clear": rows[find('com_errorMessage\" is:\"\"')]["msg"]='"com_errorMessage" is:"still live"\n'
-elif mode=="retry-visible": rows[find("ui_errorRetry")]["msg"]='"ui_errorRetry" is:"1"\n'
+elif mode=="retry-visible": rows[find('text:  "0"')]["msg"]='  text:  "1"\n'
 elif mode=="missing-complete": rows.pop(find("Q0_DEMO_IO_FAULT_COMPLETE"))
 elif mode=="semantic-marker": rows.insert(find("playback rejected"),{"sev":"DEBUG","cat":"client","msg":"Demo semantic parse recovered command=7 generic_teardown=0\n"})
 elif mode=="generic-error": rows.insert(find("playback rejected"),{"sev":"ERROR","cat":"system","msg":"CL_ParseSnapshot: Invalid size 255 for areamask\n"})
@@ -258,7 +265,7 @@ elif mode=="accept": rows.append({"sev":"DEBUG","cat":"network","msg":"QUIC clie
 elif mode=="admission": rows.append({"sev":"DEBUG","cat":"server","msg":"SV_OnPlayerConnect: conn=1\n"})
 elif mode=="wrong-selection": rows[find("demo feeder selection")]["msg"]="WiredUI: demo feeder selection row=0 name=other generation=2\n"
 elif mode=="wrong-queue": rows[find("queued validated demo")]["msg"]="WiredUI: queued validated demo playback name=other\n"
-elif mode=="wrong-file": rows[find("Demo file:")]["msg"]="Demo file: demos/other.dm_74\n"
+elif mode=="wrong-file": rows[find("Demo file:")]["msg"]="Demo file: demos/other.dm_75\n"
 elif mode=="extra-enter": rows.insert(find("fault armed"),{"sev":"DEBUG","cat":"ui","msg":"wui_menu_nav: K_ENTER dispatched\n"})
 elif mode=="extra-focus": rows.insert(find("fault armed"),{"sev":"DEBUG","cat":"ui","msg":"wui_menu_nav focus: focused item 'demolist' (top index -1)\n"})
 elif mode=="extra-push": rows.insert(find("fault armed"),{"sev":"DEBUG","cat":"ui","msg":"WiredUI: push menu 'other' (depth 3)\n"})
@@ -268,7 +275,7 @@ elif mode=="refusal-command": rows.insert(find("fault armed"),{"sev":"WARN","cat
 with open(path,"w") as f:
     for row in rows: f.write(json.dumps(row)+"\n")
 PYEOF
-        demo="$ROOT/io.fault.dm_74"
+        demo="$ROOT/io.fault.dm_75"
         if [ "$defect" = bad-fixture ]; then printf '\001' >>"$demo"; fi
         if analyze_contract "$ROOT/$defect.jsonl" "$demo" >/dev/null 2>&1; then
             echo "FAIL: I/O analyzer accepted defect $defect"; exit 1
@@ -287,30 +294,21 @@ WIRED="${1:-}"
 [ -n "$WIRED" ] && [ -x "$WIRED" ] || { echo "usage: $0 /absolute/path/to/wired"; exit 64; }
 WIRED="$(cd "$(dirname "$WIRED")" && pwd)/$(basename "$WIRED")"
 WIRED_DIR="$(dirname "$WIRED")"
-PACK_ROOT=""
-for candidate in "$WIRED_DIR" "$WIRED_DIR/../Resources" "$WIRED_DIR/../../.."; do
-    [ -f "$candidate/base/pax21.sw3z" ] && { PACK_ROOT="$(cd "$candidate" && pwd)"; break; }
-done
-[ -n "$PACK_ROOT" ] || { echo "SKIP: current pax21 not found"; exit 77; }
-CONTENT_ROOT=""
-for candidate in "${WIRED_CONTENT_ROOT:-}" "$PACK_ROOT"; do
-    [ -n "$candidate" ] || continue
-    if [ -f "$candidate/base/pax01.sw3z" ] || [ -f "$candidate/base/pak0.pk3" ]; then
-        CONTENT_ROOT="$(cd "$candidate" && pwd)"; break
-    fi
-done
+PACK_ROOT="$(wired_find_archive_root "$WIRED_DIR" "$WIRED_DIR/../Resources" "$WIRED_DIR/../../.." 2>/dev/null || true)"
+[ -n "$PACK_ROOT" ] || { echo "SKIP: current VFS archives not found"; exit 77; }
+CONTENT_ROOT="$(wired_find_archive_root "${WIRED_CONTENT_ROOT:-}" "$WIRED_HOME" "$PACK_ROOT" 2>/dev/null || true)"
 [ -n "$CONTENT_ROOT" ] || { echo "SKIP: set WIRED_CONTENT_ROOT"; exit 77; }
-if [ -f "$CONTENT_ROOT/base/pax01.sw3z" ]; then BASE_ARCHIVE="$CONTENT_ROOT/base/pax01.sw3z"; else BASE_ARCHIVE="$CONTENT_ROOT/base/pak0.pk3"; fi
+CURRENT_ARCHIVE="$(wired_first_archive "$PACK_ROOT/base")"; BASE_ARCHIVE="$(wired_first_archive "$CONTENT_ROOT/base")"
 
 RUN_ROOT="$(mktemp -d -t wired-demo-io-XXXXXX 2>/dev/null || mktemp -d)"
 HOME_DIR="$RUN_ROOT/home/q3now-preview"
 mkdir -p "$HOME_DIR/base/demos" "$RUN_ROOT/run"
 cleanup(){ if [ "${WIRED_KEEP_ARTIFACTS:-0}" = 1 ]; then echo "    kept artifacts: $RUN_ROOT"; else rm -rf "$RUN_ROOT"; fi; }
 trap cleanup EXIT INT TERM
-cp "$BASE_ARCHIVE" "$HOME_DIR/base/" || exit 1
-cp "$PACK_ROOT/base/pax21.sw3z" "$HOME_DIR/base/pax21.sw3z" || exit 1
-cp "$CFG_SOURCE" "$HOME_DIR/base/wiredui-demo-io-fault.cfg" || exit 1
-python3 - "$HOME_DIR/base/demos/io.fault.dm_74" "$DEMO_HEX" <<'PYEOF'
+wired_link_content_into_home "$HOME_DIR" "$CONTENT_ROOT/base" "$PACK_ROOT/base" || exit 1
+LIVE_CFG="wiredui-demo-io-fault-live.cfg"
+cp "$CFG_SOURCE" "$HOME_DIR/base/$LIVE_CFG" || exit 1
+python3 - "$HOME_DIR/base/demos/io.fault.dm_75" "$DEMO_HEX" <<'PYEOF'
 import sys
 open(sys.argv[1],"wb").write(bytes.fromhex(sys.argv[2]))
 PYEOF
@@ -326,14 +324,14 @@ python3 "$TIMEOUT_RUNNER" --timeout 180 --kill-after 15 --cwd "$RUN_ROOT/run" --
     +set com_automated 1 +set com_noHardReboot 1 +set s_initsound 0 \
     +set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 \
     +set log_severity DEBUG +set log_file_severity DEBUG +set log_file_mode overwrite_synced \
-    +exec wiredui-demo-io-fault.cfg
+    +exec "$LIVE_CFG"
 [ "$?" -eq 0 ] || { echo "FAIL: demo I/O fault client did not exit cleanly"; exit 1; }
-LOG="$HOME_DIR/qconsole.jsonl"; DEMO="$HOME_DIR/base/demos/io.fault.dm_74"
+LOG="$HOME_DIR/qconsole.jsonl"; DEMO="$HOME_DIR/base/demos/io.fault.dm_75"
 [ -s "$LOG" ] && [ -s "$DEMO" ] || { echo "FAIL: missing demo I/O evidence"; exit 1; }
 analyze_contract "$LOG" "$DEMO" || exit 1
-python3 - "$WIRED" "$PACK_ROOT/base/pax21.sw3z" "$BASE_ARCHIVE" "$0" "$CFG_SOURCE" <<'PYEOF'
+python3 - "$WIRED" "$CURRENT_ARCHIVE" "$BASE_ARCHIVE" "$0" "$CFG_SOURCE" <<'PYEOF'
 import hashlib,sys
-for label,path in zip(("binary","pax21","base","harness","cfg"),sys.argv[1:]):
+for label,path in zip(("binary","product-archive","base-archive","harness","cfg"),sys.argv[1:]):
     print(f"    {label}_sha256={hashlib.sha256(open(path,'rb').read()).hexdigest()}")
 PYEOF
 echo "==> WiredUI Demo I/O fault gate: PASS"

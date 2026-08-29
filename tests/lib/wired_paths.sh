@@ -219,6 +219,64 @@ wired_find_chrome() {
 }
 
 # ── isolated capture homes ──────────────────────────────────────────────────
+# wired_base_has_archives <base-dir> — true when a VFS content directory has
+# at least one supported immutable archive, without assigning semantic roles to
+# archive filenames.
+wired_base_has_archives() {
+    local source="$1" f
+    [ -d "$source" ] || return 1
+    for f in "$source"/*.sw3z "$source"/*.pk3; do
+        [ -e "$f" ] && return 0
+    done
+    return 1
+}
+
+# wired_first_archive <base-dir> — print one supported archive path. This is
+# only for provenance records that require a concrete file; VFS staging must
+# always use wired_link_content_into_home so it sees the complete archive set.
+wired_first_archive() {
+    local source="$1" f
+    for f in "$source"/*.sw3z "$source"/*.pk3; do
+        [ -e "$f" ] && { printf '%s' "$f"; return 0; }
+    done
+    return 1
+}
+
+# wired_find_archive_root <root ...> — print the first root whose base/
+# contains a supported archive.
+wired_find_archive_root() {
+    local root
+    for root in "$@"; do
+        [ -n "$root" ] || continue
+        if wired_base_has_archives "$root/base"; then
+            (cd "$root" && pwd)
+            return 0
+        fi
+    done
+    return 1
+}
+
+# wired_link_content_into_home <home> [content-base ...] — symlink immutable
+# archives from one or more base/ directories into an existing scratch home.
+# When no content-base is supplied, the installed game data and the player's
+# licensed/base content are used. Later directories win on duplicate names.
+wired_link_content_into_home() {
+    local home="$1" source f
+    shift
+    mkdir -p "$home/base" || return 1
+
+    if [ "$#" -eq 0 ]; then
+        set -- "$WIRED_GAMEDATA" "$WIRED_BASE"
+    fi
+    for source in "$@"; do
+        [ -d "$source" ] || continue
+        for f in "$source"/*.sw3z "$source"/*.pk3; do
+            [ -e "$f" ] || continue
+            ln -sfn "$f" "$home/base/$( basename "$f" )" || return 1
+        done
+    done
+}
+
 # wired_isolated_home <name> — print a scratch fs_homepath with the real paks
 # symlinked into base/, creating it if needed.
 #
@@ -243,15 +301,9 @@ wired_find_chrome() {
 # the engine, so copying would cost real time per run and add a second, stale
 # copy of the game data that could silently diverge from the built one.
 wired_isolated_home() {
-    local name="${1:-capture}" home f
+    local name="${1:-capture}" home
     home="$WIRED_TMP/$name"
-    mkdir -p "$home/base" || return 1
-    if [ -d "$WIRED_BASE" ]; then
-        for f in "$WIRED_BASE"/*.sw3z "$WIRED_BASE"/*.pk3; do
-            [ -e "$f" ] || continue
-            ln -sfn "$f" "$home/base/$( basename "$f" )"
-        done
-    fi
+    wired_link_content_into_home "$home" || return 1
     printf '%s' "$home"
 }
 

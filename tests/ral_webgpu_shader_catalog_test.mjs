@@ -11,7 +11,7 @@ import { openWebGpuShaderCatalog } from '../code/render/ral/core/ral_webgpu_shad
 const root = fileURLToPath(new URL('..', import.meta.url));
 const source = join(root, 'code/render/ral/backends/vulkan/renderer/shaders/portable');
 const catalog = openWebGpuShaderCatalog(source);
-assert.equal(catalog.moduleCount, 294);
+assert.equal(catalog.moduleCount, 299);
 assert.match(catalog.toolchainIdentity, /naga\/30\.0\.0\+wired-portable-v1$/);
 const color = catalog.get('color_vert_spv');
 assert.equal(color.stage, 'RAL_STAGE_VERTEX');

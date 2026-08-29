@@ -725,11 +725,16 @@ extern	int		bg_numItems;
 										// then BUTTON_WALKING should be set
 
 // usercmd_t is sent to the server each client frame
+#define UCMD_AIM_NONE                 0
+#define UCMD_AIM_THIRD_PERSON_CENTER  1
+
 typedef struct usercmd_s {
 	int				serverTime;
 	int				angles[3];
+	int				aimAngles[2];	// absolute pitch/yaw used only when aimMode is active
 	int 			buttons;
 	byte			weapon;
+	byte			aimMode;
 	signed char		forwardmove, rightmove, upmove;
 } usercmd_t;
 

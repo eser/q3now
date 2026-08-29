@@ -42,8 +42,8 @@ void CG_ModernHUDElementNetStatsRoutine(void* context)
 	int delag = ping;
 
 	if (element->config.style.isSet && element->config.style.value == 1) {
-		// compact: just the number
-		element->ctx.text = va("%i", ping);
+		// compact: keep the unit in the same visibility-gated draw as the value
+		element->ctx.text = va("%ims", ping);
 	} else {
 		// default: labelled
 		element->ctx.text = va("%ims delag:%ims", ping, delag);

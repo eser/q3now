@@ -258,7 +258,7 @@ extract_between("${PRODUCT_TEXT}" "void vk_end_render_pass( void )"
 foreach(REQUIRED IN ITEMS
 	"vk_publish_color_attachment_handoff( postRoute->attachment"
 	"RAL_STAGE_FRAGMENT | RAL_STAGE_COMPUTE"
-	"vk_publish_color_attachment_handoff( vk.ral_tonemapped_image"
+	"vk_publish_color_attachment_handoff( vk.ral_ui_image"
 	"vk_publish_color_attachment_handoff( vk.screenMap.ral_color_image"
 	"vk_publish_color_attachment_handoff( vk.capture.ral_image"
 	"RAL_RESOURCE_USAGE_COPY_SOURCE, 0u"

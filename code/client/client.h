@@ -111,6 +111,8 @@ typedef struct {
 	int			cgameUserCmdValue;	// current weapon to add to usercmd_t
 	float		cgameSensitivity;
 	int			cgameFreezeMove;	// cinematic scene: 1 = null-move this cmd (client-only, no server change)
+	int			cgameAimMode;		// UCMD_AIM_* staged after cgame resolves the camera
+	int			cgameAimAngles[2];	// absolute pitch/yaw shorts; camera angles remain independent
 
 	// cmds[cmdNumber] is the predicted command, [cmdNumber-1] is the last
 	// properly generated command

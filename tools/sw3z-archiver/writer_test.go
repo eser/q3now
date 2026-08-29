@@ -113,6 +113,29 @@ func TestWriter_SingleFile(t *testing.T) {
 	}
 }
 
+func TestWriter_ExecutableFlagRoundTrip(t *testing.T) {
+	var buf bytes.Buffer
+	w := Create(&buf)
+	if err := w.AddFileWithFlags("bin/q3map2", []byte("tool"), CompressNone, FlagExecutable); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r := bytes.NewReader(buf.Bytes())
+	header, err := ReadHeader(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := ReadIndex(r, header.EntryCount)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Flags&FlagExecutable == 0 {
+		t.Fatalf("executable metadata was not preserved: %#v", entries)
+	}
+}
+
 func TestWriter_MultipleFiles(t *testing.T) {
 	var buf bytes.Buffer
 	w := Create(&buf)

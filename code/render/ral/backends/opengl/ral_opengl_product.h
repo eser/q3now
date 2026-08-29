@@ -5,12 +5,13 @@
 #define WIRED_RAL_OPENGL_PRODUCT_H
 
 #include "ral_opengl_world.h"
+#include "ral_display_visibility.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define RAL_OPENGL_PRODUCT_SCHEMA_VERSION 2u
+#define RAL_OPENGL_PRODUCT_SCHEMA_VERSION 5u
 
 typedef struct ralOpenGlProduct_s ralOpenGlProduct_t;
 
@@ -26,7 +27,16 @@ typedef struct {
 	uint64_t fragmentShaderDigestLane0;
 	uint64_t fragmentShaderDigestLane1;
 	ralOpenGlFrontendPlanReceipt_t plan;
+	ralDisplayVisibilityPlan_t displayVisibility;
 	ralOpenGlWorldReceipt_t native;
+	ralAtmospherePlanReceipt_t atmosphere;
+	uint32_t atmosphereDispatchCount;
+	uint32_t atmosphereFroxelCount;
+	uint32_t atmosphereCompositeCount;
+	qboolean atmosphereCloudsActive;
+	ralAtmosphereWeatherReceipt_t weather;
+	uint32_t weatherDispatchCount;
+	uint32_t weatherDrawCount;
 	uint32_t unresolvedCount;
 	uint32_t fallbackCount;
 	uint32_t fatalCount;
@@ -39,6 +49,10 @@ qboolean RalOpenGl_ProductCreate( ralOpenGlCore_t *core,
 void RalOpenGl_ProductDestroy( ralOpenGlProduct_t *product );
 qboolean RalOpenGl_ProductSetOutputExtent( ralOpenGlProduct_t *product,
 	uint32_t width, uint32_t height );
+qboolean RalOpenGl_ProductSetDirectionalLighting( ralOpenGlProduct_t *product,
+	const ralOpenGlLightingReceipt_t *lighting );
+qboolean RalOpenGl_ProductSetDisplayVisibility( ralOpenGlProduct_t *product,
+	const ralDisplayVisibilityPlan_t *visibility );
 qboolean RalOpenGl_ProductReadbackRgb( ralOpenGlProduct_t *product,
 	byte *outPixels, uint32_t byteCount );
 qboolean RalOpenGl_ProductRender( ralOpenGlProduct_t *product,

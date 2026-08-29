@@ -11,10 +11,11 @@ SET(_test_path "${SOURCE_ROOT}/tests/ral_vulkan_dynamic_bind_test.c")
 SET(_adopt_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_textures.c")
 SET(_scene_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/tr_scene.c")
 SET(_init_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/tr_init.c")
+SET(_backend_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/tr_backend.c")
 SET(_smoke_path "${SOURCE_ROOT}/tests/ral-effects-dynamic-bind-smoke.sh")
 FOREACH(_path IN ITEMS "${_vk_path}" "${_vk_h_path}" "${_ral_path}"
 		"${_command_path}" "${_bridge_path}" "${_test_path}" "${_adopt_path}"
-		"${_scene_path}" "${_init_path}" "${_smoke_path}")
+		"${_scene_path}" "${_init_path}" "${_backend_path}" "${_smoke_path}")
 	IF(NOT EXISTS "${_path}")
 		MESSAGE(FATAL_ERROR "missing RAL effects dynamic-bind source: ${_path}")
 	ENDIF()
@@ -28,6 +29,7 @@ FILE(READ "${_test_path}" _test)
 FILE(READ "${_adopt_path}" _adopt)
 FILE(READ "${_scene_path}" _scene)
 FILE(READ "${_init_path}" _init)
+FILE(READ "${_backend_path}" _backend)
 FILE(READ "${_smoke_path}" _smoke)
 
 FUNCTION(slice_between out body begin_marker end_marker)
@@ -60,6 +62,14 @@ FUNCTION(require_call_count body regex expected label)
 	LIST(LENGTH _hits _count)
 	IF(NOT _count EQUAL expected)
 		MESSAGE(FATAL_ERROR "${label}: expected ${expected} matches of '${regex}', found ${_count}")
+	ENDIF()
+ENDFUNCTION()
+
+FUNCTION(require_order body first second label)
+	STRING(FIND "${body}" "${first}" _first)
+	STRING(FIND "${body}" "${second}" _second)
+	IF(_first EQUAL -1 OR _second EQUAL -1 OR NOT _first LESS _second)
+		MESSAGE(FATAL_ERROR "${label}: expected '${first}' before '${second}'")
 	ENDIF()
 ENDFUNCTION()
 
@@ -106,10 +116,27 @@ require_call_count("${_rail}" "Ral_CmdDraw[(]" 1 "rail draw inventory")
 require_call_count("${_beam}" "Ral_CmdDraw[(]" 1 "beam draw inventory")
 require_call_count("${_sprite}" "Ral_CmdDraw[(]" 2 "sprite blend draw inventory")
 
+# Surface decals belong below procedural translucency. Drawing them later lets
+# multiplicative bullet/explosion marks darken foreground smoke and trails.
+require_order("${_backend}" "RB_DrawDecals();" "RB_DrawRibbons();"
+	"surface-decal/translucent layer order")
+require_order("${_backend}" "RB_DrawDecals();" "RB_DrawParticles();"
+	"surface-decal/particle layer order")
+
 # Native verification is default-off and submits the procedural families plus
 # the retained particle/decal/atmospheric pools once per map. Evidence is
 # emitted from each backend owner only after a RAL draw call.
 require_text("${_init}" "ri.Cvar_Get( \"r_ralEffectsSmoke\", \"0\", CVAR_CHEAT )" "effects smoke default-off gate")
+require_text("${_init}" "static void FrontendInjectRalAtmosphereGraphSmoke( const refdef_t *view )" "authored atmosphere graph smoke injector")
+require_text("${_init}" "FrontendTryRegisterAtmosphereEffectProfile(" "atmosphere graph frontend registration")
+require_text("${_init}" "FrontendTryAddAtmosphereEmitter( &emitter )" "atmosphere graph frontend emitter")
+require_text("${_vk}" "ral-atmosphere-effect-graph schema=1" "atmosphere graph post-compute native receipt")
+require_text("${_vk}" "qboolean vk_atmosphere_full_execute( void )" "full atmosphere executor")
+require_text("${_vk}" "ral-atmosphere-full schema=1" "full atmosphere post-composite native receipt")
+require_text("${_vk}" "dispatches=%u clouds=%u coverage-milli=%u composite=1 history=%s scene-hdr=copy-back" "full atmosphere exact receipt")
+require_text("${_vk}" "vk_atmosphere_full.cloudPipeline" "full atmosphere cloud executor")
+require_text("${_adopt}" "vk_update_attachment_descriptors();" "atmosphere sampling-parent refresh")
+require_text("${_adopt}" "vk_atmosphere_full_init( s_ral_backend );" "full atmosphere lifecycle init")
 require_text("${_scene}" "static void R_InjectRalEffectsSmoke( const refdef_t *fd )" "effects smoke injector")
 require_text("${_scene}" "!vk.ribbon.available || !vk.railRibbon.available" "effects smoke all-owner preflight")
 FOREACH(_needle IN ITEMS "RE_AddRibbonToScene( &ribbon )" "RE_AddRailRibbonToScene( &rail )" "RE_AddBeamToScene( &beam )" "RE_AddSpriteToScene( &sprite )")
@@ -119,7 +146,7 @@ require_call_count("${_vk}" "vk_effects_smoke_receipt[(]" 8 "effects post-draw r
 FOREACH(_span_name IN LISTS _draw_spans)
 	require_text("${${_span_name}}" "vk_effects_smoke_receipt(" "${_span_name} post-draw receipt")
 ENDFOREACH()
-FOREACH(_needle IN ITEMS "arena1" "arena17" "ribbon" "rail-ribbon" "beam" "sprite" "particle" "decal" "atmospheric" "draws=([0-9]+)" "dynamic-offsets=" "expected_dynamic=1")
+FOREACH(_needle IN ITEMS "arena1" "arena17" "ribbon" "rail-ribbon" "beam" "sprite" "particle" "decal" "atmospheric" "ral-atmosphere-effect-graph schema=1" "collision=1 death=1" "ral-atmosphere-full schema=1" "tier=full froxels=" "dispatches=5 clouds=1 coverage-milli=650 composite=1" "scene-hdr=copy-back" "draws=([0-9]+)" "dynamic-offsets=" "expected_dynamic=1")
 	require_text("${_smoke}" "${_needle}" "effects native smoke analyzer")
 ENDFOREACH()
 

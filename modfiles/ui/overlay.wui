@@ -27,7 +27,7 @@ menuDef {
 	// activate simultaneously (rare but well-defined ordering).
 	itemDef {
 		name "wui_tooltip"
-		rect 0 0 1 1
+		width FIXED 1 height FIXED 1
 		decoration
 		visible 1
 		custom "wui_tooltip"
@@ -39,7 +39,7 @@ menuDef {
 	// when wui_cursorShader failed to register.
 	itemDef {
 		name "wui_cursor"
-		rect 0 0 1 1
+		width FIXED 1 height FIXED 1
 		decoration
 		visible 1
 		custom "wui_cursor"

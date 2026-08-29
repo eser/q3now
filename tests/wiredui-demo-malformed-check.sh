@@ -6,6 +6,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/lib/wired_paths.sh"
 TIMEOUT_RUNNER="$SCRIPT_DIR/run-with-timeout.py"
 CFG_SOURCE="$SCRIPT_DIR/fixtures/wiredui-demo-malformed.cfg"
 MATRIX_CFG_SOURCE="$SCRIPT_DIR/fixtures/wiredui-demo-malformed-matrix.cfg"
@@ -60,7 +61,7 @@ ordered([
  ("queue",r"queued validated demo playback name=broken\.current\b"),
  ("close",r"close all postcondition depth=0 active=none catcher_ui=0 paused=0"),
  ("play-enter",r"wui_menu_nav: K_ENTER dispatched"),
- ("file",r"Demo file: demos/broken\.current\.dm_74\n?$"),
+ ("file",r"Demo file: demos/broken\.current\.dm_75\n?$"),
  ("reject",r"Demo playback rejected reason=oversize continuation=0\b"),
  ("error",re.escape(expected_error)),
  ("main-recovery",r"WiredUI: push menu 'main' \(depth 1\)"),
@@ -70,7 +71,8 @@ ordered([
  ("popup",r"WiredUI: push menu 'error_popup' \(depth 3\)"),
  ("recovery",r"Demo playback recovery reason=oversize depth=3 popup=1 automated=0\b"),
  ("message-live",r'"com_errorMessage" is:"(?:\^7)?The demo contains a message larger than the protocol limit\."'),
- ("retry-hidden",r'"ui_errorRetry" is:"(?:\^7)?0"'),
+ ("retry-key",r"  key:   ui_errorRetry"),
+ ("retry-hidden",r'  text:  "0"'),
  ("Back focus",r"wui_menu_nav focus: focused item 'btn_back'"),
  ("popup-dismiss",r"WiredUI: pop menu \(depth 2\)"),
  ("dismiss-enter",r"wui_menu_nav: K_ENTER dispatched"),
@@ -128,7 +130,7 @@ if (len(errors)!=1 or str(errors[0].get("cat","")).lower()!="system" or
     raise SystemExit("FAIL attract malformed: exact ERROR cardinality")
 cursor=0
 for label,pattern in (
-    ("file",r"Demo file: demos/broken\.current\.dm_74\n?$"),
+    ("file",r"Demo file: demos/broken\.current\.dm_75\n?$"),
     ("reject",r"Demo playback rejected reason=oversize continuation=1\b"),
     ("error",re.escape(expected)),
     ("status",r"attract_status:"),
@@ -245,7 +247,7 @@ for index,(name,reason,text,wanted) in enumerate(cases):
     expect_exact(f"WiredUI: queued validated demo playback name={name}\n",f"case {index} queue","DEBUG","ui")
     expect_exact("WiredUI: close all postcondition depth=0 active=none catcher_ui=0 paused=0\n",f"case {index} CloseAll","DEBUG","ui")
     expect_exact("wui_menu_nav: K_ENTER dispatched\n",f"case {index} Play Enter","DEBUG","ui")
-    expect_exact(f"Demo file: demos/{name}.dm_74\n",f"case {index} file","INFO","client")
+    expect_exact(f"Demo file: demos/{name}.dm_75\n",f"case {index} file","INFO","client")
     if name=="08.badmessage":
         expect_exact("Demo semantic parse recovered command=255 generic_teardown=0\n",
                      "semantic local recovery marker","DEBUG","client")
@@ -262,13 +264,14 @@ for index,(name,reason,text,wanted) in enumerate(cases):
     expect_exact("WiredUI: push menu 'error_popup' (depth 3)\n",f"case {index} popup","DEBUG","ui")
     expect_exact(f"Demo playback recovery reason={reason} depth=3 popup=1 automated=0\n",f"case {index} recovery","INFO","client")
     expect_exact(f'"com_errorMessage" is:"{text}"',f"case {index} message live","INFO","system")
-    expect_exact('"ui_errorRetry" is:"0"',f"case {index} retry hidden","INFO","system")
+    expect_exact("  key:   ui_errorRetry\n",f"case {index} retry key","INFO","client")
+    expect_exact('  text:  "0"\n',f"case {index} retry hidden","INFO","client")
     expect_exact("wui_menu_nav focus: focused item 'btn_back' (top index -1)\n",f"case {index} Back focus","DEBUG","ui")
     expect_exact("WiredUI: pop menu (depth 2)\n",f"case {index} popup dismiss","DEBUG","ui")
     expect_exact("wui_menu_nav: K_ENTER dispatched\n",f"case {index} Back Enter","DEBUG","ui")
     expect_exact('"com_errorMessage" is:""',f"case {index} message clear","INFO","system")
     expect_exact(f"Q0_MALFORMED_MATRIX_CASE_{index}\n",f"case {index} marker","INFO","system")
-    path=f"{fixture_dir}/{name}.dm_74"
+    path=f"{fixture_dir}/{name}.dm_75"
     actual=open(path,"rb").read()
     if actual!=wanted: raise SystemExit(f"FAIL matrix case {index}: fixture bytes")
     if hashlib.sha256(actual).hexdigest()!=hashlib.sha256(wanted).hexdigest():
@@ -310,10 +313,12 @@ if sum(m.startswith("Demo playback recovery reason=") for m in messages)!=len(ca
     raise SystemExit("FAIL matrix: recovery cardinality")
 if sum(m.startswith('"com_errorMessage" is:') for m in messages)!=len(cases)*2:
     raise SystemExit("FAIL matrix: error-message cvar cardinality")
-retry_messages=[(r,m) for r,m in zip(rows,messages) if m.startswith('"ui_errorRetry" is:')]
-if len(retry_messages)!=len(cases) or any(m!='"ui_errorRetry" is:"0"' or
-        str(r.get("sev","")).upper()!="INFO" or str(r.get("cat","")).lower()!="system"
-        for r,m in retry_messages):
+retry_messages=[]
+for i,message in enumerate(messages[:-1]):
+    if message=="  key:   ui_errorRetry\n":retry_messages.append((rows[i],rows[i+1],messages[i+1]))
+if len(retry_messages)!=len(cases) or any(m!='  text:  "0"\n' or
+        any(str(r.get("sev","")).upper()!="INFO" or str(r.get("cat","")).lower()!="client" for r in pair)
+        for *pair,m in retry_messages):
     raise SystemExit("FAIL matrix: retry cardinality")
 pop_messages=[(r,m) for r,m in zip(rows,messages) if m.startswith("WiredUI: pop menu")]
 if len(pop_messages)!=len(cases) or any(m!="WiredUI: pop menu (depth 2)\n" or
@@ -425,7 +430,7 @@ msgs=[
 ("DEBUG","ui","WiredUI: queued validated demo playback name=broken.current\n"),
 ("DEBUG","ui","WiredUI: close all postcondition depth=0 active=none catcher_ui=0 paused=0 pointer_down=0\n"),
 ("DEBUG","ui","wui_menu_nav: K_ENTER dispatched\n"),
-("INFO","client","Demo file: demos/broken.current.dm_74\n"),
+("INFO","client","Demo file: demos/broken.current.dm_75\n"),
 ("INFO","client","Demo playback rejected reason=oversize continuation=0\n"),
 ("ERROR","system","Error: The demo contains a message larger than the protocol limit.\n"),
 ("DEBUG","ui","WiredUI: push menu 'main' (depth 1)\n"),
@@ -435,7 +440,8 @@ msgs=[
 ("DEBUG","ui","WiredUI: push menu 'error_popup' (depth 3)\n"),
 ("INFO","client","Demo playback recovery reason=oversize depth=3 popup=1 automated=0\n"),
 ("INFO","system",'"com_errorMessage" is:"The demo contains a message larger than the protocol limit."\n'),
-("INFO","system",'"ui_errorRetry" is:"0"\n'),
+("INFO","client","  key:   ui_errorRetry\n"),
+("INFO","client",'  text:  "0"\n'),
 ("DEBUG","ui","wui_menu_nav focus: focused item 'btn_back' (top index -1)\n"),
 ("DEBUG","ui","WiredUI: pop menu (depth 2)\n"),
 ("DEBUG","ui","wui_menu_nav: K_ENTER dispatched\n"),
@@ -491,7 +497,7 @@ for index,(name,reason,text,data) in enumerate(cases):
     add("DEBUG","ui",f"WiredUI: queued validated demo playback name={name}")
     add("DEBUG","ui","WiredUI: close all postcondition depth=0 active=none catcher_ui=0 paused=0")
     add("DEBUG","ui","wui_menu_nav: K_ENTER dispatched")
-    add("INFO","client",f"Demo file: demos/{name}.dm_74")
+    add("INFO","client",f"Demo file: demos/{name}.dm_75")
     if name=="08.badmessage":
         add("DEBUG","client","Demo semantic parse recovered command=255 generic_teardown=0")
     elif name=="09.badsnapshot":
@@ -506,13 +512,14 @@ for index,(name,reason,text,data) in enumerate(cases):
     add("DEBUG","ui","WiredUI: push menu 'error_popup' (depth 3)")
     add("INFO","client",f"Demo playback recovery reason={reason} depth=3 popup=1 automated=0")
     add_raw("INFO","system",f'"com_errorMessage" is:"{text}"')
-    add_raw("INFO","system",'"ui_errorRetry" is:"0"')
+    add("INFO","client","  key:   ui_errorRetry")
+    add("INFO","client",'  text:  "0"')
     add("DEBUG","ui","wui_menu_nav focus: focused item 'btn_back' (top index -1)")
     add("DEBUG","ui","WiredUI: pop menu (depth 2)")
     add("DEBUG","ui","wui_menu_nav: K_ENTER dispatched")
     add_raw("INFO","system",'"com_errorMessage" is:""')
     add("INFO","system",f"Q0_MALFORMED_MATRIX_CASE_{index}")
-    open(os.path.join(fixture_dir,name+".dm_74"),"wb").write(data)
+    open(os.path.join(fixture_dir,name+".dm_75"),"wb").write(data)
 add("INFO","system","Q0_MALFORMED_MATRIX_COMPLETE")
 with open(log_path,"w") as f:
     for row in rows: f.write(json.dumps(row)+"\n")
@@ -528,8 +535,8 @@ fi
 if [ "${1:-}" = "--self-test" ]; then
     ROOT="$(mktemp -d -t wired-demobad-self-XXXXXX 2>/dev/null || mktemp -d)"
     trap 'rm -rf "$ROOT"' EXIT
-    write_fixture "$ROOT/clean.jsonl" "$ROOT/broken.current.dm_74"
-    analyze_contract "$ROOT/clean.jsonl" "$ROOT/broken.current.dm_74" >/dev/null || exit 1
+    write_fixture "$ROOT/clean.jsonl" "$ROOT/broken.current.dm_75"
+    analyze_contract "$ROOT/clean.jsonl" "$ROOT/broken.current.dm_75" >/dev/null || exit 1
     defects=(missing-error duplicate-error wrong-reason missing-popup retry-visible missing-back-focus missing-clear first-frame network active-action nextdemo extra-down wrong-row stale-selection wrong-selection duplicate-queue wrong-queue wrong-file bad-envelope)
     for defect in "${defects[@]}"; do
         python3 - "$ROOT/clean.jsonl" "$ROOT/$defect.jsonl" "$defect" <<'PYEOF'
@@ -540,7 +547,7 @@ if mode=="missing-error": rows.pop(find("Error: The demo contains"))
 elif mode=="duplicate-error": rows.insert(find("Error: The demo contains"),dict(rows[find("Error: The demo contains")]))
 elif mode=="wrong-reason": rows[find("reason=oversize")]["msg"]=rows[find("reason=oversize")]["msg"].replace("oversize","truncated-payload")
 elif mode=="missing-popup": rows.pop(find("push menu 'error_popup'"))
-elif mode=="retry-visible": rows[find('"ui_errorRetry"')]["msg"]='"ui_errorRetry" is:"1"\n'
+elif mode=="retry-visible": rows[find('text:  "0"')]["msg"]='  text:  "1"\n'
 elif mode=="missing-back-focus": rows.pop(find("focused item 'btn_back'"))
 elif mode=="missing-clear": rows[find('"com_errorMessage" is:""')]["msg"]='"com_errorMessage" is:"still live"\n'
 elif mode=="first-frame": rows.append({"sev":"INFO","cat":"client","msg":"FIRST GAMEPLAY FRAME mapname=arena7 numEntities=1\n"})
@@ -553,18 +560,18 @@ elif mode=="stale-selection": rows.insert(find("demo feeder selection"),{"sev":"
 elif mode=="wrong-selection": rows.insert(find("demo feeder selection"),{"sev":"DEBUG","cat":"ui","msg":"WiredUI: demo feeder selection row=0 name=other generation=2\n"})
 elif mode=="duplicate-queue": rows.insert(find("queued validated demo"),dict(rows[find("queued validated demo")]))
 elif mode=="wrong-queue": rows.insert(find("queued validated demo"),{"sev":"DEBUG","cat":"ui","msg":"WiredUI: queued validated demo playback name=other\n"})
-elif mode=="wrong-file": rows[find("Demo file:")]["msg"]="Demo file: demos/broken.current.dm_74.tmp\n"
+elif mode=="wrong-file": rows[find("Demo file:")]["msg"]="Demo file: demos/broken.current.dm_75.tmp\n"
 with open(dst,"w") as f:
     for row in rows: f.write(json.dumps(row)+"\n")
 PYEOF
-        demo="$ROOT/broken.current.dm_74"
-        if [ "$defect" = bad-envelope ]; then printf '\000' >"$ROOT/bad.dm_74"; demo="$ROOT/bad.dm_74"; fi
+        demo="$ROOT/broken.current.dm_75"
+        if [ "$defect" = bad-envelope ]; then printf '\000' >"$ROOT/bad.dm_75"; demo="$ROOT/bad.dm_75"; fi
         if analyze_contract "$ROOT/$defect.jsonl" "$demo" >/dev/null 2>&1; then
             echo "FAIL: analyzer accepted defect $defect"; exit 1
         fi
     done
     cat >"$ROOT/attract.jsonl" <<'EOF'
-{"sev":"INFO","cat":"client","msg":"Demo file: demos/broken.current.dm_74\n"}
+{"sev":"INFO","cat":"client","msg":"Demo file: demos/broken.current.dm_75\n"}
 {"sev":"INFO","cat":"client","msg":"Demo playback rejected reason=oversize continuation=1\n"}
 {"sev":"ERROR","cat":"system","msg":"Error: The demo contains a message larger than the protocol limit.\n"}
 {"sev":"INFO","cat":"ui","msg":"attract_status:\n"}
@@ -674,8 +681,8 @@ elif mode=="retained-error":
 elif mode=="first-frame": rows.append({"sev":"INFO","cat":"client","msg":"FIRST GAMEPLAY FRAME mapname=arena7 numEntities=1\n"})
 elif mode=="network": rows.append({"sev":"INFO","cat":"network","msg":"QUIC client: TLV ACCEPT\n"})
 elif mode=="forged-file":
-    i=find("Demo file: demos/00.missing.dm_74")
-    rows.insert(i+1,{"sev":"INFO","cat":"client","msg":"Demo file: demos/forged.dm_74\n"})
+    i=find("Demo file: demos/00.missing.dm_75")
+    rows.insert(i+1,{"sev":"INFO","cat":"client","msg":"Demo file: demos/forged.dm_75\n"})
 elif mode=="error-suffix":
     i=find("Error: The demo ended without its required terminator.")
     rows[i]["msg"]=rows[i]["msg"].rstrip("\n")+" EXTRA\n"
@@ -701,11 +708,11 @@ elif mode=="duplicate-recovery":
     i=find("Demo playback recovery reason=oversize")
     rows.insert(i,dict(rows[i]))
 elif mode=="retry-visible":
-    i=find('"ui_errorRetry" is:"0"')
-    rows[i]["msg"]='"ui_errorRetry" is:"1"'
+    i=find('text:  "0"')
+    rows[i]["msg"]='  text:  "1"'
 elif mode=="additive-retry-visible":
-    i=find('"ui_errorRetry" is:"0"')
-    rows.insert(i,{"sev":"INFO","cat":"system","msg":"\"ui_errorRetry\" is:\"1\""})
+    i=find('text:  "0"')
+    rows.insert(i,{"sev":"INFO","cat":"client","msg":"  text:  \"1\""})
 elif mode=="reload-after-popup":
     start=find("demos loaded protocol=74 count=10 generation=3")
     end=start+1
@@ -738,25 +745,25 @@ elif mode=="wrong-depth-demos":
 with open(path,"w") as f:
     for row in rows: f.write(json.dumps(row)+"\n")
 PYEOF
-        if [ "$defect" = bad-fixture ]; then printf '\001' >"$ROOT/matrix/00.missing.dm_74"; fi
-        if [ "$defect" = bad-empty-fixture ]; then printf '\001' >>"$ROOT/matrix/07.emptypayload.dm_74"; fi
-        if [ "$defect" = bad-semantic-fixture ]; then printf '\001' >>"$ROOT/matrix/08.badmessage.dm_74"; fi
-        if [ "$defect" = bad-snapshot-fixture ]; then printf '\001' >>"$ROOT/matrix/09.badsnapshot.dm_74"; fi
+        if [ "$defect" = bad-fixture ]; then printf '\001' >"$ROOT/matrix/00.missing.dm_75"; fi
+        if [ "$defect" = bad-empty-fixture ]; then printf '\001' >>"$ROOT/matrix/07.emptypayload.dm_75"; fi
+        if [ "$defect" = bad-semantic-fixture ]; then printf '\001' >>"$ROOT/matrix/08.badmessage.dm_75"; fi
+        if [ "$defect" = bad-snapshot-fixture ]; then printf '\001' >>"$ROOT/matrix/09.badsnapshot.dm_75"; fi
         if analyze_matrix_contract "$ROOT/matrix-$defect.jsonl" "$ROOT/matrix" >/dev/null 2>&1; then
             echo "FAIL: matrix analyzer accepted defect $defect"; exit 1
         fi
-        if [ "$defect" = bad-fixture ]; then : >"$ROOT/matrix/00.missing.dm_74"; fi
-        if [ "$defect" = bad-empty-fixture ]; then python3 - "$ROOT/matrix/07.emptypayload.dm_74" <<'PYEOF2'
+        if [ "$defect" = bad-fixture ]; then : >"$ROOT/matrix/00.missing.dm_75"; fi
+        if [ "$defect" = bad-empty-fixture ]; then python3 - "$ROOT/matrix/07.emptypayload.dm_75" <<'PYEOF2'
 import sys
 open(sys.argv[1],"wb").write(bytes.fromhex("0100000000000000ffffffffffffffff"))
 PYEOF2
         fi
-        if [ "$defect" = bad-semantic-fixture ]; then python3 - "$ROOT/matrix/08.badmessage.dm_74" <<'PYEOF2'
+        if [ "$defect" = bad-semantic-fixture ]; then python3 - "$ROOT/matrix/08.badmessage.dm_75" <<'PYEOF2'
 import sys
 open(sys.argv[1],"wb").write(bytes.fromhex("0100000002000000aa24ffffffffffffffff"))
 PYEOF2
         fi
-        if [ "$defect" = bad-snapshot-fixture ]; then python3 - "$ROOT/matrix/09.badsnapshot.dm_74" <<'PYEOF2'
+        if [ "$defect" = bad-snapshot-fixture ]; then python3 - "$ROOT/matrix/09.badsnapshot.dm_75" <<'PYEOF2'
 import sys
 open(sys.argv[1],"wb").write(bytes.fromhex("0100000005000000aabfaa9200ffffffffffffffff"))
 PYEOF2
@@ -770,18 +777,11 @@ WIRED="${1:-}"
 [ -n "$WIRED" ] && [ -x "$WIRED" ] || { echo "usage: $0 /absolute/path/to/wired"; exit 64; }
 WIRED="$(cd "$(dirname "$WIRED")" && pwd)/$(basename "$WIRED")"
 WIRED_DIR="$(dirname "$WIRED")"
-PACK_ROOT=""
-for candidate in "$WIRED_DIR" "$WIRED_DIR/../Resources" "$WIRED_DIR/../../.."; do
-    [ -f "$candidate/base/pax21.sw3z" ] && { PACK_ROOT="$(cd "$candidate" && pwd)"; break; }
-done
-[ -n "$PACK_ROOT" ] || { echo "SKIP: current pax21 not found"; exit 77; }
-CONTENT_ROOT=""
-for candidate in "${WIRED_CONTENT_ROOT:-}" "$PACK_ROOT"; do
-    [ -n "$candidate" ] || continue
-    if [ -f "$candidate/base/pax01.sw3z" ] || [ -f "$candidate/base/pak0.pk3" ]; then CONTENT_ROOT="$(cd "$candidate" && pwd)"; break; fi
-done
+PACK_ROOT="$(wired_find_archive_root "$WIRED_DIR" "$WIRED_DIR/../Resources" "$WIRED_DIR/../../.." 2>/dev/null || true)"
+[ -n "$PACK_ROOT" ] || { echo "SKIP: current VFS archives not found"; exit 77; }
+CONTENT_ROOT="$(wired_find_archive_root "${WIRED_CONTENT_ROOT:-}" "$WIRED_HOME" "$PACK_ROOT" 2>/dev/null || true)"
 [ -n "$CONTENT_ROOT" ] || { echo "SKIP: set WIRED_CONTENT_ROOT"; exit 77; }
-if [ -f "$CONTENT_ROOT/base/pax01.sw3z" ]; then BASE_ARCHIVE="$CONTENT_ROOT/base/pax01.sw3z"; else BASE_ARCHIVE="$CONTENT_ROOT/base/pak0.pk3"; fi
+CURRENT_ARCHIVE="$(wired_first_archive "$PACK_ROOT/base")"; BASE_ARCHIVE="$(wired_first_archive "$CONTENT_ROOT/base")"
 
 RUN_ROOT="$(mktemp -d -t wired-demobad-XXXXXX 2>/dev/null || mktemp -d)"
 HOME_DIR="$RUN_ROOT/home/q3now-preview"
@@ -791,22 +791,20 @@ MATRIX_HOME="$RUN_ROOT/matrix/q3now-preview"
 mkdir -p "$HOME_DIR/base/demos" "$ATTRACT_HOME/base/demos" "$ATTRACT_HOME/base/scripts" "$LOOP_HOME/base/demos" "$MATRIX_HOME/base/demos"
 cleanup(){ if [ "${WIRED_KEEP_ARTIFACTS:-0}" = 1 ]; then echo "    kept artifacts: $RUN_ROOT"; else rm -rf "$RUN_ROOT"; fi; }
 trap cleanup EXIT INT TERM
-cp "$BASE_ARCHIVE" "$HOME_DIR/base/" || exit 1
-cp "$PACK_ROOT/base/pax21.sw3z" "$HOME_DIR/base/pax21.sw3z" || exit 1
-cp "$CFG_SOURCE" "$HOME_DIR/base/wiredui-demo-malformed.cfg" || exit 1
-cp "$BASE_ARCHIVE" "$ATTRACT_HOME/base/" || exit 1
-cp "$PACK_ROOT/base/pax21.sw3z" "$ATTRACT_HOME/base/pax21.sw3z" || exit 1
-cp "$BASE_ARCHIVE" "$LOOP_HOME/base/" || exit 1
-cp "$PACK_ROOT/base/pax21.sw3z" "$LOOP_HOME/base/pax21.sw3z" || exit 1
-cp "$BASE_ARCHIVE" "$MATRIX_HOME/base/" || exit 1
-cp "$PACK_ROOT/base/pax21.sw3z" "$MATRIX_HOME/base/pax21.sw3z" || exit 1
-cp "$MATRIX_CFG_SOURCE" "$MATRIX_HOME/base/wiredui-demo-malformed-matrix.cfg" || exit 1
-python3 - "$HOME_DIR/base/demos/broken.current.dm_74" <<'PYEOF'
+wired_link_content_into_home "$HOME_DIR" "$CONTENT_ROOT/base" "$PACK_ROOT/base" || exit 1
+LIVE_CFG="wiredui-demo-malformed-live.cfg"
+cp "$CFG_SOURCE" "$HOME_DIR/base/$LIVE_CFG" || exit 1
+wired_link_content_into_home "$ATTRACT_HOME" "$CONTENT_ROOT/base" "$PACK_ROOT/base" || exit 1
+wired_link_content_into_home "$LOOP_HOME" "$CONTENT_ROOT/base" "$PACK_ROOT/base" || exit 1
+wired_link_content_into_home "$MATRIX_HOME" "$CONTENT_ROOT/base" "$PACK_ROOT/base" || exit 1
+MATRIX_LIVE_CFG="wiredui-demo-malformed-matrix-live.cfg"
+cp "$MATRIX_CFG_SOURCE" "$MATRIX_HOME/base/$MATRIX_LIVE_CFG" || exit 1
+python3 - "$HOME_DIR/base/demos/broken.current.dm_75" <<'PYEOF'
 import struct,sys
 open(sys.argv[1],"wb").write(struct.pack("<ii",0x13579bdf,16385))
 PYEOF
-cp "$HOME_DIR/base/demos/broken.current.dm_74" "$ATTRACT_HOME/base/demos/broken.current.dm_74"
-cp "$HOME_DIR/base/demos/broken.current.dm_74" "$LOOP_HOME/base/demos/broken.current.dm_74"
+cp "$HOME_DIR/base/demos/broken.current.dm_75" "$ATTRACT_HOME/base/demos/broken.current.dm_75"
+cp "$HOME_DIR/base/demos/broken.current.dm_75" "$LOOP_HOME/base/demos/broken.current.dm_75"
 python3 - "$MATRIX_HOME/base/demos" <<'PYEOF'
 import os,sys
 root=sys.argv[1]
@@ -823,7 +821,7 @@ fixtures={
  "09.badsnapshot":bytes.fromhex("0100000005000000aabfaa9200ffffffffffffffff"),
 }
 for name,data in fixtures.items():
-    open(os.path.join(root,name+".dm_74"),"wb").write(data)
+    open(os.path.join(root,name+".dm_75"),"wb").write(data)
 PYEOF
 cat >"$ATTRACT_HOME/base/q0-demo-malformed-attract.cfg" <<'EOF'
 wait 100
@@ -871,9 +869,9 @@ python3 "$TIMEOUT_RUNNER" --timeout 180 --kill-after 15 --cwd "$RUN_ROOT/home" -
     +set com_automated 1 +set com_noHardReboot 1 +set s_initsound 0 \
     +set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 \
     +set log_severity DEBUG +set log_file_severity DEBUG +set log_file_mode overwrite_synced \
-    +exec wiredui-demo-malformed.cfg
+    +exec "$LIVE_CFG"
 [ "$?" -eq 0 ] || { echo "FAIL: malformed demo client did not exit cleanly"; exit 1; }
-LOG="$HOME_DIR/qconsole.jsonl"; DEMO="$HOME_DIR/base/demos/broken.current.dm_74"
+LOG="$HOME_DIR/qconsole.jsonl"; DEMO="$HOME_DIR/base/demos/broken.current.dm_75"
 [ -s "$LOG" ] && [ -s "$DEMO" ] || { echo "FAIL: missing malformed demo evidence"; exit 1; }
 analyze_contract "$LOG" "$DEMO" || exit 1
 
@@ -883,7 +881,7 @@ python3 "$TIMEOUT_RUNNER" --timeout 240 --kill-after 15 --cwd "$RUN_ROOT/matrix"
     +set com_automated 1 +set com_noHardReboot 1 +set s_initsound 0 \
     +set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 \
     +set log_severity DEBUG +set log_file_severity DEBUG +set log_file_mode overwrite_synced \
-    +exec wiredui-demo-malformed-matrix.cfg
+    +exec "$MATRIX_LIVE_CFG"
 [ "$?" -eq 0 ] || { echo "FAIL: malformed matrix client did not exit cleanly"; exit 1; }
 MLOG="$MATRIX_HOME/qconsole.jsonl"; [ -s "$MLOG" ] || { echo "FAIL: missing malformed matrix evidence"; exit 1; }
 analyze_matrix_contract "$MLOG" "$MATRIX_HOME/base/demos" || exit 1
@@ -909,9 +907,9 @@ python3 "$TIMEOUT_RUNNER" --timeout 180 --kill-after 15 --cwd "$RUN_ROOT/loop" -
 [ "$?" -eq 0 ] || { echo "FAIL: malformed attract loop did not exit cleanly"; exit 1; }
 LLOG="$LOOP_HOME/qconsole.jsonl"; [ -s "$LLOG" ] || { echo "FAIL: missing malformed attract loop evidence"; exit 1; }
 analyze_loop_contract "$LLOG" || exit 1
-python3 - "$WIRED" "$PACK_ROOT/base/pax21.sw3z" "$BASE_ARCHIVE" "$0" <<'PYEOF'
+python3 - "$WIRED" "$CURRENT_ARCHIVE" "$BASE_ARCHIVE" "$0" <<'PYEOF'
 import hashlib,sys
-for label,path in zip(("binary","pax21","base","harness"),sys.argv[1:]):
+for label,path in zip(("binary","product-archive","base-archive","harness"),sys.argv[1:]):
     print(f"    {label}_sha256={hashlib.sha256(open(path,'rb').read()).hexdigest()}")
 PYEOF
 echo "==> WiredUI Malformed Demo gate: PASS"

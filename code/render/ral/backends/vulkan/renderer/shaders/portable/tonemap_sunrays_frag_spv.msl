@@ -21,6 +21,8 @@ struct ExposureBlock
     float sunScreenY;
     float sunrayIntensity;
     float sunrayDecay;
+    float shadowExponent;
+    float shadowPivot;
 };
 
 constant float sunrays_density_tmp [[function_constant(27)]];
@@ -149,6 +151,23 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
     }
     float3 base = _199;
     base *= (*spvDescriptorSet2.eb).exposure_bias;
+    float shadowLuma = dot(fast::max(base, float3(0.0)), float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    bool _229 = ((*spvDescriptorSet2.eb).shadowExponent != 1.0) && (shadowLuma > 0.0);
+    bool _237;
+    if (_229)
+    {
+        _237 = shadowLuma < (*spvDescriptorSet2.eb).shadowPivot;
+    }
+    else
+    {
+        _237 = _229;
+    }
+    if (_237)
+    {
+        float normalized = shadowLuma / (*spvDescriptorSet2.eb).shadowPivot;
+        float curved = powr(normalized, (*spvDescriptorSet2.eb).shadowExponent) * (*spvDescriptorSet2.eb).shadowPivot;
+        base *= (curved / shadowLuma);
+    }
     base += computeSunRays(in.frag_tex_coord, (*spvDescriptorSet2.eb), spvDescriptorSet1.depthMap, spvDescriptorSet1.depthMapSmplr, spvDescriptorSet0.texture0, spvDescriptorSet0.texture0Smplr);
     if (saturation != 1.0)
     {

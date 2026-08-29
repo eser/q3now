@@ -13,6 +13,17 @@ const requiredAssets = Object.freeze({
   "visor-animation": "/base/characters/visor/models/animation.cfg",
   "authored-content": "/base/web/authored-content.wac"
 });
+const requiredFontFiles = Object.freeze([
+  "jetbrainsmono.json", "jetbrainsmono.png", "oxanium-medium.json", "oxanium-medium.png",
+  "oxanium.json", "oxanium.png", "sansman-bold-italic.json", "sansman-bold-italic.png",
+  "sansman-bold.json", "sansman-bold.png", "sansman-italic.json", "sansman-italic.png",
+  "sansman-medium.json", "sansman-medium.png", "sansman-regular.json", "sansman-regular.png",
+  "sharetechmono.json", "sharetechmono.png", "wui_icons.json", "wui_icons.png"
+]);
+const requiredUiFiles = Object.freeze([
+  "_tokens.wui", "assets.wui", "main.wui", "classic.wui", "perspective.wui",
+  "loading_screen.wui", "overlay.wui"
+]);
 
 const hex = (bytes) => [...new Uint8Array(bytes)]
   .map(value => value.toString(16).padStart(2, "0")).join("");
@@ -30,7 +41,12 @@ function validateManifest(manifest) {
   if (!Array.isArray(manifest.assets)) throw new Error("browser content assets are missing");
   const seen = new Set();
   for (const asset of manifest.assets) {
-    if (!asset || requiredAssets[asset.id] !== asset.mountPath || seen.has(asset.id))
+	const expectedMount = requiredAssets[asset?.id]
+		?? (String(asset?.id ?? "").startsWith("font-")
+			? `/base/fonts/${String(asset.id).slice(5)}`
+			: String(asset?.id ?? "").startsWith("ui-")
+				? `/base/ui/${String(asset.id).slice(3)}` : undefined);
+    if (!asset || expectedMount !== asset.mountPath || seen.has(asset.id))
       throw new Error(`invalid browser content asset ${String(asset?.id ?? "unknown")}`);
     if (typeof asset.url !== "string" || !asset.url || asset.url.startsWith("file:")
         || asset.url.includes("\\") || asset.url.split("/").includes(".."))
@@ -43,6 +59,14 @@ function validateManifest(manifest) {
   for (const id of Object.keys(requiredAssets)) {
     if (!seen.has(id)) throw new Error(`required browser content asset is missing: ${id}`);
   }
+	for (const file of requiredFontFiles) {
+		if (!seen.has(`font-${file}`))
+			throw new Error(`required browser font asset is missing: ${file}`);
+	}
+	for (const file of requiredUiFiles) {
+		if (!seen.has(`ui-${file}`))
+			throw new Error(`required browser UI source is missing: ${file}`);
+	}
   return manifest;
 }
 

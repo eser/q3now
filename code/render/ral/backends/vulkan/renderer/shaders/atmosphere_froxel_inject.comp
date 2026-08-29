@@ -1,0 +1,77 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Wired Engine contributors
+#version 450
+
+layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
+
+struct MediaVolume {
+	vec4 originRadius;
+	vec4 extentShape;
+	vec4 albedoAnisotropy;
+	vec4 emissiveIntensity;
+	vec4 media; // extinction, heightFalloff, noiseScale, flags
+};
+
+layout(set=0,binding=0) uniform Params {
+	mat4 invViewProjection;
+	vec4 eyeNear;
+	vec4 farGlobalDensity;
+	vec4 globalAlbedoAnisotropy;
+	uvec4 gridVolumeCount;
+	vec4 timelineSeed;
+} p;
+layout(std430,set=0,binding=1) readonly buffer Volumes { MediaVolume v[]; };
+layout(std430,set=0,binding=2) writeonly buffer Media {
+	vec4 scatteringExtinction[];
+};
+
+float hash13(vec3 q) {
+	q = fract(q * 0.1031);
+	q += dot(q, q.yzx + 33.33);
+	return fract((q.x + q.y) * q.z);
+}
+
+float volumeWeight(MediaVolume m, vec3 world) {
+	vec3 local = world - m.originRadius.xyz;
+	float shape = m.extentShape.w;
+	float weight = shape < 1.5
+		? 1.0 - smoothstep(m.originRadius.w * 0.85, m.originRadius.w,
+			length(local))
+		: 1.0 - smoothstep(0.85, 1.0,
+			max(max(abs(local.x) / m.extentShape.x,
+				abs(local.y) / m.extentShape.y),
+				abs(local.z) / m.extentShape.z));
+	if (m.media.z > 0.0)
+		weight *= mix(0.55, 1.0, hash13(world / m.media.z
+			+ vec3(p.timelineSeed.x, p.timelineSeed.y, p.timelineSeed.w)));
+	return max(weight, 0.0) * exp(-max(m.media.y, 0.0)
+		* max(world.z - m.originRadius.z, 0.0));
+}
+
+void main() {
+	uvec3 c = gl_GlobalInvocationID.xyz;
+	uvec3 dims = p.gridVolumeCount.xyz;
+	if (any(greaterThanEqual(c, dims))) return;
+	uint index = (c.z * dims.y + c.y) * dims.x + c.x;
+	vec2 uv = (vec2(c.xy) + 0.5) / vec2(dims.xy);
+	float slice = (float(c.z) + 0.5) / float(dims.z);
+	float nearZ = max(p.eyeNear.w, 0.01);
+	float farZ = max(p.farGlobalDensity.x, nearZ + 0.01);
+	float distanceZ = nearZ * pow(farZ / nearZ, slice);
+	vec4 worldH = p.invViewProjection * vec4(uv * 2.0 - 1.0,
+		1.0 - nearZ / distanceZ, 1.0);
+	vec3 world = worldH.xyz / max(abs(worldH.w), 1e-6);
+	float extinction = max(p.farGlobalDensity.y, 0.0)
+		* exp(-max(p.farGlobalDensity.z, 0.0) * max(world.z, 0.0));
+	vec3 scattering = p.globalAlbedoAnisotropy.rgb * extinction;
+	uint count = min(p.gridVolumeCount.w, 64u);
+	for (uint i = 0u; i < count; ++i) {
+		float weight = volumeWeight(v[i], world);
+		float localExtinction = max(v[i].media.x, 0.0) * weight;
+		extinction += localExtinction;
+		scattering += v[i].albedoAnisotropy.rgb * localExtinction
+			+ v[i].emissiveIntensity.rgb
+				* max(v[i].emissiveIntensity.w, 0.0) * weight;
+	}
+	scatteringExtinction[index] = vec4(scattering, extinction);
+}

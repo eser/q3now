@@ -6,6 +6,7 @@
 
 #include "../game/bg_public.h"
 #include "../render/frontend/tr_types.h"
+#include "../qcommon/wired/render/effect_profile.h"
 //
 
 
@@ -296,6 +297,25 @@ typedef enum {
 	// every frame with no further trap. Returns qtrue on success. Slot 228,
 	// append-at-end after 227. FULL REBUILD required after this change.
 
+	CG_R_ADDATMOSPHEREEMITTER      = 233,
+	// void trap_R_AddAtmosphereEmitter( const atmosphereEmitter_t *emitter )
+	// Pointer-free, frame-local semantic intent. The renderer owns particle
+	// allocation, simulation, collision and retirement on the GPU.
+	CG_R_REGISTERATMOSPHEREEFFECTPROFILE = 234,
+	// void trap_R_RegisterAtmosphereEffectProfile( uint32_t handle,
+	//     const atmosphereEffectProfile_t *profile )
+	CG_R_ADDATMOSPHERESURFACEEVENT = 235,
+	// void trap_R_AddAtmosphereSurfaceEvent(
+	//     const atmosphereSurfaceEvent_t *event )
+	CG_R_ADDATMOSPHEREMEDIAVOLUME = 236,
+	// void trap_R_AddAtmosphereMediaVolume(
+	//     const atmosphereMediaVolume_t *volume )
+
+	CG_SETUSERCMDAIM               = 237,
+	// void trap_SetUserCmdAim( int mode, int pitchShort, int yawShort )
+	// Publishes cgame's absolute weapon-aim direction without replacing the
+	// camera/movement view angles. FULL REBUILD required.
+
 	CG_GET_SCENE_FRAME_CONTEXT      = 224,
 	// void trap_GetSceneFrameContext( wuiSceneFrameCtx_t *out )
 	// pull per-frame scene context (serverTime / stereo /
@@ -339,6 +359,15 @@ typedef enum {
 	// fixed 24-byte refEntityMotion_t as two VARG_VMPTR arguments. Old engines
 	// do not advertise this slot and the cgame wrapper falls back to the ordinary
 	// entity submission without changing refEntity_t.
+
+	CG_WIRED_FX_EMIT_EVENT           = 238,
+	// void trap_WiredFx_EmitEvent( const wiredFxEvent_t *event )
+	// One bounded semantic occurrence; composition remains engine-owned.
+	CG_R_REGISTERPARTICLECLASSNAMED  = 239,
+	// void trap_R_RegisterParticleClassNamed( particleClassHandle_t handle,
+	//     const particleClass_t *cls, const char *name )
+	// Registration-only name metadata lets Lua WiredFX recipes resolve the
+	// cgame particle registry without leaking names into the render ABI.
 
 	CG_TRAP_GETVALUE = COM_TRAP_GETVALUE,
 
@@ -521,6 +550,7 @@ typedef struct {
 	int         warmup, levelStartTime;
 	qboolean    showScores, demoPlayback, intermission;
 	qboolean    connectionInterrupted; // client commands fell past CMD_BACKUP without ack
+	qboolean    hud2DHidden;           // cg_draw2D == 0: hide WiredUI HUD as well as legacy 2D
 	qboolean    sceneHudHidden;        // cinematic director active + HUD off: hide the whole game HUD
 
 	// team

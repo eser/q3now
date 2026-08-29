@@ -34,22 +34,42 @@ struct ralWebGpuProduct_s {
 	uint32_t materialCount;
 	ralWebGpuResource_t *worldVertices;
 	ralWebGpuResource_t *worldIndices;
+	ralWebGpuResource_t *worldMaterials;
 	ralWebGpuResource_t *entityVertices;
 	ralWebGpuResource_t *entityIndices;
+	ralWebGpuResource_t *entityLighting;
 	ralWebGpuResource_t *miscVertices;
 	ralWebGpuResource_t *miscIndices;
 	ralWebGpuResourceReceipt_t worldVertexReceipt;
 	ralWebGpuResourceReceipt_t worldIndexReceipt;
+	ralWebGpuResourceReceipt_t worldMaterialReceipt;
 	ralWebGpuResourceReceipt_t entityVertexReceipt;
 	ralWebGpuResourceReceipt_t entityIndexReceipt;
+	ralWebGpuResourceReceipt_t entityLightingReceipt;
 	ralWebGpuResourceReceipt_t miscVertexReceipt;
 	ralWebGpuResourceReceipt_t miscIndexReceipt;
 	ralWebGpuProductFrameReceipt_t published;
 	qboolean inFlight;
 	qboolean entityPipelineReady;
+	uintptr_t worldMaterialBindGroup;
+	qboolean worldMaterialBindGroupReady;
+	uintptr_t entityLightingBindGroup;
+	qboolean entityLightingBindGroupReady;
 	qboolean effectPipelineReady;
 	qboolean uiPipelinesReady;
+	uintptr_t atmosphereBindGroups[3];
+	qboolean atmosphereBindGroupsReady;
+	ralAtmosphereWeatherReceipt_t weatherPlan;
+	ralWebGpuWeatherReceipt_t weatherExecution;
+	qboolean weatherReady;
 };
+
+#define RAL_WEBGPU_ENTITY_LIGHTING_CAPACITY \
+	( RENDER_SUBMISSION_MAX_ENTITIES * RENDER_SUBMISSION_MAX_MODEL_BATCHES )
+#define RAL_WEBGPU_ENTITY_LIGHTING_BYTES \
+	( (uint64_t)RAL_WEBGPU_ENTITY_LIGHTING_CAPACITY * 16u * sizeof( float ) )
+#define RAL_WEBGPU_WORLD_MATERIAL_BYTES \
+	( (uint64_t)RENDER_SUBMISSION_MAX_WORLD_BATCHES * 4u * sizeof( float ) )
 
 static uint32_t s_productFailureStage;
 uint32_t RalWebGpu_ProductLastFailureStage( void ) {
@@ -74,10 +94,14 @@ static qboolean ReceiptValid( const ralWebGpuProductFrameReceipt_t *receipt ) {
 			&receipt->entityVertexBuffer )
 			&& RalWebGpu_ResourceReceiptExact( &receipt->entityIndexBuffer,
 				&receipt->entityIndexBuffer )
+			&& RalWebGpu_ResourceReceiptExact( &receipt->entityLightingBuffer,
+				&receipt->entityLightingBuffer )
 			&& RalWebGpu_WriteReceiptExact( &receipt->entityVertexWrite,
 				&receipt->entityVertexWrite )
 			&& RalWebGpu_WriteReceiptExact( &receipt->entityIndexWrite,
-				&receipt->entityIndexWrite );
+				&receipt->entityIndexWrite )
+			&& RalWebGpu_WriteReceiptExact( &receipt->entityLightingWrite,
+				&receipt->entityLightingWrite );
 	miscResourcesValid = receipt->plan.polygonBatchCount == 0u
 			&& receipt->plan.lightCount == 0u
 			&& receipt->plan.uiPrimitiveCount == 0u
@@ -103,19 +127,35 @@ static qboolean ReceiptValid( const ralWebGpuProductFrameReceipt_t *receipt ) {
 			&receipt->worldVertexWrite )
 		&& RalWebGpu_WriteReceiptExact( &receipt->worldIndexWrite,
 			&receipt->worldIndexWrite )
+		&& RalWebGpu_ResourceReceiptExact( &receipt->worldMaterialBuffer,
+			&receipt->worldMaterialBuffer )
+		&& RalWebGpu_WriteReceiptExact( &receipt->worldMaterialWrite,
+			&receipt->worldMaterialWrite )
 		&& RalWebGpu_CommandReceiptExact( &receipt->command, &receipt->command )
 		&& RalWebGpu_SubmissionReceiptExact( &receipt->submission,
 			&receipt->submission )
 		&& entityResourcesValid
 		&& miscResourcesValid
 		&& receipt->worldDrawCount == receipt->plan.worldBatchCount
+		&& receipt->worldEmissiveDrawCount <= receipt->worldDrawCount
 		&& receipt->modelEntityCount == receipt->plan.modelEntityCount
 		&& receipt->primitiveEntityCount == receipt->plan.primitiveEntityCount
 		&& receipt->temporalEntityCount == receipt->plan.temporalEntityCount
 		&& receipt->entityDrawCount == receipt->plan.entityBatchCount
+		&& receipt->localIrradianceEntityCount
+			== receipt->plan.localIrradianceEntityCount
+		&& receipt->localIrradianceDrawCount <= receipt->entityDrawCount
+		&& ( !receipt->localIrradianceEntityCount
+			|| receipt->localIrradianceDrawCount )
 		&& receipt->polygonDrawCount == receipt->plan.polygonBatchCount
 		&& receipt->lightDrawCount == receipt->plan.lightCount
 		&& receipt->uiDrawCount == receipt->plan.uiPrimitiveCount
+		&& receipt->atmosphereBoundDrawCount == receipt->worldDrawCount
+			+ receipt->entityDrawCount + receipt->polygonDrawCount
+			+ receipt->lightDrawCount
+		&& Ral_AtmosphereWeatherReceiptExact( &receipt->weather,
+			&receipt->weather )
+		&& receipt->weatherDrawCount == ( receipt->weather.zeroWork ? 0u : 1u )
 		&& receipt->deferredNonWorldDrawCount
 			== receipt->plan.drawCount - receipt->worldDrawCount
 				- receipt->entityDrawCount - receipt->polygonDrawCount
@@ -175,7 +215,10 @@ static qboolean UploadMaterial( ralWebGpuResourceLayer_t *resources,
 	memset( out, 0, sizeof( *out ) );
 	memset( &textureDesc, 0, sizeof( textureDesc ) );
 	textureDesc.width = material->width; textureDesc.height = material->height;
-	textureDesc.depth = 1u; textureDesc.bytesPerTexel = 4u;
+	textureDesc.depth = 1u;
+	textureDesc.format = material->srgb ? RAL_FORMAT_R8G8B8A8_SRGB
+		: RAL_FORMAT_R8G8B8A8_UNORM;
+	textureDesc.bytesPerTexel = 4u;
 	memset( &samplerDesc, 0, sizeof( samplerDesc ) );
 	samplerDesc.linearMinification = qtrue;
 	samplerDesc.linearMagnification = qtrue;
@@ -225,13 +268,35 @@ typedef struct {
 	uint32_t indexCount;
 	qhandle_t material;
 	uint64_t contentDigest;
+	float localSh[4][4];
 } entityDrawPlan_t;
+
+static qboolean EntityLighting( const renderEntityCommand_t *command,
+		float out[4][4] ) {
+	if ( !command || !out ) return qfalse;
+	memset( out, 0, 16u * sizeof( float ) );
+	if ( !command->hasLocalIrradiance ) return qtrue;
+	if ( !Ral_IrradianceEntitySampleReceiptValid( &command->localIrradiance )
+			|| !Ral_LightingCompositionReceiptValid(
+				&command->lightingComposition )
+			|| command->lightingComposition.diffuseAuthority
+				!= RAL_LIGHTING_DIFFUSE_AUTHORITY_LOCAL_SH
+			|| command->lightingComposition.activeTermMask
+				!= RAL_LIGHTING_TERM_LOCAL_SH ) return qfalse;
+	for ( uint32_t coefficient = 0u; coefficient < 4u; ++coefficient )
+		for ( uint32_t channel = 0u; channel < 3u; ++channel )
+			out[coefficient][channel] = (float)command->localIrradiance
+				.blendedCoefficientsQ16[coefficient][channel] / 65536.0f;
+	out[0][3] = 1.0f;
+	return qtrue;
+}
 
 static void SetEntityVertex( renderWorldVertex_t *vertex, float x, float y,
 		float z, float s, float t, const byte color[4] ) {
 	memset( vertex, 0, sizeof( *vertex ) );
 	vertex->position[0] = x; vertex->position[1] = y; vertex->position[2] = z;
 	vertex->texCoord[0] = s; vertex->texCoord[1] = t;
+	vertex->normal[2] = 1.0f;
 	memcpy( vertex->color, color, sizeof( vertex->color ) );
 }
 
@@ -250,7 +315,8 @@ static qboolean ProjectVertices( const renderWorldSnapshot_t *world,
 	depthScale = farPlane / ( farPlane - nearPlane );
 	depthBias = -nearPlane * depthScale;
 	for ( uint32_t i = 0u; i < vertexCount; ++i ) {
-		float delta[3], forward, side, up;
+		float delta[3], forward, side, up, worldZ;
+		worldZ = vertices[i].position[2];
 		for ( uint32_t axis = 0u; axis < 3u; ++axis )
 			delta[axis] = vertices[i].position[axis] - world->viewOrigin[axis];
 		forward = delta[0] * world->viewAxis[0][0]
@@ -266,6 +332,9 @@ static qboolean ProjectVertices( const renderWorldSnapshot_t *world,
 		vertices[i].position[1] = up / tanHalfY;
 		vertices[i].position[2] = forward * depthScale + depthBias;
 		vertices[i].texCoord[0] = forward;
+		vertices[i].lightmapCoord[0] = sqrtf( delta[0] * delta[0]
+			+ delta[1] * delta[1] + delta[2] * delta[2] );
+		vertices[i].lightmapCoord[1] = worldZ;
 	}
 	return qtrue;
 }
@@ -312,29 +381,52 @@ static qboolean BuildEntityGeometry( const renderSubmissionState_t *frontend,
 	}
 	for ( uint32_t i = 0u; i < entityCount; ++i ) {
 		const refEntity_t *entity = &entities[i].entity;
+		float localSh[4][4];
 		uint32_t baseVertex = vertexCount;
+		if ( !EntityLighting( &entities[i], localSh ) ) goto fail;
 		if ( entity->reType == RT_MODEL ) {
 			renderModelSnapshot_t model;
 			if ( !RenderSubmission_ModelSnapshot( frontend, entity->hModel, &model )
-					|| !model.ready || !model.positions || !model.texCoords
+					|| !model.ready || !model.positions || !model.normals || !model.texCoords
 					|| !model.indices || !model.batches ) goto fail;
 			for ( uint32_t vertex = 0u; vertex < model.vertexCount; ++vertex ) {
 				const float *current = &model.positions[
 					( (uint32_t)entity->frame * model.vertexCount + vertex ) * 3u];
 				const float *old = &model.positions[
 					( (uint32_t)entity->oldframe * model.vertexCount + vertex ) * 3u];
-				float local[3], world[3];
+				const float *currentNormal = &model.normals[
+					( (uint32_t)entity->frame * model.vertexCount + vertex ) * 3u];
+				const float *oldNormal = &model.normals[
+					( (uint32_t)entity->oldframe * model.vertexCount + vertex ) * 3u];
+				float local[3], localNormal[3], world[3], worldNormal[3];
 				for ( uint32_t component = 0u; component < 3u; ++component )
 					local[component] = current[component] * ( 1.0f - entity->backlerp )
 						+ old[component] * entity->backlerp;
+				for ( uint32_t component = 0u; component < 3u; ++component )
+					localNormal[component] = currentNormal[component]
+						* ( 1.0f - entity->backlerp )
+						+ oldNormal[component] * entity->backlerp;
 				for ( uint32_t component = 0u; component < 3u; ++component )
 					world[component] = entity->origin[component]
 						+ entity->axis[0][component] * local[0]
 						+ entity->axis[1][component] * local[1]
 						+ entity->axis[2][component] * local[2];
+				for ( uint32_t component = 0u; component < 3u; ++component )
+					worldNormal[component] = entity->axis[0][component] * localNormal[0]
+						+ entity->axis[1][component] * localNormal[1]
+						+ entity->axis[2][component] * localNormal[2];
 				SetEntityVertex( &vertices[vertexCount++], world[0], world[1],
 					world[2], model.texCoords[vertex * 2u],
 					model.texCoords[vertex * 2u + 1u], entity->shader.rgba );
+				{
+					renderWorldVertex_t *written = &vertices[vertexCount - 1u];
+					float length = sqrtf( worldNormal[0] * worldNormal[0]
+						+ worldNormal[1] * worldNormal[1]
+						+ worldNormal[2] * worldNormal[2] );
+					if ( length > 0.000001f ) for ( uint32_t component = 0u;
+							component < 3u; ++component )
+						written->normal[component] = worldNormal[component] / length;
+				}
 			}
 			for ( uint32_t batchIndex = 0u; batchIndex < model.batchCount;
 					++batchIndex ) {
@@ -347,10 +439,11 @@ static qboolean BuildEntityGeometry( const renderSubmissionState_t *frontend,
 					goto fail;
 				draw = &draws[drawCount++]; draw->firstIndex = indexCount;
 				draw->indexCount = batch->indexCount;
-				draw->material = entity->customShader > 0
-					? entity->customShader : batch->material;
+				draw->material = RenderSubmission_EntityBatchMaterial(
+					frontend, &entities[i], batch );
 				draw->contentDigest = HashU64( model.digest,
 					( (uint64_t)i << 32u ) | batchIndex );
+				memcpy( draw->localSh, localSh, sizeof( draw->localSh ) );
 				for ( uint32_t index = 0u; index < batch->indexCount; ++index ) {
 					uint32_t source = model.indices[batch->firstIndex + index];
 					if ( source >= model.vertexCount ) goto fail;
@@ -380,6 +473,7 @@ static qboolean BuildEntityGeometry( const renderSubmissionState_t *frontend,
 			draw->firstIndex = indexCount - 6u; draw->indexCount = 6u;
 			draw->material = entity->customShader;
 			draw->contentDigest = HashU64( plan->frontendFrameDigest, i );
+			memcpy( draw->localSh, localSh, sizeof( draw->localSh ) );
 		} else {
 			static const uint32_t box[36] = { 0,1,2,0,2,3,4,6,5,4,7,6,
 				0,4,5,0,5,1,1,5,6,1,6,2,2,6,7,2,7,3,3,7,4,3,4,0 };
@@ -411,6 +505,7 @@ static qboolean BuildEntityGeometry( const renderSubmissionState_t *frontend,
 			draw->firstIndex = indexCount - 36u; draw->indexCount = 36u;
 			draw->material = entity->customShader;
 			draw->contentDigest = HashU64( plan->frontendFrameDigest, i );
+			memcpy( draw->localSh, localSh, sizeof( draw->localSh ) );
 		}
 	}
 	if ( vertexCount != vertexCapacity || indexCount != plan->entityIndexCount
@@ -562,39 +657,13 @@ static qboolean BuildMiscGeometry( const renderSubmissionState_t *frontend,
 				&material ) || !material.ready ) goto fail;
 		for ( uint32_t component = 0u; component < 4u; ++component )
 			color[component] = ColorByte( primitive->color[component] );
+		memcpy( positions, primitive->positions, sizeof( positions ) );
 		if ( primitive->kind == RENDER_UI_LINE ) {
-			float dx = primitive->width - primitive->x;
-			float dy = primitive->height - primitive->y;
-			float length = sqrtf( dx * dx + dy * dy );
-			float halfWidth = primitive->s1 * 0.5f;
-			float nx, ny;
-			if ( !isfinite( length ) || length <= 0.0f || !isfinite( halfWidth )
-					|| halfWidth <= 0.0f ) goto fail;
-			nx = -dy / length * halfWidth; ny = dx / length * halfWidth;
-			positions[0][0] = primitive->x + nx; positions[0][1] = primitive->y + ny;
-			positions[1][0] = primitive->width + nx; positions[1][1] = primitive->height + ny;
-			positions[2][0] = primitive->width - nx; positions[2][1] = primitive->height - ny;
-			positions[3][0] = primitive->x - nx; positions[3][1] = primitive->y - ny;
 			texCoords[0][0] = 0.0f; texCoords[0][1] = 0.0f;
 			texCoords[1][0] = 1.0f; texCoords[1][1] = 0.0f;
 			texCoords[2][0] = 1.0f; texCoords[2][1] = 1.0f;
 			texCoords[3][0] = 0.0f; texCoords[3][1] = 1.0f;
 		} else {
-			float centerX = primitive->x + primitive->width * 0.5f;
-			float centerY = primitive->y + primitive->height * 0.5f;
-			float radians = primitive->rotation * 0.01745329251994329577f;
-			float cosine = cosf( radians ), sine = sinf( radians );
-			static const float signs[4][2] = {
-				{ -1.0f, -1.0f }, { 1.0f, -1.0f },
-				{ 1.0f, 1.0f }, { -1.0f, 1.0f } };
-			if ( !isfinite( centerX ) || !isfinite( centerY )
-					|| !isfinite( cosine ) || !isfinite( sine ) ) goto fail;
-			for ( uint32_t corner = 0u; corner < 4u; ++corner ) {
-				float x = signs[corner][0] * primitive->width * 0.5f;
-				float y = signs[corner][1] * primitive->height * 0.5f;
-				positions[corner][0] = centerX + x * cosine - y * sine;
-				positions[corner][1] = centerY + x * sine + y * cosine;
-			}
 			texCoords[0][0] = primitive->s1; texCoords[0][1] = primitive->t1;
 			texCoords[1][0] = primitive->s2; texCoords[1][1] = primitive->t1;
 			texCoords[2][0] = primitive->s2; texCoords[2][1] = primitive->t2;
@@ -636,6 +705,8 @@ qboolean RalWebGpu_ProductCreate( ralWebGpuRuntime_t *runtime,
 		const ralWebGpuPipelineReceipt_t *worldPipeline, uint64_t generation,
 		ralWebGpuProduct_t **outProduct ) {
 	ralWebGpuProduct_t *product;
+	ralWebGpuResourceLayer_t *resources;
+	ralWebGpuBufferDesc_t lightingDesc;
 	if ( !runtime || !runtimeReceipt || !worldPipeline || !outProduct
 			|| !generation || generation == UINT64_MAX
 			|| worldPipeline->kind != RAL_SHADER_PIPELINE_GRAPHICS
@@ -645,7 +716,66 @@ qboolean RalWebGpu_ProductCreate( ralWebGpuRuntime_t *runtime,
 	if ( !product ) return qfalse;
 	product->runtime = runtime; product->worldPipeline = *worldPipeline;
 	product->generation = generation; product->planGeneration = generation;
+	resources = RalWebGpu_RuntimeResources( runtime, runtimeReceipt );
+	memset( &lightingDesc, 0, sizeof( lightingDesc ) );
+	lightingDesc.size = RAL_WEBGPU_ENTITY_LIGHTING_BYTES;
+	lightingDesc.usage = RAL_WEBGPU_BUFFER_STORAGE
+		| RAL_WEBGPU_BUFFER_COPY_DESTINATION;
+	lightingDesc.memoryClass = RAL_ALLOCATION_DEVICE_LOCAL;
+	if ( !resources || !RalWebGpu_CreateBuffer( resources, &lightingDesc,
+			&product->entityLighting, &product->entityLightingReceipt ) ) {
+		free( product ); return qfalse;
+	}
+	lightingDesc.size = RAL_WEBGPU_WORLD_MATERIAL_BYTES;
+	if ( !RalWebGpu_CreateBuffer( resources, &lightingDesc,
+			&product->worldMaterials, &product->worldMaterialReceipt ) ) {
+		RalWebGpu_DestroyResource( resources, product->entityLighting,
+			&product->entityLightingReceipt );
+		free( product ); return qfalse;
+	}
+	{
+		ralAtmosphereWeatherRequest_t emptyWeather;
+		memset( &emptyWeather, 0, sizeof( emptyWeather ) );
+		emptyWeather.schemaVersion = RAL_ATMOSPHERE_WEATHER_SCHEMA_VERSION;
+		emptyWeather.tier = RAL_ATMOSPHERE_TIER_OFF;
+		emptyWeather.maxParticles = RAL_WEBGPU_WEATHER_PARTICLE_CAPACITY;
+		if ( !Ral_AtmospherePlanWeather( &emptyWeather,
+				&product->weatherPlan ) ) {
+			RalWebGpu_DestroyResource( resources, product->worldMaterials,
+				&product->worldMaterialReceipt );
+			RalWebGpu_DestroyResource( resources, product->entityLighting,
+				&product->entityLightingReceipt );
+			free( product ); return qfalse;
+		}
+	}
 	*outProduct = product; return qtrue;
+}
+
+qboolean RalWebGpu_ProductGetWorldMaterialBuffer(
+		const ralWebGpuProduct_t *product,
+		const ralWebGpuRuntimeReceipt_t *runtimeReceipt,
+		uintptr_t *outIdentity, uint64_t *outByteSize ) {
+	if ( !product || !runtimeReceipt || !outIdentity || !outByteSize
+			|| !product->worldMaterials
+			|| !RalWebGpu_ResourceReceiptExact( &product->worldMaterialReceipt,
+				&product->worldMaterialReceipt )
+			|| !RalWebGpu_RuntimeOwnsPipeline( product->runtime, runtimeReceipt,
+				&product->worldPipeline ) ) return qfalse;
+	*outIdentity = product->worldMaterialReceipt.resourceIdentity;
+	*outByteSize = product->worldMaterialReceipt.byteSize;
+	return *outIdentity && *outByteSize == RAL_WEBGPU_WORLD_MATERIAL_BYTES;
+}
+
+qboolean RalWebGpu_ProductSetWorldMaterialBindGroup(
+		ralWebGpuProduct_t *product,
+		const ralWebGpuRuntimeReceipt_t *runtimeReceipt,
+		uintptr_t bindGroupIdentity ) {
+	if ( !product || !runtimeReceipt || !bindGroupIdentity || product->inFlight
+			|| !RalWebGpu_RuntimeOwnsPipeline( product->runtime, runtimeReceipt,
+				&product->worldPipeline ) ) return qfalse;
+	product->worldMaterialBindGroup = bindGroupIdentity;
+	product->worldMaterialBindGroupReady = qtrue;
+	return qtrue;
 }
 
 qboolean RalWebGpu_ProductSetEntityPipeline( ralWebGpuProduct_t *product,
@@ -657,6 +787,34 @@ qboolean RalWebGpu_ProductSetEntityPipeline( ralWebGpuProduct_t *product,
 				entityPipeline ) ) return qfalse;
 	product->entityPipeline = *entityPipeline;
 	product->entityPipelineReady = qtrue; return qtrue;
+}
+
+qboolean RalWebGpu_ProductGetEntityLightingBuffer(
+		const ralWebGpuProduct_t *product,
+		const ralWebGpuRuntimeReceipt_t *runtimeReceipt,
+		uintptr_t *outIdentity, uint64_t *outByteSize ) {
+	if ( !product || !runtimeReceipt || !outIdentity || !outByteSize
+			|| !product->entityLighting
+			|| !RalWebGpu_ResourceReceiptExact( &product->entityLightingReceipt,
+				&product->entityLightingReceipt )
+			|| !RalWebGpu_RuntimeOwnsPipeline( product->runtime, runtimeReceipt,
+				&product->worldPipeline ) ) return qfalse;
+	*outIdentity = product->entityLightingReceipt.resourceIdentity;
+	*outByteSize = product->entityLightingReceipt.byteSize;
+	return *outIdentity && *outByteSize == RAL_WEBGPU_ENTITY_LIGHTING_BYTES;
+}
+
+qboolean RalWebGpu_ProductSetEntityLightingBindGroup(
+		ralWebGpuProduct_t *product,
+		const ralWebGpuRuntimeReceipt_t *runtimeReceipt,
+		uintptr_t bindGroupIdentity ) {
+	if ( !product || !runtimeReceipt || !bindGroupIdentity || product->inFlight
+			|| !product->entityPipelineReady
+			|| !RalWebGpu_RuntimeOwnsPipeline( product->runtime, runtimeReceipt,
+				&product->entityPipeline ) ) return qfalse;
+	product->entityLightingBindGroup = bindGroupIdentity;
+	product->entityLightingBindGroupReady = qtrue;
+	return qtrue;
 }
 
 qboolean RalWebGpu_ProductSetEffectPipeline( ralWebGpuProduct_t *product,
@@ -686,6 +844,22 @@ qboolean RalWebGpu_ProductSetUiPipelines( ralWebGpuProduct_t *product,
 	product->uiPipelinesReady = qtrue; return qtrue;
 }
 
+qboolean RalWebGpu_ProductSetAtmosphereBindGroups(
+		ralWebGpuProduct_t *product,
+		const ralWebGpuRuntimeReceipt_t *runtimeReceipt,
+		uintptr_t worldBindGroup, uintptr_t entityBindGroup,
+		uintptr_t effectBindGroup ) {
+	if ( !product || !runtimeReceipt || product->inFlight || !worldBindGroup
+			|| !entityBindGroup || !effectBindGroup
+			|| !RalWebGpu_RuntimeOwnsPipeline( product->runtime, runtimeReceipt,
+				&product->worldPipeline ) ) return qfalse;
+	product->atmosphereBindGroups[0] = worldBindGroup;
+	product->atmosphereBindGroups[1] = entityBindGroup;
+	product->atmosphereBindGroups[2] = effectBindGroup;
+	product->atmosphereBindGroupsReady = qtrue;
+	return qtrue;
+}
+
 qboolean RalWebGpu_ProductSetViewport( ralWebGpuProduct_t *product,
 		const ralWebGpuRuntimeReceipt_t *runtimeReceipt,
 		uint32_t width, uint32_t height ) {
@@ -693,6 +867,30 @@ qboolean RalWebGpu_ProductSetViewport( ralWebGpuProduct_t *product,
 			|| !RalWebGpu_RuntimeOwnsPipeline( product->runtime, runtimeReceipt,
 				&product->worldPipeline ) ) return qfalse;
 	product->viewportWidth = width; product->viewportHeight = height;
+	return qtrue;
+}
+
+qboolean RalWebGpu_ProductSetWeather( ralWebGpuProduct_t *product,
+		const ralWebGpuRuntimeReceipt_t *runtimeReceipt,
+		const ralAtmosphereWeatherReceipt_t *plan,
+		const ralWebGpuWeatherReceipt_t *execution ) {
+	if ( !product || !runtimeReceipt || !plan || product->inFlight
+			|| !Ral_AtmosphereWeatherReceiptExact( plan, plan ) ) return qfalse;
+	if ( plan->zeroWork ) {
+		if ( execution ) return qfalse;
+		product->weatherPlan = *plan;
+		memset( &product->weatherExecution, 0,
+			sizeof( product->weatherExecution ) );
+		product->weatherReady = qfalse;
+		return qtrue;
+	}
+	if ( !execution || !RalWebGpu_WeatherReceiptExact( execution, execution )
+			|| !Ral_AtmosphereWeatherReceiptExact( plan, &execution->plan )
+			|| !RalWebGpu_RuntimeOwnsPipeline( product->runtime, runtimeReceipt,
+				&execution->renderPipeline ) ) return qfalse;
+	product->weatherPlan = *plan;
+	product->weatherExecution = *execution;
+	product->weatherReady = qtrue;
 	return qtrue;
 }
 
@@ -706,6 +904,12 @@ void RalWebGpu_ProductDestroy( ralWebGpuProduct_t *product,
 		DestroyFrameResources( product, resources );
 		for ( uint32_t i = 0u; i < product->materialCount; ++i )
 			DestroyMaterial( resources, &product->materials[i] );
+		if ( product->entityLighting )
+			RalWebGpu_DestroyResource( resources, product->entityLighting,
+				&product->entityLightingReceipt );
+		if ( product->worldMaterials )
+			RalWebGpu_DestroyResource( resources, product->worldMaterials,
+				&product->worldMaterialReceipt );
 	}
 	memset( product, 0, sizeof( *product ) ); free( product );
 }
@@ -753,6 +957,8 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 	uint32_t *entityIndices = NULL;
 	uint32_t *miscIndices = NULL;
 	entityDrawPlan_t *entityDraws = NULL;
+	float *entityLightingData = NULL;
+	float *worldMaterialData = NULL;
 	miscDrawPlan_t *miscDraws = NULL;
 	uint32_t entityVertexCount = 0u, entityIndexCount = 0u, entityDrawCount = 0u;
 	uint32_t miscVertexCount = 0u, miscIndexCount = 0u, miscDrawCount = 0u;
@@ -761,15 +967,40 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 	qboolean commandActive = qfalse;
 	s_productFailureStage = 1u;
 	if ( !product || !runtimeReceipt || !frontend || !submission || !plan
-			|| !outReceipt
-			|| !targetIdentity || !frameGeneration || product->inFlight
-			|| !RalWebGpu_FrontendPlanReceiptExact( plan, plan )
-			|| plan->backendGeneration != runtimeReceipt->generation
-			|| plan->frontendOwnerGeneration != submission->ownerGeneration
-			|| plan->frontendFrameGeneration != submission->frameGeneration
-			|| plan->frontendFrameDigest != submission->frameDigest
-			|| !RalWebGpu_RuntimeOwnsPipeline( product->runtime, runtimeReceipt,
-				&product->worldPipeline ) ) return qfalse;
+			|| !outReceipt ) return qfalse;
+	if ( !Ral_AtmosphereWeatherReceiptExact( &product->weatherPlan,
+			&product->weatherPlan ) ) {
+		s_productFailureStage = 14u; return qfalse;
+	}
+	if ( !product->weatherPlan.zeroWork && !product->weatherReady ) {
+		s_productFailureStage = 15u; return qfalse;
+	}
+	if ( !targetIdentity || !frameGeneration || product->inFlight ) {
+		s_productFailureStage = 11u; return qfalse;
+	}
+	if ( !RalWebGpu_FrontendPlanReceiptExact( plan, plan ) ) {
+		s_productFailureStage = 12u; return qfalse;
+	}
+	if ( plan->backendGeneration != runtimeReceipt->generation ) {
+		s_productFailureStage = 13u; return qfalse;
+	}
+	if ( plan->frontendOwnerGeneration != submission->ownerGeneration ) {
+		s_productFailureStage = 17u; return qfalse;
+	}
+	if ( plan->frontendFrameGeneration != submission->frameGeneration ) {
+		s_productFailureStage = 18u; return qfalse;
+	}
+	if ( plan->frontendFrameDigest != submission->frameDigest ) {
+		s_productFailureStage = 19u; return qfalse;
+	}
+	if ( product->atmosphereBindGroupsReady != qtrue
+			|| product->worldMaterialBindGroupReady != qtrue ) {
+		s_productFailureStage = 20u; return qfalse;
+	}
+	if ( !RalWebGpu_RuntimeOwnsPipeline( product->runtime, runtimeReceipt,
+			&product->worldPipeline ) ) {
+		s_productFailureStage = 21u; return qfalse;
+	}
 	s_productFailureStage = 2u;
 	resources = RalWebGpu_RuntimeResources( product->runtime, runtimeReceipt );
 	command = RalWebGpu_RuntimeCommand( product->runtime, runtimeReceipt );
@@ -777,12 +1008,35 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 			&world ) || !world.vertexCount || !world.indexCount ) return qfalse;
 	memset( &candidate, 0, sizeof( candidate ) );
 	candidate.plan = *plan;
+	candidate.weather = product->weatherPlan;
 	memset( &vertexReceipt, 0, sizeof( vertexReceipt ) );
 	memset( &indexReceipt, 0, sizeof( indexReceipt ) );
 	memset( &entityVertexReceipt, 0, sizeof( entityVertexReceipt ) );
 	memset( &entityIndexReceipt, 0, sizeof( entityIndexReceipt ) );
 	memset( &miscVertexReceipt, 0, sizeof( miscVertexReceipt ) );
 	memset( &miscIndexReceipt, 0, sizeof( miscIndexReceipt ) );
+	worldMaterialData = (float *)calloc( (size_t)world.batchCount * 4u,
+		sizeof( worldMaterialData[0] ) );
+	if ( !worldMaterialData ) goto fail;
+	for ( uint32_t i = 0u; i < world.batchCount; ++i ) {
+		renderMaterialSnapshot_t material;
+		if ( world.batches[i].baseMaterial <= 0
+				|| !RenderSubmission_MaterialSnapshot( frontend,
+					world.batches[i].baseMaterial, &material ) ) goto fail;
+		for ( uint32_t channel = 0u; channel < 3u; ++channel )
+			worldMaterialData[i * 4u + channel] =
+				(float)material.lighting.emissionRadianceQ16[channel]
+				/ (float)RENDER_MATERIAL_LIGHTING_Q16_ONE;
+		if ( material.lighting.emissionRadianceQ16[0]
+				|| material.lighting.emissionRadianceQ16[1]
+				|| material.lighting.emissionRadianceQ16[2] )
+			candidate.worldEmissiveDrawCount++;
+	}
+	if ( !RalWebGpu_WriteBuffer( resources, product->worldMaterials,
+			&product->worldMaterialReceipt, 0u, worldMaterialData,
+			(uint64_t)world.batchCount * 4u * sizeof( float ),
+			&candidate.worldMaterialWrite ) ) goto fail;
+	candidate.worldMaterialBuffer = product->worldMaterialReceipt;
 	s_productFailureStage = 4u;
 	materialCount = frontend->materialCount;
 	if ( materialCount > RENDER_SUBMISSION_MAX_MATERIALS ) goto fail;
@@ -796,6 +1050,7 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 	}
 	if ( candidate.plan.entityBatchCount
 			&& ( product->entityPipelineReady != qtrue
+				|| product->entityLightingBindGroupReady != qtrue
 				|| !RalWebGpu_RuntimeOwnsPipeline( product->runtime, runtimeReceipt,
 					&product->entityPipeline )
 				|| !BuildEntityGeometry( frontend, &candidate.plan, &entityVertices,
@@ -803,6 +1058,25 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 					&entityDraws, &entityDrawCount )
 				|| !ProjectVertices( &world, entityVertices,
 					entityVertexCount ) ) ) goto fail;
+	if ( entityDrawCount ) {
+		if ( entityDrawCount > RAL_WEBGPU_ENTITY_LIGHTING_CAPACITY ) goto fail;
+		entityLightingData = calloc( (size_t)entityDrawCount * 16u,
+			sizeof( entityLightingData[0] ) );
+		if ( !entityLightingData ) goto fail;
+		for ( uint32_t i = 0u; i < entityDrawCount; ++i ) {
+			memcpy( &entityLightingData[i * 16u], entityDraws[i].localSh,
+				16u * sizeof( float ) );
+			if ( entityDraws[i].localSh[0][3] > 0.5f )
+				candidate.localIrradianceDrawCount++;
+		}
+		candidate.localIrradianceEntityCount =
+			candidate.plan.localIrradianceEntityCount;
+		candidate.entityLightingBuffer = product->entityLightingReceipt;
+		if ( !RalWebGpu_WriteBuffer( resources, product->entityLighting,
+				&product->entityLightingReceipt, 0u, entityLightingData,
+				(uint64_t)entityDrawCount * 16u * sizeof( float ),
+				&candidate.entityLightingWrite ) ) goto fail;
+	}
 	if ( candidate.plan.polygonBatchCount || candidate.plan.lightCount
 			|| candidate.plan.uiPrimitiveCount ) {
 		if ( ( ( candidate.plan.polygonBatchCount || candidate.plan.lightCount )
@@ -936,13 +1210,18 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 		draw.textured = qtrue;
 		draw.firstIndex = batch->firstIndex; draw.indexCount = batch->indexCount;
 		draw.instanceCount = 1u;
+		draw.firstInstance = i;
 		draw.contentDigest = HashU64( candidate.plan.loweringDigest,
 			( (uint64_t)batch->sourceSurfaceIndex << 32u ) | batch->indexCount );
+		draw.bindGroupCount = 2u;
+		draw.bindGroupIdentities[0] = product->atmosphereBindGroups[0];
+		draw.bindGroupIdentities[1] = product->worldMaterialBindGroup;
 		s_productFailureStage = 84u;
 		if ( !RalWebGpu_CommandRecordIndexedDraw( command, &recording, &draw,
 				&updated ) ) goto fail;
 		s_productFailureStage = 8u;
 		recording = updated; candidate.worldDrawCount++;
+		candidate.atmosphereBoundDrawCount++;
 	}
 	s_productFailureStage = 9u;
 	for ( uint32_t i = 0u; i < entityDrawCount; ++i ) {
@@ -962,9 +1241,39 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 		draw.firstIndex = entityDraws[i].firstIndex;
 		draw.indexCount = entityDraws[i].indexCount;
 		draw.instanceCount = 1u; draw.contentDigest = entityDraws[i].contentDigest;
+		draw.firstInstance = i;
+		draw.bindGroupCount = 2u;
+		draw.bindGroupIdentities[0] = product->atmosphereBindGroups[1];
+		draw.bindGroupIdentities[1] = product->entityLightingBindGroup;
 		if ( !RalWebGpu_CommandRecordIndexedDraw( command, &recording, &draw,
 				&updated ) ) goto fail;
 		recording = updated; candidate.entityDrawCount++;
+		candidate.atmosphereBoundDrawCount++;
+	}
+	if ( !candidate.weather.zeroWork ) {
+		ralWebGpuIndexedDraw_t draw;
+		s_productFailureStage = 95u;
+		memset( &draw, 0, sizeof( draw ) );
+		draw.kind = RAL_WEBGPU_DRAW_EFFECT;
+		draw.pipelineIdentity =
+			product->weatherExecution.renderPipeline.pipelineIdentity;
+		draw.vertexBufferIdentity =
+			product->weatherExecution.vertexBufferIdentity;
+		draw.indexBufferIdentity =
+			product->weatherExecution.indexBufferIdentity;
+		draw.textured = qfalse;
+		draw.indexCount = product->weatherExecution.drawIndexCount;
+		draw.instanceCount = candidate.weather.activeParticleCount;
+		draw.contentDigest = HashU64( candidate.plan.loweringDigest,
+			( (uint64_t)candidate.weather.familyMask << 32u )
+				| candidate.weather.activeParticleCount );
+		if ( !draw.contentDigest ) draw.contentDigest = 1u;
+		draw.bindGroupCount = 1u;
+		draw.bindGroupIdentities[0] =
+			product->weatherExecution.renderBindGroupIdentity;
+		if ( !RalWebGpu_CommandRecordIndexedDraw( command, &recording, &draw,
+				&updated ) ) goto fail;
+		recording = updated; candidate.weatherDrawCount = 1u;
 	}
 	s_productFailureStage = 10u;
 	for ( uint32_t i = 0u; i < miscDrawCount; ++i ) {
@@ -991,12 +1300,18 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 		draw.firstIndex = miscDraws[i].firstIndex;
 		draw.indexCount = miscDraws[i].indexCount;
 		draw.instanceCount = 1u; draw.contentDigest = miscDraws[i].contentDigest;
+		if ( miscDraws[i].kind != RAL_WEBGPU_DRAW_UI ) {
+			draw.bindGroupCount = 1u;
+			draw.bindGroupIdentities[0] = product->atmosphereBindGroups[2];
+		}
 		if ( !RalWebGpu_CommandRecordIndexedDraw( command, &recording, &draw,
 				&updated ) ) goto fail;
 		recording = updated;
-		if ( i < candidate.plan.polygonBatchCount ) candidate.polygonDrawCount++;
+		if ( i < candidate.plan.polygonBatchCount ) {
+			candidate.polygonDrawCount++; candidate.atmosphereBoundDrawCount++;
+		}
 		else if ( i < candidate.plan.polygonBatchCount + candidate.plan.lightCount )
-			candidate.lightDrawCount++;
+			{ candidate.lightDrawCount++; candidate.atmosphereBoundDrawCount++; }
 		else candidate.uiDrawCount++;
 	}
 	s_productFailureStage = 11u;
@@ -1056,6 +1371,8 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 	s_productFailureStage = 13u;
 	if ( !ReceiptValid( &candidate ) ) goto fail_committed;
 	free( entityVertices ); free( entityIndices ); free( entityDraws );
+	free( entityLightingData );
+	free( worldMaterialData );
 	free( miscVertices ); free( miscIndices ); free( miscDraws );
 	free( projectedWorld );
 	free( stagedMaterial ); free( resolved ); free( staged );
@@ -1065,6 +1382,8 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 fail:
 	if ( commandActive ) RalWebGpu_CommandCancel( command, &recording );
 	free( entityVertices ); free( entityIndices ); free( entityDraws );
+	free( entityLightingData );
+	free( worldMaterialData );
 	free( miscVertices ); free( miscIndices ); free( miscDraws );
 	free( projectedWorld );
 	for ( uint32_t i = 0u; i < stagedCount; ++i )
@@ -1083,6 +1402,8 @@ fail:
 	return qfalse;
 fail_committed:
 	free( entityVertices ); free( entityIndices ); free( entityDraws );
+	free( entityLightingData );
+	free( worldMaterialData );
 	free( miscVertices ); free( miscIndices ); free( miscDraws );
 	free( projectedWorld );
 	free( stagedMaterial ); free( resolved ); free( staged );
@@ -1107,10 +1428,12 @@ qboolean RalWebGpu_ProductRender( ralWebGpuProduct_t *product,
 		const renderSubmissionReceipt_t *submission, uintptr_t targetIdentity,
 		uint64_t frameGeneration, ralWebGpuProductFrameReceipt_t *outReceipt ) {
 	ralWebGpuFrontendPlanReceipt_t plan;
-	return RalWebGpu_ProductPlan( product, runtimeReceipt, frontend, submission,
-			&plan )
-		&& RalWebGpu_ProductRenderPlan( product, runtimeReceipt, frontend,
-			submission, &plan, targetIdentity, frameGeneration, outReceipt );
+	if ( !RalWebGpu_ProductPlan( product, runtimeReceipt, frontend, submission,
+			&plan ) ) {
+		s_productFailureStage = 16u; return qfalse;
+	}
+	return RalWebGpu_ProductRenderPlan( product, runtimeReceipt, frontend,
+		submission, &plan, targetIdentity, frameGeneration, outReceipt );
 }
 
 ralWebGpuAsyncStatus_t RalWebGpu_ProductPoll( ralWebGpuProduct_t *product,

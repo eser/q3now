@@ -294,38 +294,15 @@ fi
 # Resolve the exact current UI pack from either a bare assembled install or a
 # macOS .app (Contents/MacOS binary + Contents/Resources content).  Licensed
 # base content may come from the same install or an explicit external root.
-PACK_ROOT=""
-for candidate in "$WIRED_DIR" "$WIRED_DIR/../Resources" "$WIRED_DIR/../../.."; do
-    if [ -f "$candidate/base/pax21.sw3z" ]; then
-        PACK_ROOT="$(cd "$candidate" && pwd)"
-        break
-    fi
-done
+PACK_ROOT="$(wired_find_archive_root "$WIRED_DIR" "$WIRED_DIR/../Resources" "$WIRED_DIR/../../.." 2>/dev/null || true)"
 if [ -z "$PACK_ROOT" ]; then
-    echo "SKIP: no current base/pax21.sw3z found beside bundle/install for $WIRED"
+    echo "SKIP: no current VFS archive found beside bundle/install for $WIRED"
     exit 77
 fi
 
-CONTENT_ROOT=""
-BASE_ARCHIVE=""
-# $WIRED_HOME is where the launcher actually puts pax01.sw3z on every platform
-# (GAME-DATA.md §4); without it in this list the gate SKIPped on a machine that
-# had the content all along.
-for candidate in "${WIRED_CONTENT_ROOT:-}" "$PACK_ROOT" "${WIRED_HOME:-}" "${WIRED_INSTALL:-}"; do
-    [ -n "$candidate" ] || continue
-    if [ -f "$candidate/base/pax01.sw3z" ]; then
-        CONTENT_ROOT="$(cd "$candidate" && pwd)"
-        BASE_ARCHIVE="$CONTENT_ROOT/base/pax01.sw3z"
-        break
-    fi
-    if [ -f "$candidate/base/pak0.pk3" ]; then
-        CONTENT_ROOT="$(cd "$candidate" && pwd)"
-        BASE_ARCHIVE="$CONTENT_ROOT/base/pak0.pk3"
-        break
-    fi
-done
-if [ -z "$BASE_ARCHIVE" ]; then
-    echo "SKIP: canonical base content missing; set WIRED_CONTENT_ROOT to a root containing base/pax01.sw3z or base/pak0.pk3"
+CONTENT_ROOT="$(wired_find_archive_root "${WIRED_CONTENT_ROOT:-}" "$WIRED_HOME" "$PACK_ROOT" "${WIRED_INSTALL:-}" 2>/dev/null || true)"
+if [ -z "$CONTENT_ROOT" ]; then
+    echo "SKIP: canonical base content missing; set WIRED_CONTENT_ROOT to a root containing base VFS archives"
     exit 77
 fi
 
@@ -341,11 +318,16 @@ fi
 
 HOME_PARENT="$(mktemp -d -t wired-uichk-XXXXXX 2>/dev/null || mktemp -d)"
 HOME_DIR="$HOME_PARENT/$PRODUCT_DIRNAME"
-trap 'rm -rf "$HOME_PARENT"' EXIT INT TERM
-mkdir -p "$HOME_DIR/base"
-if ! cp "$BASE_ARCHIVE" "$HOME_DIR/base/$(basename "$BASE_ARCHIVE")" ||
-   ! cp "$PACK_ROOT/base/pax21.sw3z" "$HOME_DIR/base/pax21.sw3z"; then
-    echo "FAIL: could not stage exact base archive and current pax21 into isolated home"
+cleanup_layout_check() {
+    if [ "${WIRED_KEEP_ARTIFACTS:-0}" = 1 ]; then
+        echo "    retained: $HOME_PARENT"
+    else
+        rm -rf "$HOME_PARENT"
+    fi
+}
+trap cleanup_layout_check EXIT INT TERM
+if ! wired_link_content_into_home "$HOME_DIR" "$CONTENT_ROOT/base" "$WIRED_BASE" "$PACK_ROOT/base"; then
+    echo "FAIL: could not link VFS archives into isolated home"
     exit 1
 fi
 case "$(uname -s)" in
@@ -354,15 +336,15 @@ case "$(uname -s)" in
 esac
 
 # The layout dump and stdout live beside the isolated home, never in the app or
-# build directory.  The explicit two-file stage above prevents stale/arbitrary
-# archives from contaminating this product check.
+# build directory. The current bundle directory is linked last so it wins over
+# any same-name archive in the licensed content root.
 LAYOUT_DUMP="$HOME_PARENT/layoutdump.jsonl"
 JSONL="$HOME_DIR/qconsole.jsonl"
 STDOUT="$HOME_PARENT/wired.stdout"
 
 echo "==> WiredUI layout checks: $WIRED"
-echo "    current pack: $PACK_ROOT/base/pax21.sw3z"
-echo "    base archive: $BASE_ARCHIVE (read-only source)"
+echo "    current VFS: $PACK_ROOT/base (read-only links)"
+echo "    base content: $CONTENT_ROOT/base (read-only links)"
 echo "    fs_homepath : $HOME_NATIVE (isolated)"
 echo "    layout dump : $LAYOUT_DUMP"
 
@@ -376,6 +358,7 @@ echo "    layout dump : $LAYOUT_DUMP"
 # real dpiScale the gate must observe is PHYS_W/LOGICAL_W.
 PHYS_W="${PHYS_W:-1280}"; PHYS_H="${PHYS_H:-720}"
 LOGICAL_W="${LOGICAL_W:-640}"; LOGICAL_H="${LOGICAL_H:-360}"
+UI_ROOT_SIZE="${UI_ROOT_SIZE:-14}"
 # Expected real dpiScale = physical / logical (1280/640 = 2.0).
 DPI_TEST="$(awk -v p="$PHYS_W" -v l="$LOGICAL_W" 'BEGIN{printf "%.6g", p/l}')"
 
@@ -407,6 +390,7 @@ python3 "$TIMEOUT_RUNNER" \
     +set r_fullscreen 0 \
     +set r_mode -1 +set r_customwidth "$PHYS_W" +set r_customheight "$PHYS_H" \
     +set r_uiLogicalWidthTest "$LOGICAL_W" +set r_uiLogicalHeightTest "$LOGICAL_H" \
+    +set ui_rootSize "$UI_ROOT_SIZE" \
     +set r_layoutDump 1 \
     +wait 80 \
     +wui_push main \
@@ -460,6 +444,8 @@ bad = [row for row in rows
            and str(row.get("cat", "")).lower() == "ui")]
 if errors or bad:
     print(f"FAIL: layout phase qconsole malformed={errors} unexpected-severity={len(bad)}")
+    for row in bad[:10]:
+        print("  " + json.dumps(row, sort_keys=True))
     raise SystemExit(1)
 print(f"  qconsole: {len(rows)} strict JSON records, zero ERROR/FATAL/cat=ui WARN")
 LOGPY

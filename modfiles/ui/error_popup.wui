@@ -3,7 +3,7 @@
 // Centered popup (§7.2 pattern). Title bound to ui_errorTitle,
 // body bound to com_errorMessage (single source of truth — engine
 // publishes there; ED4 fix). Three actions: Copy to clipboard,
-// Retry (only when ui_errorRetry == "1" — engine gates the cvar
+// Retry (only when ui_errorRetry == "1" — engine gates store state
 // when retryable + non-localhost), Back to menu (disconnect).
 //
 // No outOfBoundsClick: error dialogs must be dismissed deliberately.
@@ -29,7 +29,7 @@ menuDef {
 		itemDef {
 			name "error_root"
 			type container
-			rect 0 0 0 0
+			width FIXED 0 height FIXED 0
 			direction column
 			padding $popup_padding
 			gap $spacing_md
@@ -45,7 +45,7 @@ menuDef {
 			itemDef {
 				name "popup_footer"
 				type container
-				rect 0 0 1 0.05
+				width FIXED 1 height FIXED 0.05
 				direction row
 				gap $spacing_md
 				alignX end

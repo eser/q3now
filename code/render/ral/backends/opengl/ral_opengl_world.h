@@ -5,18 +5,29 @@
 #define WIRED_RAL_OPENGL_WORLD_H
 
 #include "ral_opengl_frontend.h"
+#include "ral_opengl_lighting.h"
+#include "ral_atmosphere.h"
+#include "ral_display_visibility.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define RAL_OPENGL_WORLD_SCHEMA_VERSION 1u
+#define RAL_OPENGL_WORLD_SCHEMA_VERSION 4u
 
 typedef struct {
 	uint64_t generation;
 	uint32_t programName;
 	uint32_t outputWidth;
 	uint32_t outputHeight;
+	uint32_t atmosphereBufferName;
+	ralAtmospherePlanReceipt_t atmosphere;
+	uint32_t weatherProgramName;
+	uint32_t weatherUniformBufferName;
+	uint32_t weatherParticleBufferName;
+	uint32_t weatherParticleCount;
+	const ralOpenGlLightingReceipt_t *directionalLighting;
+	ralDisplayVisibilityPlan_t displayVisibility;
 } ralOpenGlWorldLowerInfo_t;
 
 typedef struct {
@@ -30,6 +41,9 @@ typedef struct {
 	uint32_t uploadedWorldVertexCount;
 	uint32_t uploadedWorldIndexCount;
 	uint32_t worldDrawCount;
+	uint32_t legacyLightmapDrawCount;
+	uint32_t directionalStaticDrawCount;
+	uint64_t surfaceLightingBindingDigest;
 	uint32_t polygonCount;
 	uint32_t lightCount;
 	uint32_t effectIndexCount;
@@ -37,12 +51,16 @@ typedef struct {
 	uint32_t modelEntityCount;
 	uint32_t primitiveEntityCount;
 	uint32_t temporalEntityCount;
+	uint32_t localIrradianceEntityCount;
+	uint32_t localIrradianceDrawCount;
 	uint32_t entityIndexCount;
 	uint32_t entityDrawCount;
 	uint32_t uiPrimitiveCount;
 	uint32_t texturedUiPrimitiveCount;
 	uint32_t msdfUiPrimitiveCount;
 	uint32_t uiDrawCount;
+	uint32_t weatherDrawCount;
+	uint32_t weatherInstanceCount;
 	uint32_t nativeDrawCount;
 	uint32_t unresolvedCount;
 	uint32_t fallbackCount;

@@ -13,22 +13,20 @@
 //   spectator/dead) the suffix vanishes too. No separate static "FPS" caption is
 //   needed (the old one was a position-absolute orphan with no SE_ gate, left
 //   hanging when the number hid). Dropping `style` here restores the inline form.
-//   netstats stays `style 1` (compact ping number) — its non-compact form is the
-//   verbose "%ims delag:%ims" which is too busy for the minimalist HUD; the "ms"
-//   sense is carried by a single small static suffix kept on the SAME line, so it
-//   reads as one "8 ms" unit. (Only netstats keeps a static suffix; it is the one
-//   element whose renderer has no short inline-ms form.)
-// Tokens: $accent (fps) $primary_green (ms) $boneDim (ms suffix) $font_sans $font_mono.
+//   netstats stays `style 1`; that compact form emits "%ims" as one gated text
+//   node. Value and unit therefore share layout, visibility, and renderer state.
+// Tokens: $accent (fps) $primary_green (ms) $font_sans.
 
-itemDef { hudElement "fps"      anchor TOP_RIGHT rect 0.940 0.020 0 0 font $font_sans fontsize 20 22 textalign 2 forecolor $accent decoration visible 1 }
-// netstats ping number (right-aligned). The "ms" sense is carried by a small
-// static suffix to its LEFT (right 2.6vw), reading "ms 8" — a common compact
-// telemetry form (cf. "ping 8"). Keeping the suffix clearly left of the digits
-// avoids the digits-overlapping-suffix glitch that a right-side suffix hit when
-// the ping is single/double digit (variable number width). The label is static
-// so it shows even when the ping number is gated in intermission — a minor,
-// accepted edge (vs the old TWO orphan captions). fps needs no caption — its
-// renderer self-labels "120fps" inline.
-itemDef { hudElement "netstats" style 1 anchor TOP_RIGHT rect 0.978 0.020 0 0 font $font_sans fontsize 20 22 textalign 2 forecolor $primary_green decoration visible 1 }
+itemDef {
+	name "hud_active_telemetry"
+	type container
+	direction row
+	width 10vw
+	height 3.2vh
+	alignY center
+	grow 0
 
-itemDef { name "tele_ms_suffix" type 0 position absolute top 2.0vh right 2.6vw width 3vw height 1.6vh text "ms" textalign 2 font $font_mono 8 forecolor $boneDim decoration visible 1 grow 0 }
+	itemDef { name "hud_fps" hudElement "fps" width 5vw height PERCENT 1 grow 0 font $font_sans fontsize 20 22 textalign 2 forecolor $accent decoration visible 1 }
+	// Compact ping remains right-aligned and self-labels as one "8ms" node.
+	itemDef { name "hud_netstats" hudElement "netstats" style 1 width 5vw height PERCENT 1 grow 0 font $font_sans fontsize 20 22 textalign 2 forecolor $primary_green decoration visible 1 }
+}

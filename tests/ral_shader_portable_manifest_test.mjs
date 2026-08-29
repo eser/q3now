@@ -12,21 +12,25 @@ const reflection = join(root, 'code/render/ral/backends/vulkan/renderer/shaders/
 const overrides = join(root, 'code/render/ral/backends/vulkan/renderer/shaders/spirv/ral_shader_portability_overrides.json');
 const manifest = join(root, 'code/render/ral/backends/vulkan/renderer/shaders/spirv/ral_shader_portable_manifest.json');
 const translationDir = join(root, 'code/render/ral/backends/vulkan/renderer/shaders/portable');
-assert.equal(runPortableManifest({ reflection, overrides, manifest, translationDir, check: true }), 294);
+assert.equal(runPortableManifest({ reflection, overrides, manifest, translationDir, check: true }), 299);
 const resolved = JSON.parse(readFileSync(manifest));
 const decisions = JSON.parse(readFileSync(overrides));
-assert.equal(resolved.sourceCount, 294); assert.equal(decisions.entries.length, 294);
+assert.equal(resolved.sourceCount, 299); assert.equal(decisions.entries.length, 299);
 assert.ok(resolved.entries.every((entry, i) => entry.ordinal === i
 	&& entry.reflection.portable === true && entry.reflection.loweringRequirements.length === 0
 	&& entry.reflection.bindings.every((binding) => !binding.bindingClass.includes('UNRESOLVED'))));
 assert.equal(decisions.entries.filter((entry) => entry.inlineUniform).length, 17);
-assert.equal(decisions.entries.reduce((sum, entry) => sum + (entry.combinedSamplers?.length ?? 0), 0), 89);
+assert.equal(decisions.entries.reduce((sum, entry) => sum + (entry.combinedSamplers?.length ?? 0), 0), 92);
 assert.equal(decisions.entries.reduce((sum, entry) => sum + (entry.arrayCounts?.length ?? 0), 0), 241);
-assert.equal(decisions.entries.reduce((sum, entry) => sum + (entry.vertexFormats?.length ?? 0), 0), 448);
+assert.equal(decisions.entries.reduce((sum, entry) => sum + (entry.vertexFormats?.length ?? 0), 0), 449);
 assert.equal(decisions.entries.reduce((sum, entry) => sum + (entry.dynamicOffsets?.length ?? 0), 0), 7);
 assert.equal(resolved.entries.filter((entry) => entry.reflection.bindings.some((binding) => binding.dynamicOffset)).length, 7);
+const particleComputeDecision = decisions.entries.find((entry) => entry.symbol === 'particle_integrate_comp_spv');
+assert.deepEqual(particleComputeDecision.combinedSamplers, [{ set: 0, binding: 7,
+	samplerSet: 0, samplerBinding: 39,
+	samplerBindingClass: 'RAL_SHADER_BIND_FILTERING_SAMPLER' }]);
 const symbols = decisions.entries.map((entry) => entry.symbol);
-assert.deepEqual(symbols, [...symbols].sort()); assert.equal(new Set(symbols).size, 294);
+assert.deepEqual(symbols, [...symbols].sort()); assert.equal(new Set(symbols).size, 299);
 for (const [symbol, textureBinding, samplerBinding] of [
 	['ribbon_frag_spv', 2, 3], ['beam_frag_spv', 1, 4],
 ]) {

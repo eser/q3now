@@ -26,7 +26,17 @@ export async function createRalWebGpuBrowserModule({ moduleFactory, gpu, canvas,
   }
   canvas.width = width; canvas.height = height;
   const host = createRalWebGpuBrowserHost({ gpu, canvas, devicePixelRatio });
-  const module = await moduleFactory({ canvas, noInitialRun: true });
+	const moduleLog = [];
+	const captureLog = (stream, value) => {
+		moduleLog.push(`${stream}: ${String(value ?? "")}`);
+		if (moduleLog.length > 256) moduleLog.splice(0, moduleLog.length - 256);
+	};
+	const module = await moduleFactory({ canvas, noInitialRun: true,
+		print: value => captureLog("stdout", value),
+		printErr: value => captureLog("stderr", value) });
+	Object.defineProperty(module, "wiredWebModuleLog", {
+		value: moduleLog, enumerable: true
+	});
   const memory = () => {
     const value = module.wasmMemory?.buffer ?? module.HEAPU8?.buffer;
     if (!(value instanceof ArrayBuffer)
@@ -74,8 +84,8 @@ export async function createRalWebGpuBrowserModule({ moduleFactory, gpu, canvas,
     },
     lastDispatchError() { let hostError = "";
       try { hostError = host.receipt(generation).error; } catch { /* teardown */ }
-      return installation.bridge.lastError() || installation.bridge.lastFailure()
-        || hostError; },
+      return [...new Set([installation.bridge.lastError(),
+        installation.bridge.lastFailure(), hostError].filter(Boolean))].join("\n"); },
     capability() {
       try {
         const receipt = host.receipt(generation);

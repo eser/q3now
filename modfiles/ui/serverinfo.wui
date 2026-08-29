@@ -24,7 +24,6 @@ menuDef {
 		itemDef {
 			name "serverinfo_root"
 			type container
-			rect 0.2 0.15 0.6 0.7
 			direction column
 			padding $popup_padding
 			gap $spacing_md
@@ -37,7 +36,7 @@ menuDef {
 			itemDef {
 				name "popup_header"
 				type 0
-				rect 0 0 1 0.06
+				width FIXED 1 height FIXED 0.06
 				height FIT
 				text "Server Info"
 				textalign 0
@@ -51,7 +50,7 @@ menuDef {
 			itemDef {
 				name "popup_subheader"
 				type 0
-				rect 0 0 1 0.03
+				width FIXED 1 height FIXED 0.03
 				height FIT
 				text "Status / map / players / version (live server query)"
 				textalign 0
@@ -67,7 +66,7 @@ menuDef {
 			itemDef {
 				name "statuslist"
 				type 6
-				rect 0 0 1 0.55
+				width FIXED 1 height FIXED 0.55
 				width PERCENT 1.0
 				height GROW
 				font $font_sans 12
@@ -83,7 +82,7 @@ menuDef {
 			itemDef {
 				name "popup_footer"
 				type container
-				rect 0 0 1 0.05
+				width FIXED 1 height FIXED 0.05
 				direction row
 				gap $spacing_md
 				alignX end
@@ -92,7 +91,7 @@ menuDef {
 				itemDef {
 					name "btn_back"
 					type 1
-					rect 0 0 0.18 0.04
+					width FIXED 0.18 height FIXED 0.04
 					height FIT
 					text "Back to Browser"
 					textalign 1
@@ -106,7 +105,7 @@ menuDef {
 				itemDef {
 					name "btn_retry"
 					type 1
-					rect 0 0 0.14 0.04
+					width FIXED 0.14 height FIXED 0.04
 					height FIT
 					text "Retry"
 					textalign 1
@@ -120,7 +119,7 @@ menuDef {
 				itemDef {
 					name "btn_connect"
 					type 1
-					rect 0 0 0.18 0.04
+					width FIXED 0.18 height FIXED 0.04
 					height FIT
 					text "Connect"
 					textalign 1
@@ -134,7 +133,7 @@ menuDef {
 				itemDef {
 					name "btn_close"
 					type 1
-					rect 0 0 0.12 0.04
+					width FIXED 0.12 height FIXED 0.04
 					height FIT
 					text "Close"
 					textalign 1

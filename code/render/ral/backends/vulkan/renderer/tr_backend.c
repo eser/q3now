@@ -741,12 +741,10 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs
 #endif
 			oldShaderSort = shader->sort;
 #endif
-#if FEAT_FOG_SYSTEM
 			// The previous batch has been flushed above. Publish the decomposed
 			// fog state now so every UBO item emitted by the new batch snapshots
 			// this fogNum; the same-sort fast path deliberately keeps it unchanged.
 			RB_Fog( fogNum );
-#endif
 			RB_BeginSurface( shader, fogNum );
 			oldShader = shader;
 		}
@@ -873,11 +871,9 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs
 	if ( oldShader != NULL ) {
 		RB_EndSurface();
 	}
-#if FEAT_FOG_SYSTEM
 	// Reset only after the final batch has emitted its UBO snapshots; unrelated
 	// passes must never inherit this draw list's advanced fog state.
 	R_FogOff();
-#endif
 
 	backEnd.refdef.floatTime = originalTime;
 
@@ -1000,9 +996,7 @@ static void RB_RenderLitSurfList( dlight_t* dl ) {
 			if ( oldShader != NULL ) {
 				RB_EndSurface();
 			}
-#if FEAT_FOG_SYSTEM
 			RB_Fog( fogNum );
-#endif
 			RB_BeginSurface( shader, fogNum );
 			oldShader = shader;
 		}
@@ -1122,9 +1116,7 @@ static void RB_RenderLitSurfList( dlight_t* dl ) {
 	if ( oldShader != NULL ) {
 		RB_EndSurface();
 	}
-#if FEAT_FOG_SYSTEM
 	R_FogOff();
-#endif
 
 	backEnd.refdef.floatTime = originalTime;
 
@@ -1195,9 +1187,7 @@ static void RB_RenderForwardPlusUnion( void )
 		if ( ( ( oldSort ^ u->sort ) & ~QSORT_REFENTITYNUM_MASK ) || !shader->entityMergable ) {
 			if ( oldShader != NULL )
 				RB_EndSurface();
-#if FEAT_FOG_SYSTEM
 			RB_Fog( fogNum );
-#endif
 			RB_BeginSurface( shader, fogNum );
 			oldShader = shader;
 		}
@@ -1235,9 +1225,7 @@ static void RB_RenderForwardPlusUnion( void )
 
 	if ( oldShader != NULL )
 		RB_EndSurface();
-#if FEAT_FOG_SYSTEM
 	R_FogOff();
-#endif
 
 	tess.forwardPlusPass = qfalse;
 	backEnd.refdef.floatTime = originalTime;
@@ -1454,6 +1442,8 @@ static void RB_TransitionToUI( void )
 	// idempotent fallback for gameplay frames that never transition to UI.
 	{
 		(void)vk_temporal_motion_seal_primary();
+		(void)vk_atmosphere_full_execute();
+		vk_atmosphere_fixture_smoke_receipt();
 		vk_temporal_recursive_record();
 	}
 	if ( r_bloom->integer )
@@ -1496,7 +1486,8 @@ static const void *RB_StretchPic( const void *data ) {
 	RB_TransitionToUI();
 #endif
 
-	RB_AddQuadStamp2( cmd->x, cmd->y, cmd->w, cmd->h, cmd->s1, cmd->t1, cmd->s2, cmd->t2, backEnd.color2D );
+	RB_AddQuadStamp2D( cmd->positions, cmd->s1, cmd->t1, cmd->s2, cmd->t2,
+		backEnd.color2D );
 	return (const void *)(cmd + 1);
 }
 
@@ -1621,7 +1612,7 @@ static const void *RB_StretchPicOverlay( const void *data ) {
 
 	if ( backEnd.numOverlayQuads < MAX_OVERLAY_QUADS ) {
 		overlayQuad_t *q = &backEnd.overlayQuads[ backEnd.numOverlayQuads++ ];
-		q->x  = cmd->x;  q->y  = cmd->y;  q->w  = cmd->w;  q->h  = cmd->h;
+		memcpy( q->positions, cmd->positions, sizeof( q->positions ) );
 		q->s1 = cmd->s1; q->t1 = cmd->t1; q->s2 = cmd->s2; q->t2 = cmd->t2;
 		q->color  = backEnd.color2D;
 		q->shader = cmd->shader;
@@ -1638,8 +1629,6 @@ RB_RotatedPic
 static const void *RB_RotatedPic( const void *data ) {
 	const rotatedPicCommand_t *cmd = (const rotatedPicCommand_t *)data;
 	shader_t *shader;
-	float cx, cy, hw, hh;
-	float ang, c, s;
 
 	shader = cmd->shader;
 	if ( shader != tess.shader ) {
@@ -1659,67 +1648,8 @@ static const void *RB_RotatedPic( const void *data ) {
 	RB_TransitionToUI();
 #endif
 
-#ifdef USE_VBO
-	VBO_Flush();
-#endif
-
-	RB_CHECKOVERFLOW( 4, 6 );
-
-#ifdef USE_VBO
-	tess.surfType = SF_TRIANGLES;
-#endif
-
-	int numIndexes = tess.numIndexes;
-	int numVerts = tess.numVertexes;
-
-	tess.numVertexes += 4;
-	tess.numIndexes += 6;
-
-	tess.indexes[numIndexes + 0] = numVerts + 3;
-	tess.indexes[numIndexes + 1] = numVerts + 0;
-	tess.indexes[numIndexes + 2] = numVerts + 2;
-	tess.indexes[numIndexes + 3] = numVerts + 2;
-	tess.indexes[numIndexes + 4] = numVerts + 0;
-	tess.indexes[numIndexes + 5] = numVerts + 1;
-
-	tess.vertexColors[numVerts + 0] =
-	tess.vertexColors[numVerts + 1] =
-	tess.vertexColors[numVerts + 2] =
-	tess.vertexColors[numVerts + 3] = backEnd.color2D;
-
-	cx = cmd->x + cmd->w * 0.5f;
-	cy = cmd->y + cmd->h * 0.5f;
-	hw = cmd->w * 0.5f;
-	hh = cmd->h * 0.5f;
-
-	ang = cmd->angle * ( ( float )M_PI / 180.0f );
-	c = cosf( ang );
-	s = sinf( ang );
-
-	tess.xyz[numVerts + 0][0] = cx + ( -hw * c - -hh * s );
-	tess.xyz[numVerts + 0][1] = cy + ( -hw * s + -hh * c );
-	tess.xyz[numVerts + 0][2] = 0;
-
-	tess.xyz[numVerts + 1][0] = cx + (  hw * c - -hh * s );
-	tess.xyz[numVerts + 1][1] = cy + (  hw * s + -hh * c );
-	tess.xyz[numVerts + 1][2] = 0;
-
-	tess.xyz[numVerts + 2][0] = cx + (  hw * c -  hh * s );
-	tess.xyz[numVerts + 2][1] = cy + (  hw * s +  hh * c );
-	tess.xyz[numVerts + 2][2] = 0;
-
-	tess.xyz[numVerts + 3][0] = cx + ( -hw * c -  hh * s );
-	tess.xyz[numVerts + 3][1] = cy + ( -hw * s +  hh * c );
-	tess.xyz[numVerts + 3][2] = 0;
-
-	tess.texCoords[0][numVerts + 0][0] = cmd->s1;
-	tess.texCoords[0][numVerts + 0][1] = cmd->t1;
-	tess.texCoords[0][numVerts + 1][0] = cmd->s2;
-	tess.texCoords[0][numVerts + 1][1] = cmd->t1;
-	tess.texCoords[0][numVerts + 2][0] = cmd->s2;
-	tess.texCoords[0][numVerts + 2][1] = cmd->t2;
-	tess.texCoords[0][numVerts + 3][0] = cmd->s1;
-	tess.texCoords[0][numVerts + 3][1] = cmd->t2;
+	RB_AddQuadStamp2D( cmd->positions, cmd->s1, cmd->t1, cmd->s2, cmd->t2,
+		backEnd.color2D );
 
 	return (const void *)( cmd + 1 );
 }
@@ -1787,7 +1717,7 @@ RB_DrawLine
 static const void *RB_DrawLine( const void *data ) {
 	const drawLineCommand_t	*cmd;
 	shader_t *shader;
-	float	dx, dy, len, px, py, halfWidth;
+	float	dx, dy, len;
 
 	cmd = (const drawLineCommand_t *)data;
 
@@ -1812,8 +1742,6 @@ static const void *RB_DrawLine( const void *data ) {
 	RB_TransitionToUI();
 #endif
 
-	halfWidth = cmd->width * 0.5f;
-
 	// handle zero-length lines: draw nothing
 	dx = cmd->x2 - cmd->x1;
 	dy = cmd->y2 - cmd->y1;
@@ -1822,71 +1750,12 @@ static const void *RB_DrawLine( const void *data ) {
 		return (const void *)(cmd + 1);
 	}
 
-	// perpendicular direction, normalized and scaled by half-width
-	px = -dy / len * halfWidth;
-	py =  dx / len * halfWidth;
-
-	// clamp very thin widths to at least 0.5 pixel
-	if ( halfWidth < 0.25f ) {
-		halfWidth = 0.25f;
-		px = -dy / len * halfWidth;
-		py =  dx / len * halfWidth;
-	}
-
 #ifdef USE_VBO
 	VBO_Flush();
 #endif
 
-	RB_CHECKOVERFLOW( 4, 6 );
-
-#ifdef USE_VBO
-	tess.surfType = SF_TRIANGLES;
-#endif
-
-	int numIndexes = tess.numIndexes;
-	int numVerts = tess.numVertexes;
-
-	tess.numVertexes += 4;
-	tess.numIndexes += 6;
-
-	tess.indexes[numIndexes + 0] = numVerts + 3;
-	tess.indexes[numIndexes + 1] = numVerts + 0;
-	tess.indexes[numIndexes + 2] = numVerts + 2;
-	tess.indexes[numIndexes + 3] = numVerts + 2;
-	tess.indexes[numIndexes + 4] = numVerts + 0;
-	tess.indexes[numIndexes + 5] = numVerts + 1;
-
-	tess.vertexColors[numVerts + 0] =
-	tess.vertexColors[numVerts + 1] =
-	tess.vertexColors[numVerts + 2] =
-	tess.vertexColors[numVerts + 3] = backEnd.color2D;
-
-	// quad corners: p1 +/- perp, p2 +/- perp
-	tess.xyz[numVerts + 0][0] = cmd->x1 + px;
-	tess.xyz[numVerts + 0][1] = cmd->y1 + py;
-	tess.xyz[numVerts + 0][2] = 0;
-
-	tess.xyz[numVerts + 1][0] = cmd->x1 - px;
-	tess.xyz[numVerts + 1][1] = cmd->y1 - py;
-	tess.xyz[numVerts + 1][2] = 0;
-
-	tess.xyz[numVerts + 2][0] = cmd->x2 - px;
-	tess.xyz[numVerts + 2][1] = cmd->y2 - py;
-	tess.xyz[numVerts + 2][2] = 0;
-
-	tess.xyz[numVerts + 3][0] = cmd->x2 + px;
-	tess.xyz[numVerts + 3][1] = cmd->y2 + py;
-	tess.xyz[numVerts + 3][2] = 0;
-
-	// stretch texture along the line
-	tess.texCoords[0][numVerts + 0][0] = 0;
-	tess.texCoords[0][numVerts + 0][1] = 0;
-	tess.texCoords[0][numVerts + 1][0] = 1;
-	tess.texCoords[0][numVerts + 1][1] = 0;
-	tess.texCoords[0][numVerts + 2][0] = 1;
-	tess.texCoords[0][numVerts + 2][1] = 1;
-	tess.texCoords[0][numVerts + 3][0] = 0;
-	tess.texCoords[0][numVerts + 3][1] = 1;
+	RB_AddQuadStamp2D( cmd->positions, 0.0f, 0.0f, 1.0f, 1.0f,
+		backEnd.color2D );
 
 	return (const void *)(cmd + 1);
 }
@@ -2207,7 +2076,6 @@ static const void *RB_DrawSurfs( const void *data ) {
 	RB_EndSurface();
 
 	cmd = (const drawSurfsCommand_t *)data;
-
 	backEnd.refdef = cmd->refdef;
 	backEnd.viewParms = cmd->viewParms;
 	if ( cmd->viewParms.temporalFrameId ) {
@@ -2273,8 +2141,14 @@ static const void *RB_DrawSurfs( const void *data ) {
 	VBO_UnBind();
 #endif
 
+	// GPU decals are surface material, not free-floating translucency. Composite
+	// them against the scene before ribbons, sprites, beams, particles, and
+	// weather so a wall mark cannot darken a trail that is physically in front.
+	// Decals depth-test against the copied world depth without writing it.
+	RB_DrawDecals();
+
 	// Primitive ribbons (world-space, translucent). Drawn after world
-	// surfaces, before screen-space sun/flares/lit-surface passes.
+	// surfaces and surface decals, before screen-space sun/flares/lit-surface passes.
 	// RB_DrawRibbons internally skips during the screenmap pass, since
 	// the ribbon pipeline is created against vk.render_pass.main only.
 	RB_DrawRibbons();
@@ -2310,11 +2184,6 @@ static const void *RB_DrawSurfs( const void *data ) {
 	// billboards over the world. Self-guards on r_atmosphericGPU / availability /
 	// active weather type.
 	RB_DrawAtmospheric();
-
-	// GPU decals (surface-aligned instanced quads from the decal ring). Drawn
-	// with the other main-pass primitives, over the world, against the world
-	// depth (tested, not written). Self-guards on r_gpuDecals / availability.
-	RB_DrawDecals();
 
 	if ( r_drawSun->integer ) {
 		RB_DrawSun( 0.1f, tr.sunShader );
@@ -2712,13 +2581,10 @@ static const void *RB_SwapBuffers( const void *data ) {
 	if ( backEnd.screenshotMask && tr.frameCount > 1 ) {
 #endif
 #ifdef USE_VULKAN
-		// ss=0 reads the swapchain (window dimensions); ss=1 reads
-		// vk.capture.image (FBO-render dimensions). gls.captureWidth tracks
-		// the FBO render size, so a non-supersample swapchain readback must
-		// use the window dimensions -- otherwise the copy extent overruns the
-		// smaller swapchain image (VK_ERROR_DEVICE_LOST under an
-		// r_renderScale-decoupled config). Matches vk_read_pixels' own
-		// vk.capture.image branch so readback extent and file size agree.
+		// Screenshots read the stable native-presentation capture image when it
+		// exists, otherwise the swapchain. gls.captureWidth/Height intentionally
+		// remain output-domain dimensions even when the 3D scene uses an
+		// independently reduced glConfig extent.
 		int ssW = vk.capture.ral_image ? gls.captureWidth : gls.windowWidth;
 		int ssH = vk.capture.ral_image ? gls.captureHeight : gls.windowHeight;
 #else

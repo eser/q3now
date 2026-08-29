@@ -21,7 +21,7 @@ menuDef {
 
 	itemDef {
 		name "debug_graph"
-		rect 0 0 1 1
+		width FIXED 1 height FIXED 1
 		decoration
 		visible 1
 		custom "debug_graph"

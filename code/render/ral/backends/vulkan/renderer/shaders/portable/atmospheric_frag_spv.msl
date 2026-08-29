@@ -23,14 +23,29 @@ struct AtmFrame
     uint gridSize;
     uint atmType;
     float _distance;
-    float invResX;
-    float invResY;
-    float depthValid;
+    float computePad0;
+    float computePad1;
+    float computePad2;
+    float4 windGust;
+    float4 precipitation;
+    float dustAsh;
+    float indoorExposure;
+    uint climateSeed;
+    uint climatePad;
+    float4 climate;
+    float4 surfaceClimate;
+    float4 sun;
+    float4 moon;
+    float4 ambientCloud;
+    float4 cloudMedia;
+    float4 effectMeta;
+    float4 effectWorkloads[48];
+    float4 renderParams;
 };
 
 struct spvDescriptorSetBuffer0
 {
-    constant AtmFrame* m_59 [[id(0)]];
+    constant AtmFrame* m_67 [[id(0)]];
     texture2d<float> sceneDepthTex [[id(1)]];
     sampler sceneDepthTexSmplr [[id(2)]];
 };
@@ -47,13 +62,13 @@ struct main0_in
 };
 
 static inline __attribute__((always_inline))
-float softParticleFade(constant AtmFrame& _59, thread float4& gl_FragCoord, texture2d<float> sceneDepthTex, sampler sceneDepthTexSmplr)
+float softParticleFade(constant AtmFrame& _67, thread float4& gl_FragCoord, texture2d<float> sceneDepthTex, sampler sceneDepthTexSmplr)
 {
-    if (_59.depthValid < 0.5)
+    if (_67.renderParams.z < 0.5)
     {
         return 1.0;
     }
-    float2 screenUV = gl_FragCoord.xy * float2(_59.invResX, _59.invResY);
+    float2 screenUV = gl_FragCoord.xy * _67.renderParams.xy;
     float sceneDepth = sceneDepthTex.sample(sceneDepthTexSmplr, screenUV).x;
     if (sceneDepth <= 0.0)
     {
@@ -73,14 +88,47 @@ float3 sRGBToLinear(thread float3& c)
     return mix(hi, lo, float3(cutoff));
 }
 
+static inline __attribute__((always_inline))
+float3 displayVisibility(thread const float3& sceneColor, constant AtmFrame& _67)
+{
+    float3 exposed = fast::max(sceneColor, float3(0.0)) * _67.viewLeft.w;
+    float luminance = dot(exposed, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    bool _84 = luminance > 0.0;
+    bool _92;
+    if (_84)
+    {
+        _92 = luminance < _67.eyeWorld.w;
+    }
+    else
+    {
+        _92 = _84;
+    }
+    bool _99;
+    if (_92)
+    {
+        _99 = _67.viewUp.w != 1.0;
+    }
+    else
+    {
+        _99 = _92;
+    }
+    if (_99)
+    {
+        float curved = powr(luminance / _67.eyeWorld.w, _67.viewUp.w) * _67.eyeWorld.w;
+        exposed *= (curved / luminance);
+    }
+    return exposed;
+}
+
 fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], float4 gl_FragCoord [[position]])
 {
     main0_out out = {};
     float edge = 1.0 - smoothstep(0.0, 0.5, abs(in.fragUV.x - 0.5));
-    float alpha = (in.fragColor.w * edge) * softParticleFade((*spvDescriptorSet0.m_59), gl_FragCoord, spvDescriptorSet0.sceneDepthTex, spvDescriptorSet0.sceneDepthTexSmplr);
+    float alpha = (in.fragColor.w * edge) * softParticleFade((*spvDescriptorSet0.m_67), gl_FragCoord, spvDescriptorSet0.sceneDepthTex, spvDescriptorSet0.sceneDepthTexSmplr);
     float3 param = in.fragColor.xyz;
-    float3 _134 = sRGBToLinear(param);
-    float3 rgb = _134;
+    float3 _188 = sRGBToLinear(param);
+    float3 param_1 = _188;
+    float3 rgb = displayVisibility(param_1, (*spvDescriptorSet0.m_67));
     out.outColor = float4(rgb, alpha);
     return out;
 }

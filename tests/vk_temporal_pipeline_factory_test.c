@@ -249,8 +249,8 @@ int main(void){
 		fragmentSpecWords[0]=0u;fragmentSpecWords[1]=0u;
 		gi.key=(vkTemporalGenericKey_t){1,VK_TEMPORAL_GENERIC_PLAIN,qfalse,qfalse};
 		CHECK(VK_TemporalGenericCatalogSelect(&gi.key,&s_splitEntry));
-		// USE_FOG shader variants read their authored UBO and are independent of
-		// the build-level FEAT_FOG_SYSTEM push range. A no-push layout admits both.
+		// USE_FOG shader variants read their authored UBO. The permanent no-push
+		// layout admits both fogged and non-fogged shader variants.
 		{ gi.key.shaderFog=qtrue;gi.pipelineGeneration++;fragmentSpecWords[10]=1u;
 			CHECK(VK_TemporalGenericCatalogSelect(&gi.key,&s_splitEntry));s_createPipeCount=0;
 			CHECK(VK_TemporalGenericPipelineFactoryEnsure(&go,&lo,&gp,&gi,&pops));

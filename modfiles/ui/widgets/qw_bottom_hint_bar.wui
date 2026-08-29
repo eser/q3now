@@ -9,9 +9,6 @@
 itemDef {
 	name "bottom_bar"
 	type container
-	position absolute
-	bottom 0
-	left 0
 	width 100vw
 	height 4vh
 	direction row
@@ -19,16 +16,16 @@ itemDef {
 	alignY center
 	gap $spacing_md
 
-	itemDef { type 0 rect 0 0 10vw 2vh height FIT width PERCENT 10vw text "[UP/DN] NAVIGATE" textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
-	itemDef { type 0 rect 0 0 8vw 2vh height FIT width PERCENT 8vw text "[ENT] SELECT"     textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
-	itemDef { type 0 rect 0 0 8vw 2vh height FIT width PERCENT 8vw text "[~] CONSOLE"      textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
-	itemDef { type 0 rect 0 0 7vw 2vh height FIT width PERCENT 7vw text "[ESC] QUIT"       textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+	itemDef { type 0 width FIXED 10vw height FIXED 2vh height FIT width PERCENT 10vw text "[UP/DN] NAVIGATE" textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+	itemDef { type 0 width FIXED 8vw height FIXED 2vh height FIT width PERCENT 8vw text "[ENT] SELECT"     textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+	itemDef { type 0 width FIXED 8vw height FIXED 2vh height FIT width PERCENT 8vw text "[~] CONSOLE"      textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+	itemDef { type 0 width FIXED 7vw height FIXED 2vh height FIT width PERCENT 7vw text "[ESC] QUIT"       textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
 	itemDef { type container grow 1 decoration visible 1 }
 
 	itemDef {
 		name "bottom_signed_in_row"
 		type container
-		rect 0 0 26vw 2vh
+		width FIXED 26vw height FIXED 2vh
 		height FIT
 		direction row
 		alignY center
@@ -36,8 +33,8 @@ itemDef {
 		width PERCENT 26vw
 		grow 0
 
-		itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond"    textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
-		itemDef { type 0 rect 0 0 11vw  2vh height FIT width PERCENT 11vw  text "SIGNED IN  ·  " textalign 0 font $font_mono  9 forecolor $accent decoration visible 1 grow 0 }
-		itemDef { type 0 rect 0 0 10vw  2vh height FIT width PERCENT 10vw  text "LAROUX.POS"     textalign 0 font $font_mono  9 forecolor $accent cvar "name" decoration visible 1 grow 0 }
+		itemDef { type 0 width FIXED 1.2vw height FIXED 2vh height FIT width PERCENT 1.2vw iconText "diamond"    textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
+		itemDef { type 0 width FIXED 11vw height FIXED 2vh height FIT width PERCENT 11vw  text "SIGNED IN  ·  " textalign 0 font $font_mono  9 forecolor $accent decoration visible 1 grow 0 }
+		itemDef { type 0 width FIXED 10vw height FIXED 2vh height FIT width PERCENT 10vw  text "LAROUX.POS"     textalign 0 font $font_mono  9 forecolor $accent cvar "name" decoration visible 1 grow 0 }
 	}
 }

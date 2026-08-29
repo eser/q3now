@@ -26,6 +26,7 @@ typedef unsigned char glBool_t;
 
 enum {
 	GL_NO_ERROR_VALUE = 0,
+	GL_ONE_VALUE = 1,
 	GL_TEXTURE_2D_VALUE = 0x0de1,
 	GL_RGBA8_VALUE = 0x8058,
 	GL_SRGB8_ALPHA8_VALUE = 0x8c43,
@@ -50,6 +51,7 @@ enum {
 	GL_SRC_ALPHA_VALUE = 0x0302,
 	GL_ONE_MINUS_SRC_ALPHA_VALUE = 0x0303,
 	GL_UNIFORM_BUFFER_VALUE = 0x8a11,
+	GL_SHADER_STORAGE_BUFFER_VALUE = 0x90d2,
 	GL_DYNAMIC_STORAGE_BIT_VALUE = 0x0100
 };
 
@@ -89,6 +91,8 @@ typedef void ( RAL_GL_APIENTRY *bindVertexArrayFn )( glName_t );
 typedef void ( RAL_GL_APIENTRY *useProgramFn )( glName_t );
 typedef void ( RAL_GL_APIENTRY *drawElementsFn )( glEnum_t, glSize_t,
 	glEnum_t, const void * );
+typedef void ( RAL_GL_APIENTRY *drawArraysInstancedFn )( glEnum_t, glInt_t,
+	glSize_t, glSize_t );
 typedef void ( RAL_GL_APIENTRY *enableFn )( glEnum_t );
 typedef void ( RAL_GL_APIENTRY *disableFn )( glEnum_t );
 typedef void ( RAL_GL_APIENTRY *blendFuncFn )( glEnum_t, glEnum_t );
@@ -122,6 +126,7 @@ typedef struct {
 	bindVertexArrayFn BindVertexArray;
 	useProgramFn UseProgram;
 	drawElementsFn DrawElements;
+	drawArraysInstancedFn DrawArraysInstanced;
 	enableFn Enable;
 	disableFn Disable;
 	blendFuncFn BlendFunc;
@@ -138,6 +143,7 @@ typedef struct {
 	float texCoord[2];
 	float lightmapCoord[2];
 	unsigned char color[4];
+	float normal[3];
 } effectVertex_t;
 
 typedef struct {
@@ -153,10 +159,17 @@ typedef struct {
 	float viewUp[4];
 	float projectionLightmap[4];
 	float viewportAlpha[4];
+	float atmosphereEyeDensity[4];
+	float atmosphereColorVisibility[4];
+	float atmosphereHeightCloud[4];
+	uint32_t atmosphereFroxelGrid[4];
+	float localSh[4][4];
+	uint32_t staticLighting[4];
+	float emissiveRadiance[4];
 } productDrawUniforms_t;
 
 typedef char productDrawUniformsMustMatchStd140[
-	sizeof( productDrawUniforms_t ) == 96u ? 1 : -1];
+	sizeof( productDrawUniforms_t ) == 256u ? 1 : -1];
 
 static qboolean LoadDispatch( const ralOpenGlCore_t *core,
 		worldDispatch_t *gl ) {
@@ -186,6 +199,8 @@ static qboolean LoadDispatch( const ralOpenGlCore_t *core,
 	LOAD_GL( BindVertexArray, "glBindVertexArray", bindVertexArrayFn );
 	LOAD_GL( UseProgram, "glUseProgram", useProgramFn );
 	LOAD_GL( DrawElements, "glDrawElements", drawElementsFn );
+	LOAD_GL( DrawArraysInstanced, "glDrawArraysInstanced",
+		drawArraysInstancedFn );
 	LOAD_GL( Enable, "glEnable", enableFn );
 	LOAD_GL( Disable, "glDisable", disableFn );
 	LOAD_GL( BlendFunc, "glBlendFunc", blendFuncFn );
@@ -204,6 +219,15 @@ static qboolean ReceiptValid( const ralOpenGlWorldReceipt_t *receipt ) {
 		&& receipt->backendType == RAL_BACKEND_OPENGL
 		&& receipt->coreGeneration && receipt->generation
 		&& receipt->frontendFrameDigest && receipt->loweringDigest
+		&& receipt->localIrradianceEntityCount
+			<= receipt->modelEntityCount + receipt->primitiveEntityCount
+		&& receipt->localIrradianceDrawCount <= receipt->entityDrawCount
+		&& receipt->legacyLightmapDrawCount + receipt->directionalStaticDrawCount
+			<= receipt->worldDrawCount
+		&& ( ( receipt->legacyLightmapDrawCount
+			|| receipt->directionalStaticDrawCount )
+			? receipt->surfaceLightingBindingDigest != 0u
+			: receipt->surfaceLightingBindingDigest == 0u )
 		&& !receipt->unresolvedCount && !receipt->fallbackCount
 		&& !receipt->fatalCount && receipt->ready == qtrue;
 }
@@ -225,7 +249,7 @@ static void ConfigureVertexArray( const worldDispatch_t *gl, glName_t vao,
 		glName_t vertexBuffer, glName_t indexBuffer, glSize_t stride ) {
 	gl->VertexArrayVertexBuffer( vao, 0u, vertexBuffer, 0, stride );
 	gl->VertexArrayElementBuffer( vao, indexBuffer );
-	for ( unsigned int i = 0u; i < 4u; ++i ) {
+	for ( unsigned int i = 0u; i < 5u; ++i ) {
 		gl->EnableVertexArrayAttrib( vao, i );
 		gl->VertexArrayAttribBinding( vao, i, 0u );
 	}
@@ -237,6 +261,8 @@ static void ConfigureVertexArray( const worldDispatch_t *gl, glName_t vao,
 		(unsigned int)offsetof( effectVertex_t, lightmapCoord ) );
 	gl->VertexArrayAttribFormat( vao, 3u, 4, GL_UNSIGNED_BYTE_VALUE, 1u,
 		(unsigned int)offsetof( effectVertex_t, color ) );
+	gl->VertexArrayAttribFormat( vao, 4u, 3, GL_FLOAT_VALUE, 0u,
+		(unsigned int)offsetof( effectVertex_t, normal ) );
 }
 
 static void UploadProductDraw( const worldDispatch_t *gl,
@@ -248,17 +274,75 @@ static void UploadProductDraw( const worldDispatch_t *gl,
 static void ApplyRaster( const worldDispatch_t *gl, glName_t uniformBuffer,
 		productDrawUniforms_t *uniforms,
 		renderAlphaMode_t alpha, float alphaCutoff, qboolean depthWrite,
-		qboolean hasLightmap ) {
+		qboolean hasLightmap, const renderEntityCommand_t *entityCommand,
+		const ralLightingSurfaceBindingReceipt_t *surfaceLighting,
+		const ralLightingRuntimePlan_t *lightingPlan,
+		const float emissiveRadiance[4] ) {
 	gl->Disable( GL_CULL_FACE_VALUE );
 	if ( alpha == RENDER_ALPHA_BLEND ) {
 		gl->Enable( GL_BLEND_VALUE );
 		gl->BlendFunc( GL_SRC_ALPHA_VALUE, GL_ONE_MINUS_SRC_ALPHA_VALUE );
+	} else if ( alpha == RENDER_ALPHA_ALPHA_ADDITIVE ) {
+		gl->Enable( GL_BLEND_VALUE );
+		gl->BlendFunc( GL_SRC_ALPHA_VALUE, GL_ONE_VALUE );
+	} else if ( alpha == RENDER_ALPHA_ADDITIVE ) {
+		gl->Enable( GL_BLEND_VALUE );
+		gl->BlendFunc( GL_ONE_VALUE, GL_ONE_VALUE );
 	} else gl->Disable( GL_BLEND_VALUE );
 	gl->DepthMask( depthWrite ? 1u : 0u );
 	uniforms->projectionLightmap[3] = hasLightmap ? 1.0f : 0.0f;
+	memset( uniforms->staticLighting, 0, sizeof( uniforms->staticLighting ) );
+	if ( surfaceLighting ) {
+		if ( surfaceLighting->directionalStaticBound && lightingPlan ) {
+			uniforms->projectionLightmap[3] = 0.0f;
+			uniforms->staticLighting[0] = 2u;
+			uniforms->staticLighting[1] = surfaceLighting->arrayLayer;
+			uniforms->staticLighting[2] = (uint32_t)lightingPlan->encoding;
+			uniforms->staticLighting[3] = surfaceLighting->visibilityPlane
+				!= RAL_LIGHTING_SURFACE_BINDING_NO_PLANE ? 1u : 0u;
+		} else if ( surfaceLighting->legacyLightmapBound )
+			uniforms->staticLighting[0] = 1u;
+	}
 	uniforms->viewportAlpha[2] = (float)alpha;
 	uniforms->viewportAlpha[3] = alphaCutoff;
+	memset( uniforms->localSh, 0, sizeof( uniforms->localSh ) );
+	if ( entityCommand && entityCommand->hasLocalIrradiance ) {
+		for ( uint32_t coefficient = 0u; coefficient < 4u; ++coefficient )
+			for ( uint32_t channel = 0u; channel < 3u; ++channel )
+				uniforms->localSh[coefficient][channel] =
+					(float)entityCommand->localIrradiance
+						.blendedCoefficientsQ16[coefficient][channel]
+					/ (float)RAL_LIGHT_Q16_ONE;
+		uniforms->localSh[0][3] = 1.0f;
+	}
+	if ( emissiveRadiance )
+		memcpy( uniforms->emissiveRadiance, emissiveRadiance,
+			sizeof( uniforms->emissiveRadiance ) );
+	else memset( uniforms->emissiveRadiance, 0,
+		sizeof( uniforms->emissiveRadiance ) );
 	UploadProductDraw( gl, uniformBuffer, uniforms );
+}
+
+static qboolean MaterialEmission( const renderSubmissionState_t *frontend,
+	qhandle_t materialHandle, float outRadiance[4] ) {
+	renderMaterialSnapshot_t material;
+	qboolean emissive = qfalse;
+	if ( !frontend || !outRadiance ) return qfalse;
+	memset( outRadiance, 0, 4u * sizeof( float ) );
+	if ( materialHandle <= 0 ||
+		!RenderSubmission_MaterialSnapshot( frontend, materialHandle, &material ) )
+		return materialHandle <= 0 ? qtrue : qfalse;
+	if ( material.lighting.schemaVersion != RENDER_MATERIAL_LIGHTING_SCHEMA_VERSION )
+		return qtrue;
+	for ( uint32_t channel = 0u; channel < 3u; ++channel ) {
+		if ( material.lighting.emissionRadianceQ16[channel] < 0 ) return qfalse;
+		outRadiance[channel] =
+			(float)material.lighting.emissionRadianceQ16[channel]
+			/ (float)RENDER_MATERIAL_LIGHTING_Q16_ONE;
+		if ( material.lighting.emissionRadianceQ16[channel] ) emissive = qtrue;
+	}
+	outRadiance[3] = emissive ? 1.0f : 0.0f;
+	return qtrue;
 }
 
 static qboolean ApplyWorldView( productDrawUniforms_t *uniforms,
@@ -277,6 +361,43 @@ static qboolean ApplyWorldView( productDrawUniforms_t *uniforms,
 	uniforms->projectionLightmap[1] = 1.0f
 		/ tanf( view->fovY * 0.00872664625997164788f );
 	uniforms->projectionLightmap[2] = 4.0f;
+	return qtrue;
+}
+
+static qboolean ApplyAtmosphere( productDrawUniforms_t *uniforms,
+		const renderSubmissionState_t *frontend,
+		const ralOpenGlWorldLowerInfo_t *info ) {
+	renderAtmosphereSnapshot_t snapshot;
+	const atmosphereEmitter_t *emitters;
+	float sunWeight, lightning;
+	if ( !uniforms || !frontend || !info
+			|| !RenderSubmission_AtmosphereSnapshot( frontend, &snapshot,
+				&emitters ) ) return qfalse;
+	(void)emitters;
+	memcpy( uniforms->atmosphereEyeDensity, uniforms->viewOriginDrawSpace,
+		3u * sizeof( float ) );
+	if ( !snapshot.active
+			|| snapshot.state.qualityTier < ATMOSPHERE_QUALITY_ANALYTIC )
+		return qtrue;
+	uniforms->atmosphereEyeDensity[3] = snapshot.state.mediaDensity;
+	uniforms->atmosphereColorVisibility[3] = snapshot.state.visibility;
+	sunWeight = snapshot.state.sunIntensity * ( 1.0f
+		- snapshot.state.cloudCover * snapshot.state.cloudShadow );
+	lightning = snapshot.state.lightning;
+	for ( uint32_t channel = 0u; channel < 3u; ++channel )
+		uniforms->atmosphereColorVisibility[channel] = fminf( 16.0f,
+			snapshot.state.ambientColor[channel]
+			+ 0.08f * sunWeight + lightning );
+	uniforms->atmosphereHeightCloud[0] = snapshot.state.bounds[2];
+	uniforms->atmosphereHeightCloud[1] = snapshot.state.mediaHeightFalloff;
+	uniforms->atmosphereHeightCloud[2] = snapshot.state.cloudCover;
+	uniforms->atmosphereHeightCloud[3] = snapshot.state.cloudShadow;
+	if ( info->atmosphere.selectedTier == RAL_ATMOSPHERE_TIER_FULL ) {
+		uniforms->atmosphereFroxelGrid[0] = info->atmosphere.froxelWidth;
+		uniforms->atmosphereFroxelGrid[1] = info->atmosphere.froxelHeight;
+		uniforms->atmosphereFroxelGrid[2] = info->atmosphere.froxelDepth;
+		uniforms->atmosphereFroxelGrid[3] = 0u;
+	}
 	return qtrue;
 }
 
@@ -318,6 +439,19 @@ static void EntityTransform( const refEntity_t *entity, const float local[3],
 			+ local[2] * entity->axis[2][axis];
 }
 
+static void EntityTransformNormal( const refEntity_t *entity,
+		const float local[3], float out[3] ) {
+	float length;
+	for ( uint32_t axis = 0u; axis < 3u; ++axis )
+		out[axis] = local[0] * entity->axis[0][axis]
+			+ local[1] * entity->axis[1][axis]
+			+ local[2] * entity->axis[2][axis];
+	length = sqrtf( out[0] * out[0] + out[1] * out[1] + out[2] * out[2] );
+	if ( length > 0.000001f ) for ( uint32_t axis = 0u; axis < 3u; ++axis )
+		out[axis] /= length;
+	else out[2] = 1.0f;
+}
+
 static qboolean DrawModelEntity( const worldDispatch_t *gl,
 		glName_t uniformBuffer, productDrawUniforms_t *uniforms,
 		const renderSubmissionState_t *frontend, const glName_t *textures,
@@ -331,7 +465,7 @@ static qboolean DrawModelEntity( const worldDispatch_t *gl,
 	qboolean ok = qfalse;
 	if ( !RenderSubmission_ModelSnapshot( frontend, command->entity.hModel, &model )
 			|| !model.ready || !model.vertexCount || !model.indexCount
-			|| !model.positions || !model.texCoords || !model.indices
+			|| !model.positions || !model.normals || !model.texCoords || !model.indices
 			|| !model.batches || !model.frameCount ) return qfalse;
 	frame = command->entity.frame < 0 ? 0u : (uint32_t)command->entity.frame;
 	oldFrame = command->entity.oldframe < 0 ? 0u : (uint32_t)command->entity.oldframe;
@@ -341,15 +475,21 @@ static qboolean DrawModelEntity( const worldDispatch_t *gl,
 	vertices = calloc( model.vertexCount, sizeof( *vertices ) );
 	if ( !vertices ) return qfalse;
 	for ( uint32_t i = 0u; i < model.vertexCount; ++i ) {
-		float local[3];
+		float local[3], localNormal[3];
 		for ( uint32_t axis = 0u; axis < 3u; ++axis ) {
 			float current = model.positions[((size_t)frame * model.vertexCount + i)
 				* 3u + axis];
 			float previous = model.positions[((size_t)oldFrame * model.vertexCount + i)
 				* 3u + axis];
 			local[axis] = current + ( previous - current ) * backlerp;
+			current = model.normals[((size_t)frame * model.vertexCount + i)
+				* 3u + axis];
+			previous = model.normals[((size_t)oldFrame * model.vertexCount + i)
+				* 3u + axis];
+			localNormal[axis] = current + ( previous - current ) * backlerp;
 		}
 		EntityTransform( &command->entity, local, vertices[i].position );
+		EntityTransformNormal( &command->entity, localNormal, vertices[i].normal );
 		memcpy( vertices[i].texCoord, model.texCoords + (size_t)i * 2u,
 			sizeof( vertices[i].texCoord ) );
 		memcpy( vertices[i].color, command->entity.shader.rgba,
@@ -359,11 +499,11 @@ static qboolean DrawModelEntity( const worldDispatch_t *gl,
 		model.indexCount, &geometry ) ) goto cleanup;
 	gl->BindVertexArray( geometry.vao );
 	for ( uint32_t i = 0u; i < model.batchCount; ++i ) {
-		qhandle_t material = command->entity.customShader > 0
-			? command->entity.customShader : model.batches[i].material;
+		qhandle_t material = RenderSubmission_EntityBatchMaterial(
+			frontend, command, &model.batches[i] );
 		gl->BindTextureUnit( 0u, MaterialTexture( frontend, textures, material ) );
 		ApplyRaster( gl, uniformBuffer, uniforms, RENDER_ALPHA_OPAQUE,
-			0.5f, qtrue, qfalse );
+			0.5f, qtrue, qfalse, command, NULL, NULL, NULL );
 		gl->DrawElements( GL_TRIANGLES_VALUE, (glSize_t)model.batches[i].indexCount,
 			GL_UNSIGNED_INT_VALUE, (const void *)(uintptr_t)( model.batches[i].firstIndex
 				* sizeof( uint32_t ) ) );
@@ -378,11 +518,15 @@ cleanup:
 static qboolean DrawPrimitiveEntity( const worldDispatch_t *gl,
 		glName_t uniformBuffer, productDrawUniforms_t *uniforms,
 		const renderSubmissionState_t *frontend, const glName_t *textures,
-		const refEntity_t *entity, uint32_t *outIndices, uint32_t *outDraws ) {
+		const renderEntityCommand_t *command, uint32_t *outIndices,
+		uint32_t *outDraws ) {
+	const refEntity_t *entity;
 	effectVertex_t vertices[8];
 	uint32_t indices[36];
 	transientGeometry_t geometry;
 	uint32_t vertexCount, indexCount;
+	if ( !command ) return qfalse;
+	entity = &command->entity;
 	memset( vertices, 0, sizeof( vertices ) );
 	memset( indices, 0, sizeof( indices ) );
 	if ( entity->reType == RT_SPRITE ) {
@@ -395,6 +539,7 @@ static qboolean DrawPrimitiveEntity( const worldDispatch_t *gl,
 			vertices[i].texCoord[0] = ( i & 1u ) ? 1.0f : 0.0f;
 			vertices[i].texCoord[1] = ( i & 2u ) ? 1.0f : 0.0f;
 			memcpy( vertices[i].color, entity->shader.rgba, sizeof( vertices[i].color ) );
+			vertices[i].normal[2] = 1.0f;
 		}
 		{ const uint32_t quad[6] = { 0u, 1u, 2u, 2u, 1u, 3u };
 			memcpy( indices, quad, sizeof( quad ) ); }
@@ -415,6 +560,7 @@ static qboolean DrawPrimitiveEntity( const worldDispatch_t *gl,
 			vertices[i].position[1] += ( i & 2u ) ? radius : -radius;
 			if ( !beam ) vertices[i].position[2] += ( i & 4u ) ? radius : -radius;
 			memcpy( vertices[i].color, entity->shader.rgba, sizeof( vertices[i].color ) );
+			vertices[i].normal[2] = 1.0f;
 		}
 		memcpy( indices, box, sizeof( box ) );
 	} else return qfalse;
@@ -424,7 +570,7 @@ static qboolean DrawPrimitiveEntity( const worldDispatch_t *gl,
 	gl->BindTextureUnit( 0u, MaterialTexture( frontend, textures,
 		entity->customShader ) );
 	ApplyRaster( gl, uniformBuffer, uniforms, RENDER_ALPHA_BLEND,
-		0.5f, qfalse, qfalse );
+		0.5f, qfalse, qfalse, command, NULL, NULL, NULL );
 	gl->DrawElements( GL_TRIANGLES_VALUE, (glSize_t)indexCount,
 		GL_UNSIGNED_INT_VALUE, NULL );
 	TransientDestroy( gl, &geometry );
@@ -439,18 +585,16 @@ static qboolean DrawUiPrimitive( const worldDispatch_t *gl,
 	effectVertex_t vertices[4];
 	const uint32_t indices[6] = { 0u, 1u, 2u, 2u, 1u, 3u };
 	transientGeometry_t geometry;
-	float centerX = ui->x + ui->width * 0.5f;
-	float centerY = ui->y + ui->height * 0.5f;
-	float radians = ui->rotation * 0.01745329251994329577f;
-	float cosine = cosf( radians ), sine = sinf( radians );
+	static const uint8_t positionIndex[4] = { 0u, 1u, 3u, 2u };
 	memset( vertices, 0, sizeof( vertices ) );
 	for ( uint32_t i = 0u; i < 4u; ++i ) {
-		float x = ( ( i & 1u ) ? 0.5f : -0.5f ) * ui->width;
-		float y = ( ( i & 2u ) ? 0.5f : -0.5f ) * ui->height;
-		vertices[i].position[0] = centerX + x * cosine - y * sine;
-		vertices[i].position[1] = centerY + x * sine + y * cosine;
-		vertices[i].texCoord[0] = ( i & 1u ) ? ui->s2 : ui->s1;
-		vertices[i].texCoord[1] = ( i & 2u ) ? ui->t2 : ui->t1;
+		uint32_t corner = positionIndex[i];
+		vertices[i].position[0] = ui->positions[corner][0];
+		vertices[i].position[1] = ui->positions[corner][1];
+		vertices[i].texCoord[0] = ui->kind == RENDER_UI_LINE
+			? ( ( i & 1u ) ? 1.0f : 0.0f ) : ( ( i & 1u ) ? ui->s2 : ui->s1 );
+		vertices[i].texCoord[1] = ui->kind == RENDER_UI_LINE
+			? ( ( i & 2u ) ? 1.0f : 0.0f ) : ( ( i & 2u ) ? ui->t2 : ui->t1 );
 		for ( uint32_t c = 0u; c < 4u; ++c ) {
 			float value = ui->color[c] * 255.0f;
 			vertices[i].color[c] = (unsigned char)( value < 0.0f ? 0u
@@ -461,7 +605,7 @@ static qboolean DrawUiPrimitive( const worldDispatch_t *gl,
 	gl->BindVertexArray( geometry.vao );
 	gl->BindTextureUnit( 0u, MaterialTexture( frontend, textures, ui->material ) );
 	ApplyRaster( gl, uniformBuffer, uniforms, RENDER_ALPHA_BLEND,
-		0.5f, qfalse, qfalse );
+		0.5f, qfalse, qfalse, NULL, NULL, NULL, NULL );
 	gl->DrawElements( GL_TRIANGLES_VALUE, 6, GL_UNSIGNED_INT_VALUE, NULL );
 	TransientDestroy( gl, &geometry );
 	return qtrue;
@@ -498,6 +642,19 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 			|| !info->outputWidth || !info->outputHeight
 			|| !RalOpenGl_CoreMatchesReceipt( core, coreReceipt )
 			|| !RalOpenGl_FrontendPlanReceiptExact( plan, plan )
+			|| !Ral_AtmospherePlanReceiptExact( &info->atmosphere,
+				&info->atmosphere )
+			|| !Ral_DisplayVisibilityPlanValid( &info->displayVisibility )
+			|| info->atmosphere.frameGeneration != info->generation
+			|| !info->atmosphereBufferName
+			|| ( info->weatherParticleCount && ( !info->weatherProgramName
+				|| !info->weatherUniformBufferName
+				|| !info->weatherParticleBufferName ) )
+			|| ( info->directionalLighting
+				&& ( !RalOpenGl_LightingReceiptExact( info->directionalLighting,
+						info->directionalLighting )
+					|| info->directionalLighting->coreGeneration
+						!= coreReceipt->generation ) )
 			|| !RenderSubmission_ReceiptExact( submission, submission )
 			|| plan->coreGeneration != coreReceipt->generation
 			|| plan->frontendFrameDigest != submission->frameDigest
@@ -532,8 +689,15 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 	gl.NamedBufferStorage( uniformBuffer, (glSizePtr_t)sizeof( uniforms ), NULL,
 		GL_DYNAMIC_STORAGE_BIT_VALUE );
 	gl.BindBufferBase( GL_UNIFORM_BUFFER_VALUE, 0u, uniformBuffer );
+	gl.BindBufferBase( GL_SHADER_STORAGE_BUFFER_VALUE, 0u,
+		info->atmosphereBufferName );
 	uniforms.viewportAlpha[0] = (float)info->outputWidth;
 	uniforms.viewportAlpha[1] = (float)info->outputHeight;
+	/* The view axes use xyz only; their std140 padding carries the display
+	 * visibility plan while preserving the portable 256-byte draw ABI. */
+	uniforms.viewForward[3] = info->displayVisibility.exposureScale;
+	uniforms.viewLeft[3] = info->displayVisibility.shadowExponent;
+	uniforms.viewUp[3] = info->displayVisibility.shadowPivot;
 	for ( uint32_t i = 0u; i < polyVertexCount; ++i ) {
 		memcpy( effectVertices[i].position, polyVertices[i].xyz,
 			sizeof( effectVertices[i].position ) );
@@ -630,17 +794,67 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 	gl.Enable( GL_DEPTH_TEST_VALUE );
 	gl.DepthFunc( GL_LEQUAL_VALUE );
 	if ( ( world.batchCount || effectVertexCount || entityCount )
-			&& !ApplyWorldView( &uniforms, &world ) ) goto cleanup;
+			&& ( !ApplyWorldView( &uniforms, &world )
+				|| !ApplyAtmosphere( &uniforms, frontend, info ) ) ) goto cleanup;
 	if ( world.batchCount ) gl.BindVertexArray( vaos[0] );
 	for ( uint32_t i = 0u; i < world.batchCount; ++i ) {
 		const renderWorldBatch_t *batch = &world.batches[i];
+		float emissiveRadiance[4];
+		ralLightingSurfaceBindingReceipt_t surfaceLighting;
+		ralLightingSurfaceBindingRequest_t bindingRequest;
+		const ralLightingRuntimePlan_t *lightingPlan = info->directionalLighting
+			? &info->directionalLighting->plan : NULL;
+		const ralLightingSurfaceBindingReceipt_t *binding = NULL;
+		if ( !MaterialEmission( frontend, batch->baseMaterial,
+			emissiveRadiance ) ) goto cleanup;
 		gl.BindTextureUnit( 0u, MaterialTexture( frontend, textures,
 			batch->baseMaterial ) );
-		gl.BindTextureUnit( 1u, MaterialTexture( frontend, textures,
-			batch->lightmapMaterial ) );
+		if ( batch->lightmapIndex >= 0 ) {
+			memset( &bindingRequest, 0, sizeof( bindingRequest ) );
+			bindingRequest.schemaVersion = RAL_LIGHTING_SURFACE_BINDING_SCHEMA_VERSION;
+			bindingRequest.frameGeneration = info->generation;
+			bindingRequest.surfaceId = (uint64_t)batch->sourceSurfaceIndex + 1u;
+			bindingRequest.lightmapIndex = batch->lightmapIndex;
+			bindingRequest.legacyLightmapAvailable = batch->lightmapMaterial > 0
+				? qtrue : qfalse;
+			if ( !Ral_LightingSurfaceBindingBuild( &bindingRequest, lightingPlan,
+					&surfaceLighting ) ) goto cleanup;
+			binding = &surfaceLighting;
+		}
+		if ( binding && binding->directionalStaticBound ) {
+			gl.BindTextureUnit( 1u, 0u );
+			gl.BindTextureUnit( 2u, info->directionalLighting->textureNames[
+				binding->radiancePlane] );
+			gl.BindTextureUnit( 3u, info->directionalLighting->textureNames[
+				binding->directionPlane] );
+			gl.BindTextureUnit( 4u,
+				binding->visibilityPlane == RAL_LIGHTING_SURFACE_BINDING_NO_PLANE
+					? 0u : info->directionalLighting->textureNames[
+						binding->visibilityPlane] );
+		} else {
+			gl.BindTextureUnit( 1u, MaterialTexture( frontend, textures,
+				batch->lightmapMaterial ) );
+			gl.BindTextureUnit( 2u, 0u );
+			gl.BindTextureUnit( 3u, 0u );
+			gl.BindTextureUnit( 4u, 0u );
+		}
 		ApplyRaster( &gl, uniformBuffer, &uniforms, batch->alphaMode,
 			batch->alphaCutoff, batch->depthWrite,
-			batch->lightmapMaterial > 0 ? qtrue : qfalse );
+			binding && binding->legacyLightmapBound, NULL, binding, lightingPlan,
+			emissiveRadiance );
+		if ( binding ) {
+			uint64_t identity = binding->surfaceId
+				^ ( (uint64_t)binding->diffuseAuthority << 56u )
+				^ ( (uint64_t)binding->arrayLayer << 24u );
+			if ( binding->legacyLightmapBound ) receipt.legacyLightmapDrawCount++;
+			else receipt.directionalStaticDrawCount++;
+			receipt.surfaceLightingBindingDigest ^= identity
+				+ UINT64_C( 0x9e3779b97f4a7c15 )
+				+ ( receipt.surfaceLightingBindingDigest << 6u )
+				+ ( receipt.surfaceLightingBindingDigest >> 2u );
+			if ( !receipt.surfaceLightingBindingDigest )
+				receipt.surfaceLightingBindingDigest = 1u;
+		}
 		gl.DrawElements( GL_TRIANGLES_VALUE, (glSize_t)batch->indexCount,
 			GL_UNSIGNED_INT_VALUE, (const void *)(uintptr_t)( batch->firstIndex
 				* sizeof( uint32_t ) ) );
@@ -654,7 +868,7 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 			gl.BindTextureUnit( 0u, MaterialTexture( frontend, textures,
 				polygons[i].material ) );
 			ApplyRaster( &gl, uniformBuffer, &uniforms, RENDER_ALPHA_BLEND, 0.5f,
-				qfalse, qfalse );
+				qfalse, qfalse, NULL, NULL, NULL, NULL );
 			gl.DrawElements( GL_TRIANGLES_VALUE, (glSize_t)count,
 				GL_UNSIGNED_INT_VALUE, (const void *)(uintptr_t)( firstIndex
 					* sizeof( uint32_t ) ) );
@@ -663,13 +877,14 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 		for ( uint32_t i = 0u; i < lightCount; ++i ) {
 			gl.BindTextureUnit( 0u, 0u );
 			ApplyRaster( &gl, uniformBuffer, &uniforms, RENDER_ALPHA_BLEND, 0.5f,
-				qfalse, qfalse );
+				qfalse, qfalse, NULL, NULL, NULL, NULL );
 			gl.DrawElements( GL_TRIANGLES_VALUE, 6, GL_UNSIGNED_INT_VALUE,
 				(const void *)(uintptr_t)( firstIndex * sizeof( uint32_t ) ) );
 			firstIndex += 6u;
 		}
 	}
 	for ( uint32_t i = 0u; i < entityCount; ++i ) {
+		uint32_t drawsBefore = receipt.entityDrawCount;
 		if ( entities[i].entity.reType == RT_MODEL
 				&& entities[i].entity.hModel > 0 ) {
 			if ( !DrawModelEntity( &gl, uniformBuffer, &uniforms, frontend, textures,
@@ -678,15 +893,44 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 			receipt.modelEntityCount++;
 		} else {
 			if ( !DrawPrimitiveEntity( &gl, uniformBuffer, &uniforms, frontend, textures,
-				&entities[i].entity,
+				&entities[i],
 				&receipt.entityIndexCount, &receipt.entityDrawCount ) ) goto cleanup;
 			receipt.primitiveEntityCount++;
 		}
 		if ( entities[i].hasTemporal ) receipt.temporalEntityCount++;
+		if ( entities[i].hasLocalIrradiance ) {
+			receipt.localIrradianceEntityCount++;
+			receipt.localIrradianceDrawCount += receipt.entityDrawCount - drawsBefore;
+		}
+	}
+	if ( info->weatherParticleCount ) {
+		glName_t weatherVao = 0u;
+		gl.CreateVertexArrays( 1, &weatherVao );
+		if ( !weatherVao ) goto cleanup;
+		gl.UseProgram( info->weatherProgramName );
+		gl.BindBufferBase( GL_UNIFORM_BUFFER_VALUE, 0u,
+			info->weatherUniformBufferName );
+		gl.BindBufferBase( GL_SHADER_STORAGE_BUFFER_VALUE, 0u,
+			info->weatherParticleBufferName );
+		gl.BindVertexArray( weatherVao );
+		gl.Enable( GL_BLEND_VALUE );
+		gl.BlendFunc( GL_SRC_ALPHA_VALUE, GL_ONE_MINUS_SRC_ALPHA_VALUE );
+		gl.DepthMask( 0u );
+		gl.DrawArraysInstanced( GL_TRIANGLES_VALUE, 0, 6,
+			(glSize_t)info->weatherParticleCount );
+		gl.DeleteVertexArrays( 1, &weatherVao );
+		receipt.weatherDrawCount = 1u;
+		receipt.weatherInstanceCount = info->weatherParticleCount;
+		gl.UseProgram( info->programName );
+		gl.BindBufferBase( GL_UNIFORM_BUFFER_VALUE, 0u, uniformBuffer );
+		gl.BindBufferBase( GL_SHADER_STORAGE_BUFFER_VALUE, 0u,
+			info->atmosphereBufferName );
 	}
 	if ( uiCount ) {
 		gl.Disable( GL_DEPTH_TEST_VALUE );
 		uniforms.viewOriginDrawSpace[3] = 1.0f;
+		memset( uniforms.atmosphereFroxelGrid, 0,
+			sizeof( uniforms.atmosphereFroxelGrid ) );
 	}
 	for ( uint32_t i = 0u; i < uiCount; ++i ) {
 		renderMaterialSnapshot_t material;
@@ -704,12 +948,19 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 		receipt.modelEntityCount = content.modelEntityCount;
 		receipt.primitiveEntityCount = content.primitiveEntityCount;
 		receipt.temporalEntityCount = content.temporalEntityCount;
+		receipt.localIrradianceEntityCount = content.localIrradianceEntityCount;
+		receipt.localIrradianceDrawCount = content.localIrradianceDrawCount;
 		receipt.entityIndexCount = content.entityIndexCount;
 		receipt.entityDrawCount = content.entityDrawCount;
 		receipt.uiPrimitiveCount = content.uiPrimitiveCount;
 		receipt.texturedUiPrimitiveCount = content.texturedUiPrimitiveCount;
 		receipt.msdfUiPrimitiveCount = content.msdfUiPrimitiveCount;
 		receipt.uiDrawCount = content.uiDrawCount;
+		receipt.weatherDrawCount = content.weatherDrawCount;
+		receipt.weatherInstanceCount = content.weatherInstanceCount;
+		receipt.legacyLightmapDrawCount = content.legacyLightmapDrawCount;
+		receipt.directionalStaticDrawCount = content.directionalStaticDrawCount;
+		receipt.surfaceLightingBindingDigest = content.surfaceLightingBindingDigest;
 	}
 	receipt.schemaVersion = RAL_OPENGL_WORLD_SCHEMA_VERSION;
 	receipt.backendType = RAL_BACKEND_OPENGL;
@@ -726,7 +977,7 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 	receipt.effectIndexCount = effectIndexCount;
 	receipt.effectDrawCount = polygonCommandCount + lightCount;
 	receipt.nativeDrawCount = receipt.worldDrawCount + receipt.effectDrawCount
-		+ receipt.entityDrawCount + receipt.uiDrawCount;
+		+ receipt.entityDrawCount + receipt.uiDrawCount + receipt.weatherDrawCount;
 	receipt.ready = qtrue;
 	if ( receipt.uploadedMaterialCount != plan->loweredMaterialCount
 			|| receipt.worldDrawCount != plan->loweredWorldBatchCount
@@ -735,6 +986,8 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 			|| receipt.modelEntityCount != plan->loweredModelEntityCount
 			|| receipt.primitiveEntityCount != plan->loweredPrimitiveEntityCount
 			|| receipt.temporalEntityCount != plan->loweredTemporalEntityCount
+			|| receipt.localIrradianceEntityCount
+				!= plan->loweredLocalIrradianceEntityCount
 			|| receipt.entityIndexCount != plan->loweredEntityIndexCount
 			|| receipt.entityDrawCount != plan->loweredEntityBatchCount
 			|| receipt.uiPrimitiveCount != plan->loweredUiPrimitiveCount

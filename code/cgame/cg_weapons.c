@@ -477,15 +477,47 @@ void CG_AddRailTrails( void ) {
 
 /*
 ==========================
+CG_EmitProjectileTrailLayer
+
+Build one endpoint-inclusive path request. The particle ABI's generic EMIT_PATH
+samples bin centres; translating both ends by half a bin turns those samples
+into (ordinal + 1) / count so every rocket/grenade layer touches the newest
+rendered projectile endpoint without changing other path emitters.
+==========================
+*/
+static void CG_EmitProjectileTrailLayer( qhandle_t trailClass, int count,
+										 const vec3_t start, const vec3_t end )
+{
+	emitterDesc_t emitter;
+	vec3_t        axis, pathShift;
+
+	if ( !trailClass || count <= 0 ) return;
+
+	memset( &emitter, 0, sizeof( emitter ) );
+	emitter.cls   = trailClass;
+	emitter.count = count;
+	VectorSubtract( end, start, axis );
+	VectorScale( axis, 0.5f / (float)count, pathShift );
+	VectorAdd( start, pathShift, emitter.origin );
+	VectorAdd( end, pathShift, emitter.end );
+	VectorNormalize( axis );
+	VectorCopy( axis, emitter.axis );
+	Vector4Set( emitter.colorTint, 1.0f, 1.0f, 1.0f, 1.0f );
+	trap_R_EmitParticles( &emitter );
+}
+
+/*
+==========================
 CG_RocketTrail
 ==========================
 */
 static void CG_RocketTrail( centity_t *ent, const weaponInfo_t *wi ) {
-	int		step;
 	vec3_t	origin, lastPos;
-	int		startTime, contents;
+	vec3_t	trailOrigin, lastTrailPos, trailDirection;
+	int		startTime, elapsed, contents;
 	int		lastContents;
 	entityState_t	*es;
+	qboolean	isGrenade;
 
 	if ( cg_noProjectileTrail.integer ) {
 		return;
@@ -494,12 +526,13 @@ static void CG_RocketTrail( centity_t *ent, const weaponInfo_t *wi ) {
 	if ( cg.stopTime ) return;
 #endif
 
-	step = 50;
-
 	es = &ent->currentState;
+	isGrenade = es->weapon == WP_GRENADE_LAUNCHER;
 	startTime = ent->trailTime;
+	if ( startTime > cg.time ) startTime = cg.time;
+	elapsed = cg.time - startTime;
 
-	BG_EvaluateTrajectory( &es->pos, cg.time, origin );
+	CG_EvaluateVisualTrajectory( ent, cg.time, origin );
 	contents = CG_PointContents( origin, -1 );
 
 	// if object (e.g. grenade) is stationary, don't toss up smoke
@@ -508,8 +541,22 @@ static void CG_RocketTrail( centity_t *ent, const weaponInfo_t *wi ) {
 		return;
 	}
 
-	BG_EvaluateTrajectory( &es->pos, ent->trailTime, lastPos );
+	CG_EvaluateVisualTrajectory( ent, startTime, lastPos );
 	lastContents = CG_PointContents( lastPos, -1 );
+
+	// The trajectory describes the projectile model origin, but authored missile
+	// models need not place that origin at the exhaust.  Keep contents/crossing
+	// tests on the physical centre above, then move only the visual smoke segment
+	// to the cached local-X attachment point.  Rockets use their model's rear
+	// bound; grenades and volume/bubble trails deliberately retain a centre
+	// emitter by leaving missileTrailAnchor at zero.
+	VectorCopy( origin, trailOrigin );
+	VectorCopy( lastPos, lastTrailPos );
+	if ( wi->missileTrailAnchor != 0.0f &&
+		 VectorNormalize2( es->pos.trDelta, trailDirection ) != 0.0f ) {
+		VectorMA( trailOrigin, wi->missileTrailAnchor, trailDirection, trailOrigin );
+		VectorMA( lastTrailPos, wi->missileTrailAnchor, trailDirection, lastTrailPos );
+	}
 
 	// rocket/grenade pierced a water surface this frame → splash
 	// at the crossing point (Q1 maps only). Re-trace the just-travelled segment
@@ -535,50 +582,43 @@ static void CG_RocketTrail( centity_t *ent, const weaponInfo_t *wi ) {
 		return;
 	}
 
-	if ( cgs.media.rocketSmokeClass ) {
-		// GPU-ring smoke (MIG-trail-1, single path — W-51 cvar gate retired):
-		// ONE EMIT_PATH per frame over the just-travelled segment instead of N
-		// legacy LE_ puffs. EMIT_PATH samples the rocket_smoke class uniformly
-		// start→end; the class carries the exact look (alpha-blend, grow 8→56,
-		// alpha 0.33→0 over 1.8s, zero velocity = hang in place), so colorTint is
-		// neutral white.
-		//
-		// FRAMERATE-INDEPENDENT EMIT (restores the vanilla accumulator the GPU
-		// port dropped): `step` is a 50 ms TIME interval (NOT a per-frame
-		// distance). ent->trailTime is a RUNNING CURSOR, not reset to cg.time each
-		// frame. Count the fixed 50 ms grid-boundaries that fall in
-		// (startTime, cg.time], emit one particle per crossed boundary along the
-		// travelled segment, and advance the cursor to the LAST crossed boundary —
-		// leaving the sub-step (< 50 ms) remainder to accumulate into the next
-		// frame. A 1000 u/s rocket crosses 20 boundaries/s → 20 puffs/s at ANY
-		// framerate (vs the old segLen/50 single-frame truncation, which rounded
-		// each ~8–33 u frame down to 0 above ~20 fps → dead trail). On a frame
-		// short enough that no boundary is crossed (count == 0) the cursor is left
-		// UNCHANGED so the remainder keeps building — this is the load-bearing fix.
-		int t     = step * ( ( startTime + step ) / step );  // first grid boundary > startTime
-		int count = 0;
-		for ( ; t <= cg.time; t += step ) count++;            // boundaries in (startTime, cg.time]
-		if ( count > 0 ) {
-			vec3_t        segStart;
-			emitterDesc_t emitter;
-			vec3_t        axis;
-			BG_EvaluateTrajectory( &es->pos, startTime, segStart );  // pos at the OLD cursor
-			memset( &emitter, 0, sizeof( emitter ) );
-			emitter.cls   = cgs.media.rocketSmokeClass;
-			emitter.count = count;
-			VectorCopy( segStart, emitter.origin );
-			VectorCopy( origin,   emitter.end );                     // origin = pos@cg.time (above)
-			VectorSubtract( origin, segStart, axis );
-			VectorNormalize( axis );
-			VectorCopy( axis, emitter.axis );
-			emitter.colorTint[0] = 1.0f; emitter.colorTint[1] = 1.0f;
-			emitter.colorTint[2] = 1.0f; emitter.colorTint[3] = 1.0f;
-			trap_R_EmitParticles( &emitter );
+	if ( elapsed > 0 ) {
+		vec3_t axis;
+		float  distance;
 
-			ent->trailTime = t - step;   // last crossed boundary; < step remainder carries over
+		VectorSubtract( trailOrigin, lastTrailPos, axis );
+		distance = VectorLength( axis );
+
+		if ( isGrenade ) {
+			int count = (int)ceilf( distance / 4.0f );
+			int timeCount = ( elapsed + 49 ) / 50;
+			if ( count < timeCount ) count = timeCount;
+			if ( count < 1 ) count = 1;
+			CG_EmitProjectileTrailLayer( cgs.media.grenadeTrailClass, count,
+				lastTrailPos, trailOrigin );
+		} else {
+			// Q4-inspired fx_fly composition. The core is endpoint-live every visual
+			// frame; smoke and embers use fixed-rate boundary counts so their GPU
+			// population is FPS-independent. Counts are hitch-bounded, while every
+			// layer samples the same nozzle-aligned segment and persists after impact.
+			int coreCount  = (int)ceilf( distance / 8.0f );
+			int smokeCount = cg.time / 20 - startTime / 20; // 50 Hz
+			int emberCount = cg.time / 40 - startTime / 40; // 25 Hz
+
+			if ( coreCount < 1 ) coreCount = 1;
+			if ( coreCount > 8 ) coreCount = 8;
+			if ( smokeCount > 6 ) smokeCount = 6;
+			if ( emberCount > 3 ) emberCount = 3;
+
+			CG_EmitProjectileTrailLayer( cgs.media.rocketExhaustClass, coreCount,
+				lastTrailPos, trailOrigin );
+			CG_EmitProjectileTrailLayer( cgs.media.rocketSmokeClass, smokeCount,
+				lastTrailPos, trailOrigin );
+			CG_EmitProjectileTrailLayer( cgs.media.rocketEmberClass, emberCount,
+				lastTrailPos, trailOrigin );
 		}
-		// count == 0: leave ent->trailTime unchanged (remainder accumulates).
 	}
+	ent->trailTime = cg.time;
 
 }
 
@@ -657,7 +697,6 @@ CG_PlasmaTrail
 static void CG_PlasmaTrail( centity_t *cent, const weaponInfo_t *wi ) {
 	localEntity_t	*le;
 	refEntity_t		*re;
-	entityState_t	*es;
 	vec3_t			velocity, xvelocity, origin;
 	vec3_t			offset, xoffset;
 	vec3_t			v[3];
@@ -671,9 +710,7 @@ static void CG_PlasmaTrail( centity_t *cent, const weaponInfo_t *wi ) {
 	if ( cg.stopTime ) return;
 #endif
 
-	es = &cent->currentState;
-
-	BG_EvaluateTrajectory( &es->pos, cg.time, origin );
+	CG_EvaluateVisualTrajectory( cent, cg.time, origin );
 
 	le = CG_AllocLocalEntity();
 	re = &le->refEntity;
@@ -750,12 +787,9 @@ CG_GrappleTrail
 void CG_GrappleTrail( centity_t *ent, const weaponInfo_t *wi ) {
 	vec3_t	origin;
 	vec3_t	beamStart;
-	entityState_t	*es;
 	vec3_t	up;
 
-	es = &ent->currentState;
-
-	BG_EvaluateTrajectory( &es->pos, cg.time, origin );
+	VectorCopy( ent->lerpOrigin, origin );
 	ent->trailTime = cg.time;
 
 	// FIXME adjust for muzzle position
@@ -926,10 +960,15 @@ void CG_RegisterWeapon( int weaponNum ) {
 		break;
 
 	case WP_ROCKET_LAUNCHER:
+	{
+		vec3_t missileMins, missileMaxs;
+
 		MAKERGB( weaponInfo->missileDlightColor, 1, 0.75f, 0 );
 		MAKERGB( weaponInfo->flashDlightColor, 1, 0.75f, 0 );
 
 		weaponInfo->missileModel = trap_R_RegisterModel( "models/ammo/rocket/rocket.md3" );
+		trap_R_ModelBounds( weaponInfo->missileModel, missileMins, missileMaxs );
+		weaponInfo->missileTrailAnchor = missileMins[0];
 		weaponInfo->missileSound = trap_S_RegisterSound( "sound/weapons/rocket/rockfly.opus", qfalse );
 		weaponInfo->missileTrailFunc = CG_RocketTrail;
 		weaponInfo->missileDlight = 200;
@@ -939,6 +978,7 @@ void CG_RegisterWeapon( int weaponNum ) {
 
 		cgs.media.rocketExplosionShader = trap_R_RegisterShader( "rocketExplosion" );
 		break;
+	}
 
 	case WP_LIGHTNING_GUN:
 		MAKERGB( weaponInfo->flashDlightColor, 0.6f, 0.6f, 1.0f );
@@ -1161,7 +1201,11 @@ static void CG_LightningBolt( centity_t *cent, vec3_t origin ) {
 		vec3_t angle;
 		// eser - true lightning
         // might as well fix up true lightning while we're at it
-        AngleVectors(cg.predictedPlayerState.viewangles, forward, NULL, NULL);
+		if ( cg.thirdPersonCenterAimActive ) {
+			AngleVectors( cg.thirdPersonCenterAimAngles, forward, NULL, NULL );
+		} else {
+			AngleVectors( cg.predictedPlayerState.viewangles, forward, NULL, NULL );
+		}
         VectorCopy(cg.predictedPlayerState.origin, muzzlePoint);
 		// eser - true lightning
 
@@ -2169,6 +2213,45 @@ CG_MissileHitWall
 Caused by an EV_MISSILE_MISS event, or directly by local bullet tracing
 =================
 */
+void CG_WiredFx_RocketExplosion( const vec3_t origin, const vec3_t normal,
+		impactSound_t material, qboolean freeAir, qboolean forceUnderwater ) {
+	static uint32_t nextEventId = 1u;
+	wiredFxEvent_t event;
+	vec3_t forward;
+	memset( &event, 0, sizeof( event ) );
+	event.schemaVersion = WIRED_FX_EVENT_SCHEMA_VERSION;
+	event.profile = freeAir ? WIRED_FX_PROFILE_ROCKET_DETONATION
+		: WIRED_FX_PROFILE_ROCKET_EXPLOSION;
+	event.eventId = nextEventId++;
+	if ( nextEventId == 0u ) nextEventId = 1u;
+	event.seed = event.eventId ^ (uint32_t)cg.time * 0x9E3779B9u;
+	event.materialClass = (uint32_t)material;
+	switch ( material ) {
+	case IMPACTSOUND_METAL: event.conditionMask = WIRED_FX_CONDITION_MATERIAL_METAL; break;
+	case IMPACTSOUND_FLESH: event.conditionMask = WIRED_FX_CONDITION_MATERIAL_FLESH; break;
+	default: event.conditionMask = WIRED_FX_CONDITION_MATERIAL_DEFAULT; break;
+	}
+	if ( forceUnderwater || ( CG_PointContents( origin, 0 )
+			& ( CONTENTS_WATER | CONTENTS_SLIME | CONTENTS_LAVA ) ) ) {
+		event.profile = WIRED_FX_PROFILE_ROCKET_UNDERWATER;
+		event.flags |= WIRED_FX_EVENT_UNDERWATER;
+		event.conditionMask |= WIRED_FX_CONDITION_UNDERWATER;
+	} else if ( freeAir ) {
+		event.flags |= WIRED_FX_EVENT_FREE_AIR;
+		event.conditionMask |= WIRED_FX_CONDITION_FREE_AIR;
+	}
+	event.startTimeSeconds = (float)cg.time * 0.001f;
+	VectorCopy( origin, event.origin );
+	if ( VectorNormalize2( normal, forward ) == 0.0f ) VectorSet( forward, 0, 0, 1 );
+	VectorCopy( forward, &event.axis[6] );
+	PerpendicularVector( &event.axis[0], forward );
+	CrossProduct( forward, &event.axis[0], &event.axis[3] );
+	Vector4Set( event.color, 1, 1, 1, 1 );
+	event.intensity = 1.0f;
+	event.sizeScale = 1.0f;
+	trap_WiredFx_EmitEvent( &event );
+}
+
 void CG_MissileHitWall( int pType, int clientNum, vec3_t origin, vec3_t dir, impactSound_t soundType, int sourceEntityNum ) {
 	qhandle_t		mod;
 	qhandle_t		mark;
@@ -2182,8 +2265,6 @@ void CG_MissileHitWall( int pType, int clientNum, vec3_t origin, vec3_t dir, imp
 	qboolean		alphaFade;
 	qboolean		isSprite;
 	int				duration;
-	vec3_t			sprOrg;
-	vec3_t			sprVel;
 
 	mod = 0;
 	shader = 0;
@@ -2216,6 +2297,13 @@ void CG_MissileHitWall( int pType, int clientNum, vec3_t origin, vec3_t dir, imp
 		}
 	}
 
+	/* Rocket composition is authored once in WiredFX. Cgame emits no renderer,
+	   sound, mark or shake choreography for this semantic occurrence. */
+	if ( pType == PROJ_ROCKET ) {
+		CG_WiredFx_RocketExplosion( origin, dir, soundType, qfalse, qfalse );
+		return;
+	}
+
 	switch ( pType ) {
 	default:
 	case PROJ_NONE:
@@ -2244,26 +2332,7 @@ void CG_MissileHitWall( int pType, int clientNum, vec3_t origin, vec3_t dir, imp
 #endif
 		break;
 	case PROJ_ROCKET:
-		mod = cgs.media.dishFlashModel;
-		shader = cgs.media.rocketExplosionShader;
-		sfx = cgs.media.sfx_rockexp;
-		mark = cgs.media.burnMarkShader;
-		radius = 64;
-		light = 300;
-		isSprite = qtrue;
-		duration = 1000;
-		lightColor[0] = 1;
-		lightColor[1] = 0.75;
-		lightColor[2] = 0.0;
-		// eser - removed explosion sprite animation
-		// VectorMA( origin, 24, dir, sprOrg );
-		// VectorScale( dir, 64, sprVel );
-
-		// CG_ParticleExplosion( "explode1", sprOrg, sprVel, 1400, 20, 30 );
-#if FEAT_EARTHQUAKE_SYSTEM
-		CG_AddEarthquake( origin, 480, 0.6f, 0, 0.5f, 300 );
-#endif
-		break;
+		return; /* handled by the semantic WiredFX event above */
 	case PROJ_RAILGUN:
 		mod = cgs.media.ringFlashModel;
 		shader = cgs.media.railExplosionShader;
@@ -2296,39 +2365,6 @@ void CG_MissileHitWall( int pType, int clientNum, vec3_t origin, vec3_t dir, imp
 		light = 200;
 		isSprite = qtrue;
 		break;
-	case PROJ_SHOTGUN:
-		mod = cgs.media.bulletFlashModel;
-		shader = cgs.media.bulletExplosionShader;
-		mark = cgs.media.bulletMarkShader;
-		sfx = 0;
-		radius = 4;
-		break;
-
-	case PROJ_MACHINEGUN:
-		mod = cgs.media.bulletFlashModel;
-		shader = cgs.media.bulletExplosionShader;
-		mark = cgs.media.bulletMarkShader;
-
-		r = rand() & 3;
-		if ( r == 0 ) {
-			sfx = cgs.media.sfx_ric1;
-		} else if ( r == 1 ) {
-			sfx = cgs.media.sfx_ric2;
-		} else {
-			sfx = cgs.media.sfx_ric3;
-		}
-        /*
-        if( soundType == IMPACTSOUND_FLESH ) {
-        sfx = cgs.media.sfx_chghitflesh;
-        } else if( soundType == IMPACTSOUND_METAL ) {
-        sfx = cgs.media.sfx_chghitmetal;
-        } else {
-        sfx = cgs.media.sfx_chghit;
-        }
-        */
-
-		radius = 8;
-		break;
 	}
 
 	if ( sfx ) {
@@ -2338,43 +2374,7 @@ void CG_MissileHitWall( int pType, int clientNum, vec3_t origin, vec3_t dir, imp
 	//
 	// create the explosion
 	//
-	if ( pType == PROJ_ROCKET && cgs.media.explosionFireClass ) {
-		// GPU path (single path, W-51 — cvar gate retired): the rocket
-		// fireball renders as the explosion_fire flipbook on the GPU ring
-		// instead of the legacy LE_ sprite. One BURST particle, lifted off
-		// the impact surface.
-		emitterDesc_t emitter;
-		vec3_t        emitOrigin;
-		// The billboard is camera-facing and centred on emitOrigin; the GPU
-		// particle pass depth-tests against the scene (reversed-Z, no depth
-		// write). A burst placed FLUSH on the impact surface sits at the wall's
-		// depth, so the additive billboard z-fights / depth-clips against the
-		// wall and the fireball all but vanishes. The legacy LE_ sprite avoided
-		// this by offsetting its origin 16u along the impact normal
-		// (CG_MakeExplosion, isSprite path). The GPU billboard half-extent is
-		// ~36u (cls.sizeStart), so lift it the billboard radius off the surface
-		// to clear the wall plane entirely.
-		VectorMA( origin, 36.0f, dir, emitOrigin );
-		memset( &emitter, 0, sizeof( emitter ) );
-		emitter.cls   = cgs.media.explosionFireClass;
-		emitter.count = 1;
-		VectorCopy( emitOrigin, emitter.origin );
-		VectorCopy( dir,        emitter.axis );
-		emitter.colorTint[0] = 1.0f; emitter.colorTint[1] = 1.0f;
-		emitter.colorTint[2] = 1.0f; emitter.colorTint[3] = 1.0f;
-		trap_R_EmitParticles( &emitter );
-
-		// The impact light (light=300, lightColor) rode on the LE_ sprite;
-		// preserve it with a light-only local entity — hModel 0 + shader 0
-		// makes this a light-only LE_EXPLOSION: CG_AddExplosion skips the
-		// zero-model refEntity submission (which would otherwise draw the
-		// renderer's invalid-model RGB-axis fallback) and runs only the dlight
-		// fade with the exact same formula. No feature loss; the LE_ system is
-		// untouched.
-		le = CG_MakeExplosion( origin, dir, 0, 0, duration, qfalse );
-		le->light = light;
-		VectorCopy( lightColor, le->lightColor );
-	} else if ( mod ) {
+	if ( mod ) {
 		le = CG_MakeExplosion( origin, dir,
 							   mod,	shader,
 							   duration, isSprite );
@@ -2407,9 +2407,7 @@ void CG_MissileHitWall( int pType, int clientNum, vec3_t origin, vec3_t dir, imp
 		CG_ImpactMark( mark, origin, dir, random()*360, 1,1,1,1, alphaFade, radius, qfalse );
 	}
 
-// eser - explosions
-    CG_ExplosionParticles(pType, origin);
-// eser - explosions
+	CG_ExplosionShrapnel( pType, origin, dir );
 }
 
 
@@ -2440,89 +2438,301 @@ void CG_MissileHitPlayer( int pType, vec3_t origin, vec3_t dir, int entityNum ) 
 	}
 }
 
-// eser - explosions
 /*
 =================
-CG_ExplosionParticles
+CG_ExplosionShrapnel
 =================
 */
-void CG_ExplosionParticles(int pType, vec3_t origin) {
-    int number = 32; // number of particles
-    int jump = 50; // amount to nudge the particles trajectory vector up by
-    int speed = 300; // speed of particles
-    int light = 50; // amount of light for each particle
-    vec4_t lColor; // color of light for each particle
-    qhandle_t shader; // shader to use for the particles
-    vec3_t randVec, tempVec;
-    lColor[0] = 1.0f;
-    lColor[1] = 1.0f;
-    lColor[2] = 1.0f;
-    lColor[3] = 1.0f; // alpha
+void CG_ExplosionShrapnel( int pType, vec3_t origin, vec3_t dir )
+{
+	emitterDesc_t emitter;
+	vec3_t        emitOrigin;
+	int           count;
 
-    switch (pType) {
-    case PROJ_ROCKET:
-        number = 128;
-        jump = 70;
-        light = 100;
-        lColor[0] = 1.0f;
-        lColor[1] = 0.56f;
-        lColor[2] = 0.0f;
-        shader = cgs.media.sparkShader;
-        break;
+	if ( !cgs.media.explosionShrapnelClass ) return;
 
-    case PROJ_GRENADE:
-    case PROJ_LAVABALL:
-        number = 64;
-        jump = 60;
-        light = 100;
-        lColor[0] = 1.0f;
-        lColor[1] = 0.56f;
-        lColor[2] = 0.0f;
-        shader = cgs.media.sparkShader;
-        break;
+	switch ( pType ) {
+	case PROJ_ROCKET:
+		count = 18;
+		break;
+	case PROJ_GRENADE:
+	case PROJ_LAVABALL:
+		count = 12;
+		break;
+	default:
+		return;
+	}
 
-    default:
-        return;
-    }
-
-    for (int index = 0; index < number; index++) {
-        localEntity_t *le;
-        refEntity_t *re;
-
-        le = CG_AllocLocalEntity(); //allocate a local entity
-        re = &le->refEntity;
-        le->leFlags = LEF_PUFF_DONT_SCALE; //don't change the particle size
-        le->leType = LE_MOVE_SCALE_FADE; // particle should fade over time
-        le->startTime = cg.time; // set the start time of the particle to the current time
-        le->endTime = cg.time + 3000 + random() * 250; //set the end time
-        le->lifeRate = 1.0 / (le->endTime - le->startTime);
-        re = &le->refEntity;
-        re->shaderTime.f =cg.time / 1000.0f;
-        re->reType = RT_SPRITE;
-        re->rotation = 0;
-        re->radius = 3;
-        re->customShader = shader;
-        re->shaderRGBA[0] = 0xff;
-        re->shaderRGBA[1] = 0xff;
-        re->shaderRGBA[2] = 0xff;
-        re->shaderRGBA[3] = 0xff;
-        le->light = light;
-        VectorCopy(lColor, le->lightColor);
-        le->color[3] = 1.0;
-        le->pos.trType = TR_GRAVITY; // moves in a gravity affected arc
-        le->pos.trTime = cg.time;
-        VectorCopy(origin, le->pos.trBase);
-
-        tempVec[0] = crandom(); //between 1 and -1
-        tempVec[1] = crandom();
-        tempVec[2] = crandom();
-        VectorNormalize(tempVec);
-        VectorScale(tempVec, speed, randVec);
-        randVec[2] += jump; //nudge the particles up a bit
-        VectorCopy(randVec, le->pos.trDelta);
-    }
+	// Start just clear of the struck plane and spray outward around its normal.
+	// The GPU class owns ballistic motion, gravity, drag, shrink and fade.
+	VectorMA( origin, 2.0f, dir, emitOrigin );
+	memset( &emitter, 0, sizeof( emitter ) );
+	emitter.cls   = cgs.media.explosionShrapnelClass;
+	emitter.count = count;
+	VectorCopy( emitOrigin, emitter.origin );
+	VectorCopy( dir, emitter.axis );
+	Vector4Set( emitter.colorTint, 1.0f, 1.0f, 1.0f, 1.0f );
+	trap_R_EmitParticles( &emitter );
 }
-// eser - explosions
+
+
+typedef struct {
+	int                     pType;
+	hitscanImpactMaterial_t material;
+	vec3_t                  origin;
+	vec3_t                  normal;
+	vec3_t                  incoming;
+	qboolean                emitMark;
+	qboolean                emitSecondary;
+	qboolean                emitRicochet;
+} cgHitscanImpactDesc_t;
+
+typedef struct {
+	int   flashCount;
+	int   sparkCount;
+	int   streakCount;
+	int   smokeCount;
+	int   chipCount;
+	float markRadius;
+	float streakLengthMin;
+	float streakLengthMax;
+	float streakDuration;
+} cgHitscanImpactRecipe_t;
+
+/*
+ * Midpoints of the count/range declarations in q4base pak001.pk4:
+ *   machinegun impact_default / impact_concrete / impact_electronics
+ *   shotgun   impact_default / impact_concrete / impact_electronics
+ * The reduced row is the common impact_default_mp family. It is a quality
+ * tier only: it never merges or moves individual bullet/pellet impacts.
+ */
+static cgHitscanImpactRecipe_t CG_HitscanImpactRecipe( int pType,
+		hitscanImpactMaterial_t material, qboolean reduced ) {
+	cgHitscanImpactRecipe_t recipe;
+
+	memset( &recipe, 0, sizeof( recipe ) );
+	recipe.markRadius       = pType == PROJ_SHOTGUN ? 2.5f : 5.0f;
+	recipe.streakLengthMin  = 10.0f;
+	recipe.streakLengthMax  = pType == PROJ_SHOTGUN ? 16.0f : 20.0f;
+	recipe.streakDuration   = pType == PROJ_SHOTGUN ? 0.12f : 0.16f;
+
+	if ( reduced ) {
+		recipe.flashCount  = 1;
+		recipe.sparkCount  = 3;
+		recipe.streakCount = 6;
+		recipe.smokeCount  = 1;
+		return recipe;
+	}
+
+	if ( pType == PROJ_SHOTGUN ) {
+		recipe.flashCount = 3;
+		recipe.smokeCount = 4;
+		switch ( material ) {
+		case HITSCAN_IMPACT_DUST: // q4 impact_concrete: 2-3 spark trails, 3-5 chunks
+			recipe.sparkCount  = 3;
+			recipe.streakCount = 4;
+			recipe.chipCount   = 4;
+			break;
+		case HITSCAN_IMPACT_METAL: // q4 electronics/metal family
+			recipe.sparkCount  = 4;
+			recipe.streakCount = 5;
+			break;
+		case HITSCAN_IMPACT_DEFAULT:
+		default: // q4 impact_default: 3-5 trails, 3-5 side streaks
+			recipe.sparkCount  = 4;
+			recipe.streakCount = 4;
+			break;
+		}
+		return recipe;
+	}
+
+	switch ( material ) {
+	case HITSCAN_IMPACT_DUST: // q4 concrete: flash 3, trails 4-6, chunks 7-12
+		recipe.flashCount  = 3;
+		recipe.sparkCount  = 5;
+		recipe.streakCount = 8;
+		recipe.smokeCount  = 7;
+		recipe.chipCount   = 9;
+		break;
+	case HITSCAN_IMPACT_METAL: // q4 electronics: flash 3, trails/side streaks 6-9
+		recipe.flashCount  = 3;
+		recipe.sparkCount  = 8;
+		recipe.streakCount = 8;
+		recipe.smokeCount  = 8;
+		break;
+	case HITSCAN_IMPACT_DEFAULT:
+	default: // q4 default: flash 1, trails 7-9, spark lines 9-12, smoke 9-12
+		recipe.flashCount  = 1;
+		recipe.sparkCount  = 8;
+		recipe.streakCount = 9;
+		recipe.smokeCount  = 10;
+		break;
+	}
+	return recipe;
+}
+
+static void CG_EmitHitscanParticleClass( qhandle_t particleClass, int count,
+										 const vec3_t origin, const vec3_t normal ) {
+	emitterDesc_t emitter;
+	vec3_t        emitOrigin;
+
+	if ( !particleClass || count <= 0 ) return;
+
+	VectorMA( origin, 1.5f, normal, emitOrigin );
+	memset( &emitter, 0, sizeof( emitter ) );
+	emitter.cls   = particleClass;
+	emitter.count = count;
+	VectorCopy( emitOrigin, emitter.origin );
+	VectorCopy( normal, emitter.axis );
+	Vector4Set( emitter.colorTint, 1.0f, 1.0f, 1.0f, 1.0f );
+	trap_R_EmitParticles( &emitter );
+}
+
+static unsigned CG_HitscanImpactSeed( const cgHitscanImpactDesc_t *impact ) {
+	unsigned seed = (unsigned)(int)( impact->origin[0] * 8.0f ) * 73856093u
+		^ (unsigned)(int)( impact->origin[1] * 8.0f ) * 19349663u
+		^ (unsigned)(int)( impact->origin[2] * 8.0f ) * 83492791u;
+	return seed ? seed : 1u;
+}
+
+static float CG_HitscanImpactRandom( unsigned *seed ) {
+	*seed = *seed * 1664525u + 1013904223u;
+	return (float)( ( *seed >> 8 ) & 0xffffu ) / 65535.0f;
+}
+
+static void CG_EmitHitscanStreaks( const cgHitscanImpactDesc_t *impact,
+		const cgHitscanImpactRecipe_t *recipe ) {
+	vec3_t tangent;
+	vec3_t bitangent;
+	vec3_t start;
+	unsigned seed;
+	int i;
+
+	if ( recipe->streakCount <= 0 || !cgs.media.tracerShaderPrim ) return;
+	PerpendicularVector( tangent, impact->normal );
+	CrossProduct( impact->normal, tangent, bitangent );
+	VectorMA( impact->origin, 1.5f, impact->normal, start );
+	seed = CG_HitscanImpactSeed( impact );
+
+	for ( i = 0; i < recipe->streakCount; i++ ) {
+		beamDesc_t beam;
+		vec3_t direction;
+		float tangentA = CG_HitscanImpactRandom( &seed ) * 2.0f - 1.0f;
+		float tangentB = CG_HitscanImpactRandom( &seed ) * 2.0f - 1.0f;
+		float length = recipe->streakLengthMin
+			+ CG_HitscanImpactRandom( &seed )
+				* ( recipe->streakLengthMax - recipe->streakLengthMin );
+
+		VectorScale( impact->normal, 0.55f + 0.45f * CG_HitscanImpactRandom( &seed ), direction );
+		VectorMA( direction, tangentA * 0.72f, tangent, direction );
+		VectorMA( direction, tangentB * 0.72f, bitangent, direction );
+		VectorNormalize( direction );
+
+		memset( &beam, 0, sizeof( beam ) );
+		VectorCopy( start, beam.start );
+		VectorMA( start, length, direction, beam.end );
+		beam.startWidth     = 0.24f;
+		beam.endWidth       = 0.035f;
+		Vector4Set( beam.startColor, 1.0f, 0.90f, 0.56f, 0.88f );
+		Vector4Set( beam.endColor, 1.0f, 0.36f, 0.05f, 0.0f );
+		beam.shader         = cgs.media.tracerShaderPrim;
+		beam.duration       = recipe->streakDuration;
+		beam.fadeOut        = recipe->streakDuration * 0.70f;
+		beam.axialCopies    = 1;
+		beam.startEntityNum = -1;
+		beam.endEntityNum   = -1;
+		trap_R_AddBeamToScene( &beam );
+	}
+}
+
+static qboolean CG_EmitHitscanRicochet( const cgHitscanImpactDesc_t *impact ) {
+	beamDesc_t beam;
+	vec3_t     start;
+	vec3_t     end;
+	vec3_t     reflected;
+	vec3_t     soundOrigin;
+	float      incomingDot;
+	float      length;
+	int        soundPick;
+
+	if ( impact->material != HITSCAN_IMPACT_METAL || !cgs.media.tracerShaderPrim ) return qfalse;
+
+	incomingDot = DotProduct( impact->incoming, impact->normal );
+	// incoming points into the struck plane. Only shallow, visibly grazing
+	// impacts receive a cosmetic reflected streak; damage never re-traces.
+	if ( incomingDot >= -0.02f || incomingDot <= -0.62f ) return qfalse;
+
+	VectorMA( impact->incoming, -2.0f * incomingDot, impact->normal, reflected );
+	if ( VectorNormalize( reflected ) == 0.0f ) return qfalse;
+
+	VectorMA( impact->origin, 1.75f, impact->normal, start );
+	length = 26.0f;
+	VectorMA( start, length, reflected, end );
+
+	memset( &beam, 0, sizeof( beam ) );
+	VectorCopy( start, beam.start );
+	VectorCopy( end, beam.end );
+	beam.startWidth     = 0.38f;
+	beam.endWidth       = 0.06f;
+	Vector4Set( beam.startColor, 1.0f, 0.88f, 0.52f, 0.95f );
+	Vector4Set( beam.endColor, 1.0f, 0.32f, 0.04f, 0.0f );
+	beam.shader         = cgs.media.tracerShaderPrim;
+	beam.duration       = 0.070f;
+	beam.fadeOut        = 0.040f;
+	beam.axialCopies    = 1;
+	beam.startEntityNum = -1;
+	beam.endEntityNum   = -1;
+	trap_R_AddBeamToScene( &beam );
+
+	soundPick = rand() % 3;
+	VectorCopy( impact->origin, soundOrigin );
+	trap_S_StartSound( soundOrigin, ENTITYNUM_WORLD, CHAN_AUTO,
+					   soundPick == 0 ? cgs.media.sfx_ric1
+					                  : ( soundPick == 1 ? cgs.media.sfx_ric2 : cgs.media.sfx_ric3 ) );
+	return qtrue;
+}
+
+/*
+=================
+CG_EmitHitscanImpact
+
+One cgame-owned composition point for machinegun and shotgun wall hits. Every
+hit keeps its authored position. Quality changes only the Q4-derived layer
+counts; no local entities, dynamic lights, or spatial clustering are involved.
+=================
+*/
+static void CG_EmitHitscanImpact( const cgHitscanImpactDesc_t *impact ) {
+	hitscanImpactMaterial_t material = impact->material;
+	cgHitscanImpactRecipe_t recipe;
+
+	if ( material < HITSCAN_IMPACT_DEFAULT || material >= HITSCAN_IMPACT_MATERIAL_COUNT ) {
+		material = HITSCAN_IMPACT_DEFAULT;
+	}
+	recipe = CG_HitscanImpactRecipe( impact->pType, material,
+		cg_hitscanImpactDetail.integer <= 0 );
+
+	if ( impact->emitMark ) {
+		CG_ImpactMark( cgs.media.bulletMarkShader, impact->origin, impact->normal,
+					   random() * 360.0f, 1, 1, 1, 1, qfalse, recipe.markRadius, qfalse );
+	}
+
+	if ( !impact->emitSecondary ) return;
+	if ( CG_PointContents( impact->origin, 0 ) & ( CONTENTS_WATER | CONTENTS_SLIME | CONTENTS_LAVA ) ) return;
+
+	CG_EmitHitscanParticleClass( cgs.media.hitscanFlashClass, recipe.flashCount,
+		impact->origin, impact->normal );
+	CG_EmitHitscanParticleClass( cgs.media.hitscanMetalSparkClass, recipe.sparkCount,
+		impact->origin, impact->normal );
+	CG_EmitHitscanStreaks( impact, &recipe );
+	CG_EmitHitscanParticleClass( cgs.media.hitscanDustClass, recipe.smokeCount,
+		impact->origin, impact->normal );
+	CG_EmitHitscanParticleClass( cgs.media.hitscanChipClass, recipe.chipCount,
+		impact->origin, impact->normal );
+
+	if ( impact->emitRicochet ) {
+		CG_EmitHitscanRicochet( impact );
+	}
+}
 
 
 /*
@@ -2578,15 +2788,24 @@ static void CG_ShotgunPellet( vec3_t start, vec3_t end, int skipNum ) {
 	if ( cg_entities[tr.entityNum].currentState.eType == ET_PLAYER ) {
 		CG_MissileHitPlayer( PROJ_SHOTGUN, tr.endpos, tr.plane.normal, tr.entityNum );
 	} else {
-		if ( tr.surfaceFlags & SURF_NOIMPACT ) {
-			// SURF_NOIMPACT will not make a flame puff or a mark
-			return;
+		cgHitscanImpactDesc_t impact;
+		vec3_t                incoming;
+
+		VectorSubtract( tr.endpos, start, incoming );
+		if ( VectorNormalize( incoming ) == 0.0f ) {
+			VectorNegate( tr.plane.normal, incoming );
 		}
-		if ( tr.surfaceFlags & SURF_METALSTEPS ) {
-			CG_MissileHitWall( PROJ_SHOTGUN, 0, tr.endpos, tr.plane.normal, IMPACTSOUND_METAL, ENTITYNUM_WORLD );
-		} else {
-			CG_MissileHitWall( PROJ_SHOTGUN, 0, tr.endpos, tr.plane.normal, IMPACTSOUND_DEFAULT, ENTITYNUM_WORLD );
-		}
+
+		memset( &impact, 0, sizeof( impact ) );
+		impact.pType    = PROJ_SHOTGUN;
+		impact.material = BG_HitscanImpactMaterialForSurfaceFlags( tr.surfaceFlags );
+		impact.emitMark      = qtrue;
+		impact.emitSecondary = qtrue;
+		impact.emitRicochet  = qtrue;
+		VectorCopy( tr.endpos, impact.origin );
+		VectorCopy( tr.plane.normal, impact.normal );
+		VectorCopy( incoming, impact.incoming );
+		CG_EmitHitscanImpact( &impact );
 	}
 }
 
@@ -2850,9 +3069,15 @@ qboolean	CG_CalcMuzzlePoint( int entityNum, vec3_t muzzle ) {
 	int			anim;
 
 	if ( entityNum == cg.snap->ps.clientNum ) {
-		VectorCopy( cg.snap->ps.origin, muzzle );
-		muzzle[2] += cg.snap->ps.viewheight;
-		AngleVectors( cg.snap->ps.viewangles, forward, NULL, NULL );
+		if ( cg.thirdPersonCenterAimActive ) {
+			VectorCopy( cg.predictedPlayerState.origin, muzzle );
+			muzzle[2] += cg.predictedPlayerState.viewheight;
+			AngleVectors( cg.thirdPersonCenterAimAngles, forward, NULL, NULL );
+		} else {
+			VectorCopy( cg.snap->ps.origin, muzzle );
+			muzzle[2] += cg.snap->ps.viewheight;
+			AngleVectors( cg.snap->ps.viewangles, forward, NULL, NULL );
+		}
 		VectorMA( muzzle, 14, forward, muzzle );
 		return qtrue;
 	}
@@ -2885,10 +3110,14 @@ CG_Bullet
 Renders bullet effects.
 ======================
 */
-void CG_Bullet( vec3_t end, int sourceEntityNum, vec3_t normal, qboolean flesh, int fleshEntityNum ) {
+void CG_Bullet( vec3_t end, int sourceEntityNum, vec3_t normal, qboolean flesh, int fleshEntityNum,
+				hitscanImpactMaterial_t material ) {
 	trace_t trace;
 	int sourceContentType, destContentType;
-	vec3_t		start;
+	vec3_t start;
+	vec3_t incoming;
+
+	VectorNegate( normal, incoming );
 
 	// if the shooter is currently valid, calc a source point and do the
 	// underwater trail / water-crossing effects.
@@ -2899,6 +3128,10 @@ void CG_Bullet( vec3_t end, int sourceEntityNum, vec3_t normal, qboolean flesh, 
 	// tracer-draw at the bottom keeps the cg_tracerChance check.
 	if ( sourceEntityNum >= 0 ) {
 		if ( CG_CalcMuzzlePoint( sourceEntityNum, start ) ) {
+			VectorSubtract( end, start, incoming );
+			if ( VectorNormalize( incoming ) == 0.0f ) {
+				VectorNegate( normal, incoming );
+			}
 			sourceContentType = CG_PointContents( start, 0 );
 			destContentType = CG_PointContents( end, 0 );
 
@@ -2944,7 +3177,17 @@ void CG_Bullet( vec3_t end, int sourceEntityNum, vec3_t normal, qboolean flesh, 
 	if ( flesh ) {
 		CG_Bleed( end, fleshEntityNum );
 	} else {
-		CG_MissileHitWall( PROJ_MACHINEGUN, 0, end, normal, IMPACTSOUND_DEFAULT, ENTITYNUM_WORLD );
+		cgHitscanImpactDesc_t impact;
+		memset( &impact, 0, sizeof( impact ) );
+		impact.pType          = PROJ_MACHINEGUN;
+		impact.material       = material;
+		impact.emitMark       = qtrue;
+		impact.emitSecondary  = qtrue;
+		impact.emitRicochet   = qtrue;
+		VectorCopy( end, impact.origin );
+		VectorCopy( normal, impact.normal );
+		VectorCopy( incoming, impact.incoming );
+		CG_EmitHitscanImpact( &impact );
 	}
 
 }

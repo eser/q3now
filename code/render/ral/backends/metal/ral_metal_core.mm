@@ -45,6 +45,15 @@ qboolean RalMetal_TextureFormatSupportsFeatures( const ralMetalCore_t *core,
 	// the pixel-format tables for all devices accepted by this core; optional
 	// families remain false until an exact device gate is added.
 	switch ( format ) {
+	case RAL_FORMAT_E5B9G9R9_UFLOAT:
+	case RAL_FORMAT_R16G16_SNORM:
+	case RAL_FORMAT_R8G8_UNORM:
+	case RAL_FORMAT_R8_UNORM:
+		available = RAL_TEXTURE_FORMAT_FEATURE_SAMPLED
+			| RAL_TEXTURE_FORMAT_FEATURE_FILTER_LINEAR
+			| RAL_TEXTURE_FORMAT_FEATURE_TRANSFER_SRC
+			| RAL_TEXTURE_FORMAT_FEATURE_TRANSFER_DST;
+		break;
 	case RAL_FORMAT_R16G16B16A16_SFLOAT:
 		available = RAL_TEXTURE_FORMAT_FEATURE_SAMPLED
 			| RAL_TEXTURE_FORMAT_FEATURE_FILTER_LINEAR

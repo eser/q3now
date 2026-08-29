@@ -32,6 +32,53 @@ qboolean CG_IsPlayerInvisible( centity_t *cent ) {
 	return qfalse;
 }
 
+/*
+===========================
+CG_EvaluateVisualTrajectory
+
+Evaluate a historical point in the same visual space as cent->lerpOrigin.
+Projectile prediction, mover correction and interpolation may move the rendered
+entity away from the raw server trajectory. Applying the current visual offset
+to every trail sample keeps the model, trail and liquid crossings coherent.
+===========================
+*/
+void CG_EvaluateVisualTrajectory( const centity_t *cent, int atTime, vec3_t result ) {
+	vec3_t rawNow;
+	vec3_t visualOffset;
+
+	BG_EvaluateTrajectory( &cent->currentState.pos, atTime, result );
+	BG_EvaluateTrajectory( &cent->currentState.pos, cg.time, rawNow );
+	VectorSubtract( cent->lerpOrigin, rawNow, visualOffset );
+	VectorAdd( result, visualOffset, result );
+}
+
+/*
+============================
+CG_ProjectileTrailStepForSpacing
+
+Convert a desired maximum world-space gap into a bounded time-grid step.
+Slow projectiles retain the legacy cadence; fast projectiles receive denser
+samples so the visible trail cannot lose contact with the rendered missile.
+============================
+*/
+int CG_ProjectileTrailStepForSpacing( const centity_t *cent, float spacing, int maxStep ) {
+	vec3_t velocity;
+	float speed;
+	int step;
+
+	if ( maxStep < 1 ) maxStep = 1;
+	if ( !cent || spacing <= 0.0f ) return maxStep;
+
+	BG_EvaluateTrajectoryDelta( &cent->currentState.pos, cg.time, velocity );
+	speed = VectorLength( velocity );
+	if ( speed <= 1.0f ) return maxStep;
+
+	step = (int)( 1000.0f * spacing / speed + 0.5f );
+	if ( step < 8 ) step = 8;
+	if ( step > maxStep ) step = maxStep;
+	return step;
+}
+
 int CG_CrosshairPlayer( void ) {
 	if ( cg.time > ( cg.crosshairClientTime + 1000 ) ) {
 		return -1;

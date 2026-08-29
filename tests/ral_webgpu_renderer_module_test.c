@@ -25,7 +25,9 @@ int main( void ) {
 		&& renderer->BeginFrame && renderer->EndFrame
 		&& renderer->GetConfig && renderer->GetMemoryBudget
 		&& renderer->AddRefEntityToSceneTemporal
-		&& renderer->PresentationChanged );
+		&& renderer->PresentationChanged
+		&& renderer->CookLightingProject
+		&& !renderer->CookLightingProject( "/tmp" ) );
 	CHECK( WiredWebGpu_RendererPoll() == RAL_WEBGPU_ASYNC_READY );
 	CHECK( !WiredWebGpu_GetFrameReceipt( &receipt ) );
 	memset( &config, 0xa5, sizeof( config ) );

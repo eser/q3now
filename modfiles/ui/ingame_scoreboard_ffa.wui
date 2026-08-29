@@ -37,7 +37,6 @@ menuDef {
 		itemDef {
 			name "scoreboard_root"
 			type container
-			rect 0.1 0.04 0.8 0.92
 			direction column
 			width PERCENT 0.8
 			height PERCENT 0.92

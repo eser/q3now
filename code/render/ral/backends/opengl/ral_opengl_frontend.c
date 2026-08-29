@@ -90,6 +90,7 @@ qboolean RalOpenGl_FrontendPlanBuild(
 				!= submission->frameDigest
 			|| frontend->entityCount != submission->entityCount
 			|| frontend->temporalEntityCount != submission->temporalEntityCount
+			|| frontend->localIrradianceEntityCount != submission->localIrradianceEntityCount
 			|| frontend->polygonCount != submission->polygonCount
 			|| frontend->lightCount != submission->lightCount
 			|| frontend->uiPrimitiveCount != submission->uiPrimitiveCount ) return qfalse;
@@ -137,6 +138,14 @@ qboolean RalOpenGl_FrontendPlanBuild(
 	for ( uint32_t i = 0u; entities && i < entityCount; ++i ) {
 		const refEntity_t *entity = &entities[i].entity;
 		if ( entities[i].hasTemporal ) candidate.loweredTemporalEntityCount++;
+		if ( entities[i].hasLocalIrradiance ) {
+			if ( !Ral_IrradianceEntitySampleReceiptValid( &entities[i].localIrradiance )
+					|| !Ral_LightingCompositionReceiptValid( &entities[i].lightingComposition )
+					|| entities[i].lightingComposition.diffuseAuthority
+						!= RAL_LIGHTING_DIFFUSE_AUTHORITY_LOCAL_SH )
+				candidate.unresolvedCount++;
+			else candidate.loweredLocalIrradianceEntityCount++;
+		}
 		if ( entity->reType == RT_MODEL ) {
 			renderModelSnapshot_t model;
 			if ( entity->hModel == 0 ) {
@@ -160,8 +169,8 @@ qboolean RalOpenGl_FrontendPlanBuild(
 					|| !AddU32( &candidate.loweredEntityBatchCount, model.batchCount ) )
 				return qfalse;
 			for ( uint32_t batch = 0u; batch < model.batchCount; ++batch ) {
-				qhandle_t material = entity->customShader > 0
-					? entity->customShader : model.batches[batch].material;
+				qhandle_t material = RenderSubmission_EntityBatchMaterial(
+					frontend, &entities[i], &model.batches[batch] );
 				if ( !MaterialReady( frontend, material, NULL ) )
 					candidate.unresolvedCount++;
 			}
@@ -187,6 +196,8 @@ qboolean RalOpenGl_FrontendPlanBuild(
 	}
 	if ( candidate.loweredTemporalEntityCount != submission->temporalEntityCount )
 		candidate.unresolvedCount++;
+	if ( candidate.loweredLocalIrradianceEntityCount
+			!= submission->localIrradianceEntityCount ) candidate.unresolvedCount++;
 	ui = RenderSubmission_UiPrimitives( frontend, &uiCount );
 	if ( uiCount != submission->uiPrimitiveCount || ( uiCount && !ui ) )
 		candidate.unresolvedCount++;
@@ -272,6 +283,8 @@ qboolean RalOpenGl_FrontendPlanBuild(
 	candidate.loweringDigest = HashU64( candidate.loweringDigest,
 		( (uint64_t)candidate.loweredPolygonCount << 32u )
 		| candidate.loweredLightCount );
+	candidate.loweringDigest = HashU64( candidate.loweringDigest,
+		candidate.loweredLocalIrradianceEntityCount );
 	candidate.ready = qtrue;
 	if ( !ReceiptValid( &candidate ) ) return qfalse;
 	*outReceipt = candidate;

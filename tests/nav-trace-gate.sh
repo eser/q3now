@@ -13,8 +13,9 @@
 #   2. GOLDEN gate — Windows (the committed golden's owner) compares the fresh
 #      trace byte-for-byte. Other platforms compare a bounded semantic trace:
 #      event order, repath reason, waypoint topology/flags, OMC and stuck events
-#      stay exact; Detour query counts may vary and coordinates get a measured
-#      four-unit cross-platform tolerance instead of being discarded.
+#      stay exact; Detour query counts may vary, routed coordinates get a measured
+#      four-unit cross-platform tolerance, and the live START pose remains bound
+#      to its repath origin instead of being mistaken for corridor geometry.
 #      NAVVAL remains the geometry/collision authority on every platform.
 #      Set NAV_UPDATE_GOLDEN=1 on Windows to re-bless after an INTENDED change.
 #
@@ -141,6 +142,9 @@ def delta(left, right):
 
 errors = []
 max_delta = 0.0
+max_actor_delta = 0.0
+expected_origin = None
+actual_origin = None
 if len(golden) != len(fresh):
     errors.append(f"line-count: golden={len(golden)} fresh={len(fresh)}")
 
@@ -163,13 +167,19 @@ for number, (expected, actual) in enumerate(zip(golden, fresh), 1):
         actual_shape = (actual_repath.group(1), actual_repath.group(2),
                         actual_repath.group(5), actual_repath.group(6))
         try:
-            origin_delta = delta(expected_repath.group(3), actual_repath.group(3))
+            expected_origin = expected_repath.group(3)
+            actual_origin = actual_repath.group(3)
+            origin_delta = delta(expected_origin, actual_origin)
             goal_delta = delta(expected_repath.group(4), actual_repath.group(4))
         except ValueError:
             errors.append(f"line {number}: invalid/non-finite repath coordinate\n  G: {expected}\n  F: {actual}")
             continue
-        max_delta = max(max_delta, origin_delta, goal_delta)
-        if expected_shape != actual_shape or origin_delta > tolerance or goal_delta > tolerance:
+        # O is the actor's live simulation pose, not a routed corridor point.
+        # Small platform-dependent movement differences accumulate over the run,
+        # so report that drift but bind the START waypoint to this pose below.
+        max_actor_delta = max(max_actor_delta, origin_delta)
+        max_delta = max(max_delta, goal_delta)
+        if expected_shape != actual_shape or goal_delta > tolerance:
             errors.append(
                 f"line {number}: repath changed (origin delta={origin_delta:g}, "
                 f"goal delta={goal_delta:g}, tolerance={tolerance:g})\n"
@@ -189,8 +199,21 @@ for number, (expected, actual) in enumerate(zip(golden, fresh), 1):
         except ValueError:
             errors.append(f"line {number}: invalid/non-finite waypoint coordinate\n  G: {expected}\n  F: {actual}")
             continue
-        max_delta = max(max_delta, waypoint_delta)
-        if expected_shape != actual_shape or waypoint_delta > tolerance:
+        flags = int(actual_waypoint.group(3), 16)
+        is_start_only = (flags & 0x01) != 0 and (flags & 0x02) == 0
+        start_detached = False
+        if is_start_only:
+            if expected_origin is None or actual_origin is None:
+                start_detached = True
+            else:
+                start_detached = (
+                    delta(expected_waypoint.group(2), expected_origin) > tolerance or
+                    delta(actual_waypoint.group(2), actual_origin) > tolerance
+                )
+        else:
+            max_delta = max(max_delta, waypoint_delta)
+        if (expected_shape != actual_shape or start_detached or
+                (not is_start_only and waypoint_delta > tolerance)):
             errors.append(
                 f"line {number}: waypoint changed (delta={waypoint_delta:g}, "
                 f"tolerance={tolerance:g})\n  G: {expected}\n  F: {actual}"
@@ -204,7 +227,10 @@ if errors:
     print("\n".join(errors[:30]))
     raise SystemExit(1)
 
-print(f"    semantic coordinate delta: max={max_delta:g}u <= {tolerance:g}u")
+print(
+    f"    semantic route delta: max={max_delta:g}u <= {tolerance:g}u "
+    f"(live actor drift={max_actor_delta:g}u; START remains origin-bound)"
+)
 PY
 }
 
@@ -227,12 +253,19 @@ if [ "${1:-}" = "--self-test" ]; then
   rc=0
   semantic_nav_match "$golden_fixture" "$fresh_fixture" "$NAV_COORD_TOLERANCE" \
     || { echo "FAIL: semantic self-test rejected measured 3u platform drift"; rc=1; }
-  sed 's/(103,198,24)/(9000,9000,9000)/g' "$fresh_fixture" > "$fixture_dir/diverged.trace"
+  sed 's/(400,500,15)/(9000,9000,9000)/g' "$fresh_fixture" > "$fixture_dir/diverged.trace"
   if semantic_nav_match "$golden_fixture" "$fixture_dir/diverged.trace" "$NAV_COORD_TOLERANCE" >/dev/null; then
     echo "FAIL: semantic self-test accepted a divergent corridor"
     rc=1
   else
     echo "PASS: semantic self-test rejected a divergent corridor"
+  fi
+  sed 's/wp 0: (103,198,24)/wp 0: (9000,9000,9000)/' "$fresh_fixture" > "$fixture_dir/detached-start.trace"
+  if semantic_nav_match "$golden_fixture" "$fixture_dir/detached-start.trace" "$NAV_COORD_TOLERANCE" >/dev/null; then
+    echo "FAIL: semantic self-test accepted a START waypoint detached from actor origin"
+    rc=1
+  else
+    echo "PASS: semantic self-test rejected a detached START waypoint"
   fi
   sed 's/reason: new/reason: timer/' "$fresh_fixture" > "$fixture_dir/reason.trace"
   if semantic_nav_match "$golden_fixture" "$fixture_dir/reason.trace" "$NAV_COORD_TOLERANCE" >/dev/null; then
@@ -277,46 +310,22 @@ Q3DIR="$(slashify "$Q3DIR")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GOLDEN="$SCRIPT_DIR/golden/botnav_${NAV_MAP}.trace"
 
-# Resolve where the map/asset content packs actually live. The build install root
-# ($Q3DIR/base) holds the freshly built game-module pack (pax21) but NOT the large
-# map/asset content pack (pax01) — the launcher downloads that into the user's data
-# home (<user-home>/wired/<product>-<channel>/base), so on a normal machine the map
-# BSPs (arena1.bsp, e1m1.bsp) exist ONLY there. Probing $Q3DIR/base alone finds
-# pax21 (no BSP) and the map load dies with "Can't find map". Search a candidate
-# list for the base/ dir that actually holds a MAP content pack (pax0* / pak*, not
-# merely the game-module pax21), so the gate is runnable regardless of which root
-# the caller pointed Q3DIR at. Q3CONTENT overrides the search explicitly. This is
-# content DISCOVERY (where to copy the real pack FROM) — NOT an fs_*path override:
-# the engine still runs against the isolated fs_homepath assembled below.
+# Resolve where the installed content archives live. Prefer the explicit root,
+# then the player's downloaded content, and only then the build/install root.
+# Archive filenames do not encode roles here; the engine is the inventory
+# authority and the run fails closed if the requested map is absent.
 #
 # The data home lives under the *Windows* user profile, not the msys $HOME
 # (/home/<user>). Derive it from $USERPROFILE (cygpath maps it to a msys path when
 # available; otherwise slashify the raw value) with $HOME as a last resort.
-has_map_pak()  { compgen -G "$1/pax0"*.sw3z >/dev/null 2>&1 || compgen -G "$1/pak"*.pk3 >/dev/null 2>&1; }
-has_any_pak()  { compgen -G "$1/pa"[xk]*.sw3z >/dev/null 2>&1 || compgen -G "$1/pak"*.pk3 >/dev/null 2>&1; }
-
 USER_HOME=""
 if [ -n "${USERPROFILE:-}" ]; then
   USER_HOME="$(cygpath -u "$USERPROFILE" 2>/dev/null || slashify "$USERPROFILE")"
 fi
 [ -z "$USER_HOME" ] && USER_HOME="$HOME"
-DATA_HOME="$USER_HOME/wired/q3now-preview/base"
-
-CONTENT_BASE=""
-# Preference order: explicit Q3CONTENT, then any candidate that holds MAP content.
-for cand in \
-  ${Q3CONTENT:+"$(slashify "${Q3CONTENT}")/base"} \
-  "$Q3DIR/base" \
-  "$DATA_HOME"; do
-  if has_map_pak "$cand"; then CONTENT_BASE="$cand"; break; fi
-done
-# Last resort: any dir with *some* pak (keeps SKIP honest on an asset-free machine,
-# and still lets a maps-in-pak21 layout work if that is ever how content ships).
-if [ -z "$CONTENT_BASE" ]; then
-  for cand in "$Q3DIR/base" "$DATA_HOME"; do
-    if has_any_pak "$cand"; then CONTENT_BASE="$cand"; break; fi
-  done
-fi
+DATA_ROOT="$USER_HOME/wired/q3now-preview"
+CONTENT_ROOT="$(wired_find_archive_root "${Q3CONTENT:-}" "$DATA_ROOT" "$Q3DIR" 2>/dev/null || true)"
+CONTENT_BASE="${CONTENT_ROOT:+$CONTENT_ROOT/base}"
 
 # A gameplay run (fight + traverse) needs a bigger time budget than the arena
 # nav pass; the walltime/wait scale with the mode.
@@ -356,8 +365,8 @@ fi
 # environment that cannot run a real bot-nav pass. CONTENT_BASE was resolved above
 # to the base/ dir that actually holds a content pack; an empty result means none
 # of the candidate roots had one.
-if [ -z "$CONTENT_BASE" ] || ! has_any_pak "$CONTENT_BASE"; then
-  echo "SKIP: no content paks (*.sw3z / pak0.pk3) found (searched Q3DIR=$Q3DIR/base and the data home $DATA_HOME) — skipping nav gate"
+if [ -z "$CONTENT_BASE" ] || ! wired_base_has_archives "$CONTENT_BASE"; then
+  echo "SKIP: no content archives found (searched explicit, data-home and Q3DIR roots) — skipping nav gate"
   exit 77
 fi
 echo "==> nav-trace gate [$NAV_MODE]: content packs from $CONTENT_BASE"
@@ -402,24 +411,18 @@ cleanup_nav_gate() {
     [ -n "$PLAY" ] && rm -f "$PLAY"
     rm -rf "$NAV_HOME"
   fi
+  # Diagnostic retention commonly leaves ACT/OFC/PLAY empty. Do not let the
+  # final false `[ -n ... ]` probe replace a successful gate's exit status.
+  return 0
 }
 trap cleanup_nav_gate EXIT
 
 # Isolated run home so the FRESH build's game modules are exercised, not an
-# installed copy. Maps (pax01) come from the Q3DIR content; the freshly built
-# game module pack (pax21) is taken from the headless binary's own base/ dir so
-# it wins over any installed copy. No deploy, no fs override beyond locating
-# content — the same content-path contract smoke.sh uses.
-mkdir -p "$NAV_HOME/base"
+# installed copy. Link the complete content archive set first, then the
+# headless binary's adjacent archive set so freshly built duplicates win.
+# No deploy or archive copy is involved.
 DED_DIR="$(cd "$(dirname "$DED")" && pwd)"
-# content packs (maps + assets) from the resolved content base — this is the dir
-# that actually holds the map BSPs (pax01), which may be the data home rather than
-# the install root the caller passed as Q3DIR.
-for pak in "$CONTENT_BASE"/pa[xk]*.sw3z "$CONTENT_BASE"/pak*.pk3; do
-  [ -f "$pak" ] && cp "$pak" "$NAV_HOME/base/" 2>/dev/null || true
-done
-# fresh game-module pack from the build, if present — overrides the installed one
-[ -f "$DED_DIR/base/pax21.sw3z" ] && cp "$DED_DIR/base/pax21.sw3z" "$NAV_HOME/base/" 2>/dev/null || true
+wired_link_content_into_home "$NAV_HOME" "$CONTENT_BASE" "$DED_DIR/base" || exit 1
 NAV_HOME_NATIVE="$(cygpath -w "$NAV_HOME" 2>/dev/null || echo "$NAV_HOME")"
 
 # Unique server port per run so back-to-back invocations never collide on the
@@ -969,9 +972,9 @@ fi
 
 # Portable comparison — cmp/diff are not always on PATH in this environment.
 # Exact mode normalizes only CR. Semantic mode ignores the platform-dependent
-# FindPath diagnostic counts, but checks every corridor coordinate within the
-# measured 4u band and keeps event order/reasons/point counts/indices/flags,
-# OMC and stuck/reached events exact.
+# FindPath diagnostic counts, but checks every routed interior/END coordinate
+# within the measured 4u band, binds START to the live repath origin, and keeps
+# event order/reasons/point counts/indices/flags, OMC and stuck/reached exact.
 if [ "$NAV_GOLDEN_MODE" = "exact" ]; then
   golden_body="$(tr -d '\r' < "$GOLDEN")"
   fresh_body="$(tr -d '\r' < "$FRESH")"

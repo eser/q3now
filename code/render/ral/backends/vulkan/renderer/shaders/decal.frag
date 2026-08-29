@@ -50,6 +50,15 @@ layout(set = 0, binding = 2) uniform sampler2D decalTextures[64];
 // tonemap consumers sample. Used to reconstruct the surface beneath the decal.
 layout(set = 0, binding = 3) uniform sampler2D sceneDepthTex;
 
+struct SurfaceClimateTile {
+	ivec2 key;
+	uvec2 meta;
+	vec4 climate;
+};
+layout(std430, set = 0, binding = 4) readonly buffer SurfaceClimateTable {
+	SurfaceClimateTile surfaceClimateTiles[256];
+};
+
 layout(location = 0) out vec4 outColor;
 
 // How far along the decal normal the projected surface may sit and still be
@@ -68,10 +77,31 @@ vec3 sRGBToLinear( vec3 c ) {
 	return mix( hi, lo, vec3( cutoff ) );
 }
 
+vec4 surfaceClimateAt( vec2 worldXY ) {
+	ivec2 wanted = ivec2( floor( worldXY / 128.0 ) );
+	uint count = min( uint( reconParams.w ), 256u );
+	uint low = 0u;
+	uint high = count;
+	// Exact lower_bound over the frontend-sorted fixed table. Eight comparisons
+	// cover all 256 entries; empty tables perform no storage read.
+	for ( uint step = 0u; step < 8u; ++step ) {
+		if ( low >= high ) break;
+		uint middle = ( low + high ) >> 1u;
+		ivec2 key = surfaceClimateTiles[middle].key;
+		bool less = key.x < wanted.x || ( key.x == wanted.x && key.y < wanted.y );
+		if ( less ) low = middle + 1u;
+		else high = middle;
+	}
+	if ( low < count && all( equal( surfaceClimateTiles[low].key, wanted ) ) )
+		return surfaceClimateTiles[low].climate;
+	return vec4( 0.0 );
+}
+
 void main() {
 	// Default to the legacy flat-quad UV; the box-projection path overrides it
 	// with the UV of the actual surface point beneath this fragment.
 	vec2 decalUV = fragUV;
+	vec4 localSurfaceClimate = vec4( 0.0 );
 
 	// Box-projection: reconstruct the surface world position from scene depth and
 	// keep only fragments whose underlying surface falls inside the decal's
@@ -102,6 +132,7 @@ void main() {
 		vec3 ndc = vec3( screenUV * 2.0 - 1.0, sceneDepth );
 		vec4 worldH = invMvp * vec4( ndc, 1.0 );
 		vec3 worldPos = worldH.xyz / worldH.w;
+		localSurfaceClimate = surfaceClimateAt( worldPos.xy );
 
 		// Project the surface point into the decal's tangent frame.
 		vec3  local = worldPos - fragDecalOrigin;
@@ -126,6 +157,17 @@ void main() {
 	vec4 texel = texture( decalTextures[fragTextureIndex], decalUV );
 	vec3 rgb   = sRGBToLinear( texel.rgb ) * sRGBToLinear( fragColor.rgb );
 	float alpha = texel.a * fragColor.a;
+	float localWetness = clamp( localSurfaceClimate.x
+		+ 0.5 * localSurfaceClimate.w, 0.0, 1.0 );
+	float localFrost = clamp( localSurfaceClimate.y, 0.0, 1.0 );
+	float localSnow = clamp( localSurfaceClimate.z, 0.0, 1.0 );
+	float luminance = dot( rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
+	rgb *= mix( 1.0, 0.86, localWetness );
+	rgb = mix( rgb, vec3( luminance * 0.88, luminance * 0.94, luminance ),
+		localFrost * 0.45 );
+	// Fresh accumulation partially veils older marks. Footprint/impact events
+	// reduce the tile's snow first, so their own projected mark remains legible.
+	alpha *= mix( 1.0, 0.65, localSnow );
 
 	outColor = vec4( rgb, alpha );
 }

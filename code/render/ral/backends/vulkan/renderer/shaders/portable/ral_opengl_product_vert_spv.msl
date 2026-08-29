@@ -11,6 +11,13 @@ struct ProductDraw
     float4 viewUp;
     float4 projectionLightmap;
     float4 viewportAlpha;
+    float4 atmosphereEyeDensity;
+    float4 atmosphereColorVisibility;
+    float4 atmosphereHeightCloud;
+    uint4 atmosphereFroxelGrid;
+    float4 localSh[4];
+    uint4 staticLighting;
+    float4 emissiveRadiance;
 };
 
 struct main0_out
@@ -18,6 +25,8 @@ struct main0_out
     float2 texCoord [[user(locn0)]];
     float2 lightmapCoord [[user(locn1)]];
     float4 color [[user(locn2)]];
+    float3 worldPosition [[user(locn3)]];
+    float3 worldNormal [[user(locn4)]];
     float4 gl_Position [[position]];
 };
 
@@ -27,6 +36,7 @@ struct main0_in
     float2 in_tex_coord [[attribute(1)]];
     float2 in_lightmap_coord [[attribute(2)]];
     float4 in_color [[attribute(3)]];
+    float3 in_normal [[attribute(4)]];
 };
 
 vertex main0_out main0(main0_in in [[stage_in]], constant ProductDraw& productDraw [[buffer(0)]])
@@ -45,6 +55,8 @@ vertex main0_out main0(main0_in in [[stage_in]], constant ProductDraw& productDr
     out.texCoord = in.in_tex_coord;
     out.lightmapCoord = in.in_lightmap_coord;
     out.color = in.in_color;
+    out.worldPosition = in.in_position;
+    out.worldNormal = fast::normalize(in.in_normal);
     return out;
 }
 

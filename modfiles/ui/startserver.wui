@@ -50,7 +50,7 @@ menuDef {
 		itemDef {
 			name "settings_content"
 			type container
-			rect 0 0 1 0.85
+			width FIXED 1 height FIXED 0.85
 			direction row
 			padding $content_padding_y $content_padding_x
 			gap $spacing_lg
@@ -61,7 +61,7 @@ menuDef {
 			itemDef {
 				name "startserver_left_root"
 				type container
-				rect 0 0 0.40 1
+				width FIXED 0.40 height FIXED 1
 				direction column
 				gap $spacing_sm
 
@@ -85,7 +85,7 @@ menuDef {
 				itemDef {
 					name "maplist"
 					type 6
-					rect 0 0 1 0.50
+					width FIXED 1 height FIXED 0.50
 					// GROW on both axes so the list fills the column exactly like
 					// the map preview above it. PERCENT 1 was not enough: the
 					// listbox emits FLOATING, and a percentage resolves against
@@ -120,14 +120,14 @@ menuDef {
 				itemDef {
 					name "pool_buttons_row"
 					type container
-					rect 0 0 1 0.04
+					width FIXED 1 height FIXED 0.04
 					direction row
 					gap $spacing_sm
 					height FIXED 34px
 
 					itemDef {
 						type 1
-						rect 0 0 0.30 0
+						width FIXED 0.30 height FIXED 0
 						height FIXED 32px
 						alignX center alignY center
 						padding 0 $spacing_sm
@@ -149,7 +149,7 @@ menuDef {
 					}
 					itemDef {
 						type 1
-						rect 0 0 0.30 0
+						width FIXED 0.30 height FIXED 0
 						height FIXED 32px
 						alignX center alignY center
 						padding 0 $spacing_sm
@@ -171,7 +171,7 @@ menuDef {
 					}
 					itemDef {
 						type 1
-						rect 0 0 0.22 0
+						width FIXED 0.22 height FIXED 0
 						height FIXED 32px
 						alignX center alignY center
 						padding 0 $spacing_sm
@@ -191,7 +191,7 @@ menuDef {
 					}
 					itemDef {
 						type 1
-						rect 0 0 0.20 0
+						width FIXED 0.20 height FIXED 0
 						height FIXED 32px
 						alignX center alignY center
 						padding 0 $spacing_sm
@@ -213,7 +213,7 @@ menuDef {
 					}
 					itemDef {
 						type 1
-						rect 0 0 0.20 0
+						width FIXED 0.20 height FIXED 0
 						height FIXED 32px
 						alignX center alignY center
 						padding 0 $spacing_sm
@@ -239,7 +239,7 @@ menuDef {
 				itemDef {
 					name "pool_status"
 					type 0
-					rect 0 0 1 0.025
+					width FIXED 1 height FIXED 0.025
 					height FIT
 					font $font_sans 10
 					textalign 0
@@ -255,7 +255,7 @@ menuDef {
 			itemDef {
 				name "startserver_right_root"
 				type container
-				rect 0 0 0.58 1
+				width FIXED 0.58 height FIXED 1
 				direction column
 				padding $card_padding
 				gap $card_gap_internal
@@ -268,7 +268,7 @@ menuDef {
 				itemDef {
 					name "panel_header"
 					type 0
-					rect 0 0 1 0.04
+					width FIXED 1 height FIXED 0.04
 					height FIT
 					text "Server Settings"
 					textalign 0
@@ -343,7 +343,7 @@ menuDef {
 					textalign 0
 					font $font_sans 13
 					forecolor $bone
-					cvar "sv_hostname"
+					cvar "ui_hostName"
 					maxchars 14
 					visible 1
 					grow 0
@@ -359,7 +359,7 @@ menuDef {
 					textalign 0
 					font $font_sans 13
 					forecolor $bone
-					cvarSpinner "sv_maxclients" 8 2 32 2
+					cvarSpinner "ui_hostMaxClients" 8 2 32 2
 					visible 1
 					grow 0
 				}
@@ -372,7 +372,7 @@ menuDef {
 					textalign 0
 					font $font_sans 13
 					forecolor $bone
-					cvarSpinner "g_scorelimit" 0 0 100 10
+					cvarSpinner "ui_hostScoreLimit" 20 0 100 10
 					visible 1
 					grow 0
 				}
@@ -385,7 +385,7 @@ menuDef {
 					textalign 0
 					font $font_sans 13
 					forecolor $bone
-					cvarSpinner "g_timelimit" 0 0 30 5
+					cvarSpinner "ui_hostTimeLimit" 0 0 30 5
 					visible 1
 					grow 0
 				}
@@ -400,7 +400,7 @@ menuDef {
 					textalign 0
 					font $font_sans 13
 					forecolor $bone
-					cvar "sv_pure"
+					cvar "ui_hostPure"
 					visible 1
 					grow 0
 				}
@@ -427,7 +427,7 @@ menuDef {
 					textalign 0
 					font $font_sans 13
 					forecolor $bone
-					cvar "sv_allowDownload"
+					cvar "ui_hostAllowDownload"
 					visible 1
 					grow 0
 				}
@@ -436,7 +436,7 @@ menuDef {
 				itemDef {
 					name "panel_team_header"
 					type 0
-					rect 0 0 1 0.03
+					width FIXED 1 height FIXED 0.03
 					height FIT
 					text "Team Settings"
 					textalign 0
@@ -457,7 +457,7 @@ menuDef {
 					textalign 0
 					font $font_sans 13
 					forecolor $bone
-					cvar "g_friendlyfire"
+					cvar "ui_hostFriendlyFire"
 					stateTest "ui_netGameType"
 					showState { 4 5 }
 					visible 1
@@ -472,7 +472,7 @@ menuDef {
 					textalign 0
 					font $font_sans 13
 					forecolor $bone
-					cvar "g_teamForceBalance"
+					cvar "ui_hostTeamForceBalance"
 					stateTest "ui_netGameType"
 					showState { 4 5 }
 					visible 1
@@ -487,7 +487,7 @@ menuDef {
 					textalign 0
 					font $font_sans 13
 					forecolor $bone
-					cvar "g_allowvote"
+					cvar "ui_hostAllowVote"
 					stateTest "ui_netGameType"
 					showState { 4 5 }
 					visible 1
@@ -502,7 +502,7 @@ menuDef {
 					textalign 0
 					font $font_sans 13
 					forecolor $bone
-					cvar "g_localTeamPref"
+					cvar "ui_hostTeamPref"
 					cvarFloatList { "Auto" 0 "Red" 1 "Blue" 2 }
 					stateTest "ui_netGameType"
 					showState { 4 5 }
@@ -520,7 +520,7 @@ menuDef {
 					textalign 0
 					font $font_sans 13
 					forecolor $bone
-					cvar "g_autoBots"
+					cvar "ui_hostAutoBots"
 					visible 1
 					grow 0
 				}
@@ -533,7 +533,7 @@ menuDef {
 					textalign 0
 					font $font_sans 13
 					forecolor $bone
-					cvarSpinner "g_minPlayers" 2 2 8 1
+					cvarSpinner "ui_hostMinPlayers" 0 0 8 1
 					visible 1
 					grow 0
 				}
@@ -546,7 +546,7 @@ menuDef {
 		itemDef {
 			name "panel_footer"
 			type container
-			rect 0 0 1 0.05
+			width FIXED 1 height FIXED 0.05
 			direction row
 			padding 0.005 $content_padding_x
 			gap $spacing_md

@@ -17,7 +17,15 @@ foreach(_needle IN ITEMS "glCreateShader" "glCreateProgram"
 	"ralOpenGlProductVertexSource" "ralOpenGlProductFragmentSource"
 	"vertexShaderDigestLane0" "fragmentShaderDigestLane1"
 	"RalOpenGl_ProductSetOutputExtent" "RalOpenGl_ProductReadbackRgb"
+	"RalOpenGl_ProductSetDirectionalLighting"
 	"RalOpenGl_FrontendPlanBuild" "RalOpenGl_WorldLower"
+	"ralOpenGlProductAtmosphereInjectSource"
+	"ralOpenGlProductAtmosphereLightSource"
+	"ralOpenGlProductAtmosphereCloudSource"
+	"ralOpenGlProductAtmosphereIntegrateSource"
+	"glDispatchCompute" "glMemoryBarrier"
+	"RAL_OPENGL_ATMOSPHERE_FROXEL_CAPACITY"
+	"Ral_AtmospherePlan"
 	"RalOpenGl_ProductFrameReceiptExact")
 	string(FIND "${_product}" "${_needle}" _position)
 	if(_position EQUAL -1)

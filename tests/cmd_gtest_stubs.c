@@ -94,8 +94,29 @@ qboolean CL_GameCommand( void ) {
 	return qfalse;
 }
 
+static qboolean s_serverSpawnIdle = qtrue;
+static qboolean s_serverGameHandled;
+static int s_serverGameCalls;
+
 qboolean SV_GameCommand( void ) {
-	return qfalse;
+	s_serverGameCalls++;
+	return s_serverGameHandled;
+}
+
+qboolean SV_IsSpawnIdle( void ) {
+	return s_serverSpawnIdle;
+}
+
+void CmdTest_SetServerDispatch( qboolean running, qboolean spawnIdle,
+		qboolean handled ) {
+	com_sv_running->integer = running;
+	s_serverSpawnIdle = spawnIdle;
+	s_serverGameHandled = handled;
+	s_serverGameCalls = 0;
+}
+
+int CmdTest_ServerGameCalls( void ) {
+	return s_serverGameCalls;
 }
 
 void CL_ForwardCommandToServer( const char *string ) {

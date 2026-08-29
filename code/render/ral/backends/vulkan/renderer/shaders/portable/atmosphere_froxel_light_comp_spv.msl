@@ -1,0 +1,107 @@
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct Params
+{
+    float4x4 invViewProjection;
+    float4 eyeNear;
+    float4 farPad;
+    uint4 gridLightCount;
+    float4 sunDirectionIntensity;
+    float4 sunColorCloudShadow;
+    float4 moonDirectionIntensity;
+    float4 moonColorLightning;
+    float4 ambientCloud;
+};
+
+struct Media
+{
+    float4 scatteringExtinction[1];
+};
+
+struct TileLights
+{
+    uint tileLight[1];
+};
+
+struct ForwardLight
+{
+    float4 positionRadius;
+    float4 colorInvRadius2;
+    float4 endpointLinear;
+};
+
+struct ForwardLight_1
+{
+    float4 positionRadius;
+    float4 colorInvRadius2;
+    float4 endpointLinear;
+};
+
+struct Lights
+{
+    ForwardLight_1 light[1];
+};
+
+struct LitMedia
+{
+    float4 radianceExtinction[1];
+};
+
+constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(4u);
+
+struct spvDescriptorSetBuffer0
+{
+    constant Params* p [[id(0)]];
+    device Media* m_60 [[id(1)]];
+    device TileLights* m_194 [[id(2)]];
+    device Lights* m_234 [[id(3)]];
+    device LitMedia* m_279 [[id(4)]];
+};
+
+kernel void main0(device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+{
+    uint3 c = gl_GlobalInvocationID;
+    uint3 dims = (*spvDescriptorSet0.p).gridLightCount.xyz;
+    if (any(c >= dims))
+    {
+        return;
+    }
+    uint index = (((c.z * dims.y) + c.y) * dims.x) + c.x;
+    float4 medium = (*spvDescriptorSet0.m_60).scatteringExtinction[index];
+    float2 uv = (float2(c.xy) + float2(0.5)) / float2(dims.xy);
+    float slice = (float(c.z) + 0.5) / float(dims.z);
+    float nearZ = fast::max((*spvDescriptorSet0.p).eyeNear.w, 0.00999999977648258209228515625);
+    float farZ = fast::max((*spvDescriptorSet0.p).farPad.x, nearZ + 0.00999999977648258209228515625);
+    float distanceZ = nearZ * powr(farZ / nearZ, slice);
+    float4 worldH = (*spvDescriptorSet0.p).invViewProjection * float4((uv * 2.0) - float2(1.0), 1.0 - (nearZ / distanceZ), 1.0);
+    float3 world = worldH.xyz / float3(fast::max(abs(worldH.w), 9.9999999747524270787835121154785e-07));
+    float3 illumination = (*spvDescriptorSet0.p).ambientCloud.xyz;
+    illumination += (((*spvDescriptorSet0.p).sunColorCloudShadow.xyz * (*spvDescriptorSet0.p).sunDirectionIntensity.w) * (1.0 - (*spvDescriptorSet0.p).sunColorCloudShadow.w));
+    illumination += ((*spvDescriptorSet0.p).moonColorLightning.xyz * (*spvDescriptorSet0.p).moonDirectionIntensity.w);
+    illumination += (*spvDescriptorSet0.p).moonColorLightning.www;
+    uint tile = (c.y * dims.x) + c.x;
+    uint base = tile * 33u;
+    uint count = min(min((*spvDescriptorSet0.m_194).tileLight[base], 32u), (*spvDescriptorSet0.p).gridLightCount.w);
+    ForwardLight l;
+    for (uint i = 0u; i < count; i++)
+    {
+        uint lightIndex = (*spvDescriptorSet0.m_194).tileLight[(base + 1u) + i];
+        if (lightIndex >= (*spvDescriptorSet0.p).gridLightCount.w)
+        {
+            continue;
+        }
+        l.positionRadius = (*spvDescriptorSet0.m_234).light[lightIndex].positionRadius;
+        l.colorInvRadius2 = (*spvDescriptorSet0.m_234).light[lightIndex].colorInvRadius2;
+        l.endpointLinear = (*spvDescriptorSet0.m_234).light[lightIndex].endpointLinear;
+        float3 delta = l.positionRadius.xyz - world;
+        float radius = fast::max(l.positionRadius.w, 0.001000000047497451305389404296875);
+        float attenuation = fast::max(1.0 - (length(delta) / radius), 0.0);
+        attenuation *= attenuation;
+        illumination += (l.colorInvRadius2.xyz * attenuation);
+    }
+    (*spvDescriptorSet0.m_279).radianceExtinction[index] = float4(medium.xyz * illumination, medium.w);
+}
+

@@ -65,7 +65,6 @@ OPTION(USE_WASM "Enable WASM VM backend via WAMR" OFF)
 OPTION(USE_LUA "Enable LuaJIT scripting" ON)
 OPTION(USE_WIRED_UI_CLAY "Vendor Clay layout engine for the WiredUI compositor (client target only)" ON)
 OPTION(USE_SSAO "Compile the GTAO/SSAO renderer path (current product default ON; OFF is an explicit compiled-out permutation)" ON)
-OPTION(USE_FOG_SYSTEM "Compile the enhanced linear/exp/exp2 fog path (default OFF until TASK-85 activation)" OFF)
 OPTION(WIRED_BUILD_IMGUI_TOOLS "Build tool-only Dear ImGui profiling/editor adapters" OFF)
 
 # RAL is a mandatory part of the Vulkan renderer, not an optional feature.
@@ -188,15 +187,6 @@ ELSE()
 	SET(WIRED_SSAO_COMPILE_VALUE 0)
 ENDIF()
 
-# Keep the gated fog implementation continuously buildable before activation.
-# The product default remains OFF, while verification can compile the exact ON
-# permutation through USE_FOG_SYSTEM=1 make build.
-IF(USE_FOG_SYSTEM)
-	ADD_COMPILE_DEFINITIONS(FEAT_FOG_SYSTEM=1)
-ELSE()
-	ADD_COMPILE_DEFINITIONS(FEAT_FOG_SYSTEM=0)
-ENDIF()
-
 # MinGW: picoquic + picotls use bare `#ifdef _WINDOWS` (MSVC-only auto-define)
 # to gate winsock includes. Inject _WINDOWS so they take the Windows code
 # path; vendored sources stay untouched. Definition is innocuous for wired's
@@ -248,7 +238,8 @@ list(REMOVE_ITEM SERVER_SRCS code/server/sv_rankings.c)
 # bg_weapons.c, bg_misc.c and bg_gametypes.c go into qcommon so the headless
 # server can access bg_weaponlist, bg_itemlist and bg_gametypelist
 # (e.g. for MCP tools like game.items, coaching.tick)
-list(APPEND QCOMMON_SRCS code/game/bg_weapons.c code/game/bg_misc.c code/game/bg_gametypes.c)
+list(APPEND QCOMMON_SRCS code/game/bg_weapons.c code/game/bg_misc.c code/game/bg_gametypes.c
+	code/qcommon/wired/entity/event.c)
 
 # Partition the initial qcommon + server inventory before target creation.
 WIRED_PARTITION_QCOMMON_SOURCES(
@@ -512,6 +503,62 @@ SET_TESTS_PROPERTIES(wiredui_rem_analyzer_contract PROPERTIES
 	TIMEOUT 60
 )
 
+ADD_TEST(NAME wiredui_scoreboard_authority_contract
+	COMMAND node ${CMAKE_SOURCE_DIR}/tests/wiredui-scoreboard-authority-test.mjs
+)
+SET_TESTS_PROPERTIES(wiredui_scoreboard_authority_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.q3now-client;failure.contract;feature.always"
+	TIMEOUT 30
+)
+
+ADD_TEST(NAME wiredui_layout_authority_contract
+	COMMAND node ${CMAKE_SOURCE_DIR}/tests/wiredui-layout-authority-test.mjs
+)
+SET_TESTS_PROPERTIES(wiredui_layout_authority_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.q3now-client;failure.contract;feature.always"
+	TIMEOUT 30
+)
+
+ADD_TEST(NAME wiredui_source_catalog_contract
+	COMMAND node ${CMAKE_SOURCE_DIR}/tests/wiredui-source-catalog-test.mjs
+)
+SET_TESTS_PROPERTIES(wiredui_source_catalog_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.q3now-client;failure.contract;feature.always"
+	TIMEOUT 30
+)
+
+ADD_TEST(NAME wiredui_perspective_hud_contract
+	COMMAND node ${CMAKE_SOURCE_DIR}/tests/wiredui-perspective-hud-test.mjs
+)
+SET_TESTS_PROPERTIES(wiredui_perspective_hud_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.q3now-client;failure.contract;feature.always"
+	TIMEOUT 30
+)
+
+ADD_TEST(NAME wiredui_inspector_hot_reload_contract
+	COMMAND node ${CMAKE_SOURCE_DIR}/tests/wiredui-inspector-hot-reload-test.mjs
+)
+SET_TESTS_PROPERTIES(wiredui_inspector_hot_reload_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.q3now-client;failure.contract;feature.always"
+	TIMEOUT 30
+)
+
+ADD_EXECUTABLE(wiredui_clay_layout_benchmark
+	tests/wiredui_clay_layout_benchmark.c
+)
+TARGET_INCLUDE_DIRECTORIES(wiredui_clay_layout_benchmark PRIVATE src/libs/clay)
+SET_TARGET_PROPERTIES(wiredui_clay_layout_benchmark PROPERTIES
+	C_STANDARD 11
+	C_STANDARD_REQUIRED YES
+)
+ADD_TEST(NAME wiredui_clay_layout_performance
+	COMMAND wiredui_clay_layout_benchmark
+)
+SET_TESTS_PROPERTIES(wiredui_clay_layout_performance PROPERTIES
+	LABELS "host-only;performance;owner.q3now-client;failure.performance;feature.always"
+	TIMEOUT 30
+)
+
 # Second-map Z_Free (#96) analyzer contract.  The live gate needs a BSP-bearing
 # content pak (licensed asset pipeline output), but the crash CLASSIFIER is a
 # pure function of the log: it must reject every zone-consistency terminate
@@ -543,6 +590,14 @@ SET_TESTS_PROPERTIES(ral_profile_renderdoc_analyzer_contract PROPERTIES
 	TIMEOUT 120
 )
 
+ADD_TEST(NAME ral_profile_metal_capture_analyzer_contract
+	COMMAND bash ${CMAKE_SOURCE_DIR}/tests/ral-profile-metal-capture-check.sh --self-test
+)
+SET_TESTS_PROPERTIES(ral_profile_metal_capture_analyzer_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.tools;failure.contract;feature.always"
+	TIMEOUT 60
+)
+
 ADD_TEST(NAME headless_map_transition_analyzer_contract
 	COMMAND bash ${CMAKE_SOURCE_DIR}/tests/headless-map-transition-zonecheck.sh
 		--self-test
@@ -550,6 +605,26 @@ ADD_TEST(NAME headless_map_transition_analyzer_contract
 SET_TESTS_PROPERTIES(headless_map_transition_analyzer_contract PROPERTIES
 	LABELS "host-only;infrastructure;owner.q3now-server;failure.contract;feature.always"
 	TIMEOUT 60
+)
+
+ADD_TEST(NAME nav_map_teardown_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/nav_map_teardown_policy_check.cmake
+)
+SET_TESTS_PROPERTIES(nav_map_teardown_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.q3now-server;failure.contract;feature.always"
+	TIMEOUT 30
+)
+
+ADD_TEST(NAME fs_dedup_process_smoke
+	COMMAND bash ${CMAKE_SOURCE_DIR}/tests/smoke-fs-dedup.sh
+		$<TARGET_FILE:${DNAME}${BINEXT}>
+)
+SET_TESTS_PROPERTIES(fs_dedup_process_smoke PROPERTIES
+	LABELS "process;owner.q3now-core;failure.lifecycle;feature.always"
+	SKIP_RETURN_CODE 77
+	TIMEOUT 60
+	RESOURCE_LOCK wired_net_port
 )
 
 # wired_playtest.jsonl consumer contract (TASK-120 #3). The map-race harness is
@@ -632,6 +707,16 @@ ADD_TEST(NAME ral_webgpu_vulkan_parity_analyzer_contract
 )
 SET_TESTS_PROPERTIES(ral_webgpu_vulkan_parity_analyzer_contract PROPERTIES
 	LABELS "host-only;infrastructure;owner.ral;owner.renderer;failure.contract;backend.webgpu;backend.vulkan"
+	TIMEOUT 60
+)
+
+ADD_TEST(NAME wiredui_webgpu_native_parity_analyzer_contract
+	COMMAND python3
+		${CMAKE_SOURCE_DIR}/tests/wiredui-webgpu-native-parity-analyze.py
+		--self-test
+)
+SET_TESTS_PROPERTIES(wiredui_webgpu_native_parity_analyzer_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ui;owner.ral;failure.contract;backend.webgpu;backend.metal;backend.vulkan"
 	TIMEOUT 60
 )
 
@@ -1233,6 +1318,17 @@ SET_TESTS_PROPERTIES(ral_color_output_contract PROPERTIES
 	LABELS "host-only;subsystem;owner.ral;owner.presentation;failure.contract;backend.webgpu;feature.always"
 	TIMEOUT 30)
 WIRED_CONFIGURE_HOST_TEST(ral_color_output_test ral_color_output_contract)
+ADD_EXECUTABLE(ral_display_visibility_test
+	tests/ral_display_visibility_test.c
+	code/render/ral/core/ral_display_visibility.c)
+TARGET_INCLUDE_DIRECTORIES(ral_display_visibility_test PRIVATE
+	code/qcommon code/render/ral/core code/render/frontend)
+TARGET_COMPILE_OPTIONS(ral_display_visibility_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_display_visibility_contract COMMAND ral_display_visibility_test)
+SET_TESTS_PROPERTIES(ral_display_visibility_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.presentation;owner.lighting;failure.contract;backend.webgpu;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_display_visibility_test ral_display_visibility_contract)
 ADD_TEST(NAME ral_color_output_source_policy_contract
 	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
 		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_color_output_policy_check.cmake)
@@ -1445,6 +1541,227 @@ ADD_TEST(NAME ral_material_reload_source_policy_contract
 SET_TESTS_PROPERTIES(ral_material_reload_source_policy_contract PROPERTIES
 	LABELS "host-only;infrastructure;owner.ral;owner.material;failure.contract;backend.webgpu"
 	TIMEOUT 30)
+ADD_EXECUTABLE(ral_lighting_test
+	tests/ral_lighting_test.c
+	code/render/ral/core/ral_lighting.c)
+TARGET_INCLUDE_DIRECTORIES(ral_lighting_test PRIVATE
+	code/qcommon code/render/ral/core code/render/frontend)
+TARGET_COMPILE_OPTIONS(ral_lighting_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_lighting_contract COMMAND ral_lighting_test)
+SET_TESTS_PROPERTIES(ral_lighting_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.lighting;failure.contract;backend.webgpu;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_lighting_test ral_lighting_contract)
+ADD_TEST(NAME ral_lighting_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_lighting_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_lighting_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.lighting;failure.contract;backend.webgpu"
+	TIMEOUT 30)
+ADD_EXECUTABLE(ral_static_lighting_test
+	tests/ral_static_lighting_test.c
+	code/render/ral/core/ral_lighting.c
+	code/render/ral/core/ral_static_lighting.c)
+TARGET_INCLUDE_DIRECTORIES(ral_static_lighting_test PRIVATE
+	code/qcommon code/render/ral/core code/render/frontend)
+TARGET_COMPILE_OPTIONS(ral_static_lighting_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_static_lighting_contract COMMAND ral_static_lighting_test)
+SET_TESTS_PROPERTIES(ral_static_lighting_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.lighting;failure.contract;backend.webgpu;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_static_lighting_test ral_static_lighting_contract)
+ADD_TEST(NAME ral_static_lighting_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_static_lighting_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_static_lighting_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.lighting;failure.contract;backend.webgpu"
+	TIMEOUT 30)
+ADD_EXECUTABLE(ral_lighting_cook_test tests/ral_lighting_cook_test.c
+	code/render/ral/core/ral_lighting.c code/render/ral/core/ral_static_lighting.c
+	code/render/ral/core/ral_lighting_artifact.c code/render/ral/core/ral_lighting_cook.c
+	code/render/ral/core/ral_lighting_cache.c code/render/ral/core/ral_lighting_cook_pipeline.c
+	code/render/ral/core/ral_lighting_cook_driver.c)
+TARGET_INCLUDE_DIRECTORIES(ral_lighting_cook_test PRIVATE code/qcommon code/render/ral/core code/render/frontend)
+TARGET_COMPILE_OPTIONS(ral_lighting_cook_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_lighting_cook_contract COMMAND ral_lighting_cook_test)
+SET_TESTS_PROPERTIES(ral_lighting_cook_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.lighting;failure.contract;backend.webgpu;feature.always" TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_lighting_cook_test ral_lighting_cook_contract)
+ADD_EXECUTABLE(ral_lighting_cook_producer_test
+	tests/ral_lighting_cook_producer_test.c
+	code/render/ral/core/ral_lighting.c
+	code/render/ral/core/ral_static_lighting.c
+	code/render/ral/core/ral_lighting_artifact.c
+	code/render/ral/core/ral_lighting_bake.c
+	code/render/ral/core/ral_lighting_product.c
+	code/render/ral/core/ral_irradiance_product.c
+	code/render/ral/core/ral_lighting_cook_producer.c)
+TARGET_INCLUDE_DIRECTORIES(ral_lighting_cook_producer_test PRIVATE
+	code/qcommon code/render/ral/core code/render/frontend)
+TARGET_COMPILE_OPTIONS(ral_lighting_cook_producer_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_lighting_cook_producer_contract
+	COMMAND ral_lighting_cook_producer_test)
+SET_TESTS_PROPERTIES(ral_lighting_cook_producer_contract PROPERTIES
+	LABELS "host-only;tooling;owner.ral;owner.lighting;failure.contract;backend.webgpu;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_lighting_cook_producer_test
+	ral_lighting_cook_producer_contract)
+ADD_EXECUTABLE(ral_lighting_cook_fs_test
+	tests/ral_lighting_cook_fs_test.c
+	code/tools/lighting_cook/lighting_cook_fs.c
+	code/render/ral/core/ral_static_lighting.c
+	code/render/ral/core/ral_lighting_artifact.c
+	code/render/ral/core/ral_lighting_cache.c)
+TARGET_INCLUDE_DIRECTORIES(ral_lighting_cook_fs_test PRIVATE
+	code/qcommon code/render/ral/core code/tools/lighting_cook)
+TARGET_COMPILE_OPTIONS(ral_lighting_cook_fs_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_lighting_cook_filesystem_contract
+	COMMAND ral_lighting_cook_fs_test)
+SET_TESTS_PROPERTIES(ral_lighting_cook_filesystem_contract PROPERTIES
+	LABELS "host-only;tooling;owner.ral;owner.lighting;failure.contract;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_lighting_cook_fs_test
+	ral_lighting_cook_filesystem_contract)
+ADD_EXECUTABLE(ral_lighting_cache_test tests/ral_lighting_cache_test.c
+	code/render/ral/core/ral_static_lighting.c
+	code/render/ral/core/ral_lighting_artifact.c
+	code/render/ral/core/ral_lighting_cache.c)
+TARGET_INCLUDE_DIRECTORIES(ral_lighting_cache_test PRIVATE
+	code/qcommon code/render/ral/core code/render/frontend)
+TARGET_COMPILE_OPTIONS(ral_lighting_cache_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_lighting_cache_contract COMMAND ral_lighting_cache_test)
+SET_TESTS_PROPERTIES(ral_lighting_cache_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.lighting;failure.contract;backend.webgpu;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_lighting_cache_test ral_lighting_cache_contract)
+ADD_EXECUTABLE(render_lighting_metadata_test
+	tests/render_lighting_metadata_test.c
+	code/qcommon/wired/entity/metadata.c
+	code/render/frontend/render_lighting_metadata.c
+	code/render/ral/core/ral_lighting.c
+	code/render/ral/core/ral_static_lighting.c
+	code/render/ral/core/ral_lighting_artifact.c
+	code/render/ral/core/ral_irradiance_runtime.c)
+TARGET_INCLUDE_DIRECTORIES(render_lighting_metadata_test PRIVATE
+	code/qcommon code/render/ral/core code/render/frontend)
+TARGET_COMPILE_OPTIONS(render_lighting_metadata_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME render_lighting_metadata_contract COMMAND render_lighting_metadata_test)
+SET_TESTS_PROPERTIES(render_lighting_metadata_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.lighting;owner.entity-metadata;failure.contract;backend.webgpu;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(render_lighting_metadata_test render_lighting_metadata_contract)
+ADD_TEST(NAME ral_lighting_cook_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_lighting_cook_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_lighting_cook_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.lighting;failure.contract;backend.webgpu" TIMEOUT 30)
+ADD_EXECUTABLE(ral_lighting_artifact_test tests/ral_lighting_artifact_test.c
+	code/render/ral/core/ral_lighting.c code/render/ral/core/ral_static_lighting.c
+	code/render/ral/core/ral_lighting_artifact.c)
+TARGET_INCLUDE_DIRECTORIES(ral_lighting_artifact_test PRIVATE code/qcommon code/render/ral/core code/render/frontend)
+TARGET_COMPILE_OPTIONS(ral_lighting_artifact_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_lighting_artifact_contract COMMAND ral_lighting_artifact_test)
+SET_TESTS_PROPERTIES(ral_lighting_artifact_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.lighting;failure.contract;backend.webgpu;feature.always" TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_lighting_artifact_test ral_lighting_artifact_contract)
+ADD_TEST(NAME ral_lighting_artifact_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_lighting_artifact_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_lighting_artifact_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.lighting;failure.contract;backend.webgpu" TIMEOUT 30)
+ADD_EXECUTABLE(ral_lighting_bake_test tests/ral_lighting_bake_test.c
+	code/render/ral/core/ral_lighting_bake.c)
+TARGET_INCLUDE_DIRECTORIES(ral_lighting_bake_test PRIVATE code/qcommon code/render/ral/core code/render/frontend)
+TARGET_COMPILE_OPTIONS(ral_lighting_bake_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_lighting_bake_contract COMMAND ral_lighting_bake_test)
+SET_TESTS_PROPERTIES(ral_lighting_bake_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.lighting;failure.contract;backend.webgpu;feature.always" TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_lighting_bake_test ral_lighting_bake_contract)
+ADD_TEST(NAME ral_lighting_bake_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_lighting_bake_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_lighting_bake_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.lighting;failure.contract;backend.webgpu" TIMEOUT 30)
+ADD_EXECUTABLE(ral_lighting_product_test tests/ral_lighting_product_test.c
+	code/render/ral/core/ral_lighting.c code/render/ral/core/ral_static_lighting.c
+	code/render/ral/core/ral_lighting_bake.c code/render/ral/core/ral_lighting_artifact.c
+	code/render/ral/core/ral_lighting_product.c)
+TARGET_INCLUDE_DIRECTORIES(ral_lighting_product_test PRIVATE code/qcommon code/render/ral/core code/render/frontend)
+TARGET_COMPILE_OPTIONS(ral_lighting_product_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_lighting_product_contract COMMAND ral_lighting_product_test)
+SET_TESTS_PROPERTIES(ral_lighting_product_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.lighting;failure.contract;backend.webgpu;feature.always" TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_lighting_product_test ral_lighting_product_contract)
+ADD_TEST(NAME ral_lighting_product_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_lighting_product_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_lighting_product_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.lighting;failure.contract;backend.webgpu" TIMEOUT 30)
+ADD_EXECUTABLE(ral_lighting_runtime_test tests/ral_lighting_runtime_test.c
+	code/render/ral/core/ral_lighting.c code/render/ral/core/ral_static_lighting.c
+	code/render/ral/core/ral_lighting_bake.c code/render/ral/core/ral_lighting_artifact.c
+	code/render/ral/core/ral_lighting_product.c code/render/ral/core/ral_lighting_runtime.c)
+TARGET_INCLUDE_DIRECTORIES(ral_lighting_runtime_test PRIVATE code/qcommon code/render/ral/core code/render/frontend)
+TARGET_COMPILE_OPTIONS(ral_lighting_runtime_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_lighting_runtime_contract COMMAND ral_lighting_runtime_test)
+SET_TESTS_PROPERTIES(ral_lighting_runtime_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.lighting;failure.contract;backend.vulkan;backend.metal;backend.opengl;backend.webgpu;feature.always" TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_lighting_runtime_test ral_lighting_runtime_contract)
+ADD_TEST(NAME ral_lighting_runtime_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_lighting_runtime_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_lighting_runtime_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.lighting;failure.contract;backend.webgpu" TIMEOUT 30)
+ADD_EXECUTABLE(ral_lighting_composition_test tests/ral_lighting_composition_test.c
+	code/render/ral/core/ral_lighting_composition.c
+	code/render/ral/core/ral_lighting_runtime.c
+	code/render/ral/core/ral_lighting_artifact.c)
+TARGET_INCLUDE_DIRECTORIES(ral_lighting_composition_test PRIVATE code/qcommon code/render/ral/core code/render/frontend)
+TARGET_COMPILE_OPTIONS(ral_lighting_composition_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_lighting_composition_contract COMMAND ral_lighting_composition_test)
+SET_TESTS_PROPERTIES(ral_lighting_composition_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.lighting;failure.contract;backend.vulkan;backend.metal;backend.opengl;backend.webgpu;feature.always" TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_lighting_composition_test ral_lighting_composition_contract)
+ADD_TEST(NAME ral_lighting_composition_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_lighting_composition_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_lighting_composition_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.lighting;failure.contract;backend.vulkan;backend.metal;backend.opengl;backend.webgpu" TIMEOUT 30)
+ADD_TEST(NAME ral_lighting_native_upload_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_lighting_native_upload_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_lighting_native_upload_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.lighting;failure.contract;backend.vulkan;backend.metal;backend.opengl;backend.webgpu"
+	TIMEOUT 30)
+ADD_EXECUTABLE(ral_irradiance_product_test tests/ral_irradiance_product_test.c
+	code/render/ral/core/ral_lighting.c code/render/ral/core/ral_static_lighting.c
+	code/render/ral/core/ral_lighting_bake.c code/render/ral/core/ral_lighting_artifact.c
+	code/render/ral/core/ral_irradiance_product.c)
+TARGET_INCLUDE_DIRECTORIES(ral_irradiance_product_test PRIVATE code/qcommon code/render/ral/core code/render/frontend)
+TARGET_COMPILE_OPTIONS(ral_irradiance_product_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_irradiance_product_contract COMMAND ral_irradiance_product_test)
+SET_TESTS_PROPERTIES(ral_irradiance_product_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.lighting;failure.contract;backend.webgpu;feature.always" TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_irradiance_product_test ral_irradiance_product_contract)
+ADD_TEST(NAME ral_irradiance_product_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_irradiance_product_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_irradiance_product_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.lighting;failure.contract;backend.webgpu" TIMEOUT 30)
+ADD_EXECUTABLE(ral_irradiance_runtime_test tests/ral_irradiance_runtime_test.c
+	code/render/ral/core/ral_lighting.c code/render/ral/core/ral_static_lighting.c
+	code/render/ral/core/ral_lighting_artifact.c code/render/ral/core/ral_irradiance_runtime.c)
+TARGET_INCLUDE_DIRECTORIES(ral_irradiance_runtime_test PRIVATE code/qcommon code/render/ral/core code/render/frontend)
+TARGET_COMPILE_OPTIONS(ral_irradiance_runtime_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_irradiance_runtime_contract COMMAND ral_irradiance_runtime_test)
+SET_TESTS_PROPERTIES(ral_irradiance_runtime_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.lighting;failure.contract;backend.vulkan;backend.metal;backend.opengl;backend.webgpu;feature.always" TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_irradiance_runtime_test ral_irradiance_runtime_contract)
+ADD_TEST(NAME ral_irradiance_runtime_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_irradiance_runtime_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_irradiance_runtime_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.lighting;failure.contract;backend.vulkan;backend.metal;backend.opengl;backend.webgpu" TIMEOUT 30)
 ADD_EXECUTABLE(ral_reflection_probe_test
 	tests/ral_reflection_probe_test.c
 	code/render/ral/core/ral_reflection_probe.c)
@@ -1527,13 +1844,32 @@ ADD_LIBRARY(ral_opengl STATIC
 	code/render/ral/backends/opengl/ral_opengl_core.c
 	code/render/ral/backends/opengl/ral_opengl_command.c
 	code/render/ral/backends/opengl/ral_opengl_frontend.c
+	code/render/ral/backends/opengl/ral_opengl_lighting.c
 	code/render/ral/backends/opengl/ral_opengl_pipeline.c
 	code/render/ral/backends/opengl/ral_opengl_product.c
 	code/render/ral/backends/opengl/ral_opengl_world.c
 	code/render/ral/core/ral_allocation.c
+	code/render/ral/core/ral_atmosphere.c
+	code/render/ral/core/ral_lighting.c
+	code/render/ral/core/ral_static_lighting.c
+	code/render/ral/core/ral_lighting_cook.c
+	code/render/ral/core/ral_lighting_cache.c
+	code/render/ral/core/ral_lighting_cook_pipeline.c
+	code/render/ral/core/ral_lighting_cook_driver.c
+	code/qcommon/wired/entity/metadata.c
+	code/render/frontend/render_lighting_metadata.c
+	code/render/ral/core/ral_lighting_artifact.c
+	code/render/ral/core/ral_lighting_bake.c
+	code/render/ral/core/ral_lighting_product.c
+	code/render/ral/core/ral_lighting_cook_producer.c
+	code/render/ral/core/ral_lighting_runtime.c
+	code/render/ral/core/ral_lighting_composition.c
+	code/render/ral/core/ral_irradiance_product.c
+	code/render/ral/core/ral_irradiance_runtime.c
 	code/render/ral/core/ral_backend_conformance.c
 	code/render/ral/core/ral_capability.c
 	code/render/ral/core/ral_command_lifecycle.c
+	code/render/ral/core/ral_display_visibility.c
 	code/render/ral/core/ral_memory_recovery.c
 	code/render/ral/core/ral_presentation_host.c
 	code/render/ral/core/ral_shader_abi.c
@@ -1548,6 +1884,9 @@ IF(UNIX)
 ENDIF()
 
 ADD_LIBRARY(ral_webgpu STATIC
+	code/render/ral/backends/webgpu/ral_webgpu_atmosphere.c
+	code/render/ral/backends/webgpu/ral_webgpu_lighting.c
+	code/render/ral/backends/webgpu/ral_webgpu_weather.c
 	code/render/ral/backends/webgpu/ral_webgpu_browser_bridge.c
 	code/render/ral/backends/webgpu/ral_webgpu_command.c
 	code/render/ral/backends/webgpu/ral_webgpu_core.c
@@ -1558,9 +1897,27 @@ ADD_LIBRARY(ral_webgpu STATIC
 	code/render/ral/backends/webgpu/ral_webgpu_resource.c
 	code/render/ral/backends/webgpu/ral_webgpu_runtime.c
 	code/render/ral/core/ral_allocation.c
+	code/render/ral/core/ral_atmosphere.c
+	code/render/ral/core/ral_lighting.c
+	code/render/ral/core/ral_static_lighting.c
+	code/render/ral/core/ral_lighting_cook.c
+	code/render/ral/core/ral_lighting_cache.c
+	code/render/ral/core/ral_lighting_cook_pipeline.c
+	code/render/ral/core/ral_lighting_cook_driver.c
+	code/qcommon/wired/entity/metadata.c
+	code/render/frontend/render_lighting_metadata.c
+	code/render/ral/core/ral_lighting_artifact.c
+	code/render/ral/core/ral_lighting_bake.c
+	code/render/ral/core/ral_lighting_product.c
+	code/render/ral/core/ral_lighting_cook_producer.c
+	code/render/ral/core/ral_lighting_runtime.c
+	code/render/ral/core/ral_lighting_composition.c
+	code/render/ral/core/ral_irradiance_product.c
+	code/render/ral/core/ral_irradiance_runtime.c
 	code/render/ral/core/ral_backend_conformance.c
 	code/render/ral/core/ral_capability.c
 	code/render/ral/core/ral_command_lifecycle.c
+	code/render/ral/core/ral_display_visibility.c
 	code/render/ral/core/ral_memory_recovery.c
 	code/render/ral/core/ral_shader_abi.c
 	code/render/ral/core/ral_transfer.c)
@@ -1620,6 +1977,12 @@ ADD_TEST(NAME ral_webgpu_resource_source_policy_contract
 SET_TESTS_PROPERTIES(ral_webgpu_resource_source_policy_contract PROPERTIES
 	LABELS "host-only;infrastructure;owner.ral;failure.contract;backend.webgpu"
 	TIMEOUT 30)
+ADD_TEST(NAME ral_webgpu_lighting_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_webgpu_lighting_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_webgpu_lighting_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.lighting;failure.contract;backend.webgpu"
+	TIMEOUT 30)
 
 ADD_EXECUTABLE(ral_webgpu_pipeline_test tests/ral_webgpu_pipeline_test.c)
 TARGET_LINK_LIBRARIES(ral_webgpu_pipeline_test PRIVATE ral_webgpu)
@@ -1673,6 +2036,7 @@ ADD_EXECUTABLE(ral_webgpu_frontend_test
 	tests/ral_webgpu_frontend_test.c
 	code/render/frontend/render_submission.c
 	code/render/frontend/render_submission_effects.c
+	code/render/frontend/render_submission_lighting.c
 	code/render/frontend/render_submission_material.c
 	code/render/frontend/render_submission_model.c
 	code/render/frontend/render_submission_ui.c
@@ -1696,6 +2060,51 @@ ADD_TEST(NAME ral_webgpu_frontend_source_policy_contract
 SET_TESTS_PROPERTIES(ral_webgpu_frontend_source_policy_contract PROPERTIES
 	LABELS "host-only;infrastructure;owner.ral;owner.renderer;failure.contract;backend.webgpu"
 	TIMEOUT 30)
+ADD_TEST(NAME ral_atmosphere_surface_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_atmosphere_surface_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_atmosphere_surface_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.renderer;failure.contract;backend-neutral"
+	TIMEOUT 30)
+ADD_EXECUTABLE(ral_atmosphere_test tests/ral_atmosphere_test.c
+	code/render/ral/core/ral_atmosphere.c)
+TARGET_INCLUDE_DIRECTORIES(ral_atmosphere_test PRIVATE
+	code/qcommon code/render/ral/core code/render/frontend)
+TARGET_COMPILE_OPTIONS(ral_atmosphere_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_atmosphere_contract COMMAND ral_atmosphere_test)
+SET_TESTS_PROPERTIES(ral_atmosphere_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.renderer;failure.contract;backend-neutral;backend.vulkan;backend.opengl;backend.metal;backend.webgpu"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_atmosphere_test ral_atmosphere_contract)
+ADD_EXECUTABLE(ral_atmosphere_frame_graph_test
+	tests/ral_atmosphere_frame_graph_test.c
+	code/render/ral/core/ral_atmosphere.c
+	code/render/ral/core/ral_atmosphere_frame_graph.c
+	code/render/ral/core/frame_graph/ral_frame_graph.c
+	code/render/ral/core/ral_transient.c
+	code/render/ral/core/ral_transition.c)
+TARGET_INCLUDE_DIRECTORIES(ral_atmosphere_frame_graph_test PRIVATE
+	code/qcommon code/render/ral/core code/render/frontend)
+TARGET_COMPILE_OPTIONS(ral_atmosphere_frame_graph_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_atmosphere_frame_graph_contract
+	COMMAND ral_atmosphere_frame_graph_test)
+SET_TESTS_PROPERTIES(ral_atmosphere_frame_graph_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.renderer;failure.contract;frame-graph;backend.vulkan;backend.opengl;backend.metal;backend.webgpu"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_atmosphere_frame_graph_test
+	ral_atmosphere_frame_graph_contract)
+ADD_TEST(NAME ral_atmosphere_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_atmosphere_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_atmosphere_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.renderer;failure.contract;backend-neutral"
+	TIMEOUT 30)
+ADD_TEST(NAME ral_atmosphere_shader_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_atmosphere_shader_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_atmosphere_shader_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.renderer;failure.contract;backend.vulkan;backend.opengl;backend.metal;backend.webgpu"
+	TIMEOUT 30)
 ADD_TEST(NAME ral_webgpu_product_source_policy_contract
 	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
 		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_webgpu_product_policy_check.cmake)
@@ -1705,17 +2114,25 @@ SET_TESTS_PROPERTIES(ral_webgpu_product_source_policy_contract PROPERTIES
 
 ADD_EXECUTABLE(ral_webgpu_renderer_module_test
 	tests/ral_webgpu_renderer_module_test.c
+	code/tools/lighting_cook/lighting_cook_fs.c
 	code/render/ral/backends/webgpu/ral_webgpu_browser_emscripten.c
 	code/render/ral/backends/webgpu/ral_webgpu_renderer_module.c
+	code/render/frontend/render_lighting_project_cook.c
+	code/render/frontend/render_lighting_project_source.c
+	code/render/frontend/render_material_script.c
+	code/render/frontend/render_material_script_lighting.c
+	code/render/frontend/render_lighting_sidecar.c
 	code/render/frontend/render_submission.c
 	code/render/frontend/render_submission_effects.c
+	code/render/frontend/render_submission_lighting.c
 	code/render/frontend/render_submission_material.c
 	code/render/frontend/render_submission_model.c
 	code/render/frontend/render_submission_ui.c
 	code/render/frontend/render_submission_world.c)
 TARGET_LINK_LIBRARIES(ral_webgpu_renderer_module_test PRIVATE ral_webgpu)
 TARGET_INCLUDE_DIRECTORIES(ral_webgpu_renderer_module_test PRIVATE code/qcommon
-	code/render/frontend code/render/ral/core code/render/ral/backends/webgpu)
+	code/render/frontend code/render/ral/core code/render/ral/backends/webgpu
+	code/tools/lighting_cook)
 TARGET_COMPILE_OPTIONS(ral_webgpu_renderer_module_test PRIVATE
 	-Wall -Wextra -Werror)
 ADD_TEST(NAME ral_webgpu_renderer_module_contract
@@ -1727,15 +2144,21 @@ WIRED_CONFIGURE_HOST_TEST(ral_webgpu_renderer_module_test
 	ral_webgpu_renderer_module_contract)
 
 ADD_LIBRARY(${RENDERER_PREFIX}_opengl${RENDEXT} SHARED
+	code/tools/lighting_cook/lighting_cook_fs.c
 	code/render/ral/backends/opengl/ral_opengl_module.c
 	code/render/ral/backends/opengl/ral_opengl_image_decode.c
+	code/render/frontend/render_lighting_project_cook.c
+	code/render/frontend/render_lighting_project_source.c
 	code/render/frontend/render_submission.c
 	code/render/frontend/render_submission_effects.c
+	code/render/frontend/render_submission_lighting.c
 	code/render/frontend/render_submission_material.c
 	code/render/frontend/render_submission_model.c
 	code/render/frontend/render_submission_ui.c
 	code/render/frontend/render_submission_world.c
 	code/render/frontend/render_material_script.c
+	code/render/frontend/render_material_script_lighting.c
+	code/render/frontend/render_lighting_sidecar.c
 	code/render/frontend/tr_screenshot.c
 	code/render/frontend/tr_image_png_write.c
 	code/render/frontend/tr_image_bmp.c
@@ -1745,7 +2168,7 @@ ADD_LIBRARY(${RENDERER_PREFIX}_opengl${RENDEXT} SHARED
 	code/qcommon/puff.c)
 TARGET_INCLUDE_DIRECTORIES(${RENDERER_PREFIX}_opengl${RENDEXT} PRIVATE
 	code/qcommon code/render/frontend code/render/ral/core
-	code/render/ral/backends/opengl)
+	code/render/ral/backends/opengl code/tools/lighting_cook)
 TARGET_LINK_LIBRARIES(${RENDERER_PREFIX}_opengl${RENDEXT} PRIVATE ral_opengl)
 TARGET_COMPILE_DEFINITIONS(${RENDERER_PREFIX}_opengl${RENDEXT} PRIVATE USE_RENDERER_DLOPEN)
 TARGET_COMPILE_OPTIONS(${RENDERER_PREFIX}_opengl${RENDEXT} PRIVATE -Wall -Wextra -Werror)
@@ -1813,6 +2236,7 @@ ADD_EXECUTABLE(ral_opengl_frontend_test
 	tests/ral_opengl_frontend_test.c
 	code/render/frontend/render_submission.c
 	code/render/frontend/render_submission_effects.c
+	code/render/frontend/render_submission_lighting.c
 	code/render/frontend/render_submission_material.c
 	code/render/frontend/render_submission_model.c
 	code/render/frontend/render_submission_ui.c
@@ -1868,6 +2292,7 @@ ADD_EXECUTABLE(wired_opengl46_smoke
 	tests/wired_opengl46_smoke.c
 	code/render/frontend/render_submission.c
 	code/render/frontend/render_submission_effects.c
+	code/render/frontend/render_submission_lighting.c
 	code/render/frontend/render_submission_material.c
 	code/render/frontend/render_submission_model.c
 	code/render/frontend/render_submission_ui.c
@@ -1958,7 +2383,6 @@ IF(APPLE)
 	FIND_LIBRARY(WIRED_FOUNDATION_FRAMEWORK Foundation REQUIRED)
 	FIND_LIBRARY(WIRED_QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
 	FIND_LIBRARY(WIRED_COREGRAPHICS_FRAMEWORK CoreGraphics REQUIRED)
-	FIND_LIBRARY(WIRED_IMAGEIO_FRAMEWORK ImageIO REQUIRED)
 	SET(RAL_METAL_PRODUCT_SHADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/metal-product-shaders")
 	SET(RAL_METAL_UI_SHADER_SOURCE
 		"${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/metal/shaders/ui_solid.msl")
@@ -1982,21 +2406,42 @@ IF(APPLE)
 	ADD_CUSTOM_TARGET(ral_metal_product_metallib DEPENDS ${RAL_METAL_UI_SHADER_HEADER})
 	ADD_LIBRARY(ral_metal STATIC
 		code/render/ral/backends/metal/ral_metal_core.mm
+		code/render/ral/backends/metal/ral_metal_lighting.mm
 		code/render/ral/backends/metal/ral_metal_bind_group.mm
 		code/render/ral/backends/metal/ral_metal_render.mm
 		code/render/ral/backends/metal/ral_metal_pipeline.mm
 		code/render/ral/backends/metal/ral_metal_draw.mm
 		code/render/ral/backends/metal/ral_metal_present.mm
+		code/render/frontend/render_submission_effects.c
+		code/render/frontend/render_submission_lighting.c
 		code/render/frontend/render_submission_material.c
 		code/render/frontend/render_submission_model.c
 		code/render/frontend/render_submission_ui.c
 		code/render/frontend/render_submission_world.c
 		code/render/ral/core/ral_allocation.c
+		code/render/ral/core/ral_atmosphere.c
+		code/render/ral/core/ral_lighting.c
+		code/render/ral/core/ral_static_lighting.c
+		code/render/ral/core/ral_lighting_cook.c
+		code/render/ral/core/ral_lighting_cache.c
+		code/render/ral/core/ral_lighting_cook_pipeline.c
+		code/render/ral/core/ral_lighting_cook_driver.c
+		code/qcommon/wired/entity/metadata.c
+		code/render/frontend/render_lighting_metadata.c
+		code/render/ral/core/ral_lighting_artifact.c
+		code/render/ral/core/ral_lighting_bake.c
+		code/render/ral/core/ral_lighting_product.c
+		code/render/ral/core/ral_lighting_cook_producer.c
+		code/render/ral/core/ral_lighting_runtime.c
+		code/render/ral/core/ral_lighting_composition.c
+		code/render/ral/core/ral_irradiance_product.c
+		code/render/ral/core/ral_irradiance_runtime.c
 		code/render/ral/core/ral_buffer_map.c
 		code/render/ral/core/ral_backend_conformance.c
 		code/render/ral/core/ral_capability.c
 		code/render/ral/core/ral_command_lifecycle.c
 		code/render/ral/core/ral_color_output.c
+		code/render/ral/core/ral_display_visibility.c
 		code/render/ral/core/ral_frame_shell.c
 		code/render/ral/core/ral_material.c
 		code/render/ral/core/ral_material_proxy.c
@@ -2136,6 +2581,16 @@ IF(APPLE)
 	SET_TESTS_PROPERTIES(ral_metal_present_contract PROPERTIES
 		LABELS "host-only;subsystem;owner.ral;failure.contract;backend.metal" TIMEOUT 30)
 	WIRED_CONFIGURE_HOST_TEST(ral_metal_present_test ral_metal_present_contract)
+	ADD_EXECUTABLE(ral_metal_lighting_test tests/ral_metal_lighting_test.mm)
+	TARGET_LINK_LIBRARIES(ral_metal_lighting_test PRIVATE ral_metal)
+	TARGET_INCLUDE_DIRECTORIES(ral_metal_lighting_test PRIVATE code/qcommon
+		code/render/frontend code/render/ral/core code/render/ral/backends/metal)
+	TARGET_COMPILE_OPTIONS(ral_metal_lighting_test PRIVATE -Wall -Wextra -Werror)
+	ADD_TEST(NAME ral_metal_lighting_contract COMMAND ral_metal_lighting_test)
+	SET_TESTS_PROPERTIES(ral_metal_lighting_contract PROPERTIES
+		LABELS "host-only;subsystem;owner.ral;owner.lighting;failure.contract;backend.metal"
+		TIMEOUT 30)
+	WIRED_CONFIGURE_HOST_TEST(ral_metal_lighting_test ral_metal_lighting_contract)
 	ADD_EXECUTABLE(wired_metal_smoke tests/wired_metal_smoke.mm)
 	TARGET_LINK_LIBRARIES(wired_metal_smoke PRIVATE ral_metal_sdl)
 	TARGET_COMPILE_OPTIONS(wired_metal_smoke PRIVATE -Wall -Wextra -Werror)
@@ -2415,6 +2870,11 @@ ADD_TEST(NAME ral_vulkan_bridge_source_policy_contract
 		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_vulkan_bridge_policy_check.cmake)
 SET_TESTS_PROPERTIES(ral_vulkan_bridge_source_policy_contract PROPERTIES
 	LABELS "host-only;infrastructure;owner.ral;failure.contract;feature.always;backend.vulkan" TIMEOUT 30)
+ADD_TEST(NAME vk_presentation_domain_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/vk_presentation_domain_policy_check.cmake)
+SET_TESTS_PROPERTIES(vk_presentation_domain_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.presentation;failure.contract;feature.always;backend.vulkan" TIMEOUT 30)
 TARGET_INCLUDE_DIRECTORIES(ral_shader_abi_test PRIVATE
 	code/qcommon
 	code/render/ral/core
@@ -2450,6 +2910,11 @@ SET_TESTS_PROPERTIES(ral_shader_abi_source_policy_contract PROPERTIES
 )
 FIND_PROGRAM(WIRED_NODE_EXECUTABLE NAMES node nodejs)
 IF(WIRED_NODE_EXECUTABLE)
+	ADD_TEST(NAME lighting_reference_contract
+		COMMAND ${WIRED_NODE_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/lighting-reference-contract-test.mjs)
+	SET_TESTS_PROPERTIES(lighting_reference_contract PROPERTIES
+		LABELS "host-only;subsystem;owner.ral;owner.lighting;failure.contract;backend.webgpu;feature.always"
+		TIMEOUT 30)
 	ADD_TEST(NAME ral_shader_artifact_catalog_contract
 		COMMAND ${WIRED_NODE_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/ral_shader_artifact_catalog_test.mjs)
 	SET_TESTS_PROPERTIES(ral_shader_artifact_catalog_contract PROPERTIES
@@ -2525,6 +2990,12 @@ IF(WIRED_NODE_EXECUTABLE)
 		LABELS "host-only;subsystem;owner.ral;owner.presentation;failure.contract;backend.webgpu"
 		TIMEOUT 30
 	)
+	ADD_TEST(NAME ral_lighting_cook_opfs_contract
+		COMMAND ${WIRED_NODE_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/ral_lighting_cook_opfs_test.mjs)
+	SET_TESTS_PROPERTIES(ral_lighting_cook_opfs_contract PROPERTIES
+		LABELS "host-only;tooling;owner.ral;owner.lighting;failure.contract;backend.webgpu"
+		TIMEOUT 30
+	)
 	ADD_TEST(NAME ral_webgpu_browser_dispatch_contract
 		COMMAND ${WIRED_NODE_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/ral_webgpu_browser_dispatch_test.mjs)
 	SET_TESTS_PROPERTIES(ral_webgpu_browser_dispatch_contract PROPERTIES
@@ -2581,6 +3052,9 @@ IF(WIRED_EMCC_EXECUTABLE)
 			-I${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core
 			-I${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_browser_emscripten.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_atmosphere.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_lighting.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_weather.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_browser_bridge.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_command.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_core.c
@@ -2589,20 +3063,48 @@ IF(WIRED_EMCC_EXECUTABLE)
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_presentation.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_product.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_renderer_module.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_image_decode.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_resource.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_runtime.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_lighting_metadata.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_material_script.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_material_script_lighting.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_lighting_sidecar.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_submission.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_submission_effects.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_submission_lighting.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_submission_material.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_submission_model.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_submission_ui.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_submission_world.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/tr_image_bmp.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/tr_image_jpg.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/tr_image_png.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/tr_image_tga.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/qcommon/puff.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/qcommon/wired/entity/metadata.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_allocation.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_atmosphere.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_backend_conformance.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_capability.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_command_lifecycle.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_display_visibility.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_lighting.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_lighting_artifact.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_lighting_bake.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_lighting_cache.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_lighting_cook.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_lighting_cook_driver.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_lighting_cook_pipeline.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_lighting_cook_producer.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_lighting_product.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_lighting_runtime.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_irradiance_runtime.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_irradiance_product.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_lighting_composition.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_memory_recovery.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_shader_abi.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_static_lighting.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_transfer.c
 			--no-entry -sMODULARIZE=1 -sEXPORT_ES6=1
 			"-sEXPORTED_FUNCTIONS=['_RalWebGpu_BrowserModuleStart','_RalWebGpu_BrowserModulePoll','_RalWebGpu_BrowserModuleResize','_RalWebGpu_BrowserModuleSmokeBegin','_RalWebGpu_BrowserModuleSmokePoll','_RalWebGpu_BrowserModuleStop','_GetRefAPI','_WiredWebGpu_RendererPoll','_WiredWebGpu_RendererResize','_WiredWebGpu_GetFrameReceipt','_WiredWebGpu_RendererSmokeBegin','_WiredWebGpu_RendererSmokePoll']"
@@ -4054,11 +4556,42 @@ SET_TESTS_PROPERTIES(cg_temporal_identity_contract PROPERTIES
 	TIMEOUT 30)
 WIRED_CONFIGURE_HOST_TEST(cg_temporal_identity_test cg_temporal_identity_contract)
 
+ADD_EXECUTABLE(cg_hitscan_impact_test tests/cg_hitscan_impact_test.c)
+TARGET_INCLUDE_DIRECTORIES(cg_hitscan_impact_test PRIVATE
+	code/game
+	code/qcommon)
+ADD_TEST(NAME cg_hitscan_impact_contract COMMAND cg_hitscan_impact_test)
+SET_TESTS_PROPERTIES(cg_hitscan_impact_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.q3now-cgame;owner.q3now-server;failure.contract;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(cg_hitscan_impact_test cg_hitscan_impact_contract)
+
 ADD_TEST(NAME cg_temporal_identity_source_policy_contract
 	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
 		-P ${CMAKE_SOURCE_DIR}/cmake/cg_temporal_identity_policy_check.cmake)
 SET_TESTS_PROPERTIES(cg_temporal_identity_source_policy_contract PROPERTIES
 	LABELS "host-only;infrastructure;owner.q3now-cgame;failure.contract;feature.always"
+	TIMEOUT 30)
+
+ADD_TEST(NAME cg_projectile_trail_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/cg_projectile_trail_policy_check.cmake)
+SET_TESTS_PROPERTIES(cg_projectile_trail_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.q3now-cgame;failure.contract;feature.always"
+	TIMEOUT 30)
+
+ADD_TEST(NAME cg_hitscan_impact_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/cg_hitscan_impact_policy_check.cmake)
+SET_TESTS_PROPERTIES(cg_hitscan_impact_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.q3now-cgame;owner.q3now-server;failure.contract;feature.always"
+	TIMEOUT 30)
+
+ADD_TEST(NAME thirdperson_center_aim_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/thirdperson_center_aim_policy_check.cmake)
+SET_TESTS_PROPERTIES(thirdperson_center_aim_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.q3now-cgame;owner.q3now-server;failure.contract;feature.always"
 	TIMEOUT 30)
 
 ADD_TEST(NAME ref_entity_motion_source_policy_contract
@@ -4191,6 +4724,29 @@ SET_TESTS_PROPERTIES(wired_scene_eval PROPERTIES
 	TIMEOUT 30
 )
 WIRED_CONFIGURE_HOST_TEST(wired_scene_eval_test wired_scene_eval)
+
+ADD_EXECUTABLE(wired_entity_metadata_test
+	tests/wired_entity_metadata_test.c
+	code/qcommon/wired/entity/metadata.c
+)
+TARGET_INCLUDE_DIRECTORIES(wired_entity_metadata_test PRIVATE code/qcommon)
+TARGET_COMPILE_OPTIONS(wired_entity_metadata_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME wired_entity_metadata_contract COMMAND wired_entity_metadata_test)
+SET_TESTS_PROPERTIES(wired_entity_metadata_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.entity-metadata;failure.contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(wired_entity_metadata_test wired_entity_metadata_contract)
+ADD_EXECUTABLE(wired_entity_event_test
+	tests/wired_entity_event_test.c
+	code/qcommon/wired/entity/event.c)
+TARGET_INCLUDE_DIRECTORIES(wired_entity_event_test PRIVATE code/qcommon)
+TARGET_COMPILE_OPTIONS(wired_entity_event_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME wired_entity_event_contract COMMAND wired_entity_event_test)
+SET_TESTS_PROPERTIES(wired_entity_event_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.entity-metadata;failure.contract;backend.webgpu;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(wired_entity_event_test wired_entity_event_contract)
 
 # savegame callback registry — Phase-2 hard gate: name<->pointer round-trip +
 # completeness across both registry tiers. Compiles the REAL resolver source
@@ -4427,6 +4983,21 @@ SET_TESTS_PROPERTIES(attract_input_promotion_contract PROPERTIES
 	TIMEOUT 30
 )
 WIRED_CONFIGURE_HOST_TEST(attract_input_promotion_test attract_input_promotion_contract)
+
+# Attract session suspension is reversible while an explicit user stop is
+# durable. This compiles the exact dependency-free decision and therefore does
+# not rely on CL_FlushMemory reinitializing the scheduler after disconnect.
+ADD_EXECUTABLE(cl_wired_attract_policy_test
+	tests/cl_wired_attract_policy_test.c
+	code/client/wired/ui/cl_wired_attract_policy.c
+)
+TARGET_INCLUDE_DIRECTORIES(cl_wired_attract_policy_test PRIVATE code/client/wired/ui)
+ADD_TEST(NAME cl_wired_attract_policy_contract COMMAND cl_wired_attract_policy_test)
+SET_TESTS_PROPERTIES(cl_wired_attract_policy_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.q3now-client;failure.contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(cl_wired_attract_policy_test cl_wired_attract_policy_contract)
 
 # Background preset evaluator. A menu declares what it wants behind it and the
 # preset table decides which layers answer; menus never name a layer, so the
@@ -4680,6 +5251,43 @@ SET_TESTS_PROPERTIES(particle_curve_contract PROPERTIES
 	LABELS "host-only;subsystem;owner.renderer;failure.contract;feature.always"
 	TIMEOUT 30
 )
+
+# WiredFX profile ABI + immutable registry. This compiles the production
+# validator directly and pins the complete id Tech 5 action vocabulary without
+# pulling in a renderer backend or cgame stubs.
+ADD_EXECUTABLE(wired_fx_profile_test
+	tests/wired_fx_profile_test.c
+	code/render/frontend/render_effect_profile.c
+)
+TARGET_INCLUDE_DIRECTORIES(wired_fx_profile_test PRIVATE
+	code/qcommon code/render/frontend
+)
+TARGET_COMPILE_OPTIONS(wired_fx_profile_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME wired_fx_profile_contract COMMAND wired_fx_profile_test)
+SET_TESTS_PROPERTIES(wired_fx_profile_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;backend-neutral"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(wired_fx_profile_test wired_fx_profile_contract)
+
+ADD_EXECUTABLE(wired_fx_runtime_test
+	tests/wired_fx_runtime_test.c
+	code/render/frontend/render_effect_profile.c
+	code/render/frontend/render_effect_runtime.c
+)
+TARGET_INCLUDE_DIRECTORIES(wired_fx_runtime_test PRIVATE
+	code/qcommon code/render/frontend
+)
+TARGET_COMPILE_OPTIONS(wired_fx_runtime_test PRIVATE -Wall -Wextra -Werror)
+IF(NOT WIN32)
+	TARGET_LINK_LIBRARIES(wired_fx_runtime_test PRIVATE m)
+ENDIF()
+ADD_TEST(NAME wired_fx_runtime_contract COMMAND wired_fx_runtime_test)
+SET_TESTS_PROPERTIES(wired_fx_runtime_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;backend-neutral"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(wired_fx_runtime_test wired_fx_runtime_contract)
 
 ADD_EXECUTABLE(fs_qpath_test
 	tests/fs_qpath_test.c
@@ -5489,6 +6097,10 @@ target_include_directories(opusfile PRIVATE src/libs/opus/include/opus)
 
 # client + Wired UI + miniaudio test
 AUX_SOURCE_DIRECTORY(code/client CLIENT_SRCS)
+LIST(APPEND CLIENT_SRCS
+	code/render/frontend/render_effect_profile.c
+	code/render/frontend/render_effect_runtime.c
+)
 list(FILTER CLIENT_SRCS EXCLUDE REGEX "cl_ui\\.c$")
 
 # snd_miniaudio_test.c is a standalone test runner with its own main();
@@ -5625,10 +6237,40 @@ LIST(REMOVE_ITEM RENDERER_COMMON_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/code/render/fr
 # may emit either depending on CMake version.
 LIST(REMOVE_ITEM RENDERER_COMMON_SRCS code/render/frontend/r_image_probe.c)
 LIST(REMOVE_ITEM RENDERER_COMMON_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/r_image_probe.c)
+# RAL lighting metadata depends on the RAL irradiance contract and is linked
+# explicitly into the four greenfield backend libraries. Deprecated renderer
+# DLLs consume the shared frontend glob but must not acquire this new authority.
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS code/render/frontend/render_lighting_metadata.c)
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_lighting_metadata.c)
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS code/render/frontend/render_material_script_lighting.c)
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_material_script_lighting.c)
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS code/render/frontend/render_lighting_sidecar.c)
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_lighting_sidecar.c)
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS code/render/frontend/render_lighting_project_source.c)
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_lighting_project_source.c)
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS code/render/frontend/render_lighting_project_cook.c)
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_lighting_project_cook.c)
+# The shared frontend's lighting submission owns backend-neutral validation and
+# selection. Deprecated renderer DLLs remain compatibility consumers, but they
+# still need the small, handle-free RAL core implementations used by that
+# frontend code in order to link. Native backend authority stays under
+# code/render/ral/backends/*.
+SET(RENDERER_LIGHTING_COMPAT_SRCS
+	code/render/ral/core/ral_lighting.c
+	code/render/ral/core/ral_static_lighting.c
+	code/render/ral/core/ral_lighting_artifact.c
+	code/render/ral/core/ral_irradiance_runtime.c
+	code/render/ral/core/ral_lighting_composition.c
+)
 AUX_SOURCE_DIRECTORY(code/renderer RENDERER_GL_SRCS)
 AUX_SOURCE_DIRECTORY(code/renderer2 RENDERER_GL2_SRCS)
 AUX_SOURCE_DIRECTORY(code/render/ral/backends/vulkan/renderer RENDERER_VK_SRCS)
 LIST(APPEND RENDERER_VK_SRCS
+	code/tools/lighting_cook/lighting_cook_fs.c
+	code/render/frontend/render_lighting_project_cook.c
+	code/render/frontend/render_lighting_project_source.c
+	code/render/frontend/render_material_script_lighting.c
+	code/render/frontend/render_lighting_sidecar.c
 	code/render/ral/core/frame_graph/ral_frame_graph.c
 	code/render/ral/core/frame_graph/ral_frame_graph_execution.c
 	code/render/ral/core/frame_graph/ral_frame_graph_transient.c
@@ -5654,10 +6296,28 @@ SET(RAL_VK_SRCS
 	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_buffer_map.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_bind_group_arena.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_allocation.c
+	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_atmosphere.c
+	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_lighting.c
+	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_static_lighting.c
+	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_lighting_cook.c
+	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_lighting_cache.c
+	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_lighting_cook_pipeline.c
+	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_lighting_cook_driver.c
+	${CMAKE_CURRENT_SOURCE_DIR}/code/qcommon/wired/entity/metadata.c
+	${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_lighting_metadata.c
+	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_lighting_artifact.c
+	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_lighting_bake.c
+	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_lighting_product.c
+	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_lighting_cook_producer.c
+	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_lighting_runtime.c
+	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_lighting_composition.c
+	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_irradiance_product.c
+	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_irradiance_runtime.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_backend_conformance.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_capability.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_command_lifecycle.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_color_output.c
+	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_display_visibility.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_legacy_material.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_material.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_material_proxy.c
@@ -5692,6 +6352,7 @@ SET(RAL_VK_SRCS
 	${RAL_VK_DIR}/ral_vulkan_caps.c
 	${RAL_VK_DIR}/ral_vulkan_memory.c
 	${RAL_VK_DIR}/ral_vulkan_map.c
+	${RAL_VK_DIR}/ral_vulkan_lighting.c
 	${RAL_VK_DIR}/ral_vulkan_readback.c
 	${RAL_VK_DIR}/ral_vulkan_translate.c
 	${RAL_VK_DIR}/ral_vulkan_mrt_policy.c
@@ -5914,19 +6575,20 @@ IF(USE_RENDERER_DLOPEN)
 	)
 	TARGET_COMPILE_DEFINITIONS(client PRIVATE USE_RENDERER_DLOPEN RENDERER_PREFIX="${RENDERER_PREFIX}" RENDERER_DEFAULT=${RENDERER_DEFAULT})
 
-	ADD_LIBRARY(${RENDERER_PREFIX}_opengl_legacy${RENDEXT} SHARED ${RENDERER_GL_SRCS} ${RENDERER_COMMON_SRCS} ${AUX_SRCS})
+	ADD_LIBRARY(${RENDERER_PREFIX}_opengl_legacy${RENDEXT} SHARED ${RENDERER_GL_SRCS} ${RENDERER_COMMON_SRCS} ${RENDERER_LIGHTING_COMPAT_SRCS} ${AUX_SRCS})
 	TARGET_COMPILE_DEFINITIONS(${RENDERER_PREFIX}_opengl_legacy${RENDEXT} PRIVATE USE_RENDERER_DLOPEN)
-	TARGET_INCLUDE_DIRECTORIES(${RENDERER_PREFIX}_opengl_legacy${RENDEXT} PRIVATE code/qcommon)
+	TARGET_INCLUDE_DIRECTORIES(${RENDERER_PREFIX}_opengl_legacy${RENDEXT} PRIVATE code/qcommon code/render/ral/core)
 	SET_TARGET_PROPERTIES(${RENDERER_PREFIX}_opengl_legacy${RENDEXT} PROPERTIES PREFIX "")
 
-	ADD_LIBRARY(${RENDERER_PREFIX}_opengl2${RENDEXT} SHARED ${RENDERER_GL2_SRCS} ${RENDERER_GL2_FALLBACK_SRCS} ${RENDERER_COMMON_SRCS} ${AUX_SRCS})
+	ADD_LIBRARY(${RENDERER_PREFIX}_opengl2${RENDEXT} SHARED ${RENDERER_GL2_SRCS} ${RENDERER_GL2_FALLBACK_SRCS} ${RENDERER_COMMON_SRCS} ${RENDERER_LIGHTING_COMPAT_SRCS} ${AUX_SRCS})
 	TARGET_COMPILE_DEFINITIONS(${RENDERER_PREFIX}_opengl2${RENDEXT} PRIVATE USE_RENDERER_DLOPEN)
-	TARGET_INCLUDE_DIRECTORIES(${RENDERER_PREFIX}_opengl2${RENDEXT} PRIVATE code/qcommon)
+	TARGET_INCLUDE_DIRECTORIES(${RENDERER_PREFIX}_opengl2${RENDEXT} PRIVATE code/qcommon code/render/ral/core)
 	SET_TARGET_PROPERTIES(${RENDERER_PREFIX}_opengl2${RENDEXT} PROPERTIES PREFIX "")
 
 	ADD_LIBRARY(${RENDERER_PREFIX}_vulkan${RENDEXT} SHARED ${RENDERER_VK_SRCS} ${RENDERER_COMMON_SRCS} ${AUX_SRCS})
 	TARGET_COMPILE_DEFINITIONS(${RENDERER_PREFIX}_vulkan${RENDEXT} PRIVATE USE_RENDERER_DLOPEN)
-	TARGET_INCLUDE_DIRECTORIES(${RENDERER_PREFIX}_vulkan${RENDEXT} PRIVATE code/qcommon)
+	TARGET_INCLUDE_DIRECTORIES(${RENDERER_PREFIX}_vulkan${RENDEXT} PRIVATE
+		code/qcommon code/tools/lighting_cook)
 	SET_TARGET_PROPERTIES(${RENDERER_PREFIX}_vulkan${RENDEXT} PROPERTIES PREFIX "")
 	# Emit a linker map file alongside the DLL — includes every symbol (static
 	# functions, compiler-generated helpers, etc.) with its VMA. Built-in
@@ -5980,7 +6642,8 @@ ELSE()
 		# client link list below). Just put the include path on the OBJECT lib here.
 		TARGET_INCLUDE_DIRECTORIES(${RENDERER_PREFIX}_vulkan PRIVATE
 			code/qcommon
-			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core)
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core
+			${CMAKE_CURRENT_SOURCE_DIR}/code/tools/lighting_cook)
 	ELSE()
 		ADD_LIBRARY(${RENDERER_PREFIX}_opengl OBJECT ${RENDERER_GL_SRCS} ${RENDERER_COMMON_SRCS})
 		TARGET_INCLUDE_DIRECTORIES(${RENDERER_PREFIX}_opengl PRIVATE code/qcommon)
@@ -6063,6 +6726,7 @@ IF(APPLE AND USE_RENDERER_DLOPEN)
 		FIND_LIBRARY(WIRED_COREGRAPHICS_FRAMEWORK CoreGraphics REQUIRED)
 		ADD_LIBRARY(ral_metal STATIC
 			code/render/ral/backends/metal/ral_metal_core.mm
+			code/render/ral/backends/metal/ral_metal_lighting.mm
 			code/render/ral/backends/metal/ral_metal_bind_group.mm
 			code/render/ral/backends/metal/ral_metal_render.mm
 			code/render/ral/backends/metal/ral_metal_pipeline.mm
@@ -6073,11 +6737,29 @@ IF(APPLE AND USE_RENDERER_DLOPEN)
 			code/render/frontend/render_submission_ui.c
 			code/render/frontend/render_submission_world.c
 			code/render/ral/core/ral_allocation.c
+			code/render/ral/core/ral_atmosphere.c
+			code/render/ral/core/ral_lighting.c
+			code/render/ral/core/ral_static_lighting.c
+			code/render/ral/core/ral_lighting_cook.c
+			code/render/ral/core/ral_lighting_cache.c
+			code/render/ral/core/ral_lighting_cook_pipeline.c
+			code/render/ral/core/ral_lighting_cook_driver.c
+			code/qcommon/wired/entity/metadata.c
+			code/render/frontend/render_lighting_metadata.c
+			code/render/ral/core/ral_lighting_artifact.c
+			code/render/ral/core/ral_lighting_bake.c
+			code/render/ral/core/ral_lighting_product.c
+			code/render/ral/core/ral_lighting_cook_producer.c
+			code/render/ral/core/ral_lighting_runtime.c
+			code/render/ral/core/ral_lighting_composition.c
+			code/render/ral/core/ral_irradiance_product.c
+			code/render/ral/core/ral_irradiance_runtime.c
 			code/render/ral/core/ral_buffer_map.c
 			code/render/ral/core/ral_backend_conformance.c
 			code/render/ral/core/ral_capability.c
 			code/render/ral/core/ral_command_lifecycle.c
 			code/render/ral/core/ral_color_output.c
+			code/render/ral/core/ral_display_visibility.c
 			code/render/ral/core/ral_frame_shell.c
 			code/render/ral/core/ral_material.c
 			code/render/ral/core/ral_material_proxy.c
@@ -6124,11 +6806,23 @@ IF(APPLE AND USE_RENDERER_DLOPEN)
 		TARGET_COMPILE_OPTIONS(ral_sdl_presentation_host PRIVATE -Wall -Wextra -Werror)
 	ENDIF()
 	ADD_LIBRARY(${RENDERER_PREFIX}_metal${RENDEXT} SHARED
+		code/tools/lighting_cook/lighting_cook_fs.c
 		code/render/ral/backends/metal/ral_metal_module.mm
+		code/render/frontend/render_lighting_project_cook.c
+		code/render/frontend/render_lighting_project_source.c
 		code/render/frontend/render_submission.c
+		code/render/frontend/render_submission_effects.c
+		code/render/frontend/render_submission_lighting.c
 		code/render/frontend/render_material_script.c
+		code/render/frontend/render_material_script_lighting.c
+		code/render/frontend/render_lighting_sidecar.c
 		code/render/frontend/tr_screenshot.c
 		code/render/frontend/tr_image_png_write.c
+		code/render/frontend/tr_image_bmp.c
+		code/render/frontend/tr_image_jpg.c
+		code/render/frontend/tr_image_png.c
+		code/render/frontend/tr_image_tga.c
+		code/qcommon/puff.c
 		code/render/ral/backends/metal/ral_metal_image_decode.mm)
 	# The renderer boundary itself is a native-free C ABI. Metal and SDL
 	# ownership remain in their Objective-C++ libraries below that boundary.
@@ -6136,9 +6830,8 @@ IF(APPLE AND USE_RENDERER_DLOPEN)
 		PROPERTIES LANGUAGE C)
 	TARGET_INCLUDE_DIRECTORIES(${RENDERER_PREFIX}_metal${RENDEXT} PRIVATE
 		code/qcommon code/render/ral/core code/render/ral/backends/metal
-		code/render/frontend code/sdl)
-	TARGET_LINK_LIBRARIES(${RENDERER_PREFIX}_metal${RENDEXT} PRIVATE ral_metal
-		${WIRED_IMAGEIO_FRAMEWORK})
+		code/render/frontend code/sdl code/tools/lighting_cook)
+	TARGET_LINK_LIBRARIES(${RENDERER_PREFIX}_metal${RENDEXT} PRIVATE ral_metal)
 	TARGET_COMPILE_DEFINITIONS(${RENDERER_PREFIX}_metal${RENDEXT} PRIVATE
 		USE_RENDERER_DLOPEN)
 	TARGET_COMPILE_OPTIONS(${RENDERER_PREFIX}_metal${RENDEXT} PRIVATE
@@ -6177,18 +6870,75 @@ IF(APPLE AND USE_RENDERER_DLOPEN)
 		tests/render_submission_test.c
 		code/render/frontend/render_submission.c
 		code/render/frontend/render_submission_effects.c
+		code/render/frontend/render_submission_lighting.c
 		code/render/frontend/render_submission_material.c
 		code/render/frontend/render_submission_model.c
 		code/render/frontend/render_submission_ui.c
-		code/render/frontend/render_submission_world.c)
+		code/render/frontend/render_submission_world.c
+		code/render/frontend/render_material_script.c
+		code/render/frontend/render_material_script_lighting.c
+		code/render/frontend/render_lighting_sidecar.c
+		code/render/frontend/render_lighting_metadata.c
+		code/qcommon/wired/entity/metadata.c
+		code/render/ral/core/ral_lighting.c
+		code/render/ral/core/ral_static_lighting.c
+		code/render/ral/core/ral_lighting_artifact.c
+		code/render/ral/core/ral_irradiance_runtime.c
+		code/render/ral/core/ral_lighting_composition.c)
 		TARGET_INCLUDE_DIRECTORIES(render_submission_test PRIVATE
-			code/qcommon code/render/frontend)
+			code/qcommon code/render/frontend code/render/ral/core)
 		TARGET_COMPILE_OPTIONS(render_submission_test PRIVATE -Wall -Wextra -Werror)
 		ADD_TEST(NAME render_submission_contract COMMAND render_submission_test)
 		SET_TESTS_PROPERTIES(render_submission_contract PROPERTIES
 			LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;backend-neutral"
 			TIMEOUT 30)
 		WIRED_CONFIGURE_HOST_TEST(render_submission_test render_submission_contract)
+		ADD_EXECUTABLE(render_lighting_project_source_test
+			tests/render_lighting_project_source_test.c
+			code/tools/lighting_cook/lighting_cook_fs.c
+			code/render/frontend/render_lighting_project_cook.c
+			code/render/frontend/render_lighting_project_source.c
+			code/render/frontend/render_lighting_sidecar.c
+			code/render/frontend/render_lighting_metadata.c
+			code/render/frontend/render_submission.c
+			code/render/frontend/render_submission_effects.c
+			code/render/frontend/render_submission_lighting.c
+			code/render/frontend/render_submission_material.c
+			code/render/frontend/render_submission_model.c
+			code/render/frontend/render_submission_ui.c
+			code/render/frontend/render_submission_world.c
+			code/qcommon/wired/entity/metadata.c
+			code/render/ral/core/ral_lighting.c
+			code/render/ral/core/ral_lighting_product.c
+			code/render/ral/core/ral_irradiance_product.c
+			code/render/ral/core/ral_lighting_bake.c
+			code/render/ral/core/ral_lighting_cache.c
+			code/render/ral/core/ral_lighting_cook.c
+			code/render/ral/core/ral_lighting_cook_pipeline.c
+			code/render/ral/core/ral_lighting_cook_driver.c
+			code/render/ral/core/ral_lighting_cook_producer.c
+			code/render/ral/core/ral_static_lighting.c
+			code/render/ral/core/ral_lighting_artifact.c
+			code/render/ral/core/ral_irradiance_runtime.c
+			code/render/ral/core/ral_lighting_composition.c)
+		TARGET_INCLUDE_DIRECTORIES(render_lighting_project_source_test PRIVATE
+			code/qcommon code/render/frontend code/render/ral/core
+			code/tools/lighting_cook)
+		TARGET_COMPILE_OPTIONS(render_lighting_project_source_test PRIVATE
+			-Wall -Wextra -Werror)
+		ADD_TEST(NAME render_lighting_project_source_contract
+			COMMAND render_lighting_project_source_test)
+		SET_TESTS_PROPERTIES(render_lighting_project_source_contract PROPERTIES
+			LABELS "host-only;subsystem;owner.lighting;owner.ral;failure.contract;backend-neutral"
+			TIMEOUT 30)
+		WIRED_CONFIGURE_HOST_TEST(render_lighting_project_source_test
+			render_lighting_project_source_contract)
+		ADD_TEST(NAME render_submission_lighting_source_policy_contract
+			COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+				-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/render_submission_lighting_policy_check.cmake)
+		SET_TESTS_PROPERTIES(render_submission_lighting_source_policy_contract PROPERTIES
+			LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.contract;backend-neutral"
+			TIMEOUT 30)
 		ADD_TEST(NAME ral_metal_module_link_policy_contract
 			COMMAND ${CMAKE_COMMAND}
 				-DBINARY=$<TARGET_FILE:${RENDERER_PREFIX}_metal${RENDEXT}>
@@ -6342,6 +7092,7 @@ IF(USE_LUA)
 	TARGET_INCLUDE_DIRECTORIES(qcommon_ded PRIVATE ${LUAJIT_DIR}/src)
 	TARGET_INCLUDE_DIRECTORIES(qcommon_engine_shared PRIVATE ${LUAJIT_DIR}/src)
 	TARGET_INCLUDE_DIRECTORIES(client PRIVATE ${LUAJIT_DIR}/src)
+	TARGET_COMPILE_DEFINITIONS(client PRIVATE WIRED_FX_LUA_AUTHORING=1)
 
 	# Link LuaJIT to both client and headless server executables
 	TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} luajit)
@@ -6376,6 +7127,27 @@ IF(USE_LUA)
 		TIMEOUT 30
 	)
 	WIRED_CONFIGURE_HOST_TEST(wired_scene_test wired_scene)
+
+	# WiredFX Lua authoring compiles one trusted System-VM table into the
+	# pointer-free profile ABI. Runtime scheduling and backend dispatch never
+	# retain lua_State or expose raw Lua across the native/WASM boundary.
+	ADD_EXECUTABLE(wired_fx_authoring_test
+		tests/wired_fx_authoring_test.c
+		code/qcommon/wired/core/scripting/wired_fx_authoring.c
+		code/render/frontend/render_effect_profile.c
+	)
+	TARGET_INCLUDE_DIRECTORIES(wired_fx_authoring_test PRIVATE ${LUAJIT_DIR}/src)
+	TARGET_COMPILE_DEFINITIONS(wired_fx_authoring_test PRIVATE WIRED_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+	TARGET_LINK_LIBRARIES(wired_fx_authoring_test luajit)
+	IF(NOT WIN32)
+		TARGET_LINK_LIBRARIES(wired_fx_authoring_test m dl pthread)
+	ENDIF()
+	ADD_TEST(NAME wired_fx_authoring_contract COMMAND wired_fx_authoring_test)
+	SET_TESTS_PROPERTIES(wired_fx_authoring_contract PROPERTIES
+		LABELS "host-only;subsystem;owner.ral;failure.contract;feature.lua;feature.wired-fx"
+		TIMEOUT 30
+	)
+	WIRED_CONFIGURE_HOST_TEST(wired_fx_authoring_test wired_fx_authoring_contract)
 	ENDIF()
 
 	MESSAGE(STATUS "LuaJIT scripting enabled")
@@ -6405,17 +7177,28 @@ IF(WIRED_EMCC_EXECUTABLE)
 		code/web/web_presentation.c
 		code/web/web_transport.c
 		code/web/web_scripting.c
-		code/web/web_ui.c
+		code/web/web_ui_native.c
 		code/web/web_authored_content.c
 		code/render/ral/core/ral_presentation_host.c
 		code/render/ral/backends/webgpu/ral_webgpu_browser_emscripten.c
 		code/render/ral/backends/webgpu/ral_webgpu_renderer_module.c
+		code/render/ral/backends/webgpu/ral_webgpu_image_decode.c
+		code/render/frontend/render_lighting_metadata.c
+		code/render/frontend/render_material_script.c
+		code/render/frontend/render_material_script_lighting.c
+		code/render/frontend/render_lighting_sidecar.c
 		code/render/frontend/render_submission.c
 		code/render/frontend/render_submission_effects.c
+		code/render/frontend/render_submission_lighting.c
 		code/render/frontend/render_submission_material.c
 		code/render/frontend/render_submission_model.c
 		code/render/frontend/render_submission_ui.c
-		code/render/frontend/render_submission_world.c)
+		code/render/frontend/render_submission_world.c
+		code/render/frontend/tr_image_bmp.c
+		code/render/frontend/tr_image_jpg.c
+		code/render/frontend/tr_image_png.c
+		code/render/frontend/tr_image_tga.c
+		code/qcommon/puff.c)
 	# OPUS_ARCH_SRCS follows the native configure host (arm64 on this machine).
 	# wasm32 must use Opus' generic C implementation; host NEON/SSE translation
 	# units are neither valid nor useful in the browser artifact.
@@ -6435,6 +7218,8 @@ IF(WIRED_EMCC_EXECUTABLE)
 	# browser builds through the explicit subsystem-level fail-closed adapter.
 	LIST(FILTER WIRED_WEB_FULL_CLIENT_SOURCES EXCLUDE REGEX
 		"(^|/)code/qcommon/wired/core/scripting/|(^|/)code/qcommon/wired/scene/wired_scene\\.c$|(^|/)code/server/sv_lua\\.c$|(^|/)code/server/sv_wired_rcon_lua\\.c$|(^|/)code/client/cl_characters\\.c$")
+	LIST(FILTER WIRED_WEB_FULL_CLIENT_SOURCES EXCLUDE REGEX
+		"(^|/)code/client/wired/(store/cl_wired_store_lua|scene/cl_wired_scene_lua|hud/cl_wired_crosshair|l10n/cl_wired_l10n|ui/cl_wired_attract|ui/cl_wired_lua_test)\\.c$")
 	LIST(REMOVE_DUPLICATES WIRED_WEB_FULL_CLIENT_SOURCES)
 	SET(WIRED_WEB_FULL_CLIENT_ABSOLUTE)
 	FOREACH(_wired_web_source IN LISTS WIRED_WEB_FULL_CLIENT_SOURCES)
@@ -6460,7 +7245,7 @@ IF(WIRED_EMCC_EXECUTABLE)
 			-Wno-unused-parameter -Wno-unused-function -Wno-unused-variable
 			-Wno-sign-compare -D_GNU_SOURCE -DWASM_MODULE
 			-DFEAT_WASM=0 -DFEAT_SENTRY_CRASH=0 -DFEAT_RECAST_NAVMESH=0
-			-DFEAT_FOG_SYSTEM=0 -DFEAT_SSAO=1 -DFEAT_WIRED_UI=0 -DBOTLIB
+			-DFEAT_SSAO=1 -DFEAT_WIRED_UI=1 -DWIRED_WEB_UI_NATIVE=1 -DBOTLIB
 			-DOPUS_BUILD -DUSE_ALLOCA -DFLOATING_POINT -DHAVE_LRINTF
 			-DPRODUCT_NAME=\"q3now\" -DCHANNEL_SUFFIX=\"-preview\"
 			-include ${CMAKE_CURRENT_SOURCE_DIR}/code/web/web_ui_compat.h
@@ -6509,7 +7294,7 @@ IF(WIRED_EMCC_EXECUTABLE)
 			# MAIN_MODULE=2 deliberately dead-strips dynamic dependencies. Keep the
 			# bounded union imported by gamecl/gamesv side modules explicit so a
 			# browser content update cannot silently widen the host ABI.
-			"-sEXPORTED_FUNCTIONS=['___stack_pointer','_stderr','___assert_fail','_acos','_atan2','_atan2f','_atof','_atoi','_cos','_cosf','_exit','_fiprintf','_qsort','_rand','_sin','_sinf','_snprintf','_srand','_sscanf','_strcat','_strchr','_strcmp','_strcpy','_strlen','_strncmp','_strncpy','_strrchr','_strstr','_strtok','_strtol','_tan','_tolower','_toupper','_vsnprintf','_WiredWeb_ClientStart','_WiredWeb_ClientFrame','_WiredWeb_ClientShutdown','_WiredWeb_ClientStatus','_WiredWeb_ContentProbe','_WiredWeb_ArenaReceiptProbe','_WiredWeb_AuthoredReceiptProbe','_WiredWeb_InputKey','_WiredWeb_InputChar','_WiredWeb_InputMouse','_RalWebGpu_BrowserModuleStart','_RalWebGpu_BrowserModulePoll','_RalWebGpu_BrowserModuleResize','_RalWebGpu_BrowserModuleStop','_GetRefAPI','_WiredWebGpu_RendererPoll','_WiredWebGpu_RendererResize']"
+			"-sEXPORTED_FUNCTIONS=['___stack_pointer','___errno_location','_stderr','___assert_fail','_acos','_atan2','_atan2f','_atof','_atoi','_cos','_cosf','_exit','_fiprintf','_qsort','_rand','_sin','_sinf','_snprintf','_srand','_sscanf','_strcat','_strchr','_strcmp','_strcpy','_strlen','_strncmp','_strncpy','_strrchr','_strstr','_strtof','_strtok','_strtol','_tan','_tolower','_toupper','_vsnprintf','_WiredWeb_ClientStart','_WiredWeb_ClientFrame','_WiredWeb_ClientShutdown','_WiredWeb_ClientStatus','_WiredWeb_ClientPresentationChanged','_WiredWeb_ContentProbe','_WiredWeb_ArenaReceiptProbe','_WiredWeb_AuthoredReceiptProbe','_WiredWeb_UiTextReceiptProbe','_WiredWeb_UiMenuReceiptProbe','_WiredWeb_UiHudReceiptProbe','_WiredWeb_UiHudExtentProbe','_WiredWeb_UiEnableServerFixture','_WiredWeb_UiServerReceiptProbe','_WiredWeb_UiServerRowCenterProbe','_WiredWeb_UiServerP99MicrosProbe','_WiredWeb_UiLayerReceiptProbe','_WiredWeb_UiActivateLayerFixture','_WiredWeb_UiRootCount','_WiredWeb_UiActivateRoot','_WiredWeb_UiRootReceiptProbe','_WiredWeb_InputKey','_WiredWeb_InputBrowserKey','_WiredWeb_InputChar','_WiredWeb_InputMouse','_WiredWeb_InputPointer','_WiredWeb_InputWheel','_RalWebGpu_BrowserModuleStart','_RalWebGpu_BrowserModulePoll','_RalWebGpu_BrowserModuleResize','_RalWebGpu_BrowserModuleStop','_GetRefAPI','_WiredWebGpu_RendererPoll','_WiredWebGpu_RendererResize','_WiredWebGpu_RendererFailureStage']"
 			"-sEXPORTED_RUNTIME_METHODS=['FS','wasmMemory']"
 			-o ${CMAKE_BINARY_DIR}/wired_web_client.mjs
 		VERBATIM)

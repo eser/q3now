@@ -4,6 +4,7 @@
 
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/lib/wired_paths.sh"
 FIXTURE="$SCRIPT_DIR/wiredui-server-fixture.py"
 TIMEOUT_RUNNER="$SCRIPT_DIR/run-with-timeout.py"
 
@@ -139,7 +140,7 @@ epochs=[]
 for frame,region,row in focused:
  if not epochs or region!=epochs[-1][1] or frame>epochs[-1][0]+1:epochs.append([frame,region,row])
  else:epochs[-1]=[frame,region,row]
-if [x[1] for x in epochs] != ["row_password","row_password"]:raise SystemExit("FAIL layout focus epochs")
+if [x[1] for x in epochs] != ["btn_cancel","row_password"]:raise SystemExit("FAIL layout focus epochs")
 server_focus=sorted(r["frame"] for r in server_layout if r.get("region")=="btn_connect" and r.get("focused")==1)
 server_epochs=[]
 for frame in server_focus:
@@ -154,9 +155,10 @@ if tuple(map(int,cm.groups()))!=(x,y):raise SystemExit("FAIL pointer coordinate 
 # The moved marker is emitted from the compositor's authoritative rendered
 # btn_cancel centre. layoutdump currently exposes the legacy resolved rect,
 # which is not the compositor hit rect; bind its positive presence above and
-# require the actual ingress coordinate to remain in the password surface.
-password_roots=[r for r in password_layout if r.get("region")=="password_root"]
-if not password_roots or any(not (r.get("x")<=x<=r.get("x")+r.get("w") and r.get("y")<=y<=r.get("y")+r.get("h")) for r in password_roots):raise SystemExit("FAIL pointer outside password surface")
+# require the actual ingress coordinate to remain in the complete password
+# modal surface. password_root is the content body and excludes its footer.
+password_surfaces=[r for r in password_layout if r.get("region")=="password"]
+if not password_surfaces or any(not (r.get("x")<=x<=r.get("x")+r.get("w") and r.get("y")<=y<=r.get("y")+r.get("h")) for r in password_surfaces):raise SystemExit("FAIL pointer outside password surface")
 print("PASS password cancel: pointer button + menu ESC + edit ESC wipe prompt and preserve READY Server Info")
 PYEOF
 }
@@ -191,7 +193,7 @@ for x in rows:add(x.replace("server status row=","server status registry row="))
 add("WiredUI: pointer phase=release reason=shutdown was_down=0 pointer_down=0");add("WiredUI: server status cancelled generation=8 rows=0");add("WiredUI: server status cancelled generation=9 rows=0")
 F=[{"event":"ready","client_port":40000,"sentinel_port":30001,"target_port":30002,"protocol":74},{"event":"request","role":"target","command":"getstatus","peer_port":40000},{"event":"challenge_seen","ordinal":1,"challenge":"1"*16},{"event":"status_response","role":"target","peer_port":40000},{"event":"stopped","reason":"signal"}]
 L=[]
-for frame,menu,regions,focus in ((1,"serverinfo",("serverinfo","statuslist","btn_connect"),"btn_connect"),(2,"password",("password","password_root","row_password","btn_cancel","btn_connect"),"row_password"),(4,"serverinfo",("serverinfo","statuslist","btn_connect"),"btn_connect"),(5,"password",("password","password_root","row_password","btn_cancel","btn_connect"),None),(6,"serverinfo",("serverinfo","statuslist","btn_connect"),"btn_connect"),(7,"password",("password","password_root","row_password","btn_cancel","btn_connect"),None),(8,"serverinfo",("serverinfo","statuslist","btn_connect"),"btn_connect"),(9,"password",("password","password_root","row_password","btn_cancel","btn_connect"),"row_password")):
+for frame,menu,regions,focus in ((1,"serverinfo",("serverinfo","statuslist","btn_connect"),"btn_connect"),(2,"password",("password","password_root","row_password","btn_cancel","btn_connect"),"btn_cancel"),(4,"serverinfo",("serverinfo","statuslist","btn_connect"),"btn_connect"),(5,"password",("password","password_root","row_password","btn_cancel","btn_connect"),None),(6,"serverinfo",("serverinfo","statuslist","btn_connect"),"btn_connect"),(7,"password",("password","password_root","row_password","btn_cancel","btn_connect"),None),(8,"serverinfo",("serverinfo","statuslist","btn_connect"),"btn_connect"),(9,"password",("password","password_root","row_password","btn_cancel","btn_connect"),"row_password")):
  for i,r in enumerate(regions):
   if menu=="password" and r in ("password","password_root"):x,y,w,h=(0,0,1280,720)
   elif r=="btn_cancel":x,y,w,h=(650,480,100,40)
@@ -276,18 +278,19 @@ fi
 command -v python3 >/dev/null 2>&1 && [ -f "$FIXTURE" ] && [ -f "$TIMEOUT_RUNNER" ] || { echo 'SKIP: Python unavailable'; exit 77; }
 WIRED="${1:-}"; [ -n "$WIRED" ] && [ -x "$WIRED" ] || { echo 'SKIP: pass assembled Wired GUI binary'; exit 77; }
 WIRED="$(cd "$(dirname "$WIRED")" && pwd)/$(basename "$WIRED")"; WD="$(dirname "$WIRED")"
-PACK=""; for c in "$WD" "$WD/../Resources" "$WD/q3now-preview.arm64.app/Contents/Resources"; do [ -f "$c/base/pax21.sw3z" ] && PACK="$c" && break; done
-[ -n "$PACK" ] || { echo 'SKIP: current pax21 unavailable'; exit 77; }; CONTENT="${WIRED_CONTENT_ROOT:-$PACK}"
-if [ -f "$CONTENT/base/pax01.sw3z" ]; then BASE="$CONTENT/base/pax01.sw3z"; elif [ -f "$CONTENT/base/pak0.pk3" ]; then BASE="$CONTENT/base/pak0.pk3"; else echo 'SKIP: set WIRED_CONTENT_ROOT'; exit 77; fi
+PACK="$(wired_find_archive_root "$WD" "$WD/../Resources" "$WD/q3now-preview.arm64.app/Contents/Resources" 2>/dev/null || true)"
+[ -n "$PACK" ] || { echo 'SKIP: current VFS archives unavailable'; exit 77; }
+CONTENT="$(wired_find_archive_root "${WIRED_CONTENT_ROOT:-}" "$WIRED_HOME" "$PACK" 2>/dev/null || true)"
+[ -n "$CONTENT" ] || { echo 'SKIP: set WIRED_CONTENT_ROOT'; exit 77; }
 ROOT="$(mktemp -d -t password-cancel-XXXXXX 2>/dev/null || mktemp -d)"; EVENTS="$ROOT/fixture.jsonl"; HOME_DIR="$ROOT/q3now-preview"; RUN_DIR="$ROOT/run"; LAYOUT="$RUN_DIR/layoutdump.jsonl"; PID=""
 cleanup(){ [ -n "$PID" ] && kill -TERM "$PID" 2>/dev/null || true; [ -n "$PID" ] && wait "$PID" 2>/dev/null || true; [ "${WIRED_KEEP_ARTIFACTS:-0}" = 1 ] || rm -rf "$ROOT"; }; trap cleanup EXIT INT TERM
-mkdir -p "$HOME_DIR/base" "$RUN_DIR"; cp "$PACK/base/pax21.sw3z" "$HOME_DIR/base/" || exit 1; cp "$BASE" "$HOME_DIR/base/" || exit 1
+mkdir -p "$RUN_DIR"; wired_link_content_into_home "$HOME_DIR" "$CONTENT/base" "$PACK/base" || exit 1
 CLIENT_PORT="$(python3 - <<'PY'
 import socket
 s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.bind(('127.0.0.1',0));print(s.getsockname()[1]);s.close()
 PY
 )"; SENTINEL_PORT=$((CLIENT_PORT+1)); TARGET_PORT=$((CLIENT_PORT+2))
-python3 "$FIXTURE" --client-port "$CLIENT_PORT" --sentinel-port "$SENTINEL_PORT" --target-port "$TARGET_PORT" --protocol 74 --events "$EVENTS" --timeout 30 & PID=$!
+python3 "$FIXTURE" --client-port "$CLIENT_PORT" --sentinel-port "$SENTINEL_PORT" --target-port "$TARGET_PORT" --protocol 75 --events "$EVENTS" --timeout 30 & PID=$!
 for _ in $(seq 1 100); do [ -s "$EVENTS" ] && break; sleep .05; done
 cat >"$HOME_DIR/base/password-cancel.cfg" <<CFGEOF
 set com_maxfps 60

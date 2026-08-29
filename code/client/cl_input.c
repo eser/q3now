@@ -553,6 +553,11 @@ static void CL_FinishMove( usercmd_t *cmd ) {
 	for (int i=0 ; i<3 ; i++) {
 		cmd->angles[i] = ANGLE2SHORT(clientActiveApp->cl.viewangles[i]);
 	}
+	cmd->aimMode = clientActiveApp->cl.cgameAimMode;
+	if ( cmd->aimMode != UCMD_AIM_NONE ) {
+		cmd->aimAngles[PITCH] = clientActiveApp->cl.cgameAimAngles[PITCH];
+		cmd->aimAngles[YAW] = clientActiveApp->cl.cgameAimAngles[YAW];
+	}
 }
 
 

@@ -39,9 +39,24 @@ layout(set = 0, binding = 0) uniform AtmFrame {
 	uint  gridSize;
 	uint  atmType;
 	float distance;
-	float invResX;       // 1/renderWidth
-	float invResY;       // 1/renderHeight
-	float depthValid;    // 1.0 when the shared scene-depth copy is fresh this frame
+	float computePad0;
+	float computePad1;
+	float computePad2;
+	vec4  windGust;
+	vec4  precipitation;
+	float dustAsh;
+	float indoorExposure;
+	uint  climateSeed;
+	uint  climatePad;
+	vec4  climate;
+	vec4  surfaceClimate;
+	vec4  sun;
+	vec4  moon;
+	vec4  ambientCloud;
+	vec4  cloudMedia;
+	vec4  effectMeta;
+	vec4  effectWorkloads[48];
+	vec4  renderParams;  // xy inverse resolution, z depthValid
 };
 
 // Shared scene-depth copy (vk.sceneDepth) — same resource the decal / particle /
@@ -64,13 +79,27 @@ vec3 sRGBToLinear( vec3 c ) {
 	return mix( hi, lo, vec3( cutoff ) );
 }
 
+vec3 displayVisibility( vec3 sceneColor ) {
+	// The xyz view vectors/eye consume only three lanes. Their std140 padding
+	// carries exposure, shadow exponent and toe pivot respectively. Vulkan
+	// publishes identity here because its final tonemap owns the transform;
+	// direct-present backends publish the live RAL visibility plan.
+	vec3 exposed = max( sceneColor, vec3( 0.0 ) ) * viewLeft.w;
+	float luminance = dot( exposed, vec3( 0.2126, 0.7152, 0.0722 ) );
+	if ( luminance > 0.0 && luminance < eyeWorld.w && viewUp.w != 1.0 ) {
+		float curved = pow( luminance / eyeWorld.w, viewUp.w ) * eyeWorld.w;
+		exposed *= curved / luminance;
+	}
+	return exposed;
+}
+
 // Soft-particle depth fade: dissolve as the streak/flake nears world geometry.
 // Reversed-Z (near≈1, far/cleared≈0): a fragment in front has fragDepth >
 // sceneDepth. Returns 1.0 (no fade) when depth isn't fresh or nothing is behind.
 float softParticleFade() {
-	if ( depthValid < 0.5 )
+	if ( renderParams.z < 0.5 )
 		return 1.0;
-	vec2  screenUV   = gl_FragCoord.xy * vec2( invResX, invResY );
+	vec2  screenUV   = gl_FragCoord.xy * renderParams.xy;
 	float sceneDepth = texture( sceneDepthTex, screenUV ).r;
 	if ( sceneDepth <= 0.0 )
 		return 1.0;
@@ -85,6 +114,6 @@ void main() {
 	float edge  = 1.0 - smoothstep( 0.0, 0.5, abs( fragUV.x - 0.5 ) );
 	float alpha = fragColor.a * edge * softParticleFade();
 
-	vec3 rgb = sRGBToLinear( fragColor.rgb );
+	vec3 rgb = displayVisibility( sRGBToLinear( fragColor.rgb ) );
 	outColor = vec4( rgb, alpha );
 }

@@ -1006,6 +1006,10 @@ void trap_WCE_EmitEvent( wce_event_type_t type,
              origin, param1, param2, PASSFLOAT(fparam), text );
 }
 
+qboolean trap_EntityEventEnqueue( const wiredEntityEvent_t *event ) {
+	return syscall( G_ENTITY_EVENT_ENQUEUE, event );
+}
+
 int trap_WCE_GetSoundEvents( int clientNum, bot_sound_event_t *out, int maxOut ) {
     return syscall( G_WCE_GET_SOUND_EVENTS, clientNum, out, maxOut );
 }

@@ -9,6 +9,7 @@ LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 int		 anykeydown;
 qkey_t	 keys[MAX_KEYS];
+static unsigned int key_bindingGeneration = 1;
 
 qboolean key_overstrikeMode;
 
@@ -392,10 +393,18 @@ void Key_SetBinding( int keynum, const char *binding ) {
 
 	// allocate memory for new binding
 	keys[ keynum ].binding = CopyString( binding );
+	key_bindingGeneration++;
+	if ( key_bindingGeneration == 0 ) {
+		key_bindingGeneration = 1;
+	}
 
 	// consider this like modifying an archived cvar, so the
 	// file write will be triggered at the next opportunity
 	cvar_modifiedFlags |= CVAR_ARCHIVE;
+}
+
+unsigned int Key_GetBindingGeneration( void ) {
+	return key_bindingGeneration;
 }
 
 

@@ -58,16 +58,16 @@ menuDef {
 		itemDef {
 			name "breadcrumb"
 			type container
-			rect 0 0 1 0.03
+			width FIXED 1 height FIXED 0.03
 			height FIT
 			direction row
 			alignY center
 			gap $spacing_sm
 			padding $spacing_sm 5vw
 
-			itemDef { name "crumb_root" type 0 rect 0 0 0.12 0.025 height FIT text "QUAKEWIRED" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
-			itemDef { name "crumb_sep"  type 0 rect 0 0 0.01 0.025 height FIT text "/"          textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
-			itemDef { name "crumb_here" type 0 rect 0 0 0.12 0.025 height FIT text "CAMPAIGN"   textalign 0 font $font_mono 10 forecolor $accent  decoration visible 1 grow 0 }
+			itemDef { name "crumb_root" type 0 width FIXED 0.12 height FIXED 0.025 height FIT text "QUAKEWIRED" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+			itemDef { name "crumb_sep"  type 0 width FIXED 0.01 height FIXED 0.025 height FIT text "/"          textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+			itemDef { name "crumb_here" type 0 width FIXED 0.12 height FIXED 0.025 height FIT text "CAMPAIGN"   textalign 0 font $font_mono 10 forecolor $accent  decoration visible 1 grow 0 }
 		}
 
 		// ── title — mockup's two-tone display pair ("THE DESCENT") ──
@@ -75,21 +75,21 @@ menuDef {
 		itemDef {
 			name "campaign_title_row"
 			type container
-			rect 0 0 1 0.10
+			width FIXED 1 height FIXED 0.10
 			height FIT
 			direction row
 			alignY center
 			gap $spacing_md
 			padding $spacing_xs 5vw
 
-			itemDef { name "title_the"     type 0 rect 0 0 0.20 0.09 height FIT text "NO"       textalign 0 font $font_sans 72 forecolor $bone   decoration visible 1 grow 0 }
-			itemDef { name "title_descent" type 0 rect 0 0 0.45 0.09 height FIT text "CAMPAIGN" textalign 0 font $font_sans 72 forecolor $accent decoration visible 1 grow 0 }
+			itemDef { name "title_the"     type 0 width FIXED 0.20 height FIXED 0.09 height FIT text "NO"       textalign 0 font $font_sans 72 forecolor $bone   decoration visible 1 grow 0 }
+			itemDef { name "title_descent" type 0 width FIXED 0.45 height FIXED 0.09 height FIT text "CAMPAIGN" textalign 0 font $font_sans 72 forecolor $accent decoration visible 1 grow 0 }
 		}
 
 		itemDef {
 			name "campaign_strapline"
 			type 0
-			rect 0 0 1 0.03
+			width FIXED 1 height FIXED 0.03
 			height FIT
 			text "single-player campaign content is not part of this alpha · no chapters, no saves, no progression"
 			textalign 0
@@ -106,7 +106,7 @@ menuDef {
 		itemDef {
 			name "campaign_body"
 			type container
-			rect 0 0 1 0.55
+			width FIXED 1 height FIXED 0.55
 			direction column
 			padding $spacing_lg 5vw
 			gap $spacing_card_gap
@@ -116,7 +116,7 @@ menuDef {
 			itemDef {
 				name "status_panel"
 				type container
-				rect 0 0 1 0.32
+				width FIXED 1 height FIXED 0.32
 				height FIT
 				direction column
 				gap $spacing_sm
@@ -131,7 +131,7 @@ menuDef {
 				itemDef {
 					name "status_body"
 					type 0
-					rect 0 0 1 0.04
+					width FIXED 1 height FIXED 0.04
 					height FIT
 					text "This build ships the multiplayer arena: deathmatch, duel, king of the hill, last man standing, team deathmatch, capture the flag and one flag CTF — against bots or other players."
 					textalign 0
@@ -145,7 +145,7 @@ menuDef {
 				itemDef {
 					name "status_note"
 					type 0
-					rect 0 0 1 0.03
+					width FIXED 1 height FIXED 0.03
 					height FIT
 					text "Chapters, saves and campaign progression are not implemented — they are not hidden or locked, they do not exist yet."
 					textalign 0
@@ -161,7 +161,7 @@ menuDef {
 			itemDef {
 				name "routes_label"
 				type 0
-				rect 0 0 1 0.025
+				width FIXED 1 height FIXED 0.025
 				height FIT
 				text "PLAY INSTEAD"
 				textalign 0
@@ -175,7 +175,7 @@ menuDef {
 			itemDef {
 				name "route_host"
 				type container
-				rect 0 0 1 0.09
+				width FIXED 1 height FIXED 0.09
 				height FIT
 				direction column
 				gap $spacing_xxs
@@ -191,7 +191,7 @@ menuDef {
 			itemDef {
 				name "route_join"
 				type container
-				rect 0 0 1 0.09
+				width FIXED 1 height FIXED 0.09
 				height FIT
 				direction column
 				gap $spacing_xxs
@@ -211,15 +211,15 @@ menuDef {
 		itemDef {
 			name "campaign_footer"
 			type container
-			rect 0 0 1 0.06
+			width FIXED 1 height FIXED 0.06
 			direction row
 			alignY center
 			gap $spacing_md
 			padding $spacing_sm 5vw
 
-			itemDef { name "btn_back" type 1 rect 0 0 0.14 0.04 height FIT text "◀ Back" textalign 0 font $font_sans 13 forecolor $boneDim forecolor.active $accent visible 1 grow 0 action { close } }
+			itemDef { name "btn_back" type 1 width FIXED 0.14 height FIXED 0.04 height FIT text "◀ Back" textalign 0 font $font_sans 13 forecolor $boneDim forecolor.active $accent visible 1 grow 0 action { close } }
 			itemDef { name "footer_spacer" type container grow 1 decoration visible 1 }
-			itemDef { name "hint_back" type 0 rect 0 0 0.1 0.025 height FIT text "ESC back" textalign 2 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+			itemDef { name "hint_back" type 0 width FIXED 0.1 height FIXED 0.025 height FIT text "ESC back" textalign 2 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
 		}
 	}
 

@@ -222,7 +222,7 @@ struct spvDescriptorSetBuffer0
 
 constant spvUnsafeArray<float, 6> _606 = spvUnsafeArray<float, 6>({ 1.0, 1.0, -1.0, -1.0, 1.0, -1.0 });
 constant spvUnsafeArray<float, 6> _613 = spvUnsafeArray<float, 6>({ -1.0, 1.0, -1.0, -1.0, 1.0, 1.0 });
-constant spvUnsafeArray<float2, 6> _725 = spvUnsafeArray<float2, 6>({ float2(0.0, 1.0), float2(0.0), float2(1.0), float2(1.0), float2(0.0), float2(1.0, 0.0) });
+constant spvUnsafeArray<float2, 6> _730 = spvUnsafeArray<float2, 6>({ float2(0.0, 1.0), float2(0.0), float2(1.0), float2(1.0), float2(0.0), float2(1.0, 0.0) });
 
 struct main0_out
 {
@@ -515,6 +515,7 @@ vertex main0_out main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [
         float _658 = parmEval(param_1, param_2, param_3);
         color.w = _658;
     }
+    color *= unpack_unorm4x8_to_float(p.pad5);
     float effectiveStart = c.sizeStart + p.sizeJitterPick;
     float size = mix(effectiveStart, c.sizeEnd, p.age);
     ParticleParm param_4 = c.sizeParm;
@@ -523,12 +524,12 @@ vertex main0_out main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [
         ParticleParm param_5 = c.sizeParm;
         float param_6 = p.age;
         float param_7 = p.sizeJitterPick;
-        float _690 = parmEval(param_5, param_6, param_7);
-        size = _690;
+        float _695 = parmEval(param_5, param_6, param_7);
+        size = _695;
     }
     float3 worldPos = (p.pos + ((*spvDescriptorSet0.m_195).viewLeft.xyz * (sx * size))) + ((*spvDescriptorSet0.m_195).viewUp.xyz * (uy * size));
     out.gl_Position = (*spvDescriptorSet0.m_195).mvp * float4(worldPos, 1.0);
-    out.fragUV = _725[vertInQuad];
+    out.fragUV = _730[vertInQuad];
     out.fragColor = color;
     out.particleClassHandle = p.classHandle | (c.colorDomain << 31u);
     if (c.frameCount > 1u)
@@ -539,16 +540,16 @@ vertex main0_out main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [
         uint frame1 = min((frame0 + 1u), last);
         out.frameSlot0 = c.frameSlots[frame0];
         out.frameSlot1 = c.frameSlots[frame1];
-        float _777;
+        float _782;
         if (c.frameBlend != 0u)
         {
-            _777 = fract(fr);
+            _782 = fract(fr);
         }
         else
         {
-            _777 = 0.0;
+            _782 = 0.0;
         }
-        out.frameBlend = _777;
+        out.frameBlend = _782;
     }
     else
     {

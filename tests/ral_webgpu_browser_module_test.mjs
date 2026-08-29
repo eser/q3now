@@ -4,12 +4,14 @@
 import assert from "node:assert/strict";
 import { createRalWebGpuBrowserModule, recreateRalWebGpuBrowserModule,
   RAL_WEBGPU_BROWSER_DEFAULT_MODE } from "../code/render/ral/backends/webgpu/ral_webgpu_browser_module.mjs";
+import { RAL_WEBGPU_BROWSER_ABI_SCHEMA_VERSION as ABI }
+  from "../code/render/ral/backends/webgpu/ral_webgpu_browser_dispatch.mjs";
 
 const memory = new WebAssembly.Memory({ initial: 2 });
 const canvas = { width:0, height:0, style:{}, getContext(){ return null; } };
 const events = [];
 const beginAdapter = (generation) => { const request=new DataView(memory.buffer,0x1000,24);
-  request.setUint32(0,1,true);request.setUint32(4,1,true);request.setUint32(8,24,true);
+	  request.setUint32(0,ABI,true);request.setUint32(4,1,true);request.setUint32(8,24,true);
   request.setBigUint64(16,BigInt(generation),true);
   assert.equal(globalThis.wiredRalWebGpuDispatch(1,0x1000,24,0x2000,24),1); };
 const factory = async ({ noInitialRun }) => { assert.equal(noInitialRun,true); events.push("factory");

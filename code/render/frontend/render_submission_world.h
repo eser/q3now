@@ -27,6 +27,7 @@ typedef struct {
 	float texCoord[2];
 	float lightmapCoord[2];
 	uint8_t color[4];
+	float normal[3];
 } renderWorldVertex_t;
 
 typedef struct {
@@ -39,8 +40,13 @@ typedef struct {
 	qhandle_t lightmapMaterial;
 	renderWorldSurfaceType_t surfaceType;
 	renderAlphaMode_t alphaMode;
+	renderCullMode_t cullMode;
 	float alphaCutoff;
 	qboolean depthWrite;
+	float sort;
+	qboolean sky;
+	qboolean noDraw;
+	qboolean visible;
 } renderWorldBatch_t;
 
 typedef struct {
@@ -56,12 +62,25 @@ typedef struct {
 	float viewAxis[3][3];
 	float fovX;
 	float fovY;
+	int32_t viewportX;
+	int32_t viewportY;
+	uint32_t viewportWidth;
+	uint32_t viewportHeight;
+	/* Painter-order seam for RDF_NOWORLDMODEL UI subscenes.  Native RAL
+	 * products lower entity geometry and UI primitives separately, so retain
+	 * the number of UI primitives that preceded RenderScene; the backend can
+	 * composite the preview between the UI prefix and suffix. */
+	uint32_t uiPrimitiveInsertionIndex;
+	uint32_t rdflags;
+	int32_t timeMs;
 	qboolean ready;
 } renderWorldSnapshot_t;
 
 typedef struct renderSubmissionState_s renderSubmissionState_t;
 
 qboolean RenderSubmission_WorldSnapshot( const renderSubmissionState_t *state,
+	renderWorldSnapshot_t *outSnapshot );
+qboolean RenderSubmission_ViewSnapshot( const renderSubmissionState_t *state,
 	renderWorldSnapshot_t *outSnapshot );
 qboolean RenderSubmission_LightmapMaterialName( char outName[MAX_QPATH],
 	uint32_t checksum, int lightmapIndex );

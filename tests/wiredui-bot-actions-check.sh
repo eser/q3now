@@ -11,6 +11,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/lib/wired_paths.sh"
 TIMEOUT_RUNNER="$SCRIPT_DIR/run-with-timeout.py"
 
 analyze_contract() {
@@ -932,32 +933,18 @@ if [ ! -f "$TIMEOUT_RUNNER" ] || ! python3 -c 'import sys; raise SystemExit(0 if
     echo "SKIP: Python >=3.8 and tests/run-with-timeout.py are required"; exit 77
 fi
 
-PACK_ROOT=""
-for candidate in "$WIRED_DIR" "$WIRED_DIR/../Resources" "$WIRED_DIR/../../.."; do
-    if [ -f "$candidate/base/pax21.sw3z" ]; then PACK_ROOT="$(cd "$candidate" && pwd)"; break; fi
-done
-if [ -z "$PACK_ROOT" ]; then echo "SKIP: current base/pax21.sw3z not found beside assembled product"; exit 77; fi
-
-CONTENT_ROOT=""
-for candidate in "${WIRED_CONTENT_ROOT:-}" "$PACK_ROOT"; do
-    [ -n "$candidate" ] || continue
-    if [ -f "$candidate/base/pax01.sw3z" ] || [ -f "$candidate/base/pak0.pk3" ]; then
-        CONTENT_ROOT="$(cd "$candidate" && pwd)"; break
-    fi
-done
-if [ -z "$CONTENT_ROOT" ]; then echo "SKIP: set WIRED_CONTENT_ROOT to canonical pax01.sw3z or pak0.pk3"; exit 77; fi
-if [ -f "$CONTENT_ROOT/base/pax01.sw3z" ]; then BASE_ARCHIVE="$CONTENT_ROOT/base/pax01.sw3z"
-else BASE_ARCHIVE="$CONTENT_ROOT/base/pak0.pk3"; fi
+PACK_ROOT="$(wired_find_archive_root "$WIRED_DIR" "$WIRED_DIR/../Resources" "$WIRED_DIR/../../.." 2>/dev/null || true)"
+if [ -z "$PACK_ROOT" ]; then echo "SKIP: current VFS archives not found beside assembled product"; exit 77; fi
+CONTENT_ROOT="$(wired_find_archive_root "${WIRED_CONTENT_ROOT:-}" "$WIRED_HOME" "$PACK_ROOT" 2>/dev/null || true)"
+if [ -z "$CONTENT_ROOT" ]; then echo "SKIP: set WIRED_CONTENT_ROOT to canonical base VFS content"; exit 77; fi
 
 RUN_ROOT="$(mktemp -d -t wired-botchk-XXXXXX 2>/dev/null || mktemp -d)"
 HOME_ROOT="$RUN_ROOT/q3now-preview"
-mkdir -p "$HOME_ROOT/base"
 cleanup() {
     if [ "${WIRED_KEEP_ARTIFACTS:-0}" = 1 ]; then echo "    kept artifacts: $RUN_ROOT"; else rm -rf "$RUN_ROOT"; fi
 }
 trap cleanup EXIT INT TERM
-cp "$BASE_ARCHIVE" "$HOME_ROOT/base/" || exit 1
-cp "$PACK_ROOT/base/pax21.sw3z" "$HOME_ROOT/base/pax21.sw3z" || exit 1
+wired_link_content_into_home "$HOME_ROOT" "$CONTENT_ROOT/base" "$PACK_ROOT/base" || exit 1
 
 cat >"$HOME_ROOT/base/wiredui-bot-actions.cfg" <<'CFGEOF'
 set g_log wiredui-bot-actions-games.log
@@ -973,7 +960,7 @@ cat >"$HOME_ROOT/base/wiredui-bot-actions-live.cfg" <<'CFGEOF'
 # A cold isolated home builds arena7's navmesh asynchronously.  Bot add commands
 # issued while that bake is in flight are deferred, so make readiness an explicit
 # precondition of this identity/ABA contract rather than racing the bake.
-waitms 10000
+waitms 45000
 spawn_headless_client
 wait 300
 botkick 1 1

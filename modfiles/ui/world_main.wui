@@ -33,29 +33,39 @@ menuDef {
 		name "main_scene_full"
 		type viewport
 		id "main_scene_full"
-		rect 0 0 1 1
+		width FIXED 1 height FIXED 1
 		cvarTest "cl_splitScreen"
 		showCvar { "0" }
 		decoration
 	}
 
 	itemDef {
-		name "main_scene_split"
-		type viewport
-		id "main_scene_split"
-		rect 0 0 0.5 1
-		cvarTest "cl_splitScreen"
-		showCvar { "1" }
-		decoration
-	}
+		name "split_scene_root"
+		type container
+		direction row
+		width PERCENT 1
+		height PERCENT 1
 
-	itemDef {
-		name "camera"
-		type viewport
-		id "camera"
-		rect 0.5 0 0.5 1
-		cvarTest "cl_splitScreen"
-		showCvar { "1" }
-		decoration
+		itemDef {
+			name "main_scene_split"
+			type viewport
+			id "main_scene_split"
+			width PERCENT 0.5
+			height PERCENT 1
+			cvarTest "cl_splitScreen"
+			showCvar { "1" }
+			decoration
+		}
+
+		itemDef {
+			name "camera"
+			type viewport
+			id "camera"
+			width PERCENT 0.5
+			height PERCENT 1
+			cvarTest "cl_splitScreen"
+			showCvar { "1" }
+			decoration
+		}
 	}
 }

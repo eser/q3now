@@ -1148,7 +1148,7 @@ void CL_PublishLoadingState( void ) {
 }
 
 /* CL_DrawLoadingScreen retired. Compositor is the sole loading-
- * screen renderer via loading_screen.wmenu: 7 custom-draws (wireframe,
+ * screen renderer via loading_screen.wui: 8 custom-draws (backdrop, wireframe,
  * streaming_rows, mapinfo_stats, topbar, maptitle_block, vulkan_badge,
  * server_info_strip) + 2 bindwidth bar items + 1 storeBind phase text +
  * 1 static footer strip. Per-frame state published from CL_Frame via
@@ -1156,17 +1156,15 @@ void CL_PublishLoadingState( void ) {
  * (Loading_DrawTopBar/Wireframe/etc) STAY — sole callers are the
  * Loading_CustomDraw_* wrappers (which parameterized them).
  *
- * Loading_DrawBackground / Loading_DrawDivider retired with this fn —
- * the wmenu's `backcolor 0.04 0.06 0.10 1` + `loading_divider` itemDef
- * cover both. Loading_DrawOverallBar retired separately below — wmenu's
+ * Loading_DrawDivider retired with this fn — the WUI flex divider owns that
+ * geometry. Loading_DrawOverallBar retired separately below — WUI's
  * bindwidth bar items + storeBind phase text replace it. */
 
 /* ── unified custom-draw wrappers ──────────────────────
  * Stateless adapters wrapping the existing Loading_Draw* helpers so the
  * compositor's CUSTOM dispatch can render the loading screen segments
- * declaratively from loading_screen.wmenu. The legacy CL_DrawLoadingScreen
- * path stays intact (cl_scrn.c CA_LOADING branch); both fire during the
- * transitional double-dispatch cycle. Whole file retires once the legacy path is removed.
+ * declaratively from loading_screen.wui. CL_DrawLoadingScreen is retired; these
+ * parameterized helpers are the sole pixel producers for dynamic loading data.
  *
  * All seven wrappers now pass (x, y, w, h) through: the .wui item's rect,
  * resolved to pixels by the compositor, drives POSITION. (This paragraph
@@ -1182,6 +1180,26 @@ void CL_PublishLoadingState( void ) {
  * The paddings and marker radii are still vp-relative, and deliberately:
  * they are a share of the viewport, not a share of the type. See TASK-212.
  */
+
+static void Loading_CustomDraw_Backdrop( float x, float y, float w, float h, vec4_t color )
+{
+	vec4_t glow;
+	( void ) color;
+
+	/* Preserve the inexpensive authored atmosphere without 27 independently
+	 * positioned WUI leaves: two translucent washes and the 4%-spaced grid are
+	 * one decoration command sourced from the live map theme. */
+	Vector4Copy( cl_loadingTheme.primaryGlow, glow );
+	glow[ 3 ] *= 0.18f;
+	Loading_FillRect( x + w * 0.10f, y + h * 0.30f, w * 0.40f, h * 0.40f, glow );
+	Vector4Copy( cl_loadingTheme.secondaryGlow, glow );
+	glow[ 3 ] *= 0.18f;
+	Loading_FillRect( x + w * 0.50f, y + h * 0.30f, w * 0.40f, h * 0.40f, glow );
+	for ( int i = 1; i <= 23; i++ ) {
+		Loading_FillRect( x, y + h * ( 0.04f * (float) i ), w, h * 0.0015f,
+		                  cl_loadingTheme.gridColor );
+	}
+}
 
 static void Loading_CustomDraw_Wireframe( float x, float y, float w, float h, vec4_t color )
 {
@@ -1245,6 +1263,12 @@ static void Loading_CustomDraw_ServerInfoStrip( float x, float y, float w, float
 void WiredLoadingCustomDraws_RegisterAll( void )
 {
 	wuiCustomDrawDef_t def;
+
+	memset( &def, 0, sizeof( def ) );
+	Q_strncpyz( def.name, "custom:loading_backdrop", sizeof( def.name ) );
+	def.isStateful        = qfalse;
+	def.routine.stateless = Loading_CustomDraw_Backdrop;
+	WiredUI_RegisterCustomDraw( &def );
 
 	memset( &def, 0, sizeof( def ) );
 	Q_strncpyz( def.name, "custom:loading_wireframe", sizeof( def.name ) );

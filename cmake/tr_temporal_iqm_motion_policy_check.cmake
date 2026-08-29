@@ -124,7 +124,14 @@ foreach(product_file IN LISTS RENDERER_PRODUCT_C)
 		endif()
 	endforeach()
 endforeach()
-require_text(VK "vk_destroy_iqm_vbo( outVertBuf, outVertMem, outIdxBuf, outIdxMem );" "command-acquire failure rollback")
+foreach(needle IN ITEMS
+	"if ( !recorded ) goto fail;"
+	"if ( idxCandidate ) Ral_DestroyBuffer( idxCandidate );"
+	"if ( vertCandidate ) Ral_DestroyBuffer( vertCandidate );"
+	"*outVertBuf = vertCandidate;"
+	"*outIdxBuf = idxCandidate;")
+	require_text(VK "${needle}" "portable IQM VBO candidate rollback/publication")
+endforeach()
 
 string(FIND "${LOADER}" "if ( data->vk_gpu_skinning && data->num_poses > 0 )" gpu_pos)
 string(FIND "${LOADER}" "\t\treturn; // skip CPU tessellation" gpu_end)

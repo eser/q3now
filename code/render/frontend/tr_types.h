@@ -5,6 +5,8 @@
 #ifndef __TR_TYPES_H
 #define __TR_TYPES_H
 
+#include "../../qcommon/wired/render/effect_profile.h"
+
 #define MAX_VIDEO_HANDLES	16
 
 #define	MAX_DLIGHTS			32			// can't be increased, because bit flags are used on surfaces
@@ -218,6 +220,9 @@ typedef struct {
 
 	// text messages for deform text shaders
 	char		text[MAX_RENDER_STRINGS][MAX_RENDER_STRING_LENGTH];
+
+	// Backend-neutral full-view state emitted by WiredFX actions.
+	wiredFxFrameState_t wiredFx;
 } refdef_t;
 
 

@@ -16,6 +16,10 @@
 extern "C" {
 #include "q_shared.h"
 #include "qcommon.h"
+
+void CmdTest_SetServerDispatch( qboolean running, qboolean spawnIdle,
+	qboolean handled );
+int CmdTest_ServerGameCalls( void );
 }
 
 #include <gtest/gtest.h>
@@ -268,6 +272,21 @@ TEST_F( CmdRegistry, UnknownCommandDoesNotDispatchAnything ) {
 	Cmd_AddCommand( "gtest_alpha", AlphaHandler );
 	Cmd_ExecuteString( "gtest_no_such_command" );
 	EXPECT_EQ( 0, g_alphaCalls );
+}
+
+TEST_F( CmdRegistry, ServerGameCommandWaitsForAsyncMapCompletion ) {
+	Cbuf_Init();
+	CmdTest_SetServerDispatch( qtrue, qfalse, qtrue );
+	Cmd_ExecuteString( "addbot grunt 4 free" );
+	EXPECT_EQ( 0, CmdTest_ServerGameCalls() );
+
+	CmdTest_SetServerDispatch( qtrue, qtrue, qtrue );
+	/* Frame-end releases the one-frame yield armed by the deferral; the next
+	 * command-buffer cycle owns the preserved command exactly once. */
+	Cbuf_Wait();
+	Cbuf_Execute();
+	EXPECT_EQ( 1, CmdTest_ServerGameCalls() );
+	CmdTest_SetServerDispatch( qfalse, qtrue, qfalse );
 }
 
 TEST_F( CmdRegistry, ReRegisteringKeepsTheFirstHandler ) {

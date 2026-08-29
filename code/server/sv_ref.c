@@ -723,7 +723,6 @@ static const glconfig_t *SVR_GetConfig( void ) { return &svr_glconfig; }
 static void SVR_VertexLighting( qboolean allowed ) { (void)allowed; }
 static void SVR_SyncRender( void ) {}
 
-#if FEAT_FOG_SYSTEM
 static void SVR_GetGlobalFog( refFogType_t *type, vec3_t color, float *depthForOpaque, float *density ) {
 	if ( type ) *type = REF_FT_NONE;
 	if ( color ) VectorClear( color );
@@ -741,7 +740,6 @@ static void SVR_GetViewFog( const vec3_t origin, refFogType_t *type, vec3_t colo
 	if ( density ) *density = 0.0f;
 	if ( useColorArray ) *useColorArray = qfalse;
 }
-#endif
 
 #if FEAT_HALO
 static void SVR_AddHaloToScene( const vec3_t org, float r, float g, float b,
@@ -835,10 +833,8 @@ void GetRefAPI_Headless( refexport_t *re ) {
 	re->VertexLighting = SVR_VertexLighting;
 	re->SyncRender = SVR_SyncRender;
 
-#if FEAT_FOG_SYSTEM
 	re->GetGlobalFog = SVR_GetGlobalFog;
 	re->GetViewFog = SVR_GetViewFog;
-#endif
 #if FEAT_HALO
 	re->AddHaloToScene = SVR_AddHaloToScene;
 #endif

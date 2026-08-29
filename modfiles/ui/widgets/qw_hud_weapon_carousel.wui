@@ -23,14 +23,14 @@
 // `border` keyword below reaches cfg->border for the selected slot.
 // Tokens: $bone (slot text/ammo) $hud_panel_bg (idle slot fill) $accent
 //   (equipped slot fill + outline).
-itemDef { hudElement "weaponlist"
-	anchor BOTTOM_CENTER
+itemDef { name "hud_weapon_carousel" hudElement "weaponlist"
 	// D5 fix (2026-06-30): raised from y0.889 to y0.80. The redesign draws the
 	// ammo number BELOW the icon (weaponlist.c: ammo at y+h); at y0.889 with
 	// h0.071 the icon bottom was 0.96 and the ammo text fell at ~0.96–1.0 = OFF
 	// the screen bottom (invisible). At y0.80 the icon bottom is ~0.87 and the
 	// ammo number lands at ~0.89, on-screen and readable under each slot.
-	rect 0.5 0.80 0.071 0.071
+	width 7.1vw
+	height 7.1vh
 	font $font_sans
 	fontsize 10 12
 	textalign 1

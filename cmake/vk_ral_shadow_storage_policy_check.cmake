@@ -35,8 +35,17 @@ function(require_text HAYSTACK NEEDLE LABEL)
 	endif()
 endfunction()
 
-require_text("${CORE}" "createInfo.usage = RAL_BUFFER_STORAGE | RAL_BUFFER_TRANSFER_DST;"
+function(forbid_text HAYSTACK NEEDLE LABEL)
+	string(FIND "${HAYSTACK}" "${NEEDLE}" POSITION)
+	if(NOT POSITION EQUAL -1)
+		message(FATAL_ERROR "${LABEL}")
+	endif()
+endfunction()
+
+require_text("${CORE}" "createInfo.usage = RAL_BUFFER_STORAGE | RAL_BUFFER_TRANSFER_DST"
 	"shadow storage lost WebGPU-portable storage/upload usage")
+require_text("${CORE}" "| RAL_BUFFER_INDIRECT;"
+	"shadow storage cannot carry GPU-authored indirect child-event dispatch")
 require_text("${CORE}" "createInfo.memory = RAL_MEMORY_HOST_COHERENT;"
 	"shadow storage lost portable upload allocation class")
 require_text("${CORE}" "Ral_BufferWriteImmediate( owner->buffers[bufferIndex], offset,"
@@ -71,16 +80,42 @@ require_text("${VK}" "vkRalShadowStorageOwner_t vk_particle_pool_storage;"
 	"particle ping-pong owner is not RAL shadow storage")
 require_text("${VK}" "vkRalShadowStorageOwner_t vk_particle_class_storage;"
 	"particle class owner is not RAL shadow storage")
+require_text("${VK}" "vkRalShadowStorageOwner_t vk_particle_atmosphere_profile_storage;"
+	"particle atmosphere profiles are not RAL shadow storage")
+require_text("${VK}" "vkRalShadowStorageOwner_t vk_particle_child_event_storage;"
+	"particle child events are not bounded RAL shadow storage")
 require_text("${VK}" "vkRalShadowStorageOwner_t vk_decal_pool_storage;"
 	"decal pool owner is not RAL shadow storage")
 require_text("${VK}" "VK_RalShadowStorageFlush( &vk_particle_pool_storage, pingRead,"
 	"particle emissions are not flushed only into the current ping-read pool")
 require_text("${VK}" "VK_RalShadowStorageFlush( &vk_particle_class_storage, 0u,"
 	"particle class dirty slots are not flushed before compute")
+require_text("${VK}" "&vk_particle_atmosphere_profile_storage, 0u, &profileFlush"
+	"particle atmosphere profiles are not published before compute")
+require_text("${VK}" "&vk_particle_child_event_storage, pingRead, &eventFlush"
+	"particle child-event header is not published to the current frame slot")
+require_text("${VK}" "particle-child-budgets"
+	"particle child stage/profile counters are not reset through RAL")
+require_text("${VK}" "Ral_CmdDispatchIndirect( vk.cmd->ral_cmd, childEventBuffer, 0u );"
+	"GPU-authored child events no longer drive bounded indirect dispatch")
 require_text("${VK}" "VK_RalShadowStorageFlush( &vk_decal_pool_storage, 0u,"
 	"decal dirty slots are not flushed before draw")
-require_text("${SCENE}" "vk_particle_shadow_write_emission( pingRead, slot, &p )"
-	"particle emission bypasses the exact element shadow writer")
+require_text("${SCENE}" "vk_particle_shadow_write_spawn( vk.particle.spawnRequestCount,"
+	"particle emission bypasses the bounded GPU request writer")
+require_text("${SCENE}" "remaining = PARTICLES_PER_POOL - vk.particle.spawnParticleCount;"
+	"particle request reservations are not bounded to one pool per frame")
+require_text("${SCENE}" "vk.particle.spawnParticleCount += count;"
+	"particle request reservations no longer track their frame-local total")
+require_text("${VK}" "vk.particle.spawnParticleCount = 0u;"
+	"particle request reservation total is not reset after compute consumption")
+require_text("${SCENE}" "ATMOSPHERE_EFFECT_RUNTIME_MAX 256u"
+	"atmosphere effect-instance scheduling is no longer explicitly bounded")
+require_text("${SCENE}" "runtime->rateCarry[i] += stage->spawnRate"
+	"atmosphere continuous emission is no longer cumulative/frame-rate independent")
+require_text("${SCENE}" "runtime->totalEmitted >= profile->maxParticles"
+	"atmosphere effect scheduler lost the whole-profile particle budget")
+forbid_text("${SCENE}" "for ( i = 0; i < desc->count"
+	"CPU per-particle emission loop returned")
 require_text("${SCENE}" "vk_particle_shadow_write_class( (uint32_t)handle - 1u, dst )"
 	"particle class registration bypasses the exact element shadow writer")
 require_text("${SCENE}" "vk_decal_shadow_write( slot, &d )"
