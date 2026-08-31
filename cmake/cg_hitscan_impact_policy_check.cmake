@@ -10,6 +10,8 @@ file(READ "${ROOT}/code/cgame/cg_weapons.c" WEAPONS)
 file(READ "${ROOT}/code/cgame/cg_event.c" EVENTS)
 file(READ "${ROOT}/code/cgame/cg_consolecmds.c" CONSOLE_COMMANDS)
 file(READ "${ROOT}/code/cgame/wired/cg_wired_particles.c" PARTICLE_CLASSES)
+file(READ "${ROOT}/code/qcommon/wired/render/primitives.h" PRIMITIVES)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/shaders/particle.vert" PARTICLE_VERTEX)
 file(READ "${ROOT}/code/game/weapons/g_machinegun.c" MACHINEGUN)
 file(READ "${ROOT}/code/game/bg_public.h" BG_PUBLIC)
 file(READ "${ROOT}/modfiles/scripts/effects/machinegun-impact.lua" MG_PROFILE)
@@ -43,6 +45,15 @@ require_text(EVENTS "(hitscanImpactMaterial_t)es->generic1"
 
 require_text(PARTICLE_CLASSES "CG_RegisterParticleClass( \"hitscan_metal_sparks\", &cls )"
 	"bounded GPU metal spark recipe")
+require_text(PRIMITIVES "PRIM_FLAG_PARTICLE_MOTION_TRAIL"
+	"backend-neutral particle motion-trail contract")
+require_text(PARTICLE_CLASSES
+	"PRIM_FLAG_ADDITIVE | PRIM_FLAG_PARTICLE_MOTION_TRAIL"
+	"Quake 4 impact spark motion-trail adoption")
+require_text(PARTICLE_VERTEX "PARTICLE_MOTION_TRAIL_SECONDS = 0.10"
+	"Quake 4 recent-motion history window")
+require_text(PARTICLE_VERTEX "tail = head - p.vel * trailTime"
+	"GPU-owned animated trail history")
 require_text(PARTICLE_CLASSES "CG_RegisterParticleClass( \"hitscan_impact_flash\", &cls )"
 	"Quake 4 short additive impact-flash layer")
 require_text(PARTICLE_CLASSES "CG_RegisterParticleClass( \"shotgun_impact_flash\", &cls )"

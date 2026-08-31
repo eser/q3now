@@ -15,6 +15,7 @@
 // compression is ever needed, that is a separate turn.
 
 #include "../../qcommon/q_shared.h"
+#include "../../qcommon/wired/wired_build_stamp.h"
 #include "tr_public.h"
 #include "r_log.h"
 
@@ -96,6 +97,27 @@ static void png_write_chunk( byte **dst, const char type[4], const byte *data, u
 	*dst = p;
 }
 
+typedef struct {
+	const char *key;
+	const char *value;
+} pngTextEntry_t;
+
+static size_t png_text_chunk_size( const pngTextEntry_t *entry ) {
+	return 12u + strlen( entry->key ) + 1u + strlen( entry->value );
+}
+
+static void png_write_text_chunk( byte **dst, const pngTextEntry_t *entry ) {
+	byte payload[256];
+	const size_t keyLength = strlen( entry->key );
+	const size_t valueLength = strlen( entry->value );
+	const size_t payloadLength = keyLength + 1u + valueLength;
+	if ( payloadLength > sizeof( payload ) ) return;
+	memcpy( payload, entry->key, keyLength );
+	payload[keyLength] = '\0';
+	memcpy( payload + keyLength + 1u, entry->value, valueLength );
+	png_write_chunk( dst, "tEXt", payload, (uint32_t)payloadLength );
+}
+
 // ── encoder ─────────────────────────────────────────────────────────────
 //
 // Allocates a single Hunk temp buffer sized for the worst-case output,
@@ -109,7 +131,7 @@ static void png_write_chunk( byte **dst, const char type[4], const byte *data, u
 // None) precedes each scanline.
 
 static qboolean R_EncodePNG_bottomup_internal( const byte *rgb_bottomup, int width, int height,
-                                                byte **outBytes, int *outLen )
+		const char *rendererBackend, byte **outBytes, int *outLen )
 {
 	const byte png_sig[8] = { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
 	byte	ihdr[13];
@@ -129,6 +151,11 @@ static qboolean R_EncodePNG_bottomup_internal( const byte *rgb_bottomup, int wid
 	int		y, x;
 	uint32_t idat_data_len;
 	uint32_t idat_crc;
+	pngTextEntry_t textEntries[10];
+	size_t textEntryCount = 0u;
+	size_t textChunksSize = 0u;
+	char requestedRenderer[64], mapName[MAX_QPATH], resolution[32];
+	char brightness[64], pbr[16], mode[16], fullscreen[16];
 
 	*outBytes = NULL;
 	*outLen = 0;
@@ -140,6 +167,40 @@ static qboolean R_EncodePNG_bottomup_internal( const byte *rgb_bottomup, int wid
 	if ( (size_t)width > 0x10000u || (size_t)height > 0x10000u ) {
 		return qfalse;
 	}
+
+	requestedRenderer[0] = mapName[0] = brightness[0] = pbr[0] = '\0';
+	mode[0] = fullscreen[0] = '\0';
+	(void)snprintf( resolution, sizeof( resolution ), "%dx%d", width, height );
+	if ( rendererBackend && rendererBackend[0] && ri.Cvar_VariableStringBuffer ) {
+		ri.Cvar_VariableStringBuffer( "cl_renderer", requestedRenderer,
+			sizeof( requestedRenderer ) );
+		ri.Cvar_VariableStringBuffer( "mapname", mapName, sizeof( mapName ) );
+		ri.Cvar_VariableStringBuffer( "r_brightness", brightness, sizeof( brightness ) );
+		ri.Cvar_VariableStringBuffer( "r_pbr", pbr, sizeof( pbr ) );
+		ri.Cvar_VariableStringBuffer( "r_mode", mode, sizeof( mode ) );
+		ri.Cvar_VariableStringBuffer( "r_fullscreen", fullscreen, sizeof( fullscreen ) );
+	}
+#define ADD_TEXT( key_, value_ ) do { \
+		if ( ( value_ ) && ( value_ )[0] ) { \
+			textEntries[textEntryCount].key = ( key_ ); \
+			textEntries[textEntryCount++].value = ( value_ ); \
+		} \
+	} while ( 0 )
+	if ( rendererBackend && rendererBackend[0] ) {
+		ADD_TEXT( "Software", WIRED_ENGINE_TITLE );
+		ADD_TEXT( "Renderer", rendererBackend );
+		ADD_TEXT( "RequestedRenderer", requestedRenderer );
+		ADD_TEXT( "Map", mapName );
+		ADD_TEXT( "Resolution", resolution );
+		ADD_TEXT( "ColorSpace", "sRGB display-referred" );
+		ADD_TEXT( "r_brightness", brightness );
+		ADD_TEXT( "r_pbr", pbr );
+		ADD_TEXT( "r_mode", mode );
+		ADD_TEXT( "r_fullscreen", fullscreen );
+	}
+#undef ADD_TEXT
+	for ( size_t entryIndex = 0u; entryIndex < textEntryCount; ++entryIndex )
+		textChunksSize += png_text_chunk_size( &textEntries[entryIndex] );
 
 	scanline_size = (size_t)1 + (size_t)3 * (size_t)width;
 	raw_size      = scanline_size * (size_t)height;
@@ -160,6 +221,7 @@ static qboolean R_EncodePNG_bottomup_internal( const byte *rgb_bottomup, int wid
 
 	total = 8u                            // PNG signature
 	      + 4u + 4u + 13u + 4u            // IHDR chunk
+	      + textChunksSize                 // diagnostic tEXt chunks
 	      + 4u + 4u + zstream_size + 4u   // IDAT chunk
 	      + 4u + 4u + 0u    + 4u;         // IEND chunk
 
@@ -179,6 +241,8 @@ static qboolean R_EncodePNG_bottomup_internal( const byte *rgb_bottomup, int wid
 	ihdr[11] = 0;   // filter method: 0 (only valid value; per-scanline filter byte)
 	ihdr[12] = 0;   // interlace: 0 = none
 	png_write_chunk( &p, "IHDR", ihdr, 13 );
+	for ( size_t entryIndex = 0u; entryIndex < textEntryCount; ++entryIndex )
+		png_write_text_chunk( &p, &textEntries[entryIndex] );
 
 	// ── IDAT (zlib stream of STORED blocks) ───────────────────────────
 	idat_len_pos = p;
@@ -282,7 +346,14 @@ static qboolean R_EncodePNG_bottomup_internal( const byte *rgb_bottomup, int wid
 qboolean R_EncodePNG( const byte *rgb_bottomup, int width, int height,
                      byte **outBytes, int *outLen )
 {
-	return R_EncodePNG_bottomup_internal( rgb_bottomup, width, height, outBytes, outLen );
+	return R_EncodePNG_bottomup_internal( rgb_bottomup, width, height,
+		NULL, outBytes, outLen );
+}
+
+qboolean R_EncodeScreenshotPNG( const byte *rgb_bottomup, int width, int height,
+		const char *rendererBackend, byte **outBytes, int *outLen ) {
+	return R_EncodePNG_bottomup_internal( rgb_bottomup, width, height,
+		rendererBackend, outBytes, outLen );
 }
 
 qboolean R_SavePNG( const char *fileName, const byte *rgb_bottomup, int width, int height )
@@ -290,8 +361,24 @@ qboolean R_SavePNG( const char *fileName, const byte *rgb_bottomup, int width, i
 	byte *bytes = NULL;
 	int   len = 0;
 
-	if ( !R_EncodePNG_bottomup_internal( rgb_bottomup, width, height, &bytes, &len ) ) {
+	if ( !R_EncodePNG_bottomup_internal( rgb_bottomup, width, height,
+			NULL, &bytes, &len ) ) {
 		R_LOG( rch_png_write, SEV_WARN, "R_SavePNG: encode failed (%dx%d)\n", width, height );
+		return qfalse;
+	}
+	ri.FS_WriteFile( fileName, bytes, len );
+	ri.Free( bytes );
+	return qtrue;
+}
+
+qboolean R_SaveScreenshotPNG( const char *fileName, const byte *rgb_bottomup,
+		int width, int height, const char *rendererBackend ) {
+	byte *bytes = NULL;
+	int len = 0;
+	if ( !R_EncodePNG_bottomup_internal( rgb_bottomup, width, height,
+			rendererBackend, &bytes, &len ) ) {
+		R_LOG( rch_png_write, SEV_WARN,
+			"R_SaveScreenshotPNG: encode failed (%dx%d)\n", width, height );
 		return qfalse;
 	}
 	ri.FS_WriteFile( fileName, bytes, len );

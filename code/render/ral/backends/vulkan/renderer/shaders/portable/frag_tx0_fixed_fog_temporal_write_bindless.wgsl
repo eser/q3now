@@ -65,32 +65,32 @@ var<private> frag_tex_coord0_1: vec2<f32>;
 var<private> out_color: vec4<f32>;
 
 fn wiredTemporalFinite2_u0028_vf2_u003b(value: ptr<function, vec2<f32>>) -> bool {
-    var phi_79_: bool;
+    var phi_82_: bool;
 
     let _e82 = (*value);
     let _e83 = (*value);
     let _e85 = all((_e82 == _e83));
-    phi_79_ = _e85;
+    phi_82_ = _e85;
     if _e85 {
         let _e86 = (*value);
-        phi_79_ = all((abs(_e86) <= vec2<f32>(340282350000000000000000000000000000000f, 340282350000000000000000000000000000000f)));
+        phi_82_ = all((abs(_e86) <= vec2<f32>(340282350000000000000000000000000000000f, 340282350000000000000000000000000000000f)));
     }
-    let _e91 = phi_79_;
+    let _e91 = phi_82_;
     return _e91;
 }
 
 fn wiredTemporalFinite4_u0028_vf4_u003b(value_1: ptr<function, vec4<f32>>) -> bool {
-    var phi_64_: bool;
+    var phi_67_: bool;
 
     let _e82 = (*value_1);
     let _e83 = (*value_1);
     let _e85 = all((_e82 == _e83));
-    phi_64_ = _e85;
+    phi_67_ = _e85;
     if _e85 {
         let _e86 = (*value_1);
-        phi_64_ = all((abs(_e86) <= vec4<f32>(340282350000000000000000000000000000000f, 340282350000000000000000000000000000000f, 340282350000000000000000000000000000000f, 340282350000000000000000000000000000000f)));
+        phi_67_ = all((abs(_e86) <= vec4<f32>(340282350000000000000000000000000000000f, 340282350000000000000000000000000000000f, 340282350000000000000000000000000000000f, 340282350000000000000000000000000000000f)));
     }
-    let _e91 = phi_64_;
+    let _e91 = phi_67_;
     return _e91;
 }
 
@@ -105,44 +105,44 @@ fn wiredTemporalWriteAux_u0028_f1_u003b(coverageConfidence: ptr<function, f32>) 
     var previousUv: vec2<f32>;
     var velocity: vec2<f32>;
     var param_4: vec2<f32>;
-    var phi_102_: bool;
-    var phi_111_: bool;
-    var phi_121_: bool;
-    var phi_128_: bool;
-    var phi_157_: bool;
+    var phi_105_: bool;
+    var phi_114_: bool;
+    var phi_124_: bool;
+    var phi_131_: bool;
+    var phi_160_: bool;
 
     out_temporal_velocity = vec2<f32>(0f, 0f);
     out_temporal_validity = 0f;
     let _e92 = temporalOutcome_1;
     let _e93 = (_e92 != 1u);
-    phi_102_ = _e93;
+    phi_105_ = _e93;
     if !(_e93) {
         let _e95 = temporalCurrentClip_1;
         param = _e95;
         let _e96 = wiredTemporalFinite4_u0028_vf4_u003b((&param));
-        phi_102_ = !(_e96);
+        phi_105_ = !(_e96);
     }
-    let _e99 = phi_102_;
-    phi_111_ = _e99;
+    let _e99 = phi_105_;
+    phi_114_ = _e99;
     if !(_e99) {
         let _e101 = temporalPreviousClip_1;
         param_1 = _e101;
         let _e102 = wiredTemporalFinite4_u0028_vf4_u003b((&param_1));
-        phi_111_ = !(_e102);
+        phi_114_ = !(_e102);
     }
-    let _e105 = phi_111_;
-    phi_121_ = _e105;
+    let _e105 = phi_114_;
+    phi_124_ = _e105;
     if !(_e105) {
         let _e108 = temporalCurrentClip_1[3u];
-        phi_121_ = (_e108 <= 0.000001f);
+        phi_124_ = (_e108 <= 0.000001f);
     }
-    let _e111 = phi_121_;
-    phi_128_ = _e111;
+    let _e111 = phi_124_;
+    phi_131_ = _e111;
     if !(_e111) {
         let _e114 = temporalPreviousClip_1[3u];
-        phi_128_ = (_e114 <= 0.000001f);
+        phi_131_ = (_e114 <= 0.000001f);
     }
-    let _e117 = phi_128_;
+    let _e117 = phi_131_;
     if _e117 {
         return;
     }
@@ -156,14 +156,14 @@ fn wiredTemporalWriteAux_u0028_f1_u003b(coverageConfidence: ptr<function, f32>) 
     param_2 = _e130;
     let _e131 = wiredTemporalFinite2_u0028_vf2_u003b((&param_2));
     let _e132 = !(_e131);
-    phi_157_ = _e132;
+    phi_160_ = _e132;
     if !(_e132) {
         let _e134 = previousNdc;
         param_3 = _e134;
         let _e135 = wiredTemporalFinite2_u0028_vf2_u003b((&param_3));
-        phi_157_ = !(_e135);
+        phi_160_ = !(_e135);
     }
-    let _e138 = phi_157_;
+    let _e138 = phi_160_;
     if _e138 {
         return;
     }
@@ -256,6 +256,27 @@ fn wired_advanced_fog_amount_u0028_() -> f32 {
     return clamp((1f - exp(-((_e120 * _e121)))), 0f, 1f);
 }
 
+fn wired_boost_legacy_lightmap_u0028_vf3_u003b(rgb: ptr<function, vec3<f32>>) -> vec3<f32> {
+    var boosted: vec3<f32>;
+    var peak: f32;
+
+    let _e84 = (*rgb);
+    let _e87 = unnamed.worldLightParams[0u];
+    boosted = (_e84 * _e87);
+    let _e90 = boosted[0u];
+    let _e92 = boosted[1u];
+    let _e94 = boosted[2u];
+    peak = max(_e90, max(_e92, _e94));
+    let _e97 = peak;
+    if (_e97 > 1f) {
+        let _e99 = peak;
+        let _e100 = boosted;
+        boosted = (_e100 / vec3(_e99));
+    }
+    let _e103 = boosted;
+    return _e103;
+}
+
 fn sRGBToLinear_u0028_vf3_u003b(c: ptr<function, vec3<f32>>) -> vec3<f32> {
     var cutoff: vec3<bool>;
     var lo: vec3<f32>;
@@ -278,52 +299,53 @@ fn sRGBToLinear_u0028_vf3_u003b(c: ptr<function, vec3<f32>>) -> vec3<f32> {
 fn wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b(role: ptr<function, u32>, uv: ptr<function, vec2<f32>>, slot: ptr<function, i32>) -> vec4<f32> {
     var c_1: vec4<f32>;
     var param_5: vec3<f32>;
+    var param_6: vec3<f32>;
 
-    let _e86 = (*role);
-    let _e88 = (*role);
-    let _e93 = unnamed.packed_indices[(_e86 / 4u)][(_e88 % 4u)];
-    let _e96 = (*role);
-    let _e98 = (*role);
-    let _e103 = unnamed.packed_indices[(_e96 / 4u)][(_e98 % 4u)];
-    let _e108 = (*uv);
-    let _e109 = textureSample(wired_bindless_images[(_e93 & 4095u)], wired_bindless_samplers[((_e103 >> bitcast<u32>(12i)) & 255u)], _e108);
-    c_1 = _e109;
-    let _e110 = (*slot);
-    if ((tex_domain & (1i << bitcast<u32>(_e110))) == 0i) {
-        let _e115 = c_1;
-        param_5 = _e115.xyz;
-        let _e117 = sRGBToLinear_u0028_vf3_u003b((&param_5));
-        c_1[0u] = _e117.x;
-        c_1[1u] = _e117.y;
-        c_1[2u] = _e117.z;
+    let _e87 = (*role);
+    let _e89 = (*role);
+    let _e94 = unnamed.packed_indices[(_e87 / 4u)][(_e89 % 4u)];
+    let _e97 = (*role);
+    let _e99 = (*role);
+    let _e104 = unnamed.packed_indices[(_e97 / 4u)][(_e99 % 4u)];
+    let _e109 = (*uv);
+    let _e110 = textureSample(wired_bindless_images[(_e94 & 4095u)], wired_bindless_samplers[((_e104 >> bitcast<u32>(12i)) & 255u)], _e109);
+    c_1 = _e110;
+    let _e111 = (*slot);
+    if ((tex_domain & (1i << bitcast<u32>(_e111))) == 0i) {
+        let _e116 = c_1;
+        param_5 = _e116.xyz;
+        let _e118 = sRGBToLinear_u0028_vf3_u003b((&param_5));
+        c_1[0u] = _e118.x;
+        c_1[1u] = _e118.y;
+        c_1[2u] = _e118.z;
     }
-    let _e124 = (*slot);
-    if (lightmap_slot == (_e124 + 1i)) {
-        let _e129 = unnamed.worldLightParams[0u];
-        let _e130 = c_1;
-        let _e132 = (_e130.xyz * _e129);
-        c_1[0u] = _e132.x;
-        c_1[1u] = _e132.y;
-        c_1[2u] = _e132.z;
+    let _e125 = (*slot);
+    if (lightmap_slot == (_e125 + 1i)) {
+        let _e128 = c_1;
+        param_6 = _e128.xyz;
+        let _e130 = wired_boost_legacy_lightmap_u0028_vf3_u003b((&param_6));
+        c_1[0u] = _e130.x;
+        c_1[1u] = _e130.y;
+        c_1[2u] = _e130.z;
     }
-    let _e139 = c_1;
-    return _e139;
+    let _e137 = c_1;
+    return _e137;
 }
 
 fn main_1() {
     var fog: vec4<f32>;
     var frag_color: vec4<f32>;
     var color0_: vec4<f32>;
-    var param_6: u32;
-    var param_7: vec2<f32>;
-    var param_8: i32;
+    var param_7: u32;
+    var param_8: vec2<f32>;
+    var param_9: i32;
     var base: vec4<f32>;
     var wetness: f32;
     var frost: f32;
     var luminance: f32;
     var fogAmount: f32;
-    var param_9: f32;
     var param_10: f32;
+    var param_11: f32;
 
     let _e97 = unnamed.packed_indices[0i][3u];
     let _e103 = unnamed.packed_indices[0i][3u];
@@ -334,11 +356,11 @@ fn main_1() {
     frag_color[1u] = identity_color;
     frag_color[2u] = identity_color;
     frag_color[3u] = identity_alpha;
-    param_6 = 0u;
+    param_7 = 0u;
     let _e114 = frag_tex_coord0_1;
-    param_7 = _e114;
-    param_8 = 0i;
-    let _e115 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_6), (&param_7), (&param_8));
+    param_8 = _e114;
+    param_9 = 0i;
+    let _e115 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_7), (&param_8), (&param_9));
     let _e116 = frag_color;
     color0_ = (_e115 * _e116);
     let _e118 = color0_;
@@ -472,10 +494,10 @@ fn main_1() {
     let _e263 = base;
     out_color = _e263;
     let _e265 = color0_[3u];
-    param_9 = _e265;
-    let _e266 = wiredTemporalAtestConfidence_u0028_f1_u003b((&param_9));
-    param_10 = _e266;
-    wiredTemporalWriteAux_u0028_f1_u003b((&param_10));
+    param_10 = _e265;
+    let _e266 = wiredTemporalAtestConfidence_u0028_f1_u003b((&param_10));
+    param_11 = _e266;
+    wiredTemporalWriteAux_u0028_f1_u003b((&param_11));
     return;
 }
 

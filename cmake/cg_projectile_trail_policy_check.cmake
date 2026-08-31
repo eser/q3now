@@ -127,12 +127,22 @@ require_text(ENTS
 	"non-WiredFX missile sound fallback boundary")
 require_text(FX_CLIENT "S_AddLoopingSound( event->sourceEntityNum"
 	"looping sound lowering")
-require_text(WEAPONS "CG_WiredFx_WeaponMuzzlePresent( cent, weaponNum, flash.origin, flash.axis[0] );"
+require_text(WEAPONS "CG_WiredFx_WeaponMuzzlePresent( cent, weaponNum, flash.origin,"
 	"exact oriented tag_flash WiredFX muzzle presentation")
 require_text(WEAPONS "cent->wiredFxMuzzleTime == cent->muzzleFlashTime"
 	"idempotent one-shot muzzle occurrence across view/world passes")
-require_text(WEAPONS "event.conditionMask = WIRED_FX_CONDITION_MUZZLE_PRESENT;"
-	"muzzle-light-only presentation occurrence")
+require_text(WEAPONS "if ( localView ) conditionMask |= WIRED_FX_CONDITION_LOCAL_VIEW;"
+	"local view muzzle presentation classification")
+require_text(WEAPONS "WIRED_FX_PROFILE_SHOTGUN_SMOKE_WIDE"
+	"shotgun smoke attached to exact tag_flash presentation")
+require_text(WEAPONS "cent->wiredFxMuzzleSecondary = secondary;"
+	"secondary fire presentation ownership")
+require_text(FX_CLIENT "WIRED_FX_ACTION_VIEW_DEPTH_HACK"
+	"view-attached muzzle sprite weapon-depth lowering")
+forbid_text(WEAPONS "CG_WiredFx_ShotgunSmoke("
+	"server-event shotgun smoke attachment")
+forbid_text(WEAPONS "VectorMA( es->pos.trBase, 32.0f, direction, origin );"
+	"arbitrary shotgun smoke muzzle push")
 require_text(FX_CLIENT
 	"S_StartSound( NULL, event->sourceEntityNum,"
 	"declarative entity-bound one-shot sound lowering")
@@ -185,6 +195,15 @@ require_text(PARTICLE_CLASSES
 require_text(PARTICLE_CLASSES
 	"cls.sizeStart        = 0.65f;"
 	"bounded classic grenade particle scale")
+require_text(PARTICLE_CLASSES
+	"cls.scatterMagnitude   = 3.0f;"
+	"preserved classic grenade scatter")
+require_text(PARTICLE_CLASSES
+	"cls.lifetimeMean       = 0.90f;"
+	"competitive grenade trail persistence")
+require_text(PARTICLE_CLASSES
+	"const float grey = 0.18f + 0.03f * (float)i;"
+	"competitive grenade trail contrast")
 require_text(PARTICLE_CLASSES
 	"cls.gravityScale     = -0.03f;"
 	"classic grenade particle up-drift")

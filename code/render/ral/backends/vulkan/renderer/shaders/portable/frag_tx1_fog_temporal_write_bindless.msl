@@ -44,27 +44,27 @@ constant int lightmap_slot_tmp [[function_constant(26)]];
 constant int lightmap_slot = is_function_constant_defined(lightmap_slot_tmp) ? lightmap_slot_tmp : 0;
 constant int tex_mode_tmp [[function_constant(6)]];
 constant int tex_mode = is_function_constant_defined(tex_mode_tmp) ? tex_mode_tmp : 0;
-constant bool _425 = (tex_mode == 1);
-constant bool _451 = (tex_mode == 2);
-constant bool _500 = (lightmap_slot != 0);
+constant bool _452 = (tex_mode == 1);
+constant bool _478 = (tex_mode == 2);
+constant bool _527 = (lightmap_slot != 0);
 constant int acff_tmp [[function_constant(10)]];
 constant int acff = is_function_constant_defined(acff_tmp) ? acff_tmp : 0;
-constant bool _575 = (acff == 1);
-constant bool _590 = (acff == 2);
-constant bool _598 = (acff == 3);
-constant bool _623 = (acff == 1);
-constant bool _639 = (acff == 2);
-constant bool _648 = (acff == 3);
+constant bool _602 = (acff == 1);
+constant bool _617 = (acff == 2);
+constant bool _625 = (acff == 3);
+constant bool _650 = (acff == 1);
+constant bool _666 = (acff == 2);
+constant bool _675 = (acff == 3);
 constant int discard_mode_tmp [[function_constant(7)]];
 constant int discard_mode = is_function_constant_defined(discard_mode_tmp) ? discard_mode_tmp : 0;
-constant bool _670 = (discard_mode == 1);
-constant bool _680 = (discard_mode == 2);
+constant bool _697 = (discard_mode == 1);
+constant bool _707 = (discard_mode == 2);
 constant int alpha_to_coverage_tmp [[function_constant(3)]];
 constant int alpha_to_coverage = is_function_constant_defined(alpha_to_coverage_tmp) ? alpha_to_coverage_tmp : 0;
 
 struct spvDescriptorSetBuffer0
 {
-    constant UBO* m_223 [[id(0)]];
+    constant UBO* m_193 [[id(0)]];
 };
 
 struct spvDescriptorSetBuffer1
@@ -102,55 +102,67 @@ float3 sRGBToLinear(thread float3& c)
 }
 
 static inline __attribute__((always_inline))
-float4 wired_bl_sample_domain(thread const uint& role, thread const float2& uv, thread const int& slot, constant UBO& _223, const spvDescriptorArray<texture2d<float>> wired_bindless_images, const spvDescriptorArray<sampler> wired_bindless_samplers)
+float3 wired_boost_legacy_lightmap(thread const float3& rgb, constant UBO& _193)
 {
-    uint _320 = _223.packed_indices[role / 4u][role % 4u] & 4095u;
-    uint _337 = (_223.packed_indices[role / 4u][role % 4u] >> uint(12)) & 255u;
-    float4 c = wired_bindless_images[_320].sample(wired_bindless_samplers[_337], uv);
+    float3 boosted = rgb * _193.worldLightParams.x;
+    float peak = fast::max(boosted.x, fast::max(boosted.y, boosted.z));
+    if (peak > 1.0)
+    {
+        boosted /= float3(peak);
+    }
+    return boosted;
+}
+
+static inline __attribute__((always_inline))
+float4 wired_bl_sample_domain(thread const uint& role, thread const float2& uv, thread const int& slot, constant UBO& _193, const spvDescriptorArray<texture2d<float>> wired_bindless_images, const spvDescriptorArray<sampler> wired_bindless_samplers)
+{
+    uint _349 = _193.packed_indices[role / 4u][role % 4u] & 4095u;
+    uint _366 = (_193.packed_indices[role / 4u][role % 4u] >> uint(12)) & 255u;
+    float4 c = wired_bindless_images[_349].sample(wired_bindless_samplers[_366], uv);
     if ((tex_domain & (1 << slot)) == 0)
     {
         float3 param = c.xyz;
-        float3 _356 = sRGBToLinear(param);
-        c.x = _356.x;
-        c.y = _356.y;
-        c.z = _356.z;
+        float3 _385 = sRGBToLinear(param);
+        c.x = _385.x;
+        c.y = _385.y;
+        c.z = _385.z;
     }
     if (lightmap_slot == (slot + 1))
     {
-        float4 _372 = c;
-        float3 _374 = _372.xyz * _223.worldLightParams.x;
-        c.x = _374.x;
-        c.y = _374.y;
-        c.z = _374.z;
+        float3 param_1 = c.xyz;
+        float3 _401 = wired_boost_legacy_lightmap(param_1, _193);
+        c.x = _401.x;
+        c.y = _401.y;
+        c.z = _401.z;
     }
     return c;
 }
 
 static inline __attribute__((always_inline))
-bool wired_advanced_fog_enabled(constant UBO& _223)
+bool wired_advanced_fog_enabled(constant UBO& _193)
 {
-    int fogType = int(_223.advancedFogTypeFarEnabled.x + 0.5);
-    return ((_223.advancedFogTypeFarEnabled.z > 0.5) && (fogType >= 1)) && (fogType <= 3);
+    int fogType = int(_193.advancedFogTypeFarEnabled.x + 0.5);
+    return ((_193.advancedFogTypeFarEnabled.z > 0.5) && (fogType >= 1)) && (fogType <= 3);
 }
 
 static inline __attribute__((always_inline))
-float wired_advanced_fog_amount(constant UBO& _223, thread float4& gl_FragCoord)
+float wired_advanced_fog_amount(constant UBO& _193, thread float4& gl_FragCoord)
 {
-    if (!wired_advanced_fog_enabled(_223))
+    if (!wired_advanced_fog_enabled(_193))
     {
         return 0.0;
     }
     float viewDepth = 1.0 / fast::max(gl_FragCoord.w, 9.9999999747524270787835121154785e-07);
-    int fogType = int(_223.advancedFogTypeFarEnabled.x + 0.5);
+    int fogType = int(_193.advancedFogTypeFarEnabled.x + 0.5);
     if (fogType == 1)
     {
-        if (_223.advancedFogTypeFarEnabled.y <= 0.0)
+        if (_193.advancedFogTypeFarEnabled.y <= 0.0)
         {
             return 0.0;
         }
-        return fast::clamp(viewDepth / _223.advancedFogTypeFarEnabled.y, 0.0, 1.0);
+        return fast::clamp(viewDepth / _193.advancedFogTypeFarEnabled.y, 0.0, 1.0);
     }
-    float opticalDepth = fast::max(_223.advancedFogColorDensity.w, 0.0) * viewDepth;
+    float opticalDepth = fast::max(_193.advancedFogColorDensity.w, 0.0) * viewDepth;
     if (fogType == 2)
     {
         return fast::clamp(1.0 - exp(-opticalDepth), 0.0, 1.0);
@@ -161,33 +173,33 @@ float wired_advanced_fog_amount(constant UBO& _223, thread float4& gl_FragCoord)
 static inline __attribute__((always_inline))
 bool wiredTemporalFinite4(thread const float4& value)
 {
-    bool _51 = all(value == value);
-    bool _60;
-    if (_51)
+    bool _54 = all(value == value);
+    bool _63;
+    if (_54)
     {
-        _60 = all(abs(value) <= float4(3.4028234663852885981170418348452e+38));
+        _63 = all(abs(value) <= float4(3.4028234663852885981170418348452e+38));
     }
     else
     {
-        _60 = _51;
+        _63 = _54;
     }
-    return _60;
+    return _63;
 }
 
 static inline __attribute__((always_inline))
 bool wiredTemporalFinite2(thread const float2& value)
 {
-    bool _67 = all(value == value);
-    bool _75;
-    if (_67)
+    bool _70 = all(value == value);
+    bool _78;
+    if (_70)
     {
-        _75 = all(abs(value) <= float2(3.4028234663852885981170418348452e+38));
+        _78 = all(abs(value) <= float2(3.4028234663852885981170418348452e+38));
     }
     else
     {
-        _75 = _67;
+        _78 = _70;
     }
-    return _75;
+    return _78;
 }
 
 static inline __attribute__((always_inline))
@@ -195,64 +207,64 @@ void wiredTemporalWriteAux(thread const float& coverageConfidence, thread float2
 {
     out_temporal_velocity = float2(0.0);
     out_temporal_validity = 0.0;
-    bool _88 = temporalOutcome != 1u;
-    bool _98;
-    if (!_88)
+    bool _91 = temporalOutcome != 1u;
+    bool _101;
+    if (!_91)
     {
         float4 param = temporalCurrentClip;
-        _98 = !wiredTemporalFinite4(param);
+        _101 = !wiredTemporalFinite4(param);
     }
     else
     {
-        _98 = _88;
+        _101 = _91;
     }
-    bool _107;
-    if (!_98)
+    bool _110;
+    if (!_101)
     {
         float4 param_1 = temporalPreviousClip;
-        _107 = !wiredTemporalFinite4(param_1);
+        _110 = !wiredTemporalFinite4(param_1);
     }
     else
     {
-        _107 = _98;
+        _110 = _101;
     }
-    bool _117;
-    if (!_107)
+    bool _120;
+    if (!_110)
     {
-        _117 = temporalCurrentClip.w <= 9.9999999747524270787835121154785e-07;
+        _120 = temporalCurrentClip.w <= 9.9999999747524270787835121154785e-07;
     }
     else
     {
-        _117 = _107;
+        _120 = _110;
     }
-    bool _124;
-    if (!_117)
+    bool _127;
+    if (!_120)
     {
-        _124 = temporalPreviousClip.w <= 9.9999999747524270787835121154785e-07;
+        _127 = temporalPreviousClip.w <= 9.9999999747524270787835121154785e-07;
     }
     else
     {
-        _124 = _117;
+        _127 = _120;
     }
-    if (_124)
+    if (_127)
     {
         return;
     }
     float2 currentNdc = temporalCurrentClip.xy / float2(temporalCurrentClip.w);
     float2 previousNdc = temporalPreviousClip.xy / float2(temporalPreviousClip.w);
     float2 param_2 = currentNdc;
-    bool _145 = !wiredTemporalFinite2(param_2);
-    bool _153;
-    if (!_145)
+    bool _148 = !wiredTemporalFinite2(param_2);
+    bool _156;
+    if (!_148)
     {
         float2 param_3 = previousNdc;
-        _153 = !wiredTemporalFinite2(param_3);
+        _156 = !wiredTemporalFinite2(param_3);
     }
     else
     {
-        _153 = _145;
+        _156 = _148;
     }
-    if (_153)
+    if (_156)
     {
         return;
     }
@@ -274,33 +286,33 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
     spvDescriptorArray<sampler> wired_bindless_samplers {reinterpret_cast<const device spvDescriptor<sampler>*>(&spvDescriptorSet1.wired_bindless_images)};
 
     main0_out out = {};
-    uint _388 = (*spvDescriptorSet0.m_223).packed_indices[0].w & 4095u;
-    uint _395 = ((*spvDescriptorSet0.m_223).packed_indices[0].w >> uint(12)) & 255u;
-    float4 fog = wired_bindless_images[_388].sample(wired_bindless_samplers[_395], in.fog_tex_coord);
+    uint _415 = (*spvDescriptorSet0.m_193).packed_indices[0].w & 4095u;
+    uint _422 = ((*spvDescriptorSet0.m_193).packed_indices[0].w >> uint(12)) & 255u;
+    float4 fog = wired_bindless_images[_415].sample(wired_bindless_samplers[_422], in.fog_tex_coord);
     float3 param = in.frag_color0In.xyz;
-    float3 _408 = sRGBToLinear(param);
-    float4 frag_color0 = float4(_408, in.frag_color0In.w);
+    float3 _435 = sRGBToLinear(param);
+    float4 frag_color0 = float4(_435, in.frag_color0In.w);
     uint param_1 = 0u;
     float2 param_2 = in.frag_tex_coord0;
     int param_3 = 0;
-    float4 color0 = wired_bl_sample_domain(param_1, param_2, param_3, (*spvDescriptorSet0.m_223), wired_bindless_images, wired_bindless_samplers) * frag_color0;
+    float4 color0 = wired_bl_sample_domain(param_1, param_2, param_3, (*spvDescriptorSet0.m_193), wired_bindless_images, wired_bindless_samplers) * frag_color0;
     float4 base;
-    if (_425)
+    if (_452)
     {
         uint param_4 = 1u;
         float2 param_5 = in.frag_tex_coord1;
         int param_6 = 1;
-        float4 color1 = wired_bl_sample_domain(param_4, param_5, param_6, (*spvDescriptorSet0.m_223), wired_bindless_images, wired_bindless_samplers);
+        float4 color1 = wired_bl_sample_domain(param_4, param_5, param_6, (*spvDescriptorSet0.m_193), wired_bindless_images, wired_bindless_samplers);
         base = float4(color0.xyz + color1.xyz, color0.w * color1.w);
     }
     else
     {
-        if (_451)
+        if (_478)
         {
             uint param_7 = 1u;
             float2 param_8 = in.frag_tex_coord1;
             int param_9 = 1;
-            float4 color1_1 = wired_bl_sample_domain(param_7, param_8, param_9, (*spvDescriptorSet0.m_223), wired_bindless_images, wired_bindless_samplers) * frag_color0;
+            float4 color1_1 = wired_bl_sample_domain(param_7, param_8, param_9, (*spvDescriptorSet0.m_193), wired_bindless_images, wired_bindless_samplers) * frag_color0;
             base = float4(color0.xyz + color1_1.xyz, color0.w * color1_1.w);
         }
         else
@@ -308,99 +320,99 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
             uint param_10 = 1u;
             float2 param_11 = in.frag_tex_coord1;
             int param_12 = 1;
-            float4 color1_2 = wired_bl_sample_domain(param_10, param_11, param_12, (*spvDescriptorSet0.m_223), wired_bindless_images, wired_bindless_samplers);
-            float3 _487 = color0.xyz * color1_2.xyz;
-            base.x = _487.x;
-            base.y = _487.y;
-            base.z = _487.z;
+            float4 color1_2 = wired_bl_sample_domain(param_10, param_11, param_12, (*spvDescriptorSet0.m_193), wired_bindless_images, wired_bindless_samplers);
+            float3 _514 = color0.xyz * color1_2.xyz;
+            base.x = _514.x;
+            base.y = _514.y;
+            base.z = _514.z;
             base.w = color0.w * color1_2.w;
         }
     }
-    if (_500)
+    if (_527)
     {
-        float wetness = fast::clamp((*spvDescriptorSet0.m_223).worldLightParams.y, 0.0, 1.0);
-        float frost = fast::clamp((*spvDescriptorSet0.m_223).worldLightParams.z, 0.0, 1.0);
+        float wetness = fast::clamp((*spvDescriptorSet0.m_193).worldLightParams.y, 0.0, 1.0);
+        float frost = fast::clamp((*spvDescriptorSet0.m_193).worldLightParams.z, 0.0, 1.0);
         float luminance = dot(base.xyz, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
-        float4 _522 = base;
-        float3 _524 = _522.xyz * mix(1.0, 0.819999992847442626953125, wetness);
-        base.x = _524.x;
-        base.y = _524.y;
-        base.z = _524.z;
-        float4 _531 = base;
-        float3 _545 = mix(_531.xyz, float3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), float3(frost * 0.550000011920928955078125));
-        base.x = _545.x;
-        base.y = _545.y;
-        base.z = _545.z;
+        float4 _549 = base;
+        float3 _551 = _549.xyz * mix(1.0, 0.819999992847442626953125, wetness);
+        base.x = _551.x;
+        base.y = _551.y;
+        base.z = _551.z;
+        float4 _558 = base;
+        float3 _572 = mix(_558.xyz, float3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), float3(frost * 0.550000011920928955078125));
+        base.x = _572.x;
+        base.y = _572.y;
+        base.z = _572.z;
     }
-    float4 _560 = base;
-    float3 _562 = _560.xyz + (color0.xyz * (*spvDescriptorSet0.m_223).emissionRadiance.xyz);
-    base.x = _562.x;
-    base.y = _562.y;
-    base.z = _562.z;
-    if (wired_advanced_fog_enabled((*spvDescriptorSet0.m_223)))
+    float4 _587 = base;
+    float3 _589 = _587.xyz + (color0.xyz * (*spvDescriptorSet0.m_193).emissionRadiance.xyz);
+    base.x = _589.x;
+    base.y = _589.y;
+    base.z = _589.z;
+    if (wired_advanced_fog_enabled((*spvDescriptorSet0.m_193)))
     {
-        float fogAmount = wired_advanced_fog_amount((*spvDescriptorSet0.m_223), gl_FragCoord);
-        if (_575)
+        float fogAmount = wired_advanced_fog_amount((*spvDescriptorSet0.m_193), gl_FragCoord);
+        if (_602)
         {
-            float4 _580 = base;
-            float3 _582 = _580.xyz * (1.0 - fogAmount);
-            base.x = _582.x;
-            base.y = _582.y;
-            base.z = _582.z;
+            float4 _607 = base;
+            float3 _609 = _607.xyz * (1.0 - fogAmount);
+            base.x = _609.x;
+            base.y = _609.y;
+            base.z = _609.z;
         }
         else
         {
-            if (_590)
+            if (_617)
             {
                 base *= (1.0 - fogAmount);
             }
             else
             {
-                if (_598)
+                if (_625)
                 {
                     base.w *= (1.0 - fogAmount);
                 }
                 else
                 {
-                    float4 _608 = base;
-                    float3 _615 = mix(_608.xyz, (*spvDescriptorSet0.m_223).advancedFogColorDensity.xyz, float3(fogAmount));
-                    base.x = _615.x;
-                    base.y = _615.y;
-                    base.z = _615.z;
+                    float4 _635 = base;
+                    float3 _642 = mix(_635.xyz, (*spvDescriptorSet0.m_193).advancedFogColorDensity.xyz, float3(fogAmount));
+                    base.x = _642.x;
+                    base.y = _642.y;
+                    base.z = _642.z;
                 }
             }
         }
     }
     else
     {
-        if (_623)
+        if (_650)
         {
-            float4 _626 = base;
-            float3 _631 = _626.xyz * (1.0 - fog.w);
-            base.x = _631.x;
-            base.y = _631.y;
-            base.z = _631.z;
+            float4 _653 = base;
+            float3 _658 = _653.xyz * (1.0 - fog.w);
+            base.x = _658.x;
+            base.y = _658.y;
+            base.z = _658.z;
         }
         else
         {
-            if (_639)
+            if (_666)
             {
                 base *= (1.0 - fog.w);
             }
             else
             {
-                if (_648)
+                if (_675)
                 {
                     base.w *= (1.0 - fog.w);
                 }
                 else
                 {
-                    base = mix(base, fog * (*spvDescriptorSet0.m_223).fogColor, float4(fog.w));
+                    base = mix(base, fog * (*spvDescriptorSet0.m_193).fogColor, float4(fog.w));
                 }
             }
         }
     }
-    if (_670)
+    if (_697)
     {
         if (base.w == 0.0)
         {
@@ -409,7 +421,7 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
     }
     else
     {
-        if (_680)
+        if (_707)
         {
             if (dot(base.xyz, base.xyz) == 0.0)
             {

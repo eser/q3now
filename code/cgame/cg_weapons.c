@@ -1464,14 +1464,33 @@ static uint32_t CG_WiredFx_WeaponFireProfile( int weaponNum, qboolean secondary 
  * Emit a presentation occurrence here so the authored muzzle light retains
  * the exact legacy tag_flash position without a renderer-side attachment shim. */
 static void CG_WiredFx_WeaponMuzzlePresent( centity_t *cent, int weaponNum,
-		const vec3_t origin, const vec3_t forward ) {
+		const vec3_t origin, const vec3_t forward, qboolean localView ) {
 	wiredFxEvent_t event;
-	uint32_t profile = CG_WiredFx_WeaponFireProfile( weaponNum, qfalse );
+	uint64_t conditionMask = WIRED_FX_CONDITION_MUZZLE_PRESENT;
+	uint32_t profile = CG_WiredFx_WeaponFireProfile( weaponNum,
+		cent->wiredFxMuzzleSecondary );
 	if ( profile == 0u || cent->wiredFxMuzzleTime == cent->muzzleFlashTime ) return;
 	cent->wiredFxMuzzleTime = cent->muzzleFlashTime;
+	if ( localView ) conditionMask |= WIRED_FX_CONDITION_LOCAL_VIEW;
 	CG_WiredFx_InitEvent( &event, profile, origin, forward );
-	event.conditionMask = WIRED_FX_CONDITION_MUZZLE_PRESENT;
+	event.conditionMask = conditionMask;
 	trap_WiredFx_EmitEvent( &event );
+
+	/* Shotgun smoke used to be emitted from EV_SHOTGUN's server-side ballistic
+	 * origin plus an arbitrary 32-unit push. That point is not the rendered
+	 * muzzle and visibly walks around the weapon as the camera turns. Spawn the
+	 * existing recipe from the same authoritative tag_flash transform as the
+	 * flash geometry and muzzle light instead. */
+	if ( weaponNum == WP_SHOTGUN &&
+			!( CG_PointContents( origin, cent->currentState.number ) &
+				( CONTENTS_WATER | CONTENTS_SLIME | CONTENTS_LAVA ) ) ) {
+		uint32_t smokeProfile = cent->wiredFxMuzzleSecondary
+			? WIRED_FX_PROFILE_SHOTGUN_SMOKE_WIDE
+			: WIRED_FX_PROFILE_SHOTGUN_SMOKE;
+		CG_WiredFx_InitEvent( &event, smokeProfile, origin, forward );
+		event.conditionMask = conditionMask;
+		trap_WiredFx_EmitEvent( &event );
+	}
 }
 
 void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent, int team ) {
@@ -1679,7 +1698,8 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
 		if ( weapon->flashDlightColor[0] || weapon->flashDlightColor[1] ||
 			 weapon->flashDlightColor[2] ) {
 			if ( CG_WiredFx_OwnsWeaponFire( weaponNum ) )
-				CG_WiredFx_WeaponMuzzlePresent( cent, weaponNum, flash.origin, flash.axis[0] );
+				CG_WiredFx_WeaponMuzzlePresent( cent, weaponNum, flash.origin,
+					flash.axis[0], ps != NULL );
 			else
 				trap_R_AddLightToScene( flash.origin, 300 + (rand()&31),
 					weapon->flashDlightColor[0], weapon->flashDlightColor[1],
@@ -2161,6 +2181,7 @@ void CG_FireWeapon( centity_t *cent, qboolean secondary ) {
 	// mark the entity as muzzle flashing, so when it is added it will
 	// append the flash to the weapon model
 	cent->muzzleFlashTime = cg.time;
+	cent->wiredFxMuzzleSecondary = secondary;
 
 	// lightning gun only does this this on initial press
 	if ( ent->weapon == WP_LIGHTNING_GUN ) {
@@ -2685,24 +2706,7 @@ static void CG_ShotgunPattern( vec3_t origin, vec3_t origin2, int seed, int othe
 CG_ShotgunFire
 ==============
 */
-static void CG_WiredFx_ShotgunSmoke( const entityState_t *es, qboolean wide ) {
-	wiredFxEvent_t event;
-	vec3_t origin;
-	vec3_t direction;
-	vec3_t up = { 0.0f, 0.0f, 1.0f };
-
-	if ( CG_PointContents( es->pos.trBase, 0 ) & CONTENTS_WATER ) return;
-	VectorSubtract( es->origin2, es->pos.trBase, direction );
-	VectorNormalize( direction );
-	VectorMA( es->pos.trBase, 32.0f, direction, origin );
-	CG_WiredFx_InitEvent( &event,
-		wide ? WIRED_FX_PROFILE_SHOTGUN_SMOKE_WIDE : WIRED_FX_PROFILE_SHOTGUN_SMOKE,
-		origin, up );
-	trap_WiredFx_EmitEvent( &event );
-}
-
 void CG_ShotgunFire( entityState_t *es ) {
-	CG_WiredFx_ShotgunSmoke( es, qfalse );
 	CG_ShotgunPattern( es->pos.trBase, es->origin2, es->eventParm, es->otherEntityNum );
 }
 
@@ -2769,7 +2773,6 @@ CG_ShotgunFireWide — double-blast uses wider spread
 ==============
 */
 void CG_ShotgunFireWide( entityState_t *es ) {
-	CG_WiredFx_ShotgunSmoke( es, qtrue );
 	CG_ShotgunPatternSpread( es->pos.trBase, es->origin2, es->eventParm, es->otherEntityNum, DEFAULT_SHOTGUN_DOUBLE_BLAST_SPREAD );
 }
 

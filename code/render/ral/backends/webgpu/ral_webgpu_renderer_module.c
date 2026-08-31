@@ -1072,18 +1072,18 @@ static void BeginRegistration( glconfig_t *config )
 		if ( !ri.Cvar_Get || !ri.Cvar_CheckRange ) {
 			memset( &s_module.brightnessFallback, 0,
 				sizeof( s_module.brightnessFallback ) );
-			s_module.brightnessFallback.value = 1.0f;
+			s_module.brightnessFallback.value = 1.4f;
 			s_module.brightnessFallback.integer = 1;
 			s_module.brightness = &s_module.brightnessFallback;
 		} else {
-			s_module.brightness = ri.Cvar_Get( "r_brightness", "1",
+			s_module.brightness = ri.Cvar_Get( "r_brightness", "1.4",
 				CVAR_ARCHIVE | CVAR_NODEFAULT );
 			if ( !s_module.brightness ) {
 				MarkFailed( "display-visibility-cvar" ); return;
 			}
 			ri.Cvar_CheckRange( s_module.brightness, "0", "32", CV_FLOAT );
 			if ( ri.Cvar_SetDescription ) ri.Cvar_SetDescription( s_module.brightness,
-				"Continuous display visibility scalar; 1.0 is authored identity, fractional values are preserved." );
+				"Continuous display visibility scalar; default 1.4, 1.0 is authored identity, fractional values are preserved." );
 			if ( ri.Cvar_SetGroup ) ri.Cvar_SetGroup( s_module.brightness, CVG_RENDERER );
 		}
 	}

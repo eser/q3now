@@ -215,14 +215,14 @@ constant uint PIPELINE_BLEND_MASK = is_function_constant_defined(PIPELINE_BLEND_
 
 struct spvDescriptorSetBuffer0
 {
-    constant ParticleFrame* m_195 [[id(0)]];
-    const device Pool* m_213 [[id(1)]];
-    const device Classes* m_285 [[id(2)]];
+    constant ParticleFrame* m_197 [[id(0)]];
+    const device Pool* m_215 [[id(1)]];
+    const device Classes* m_286 [[id(2)]];
 };
 
-constant spvUnsafeArray<float, 6> _606 = spvUnsafeArray<float, 6>({ 1.0, 1.0, -1.0, -1.0, 1.0, -1.0 });
-constant spvUnsafeArray<float, 6> _613 = spvUnsafeArray<float, 6>({ -1.0, 1.0, -1.0, -1.0, 1.0, 1.0 });
-constant spvUnsafeArray<float2, 6> _730 = spvUnsafeArray<float2, 6>({ float2(0.0, 1.0), float2(0.0), float2(1.0), float2(1.0), float2(0.0), float2(1.0, 0.0) });
+constant spvUnsafeArray<float, 6> _607 = spvUnsafeArray<float, 6>({ 1.0, 1.0, -1.0, -1.0, 1.0, -1.0 });
+constant spvUnsafeArray<float, 6> _614 = spvUnsafeArray<float, 6>({ -1.0, 1.0, -1.0, -1.0, 1.0, 1.0 });
+constant spvUnsafeArray<float2, 6> _861 = spvUnsafeArray<float2, 6>({ float2(0.0, 1.0), float2(0.0), float2(1.0), float2(1.0), float2(0.0), float2(1.0, 0.0) });
 
 struct main0_out
 {
@@ -232,11 +232,12 @@ struct main0_out
     uint frameSlot0 [[user(locn3)]];
     uint frameSlot1 [[user(locn4)]];
     float frameBlend [[user(locn5)]];
+    uint particleRenderFlags [[user(locn6)]];
     float4 gl_Position [[position]];
 };
 
 static inline __attribute__((always_inline))
-void emitDegenerate(thread float4& gl_Position, thread float2& fragUV, thread float4& fragColor, thread uint& particleClassHandle, thread uint& frameSlot0, thread uint& frameSlot1, thread float& frameBlend)
+void emitDegenerate(thread float4& gl_Position, thread float2& fragUV, thread float4& fragColor, thread uint& particleClassHandle, thread uint& frameSlot0, thread uint& frameSlot1, thread float& frameBlend, thread uint& particleRenderFlags)
 {
     gl_Position = float4(0.0, 0.0, 0.0, 1.0);
     fragUV = float2(0.0);
@@ -245,6 +246,7 @@ void emitDegenerate(thread float4& gl_Position, thread float2& fragUV, thread fl
     frameSlot0 = 4294967295u;
     frameSlot1 = 4294967295u;
     frameBlend = 0.0;
+    particleRenderFlags = 0u;
 }
 
 static inline __attribute__((always_inline))
@@ -324,184 +326,184 @@ vertex main0_out main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [
     main0_out out = {};
     uint particleIdx = uint(int(gl_InstanceIndex));
     uint vertInQuad = uint(int(gl_VertexIndex)) % 6u;
-    if (particleIdx >= (*spvDescriptorSet0.m_195).poolSize)
+    if (particleIdx >= (*spvDescriptorSet0.m_197).poolSize)
     {
-        emitDegenerate(out.gl_Position, out.fragUV, out.fragColor, out.particleClassHandle, out.frameSlot0, out.frameSlot1, out.frameBlend);
+        emitDegenerate(out.gl_Position, out.fragUV, out.fragColor, out.particleClassHandle, out.frameSlot0, out.frameSlot1, out.frameBlend, out.particleRenderFlags);
         return out;
     }
     Particle p;
-    p.pos = float3((*spvDescriptorSet0.m_213).particles[particleIdx].pos);
-    p.age = (*spvDescriptorSet0.m_213).particles[particleIdx].age;
-    p.vel = float3((*spvDescriptorSet0.m_213).particles[particleIdx].vel);
-    p.lifetimeInv = (*spvDescriptorSet0.m_213).particles[particleIdx].lifetimeInv;
-    p.classHandle = (*spvDescriptorSet0.m_213).particles[particleIdx].classHandle;
-    p.paletteIndex = (*spvDescriptorSet0.m_213).particles[particleIdx].paletteIndex;
-    p.sizeJitterPick = (*spvDescriptorSet0.m_213).particles[particleIdx].sizeJitterPick;
-    p.pad1 = (*spvDescriptorSet0.m_213).particles[particleIdx].pad1;
-    p.pad2 = (*spvDescriptorSet0.m_213).particles[particleIdx].pad2;
-    p.pad3 = (*spvDescriptorSet0.m_213).particles[particleIdx].pad3;
-    p.pad4 = (*spvDescriptorSet0.m_213).particles[particleIdx].pad4;
-    p.pad5 = (*spvDescriptorSet0.m_213).particles[particleIdx].pad5;
-    bool _250 = p.classHandle == 0u;
-    bool _257;
-    if (!_250)
+    p.pos = float3((*spvDescriptorSet0.m_215).particles[particleIdx].pos);
+    p.age = (*spvDescriptorSet0.m_215).particles[particleIdx].age;
+    p.vel = float3((*spvDescriptorSet0.m_215).particles[particleIdx].vel);
+    p.lifetimeInv = (*spvDescriptorSet0.m_215).particles[particleIdx].lifetimeInv;
+    p.classHandle = (*spvDescriptorSet0.m_215).particles[particleIdx].classHandle;
+    p.paletteIndex = (*spvDescriptorSet0.m_215).particles[particleIdx].paletteIndex;
+    p.sizeJitterPick = (*spvDescriptorSet0.m_215).particles[particleIdx].sizeJitterPick;
+    p.pad1 = (*spvDescriptorSet0.m_215).particles[particleIdx].pad1;
+    p.pad2 = (*spvDescriptorSet0.m_215).particles[particleIdx].pad2;
+    p.pad3 = (*spvDescriptorSet0.m_215).particles[particleIdx].pad3;
+    p.pad4 = (*spvDescriptorSet0.m_215).particles[particleIdx].pad4;
+    p.pad5 = (*spvDescriptorSet0.m_215).particles[particleIdx].pad5;
+    bool _251 = p.classHandle == 0u;
+    bool _258;
+    if (!_251)
     {
-        _257 = p.age >= 1.0;
+        _258 = p.age >= 1.0;
     }
     else
     {
-        _257 = _250;
+        _258 = _251;
     }
-    bool _266;
-    if (!_257)
+    bool _267;
+    if (!_258)
     {
-        _266 = p.classHandle > (*spvDescriptorSet0.m_195).numClasses;
+        _267 = p.classHandle > (*spvDescriptorSet0.m_197).numClasses;
     }
     else
     {
-        _266 = _257;
+        _267 = _258;
     }
-    if (_266)
+    if (_267)
     {
-        emitDegenerate(out.gl_Position, out.fragUV, out.fragColor, out.particleClassHandle, out.frameSlot0, out.frameSlot1, out.frameBlend);
+        emitDegenerate(out.gl_Position, out.fragUV, out.fragColor, out.particleClassHandle, out.frameSlot0, out.frameSlot1, out.frameBlend, out.particleRenderFlags);
         return out;
     }
-    uint _288 = p.classHandle - 1u;
+    uint _289 = p.classHandle - 1u;
     ParticleClassGPU c;
-    c.shader = (*spvDescriptorSet0.m_285).classes[_288].shader;
-    c.renderFlags = (*spvDescriptorSet0.m_285).classes[_288].renderFlags;
-    c.emitMode = (*spvDescriptorSet0.m_285).classes[_288].emitMode;
-    c.scatterShape = (*spvDescriptorSet0.m_285).classes[_288].scatterShape;
-    c.scatterMagnitude = (*spvDescriptorSet0.m_285).classes[_288].scatterMagnitude;
-    c.velocityShape = (*spvDescriptorSet0.m_285).classes[_288].velocityShape;
-    c.axialSpeed = (*spvDescriptorSet0.m_285).classes[_288].axialSpeed;
-    c.cubeJitter = (*spvDescriptorSet0.m_285).classes[_288].cubeJitter;
-    c.coneHalfAngle = (*spvDescriptorSet0.m_285).classes[_288].coneHalfAngle;
-    c.lifetimeMean = (*spvDescriptorSet0.m_285).classes[_288].lifetimeMean;
-    c.lifetimeJitter = (*spvDescriptorSet0.m_285).classes[_288].lifetimeJitter;
-    c.paletteCount = (*spvDescriptorSet0.m_285).classes[_288].paletteCount;
-    c.colorPalette[0] = (*spvDescriptorSet0.m_285).classes[_288].colorPalette[0];
-    c.colorPalette[1] = (*spvDescriptorSet0.m_285).classes[_288].colorPalette[1];
-    c.colorPalette[2] = (*spvDescriptorSet0.m_285).classes[_288].colorPalette[2];
-    c.colorPalette[3] = (*spvDescriptorSet0.m_285).classes[_288].colorPalette[3];
-    c.colorPalette[4] = (*spvDescriptorSet0.m_285).classes[_288].colorPalette[4];
-    c.colorPalette[5] = (*spvDescriptorSet0.m_285).classes[_288].colorPalette[5];
-    c.colorPalette[6] = (*spvDescriptorSet0.m_285).classes[_288].colorPalette[6];
-    c.colorPalette[7] = (*spvDescriptorSet0.m_285).classes[_288].colorPalette[7];
-    c.colorPalette[8] = (*spvDescriptorSet0.m_285).classes[_288].colorPalette[8];
-    c.colorPalette[9] = (*spvDescriptorSet0.m_285).classes[_288].colorPalette[9];
-    c.colorPalette[10] = (*spvDescriptorSet0.m_285).classes[_288].colorPalette[10];
-    c.colorPalette[11] = (*spvDescriptorSet0.m_285).classes[_288].colorPalette[11];
-    c.colorPalette[12] = (*spvDescriptorSet0.m_285).classes[_288].colorPalette[12];
-    c.colorPalette[13] = (*spvDescriptorSet0.m_285).classes[_288].colorPalette[13];
-    c.colorPalette[14] = (*spvDescriptorSet0.m_285).classes[_288].colorPalette[14];
-    c.colorPalette[15] = (*spvDescriptorSet0.m_285).classes[_288].colorPalette[15];
-    c.colorEndMult = (*spvDescriptorSet0.m_285).classes[_288].colorEndMult;
-    c.sizeStart = (*spvDescriptorSet0.m_285).classes[_288].sizeStart;
-    c.sizeEnd = (*spvDescriptorSet0.m_285).classes[_288].sizeEnd;
-    c.gravityScale = (*spvDescriptorSet0.m_285).classes[_288].gravityScale;
-    c.drag = (*spvDescriptorSet0.m_285).classes[_288].drag;
-    c.shaderBlendIsAdditive = (*spvDescriptorSet0.m_285).classes[_288].shaderBlendIsAdditive;
-    c.pad1 = (*spvDescriptorSet0.m_285).classes[_288].pad1;
-    c.pad2 = (*spvDescriptorSet0.m_285).classes[_288].pad2;
-    c.pad3 = (*spvDescriptorSet0.m_285).classes[_288].pad3;
-    c.velocityBias = (*spvDescriptorSet0.m_285).classes[_288].velocityBias;
-    c.velocityBiasJitter = (*spvDescriptorSet0.m_285).classes[_288].velocityBiasJitter;
-    c.speedJitter = (*spvDescriptorSet0.m_285).classes[_288].speedJitter;
-    c.sizeJitter = (*spvDescriptorSet0.m_285).classes[_288].sizeJitter;
-    c.colorDomain = (*spvDescriptorSet0.m_285).classes[_288].colorDomain;
-    c.pad5 = (*spvDescriptorSet0.m_285).classes[_288].pad5;
-    c.frameSlots[0] = (*spvDescriptorSet0.m_285).classes[_288].frameSlots[0];
-    c.frameSlots[1] = (*spvDescriptorSet0.m_285).classes[_288].frameSlots[1];
-    c.frameSlots[2] = (*spvDescriptorSet0.m_285).classes[_288].frameSlots[2];
-    c.frameSlots[3] = (*spvDescriptorSet0.m_285).classes[_288].frameSlots[3];
-    c.frameSlots[4] = (*spvDescriptorSet0.m_285).classes[_288].frameSlots[4];
-    c.frameSlots[5] = (*spvDescriptorSet0.m_285).classes[_288].frameSlots[5];
-    c.frameSlots[6] = (*spvDescriptorSet0.m_285).classes[_288].frameSlots[6];
-    c.frameSlots[7] = (*spvDescriptorSet0.m_285).classes[_288].frameSlots[7];
-    c.frameSlots[8] = (*spvDescriptorSet0.m_285).classes[_288].frameSlots[8];
-    c.frameSlots[9] = (*spvDescriptorSet0.m_285).classes[_288].frameSlots[9];
-    c.frameSlots[10] = (*spvDescriptorSet0.m_285).classes[_288].frameSlots[10];
-    c.frameSlots[11] = (*spvDescriptorSet0.m_285).classes[_288].frameSlots[11];
-    c.frameSlots[12] = (*spvDescriptorSet0.m_285).classes[_288].frameSlots[12];
-    c.frameSlots[13] = (*spvDescriptorSet0.m_285).classes[_288].frameSlots[13];
-    c.frameSlots[14] = (*spvDescriptorSet0.m_285).classes[_288].frameSlots[14];
-    c.frameSlots[15] = (*spvDescriptorSet0.m_285).classes[_288].frameSlots[15];
-    c.frameCount = (*spvDescriptorSet0.m_285).classes[_288].frameCount;
-    c.frameBlend = (*spvDescriptorSet0.m_285).classes[_288].frameBlend;
-    c.framePad0 = (*spvDescriptorSet0.m_285).classes[_288].framePad0;
-    c.framePad1 = (*spvDescriptorSet0.m_285).classes[_288].framePad1;
-    c.sizeParm.calc = (*spvDescriptorSet0.m_285).classes[_288].sizeParm.calc;
-    c.sizeParm.hasCurve = (*spvDescriptorSet0.m_285).classes[_288].sizeParm.hasCurve;
-    c.sizeParm.val0 = (*spvDescriptorSet0.m_285).classes[_288].sizeParm.val0;
-    c.sizeParm.val1 = (*spvDescriptorSet0.m_285).classes[_288].sizeParm.val1;
-    c.sizeParm.variance = (*spvDescriptorSet0.m_285).classes[_288].sizeParm.variance;
-    c.sizeParm.parmPad0 = (*spvDescriptorSet0.m_285).classes[_288].sizeParm.parmPad0;
-    c.sizeParm.parmPad1 = (*spvDescriptorSet0.m_285).classes[_288].sizeParm.parmPad1;
-    c.sizeParm.parmPad2 = (*spvDescriptorSet0.m_285).classes[_288].sizeParm.parmPad2;
-    c.sizeParm.samples[0] = (*spvDescriptorSet0.m_285).classes[_288].sizeParm.samples[0];
-    c.sizeParm.samples[1] = (*spvDescriptorSet0.m_285).classes[_288].sizeParm.samples[1];
-    c.sizeParm.samples[2] = (*spvDescriptorSet0.m_285).classes[_288].sizeParm.samples[2];
-    c.sizeParm.samples[3] = (*spvDescriptorSet0.m_285).classes[_288].sizeParm.samples[3];
-    c.sizeParm.samples[4] = (*spvDescriptorSet0.m_285).classes[_288].sizeParm.samples[4];
-    c.sizeParm.samples[5] = (*spvDescriptorSet0.m_285).classes[_288].sizeParm.samples[5];
-    c.sizeParm.samples[6] = (*spvDescriptorSet0.m_285).classes[_288].sizeParm.samples[6];
-    c.sizeParm.samples[7] = (*spvDescriptorSet0.m_285).classes[_288].sizeParm.samples[7];
-    c.alphaParm.calc = (*spvDescriptorSet0.m_285).classes[_288].alphaParm.calc;
-    c.alphaParm.hasCurve = (*spvDescriptorSet0.m_285).classes[_288].alphaParm.hasCurve;
-    c.alphaParm.val0 = (*spvDescriptorSet0.m_285).classes[_288].alphaParm.val0;
-    c.alphaParm.val1 = (*spvDescriptorSet0.m_285).classes[_288].alphaParm.val1;
-    c.alphaParm.variance = (*spvDescriptorSet0.m_285).classes[_288].alphaParm.variance;
-    c.alphaParm.parmPad0 = (*spvDescriptorSet0.m_285).classes[_288].alphaParm.parmPad0;
-    c.alphaParm.parmPad1 = (*spvDescriptorSet0.m_285).classes[_288].alphaParm.parmPad1;
-    c.alphaParm.parmPad2 = (*spvDescriptorSet0.m_285).classes[_288].alphaParm.parmPad2;
-    c.alphaParm.samples[0] = (*spvDescriptorSet0.m_285).classes[_288].alphaParm.samples[0];
-    c.alphaParm.samples[1] = (*spvDescriptorSet0.m_285).classes[_288].alphaParm.samples[1];
-    c.alphaParm.samples[2] = (*spvDescriptorSet0.m_285).classes[_288].alphaParm.samples[2];
-    c.alphaParm.samples[3] = (*spvDescriptorSet0.m_285).classes[_288].alphaParm.samples[3];
-    c.alphaParm.samples[4] = (*spvDescriptorSet0.m_285).classes[_288].alphaParm.samples[4];
-    c.alphaParm.samples[5] = (*spvDescriptorSet0.m_285).classes[_288].alphaParm.samples[5];
-    c.alphaParm.samples[6] = (*spvDescriptorSet0.m_285).classes[_288].alphaParm.samples[6];
-    c.alphaParm.samples[7] = (*spvDescriptorSet0.m_285).classes[_288].alphaParm.samples[7];
-    c.dragParm.calc = (*spvDescriptorSet0.m_285).classes[_288].dragParm.calc;
-    c.dragParm.hasCurve = (*spvDescriptorSet0.m_285).classes[_288].dragParm.hasCurve;
-    c.dragParm.val0 = (*spvDescriptorSet0.m_285).classes[_288].dragParm.val0;
-    c.dragParm.val1 = (*spvDescriptorSet0.m_285).classes[_288].dragParm.val1;
-    c.dragParm.variance = (*spvDescriptorSet0.m_285).classes[_288].dragParm.variance;
-    c.dragParm.parmPad0 = (*spvDescriptorSet0.m_285).classes[_288].dragParm.parmPad0;
-    c.dragParm.parmPad1 = (*spvDescriptorSet0.m_285).classes[_288].dragParm.parmPad1;
-    c.dragParm.parmPad2 = (*spvDescriptorSet0.m_285).classes[_288].dragParm.parmPad2;
-    c.dragParm.samples[0] = (*spvDescriptorSet0.m_285).classes[_288].dragParm.samples[0];
-    c.dragParm.samples[1] = (*spvDescriptorSet0.m_285).classes[_288].dragParm.samples[1];
-    c.dragParm.samples[2] = (*spvDescriptorSet0.m_285).classes[_288].dragParm.samples[2];
-    c.dragParm.samples[3] = (*spvDescriptorSet0.m_285).classes[_288].dragParm.samples[3];
-    c.dragParm.samples[4] = (*spvDescriptorSet0.m_285).classes[_288].dragParm.samples[4];
-    c.dragParm.samples[5] = (*spvDescriptorSet0.m_285).classes[_288].dragParm.samples[5];
-    c.dragParm.samples[6] = (*spvDescriptorSet0.m_285).classes[_288].dragParm.samples[6];
-    c.dragParm.samples[7] = (*spvDescriptorSet0.m_285).classes[_288].dragParm.samples[7];
-    c.gravityParm.calc = (*spvDescriptorSet0.m_285).classes[_288].gravityParm.calc;
-    c.gravityParm.hasCurve = (*spvDescriptorSet0.m_285).classes[_288].gravityParm.hasCurve;
-    c.gravityParm.val0 = (*spvDescriptorSet0.m_285).classes[_288].gravityParm.val0;
-    c.gravityParm.val1 = (*spvDescriptorSet0.m_285).classes[_288].gravityParm.val1;
-    c.gravityParm.variance = (*spvDescriptorSet0.m_285).classes[_288].gravityParm.variance;
-    c.gravityParm.parmPad0 = (*spvDescriptorSet0.m_285).classes[_288].gravityParm.parmPad0;
-    c.gravityParm.parmPad1 = (*spvDescriptorSet0.m_285).classes[_288].gravityParm.parmPad1;
-    c.gravityParm.parmPad2 = (*spvDescriptorSet0.m_285).classes[_288].gravityParm.parmPad2;
-    c.gravityParm.samples[0] = (*spvDescriptorSet0.m_285).classes[_288].gravityParm.samples[0];
-    c.gravityParm.samples[1] = (*spvDescriptorSet0.m_285).classes[_288].gravityParm.samples[1];
-    c.gravityParm.samples[2] = (*spvDescriptorSet0.m_285).classes[_288].gravityParm.samples[2];
-    c.gravityParm.samples[3] = (*spvDescriptorSet0.m_285).classes[_288].gravityParm.samples[3];
-    c.gravityParm.samples[4] = (*spvDescriptorSet0.m_285).classes[_288].gravityParm.samples[4];
-    c.gravityParm.samples[5] = (*spvDescriptorSet0.m_285).classes[_288].gravityParm.samples[5];
-    c.gravityParm.samples[6] = (*spvDescriptorSet0.m_285).classes[_288].gravityParm.samples[6];
-    c.gravityParm.samples[7] = (*spvDescriptorSet0.m_285).classes[_288].gravityParm.samples[7];
+    c.shader = (*spvDescriptorSet0.m_286).classes[_289].shader;
+    c.renderFlags = (*spvDescriptorSet0.m_286).classes[_289].renderFlags;
+    c.emitMode = (*spvDescriptorSet0.m_286).classes[_289].emitMode;
+    c.scatterShape = (*spvDescriptorSet0.m_286).classes[_289].scatterShape;
+    c.scatterMagnitude = (*spvDescriptorSet0.m_286).classes[_289].scatterMagnitude;
+    c.velocityShape = (*spvDescriptorSet0.m_286).classes[_289].velocityShape;
+    c.axialSpeed = (*spvDescriptorSet0.m_286).classes[_289].axialSpeed;
+    c.cubeJitter = (*spvDescriptorSet0.m_286).classes[_289].cubeJitter;
+    c.coneHalfAngle = (*spvDescriptorSet0.m_286).classes[_289].coneHalfAngle;
+    c.lifetimeMean = (*spvDescriptorSet0.m_286).classes[_289].lifetimeMean;
+    c.lifetimeJitter = (*spvDescriptorSet0.m_286).classes[_289].lifetimeJitter;
+    c.paletteCount = (*spvDescriptorSet0.m_286).classes[_289].paletteCount;
+    c.colorPalette[0] = (*spvDescriptorSet0.m_286).classes[_289].colorPalette[0];
+    c.colorPalette[1] = (*spvDescriptorSet0.m_286).classes[_289].colorPalette[1];
+    c.colorPalette[2] = (*spvDescriptorSet0.m_286).classes[_289].colorPalette[2];
+    c.colorPalette[3] = (*spvDescriptorSet0.m_286).classes[_289].colorPalette[3];
+    c.colorPalette[4] = (*spvDescriptorSet0.m_286).classes[_289].colorPalette[4];
+    c.colorPalette[5] = (*spvDescriptorSet0.m_286).classes[_289].colorPalette[5];
+    c.colorPalette[6] = (*spvDescriptorSet0.m_286).classes[_289].colorPalette[6];
+    c.colorPalette[7] = (*spvDescriptorSet0.m_286).classes[_289].colorPalette[7];
+    c.colorPalette[8] = (*spvDescriptorSet0.m_286).classes[_289].colorPalette[8];
+    c.colorPalette[9] = (*spvDescriptorSet0.m_286).classes[_289].colorPalette[9];
+    c.colorPalette[10] = (*spvDescriptorSet0.m_286).classes[_289].colorPalette[10];
+    c.colorPalette[11] = (*spvDescriptorSet0.m_286).classes[_289].colorPalette[11];
+    c.colorPalette[12] = (*spvDescriptorSet0.m_286).classes[_289].colorPalette[12];
+    c.colorPalette[13] = (*spvDescriptorSet0.m_286).classes[_289].colorPalette[13];
+    c.colorPalette[14] = (*spvDescriptorSet0.m_286).classes[_289].colorPalette[14];
+    c.colorPalette[15] = (*spvDescriptorSet0.m_286).classes[_289].colorPalette[15];
+    c.colorEndMult = (*spvDescriptorSet0.m_286).classes[_289].colorEndMult;
+    c.sizeStart = (*spvDescriptorSet0.m_286).classes[_289].sizeStart;
+    c.sizeEnd = (*spvDescriptorSet0.m_286).classes[_289].sizeEnd;
+    c.gravityScale = (*spvDescriptorSet0.m_286).classes[_289].gravityScale;
+    c.drag = (*spvDescriptorSet0.m_286).classes[_289].drag;
+    c.shaderBlendIsAdditive = (*spvDescriptorSet0.m_286).classes[_289].shaderBlendIsAdditive;
+    c.pad1 = (*spvDescriptorSet0.m_286).classes[_289].pad1;
+    c.pad2 = (*spvDescriptorSet0.m_286).classes[_289].pad2;
+    c.pad3 = (*spvDescriptorSet0.m_286).classes[_289].pad3;
+    c.velocityBias = (*spvDescriptorSet0.m_286).classes[_289].velocityBias;
+    c.velocityBiasJitter = (*spvDescriptorSet0.m_286).classes[_289].velocityBiasJitter;
+    c.speedJitter = (*spvDescriptorSet0.m_286).classes[_289].speedJitter;
+    c.sizeJitter = (*spvDescriptorSet0.m_286).classes[_289].sizeJitter;
+    c.colorDomain = (*spvDescriptorSet0.m_286).classes[_289].colorDomain;
+    c.pad5 = (*spvDescriptorSet0.m_286).classes[_289].pad5;
+    c.frameSlots[0] = (*spvDescriptorSet0.m_286).classes[_289].frameSlots[0];
+    c.frameSlots[1] = (*spvDescriptorSet0.m_286).classes[_289].frameSlots[1];
+    c.frameSlots[2] = (*spvDescriptorSet0.m_286).classes[_289].frameSlots[2];
+    c.frameSlots[3] = (*spvDescriptorSet0.m_286).classes[_289].frameSlots[3];
+    c.frameSlots[4] = (*spvDescriptorSet0.m_286).classes[_289].frameSlots[4];
+    c.frameSlots[5] = (*spvDescriptorSet0.m_286).classes[_289].frameSlots[5];
+    c.frameSlots[6] = (*spvDescriptorSet0.m_286).classes[_289].frameSlots[6];
+    c.frameSlots[7] = (*spvDescriptorSet0.m_286).classes[_289].frameSlots[7];
+    c.frameSlots[8] = (*spvDescriptorSet0.m_286).classes[_289].frameSlots[8];
+    c.frameSlots[9] = (*spvDescriptorSet0.m_286).classes[_289].frameSlots[9];
+    c.frameSlots[10] = (*spvDescriptorSet0.m_286).classes[_289].frameSlots[10];
+    c.frameSlots[11] = (*spvDescriptorSet0.m_286).classes[_289].frameSlots[11];
+    c.frameSlots[12] = (*spvDescriptorSet0.m_286).classes[_289].frameSlots[12];
+    c.frameSlots[13] = (*spvDescriptorSet0.m_286).classes[_289].frameSlots[13];
+    c.frameSlots[14] = (*spvDescriptorSet0.m_286).classes[_289].frameSlots[14];
+    c.frameSlots[15] = (*spvDescriptorSet0.m_286).classes[_289].frameSlots[15];
+    c.frameCount = (*spvDescriptorSet0.m_286).classes[_289].frameCount;
+    c.frameBlend = (*spvDescriptorSet0.m_286).classes[_289].frameBlend;
+    c.framePad0 = (*spvDescriptorSet0.m_286).classes[_289].framePad0;
+    c.framePad1 = (*spvDescriptorSet0.m_286).classes[_289].framePad1;
+    c.sizeParm.calc = (*spvDescriptorSet0.m_286).classes[_289].sizeParm.calc;
+    c.sizeParm.hasCurve = (*spvDescriptorSet0.m_286).classes[_289].sizeParm.hasCurve;
+    c.sizeParm.val0 = (*spvDescriptorSet0.m_286).classes[_289].sizeParm.val0;
+    c.sizeParm.val1 = (*spvDescriptorSet0.m_286).classes[_289].sizeParm.val1;
+    c.sizeParm.variance = (*spvDescriptorSet0.m_286).classes[_289].sizeParm.variance;
+    c.sizeParm.parmPad0 = (*spvDescriptorSet0.m_286).classes[_289].sizeParm.parmPad0;
+    c.sizeParm.parmPad1 = (*spvDescriptorSet0.m_286).classes[_289].sizeParm.parmPad1;
+    c.sizeParm.parmPad2 = (*spvDescriptorSet0.m_286).classes[_289].sizeParm.parmPad2;
+    c.sizeParm.samples[0] = (*spvDescriptorSet0.m_286).classes[_289].sizeParm.samples[0];
+    c.sizeParm.samples[1] = (*spvDescriptorSet0.m_286).classes[_289].sizeParm.samples[1];
+    c.sizeParm.samples[2] = (*spvDescriptorSet0.m_286).classes[_289].sizeParm.samples[2];
+    c.sizeParm.samples[3] = (*spvDescriptorSet0.m_286).classes[_289].sizeParm.samples[3];
+    c.sizeParm.samples[4] = (*spvDescriptorSet0.m_286).classes[_289].sizeParm.samples[4];
+    c.sizeParm.samples[5] = (*spvDescriptorSet0.m_286).classes[_289].sizeParm.samples[5];
+    c.sizeParm.samples[6] = (*spvDescriptorSet0.m_286).classes[_289].sizeParm.samples[6];
+    c.sizeParm.samples[7] = (*spvDescriptorSet0.m_286).classes[_289].sizeParm.samples[7];
+    c.alphaParm.calc = (*spvDescriptorSet0.m_286).classes[_289].alphaParm.calc;
+    c.alphaParm.hasCurve = (*spvDescriptorSet0.m_286).classes[_289].alphaParm.hasCurve;
+    c.alphaParm.val0 = (*spvDescriptorSet0.m_286).classes[_289].alphaParm.val0;
+    c.alphaParm.val1 = (*spvDescriptorSet0.m_286).classes[_289].alphaParm.val1;
+    c.alphaParm.variance = (*spvDescriptorSet0.m_286).classes[_289].alphaParm.variance;
+    c.alphaParm.parmPad0 = (*spvDescriptorSet0.m_286).classes[_289].alphaParm.parmPad0;
+    c.alphaParm.parmPad1 = (*spvDescriptorSet0.m_286).classes[_289].alphaParm.parmPad1;
+    c.alphaParm.parmPad2 = (*spvDescriptorSet0.m_286).classes[_289].alphaParm.parmPad2;
+    c.alphaParm.samples[0] = (*spvDescriptorSet0.m_286).classes[_289].alphaParm.samples[0];
+    c.alphaParm.samples[1] = (*spvDescriptorSet0.m_286).classes[_289].alphaParm.samples[1];
+    c.alphaParm.samples[2] = (*spvDescriptorSet0.m_286).classes[_289].alphaParm.samples[2];
+    c.alphaParm.samples[3] = (*spvDescriptorSet0.m_286).classes[_289].alphaParm.samples[3];
+    c.alphaParm.samples[4] = (*spvDescriptorSet0.m_286).classes[_289].alphaParm.samples[4];
+    c.alphaParm.samples[5] = (*spvDescriptorSet0.m_286).classes[_289].alphaParm.samples[5];
+    c.alphaParm.samples[6] = (*spvDescriptorSet0.m_286).classes[_289].alphaParm.samples[6];
+    c.alphaParm.samples[7] = (*spvDescriptorSet0.m_286).classes[_289].alphaParm.samples[7];
+    c.dragParm.calc = (*spvDescriptorSet0.m_286).classes[_289].dragParm.calc;
+    c.dragParm.hasCurve = (*spvDescriptorSet0.m_286).classes[_289].dragParm.hasCurve;
+    c.dragParm.val0 = (*spvDescriptorSet0.m_286).classes[_289].dragParm.val0;
+    c.dragParm.val1 = (*spvDescriptorSet0.m_286).classes[_289].dragParm.val1;
+    c.dragParm.variance = (*spvDescriptorSet0.m_286).classes[_289].dragParm.variance;
+    c.dragParm.parmPad0 = (*spvDescriptorSet0.m_286).classes[_289].dragParm.parmPad0;
+    c.dragParm.parmPad1 = (*spvDescriptorSet0.m_286).classes[_289].dragParm.parmPad1;
+    c.dragParm.parmPad2 = (*spvDescriptorSet0.m_286).classes[_289].dragParm.parmPad2;
+    c.dragParm.samples[0] = (*spvDescriptorSet0.m_286).classes[_289].dragParm.samples[0];
+    c.dragParm.samples[1] = (*spvDescriptorSet0.m_286).classes[_289].dragParm.samples[1];
+    c.dragParm.samples[2] = (*spvDescriptorSet0.m_286).classes[_289].dragParm.samples[2];
+    c.dragParm.samples[3] = (*spvDescriptorSet0.m_286).classes[_289].dragParm.samples[3];
+    c.dragParm.samples[4] = (*spvDescriptorSet0.m_286).classes[_289].dragParm.samples[4];
+    c.dragParm.samples[5] = (*spvDescriptorSet0.m_286).classes[_289].dragParm.samples[5];
+    c.dragParm.samples[6] = (*spvDescriptorSet0.m_286).classes[_289].dragParm.samples[6];
+    c.dragParm.samples[7] = (*spvDescriptorSet0.m_286).classes[_289].dragParm.samples[7];
+    c.gravityParm.calc = (*spvDescriptorSet0.m_286).classes[_289].gravityParm.calc;
+    c.gravityParm.hasCurve = (*spvDescriptorSet0.m_286).classes[_289].gravityParm.hasCurve;
+    c.gravityParm.val0 = (*spvDescriptorSet0.m_286).classes[_289].gravityParm.val0;
+    c.gravityParm.val1 = (*spvDescriptorSet0.m_286).classes[_289].gravityParm.val1;
+    c.gravityParm.variance = (*spvDescriptorSet0.m_286).classes[_289].gravityParm.variance;
+    c.gravityParm.parmPad0 = (*spvDescriptorSet0.m_286).classes[_289].gravityParm.parmPad0;
+    c.gravityParm.parmPad1 = (*spvDescriptorSet0.m_286).classes[_289].gravityParm.parmPad1;
+    c.gravityParm.parmPad2 = (*spvDescriptorSet0.m_286).classes[_289].gravityParm.parmPad2;
+    c.gravityParm.samples[0] = (*spvDescriptorSet0.m_286).classes[_289].gravityParm.samples[0];
+    c.gravityParm.samples[1] = (*spvDescriptorSet0.m_286).classes[_289].gravityParm.samples[1];
+    c.gravityParm.samples[2] = (*spvDescriptorSet0.m_286).classes[_289].gravityParm.samples[2];
+    c.gravityParm.samples[3] = (*spvDescriptorSet0.m_286).classes[_289].gravityParm.samples[3];
+    c.gravityParm.samples[4] = (*spvDescriptorSet0.m_286).classes[_289].gravityParm.samples[4];
+    c.gravityParm.samples[5] = (*spvDescriptorSet0.m_286).classes[_289].gravityParm.samples[5];
+    c.gravityParm.samples[6] = (*spvDescriptorSet0.m_286).classes[_289].gravityParm.samples[6];
+    c.gravityParm.samples[7] = (*spvDescriptorSet0.m_286).classes[_289].gravityParm.samples[7];
     if (c.shaderBlendIsAdditive != PIPELINE_BLEND_MASK)
     {
-        emitDegenerate(out.gl_Position, out.fragUV, out.fragColor, out.particleClassHandle, out.frameSlot0, out.frameSlot1, out.frameBlend);
+        emitDegenerate(out.gl_Position, out.fragUV, out.fragColor, out.particleClassHandle, out.frameSlot0, out.frameSlot1, out.frameBlend, out.particleRenderFlags);
         return out;
     }
-    float sx = _606[vertInQuad];
-    float uy = _613[vertInQuad];
+    float sx = _607[vertInQuad];
+    float uy = _614[vertInQuad];
     uint paletteIdx = p.paletteIndex % uint(max(c.paletteCount, 1));
     float4 baseColor = c.colorPalette[paletteIdx];
     float4 endColor = baseColor * c.colorEndMult;
@@ -512,8 +514,8 @@ vertex main0_out main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [
         ParticleParm param_1 = c.alphaParm;
         float param_2 = p.age;
         float param_3 = p.sizeJitterPick;
-        float _658 = parmEval(param_1, param_2, param_3);
-        color.w = _658;
+        float _659 = parmEval(param_1, param_2, param_3);
+        color.w = _659;
     }
     color *= unpack_unorm4x8_to_float(p.pad5);
     float effectiveStart = c.sizeStart + p.sizeJitterPick;
@@ -524,14 +526,53 @@ vertex main0_out main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [
         ParticleParm param_5 = c.sizeParm;
         float param_6 = p.age;
         float param_7 = p.sizeJitterPick;
-        float _695 = parmEval(param_5, param_6, param_7);
-        size = _695;
+        float _696 = parmEval(param_5, param_6, param_7);
+        size = _696;
     }
-    float3 worldPos = (p.pos + ((*spvDescriptorSet0.m_195).viewLeft.xyz * (sx * size))) + ((*spvDescriptorSet0.m_195).viewUp.xyz * (uy * size));
-    out.gl_Position = (*spvDescriptorSet0.m_195).mvp * float4(worldPos, 1.0);
-    out.fragUV = _730[vertInQuad];
+    bool _701 = (c.renderFlags & 64u) != 0u;
+    bool _711;
+    if (_701)
+    {
+        _711 = dot(p.vel, p.vel) > 9.9999997473787516355514526367188e-05;
+    }
+    else
+    {
+        _711 = _701;
+    }
+    float3 worldPos;
+    if (_711)
+    {
+        float ageSeconds = p.age / fast::max(p.lifetimeInv, 9.9999999747524270787835121154785e-07);
+        float trailTime = fast::min(ageSeconds, 0.100000001490116119384765625);
+        float3 head = p.pos;
+        float3 tail = head - (p.vel * trailTime);
+        tail.z -= (((400.0 * c.gravityScale) * trailTime) * trailTime);
+        float3 motion = head - tail;
+        float motionLength = length(motion);
+        float3 midpoint = (head + tail) * 0.5;
+        float3 viewDirection = fast::normalize((*spvDescriptorSet0.m_197).eyeWorld.xyz - midpoint);
+        float3 widthAxis = cross(motion / float3(fast::max(motionLength, 9.9999999747524270787835121154785e-07)), viewDirection);
+        float widthLength = length(widthAxis);
+        if ((motionLength > 0.001000000047497451305389404296875) && (widthLength > 0.001000000047497451305389404296875))
+        {
+            widthAxis /= float3(widthLength);
+            float alongTrail = (uy + 1.0) * 0.5;
+            worldPos = mix(tail, head, float3(alongTrail)) + (widthAxis * (sx * size));
+        }
+        else
+        {
+            worldPos = (p.pos + ((*spvDescriptorSet0.m_197).viewLeft.xyz * (sx * size))) + ((*spvDescriptorSet0.m_197).viewUp.xyz * (uy * size));
+        }
+    }
+    else
+    {
+        worldPos = (p.pos + ((*spvDescriptorSet0.m_197).viewLeft.xyz * (sx * size))) + ((*spvDescriptorSet0.m_197).viewUp.xyz * (uy * size));
+    }
+    out.gl_Position = (*spvDescriptorSet0.m_197).mvp * float4(worldPos, 1.0);
+    out.fragUV = _861[vertInQuad];
     out.fragColor = color;
     out.particleClassHandle = p.classHandle | (c.colorDomain << 31u);
+    out.particleRenderFlags = c.renderFlags;
     if (c.frameCount > 1u)
     {
         float fr = p.age * float(c.frameCount);
@@ -540,16 +581,16 @@ vertex main0_out main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [
         uint frame1 = min((frame0 + 1u), last);
         out.frameSlot0 = c.frameSlots[frame0];
         out.frameSlot1 = c.frameSlots[frame1];
-        float _782;
+        float _915;
         if (c.frameBlend != 0u)
         {
-            _782 = fract(fr);
+            _915 = fract(fr);
         }
         else
         {
-            _782 = 0.0;
+            _915 = 0.0;
         }
-        out.frameBlend = _782;
+        out.frameBlend = _915;
     }
     else
     {

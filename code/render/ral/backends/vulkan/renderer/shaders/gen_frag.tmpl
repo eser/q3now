@@ -300,6 +300,19 @@ layout (constant_id = 26) const int lightmap_slot = 0;
 // the world darker than vanilla. See r_lightmapBoost (tr_init.c).
 #define LIGHTMAP_BOOST (worldLightParams.x)
 
+// Legacy Q3 lightmaps are an LDR irradiance operand. Vanilla's byte-space
+// overbright shift normalized RGB by the peak channel when it overflowed,
+// preserving hue while keeping the result inside the LDR range. Keep that
+// bounded behavior after moving the boost into linear shader space; authored
+// emission remains a separate HDR term and is intentionally not bounded here.
+vec3 wired_boost_legacy_lightmap( vec3 rgb ) {
+	vec3 boosted = rgb * LIGHTMAP_BOOST;
+	float peak = max( boosted.r, max( boosted.g, boosted.b ) );
+	if ( peak > 1.0 )
+		boosted /= peak;
+	return boosted;
+}
+
 #ifdef USE_FIXED_COLOR
 layout (constant_id = 8) const float identity_color = 1.0;
 layout (constant_id = 9) const float identity_alpha = 1.0;
@@ -364,12 +377,12 @@ vec4 wired_bl_sample_domain( uint role, vec2 uv, int slot ) {
 	if ( ( tex_domain & ( 1 << slot ) ) == 0 )
 		c.rgb = sRGBToLinear( c.rgb );	// CD_SRGB — decoded (CD_LINEAR is fetched raw)
 	// World overbright follows the lightmap operand: when this slot IS the lightmap
-	// (lightmap_slot is the bundle index + 1), scale its linear RGB by LIGHTMAP_BOOST.
+	// (lightmap_slot is the bundle index + 1), apply the bounded legacy LDR boost.
 	// Both lightmap_slot and slot are compile-time constants here, so this resolves to
-	// a static multiply (or nothing) per pipeline. Applied once, at sample time, so the
+	// a static lightmap-only path (or nothing) per pipeline. Applied once at sample time, so the
 	// boost reaches the lightmap in every combine branch + the single-texture pass.
 	if ( lightmap_slot == slot + 1 )
-		c.rgb *= LIGHTMAP_BOOST;
+		c.rgb = wired_boost_legacy_lightmap( c.rgb );
 	return c;
 }
 

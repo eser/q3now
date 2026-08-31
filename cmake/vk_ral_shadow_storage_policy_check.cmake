@@ -120,6 +120,12 @@ require_text("${SCENE}" "vk_particle_shadow_write_class( (uint32_t)handle - 1u, 
 	"particle class registration bypasses the exact element shadow writer")
 require_text("${SCENE}" "vk_decal_shadow_write( slot, &d )"
 	"decal emission bypasses the exact element shadow writer")
+require_text("${VK}" "qboolean vk_decal_shadow_read( uint32_t slot, decalGPU_t *decal )"
+	"decal coalescing bypasses the RAL CPU shadow reader")
+require_text("${SCENE}" "#define DECAL_COALESCE_LOOKBACK       256u"
+	"decal overlap coalescing is not explicitly bounded")
+require_text("${SCENE}" "vk_decal_shadow_read( slot, &candidate )"
+	"decal overlap coalescing lost exact CPU-shadow reads")
 require_text("${VK}" "ral-shadow-storage schema=1 map=%s family=%s"
 	"native smoke lost generation-bound shadow-storage receipts")
 require_text("${SMOKE}" "families=(\"ribbon\",\"rail-ribbon\",\"beam\",\"sprite\",\"particle\",\"decal\",\"atmospheric\")"

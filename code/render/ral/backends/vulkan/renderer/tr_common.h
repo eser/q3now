@@ -183,8 +183,10 @@ void R_LoadTGA( const char *name, byte **pic, int *width, int *height );
 // tr_image_png_write.c). R_EncodePNG returns the bytes via a Z_Malloc
 // buffer the caller must ri.Free; R_SavePNG goes straight to FS_WriteFile.
 qboolean R_EncodePNG( const byte *rgb_bottomup, int width, int height,
-                     byte **outBytes, int *outLen );
+	byte **outBytes, int *outLen );
 qboolean R_SavePNG( const char *fileName, const byte *rgb_bottomup, int width, int height );
+qboolean R_EncodeScreenshotPNG( const byte *rgb_bottomup, int width, int height,
+	const char *rendererBackend, byte **outBytes, int *outLen );
 // DDS BCn loader. Returns the raw mip-chain buffer; caller
 // owns *pic (ri.Free) and inspects *picFormat / *numMips / *dataSize
 // to schedule the compressed upload (vk_upload_image_data_compressed).

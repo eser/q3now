@@ -709,6 +709,18 @@ static float2 wired_material_stage_uv(float2 authoredUv,
     return uv;
 }
 
+/* Legacy BSP lightmaps are LDR irradiance, even though the scene target is
+ * HDR. Match the established renderer's hue-preserving overbright overflow:
+ * boost in linear space, then normalize all channels by the peak when needed.
+ * Authored emission is added later and deliberately remains unbounded. */
+static float3 wired_boost_legacy_lightmap(float3 rgb, float boost) {
+    float3 boosted = rgb * boost;
+    float peak = max(boosted.r, max(boosted.g, boosted.b));
+    if (peak > 1.0)
+        boosted /= peak;
+    return boosted;
+}
+
 fragment float4 wired_world_fragment(WorldVertexOut in [[stage_in]],
                                      texture2d<float> baseImage [[texture(0)]],
                                      texture2d<float> lightmapImage [[texture(1)]],
@@ -834,7 +846,8 @@ fragment float4 wired_world_fragment(WorldVertexOut in [[stage_in]],
 				default: source = stageImage7.sample(stageSampler7, stageUv); break;
 			}
 			if (imageSource == 1u) {
-				source.rgb *= material.lightmapBoost;
+				source.rgb = wired_boost_legacy_lightmap(
+					source.rgb, material.lightmapBoost);
 				stageHasLightmap = true;
 			}
 			if (stage.meta.w != 0u && source.a < stage.params.x)
@@ -874,9 +887,10 @@ fragment float4 wired_world_fragment(WorldVertexOut in [[stage_in]],
     } else if (stageHasLightmap) {
 		lighting = float3(1.0);
 	} else if (material.staticLightingMode == 1u
-            && (material.hasLightmap & 1u) != 0u) {
-        lighting = lightmapImage.sample(lightmapSampler,
-            in.lightmapCoord).rgb * material.lightmapBoost;
+			&& (material.hasLightmap & 1u) != 0u) {
+		lighting = wired_boost_legacy_lightmap(
+			lightmapImage.sample(lightmapSampler, in.lightmapCoord).rgb,
+			material.lightmapBoost);
     } else {
         lighting = (material.hasLocalIrradiance & 1u) != 0u
             ? localSh : float3(1.0);

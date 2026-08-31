@@ -51,6 +51,10 @@ foreach(needle IN ITEMS
 	"RenderSubmission_EntityCommands" "RenderSubmission_ModelSnapshot"
 	"BuildEntityVertices" "loweredEntityIndexCount" "modelEntityCount"
 	"UpdatePersistentEffectBeams" "effectBeamSlots" "loweredEffectBeamCount"
+	"surfaceDecal" "batch->surfaceDecal ? 1u"
+	"surface decals second, and translucent effects last"
+	"if ( snapshot.beamCount ) return qfalse;"
+	"legacy content). Vulkan renders that surface through its default"
 	"primitiveEntityCount" "temporalEntityCount" "unresolvedEntityCount"
 	"blendedCoefficientsQ16" "localSh[4][3]"
 	"PlanWeather" "RenderSubmission_ViewSnapshot" "EncodeWeather"
@@ -71,6 +75,14 @@ foreach(needle IN ITEMS "RenderSubmission_AddEffectBeam" "AddBeamToScene = Submi
 		message(FATAL_ERROR "Metal module lost beam submission seam: ${needle}")
 	endif()
 endforeach()
+foreach(needle IN ITEMS "A VFS/meta remap changes the physical image source"
+	"RegisterMaterialImageSourceInternal( kind, name,"
+	"identity remains the authored name")
+	string(FIND "${MODULE_SOURCE}" "${needle}" pos)
+	if(pos EQUAL -1)
+		message(FATAL_ERROR "Metal material remap lost authored logical identity: ${needle}")
+	endif()
+endforeach()
 string(FIND "${MODULE_SOURCE}" "AddBeamToScene = NoopBeam" noop_beam)
 if(NOT noop_beam EQUAL -1)
 	message(FATAL_ERROR "Metal module must not silently drop beam primitives")
@@ -88,6 +100,7 @@ foreach(needle IN ITEMS "wired_ui_vertex" "wired_ui_fragment"
 	"WorldAtmosphereParams" "worldPosition" "colorVisibility"
 	"3.912023" "heightCloud" "transmittance"
 	"baseImage.sample" "lightmapImage.sample" "discard_fragment"
+	"wired_boost_legacy_lightmap" "boosted /= peak"
 	"material.localSh[1].rgb * in.normal.x"
 	"material.emissiveRadiance.rgb"
 	"wired_fullscreen_vertex" "wired_tonemap_fragment"

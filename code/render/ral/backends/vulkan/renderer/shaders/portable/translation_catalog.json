@@ -4,10 +4,10 @@
   "portableManifest": {
     "schemaVersion": 1,
     "generation": 1,
-    "byteCount": 859657,
+    "byteCount": 859797,
     "digest": {
-      "lane0": "c9cf02809b7e5722",
-      "lane1": "551ade29c0494040"
+      "lane0": "13f9f9e568c7d81c",
+      "lane1": "bdd4b818cda24ede"
     }
   },
   "requiredTargets": [
@@ -515,35 +515,35 @@
       "symbol": "particle_vert_spv",
       "stage": "RAL_STAGE_VERTEX",
       "spirv": {
-        "byteCount": 24264,
+        "byteCount": 27304,
         "digest": {
-          "lane0": "57a1910508a9b738",
-          "lane1": "5844d6fad050e4a2"
+          "lane0": "45822fbe5c3b04c8",
+          "lane1": "aca86864d7d821b3"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 21964,
+          "byteCount": 23701,
           "digest": {
-            "lane0": "800ff07ae11db0b6",
-            "lane1": "4f4a3ab92a162776"
+            "lane0": "149c70e7ad31acfd",
+            "lane1": "d17ec5eb100bc74a"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 14960,
+          "byteCount": 16486,
           "digest": {
-            "lane0": "acadc93a0f97acf7",
-            "lane1": "b62a756c77516a0c"
+            "lane0": "72c2dd05935b16b4",
+            "lane1": "9987aff41848f5da"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 19626,
+          "byteCount": 22631,
           "digest": {
-            "lane0": "cb5287f8aab5cce9",
-            "lane1": "aee001ddd3bc397c"
+            "lane0": "9781da80d897bbe0",
+            "lane1": "c8dee85c5ab4d89a"
           }
         }
       ]
@@ -1313,35 +1313,35 @@
       "symbol": "particle_frag_spv",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 6584,
+        "byteCount": 6836,
         "digest": {
-          "lane0": "564fcffda5730e89",
-          "lane1": "34d11cf017c25977"
+          "lane0": "90b8d1d2b9f1c4c4",
+          "lane1": "e700ce4077f8104f"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 4366,
+          "byteCount": 4499,
           "digest": {
-            "lane0": "1d127666643daad0",
-            "lane1": "c1d99c0614b396aa"
+            "lane0": "47599f967f068068",
+            "lane1": "e721c9ad2f056691"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 3184,
+          "byteCount": 3323,
           "digest": {
-            "lane0": "9d9d2397dc9a8a92",
-            "lane1": "535acacdbd9406a3"
+            "lane0": "292172e668268504",
+            "lane1": "c82379cf2ebc7414"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 6158,
+          "byteCount": 6470,
           "digest": {
-            "lane0": "5aae9069fa2b7f8c",
-            "lane1": "9885bcfadc7c9694"
+            "lane0": "8a7fa6f9a3fbbed2",
+            "lane1": "04b03d766f239f16"
           }
         }
       ]
@@ -1351,35 +1351,35 @@
       "symbol": "decal_frag_spv",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 10068,
+        "byteCount": 10700,
         "digest": {
-          "lane0": "f0ec37f383f84659",
-          "lane1": "19d2a0a674093f09"
+          "lane0": "ac265dfa614ba5bb",
+          "lane1": "aeab38d8abc8eac2"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 6171,
+          "byteCount": 6692,
           "digest": {
-            "lane0": "ff12d3f17003a31b",
-            "lane1": "a273b487892598f4"
+            "lane0": "a3a8217d06bb74ed",
+            "lane1": "9b9171e5b2d02fd2"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 5136,
+          "byteCount": 5500,
           "digest": {
-            "lane0": "4261bfbbf59fc980",
-            "lane1": "fd837208f4a8d582"
+            "lane0": "afbfa7d21d91c7ab",
+            "lane1": "c62212af0a799992"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 9990,
+          "byteCount": 10600,
           "digest": {
-            "lane0": "5ed735f81efb0b80",
-            "lane1": "266dae2c3565cd3a"
+            "lane0": "262996c9672e145d",
+            "lane1": "fb89e90b506ce950"
           }
         }
       ]
@@ -5531,35 +5531,35 @@
       "symbol": "frag_tx0_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 10460,
+        "byteCount": 11092,
         "digest": {
-          "lane0": "883ba063a1c8adcb",
-          "lane1": "fd95f5ca3b967949"
+          "lane0": "fb087a207a4c4fbc",
+          "lane1": "b597d9af89832f74"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 8257,
+          "byteCount": 8610,
           "digest": {
-            "lane0": "0cdae38b369554ee",
-            "lane1": "af22f3d5a3473104"
+            "lane0": "0db0f09e68906233",
+            "lane1": "0059d4bc65ed4908"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 5486,
+          "byteCount": 5736,
           "digest": {
-            "lane0": "c80f776d9d173c55",
-            "lane1": "f99fddf7354be2fa"
+            "lane0": "bf871c7ba1609f5b",
+            "lane1": "2621b6fdc5f89796"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 8237,
+          "byteCount": 8825,
           "digest": {
-            "lane0": "17c54f759b815402",
-            "lane1": "fa82e41a8d0276b4"
+            "lane0": "130740d8e4347483",
+            "lane1": "d8d1a9d9ed7a070f"
           }
         }
       ]
@@ -5569,35 +5569,35 @@
       "symbol": "frag_tx0_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 12764,
+        "byteCount": 13396,
         "digest": {
-          "lane0": "b38f25769614bc0f",
-          "lane1": "682347610f0b79cd"
+          "lane0": "9935710435eb6b7d",
+          "lane1": "726e98f099da9212"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 10152,
+          "byteCount": 10505,
           "digest": {
-            "lane0": "2b9c750ede6b5ac6",
-            "lane1": "11490ee2ef0a9260"
+            "lane0": "a6d98766edefe70d",
+            "lane1": "f4dfa2525d0e1cf2"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 7218,
+          "byteCount": 7468,
           "digest": {
-            "lane0": "5fd9cbf760bb661c",
-            "lane1": "72cfe092d9a7cb06"
+            "lane0": "7502123007a8a375",
+            "lane1": "8e931a8591267b36"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 10713,
+          "byteCount": 11301,
           "digest": {
-            "lane0": "e586a079543ce7cb",
-            "lane1": "1f72fa7ff187f879"
+            "lane0": "a2ae355f18c48007",
+            "lane1": "b8f1c9541a32b59d"
           }
         }
       ]
@@ -5607,35 +5607,35 @@
       "symbol": "frag_tx0_ident1_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 10080,
+        "byteCount": 10712,
         "digest": {
-          "lane0": "a12a4c2c008f33b3",
-          "lane1": "c3283f5ff5d04435"
+          "lane0": "7089590ba0e34563",
+          "lane1": "e3664db179ea8798"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 8058,
+          "byteCount": 8411,
           "digest": {
-            "lane0": "1f2c349a7cef1090",
-            "lane1": "154700f0e0efff35"
+            "lane0": "3f9adec6f93315e3",
+            "lane1": "8f6f59fa65da815a"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 5299,
+          "byteCount": 5549,
           "digest": {
-            "lane0": "9ea76bf87bc334e3",
-            "lane1": "bf79ce7a7d8f84c1"
+            "lane0": "bfdd0cd3d67bf16f",
+            "lane1": "51568bcd26e48743"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 7802,
+          "byteCount": 8390,
           "digest": {
-            "lane0": "44f183e6ddd39004",
-            "lane1": "ca332d60950a7eb4"
+            "lane0": "35e9ae443eec6744",
+            "lane1": "3b6ace13b5e71284"
           }
         }
       ]
@@ -5645,35 +5645,35 @@
       "symbol": "frag_tx0_ident1_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 12384,
+        "byteCount": 13016,
         "digest": {
-          "lane0": "1d536829264aa44e",
-          "lane1": "af64b7690ddb6751"
+          "lane0": "da1238f692ae7904",
+          "lane1": "0028419b37dd9dbf"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 9953,
+          "byteCount": 10306,
           "digest": {
-            "lane0": "1fbd2b1a48d8d9f0",
-            "lane1": "9d546ed1274be1f5"
+            "lane0": "bef5686a066ed331",
+            "lane1": "cff3328312b38c82"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 7031,
+          "byteCount": 7281,
           "digest": {
-            "lane0": "4bc62cf57ad787ce",
-            "lane1": "59c475346bced060"
+            "lane0": "ba2c57854381fa1d",
+            "lane1": "7c8ce1e913fd08b2"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 10276,
+          "byteCount": 10864,
           "digest": {
-            "lane0": "351f68d5b3b423f0",
-            "lane1": "7f05add12e9e9f1e"
+            "lane0": "c5c2294d22fccdf6",
+            "lane1": "a9aeb70de610b10c"
           }
         }
       ]
@@ -5683,35 +5683,35 @@
       "symbol": "frag_tx0_fixed_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 10392,
+        "byteCount": 11024,
         "digest": {
-          "lane0": "2f6510b8897b39cf",
-          "lane1": "afcd0b019add061f"
+          "lane0": "32b8882ee475595d",
+          "lane1": "8b54a93074833538"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 8572,
+          "byteCount": 8925,
           "digest": {
-            "lane0": "4e55a5023299c04b",
-            "lane1": "fd47fe4b9c15ae9e"
+            "lane0": "c4bdeb694bb4db72",
+            "lane1": "5f1a534c86d36d44"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 5589,
+          "byteCount": 5839,
           "digest": {
-            "lane0": "394bf99fd50cede4",
-            "lane1": "23c3aedbe0f6c4ca"
+            "lane0": "f1fabc7d5d64ca64",
+            "lane1": "e69c0e90edda6adb"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 8107,
+          "byteCount": 8695,
           "digest": {
-            "lane0": "5bfdf9fc77f9bda4",
-            "lane1": "141f3df2ef85267c"
+            "lane0": "e79441ff958cce40",
+            "lane1": "63fbe0d21952b485"
           }
         }
       ]
@@ -5721,35 +5721,35 @@
       "symbol": "frag_tx0_fixed_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 12696,
+        "byteCount": 13328,
         "digest": {
-          "lane0": "ae69772bf724da25",
-          "lane1": "eee5d1787cbfc1c8"
+          "lane0": "542a713f6ec5a014",
+          "lane1": "b5397c29c5d8f067"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 10467,
+          "byteCount": 10820,
           "digest": {
-            "lane0": "dfb029c5446d38e7",
-            "lane1": "e15fcc43d2387329"
+            "lane0": "550e163c77314ce8",
+            "lane1": "ac09a4cf9df51c55"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 7321,
+          "byteCount": 7571,
           "digest": {
-            "lane0": "6eb82fbe5999cb6b",
-            "lane1": "ccc3fe8e834e0dd3"
+            "lane0": "7076774d5ff59554",
+            "lane1": "9b3ed67715a07998"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 10587,
+          "byteCount": 11175,
           "digest": {
-            "lane0": "70b35ed2b5bf8bec",
-            "lane1": "4e4276fc3d42fdb4"
+            "lane0": "88b49b51d0ea59de",
+            "lane1": "242fe7dede15c721"
           }
         }
       ]
@@ -5759,35 +5759,35 @@
       "symbol": "frag_tx0_ent_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 10136,
+        "byteCount": 10768,
         "digest": {
-          "lane0": "a96b11ea0f47b7d8",
-          "lane1": "0e5b912519eb2a6e"
+          "lane0": "da186031dc98c1e4",
+          "lane1": "9cd97db9d8ae67d1"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 8098,
+          "byteCount": 8451,
           "digest": {
-            "lane0": "f8237e58a8f41da0",
-            "lane1": "4544cf553dde1c0b"
+            "lane0": "8969035919828ba1",
+            "lane1": "ef3470545d66a6a1"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 5317,
+          "byteCount": 5567,
           "digest": {
-            "lane0": "1dc58a1d9e880b97",
-            "lane1": "f409abf37ecce3fe"
+            "lane0": "e5d47485c99d8f1a",
+            "lane1": "12977441f486aac0"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 7851,
+          "byteCount": 8439,
           "digest": {
-            "lane0": "89c50093e9969e42",
-            "lane1": "4ab9a88c7b60edc3"
+            "lane0": "667ec123cd8f77fa",
+            "lane1": "2abf49e2aceaa684"
           }
         }
       ]
@@ -5797,35 +5797,35 @@
       "symbol": "frag_tx0_ent_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 12440,
+        "byteCount": 13072,
         "digest": {
-          "lane0": "cde266df09dc526a",
-          "lane1": "4a1fb68f6cea24c2"
+          "lane0": "4606b1c94c148334",
+          "lane1": "80cdac17bc2ad9ee"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 9993,
+          "byteCount": 10346,
           "digest": {
-            "lane0": "8dc4f0494e8c0d19",
-            "lane1": "92b9673b8aafd502"
+            "lane0": "c89ab5972b1568d2",
+            "lane1": "bf6a9dea867094aa"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 7049,
+          "byteCount": 7299,
           "digest": {
-            "lane0": "a18efc7c36f90578",
-            "lane1": "62496cafc773a9ac"
+            "lane0": "7eff66a60bbfd3cc",
+            "lane1": "53333e89c1993bdc"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 10327,
+          "byteCount": 10915,
           "digest": {
-            "lane0": "c9417f4989bcac3c",
-            "lane1": "05364863d55aab75"
+            "lane0": "02307fc83d804352",
+            "lane1": "fd1d5079028dc971"
           }
         }
       ]
@@ -5835,35 +5835,35 @@
       "symbol": "frag_tx0_df_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 10288,
+        "byteCount": 10920,
         "digest": {
-          "lane0": "67f4d05b8e69334a",
-          "lane1": "16079e4d6b193f26"
+          "lane0": "c1b8d5df5d736d4c",
+          "lane1": "5b680b66ab4f6d6d"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 8340,
+          "byteCount": 8693,
           "digest": {
-            "lane0": "9a5ff718a8f50658",
-            "lane1": "124302f1f669a5d5"
+            "lane0": "9ee8147aaf2f1fd7",
+            "lane1": "1eff6d89a8e4039e"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 5456,
+          "byteCount": 5706,
           "digest": {
-            "lane0": "30db46423d74a5a8",
-            "lane1": "a794b2d4bfc7238b"
+            "lane0": "18ac0b5a0310f2a0",
+            "lane1": "a5d72acb4d79e30a"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 7954,
+          "byteCount": 8542,
           "digest": {
-            "lane0": "de3589abb2af30db",
-            "lane1": "d00b357bb7a5b7ad"
+            "lane0": "2c64a1bb15af4711",
+            "lane1": "1a91bc05caa10627"
           }
         }
       ]
@@ -5873,35 +5873,35 @@
       "symbol": "frag_tx1_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 11732,
+        "byteCount": 12364,
         "digest": {
-          "lane0": "c3a4e6fac0f804e6",
-          "lane1": "1694d4a147c3f5a5"
+          "lane0": "aa293a0df0fcf50d",
+          "lane1": "0cfb4be32b31d4da"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 8779,
+          "byteCount": 9132,
           "digest": {
-            "lane0": "a89cef33a955bdce",
-            "lane1": "7c5e43d3d93ed4c1"
+            "lane0": "8ba88018b9b26eb6",
+            "lane1": "1d830a37bd6650bf"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 5919,
+          "byteCount": 6169,
           "digest": {
-            "lane0": "6b2fc15e08a211e9",
-            "lane1": "651b113c328d61a2"
+            "lane0": "f9e2a1bffd514f65",
+            "lane1": "da69c3117ac0ae07"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 9728,
+          "byteCount": 10319,
           "digest": {
-            "lane0": "49fb6f58ad4a7e51",
-            "lane1": "fb89ec4fe2d9497f"
+            "lane0": "f3dd43869b43a7ef",
+            "lane1": "352c6f70b296f051"
           }
         }
       ]
@@ -5949,35 +5949,35 @@
       "symbol": "frag_tx0_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 14860,
+        "byteCount": 15492,
         "digest": {
-          "lane0": "7d30e03729dabeec",
-          "lane1": "55a92aabae38da0e"
+          "lane0": "9369f32da5f52cdb",
+          "lane1": "20de875b542ac380"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 12261,
+          "byteCount": 12616,
           "digest": {
-            "lane0": "4b7ac421d7c5cf8b",
-            "lane1": "bdf141fda3abfe6f"
+            "lane0": "da15949e2845080f",
+            "lane1": "a13228f9695ec1a6"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 9006,
+          "byteCount": 9256,
           "digest": {
-            "lane0": "0ce2e7e1b6e98665",
-            "lane1": "7d2c6a43b95a59c0"
+            "lane0": "88c2d11b26d7cac9",
+            "lane1": "959c721511476729"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 13854,
+          "byteCount": 14447,
           "digest": {
-            "lane0": "3e873db3e7834763",
-            "lane1": "87f9f6526f207c06"
+            "lane0": "7be9fc00eda138c9",
+            "lane1": "f7172fdce14f6d33"
           }
         }
       ]
@@ -5987,35 +5987,35 @@
       "symbol": "frag_tx0_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 12072,
+        "byteCount": 12704,
         "digest": {
-          "lane0": "00bfe2a12c895bac",
-          "lane1": "2ddc412aa833d8cd"
+          "lane0": "94a86e7183a86306",
+          "lane1": "ca35598bfa0a5b7f"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 9730,
+          "byteCount": 10085,
           "digest": {
-            "lane0": "db94413df9b0ead4",
-            "lane1": "88a39ba5c07541d0"
+            "lane0": "29084a3afcf8450b",
+            "lane1": "e2f9d1f419d895ce"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 6907,
+          "byteCount": 7157,
           "digest": {
-            "lane0": "87146e434871a421",
-            "lane1": "760467607d347b6c"
+            "lane0": "e55b59abb42dfdff",
+            "lane1": "3f85da067db2b42e"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 10350,
+          "byteCount": 10938,
           "digest": {
-            "lane0": "7ea00e8133a49d2e",
-            "lane1": "60b0b779d4720ecd"
+            "lane0": "a45a39d37106b405",
+            "lane1": "3d6b915a84049419"
           }
         }
       ]
@@ -6063,35 +6063,35 @@
       "symbol": "frag_tx0_fog_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 17164,
+        "byteCount": 17796,
         "digest": {
-          "lane0": "c7a6d6886fd3aaf9",
-          "lane1": "71475c3283a4784e"
+          "lane0": "2f30ce07a49b4a6c",
+          "lane1": "5666e4bf1cd6a7b1"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 14159,
+          "byteCount": 14514,
           "digest": {
-            "lane0": "7961efa3fcf37b9c",
-            "lane1": "bf1d823bb1c4b185"
+            "lane0": "8199585bced5d114",
+            "lane1": "d076199927e9e5aa"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 10741,
+          "byteCount": 10991,
           "digest": {
-            "lane0": "ed4ff99bd107dd03",
-            "lane1": "411f9b36b996b4c5"
+            "lane0": "082d2379f43148d2",
+            "lane1": "962cfaafd89b6ac9"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 16349,
+          "byteCount": 16942,
           "digest": {
-            "lane0": "cab2a6f6fcaba9f2",
-            "lane1": "a73ee30db3494ea3"
+            "lane0": "e07f990ca52dc241",
+            "lane1": "3ded783fd48fa3c2"
           }
         }
       ]
@@ -6101,35 +6101,35 @@
       "symbol": "frag_tx0_fog_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 14376,
+        "byteCount": 15008,
         "digest": {
-          "lane0": "4197afffbbaa676e",
-          "lane1": "4bf3103c62c1cb9d"
+          "lane0": "05c8ddfbab64de7a",
+          "lane1": "a3a7e733413b00fa"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 11628,
+          "byteCount": 11983,
           "digest": {
-            "lane0": "cddf5a2685d45e73",
-            "lane1": "b7b675d75e471406"
+            "lane0": "b2c73a1edad50c13",
+            "lane1": "cc248951e50be755"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 8642,
+          "byteCount": 8892,
           "digest": {
-            "lane0": "94a1bb43e7f0c7c1",
-            "lane1": "4be95b892ff02a65"
+            "lane0": "c1578d108cb235ee",
+            "lane1": "90ee7bb29550c882"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 12836,
+          "byteCount": 13424,
           "digest": {
-            "lane0": "a07730d6166b9492",
-            "lane1": "cd292df8beb187a6"
+            "lane0": "5574595d8abc7449",
+            "lane1": "c496f9af0b9340aa"
           }
         }
       ]
@@ -6253,35 +6253,35 @@
       "symbol": "frag_tx0_ident1_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 14480,
+        "byteCount": 15112,
         "digest": {
-          "lane0": "8cee42446cccf5e3",
-          "lane1": "8dda88d9e515da4f"
+          "lane0": "f869814f1626b298",
+          "lane1": "aa1dac1baed9de2b"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 12062,
+          "byteCount": 12417,
           "digest": {
-            "lane0": "395514060afc96ce",
-            "lane1": "917a81ea0619ca13"
+            "lane0": "aec963d299d063bf",
+            "lane1": "0d109e0c307599a2"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 8819,
+          "byteCount": 9069,
           "digest": {
-            "lane0": "b34132772a243291",
-            "lane1": "b762f9738fd2436b"
+            "lane0": "0c5a0789c20dfb9d",
+            "lane1": "450f775237c29fc0"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 13416,
+          "byteCount": 14009,
           "digest": {
-            "lane0": "1861f6f000077c5d",
-            "lane1": "1fc33300d3ffbe2f"
+            "lane0": "8ae7c7cc40a4a1f6",
+            "lane1": "a7fbdde646b2b3c5"
           }
         }
       ]
@@ -6291,35 +6291,35 @@
       "symbol": "frag_tx0_ident1_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 11692,
+        "byteCount": 12324,
         "digest": {
-          "lane0": "f1b6023696aafce3",
-          "lane1": "2c2ce3007654f1da"
+          "lane0": "439cc467a4c41ec7",
+          "lane1": "c4baf59093f3a19c"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 9531,
+          "byteCount": 9886,
           "digest": {
-            "lane0": "407412fe867f07c0",
-            "lane1": "f82c81b1cd9ab86c"
+            "lane0": "3294fc6a21693fab",
+            "lane1": "9db1f673c5e97c06"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 6720,
+          "byteCount": 6970,
           "digest": {
-            "lane0": "ca625cbb86dab4a0",
-            "lane1": "aeaca3bcedada3cd"
+            "lane0": "3028c4867a3ff40e",
+            "lane1": "b1dc949bb6dec3bf"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 9915,
+          "byteCount": 10503,
           "digest": {
-            "lane0": "0391d7f22ad4dc76",
-            "lane1": "3b8cddef7b5c2ebd"
+            "lane0": "567b3dc206dd12d9",
+            "lane1": "04e1a4c7f93a0481"
           }
         }
       ]
@@ -6367,35 +6367,35 @@
       "symbol": "frag_tx0_ident1_fog_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 16784,
+        "byteCount": 17416,
         "digest": {
-          "lane0": "190dc1a6ae79e617",
-          "lane1": "bb119d7b8141b44b"
+          "lane0": "ab6e1881808c9407",
+          "lane1": "dce894377957ccd4"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 13960,
+          "byteCount": 14315,
           "digest": {
-            "lane0": "4624f6d4242ce63e",
-            "lane1": "33715ed05546d922"
+            "lane0": "e068e4cb424f3a0c",
+            "lane1": "4ce28d69ec7f5b5f"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 10554,
+          "byteCount": 10804,
           "digest": {
-            "lane0": "854c9db71dbf9432",
-            "lane1": "aac4672a01f7da62"
+            "lane0": "337ceb990ae81f1f",
+            "lane1": "cde1eb91bda1d24c"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 15907,
+          "byteCount": 16500,
           "digest": {
-            "lane0": "1bf7acb9343c71ec",
-            "lane1": "273dd7093aefe00b"
+            "lane0": "50c104be04828d49",
+            "lane1": "9896144dcf1bc413"
           }
         }
       ]
@@ -6405,35 +6405,35 @@
       "symbol": "frag_tx0_ident1_fog_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 13996,
+        "byteCount": 14628,
         "digest": {
-          "lane0": "18364035af741750",
-          "lane1": "5c4570975628d0e3"
+          "lane0": "3c27679b78133bcf",
+          "lane1": "0ef7551d6179fde2"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 11429,
+          "byteCount": 11784,
           "digest": {
-            "lane0": "0106d2b6aff6535f",
-            "lane1": "a9ff6a18cdded6d1"
+            "lane0": "4732ae6c71654dea",
+            "lane1": "4a5c7ea2a97f1142"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 8455,
+          "byteCount": 8705,
           "digest": {
-            "lane0": "239cdefb6dd44e0c",
-            "lane1": "c02775c2287a2a8e"
+            "lane0": "569af0ba9a97f57f",
+            "lane1": "dd952d88e6fccdc5"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 12401,
+          "byteCount": 12989,
           "digest": {
-            "lane0": "4eee32922f813a4c",
-            "lane1": "cf560aeeb2ae4877"
+            "lane0": "847d6ac7640924f0",
+            "lane1": "3786ba762ddd1b20"
           }
         }
       ]
@@ -6557,35 +6557,35 @@
       "symbol": "frag_tx0_fixed_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 14792,
+        "byteCount": 15424,
         "digest": {
-          "lane0": "152a0e0f5510c509",
-          "lane1": "1d962c5682c3b9d1"
+          "lane0": "39bbd4d1ff977670",
+          "lane1": "fa455b9c69a97152"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 12576,
+          "byteCount": 12931,
           "digest": {
-            "lane0": "245350d3404bc14b",
-            "lane1": "0e760a51d695e086"
+            "lane0": "1dd8004a3ceebfb6",
+            "lane1": "b122c8f0c7927852"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 9109,
+          "byteCount": 9359,
           "digest": {
-            "lane0": "81c10f3b84aaf5ea",
-            "lane1": "ca6f046776fb0469"
+            "lane0": "7ea4946e1f77f6fc",
+            "lane1": "88099e430f17de01"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 13727,
+          "byteCount": 14320,
           "digest": {
-            "lane0": "d6a48ae3b7f71594",
-            "lane1": "c2e1c7f6e5e7cc87"
+            "lane0": "39e81bb0d4bd026b",
+            "lane1": "c5d5f0ad26bc6d54"
           }
         }
       ]
@@ -6595,35 +6595,35 @@
       "symbol": "frag_tx0_fixed_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 12004,
+        "byteCount": 12636,
         "digest": {
-          "lane0": "407c9982add91a56",
-          "lane1": "3ad2665d7d21add1"
+          "lane0": "5d766d2626588347",
+          "lane1": "5a7e61ce9ab570ea"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 10045,
+          "byteCount": 10400,
           "digest": {
-            "lane0": "1e55a0ae01269fc9",
-            "lane1": "8dfc15c736c563fd"
+            "lane0": "3e07af79a5ee6cbe",
+            "lane1": "5deef97fdd7ddda5"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 7010,
+          "byteCount": 7260,
           "digest": {
-            "lane0": "18ffa0966b7cebd3",
-            "lane1": "10ac3292b29f823b"
+            "lane0": "92fcc68be4dd358f",
+            "lane1": "5e3139740459b652"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 10222,
+          "byteCount": 10810,
           "digest": {
-            "lane0": "b0d0028dd95e592a",
-            "lane1": "c7c55fd20de50916"
+            "lane0": "f784b081799e261b",
+            "lane1": "831c613ea9923d27"
           }
         }
       ]
@@ -6671,35 +6671,35 @@
       "symbol": "frag_tx0_fixed_fog_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 17096,
+        "byteCount": 17728,
         "digest": {
-          "lane0": "05e2840183c7fd1f",
-          "lane1": "eece98b2fbd24b25"
+          "lane0": "303f03c29179b766",
+          "lane1": "5b955e4bbed98467"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 14474,
+          "byteCount": 14829,
           "digest": {
-            "lane0": "98d409052afd90a7",
-            "lane1": "7b0a6b5d4ef75f8b"
+            "lane0": "da472b720a30dc87",
+            "lane1": "08223eec9bd2b33f"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 10844,
+          "byteCount": 11094,
           "digest": {
-            "lane0": "c5b06c5c08f9d667",
-            "lane1": "054ddaaff344039e"
+            "lane0": "51d3c2f6e34921e0",
+            "lane1": "46aadf26877afd25"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 16212,
+          "byteCount": 16807,
           "digest": {
-            "lane0": "75c35b112994c98b",
-            "lane1": "640eb63c0b5a8b70"
+            "lane0": "e56bf2dc2e8b7658",
+            "lane1": "f0b47cc6af9f8388"
           }
         }
       ]
@@ -6709,35 +6709,35 @@
       "symbol": "frag_tx0_fixed_fog_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 14308,
+        "byteCount": 14940,
         "digest": {
-          "lane0": "4894fa6d4a9b1634",
-          "lane1": "6eeaaf197f213c83"
+          "lane0": "2e06db289473e701",
+          "lane1": "4fa384bc88b2fc72"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 11943,
+          "byteCount": 12298,
           "digest": {
-            "lane0": "788c98b6a0ffefba",
-            "lane1": "355de8379dda4d0f"
+            "lane0": "ec1820df5923a021",
+            "lane1": "fda0af80842ece44"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 8745,
+          "byteCount": 8995,
           "digest": {
-            "lane0": "bb9ed2a43dc60dbf",
-            "lane1": "a8dbe6635ea6ef51"
+            "lane0": "1355974d4f4da2ee",
+            "lane1": "ca64e9902a79a28f"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 12704,
+          "byteCount": 13294,
           "digest": {
-            "lane0": "4679571ef29b8b5c",
-            "lane1": "5f40611a1a539a68"
+            "lane0": "9d80164c0c8d6be8",
+            "lane1": "ab1fc59070a01761"
           }
         }
       ]
@@ -6823,35 +6823,35 @@
       "symbol": "frag_tx0_ent_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 14536,
+        "byteCount": 15168,
         "digest": {
-          "lane0": "af3c85291af21b92",
-          "lane1": "c3e9d6e738fafdbb"
+          "lane0": "c65b07c307ad4068",
+          "lane1": "5ce32d14ea806af0"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 12103,
+          "byteCount": 12458,
           "digest": {
-            "lane0": "bd54dfbbff50a774",
-            "lane1": "8f808f88bb0dc2d2"
+            "lane0": "27d7998f0313d5e4",
+            "lane1": "3109c3415134766c"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 8838,
+          "byteCount": 9088,
           "digest": {
-            "lane0": "84c8b4470dbe4251",
-            "lane1": "00cafe47667dd475"
+            "lane0": "56b3784128a50e64",
+            "lane1": "0ea0a2c6f3dfafcb"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 13465,
+          "byteCount": 14058,
           "digest": {
-            "lane0": "8eb9c8438b88b51f",
-            "lane1": "7eefc0abfa9f187a"
+            "lane0": "35f62eb9800c290a",
+            "lane1": "2b15c8c37723225e"
           }
         }
       ]
@@ -6861,35 +6861,35 @@
       "symbol": "frag_tx0_ent_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 11748,
+        "byteCount": 12380,
         "digest": {
-          "lane0": "76ec0d2ff940a180",
-          "lane1": "ecafbc64bd7aa2d2"
+          "lane0": "0d645ea00aacf874",
+          "lane1": "ac4cab4f448ae918"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 9572,
+          "byteCount": 9927,
           "digest": {
-            "lane0": "32e99a13588ebf1f",
-            "lane1": "df14e88c68862e2c"
+            "lane0": "1da6c8a7adc075d1",
+            "lane1": "4a28eae6f2781120"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 6739,
+          "byteCount": 6989,
           "digest": {
-            "lane0": "a5bc2f59cbc1fc33",
-            "lane1": "052efb99d6fa5738"
+            "lane0": "f5bf9f223e062c52",
+            "lane1": "8cefb39d6f6fb590"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 9966,
+          "byteCount": 10554,
           "digest": {
-            "lane0": "c10d1b9ae483e1c2",
-            "lane1": "85c91dec26af8c92"
+            "lane0": "00daa8548df98993",
+            "lane1": "bdbe2f19d96b5d94"
           }
         }
       ]
@@ -6899,35 +6899,35 @@
       "symbol": "frag_tx0_ent_fog_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 16840,
+        "byteCount": 17472,
         "digest": {
-          "lane0": "de56af64069bcbab",
-          "lane1": "d7f40b20ea7d84c8"
+          "lane0": "eada080814a20a3b",
+          "lane1": "d9b2d8ea13ddbf30"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 14001,
+          "byteCount": 14356,
           "digest": {
-            "lane0": "b2db9b283d58b4a4",
-            "lane1": "79cc41b13e02b538"
+            "lane0": "728a2c304a6d5036",
+            "lane1": "3cb34dc008783e47"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 10573,
+          "byteCount": 10823,
           "digest": {
-            "lane0": "2f470cb1a05f75e6",
-            "lane1": "faf70040f323da44"
+            "lane0": "76c80e7065b89144",
+            "lane1": "abaa60f1f9b8cf25"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 15958,
+          "byteCount": 16551,
           "digest": {
-            "lane0": "53fc37475309fa04",
-            "lane1": "b809cec9fd4298c0"
+            "lane0": "dccc557b9a328677",
+            "lane1": "feb74c5a4107c66e"
           }
         }
       ]
@@ -6937,35 +6937,35 @@
       "symbol": "frag_tx0_ent_fog_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 14052,
+        "byteCount": 14684,
         "digest": {
-          "lane0": "8081b5c9e255ffe9",
-          "lane1": "9c01e73a9db125ee"
+          "lane0": "89804d45c9479ea6",
+          "lane1": "4df230c23692883f"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 11470,
+          "byteCount": 11825,
           "digest": {
-            "lane0": "dbe44088b8a7e20c",
-            "lane1": "2eada4fe9da730f0"
+            "lane0": "d0a7abcaf7bdf9a8",
+            "lane1": "3e247f01e548d415"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 8474,
+          "byteCount": 8724,
           "digest": {
-            "lane0": "f4aeee6bfd7e5f99",
-            "lane1": "0237bd3b914c1ea0"
+            "lane0": "ee77f57b77d1a399",
+            "lane1": "45c8051b4255afaf"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 12452,
+          "byteCount": 13040,
           "digest": {
-            "lane0": "b66710ae98acffc8",
-            "lane1": "872fbf090e8709d7"
+            "lane0": "ce9082c2e967aa4c",
+            "lane1": "73e5d9950e03c5be"
           }
         }
       ]
@@ -7013,35 +7013,35 @@
       "symbol": "frag_tx1_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 15144,
+        "byteCount": 15776,
         "digest": {
-          "lane0": "d50850c8a07afd2e",
-          "lane1": "dee29c876a386791"
+          "lane0": "2eba81ff8fd8518b",
+          "lane1": "40fb0f6aee3dbcd5"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 11799,
+          "byteCount": 12159,
           "digest": {
-            "lane0": "d86fa1c51bb0b04b",
-            "lane1": "c0adf01ef039d1ee"
+            "lane0": "fadc821c91cd6ad3",
+            "lane1": "9dc0fa4359f24c4b"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 8470,
+          "byteCount": 8725,
           "digest": {
-            "lane0": "122f3a50ab4a7efc",
-            "lane1": "528e5c13c32cde4a"
+            "lane0": "fdaa59d281411096",
+            "lane1": "ff441498fe0b84a5"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 14269,
+          "byteCount": 14864,
           "digest": {
-            "lane0": "086f33bdd62a73f2",
-            "lane1": "32f9cc441b5e4de4"
+            "lane0": "50e7f3c68a8af154",
+            "lane1": "7bccf37eea996cca"
           }
         }
       ]
@@ -7051,35 +7051,35 @@
       "symbol": "frag_tx1_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 12356,
+        "byteCount": 12988,
         "digest": {
-          "lane0": "dc822c7ac176717c",
-          "lane1": "6c850b6b507f6cef"
+          "lane0": "08700e4b3584421b",
+          "lane1": "9fea734e853ee9f5"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 9255,
+          "byteCount": 9608,
           "digest": {
-            "lane0": "fa345a1859a08d1b",
-            "lane1": "e5124dbebc00ba5a"
+            "lane0": "9782139552b6c2e9",
+            "lane1": "a99b45498dedeaca"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 6374,
+          "byteCount": 6624,
           "digest": {
-            "lane0": "985005a5c14a4e93",
-            "lane1": "6bf479871ea43ee2"
+            "lane0": "f8c1e25923df1d57",
+            "lane1": "a6f4186371e09130"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 10757,
+          "byteCount": 11352,
           "digest": {
-            "lane0": "0ae2fd3b824a992d",
-            "lane1": "b1a8e4aa68bfb8d5"
+            "lane0": "c29fc8d3b23e9cee",
+            "lane1": "e9916877351d3cff"
           }
         }
       ]
@@ -7127,35 +7127,35 @@
       "symbol": "frag_tx1_fog_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 17448,
+        "byteCount": 18080,
         "digest": {
-          "lane0": "8eacb1dbb190e16a",
-          "lane1": "e7027d2123228a9d"
+          "lane0": "59a6392425162a41",
+          "lane1": "ef22192ae9c258a4"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 13697,
+          "byteCount": 14057,
           "digest": {
-            "lane0": "021e1d011109c7b5",
-            "lane1": "9e4caec08bceb383"
+            "lane0": "b08e6d72abf7cf1d",
+            "lane1": "81cae9a8ea1e2af9"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 10205,
+          "byteCount": 10460,
           "digest": {
-            "lane0": "a294dbb16634f82e",
-            "lane1": "36ba28fc70735832"
+            "lane0": "9ea52e169e466f9e",
+            "lane1": "0d908c239161ae89"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 16747,
+          "byteCount": 17342,
           "digest": {
-            "lane0": "558639695b1e0c82",
-            "lane1": "5a20241a27876d5c"
+            "lane0": "a956e1a1e74f6731",
+            "lane1": "12439465efeee68d"
           }
         }
       ]
@@ -7165,35 +7165,35 @@
       "symbol": "frag_tx1_fog_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 14660,
+        "byteCount": 15292,
         "digest": {
-          "lane0": "a2503e1285fe0084",
-          "lane1": "784cc6b93a1c8204"
+          "lane0": "e457aba599746d18",
+          "lane1": "c131ef6792b02888"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 11150,
+          "byteCount": 11503,
           "digest": {
-            "lane0": "f3b8fe9a663b63a8",
-            "lane1": "56ec1dfa881d70ee"
+            "lane0": "b656658ebb4540de",
+            "lane1": "3d224888f686b79d"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 8106,
+          "byteCount": 8356,
           "digest": {
-            "lane0": "21f3c58801b6baeb",
-            "lane1": "6b977eb6e39719a8"
+            "lane0": "a1cb6a365920cdf9",
+            "lane1": "4fa47e206aa9f1e4"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 13239,
+          "byteCount": 13832,
           "digest": {
-            "lane0": "f4ca7af3193bcc44",
-            "lane1": "6ecaa1db95be45bd"
+            "lane0": "59f63d67b97c213a",
+            "lane1": "0b2e3a5026aa8485"
           }
         }
       ]
@@ -7317,35 +7317,35 @@
       "symbol": "frag_tx1_ident1_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 14728,
+        "byteCount": 15360,
         "digest": {
-          "lane0": "ef585988ede9eb3c",
-          "lane1": "2000d64bbabfd719"
+          "lane0": "9e7fa42c15b4eafe",
+          "lane1": "5983d4fa25bc0ab2"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 11584,
+          "byteCount": 11944,
           "digest": {
-            "lane0": "42b8decfc48ec5a3",
-            "lane1": "843dccb967a908ea"
+            "lane0": "cab5bbe671a2fc1b",
+            "lane1": "0f0aad7871440784"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 8267,
+          "byteCount": 8522,
           "digest": {
-            "lane0": "a56c00604a1b17be",
-            "lane1": "461027f13d805586"
+            "lane0": "f712e15257e6ce5c",
+            "lane1": "48ff93131af07042"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 13771,
+          "byteCount": 14366,
           "digest": {
-            "lane0": "d75f501feee9c1e9",
-            "lane1": "cf11a6b74321bf7f"
+            "lane0": "549e812f27536f05",
+            "lane1": "70d09c85385cf583"
           }
         }
       ]
@@ -7355,35 +7355,35 @@
       "symbol": "frag_tx1_ident1_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 11940,
+        "byteCount": 12572,
         "digest": {
-          "lane0": "2135e9a82f0d1636",
-          "lane1": "193c609966aa5a82"
+          "lane0": "8892c1b971e8e833",
+          "lane1": "71720de5cdaa4390"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 9040,
+          "byteCount": 9393,
           "digest": {
-            "lane0": "36f71d2e1c15840b",
-            "lane1": "fa475d59a9aad496"
+            "lane0": "c667d7ea1cf4c209",
+            "lane1": "ad79c2b268f40c2d"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 6171,
+          "byteCount": 6421,
           "digest": {
-            "lane0": "a92865d1f01defee",
-            "lane1": "caa180f989ab4735"
+            "lane0": "c674a8e1390c8a46",
+            "lane1": "4aa6b3b5fe1b94f8"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 10265,
+          "byteCount": 10856,
           "digest": {
-            "lane0": "0ade9e244f3e717c",
-            "lane1": "538cc4829b0b18d6"
+            "lane0": "3c70316ad6d9559c",
+            "lane1": "7d41b57b659d4549"
           }
         }
       ]
@@ -7431,35 +7431,35 @@
       "symbol": "frag_tx1_ident1_fog_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 17032,
+        "byteCount": 17664,
         "digest": {
-          "lane0": "7ebf9cb985c0a7b9",
-          "lane1": "45fc4cf9644f54b9"
+          "lane0": "1dab51282a947b06",
+          "lane1": "0555867ce9bf5bf9"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 13482,
+          "byteCount": 13842,
           "digest": {
-            "lane0": "5dd4246f21b0dd23",
-            "lane1": "1aadaedbf39f74fc"
+            "lane0": "72a1c623376776dc",
+            "lane1": "05f46ffd16ea7f4c"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 10002,
+          "byteCount": 10257,
           "digest": {
-            "lane0": "fe917260732f88a1",
-            "lane1": "72591d5f46b45dca"
+            "lane0": "1f05e47d0f3bf5ef",
+            "lane1": "ef655e7e0f81bbe6"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 16258,
+          "byteCount": 16853,
           "digest": {
-            "lane0": "f68ba37dee9eb520",
-            "lane1": "ff7670b5e3b8873c"
+            "lane0": "aa34a7ee131bcc65",
+            "lane1": "ea2133338965f605"
           }
         }
       ]
@@ -7469,35 +7469,35 @@
       "symbol": "frag_tx1_ident1_fog_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 14244,
+        "byteCount": 14876,
         "digest": {
-          "lane0": "6d44e3a95ae32f76",
-          "lane1": "6a7e5cef8077b99a"
+          "lane0": "e6e247ced708bff7",
+          "lane1": "4c41c1e3a25d8373"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 10935,
+          "byteCount": 11288,
           "digest": {
-            "lane0": "bff958c9d4bcb84c",
-            "lane1": "3bbe99486ab96ac8"
+            "lane0": "471bba279f1da295",
+            "lane1": "7ad08b85b62e3c49"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 7903,
+          "byteCount": 8153,
           "digest": {
-            "lane0": "afff5f81bb9a661b",
-            "lane1": "0d22f05b16f0113d"
+            "lane0": "2cdc163fdbe8ff79",
+            "lane1": "3e5bb74fd127041a"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 12747,
+          "byteCount": 13340,
           "digest": {
-            "lane0": "fda56134497e8889",
-            "lane1": "179758400a08d94a"
+            "lane0": "f93bd1618dd562ec",
+            "lane1": "f0e914a1c35d9924"
           }
         }
       ]
@@ -7621,35 +7621,35 @@
       "symbol": "frag_tx1_fixed_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 15112,
+        "byteCount": 15744,
         "digest": {
-          "lane0": "94e22900af0fd3f0",
-          "lane1": "e468284ecc9335c2"
+          "lane0": "da210650f14e9ffd",
+          "lane1": "f4df7f2455bf2eb6"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 12124,
+          "byteCount": 12484,
           "digest": {
-            "lane0": "2c10e06556812480",
-            "lane1": "a75f63cbaaf5148f"
+            "lane0": "c12929c76f670634",
+            "lane1": "2b42a305bcd62382"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 8583,
+          "byteCount": 8838,
           "digest": {
-            "lane0": "aab5ecede0ab8afb",
-            "lane1": "464c862ebb26938d"
+            "lane0": "c49c9d36c501662b",
+            "lane1": "a634b142cab33719"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 14178,
+          "byteCount": 14773,
           "digest": {
-            "lane0": "daa52bd38340c725",
-            "lane1": "ce5b7da1180f1986"
+            "lane0": "4b21dda0be71aa58",
+            "lane1": "9b40df2188231a06"
           }
         }
       ]
@@ -7659,35 +7659,35 @@
       "symbol": "frag_tx1_fixed_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 12324,
+        "byteCount": 12956,
         "digest": {
-          "lane0": "078630751797bb5f",
-          "lane1": "e46bb7a6e1107c9a"
+          "lane0": "e34c0624f66a0e65",
+          "lane1": "82a2168df6396618"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 9580,
+          "byteCount": 9933,
           "digest": {
-            "lane0": "95ee19ebcdd1d3a4",
-            "lane1": "02686e02213c7925"
+            "lane0": "3f11268e4f4a9c7e",
+            "lane1": "8e06d41335999e7a"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 6487,
+          "byteCount": 6737,
           "digest": {
-            "lane0": "a19900bfb3ad1e4b",
-            "lane1": "28fc33ba3c516c07"
+            "lane0": "27d322840fd20fcd",
+            "lane1": "ad3a54e4482e7d00"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 10668,
+          "byteCount": 11259,
           "digest": {
-            "lane0": "b1ef444df8a8ff76",
-            "lane1": "356d23d62d8b53b1"
+            "lane0": "393560c79fac5bee",
+            "lane1": "9a909fadcea9662e"
           }
         }
       ]
@@ -7735,35 +7735,35 @@
       "symbol": "frag_tx1_fixed_fog_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 17416,
+        "byteCount": 18048,
         "digest": {
-          "lane0": "fd0652e3bc378e16",
-          "lane1": "63b29b9ca41ea0d4"
+          "lane0": "0bc8683a267ea0f8",
+          "lane1": "6fddda073d9aac88"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 14022,
+          "byteCount": 14382,
           "digest": {
-            "lane0": "3860a744ba23182e",
-            "lane1": "1b0551be9c4bf7a8"
+            "lane0": "90dca3e03bc89f1b",
+            "lane1": "d32125a5832b840a"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 10318,
+          "byteCount": 10573,
           "digest": {
-            "lane0": "237023fe97fb28b4",
-            "lane1": "4130220a0677f716"
+            "lane0": "5acdb4c523879f8c",
+            "lane1": "75c0658c1d617611"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 16656,
+          "byteCount": 17253,
           "digest": {
-            "lane0": "5fdf7554165d07a6",
-            "lane1": "7cc4478e007e8871"
+            "lane0": "5a331646f09957b3",
+            "lane1": "4b995b91d3650172"
           }
         }
       ]
@@ -7773,35 +7773,35 @@
       "symbol": "frag_tx1_fixed_fog_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 14628,
+        "byteCount": 15260,
         "digest": {
-          "lane0": "86757a52fc30f8eb",
-          "lane1": "26a219ed9222d29d"
+          "lane0": "88f1181af4aff886",
+          "lane1": "75820b08f1754b1d"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 11475,
+          "byteCount": 11828,
           "digest": {
-            "lane0": "45ebaf08ccf31b51",
-            "lane1": "64ca4969cdfcc60c"
+            "lane0": "9cb0ea6215d62608",
+            "lane1": "3cc48b717a3cdbe2"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 8219,
+          "byteCount": 8469,
           "digest": {
-            "lane0": "2d09451435603349",
-            "lane1": "d07bc286370fcdb9"
+            "lane0": "8a8ac60b41b8af5f",
+            "lane1": "c8bae9b32f83f9d2"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 13148,
+          "byteCount": 13739,
           "digest": {
-            "lane0": "c92f5eb31d9d10a8",
-            "lane1": "fe5d5d853ee22fc2"
+            "lane0": "4d60b42c4715686e",
+            "lane1": "be6a71fc148bf40f"
           }
         }
       ]
@@ -7925,35 +7925,35 @@
       "symbol": "frag_tx1_cl_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 18176,
+        "byteCount": 18808,
         "digest": {
-          "lane0": "9b64ad5bbcc8f4d5",
-          "lane1": "4edc7a9d4533d70e"
+          "lane0": "60ffac700b31885c",
+          "lane1": "89fde322a88fe10c"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 14675,
+          "byteCount": 15035,
           "digest": {
-            "lane0": "e1c81e3c75585c8d",
-            "lane1": "a7d01ba9a4eb5885"
+            "lane0": "5b2e5e1ab00e13e9",
+            "lane1": "cdf8d29b7d4e99a2"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 10976,
+          "byteCount": 11231,
           "digest": {
-            "lane0": "129fa1fbb23bb762",
-            "lane1": "9198682c0918c72c"
+            "lane0": "806227e990bacba0",
+            "lane1": "2e4e73f0a4b1654e"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 19125,
+          "byteCount": 19722,
           "digest": {
-            "lane0": "36e328ce95b884df",
-            "lane1": "8d75a96ba9c48e46"
+            "lane0": "84bf3ebb507939b5",
+            "lane1": "a33317cf1fd0e4a5"
           }
         }
       ]
@@ -7963,35 +7963,35 @@
       "symbol": "frag_tx1_cl_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 15388,
+        "byteCount": 16020,
         "digest": {
-          "lane0": "09d0a7b1ea8a5a32",
-          "lane1": "6c160c5aad3916c7"
+          "lane0": "d21c71ca4b95b5f4",
+          "lane1": "3fb341a920660871"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 12127,
+          "byteCount": 12480,
           "digest": {
-            "lane0": "3790ae4c26dcd1d3",
-            "lane1": "2fb68597e8db16d2"
+            "lane0": "e6a1a4ef79b87077",
+            "lane1": "d656599b455d75f0"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 8880,
+          "byteCount": 9130,
           "digest": {
-            "lane0": "c0ceb3f9ec2de3a8",
-            "lane1": "28884aee7feb7dc5"
+            "lane0": "ba280b0d2aee56a8",
+            "lane1": "2c38662784ee6319"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 15615,
+          "byteCount": 16206,
           "digest": {
-            "lane0": "2644eb984b6ee38d",
-            "lane1": "b7275e4ebe3930eb"
+            "lane0": "3be3c528c3f5fd1f",
+            "lane1": "fb40f4c2ca0ee7ae"
           }
         }
       ]
@@ -8039,35 +8039,35 @@
       "symbol": "frag_tx1_cl_fog_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 20464,
+        "byteCount": 21096,
         "digest": {
-          "lane0": "79ead5aa91d7d9a2",
-          "lane1": "3c789a5da4edf063"
+          "lane0": "a5dbcb94d67a327e",
+          "lane1": "e731056889c9d2e9"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 16573,
+          "byteCount": 16933,
           "digest": {
-            "lane0": "faebd807fdf385ef",
-            "lane1": "79db47d118f0e492"
+            "lane0": "32204b659efef0d0",
+            "lane1": "b7567234a7eaf535"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 12711,
+          "byteCount": 12966,
           "digest": {
-            "lane0": "adf8d1b8ab7fcedd",
-            "lane1": "550e8bd80a829e2b"
+            "lane0": "67e621d928c71bd7",
+            "lane1": "693f073a8ef02918"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 21612,
+          "byteCount": 22215,
           "digest": {
-            "lane0": "ccf8ca53a6a47393",
-            "lane1": "78da1505a824646b"
+            "lane0": "7e22b1a4991d19ca",
+            "lane1": "a5489ae8c7c566f4"
           }
         }
       ]
@@ -8077,35 +8077,35 @@
       "symbol": "frag_tx1_cl_fog_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 17676,
+        "byteCount": 18308,
         "digest": {
-          "lane0": "13dfdb8789703ff8",
-          "lane1": "099a32e5a3e508fb"
+          "lane0": "c64cc8622f1bfba9",
+          "lane1": "cf783baf8e321986"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 14022,
+          "byteCount": 14375,
           "digest": {
-            "lane0": "3fc7f52c7bc0ed4a",
-            "lane1": "c222e88c48f0ea1d"
+            "lane0": "7408e9d1d01a16b5",
+            "lane1": "14e2146fb9b0e043"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 10612,
+          "byteCount": 10862,
           "digest": {
-            "lane0": "19a13808e06b83c6",
-            "lane1": "c79397770c35fef9"
+            "lane0": "05ded63e8d522260",
+            "lane1": "d9a9369576642482"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 18085,
+          "byteCount": 18684,
           "digest": {
-            "lane0": "21865df814bbf855",
-            "lane1": "5c47409030576344"
+            "lane0": "909bc164f2658c0a",
+            "lane1": "5d69be8eb0b2c159"
           }
         }
       ]
@@ -8229,35 +8229,35 @@
       "symbol": "frag_tx2_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 16284,
+        "byteCount": 16916,
         "digest": {
-          "lane0": "3a7addb46de5f6fb",
-          "lane1": "bcb47f0c1ca28ebf"
+          "lane0": "a628d27830649961",
+          "lane1": "7d9890ed30c038f4"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 12769,
+          "byteCount": 13129,
           "digest": {
-            "lane0": "85f5eb6680e4b262",
-            "lane1": "664957bc4cde773b"
+            "lane0": "ffac9de590c386bf",
+            "lane1": "0843b7f28eee469e"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 9180,
+          "byteCount": 9435,
           "digest": {
-            "lane0": "31aaa02fa5831929",
-            "lane1": "b8869391b891336d"
+            "lane0": "0f473a644a0533cf",
+            "lane1": "1b6c8ad0bec80566"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 15852,
+          "byteCount": 16447,
           "digest": {
-            "lane0": "1201f77708989881",
-            "lane1": "e7cc02e9cf35d2b2"
+            "lane0": "af5ddfd805683be2",
+            "lane1": "ed7e9ddf65fd2042"
           }
         }
       ]
@@ -8267,35 +8267,35 @@
       "symbol": "frag_tx2_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 13496,
+        "byteCount": 14128,
         "digest": {
-          "lane0": "d21f3f041e8e811a",
-          "lane1": "9ae21cc6d67aacb1"
+          "lane0": "2d9aa8ce3e66a7a0",
+          "lane1": "b997ba6a07224fb5"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 10222,
+          "byteCount": 10575,
           "digest": {
-            "lane0": "adfd2698342fc797",
-            "lane1": "a8bf04b1923f048d"
+            "lane0": "d1df544455f65120",
+            "lane1": "e3166cb8c65bee6f"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 7084,
+          "byteCount": 7334,
           "digest": {
-            "lane0": "83f257f3c7091857",
-            "lane1": "661a663d28cec1f3"
+            "lane0": "8e19a2cb1a4cdab5",
+            "lane1": "2cc51395d87c1b36"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 12348,
+          "byteCount": 12939,
           "digest": {
-            "lane0": "c32b31b03ce869b8",
-            "lane1": "51ea7dbf2dd9a559"
+            "lane0": "8e36c075e5e5861d",
+            "lane1": "27b1bed459c832b3"
           }
         }
       ]
@@ -8343,35 +8343,35 @@
       "symbol": "frag_tx2_fog_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 18588,
+        "byteCount": 19220,
         "digest": {
-          "lane0": "c0ab7f284b038f99",
-          "lane1": "8811810e3efb3db6"
+          "lane0": "e9b525bd470be069",
+          "lane1": "9eab5d881b72597a"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 14667,
+          "byteCount": 15027,
           "digest": {
-            "lane0": "31eb4405b5d21077",
-            "lane1": "3265c7e9ffe60a48"
+            "lane0": "29f95fe59bc9bf0d",
+            "lane1": "17130c5612deda58"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 10915,
+          "byteCount": 11170,
           "digest": {
-            "lane0": "838b89ef8def1834",
-            "lane1": "780ef26f3634000b"
+            "lane0": "35f5fbd74a2bff28",
+            "lane1": "4fc805c10d2ff490"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 18322,
+          "byteCount": 18919,
           "digest": {
-            "lane0": "58c2e15f46a3dc40",
-            "lane1": "4b2c54a7af35dbdc"
+            "lane0": "fb9937fd0549401a",
+            "lane1": "8c61f3ac4acda304"
           }
         }
       ]
@@ -8381,35 +8381,35 @@
       "symbol": "frag_tx2_fog_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 15800,
+        "byteCount": 16432,
         "digest": {
-          "lane0": "e278f08777be9970",
-          "lane1": "8bbcc05a0da1cdce"
+          "lane0": "e8346213c5ac50a6",
+          "lane1": "de1898d816393806"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 12117,
+          "byteCount": 12470,
           "digest": {
-            "lane0": "771e7ce549ebf783",
-            "lane1": "e3bbdf86fd340516"
+            "lane0": "77203db96e47cfd5",
+            "lane1": "f8fb847ed2ddaa45"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 8816,
+          "byteCount": 9066,
           "digest": {
-            "lane0": "84929aa156be8717",
-            "lane1": "14bae2173c5fe61d"
+            "lane0": "4dd4076423b12feb",
+            "lane1": "977ef82a92f0828f"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 14814,
+          "byteCount": 15405,
           "digest": {
-            "lane0": "50e274470d94837d",
-            "lane1": "7af7f8437bfc062e"
+            "lane0": "701f032a71e72ffd",
+            "lane1": "7d69fc9a9feed9b9"
           }
         }
       ]
@@ -8533,35 +8533,35 @@
       "symbol": "frag_tx2_cl_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 21412,
+        "byteCount": 22044,
         "digest": {
-          "lane0": "7d20172f4519fa53",
-          "lane1": "971516358affc851"
+          "lane0": "73cb4fe8ee3cd4ef",
+          "lane1": "d0c541190f4c658c"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 17450,
+          "byteCount": 17810,
           "digest": {
-            "lane0": "50c411f304c74d62",
-            "lane1": "1026a9481da78efb"
+            "lane0": "a056eed5e31c5f2e",
+            "lane1": "ea17564b0a0bcf84"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 13141,
+          "byteCount": 13396,
           "digest": {
-            "lane0": "4f0d479196a861a8",
-            "lane1": "8d77360ccb7b302f"
+            "lane0": "804a5fb39e93ff4e",
+            "lane1": "348ad53c4e816b2d"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 24049,
+          "byteCount": 24646,
           "digest": {
-            "lane0": "a9d396badeced621",
-            "lane1": "c564db2faaf0350f"
+            "lane0": "cdaf0c7c910137b3",
+            "lane1": "b2f3455e20ddfa9d"
           }
         }
       ]
@@ -8571,35 +8571,35 @@
       "symbol": "frag_tx2_cl_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 18624,
+        "byteCount": 19256,
         "digest": {
-          "lane0": "5a78bf8f541c4198",
-          "lane1": "c65bda555c3855de"
+          "lane0": "49c3bc5239f9afd2",
+          "lane1": "c0463bf625ef2902"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 14895,
+          "byteCount": 15248,
           "digest": {
-            "lane0": "5ee7e5bedc392ecb",
-            "lane1": "eb37fd66c5ed0d44"
+            "lane0": "3443cea75946f1b3",
+            "lane1": "b3f052e54c67a3c0"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 11045,
+          "byteCount": 11295,
           "digest": {
-            "lane0": "6b323429ca4845e8",
-            "lane1": "5214f736976b83c5"
+            "lane0": "e3599b70e7283b08",
+            "lane1": "5b9e1b8ba0a3087c"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 20533,
+          "byteCount": 21124,
           "digest": {
-            "lane0": "cd99e0faebe9cc94",
-            "lane1": "7f03ad5786fffb8a"
+            "lane0": "97ad2d733def419a",
+            "lane1": "3af9bd0927a5563a"
           }
         }
       ]
@@ -8647,35 +8647,35 @@
       "symbol": "frag_tx2_cl_fog_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 23700,
+        "byteCount": 24332,
         "digest": {
-          "lane0": "cf29ceaea98f2513",
-          "lane1": "c5927ad3466626fd"
+          "lane0": "da5bdd7fd6471cbc",
+          "lane1": "9af95043770feba8"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 19348,
+          "byteCount": 19708,
           "digest": {
-            "lane0": "bab3eb14b0b538ba",
-            "lane1": "b0316b08743b613f"
+            "lane0": "2949bc9db0fe1440",
+            "lane1": "e09d2a193a3aa547"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 14876,
+          "byteCount": 15131,
           "digest": {
-            "lane0": "6dbdd74cc759ce29",
-            "lane1": "176ed318094d4bd1"
+            "lane0": "6654a576d5520cd7",
+            "lane1": "44db5b95822396b2"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 26537,
+          "byteCount": 27142,
           "digest": {
-            "lane0": "e981af098546039a",
-            "lane1": "71194fa48deac399"
+            "lane0": "213479c329ee54ac",
+            "lane1": "ef4eb09e1eecbba4"
           }
         }
       ]
@@ -8685,35 +8685,35 @@
       "symbol": "frag_tx2_cl_fog_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 20912,
+        "byteCount": 21544,
         "digest": {
-          "lane0": "e5abdad54ccb4af5",
-          "lane1": "cd9cf56e2b5293aa"
+          "lane0": "71f30f474d884ea0",
+          "lane1": "b7e96a54874559ab"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 16790,
+          "byteCount": 17143,
           "digest": {
-            "lane0": "3413f31760a901ce",
-            "lane1": "d1f1b8262c7f1eb5"
+            "lane0": "7becd5ea8f4a1faa",
+            "lane1": "db2996b189edcd65"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 12777,
+          "byteCount": 13027,
           "digest": {
-            "lane0": "da2326951c1429b1",
-            "lane1": "ff40da89da13cce0"
+            "lane0": "1a1417eb586ac0ed",
+            "lane1": "6819316b438aac44"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 23009,
+          "byteCount": 23610,
           "digest": {
-            "lane0": "e5fa252c83f25ba7",
-            "lane1": "136d1048867370ad"
+            "lane0": "6e2a94d77ca92030",
+            "lane1": "0cc42363e4af23f0"
           }
         }
       ]
@@ -8799,35 +8799,35 @@
       "symbol": "frag_tx1_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 14036,
+        "byteCount": 14668,
         "digest": {
-          "lane0": "eeb8ca829f280b25",
-          "lane1": "bca06bbced7e8929"
+          "lane0": "6d542df05a77acd5",
+          "lane1": "2badca4ec694ea80"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 10674,
+          "byteCount": 11027,
           "digest": {
-            "lane0": "553ccb38a420235c",
-            "lane1": "1782f8bb35e11760"
+            "lane0": "e768ea416bf58d78",
+            "lane1": "eec3fce8752b883b"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 7651,
+          "byteCount": 7901,
           "digest": {
-            "lane0": "66f0ebcbc432e915",
-            "lane1": "575104283bff4442"
+            "lane0": "2b055284574f23c4",
+            "lane1": "7bc6eac43b50b297"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 12214,
+          "byteCount": 12805,
           "digest": {
-            "lane0": "7a51a5e362b34ec4",
-            "lane1": "e1dc4a5b0f2fa4d1"
+            "lane0": "656953d41d56ee67",
+            "lane1": "318aff40ca295a5a"
           }
         }
       ]
@@ -8837,35 +8837,35 @@
       "symbol": "frag_tx1_ident1_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 11316,
+        "byteCount": 11948,
         "digest": {
-          "lane0": "7a84a9957dfc0774",
-          "lane1": "ab75651bdc59eef5"
+          "lane0": "88073db4f42c1d8c",
+          "lane1": "9452fd0e6573f45f"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 8564,
+          "byteCount": 8917,
           "digest": {
-            "lane0": "7e09103aab84be8a",
-            "lane1": "66008215e049cf23"
+            "lane0": "3e199aaf482bb1b2",
+            "lane1": "f523ec39b00ce37b"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 5716,
+          "byteCount": 5966,
           "digest": {
-            "lane0": "9b58c6246c09af57",
-            "lane1": "039b0186aa9b87b5"
+            "lane0": "fd42235f46a6ac2b",
+            "lane1": "e4f939c6729dc9f9"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 9238,
+          "byteCount": 9831,
           "digest": {
-            "lane0": "6e3a12968b18f8eb",
-            "lane1": "b040a320d7957e1e"
+            "lane0": "840045d010883b12",
+            "lane1": "eb3e5f9dfe5d8f12"
           }
         }
       ]
@@ -8875,35 +8875,35 @@
       "symbol": "frag_tx1_ident1_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 13620,
+        "byteCount": 14252,
         "digest": {
-          "lane0": "9307b2c9f4638ce4",
-          "lane1": "b7fc37b55ca6d281"
+          "lane0": "8e6335a4b42ee435",
+          "lane1": "8b884da95bd4c88f"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 10459,
+          "byteCount": 10812,
           "digest": {
-            "lane0": "ef733e58f4e80950",
-            "lane1": "7478398ce374ee0d"
+            "lane0": "5ce10e90b3b28734",
+            "lane1": "b8e447463305470b"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 7448,
+          "byteCount": 7698,
           "digest": {
-            "lane0": "76ad269dbcdb8594",
-            "lane1": "726be194f612a154"
+            "lane0": "28d2fb1094d40f4b",
+            "lane1": "80981bcc0dc5b5a4"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 11722,
+          "byteCount": 12315,
           "digest": {
-            "lane0": "83d463af70488f8a",
-            "lane1": "d022cb6f39c37439"
+            "lane0": "a9b69678cbc251d4",
+            "lane1": "1208ff02178fb6f5"
           }
         }
       ]
@@ -8913,35 +8913,35 @@
       "symbol": "frag_tx1_fixed_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 11700,
+        "byteCount": 12332,
         "digest": {
-          "lane0": "e81da785450cc36b",
-          "lane1": "5c885fbf70349eb9"
+          "lane0": "1f621ee6ac998eb1",
+          "lane1": "5db84e054a6f0dd8"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 9104,
+          "byteCount": 9457,
           "digest": {
-            "lane0": "538587a6209afe5b",
-            "lane1": "a7bc5711243b3b45"
+            "lane0": "52f109e474d2efe5",
+            "lane1": "b64d875ed4f96a09"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 6032,
+          "byteCount": 6282,
           "digest": {
-            "lane0": "6730006cf0bf8970",
-            "lane1": "07bdb7a2f70b25ae"
+            "lane0": "7f6434d84b4d90b4",
+            "lane1": "9c2a525e395cd7ae"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 9639,
+          "byteCount": 10230,
           "digest": {
-            "lane0": "c702627e7b9a1b1d",
-            "lane1": "4b9aed268f5bd052"
+            "lane0": "0ab9155ffb0d5822",
+            "lane1": "e1e5105418325041"
           }
         }
       ]
@@ -8951,35 +8951,35 @@
       "symbol": "frag_tx1_fixed_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 14004,
+        "byteCount": 14636,
         "digest": {
-          "lane0": "5e47f2c169257a90",
-          "lane1": "4ce3463036cb3478"
+          "lane0": "60626065e7aa2aa4",
+          "lane1": "0abf76c276c963a9"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 10999,
+          "byteCount": 11352,
           "digest": {
-            "lane0": "80225b2eea0eef97",
-            "lane1": "798de430bcd40a0e"
+            "lane0": "4166bf129f57ea3f",
+            "lane1": "1c26dbd6bdd3fdf4"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 7764,
+          "byteCount": 8014,
           "digest": {
-            "lane0": "02af783a7a963a25",
-            "lane1": "8a4d8469d8bbd5d1"
+            "lane0": "281f2beee467c0ec",
+            "lane1": "d00a0d01dddd3102"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 12119,
+          "byteCount": 12710,
           "digest": {
-            "lane0": "f0a03ec240682ac9",
-            "lane1": "ceff3a5d1d12369c"
+            "lane0": "04b43e080bd33430",
+            "lane1": "358e7dd518ac6f4d"
           }
         }
       ]
@@ -8989,35 +8989,35 @@
       "symbol": "frag_tx1_cl_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 14764,
+        "byteCount": 15396,
         "digest": {
-          "lane0": "33f417ce50f13a73",
-          "lane1": "617931f6ff2b68b1"
+          "lane0": "39f5ba0d1768911c",
+          "lane1": "be957b7213b02f26"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 11651,
+          "byteCount": 12004,
           "digest": {
-            "lane0": "e7b2c4364f5f0f7a",
-            "lane1": "848e857673bd4427"
+            "lane0": "c493f984c806b710",
+            "lane1": "f7ecd621f8b79507"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 8425,
+          "byteCount": 8675,
           "digest": {
-            "lane0": "f06375c5c630bb89",
-            "lane1": "c3d7f8fb99f79647"
+            "lane0": "66fe245154218f55",
+            "lane1": "ecfc5603e3a7f56b"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 14594,
+          "byteCount": 15185,
           "digest": {
-            "lane0": "d66fc2e965bcf4be",
-            "lane1": "9ed96c59bd1f9f9b"
+            "lane0": "0510ad9707c5ea32",
+            "lane1": "712ace712de0fc31"
           }
         }
       ]
@@ -9027,35 +9027,35 @@
       "symbol": "frag_tx1_cl_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 17052,
+        "byteCount": 17684,
         "digest": {
-          "lane0": "6f4d6f1831e8cc5d",
-          "lane1": "2d7d9c3125c7d8c2"
+          "lane0": "c0d9f2e735d91591",
+          "lane1": "7d5b464f2cfbff23"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 13546,
+          "byteCount": 13899,
           "digest": {
-            "lane0": "66a64813efe6bdc8",
-            "lane1": "b12f7baf1de37611"
+            "lane0": "ad0e6e15982a62da",
+            "lane1": "5741a796507e5c4e"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 10157,
+          "byteCount": 10407,
           "digest": {
-            "lane0": "5a8f6b199559bd30",
-            "lane1": "19ea7961c5ed7d4d"
+            "lane0": "a6ee1741d2b04a99",
+            "lane1": "d0912a6d9427ef84"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 17064,
+          "byteCount": 17655,
           "digest": {
-            "lane0": "5f6aca7d632c43bf",
-            "lane1": "066ed2bcbac27520"
+            "lane0": "4f73c51d1d90e0bf",
+            "lane1": "3e572c231a140b40"
           }
         }
       ]
@@ -9065,35 +9065,35 @@
       "symbol": "frag_tx2_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 12872,
+        "byteCount": 13504,
         "digest": {
-          "lane0": "775f76367a52df43",
-          "lane1": "adb9b196ca703201"
+          "lane0": "cb58a9d1f271b102",
+          "lane1": "85f5d0fd6f1ff8f7"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 9746,
+          "byteCount": 10099,
           "digest": {
-            "lane0": "7df807ef72acff18",
-            "lane1": "9b1886b7affa8f43"
+            "lane0": "a522eaadfd8aa925",
+            "lane1": "e182f6ca19fb1cb4"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 6629,
+          "byteCount": 6879,
           "digest": {
-            "lane0": "42ba8ad13549e0cc",
-            "lane1": "3a4f110c80806f02"
+            "lane0": "39d7bf478ab3467a",
+            "lane1": "b31d9b4d2f84c102"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 11321,
+          "byteCount": 11912,
           "digest": {
-            "lane0": "df70a8428aba1e96",
-            "lane1": "a00bfae607b328d2"
+            "lane0": "120f4ac0f008d328",
+            "lane1": "005b8cfebd2278fb"
           }
         }
       ]
@@ -9103,35 +9103,35 @@
       "symbol": "frag_tx2_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 15176,
+        "byteCount": 15808,
         "digest": {
-          "lane0": "a3f5cfd930b4876b",
-          "lane1": "86462dd75e30e639"
+          "lane0": "9eb8ee6a7d6a36ae",
+          "lane1": "30c521b18faa186b"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 11641,
+          "byteCount": 11994,
           "digest": {
-            "lane0": "c04c51185e0873d4",
-            "lane1": "90a6b35e419b426c"
+            "lane0": "3e9d6307b1f4c6ee",
+            "lane1": "cbb7532c225ab190"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 8361,
+          "byteCount": 8611,
           "digest": {
-            "lane0": "9a5c9eb8043892eb",
-            "lane1": "684ce04fe6bc4b5e"
+            "lane0": "0e4b7803a78c0adc",
+            "lane1": "c2beafc723f9a6d8"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 13791,
+          "byteCount": 14382,
           "digest": {
-            "lane0": "67efe63edd7ccb69",
-            "lane1": "ac437b565be72906"
+            "lane0": "098bf6323d12c87e",
+            "lane1": "4a4d64c1e5c2b999"
           }
         }
       ]
@@ -9141,35 +9141,35 @@
       "symbol": "frag_tx2_cl_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 18000,
+        "byteCount": 18632,
         "digest": {
-          "lane0": "80c0e6545c5cbac0",
-          "lane1": "e1f723cf5cb71048"
+          "lane0": "6c7d972e9b9aaaf5",
+          "lane1": "1281b2664a456013"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 14419,
+          "byteCount": 14772,
           "digest": {
-            "lane0": "48a5227f9547f865",
-            "lane1": "fad6cc681f7101ea"
+            "lane0": "e76bca8b79fd8d2c",
+            "lane1": "cf2c7293fb6bd452"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 10590,
+          "byteCount": 10840,
           "digest": {
-            "lane0": "51c0b8a54327dc79",
-            "lane1": "85bc95ad563d6820"
+            "lane0": "9a704aa18146277d",
+            "lane1": "9ac1afe1b508877a"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 19514,
+          "byteCount": 20107,
           "digest": {
-            "lane0": "5e56224c913242ba",
-            "lane1": "8612686bf2decd6e"
+            "lane0": "a940eb0fee380718",
+            "lane1": "71fa7f99cae136ec"
           }
         }
       ]
@@ -9179,35 +9179,35 @@
       "symbol": "frag_tx2_cl_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 20288,
+        "byteCount": 20920,
         "digest": {
-          "lane0": "3b965b4864e28d73",
-          "lane1": "d797815c8cca2130"
+          "lane0": "86d9c19a2a3ee4e3",
+          "lane1": "2523413eca230d00"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 16314,
+          "byteCount": 16667,
           "digest": {
-            "lane0": "11b389b7d9598d79",
-            "lane1": "9334666938999eef"
+            "lane0": "f6281a268734b0dc",
+            "lane1": "e18b3d82a5c529ff"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 12322,
+          "byteCount": 12572,
           "digest": {
-            "lane0": "adc73811e864a6e2",
-            "lane1": "8e16a4adac3f0982"
+            "lane0": "b81de6356df2bfe5",
+            "lane1": "ab75e3750466f72c"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 21986,
+          "byteCount": 22579,
           "digest": {
-            "lane0": "f49cf5fc1efaea77",
-            "lane1": "e2321e8f2f691cba"
+            "lane0": "ca349a39d1d91d36",
+            "lane1": "ec933f118c5e1aa6"
           }
         }
       ]
@@ -9217,35 +9217,35 @@
       "symbol": "frag_tx0_dfade_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 12160,
+        "byteCount": 12792,
         "digest": {
-          "lane0": "f80b230ccf882d0b",
-          "lane1": "4072aeefe1e3beaf"
+          "lane0": "94220c342a8c3fc7",
+          "lane1": "12fb4c58c59fb424"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 9330,
+          "byteCount": 9683,
           "digest": {
-            "lane0": "a5d0a1709bfd4af2",
-            "lane1": "822632d6362b5a9b"
+            "lane0": "031913c160421675",
+            "lane1": "b8cb9bc01f8109dc"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 6380,
+          "byteCount": 6630,
           "digest": {
-            "lane0": "ae85b7154a17250a",
-            "lane1": "c051ee544e056872"
+            "lane0": "32e9bb93f49ddd26",
+            "lane1": "87bc7db63d021564"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 9458,
+          "byteCount": 10046,
           "digest": {
-            "lane0": "05a3be3e87188dce",
-            "lane1": "c4d2ee5df377ab84"
+            "lane0": "05c6c74d4ac2e2de",
+            "lane1": "dbbe7e86b1bca701"
           }
         }
       ]
@@ -9255,35 +9255,35 @@
       "symbol": "frag_tx0_dfade_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 14464,
+        "byteCount": 15096,
         "digest": {
-          "lane0": "bd14681676f4b6b5",
-          "lane1": "9caff54faad32309"
+          "lane0": "738f7c5e2d809a84",
+          "lane1": "78e02a8c9d2d19f5"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 11225,
+          "byteCount": 11578,
           "digest": {
-            "lane0": "dcfabd6dfff7c6fe",
-            "lane1": "373944949af371fa"
+            "lane0": "b57856e49d4d7267",
+            "lane1": "8e334ea468be71e5"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 8112,
+          "byteCount": 8362,
           "digest": {
-            "lane0": "b8e9bc7e748e7ecd",
-            "lane1": "e6aa2db8c7b75bd1"
+            "lane0": "8ec8378a8a5990ce",
+            "lane1": "d31b14e6929a5c32"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 11942,
+          "byteCount": 12530,
           "digest": {
-            "lane0": "5d2f9d9acd61e6ab",
-            "lane1": "1f7fbd81e8ab8cfb"
+            "lane0": "84255ee2a9546516",
+            "lane1": "50a7347ac511d7e7"
           }
         }
       ]
@@ -9293,35 +9293,35 @@
       "symbol": "frag_tx0_ident1_dfade_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 11780,
+        "byteCount": 12412,
         "digest": {
-          "lane0": "e19b3281829fedaf",
-          "lane1": "33e9a2d313d38186"
+          "lane0": "6b48d0d0070ffefb",
+          "lane1": "12be8ad6a19ec7e8"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 9131,
+          "byteCount": 9484,
           "digest": {
-            "lane0": "da758ea395b90520",
-            "lane1": "beb96c1102bd2c83"
+            "lane0": "39808fa40f198943",
+            "lane1": "bc84876f9fec4681"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 6193,
+          "byteCount": 6443,
           "digest": {
-            "lane0": "bc0bb0cc83d8914f",
-            "lane1": "2a9d35b9463d607c"
+            "lane0": "3792eb79d5e6ed15",
+            "lane1": "781cfab9a1b64569"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 9021,
+          "byteCount": 9609,
           "digest": {
-            "lane0": "d449551100bd47fd",
-            "lane1": "ca49314a14917a2b"
+            "lane0": "e2d456a1e06b6da3",
+            "lane1": "e23b5075c5453cf2"
           }
         }
       ]
@@ -9331,35 +9331,35 @@
       "symbol": "frag_tx0_ident1_dfade_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 14084,
+        "byteCount": 14716,
         "digest": {
-          "lane0": "33218ae042a83459",
-          "lane1": "4fbbd30e395d94ec"
+          "lane0": "64aefc59b4d80574",
+          "lane1": "c13ae6a60ae46bee"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 11026,
+          "byteCount": 11379,
           "digest": {
-            "lane0": "1505e3782fb006a7",
-            "lane1": "9a8dd99f813b99c6"
+            "lane0": "f2b5f71723f44eee",
+            "lane1": "a1b4fccad4150326"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 7925,
+          "byteCount": 8175,
           "digest": {
-            "lane0": "44563b227a1e6199",
-            "lane1": "22cfc4923ca8dadf"
+            "lane0": "fc23c6a6e9f012d0",
+            "lane1": "1db0190a44db3318"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 11501,
+          "byteCount": 12089,
           "digest": {
-            "lane0": "80766c0ce1367269",
-            "lane1": "52bc99e757fa66f6"
+            "lane0": "053fe23eceea8b34",
+            "lane1": "b3f100f93dfe349d"
           }
         }
       ]
@@ -9369,35 +9369,35 @@
       "symbol": "frag_tx0_fixed_dfade_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 12092,
+        "byteCount": 12724,
         "digest": {
-          "lane0": "9d5847e2eb80662a",
-          "lane1": "49d6ea2543b12aa5"
+          "lane0": "a30933db01eb9041",
+          "lane1": "32707337eafbb7ca"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 9645,
+          "byteCount": 9998,
           "digest": {
-            "lane0": "a49660c8441edd01",
-            "lane1": "e2910020204f3637"
+            "lane0": "d747801460632ab6",
+            "lane1": "60427216cb834f1f"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 6483,
+          "byteCount": 6733,
           "digest": {
-            "lane0": "820890f6d1768fa0",
-            "lane1": "83f58cdb428b1afb"
+            "lane0": "e03e50a533cbff80",
+            "lane1": "1087169f2a31aede"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 9332,
+          "byteCount": 9920,
           "digest": {
-            "lane0": "39d756b5656cfbab",
-            "lane1": "b1ec142730dc9cc8"
+            "lane0": "0b1b377b8cb461cf",
+            "lane1": "5bbc82f443e15e52"
           }
         }
       ]
@@ -9407,35 +9407,35 @@
       "symbol": "frag_tx0_fixed_dfade_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 14396,
+        "byteCount": 15028,
         "digest": {
-          "lane0": "2a5a6ff946b9bc14",
-          "lane1": "1566cdd330e35eff"
+          "lane0": "4d06ed3cd4f3913c",
+          "lane1": "2fac3b2b779e6060"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 11540,
+          "byteCount": 11893,
           "digest": {
-            "lane0": "46d840e135cd6805",
-            "lane1": "2d97dfc5bf1a6906"
+            "lane0": "d55889f2e0d64974",
+            "lane1": "3fb4ea1b1aeb9a4a"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 8215,
+          "byteCount": 8465,
           "digest": {
-            "lane0": "ab44a574488d9de7",
-            "lane1": "c1359cdd1a196ff7"
+            "lane0": "9cbeff82f81d08ea",
+            "lane1": "ee9716be87f67a4a"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 11810,
+          "byteCount": 12400,
           "digest": {
-            "lane0": "e67ac38209b80a6c",
-            "lane1": "c47d5ec974ef38b3"
+            "lane0": "c02d0b7dac444e2a",
+            "lane1": "e9667a8f7b732a2b"
           }
         }
       ]
@@ -9445,35 +9445,35 @@
       "symbol": "frag_tx0_ent_dfade_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 11836,
+        "byteCount": 12468,
         "digest": {
-          "lane0": "fa3d87d946e56f51",
-          "lane1": "11f24fbe43705844"
+          "lane0": "03c23bec0771e286",
+          "lane1": "733ac57e45327fa5"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 9171,
+          "byteCount": 9524,
           "digest": {
-            "lane0": "6ac8619f0a4518d4",
-            "lane1": "0f567baddf9da06d"
+            "lane0": "bdbd4810107be673",
+            "lane1": "071e9a557fcf560e"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 6211,
+          "byteCount": 6461,
           "digest": {
-            "lane0": "901b74304bf95f1b",
-            "lane1": "f2bb7023eeba653a"
+            "lane0": "afcdc807950bf2ba",
+            "lane1": "ba0b519a7df54475"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 9074,
+          "byteCount": 9662,
           "digest": {
-            "lane0": "ddaf3151c5537825",
-            "lane1": "4d8833757cf6d6cc"
+            "lane0": "e2432ec677a66db3",
+            "lane1": "74ea3cb44101031a"
           }
         }
       ]
@@ -9483,35 +9483,35 @@
       "symbol": "frag_tx0_ent_dfade_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 14140,
+        "byteCount": 14772,
         "digest": {
-          "lane0": "074d0035aa54b8be",
-          "lane1": "efa983e55e813e7a"
+          "lane0": "8df4c3508bc322f6",
+          "lane1": "a3f0b1c850ffd7ff"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 11066,
+          "byteCount": 11419,
           "digest": {
-            "lane0": "a2c2995a1803c4e1",
-            "lane1": "73c15f175efeffda"
+            "lane0": "7149f69d70f654de",
+            "lane1": "e24f5f8d265a2303"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 7943,
+          "byteCount": 8193,
           "digest": {
-            "lane0": "5dac9f29f287670a",
-            "lane1": "f14de79a1964daf7"
+            "lane0": "a22a198bbd63e20a",
+            "lane1": "ef4e1b87657341f3"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 11552,
+          "byteCount": 12140,
           "digest": {
-            "lane0": "e263a5bdcf9a07b2",
-            "lane1": "542bc40086a67b00"
+            "lane0": "1c5e462525e00736",
+            "lane1": "d2db4f6245652899"
           }
         }
       ]
@@ -9521,35 +9521,35 @@
       "symbol": "frag_tx1_shadow_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 21292,
+        "byteCount": 21924,
         "digest": {
-          "lane0": "66e82a8c681f3b82",
-          "lane1": "95df8f51c8c91d00"
+          "lane0": "4574e61885bc7445",
+          "lane1": "72e7c29c74ebca83"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 15747,
+          "byteCount": 16060,
           "digest": {
-            "lane0": "2bf6d5adcdd264be",
-            "lane1": "7f3857adc4c47f21"
+            "lane0": "d840162116fcee92",
+            "lane1": "118c84b62d1d7697"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 10467,
+          "byteCount": 10697,
           "digest": {
-            "lane0": "3f0619f375b5ec00",
-            "lane1": "4a7150abe5d4ebed"
+            "lane0": "dfcf23413953b268",
+            "lane1": "161622155b2c30e3"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 20338,
+          "byteCount": 20933,
           "digest": {
-            "lane0": "b54627f3ce4e0f1f",
-            "lane1": "909c5fce8e2e4fc3"
+            "lane0": "e8137c14fa5e87b6",
+            "lane1": "767613de170effad"
           }
         }
       ]
@@ -9559,35 +9559,35 @@
       "symbol": "frag_tx1_shadow_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 23596,
+        "byteCount": 24228,
         "digest": {
-          "lane0": "1ef28baaabacd0fe",
-          "lane1": "52e2fd0b3c8635ae"
+          "lane0": "240bdca568c37f91",
+          "lane1": "3c6bb36e2c462241"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 17645,
+          "byteCount": 17955,
           "digest": {
-            "lane0": "24c94fd6292768b8",
-            "lane1": "80887686896f9a4c"
+            "lane0": "014456ec8454c542",
+            "lane1": "ae00a47e17b8d354"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 12202,
+          "byteCount": 12429,
           "digest": {
-            "lane0": "2c21da34f136bd41",
-            "lane1": "f39c6e641e312d87"
+            "lane0": "d2e36982f29ae188",
+            "lane1": "1e4e84fcd4a3bcf0"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 22832,
+          "byteCount": 23433,
           "digest": {
-            "lane0": "b77fda79cf6aa817",
-            "lane1": "0acc7ec3267c4d57"
+            "lane0": "43101306a296271a",
+            "lane1": "7dcb03f019d94428"
           }
         }
       ]
@@ -9597,35 +9597,35 @@
       "symbol": "frag_tx1_cl_shadow_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 24308,
+        "byteCount": 24940,
         "digest": {
-          "lane0": "1f6f64bcd7363ca9",
-          "lane1": "8e65d591b30e486c"
+          "lane0": "722e66722f16ea86",
+          "lane1": "e62836076bbea2b5"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 18623,
+          "byteCount": 18932,
           "digest": {
-            "lane0": "460f83e1b2e47bee",
-            "lane1": "a414b0f31e6d4138"
+            "lane0": "31d01f7dc713164a",
+            "lane1": "34b8044efecc4e61"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 12973,
+          "byteCount": 13203,
           "digest": {
-            "lane0": "9b28bd5a05448eed",
-            "lane1": "725a859a4054300d"
+            "lane0": "252ce51c0d3218e3",
+            "lane1": "626e30a22906a86a"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 25208,
+          "byteCount": 25813,
           "digest": {
-            "lane0": "c28e61c9a7455dc9",
-            "lane1": "69c16476d643c237"
+            "lane0": "00eb67dce654eed2",
+            "lane1": "2becae2899583cbc"
           }
         }
       ]
@@ -9635,35 +9635,35 @@
       "symbol": "frag_tx1_cl_shadow_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 26596,
+        "byteCount": 27228,
         "digest": {
-          "lane0": "7c6276e3c3b9e1d5",
-          "lane1": "da23f44180bca8a0"
+          "lane0": "f3bbc57d323c4071",
+          "lane1": "3a98f8682406c08d"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 20541,
+          "byteCount": 20853,
           "digest": {
-            "lane0": "5467cb89c84f4427",
-            "lane1": "55d1bb78cb8f27d1"
+            "lane0": "28ed7eedb9c9ee54",
+            "lane1": "32a83a10eb0da856"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 14728,
+          "byteCount": 14961,
           "digest": {
-            "lane0": "7f95f47011201d46",
-            "lane1": "39fd878446753c23"
+            "lane0": "2b662463f938dfd3",
+            "lane1": "cffbe9192773467a"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 27704,
+          "byteCount": 28315,
           "digest": {
-            "lane0": "c847ea657d41e169",
-            "lane1": "f9b6bed0132ebbc4"
+            "lane0": "9d8b415a662e26ae",
+            "lane1": "ef7a0ec0e145b1ed"
           }
         }
       ]
@@ -9673,35 +9673,35 @@
       "symbol": "frag_tx2_shadow_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 22652,
+        "byteCount": 23284,
         "digest": {
-          "lane0": "9e79e1eb24d90094",
-          "lane1": "47d1ffb6c19beddb"
+          "lane0": "f4b809d19b7679b3",
+          "lane1": "4519a5758fb0c5e1"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 17088,
+          "byteCount": 17397,
           "digest": {
-            "lane0": "58883e708132e368",
-            "lane1": "b40c6ccda60efca0"
+            "lane0": "4ccdc918088e2826",
+            "lane1": "9adf273bbf407945"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 11394,
+          "byteCount": 11624,
           "digest": {
-            "lane0": "caf5982efb0298b9",
-            "lane1": "2f80b212a8c1a124"
+            "lane0": "f6b0e6f4d022d105",
+            "lane1": "bfbfcc3b46ae0672"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 22299,
+          "byteCount": 22894,
           "digest": {
-            "lane0": "3d645165d74b60e8",
-            "lane1": "4936b8b77c8e0a96"
+            "lane0": "8dfaf0cb320b717f",
+            "lane1": "6be0b7ce2d7079ac"
           }
         }
       ]
@@ -9711,35 +9711,35 @@
       "symbol": "frag_tx2_shadow_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 24956,
+        "byteCount": 25588,
         "digest": {
-          "lane0": "8ee2bfb6f6afd134",
-          "lane1": "cd0d791c3833f43e"
+          "lane0": "1e95a7e946cc563f",
+          "lane1": "2872dbbd6e2a4c98"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 18986,
+          "byteCount": 19296,
           "digest": {
-            "lane0": "d14dbdbc6cb2d81b",
-            "lane1": "2082bed97fe3b071"
+            "lane0": "51afb65d7f777514",
+            "lane1": "ccf4975303106fb7"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 13129,
+          "byteCount": 13360,
           "digest": {
-            "lane0": "0a2d4ae9310449b2",
-            "lane1": "4b39b3664cab3a53"
+            "lane0": "fea081122ae013ed",
+            "lane1": "f449496302bebfb8"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 24797,
+          "byteCount": 25400,
           "digest": {
-            "lane0": "531f88623a83aba2",
-            "lane1": "4ab5fb1daca1c24c"
+            "lane0": "f499af2b1ce2bd02",
+            "lane1": "2d1424600d7910ef"
           }
         }
       ]
@@ -9749,35 +9749,35 @@
       "symbol": "frag_tx2_cl_shadow_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 27764,
+        "byteCount": 28396,
         "digest": {
-          "lane0": "4b9203978d7c71e0",
-          "lane1": "6d54aaca916eed9e"
+          "lane0": "7c362948b29acb59",
+          "lane1": "bce79ee331e9cfe9"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 21797,
+          "byteCount": 22104,
           "digest": {
-            "lane0": "6141c653e5c0bc48",
-            "lane1": "25d268265509f1bf"
+            "lane0": "0e186cbca6566f66",
+            "lane1": "d13ae3e6537a94e3"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 15383,
+          "byteCount": 15619,
           "digest": {
-            "lane0": "248cf490e6c82772",
-            "lane1": "2ed54286a58ff0ea"
+            "lane0": "e68898e1004f3480",
+            "lane1": "2bd06341e92f4a84"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 30530,
+          "byteCount": 31137,
           "digest": {
-            "lane0": "78727a0e49fc2441",
-            "lane1": "3d580745b0f16e3a"
+            "lane0": "ad7379659187c697",
+            "lane1": "f311fb99bf0f5514"
           }
         }
       ]
@@ -9787,35 +9787,35 @@
       "symbol": "frag_tx2_cl_shadow_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 30052,
+        "byteCount": 30684,
         "digest": {
-          "lane0": "5de05241612ed8c6",
-          "lane1": "ab925bb681f64fec"
+          "lane0": "91b8ee550e990784",
+          "lane1": "4b748000823fac02"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 23725,
+          "byteCount": 24027,
           "digest": {
-            "lane0": "f587c95de21a4844",
-            "lane1": "78bc811022788fc1"
+            "lane0": "48cac0c7e9904a17",
+            "lane1": "9de5b51f51312b11"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 17148,
+          "byteCount": 17379,
           "digest": {
-            "lane0": "e03511f4e8a478e6",
-            "lane1": "4224e1754cb1b33b"
+            "lane0": "31bd3cac80a338b3",
+            "lane1": "f75cd0493d530b35"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 33026,
+          "byteCount": 33637,
           "digest": {
-            "lane0": "992e05e7e9cdfd68",
-            "lane1": "bb64d172986c676d"
+            "lane0": "22ed9c5897d3e60a",
+            "lane1": "475cb9cc1b214615"
           }
         }
       ]
@@ -9825,35 +9825,35 @@
       "symbol": "frag_tx1_ident1_shadow_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 20876,
+        "byteCount": 21508,
         "digest": {
-          "lane0": "4c6943d5f6f43be9",
-          "lane1": "cdce91696305ac02"
+          "lane0": "92939ef62ccde830",
+          "lane1": "a3c5dd775a938e0b"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 15532,
+          "byteCount": 15845,
           "digest": {
-            "lane0": "aa70a2958c007c7a",
-            "lane1": "036bc14710ac35a4"
+            "lane0": "bfb88697aac3f154",
+            "lane1": "71f14389eeed5276"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 10264,
+          "byteCount": 10494,
           "digest": {
-            "lane0": "1c66f25201cba529",
-            "lane1": "84969eb4760f8eb9"
+            "lane0": "8a7a5a67590b86fe",
+            "lane1": "70ea306fbd7062be"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 19840,
+          "byteCount": 20435,
           "digest": {
-            "lane0": "b5facd718f6aa518",
-            "lane1": "b51bcc247d18650d"
+            "lane0": "d31b286c4dc1f822",
+            "lane1": "494a093438c483af"
           }
         }
       ]
@@ -9863,35 +9863,35 @@
       "symbol": "frag_tx1_ident1_shadow_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 23180,
+        "byteCount": 23812,
         "digest": {
-          "lane0": "df8fb8cbbf6b0bb8",
-          "lane1": "c5fdc5ba0c2136eb"
+          "lane0": "897d52fc7e1f46b7",
+          "lane1": "8ac2565d8cfcd2df"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 17430,
+          "byteCount": 17740,
           "digest": {
-            "lane0": "b5239a9ca1ac5377",
-            "lane1": "8da453ff1dcf2710"
+            "lane0": "3ffb82b5eb9154dc",
+            "lane1": "9558cbe068bc7541"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 11999,
+          "byteCount": 12226,
           "digest": {
-            "lane0": "fb09c877635f7413",
-            "lane1": "90d4d80cebeb7b95"
+            "lane0": "7881fb596aa4530a",
+            "lane1": "8265943bc75314d5"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 22338,
+          "byteCount": 22941,
           "digest": {
-            "lane0": "edd99100c08a4a45",
-            "lane1": "4d6752d343b53293"
+            "lane0": "3f5b0078e2cff2e5",
+            "lane1": "004d7263bd42bcf9"
           }
         }
       ]
@@ -9901,35 +9901,35 @@
       "symbol": "frag_tx1_fixed_shadow_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 21260,
+        "byteCount": 21892,
         "digest": {
-          "lane0": "180de77855468bc6",
-          "lane1": "f735fc769b819df8"
+          "lane0": "e30f7389174a8e6b",
+          "lane1": "36e951eb6acdbf8b"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 16072,
+          "byteCount": 16385,
           "digest": {
-            "lane0": "65704c09a680409d",
-            "lane1": "65db9493e7d830e4"
+            "lane0": "31a7c1b405dcb8f4",
+            "lane1": "eedcc98d2bfeff61"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 10580,
+          "byteCount": 10810,
           "digest": {
-            "lane0": "e20ab70b732836d6",
-            "lane1": "6608e84f8365c554"
+            "lane0": "0f801a283c033b90",
+            "lane1": "398333933cd264d8"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 20247,
+          "byteCount": 20842,
           "digest": {
-            "lane0": "6e37ef07fcee222c",
-            "lane1": "5f8eaeb91a30b234"
+            "lane0": "0e33b76e262a0ef8",
+            "lane1": "b7b48571de51e83a"
           }
         }
       ]
@@ -9939,35 +9939,35 @@
       "symbol": "frag_tx1_fixed_shadow_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 23564,
+        "byteCount": 24196,
         "digest": {
-          "lane0": "cdfa5d61dbeaa407",
-          "lane1": "e0be47e150bfcd56"
+          "lane0": "a284a08bf72ab2b8",
+          "lane1": "890ee2ee70f913ca"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 17970,
+          "byteCount": 18280,
           "digest": {
-            "lane0": "75963be029fe4052",
-            "lane1": "ed3a1130de0610cf"
+            "lane0": "d17c0742ceea098d",
+            "lane1": "e89dc76c18de5006"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 12315,
+          "byteCount": 12542,
           "digest": {
-            "lane0": "ea8e84fc6a78b3ad",
-            "lane1": "49958b5a59dcdaf3"
+            "lane0": "de86ceb9291587e1",
+            "lane1": "37d5e1a515c62e1a"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 22741,
+          "byteCount": 23346,
           "digest": {
-            "lane0": "e2af7b64ceedc3c6",
-            "lane1": "ddd1fe621788d559"
+            "lane0": "72d4592834eb4efd",
+            "lane1": "6bc0f9f9fde7bb8c"
           }
         }
       ]
@@ -9977,35 +9977,35 @@
       "symbol": "frag_tx0_shadow_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 19112,
+        "byteCount": 19744,
         "digest": {
-          "lane0": "7ee4d38dbdba5f3c",
-          "lane1": "df12aaed0a58496c"
+          "lane0": "28f996e49b578ab6",
+          "lane1": "fb8f4b86d71c49c0"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 13873,
+          "byteCount": 14190,
           "digest": {
-            "lane0": "d5d6fffb78a25a5f",
-            "lane1": "18ae4ebcfd712881"
+            "lane0": "acc80de3d1b53fd7",
+            "lane1": "0dd0b1a73eefbd84"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 9110,
+          "byteCount": 9340,
           "digest": {
-            "lane0": "65c8d46da507b882",
-            "lane1": "6898e50ea34a3aa6"
+            "lane0": "c3af4f38bb163d94",
+            "lane1": "6a2b0a4fec615060"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 17623,
+          "byteCount": 18218,
           "digest": {
-            "lane0": "6b2738d835f71429",
-            "lane1": "47922b20310d6496"
+            "lane0": "57c80a110e0924c1",
+            "lane1": "4a78249e2f099581"
           }
         }
       ]
@@ -10015,35 +10015,35 @@
       "symbol": "frag_tx0_shadow_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 21416,
+        "byteCount": 22048,
         "digest": {
-          "lane0": "8762ed1510de32ee",
-          "lane1": "49c3a54d47d6bef4"
+          "lane0": "a2a1b57d662378ee",
+          "lane1": "3e7b1583e12d33d8"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 15771,
+          "byteCount": 16085,
           "digest": {
-            "lane0": "cf3f1982d27d7ca7",
-            "lane1": "a2cc14000509687f"
+            "lane0": "b0840105dbef382c",
+            "lane1": "ed808cdacf69ddf3"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 10845,
+          "byteCount": 11072,
           "digest": {
-            "lane0": "34e65c3232990183",
-            "lane1": "3be36ae0743461eb"
+            "lane0": "8e15eaa38cf83f62",
+            "lane1": "e3d25741f9f9aa28"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 20138,
+          "byteCount": 20735,
           "digest": {
-            "lane0": "40a3119e3556dd12",
-            "lane1": "d9ed46e2556f0ae5"
+            "lane0": "6a435a8f54fa432d",
+            "lane1": "ca25e5349c59e805"
           }
         }
       ]
@@ -10053,35 +10053,35 @@
       "symbol": "frag_tx0_ident1_shadow_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 18732,
+        "byteCount": 19364,
         "digest": {
-          "lane0": "fe8ede9f58d8c105",
-          "lane1": "7be24134761df075"
+          "lane0": "8fbc010948fa8f13",
+          "lane1": "bed367730d03c2d7"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 13674,
+          "byteCount": 13991,
           "digest": {
-            "lane0": "0e544f2656c85499",
-            "lane1": "2122ea993054c202"
+            "lane0": "5ce875d6559600fd",
+            "lane1": "3faa536e6e0f09cc"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 8923,
+          "byteCount": 9153,
           "digest": {
-            "lane0": "89608ae9c73883d4",
-            "lane1": "a9794c9cf0d84a63"
+            "lane0": "a5e488694150aab8",
+            "lane1": "8552d7fa98a25ed4"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 17187,
+          "byteCount": 17782,
           "digest": {
-            "lane0": "03b20248d27b484f",
-            "lane1": "fabcb71d7c2d3eba"
+            "lane0": "9dda669df15da40f",
+            "lane1": "54ba22c93ba43878"
           }
         }
       ]
@@ -10091,35 +10091,35 @@
       "symbol": "frag_tx0_ident1_shadow_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 21036,
+        "byteCount": 21668,
         "digest": {
-          "lane0": "c8eb7ea2410c4e8f",
-          "lane1": "b92edfb13a96dcd4"
+          "lane0": "e7fd914c3bc590b5",
+          "lane1": "de4632f39e207274"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 15572,
+          "byteCount": 15886,
           "digest": {
-            "lane0": "eb49b5cb91f4cc69",
-            "lane1": "7515fec6d83efad7"
+            "lane0": "917fbd6fb3030fcf",
+            "lane1": "1195b6fc3b8e9fab"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 10658,
+          "byteCount": 10885,
           "digest": {
-            "lane0": "227d379c5a072b93",
-            "lane1": "6ed11d8948b43f14"
+            "lane0": "5c0391a71aa156d2",
+            "lane1": "41f4c4ba42908304"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 19690,
+          "byteCount": 20287,
           "digest": {
-            "lane0": "5dc0633b639b610b",
-            "lane1": "f8804d87d0d28712"
+            "lane0": "6de754666a924e9a",
+            "lane1": "cf11db18e970e10d"
           }
         }
       ]
@@ -10129,35 +10129,35 @@
       "symbol": "frag_tx0_fixed_shadow_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 19044,
+        "byteCount": 19676,
         "digest": {
-          "lane0": "9725b28f6ced2a1b",
-          "lane1": "29936a125f307067"
+          "lane0": "04510aca27be6ff0",
+          "lane1": "a513d5ee6821dcbc"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 14188,
+          "byteCount": 14505,
           "digest": {
-            "lane0": "2696bdbb8424846a",
-            "lane1": "b7da4bfb846efe93"
+            "lane0": "79da61d314b6b5cc",
+            "lane1": "f94028d80ea14ed5"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 9213,
+          "byteCount": 9443,
           "digest": {
-            "lane0": "9c0696281f8cfe57",
-            "lane1": "0e2ef19ced16a714"
+            "lane0": "5b51cf6d4f47f35d",
+            "lane1": "4aa7120c1916ca04"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 17503,
+          "byteCount": 18100,
           "digest": {
-            "lane0": "ea073abe3f563728",
-            "lane1": "7bf218c7b1a0dcb4"
+            "lane0": "8d7c4c777d0c88a8",
+            "lane1": "53f18d5a03532adf"
           }
         }
       ]
@@ -10167,35 +10167,35 @@
       "symbol": "frag_tx0_fixed_shadow_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 21348,
+        "byteCount": 21980,
         "digest": {
-          "lane0": "08f77643571a4554",
-          "lane1": "e047c6d4846ce6b1"
+          "lane0": "3272b93b6b674d06",
+          "lane1": "85b468cc16d19953"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 16086,
+          "byteCount": 16400,
           "digest": {
-            "lane0": "52c389cdffd49702",
-            "lane1": "414073fb8b0d4966"
+            "lane0": "31d51c891abbaed6",
+            "lane1": "afe2163b9c46f9fd"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 10948,
+          "byteCount": 11175,
           "digest": {
-            "lane0": "4a07688530fb815a",
-            "lane1": "fd95b527fa53ec56"
+            "lane0": "59b80e3f97ad645d",
+            "lane1": "bbe48891b23730b2"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 19999,
+          "byteCount": 20596,
           "digest": {
-            "lane0": "16607c8065b19bf2",
-            "lane1": "825a11c1376b4616"
+            "lane0": "858b46b8c3eb82e2",
+            "lane1": "44ffa3f55cc9d8bd"
           }
         }
       ]
@@ -10205,35 +10205,35 @@
       "symbol": "frag_tx1_ibl_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 16836,
+        "byteCount": 17468,
         "digest": {
-          "lane0": "5737d93cb70e7426",
-          "lane1": "3850081f5cc3b7f7"
+          "lane0": "4232a855dc69b469",
+          "lane1": "1892db817977cd49"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 12152,
+          "byteCount": 12505,
           "digest": {
-            "lane0": "6637077d3d93381d",
-            "lane1": "548afeb0f19e3ca4"
+            "lane0": "e1c375630fd272cd",
+            "lane1": "57ba65ad1065dea9"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 8520,
+          "byteCount": 8770,
           "digest": {
-            "lane0": "4499d991de44a6ab",
-            "lane1": "99a725e88126d8f0"
+            "lane0": "ce4e10c64a3eb4fd",
+            "lane1": "82e21b2915af7ac1"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 14724,
+          "byteCount": 15317,
           "digest": {
-            "lane0": "f97da5b3cc86277f",
-            "lane1": "cc758e0d8e2b5975"
+            "lane0": "9772720ea46ec816",
+            "lane1": "7004f8060bf0ad6e"
           }
         }
       ]
@@ -10243,35 +10243,35 @@
       "symbol": "frag_tx1_ibl_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 19140,
+        "byteCount": 19772,
         "digest": {
-          "lane0": "fd26faee3b3e00c5",
-          "lane1": "78fec47a69d230c8"
+          "lane0": "a25be3ba4834d936",
+          "lane1": "ce27aab3e5513fd1"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 14047,
+          "byteCount": 14400,
           "digest": {
-            "lane0": "1ffff012669206b1",
-            "lane1": "3b5113678094ed08"
+            "lane0": "e82327a1476ad98f",
+            "lane1": "5966af870ea2e3f0"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 10252,
+          "byteCount": 10502,
           "digest": {
-            "lane0": "bf7c6b3b4850da0c",
-            "lane1": "6ea37ddc35841840"
+            "lane0": "bd345f25cd64ec4f",
+            "lane1": "5bb266510bf6a228"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 17206,
+          "byteCount": 17807,
           "digest": {
-            "lane0": "3c3253adf3ac761d",
-            "lane1": "8c81784a986abc6a"
+            "lane0": "85b45f21ed7e0546",
+            "lane1": "f22a77d22530211a"
           }
         }
       ]
@@ -10281,35 +10281,35 @@
       "symbol": "frag_tx1_cl_ibl_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 19868,
+        "byteCount": 20500,
         "digest": {
-          "lane0": "139d663f9946ab4a",
-          "lane1": "5971bf5b0bd6e76b"
+          "lane0": "200002ea60f8fb76",
+          "lane1": "9d77b49c8aac09e3"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 15024,
+          "byteCount": 15377,
           "digest": {
-            "lane0": "b7d2ae63f693a127",
-            "lane1": "49f5cff27cc72942"
+            "lane0": "2abca33973801958",
+            "lane1": "20012c3c76897561"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 11026,
+          "byteCount": 11276,
           "digest": {
-            "lane0": "d2347acc40686f06",
-            "lane1": "153813cf461fe9cd"
+            "lane0": "139e6e3f14c67acc",
+            "lane1": "b637ea368ffbb70a"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 19588,
+          "byteCount": 20191,
           "digest": {
-            "lane0": "580213225b578b22",
-            "lane1": "3c881c86e9f96288"
+            "lane0": "93ebda72107aafe8",
+            "lane1": "c7ee7e47794500b1"
           }
         }
       ]
@@ -10319,35 +10319,35 @@
       "symbol": "frag_tx1_cl_ibl_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 22156,
+        "byteCount": 22788,
         "digest": {
-          "lane0": "f290cd198e7e6691",
-          "lane1": "5824885775b596fb"
+          "lane0": "5e2fb0408aaf93ea",
+          "lane1": "6fb65eb778a51c1a"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 16919,
+          "byteCount": 17272,
           "digest": {
-            "lane0": "d65ccbb635ce923a",
-            "lane1": "938041a0d4bec6f7"
+            "lane0": "8ae7ee8c30fb2019",
+            "lane1": "6779245fbc6bd626"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 12758,
+          "byteCount": 13008,
           "digest": {
-            "lane0": "9b3648025a1506a0",
-            "lane1": "c0a3d77b3ec6b1cf"
+            "lane0": "fd50faebd058f809",
+            "lane1": "228b4e1cf06fd467"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 22072,
+          "byteCount": 22681,
           "digest": {
-            "lane0": "c306e53bf9312946",
-            "lane1": "a67cec96ff121a17"
+            "lane0": "8326d17bc0d430a2",
+            "lane1": "2507524603110231"
           }
         }
       ]
@@ -10357,35 +10357,35 @@
       "symbol": "frag_tx2_ibl_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 17976,
+        "byteCount": 18608,
         "digest": {
-          "lane0": "a9dbb6042fe74eee",
-          "lane1": "89f359ad67ab6df5"
+          "lane0": "b477225691f24f42",
+          "lane1": "f24987e9e7fe72d1"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 13119,
+          "byteCount": 13472,
           "digest": {
-            "lane0": "0fb1d47dc0ecef55",
-            "lane1": "7cce1afd03e150a6"
+            "lane0": "67e7634be41b74e6",
+            "lane1": "53bcccf198424983"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 9230,
+          "byteCount": 9480,
           "digest": {
-            "lane0": "f607ad64a6ae82c5",
-            "lane1": "9f96a28e22ee8001"
+            "lane0": "acb143afb44d3e09",
+            "lane1": "dd80e9ccab261ca3"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 16301,
+          "byteCount": 16894,
           "digest": {
-            "lane0": "a14f7aab4ab97162",
-            "lane1": "e02b69c9eeb31786"
+            "lane0": "0cf3e3ee93146cbd",
+            "lane1": "c4215706c891d82a"
           }
         }
       ]
@@ -10395,35 +10395,35 @@
       "symbol": "frag_tx2_ibl_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 20280,
+        "byteCount": 20912,
         "digest": {
-          "lane0": "2764679cbbb9ea75",
-          "lane1": "b57cb82c8c8e68ce"
+          "lane0": "7071aa77a77aaddf",
+          "lane1": "ebc606135186e630"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 15014,
+          "byteCount": 15367,
           "digest": {
-            "lane0": "a52a5013a1b80de5",
-            "lane1": "c864aafc080d457f"
+            "lane0": "50cb6c9a8e9934a4",
+            "lane1": "602f90ce14fb99b8"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 10962,
+          "byteCount": 11212,
           "digest": {
-            "lane0": "deb064c2e2917f77",
-            "lane1": "de2e3202ad5ec545"
+            "lane0": "f08e089fb907c83e",
+            "lane1": "a322130d403dd1df"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 18785,
+          "byteCount": 19388,
           "digest": {
-            "lane0": "60aae2787293a6e8",
-            "lane1": "e6c59cba2d3b83e5"
+            "lane0": "41f27f7f8f95c9b3",
+            "lane1": "ed9b3e54e9d55689"
           }
         }
       ]
@@ -10433,35 +10433,35 @@
       "symbol": "frag_tx2_cl_ibl_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 23104,
+        "byteCount": 23736,
         "digest": {
-          "lane0": "89c5ef8ff24a7275",
-          "lane1": "b13ebb4cce0ba0eb"
+          "lane0": "bcf0b17a9039e920",
+          "lane1": "3e21b4de48884d7d"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 17792,
+          "byteCount": 18145,
           "digest": {
-            "lane0": "9f2b34eb166a9734",
-            "lane1": "a4a2b67b4af912b9"
+            "lane0": "b9d60f2652a27dff",
+            "lane1": "c302a0898b06d3a3"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 13191,
+          "byteCount": 13441,
           "digest": {
-            "lane0": "feee0bbbd1a81667",
-            "lane1": "d9a3aa1edcfd4483"
+            "lane0": "fbc4bbef08bc2607",
+            "lane1": "468a12c46ab8d9ff"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 24514,
+          "byteCount": 25121,
           "digest": {
-            "lane0": "c63144b6844f1648",
-            "lane1": "69894c3c469efccb"
+            "lane0": "9d91a83ed962c3b3",
+            "lane1": "09074519ed443b42"
           }
         }
       ]
@@ -10471,35 +10471,35 @@
       "symbol": "frag_tx2_cl_ibl_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 25392,
+        "byteCount": 26024,
         "digest": {
-          "lane0": "8d2f3f8d65a154e0",
-          "lane1": "c3423bd6d4ff0ca2"
+          "lane0": "0e2feb4aa2a2c91c",
+          "lane1": "ea36f2f2f94107a0"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 19687,
+          "byteCount": 20042,
           "digest": {
-            "lane0": "913f61fc997e529a",
-            "lane1": "cf682c62d438cc58"
+            "lane0": "837dfce51cc5e2a1",
+            "lane1": "97e7219271b1c110"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 14923,
+          "byteCount": 15175,
           "digest": {
-            "lane0": "1740f5e88bcc95fa",
-            "lane1": "20dd14a08570093e"
+            "lane0": "be73c10112381471",
+            "lane1": "239c0204f0bf59f8"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 26990,
+          "byteCount": 27599,
           "digest": {
-            "lane0": "3c674b823b930c70",
-            "lane1": "03b96c3ff3b52169"
+            "lane0": "1021efb571773f3a",
+            "lane1": "0d94c8863729462e"
           }
         }
       ]

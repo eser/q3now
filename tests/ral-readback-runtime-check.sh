@@ -120,6 +120,7 @@ def decode_png(path):
     offset = 8
     width = height = None
     compressed = bytearray()
+    metadata = {}
     saw_end = False
     while offset + 12 <= len(data):
         length = struct.unpack_from(">I", data, offset)[0]
@@ -138,6 +139,11 @@ def decode_png(path):
                 raise SystemExit("FAIL ral-readback-runtime noncanonical PNG")
         elif kind == b"IDAT":
             compressed.extend(payload)
+        elif kind == b"tEXt":
+            key, separator, value = payload.partition(b"\0")
+            if not separator:
+                raise SystemExit("FAIL ral-readback-runtime malformed PNG metadata")
+            metadata[key.decode("latin-1")] = value.decode("latin-1")
         elif kind == b"IEND":
             saw_end = True
             break
@@ -175,10 +181,22 @@ def decode_png(path):
             current[x] = (byte + predictor) & 0xFF
         result[y * stride:(y + 1) * stride] = current
         previous = current
-    return width, height, bytes(result)
+    return width, height, bytes(result), metadata
 
 tga_width, tga_height, tga_rgb = decode_tga(tga_path)
-png_width, png_height, png_rgb = decode_png(png_path)
+png_width, png_height, png_rgb, png_metadata = decode_png(png_path)
+expected_metadata = {
+    "Renderer": "vulkan",
+    "RequestedRenderer": "vulkan",
+    "Resolution": f"{png_width}x{png_height}",
+    "ColorSpace": "sRGB display-referred",
+}
+for key, value in expected_metadata.items():
+    if png_metadata.get(key) != value:
+        raise SystemExit(
+            f"FAIL ral-readback-runtime PNG metadata {key}: "
+            f"expected {value!r}, got {png_metadata.get(key)!r}"
+        )
 if (tga_width, tga_height) != (png_width, png_height):
     raise SystemExit("FAIL ral-readback-runtime TGA/PNG extent drift")
 if tga_width * 9 != tga_height * 16:

@@ -61,6 +61,10 @@ void R_ScreenshotPrintSaved( const char *fileName );
 // Encode/write a bottom-up RGB8 capture through the renderer import allocator/VFS.
 qboolean R_SavePNG( const char *fileName, const byte *rgb_bottomup,
 	int width, int height );
+qboolean R_EncodeScreenshotPNG( const byte *rgb_bottomup, int width, int height,
+	const char *rendererBackend, byte **outBytes, int *outLen );
+qboolean R_SaveScreenshotPNG( const char *fileName, const byte *rgb_bottomup,
+	int width, int height, const char *rendererBackend );
 
 // ── Renderer-provided hooks (defined once per renderer) ──────────────────
 

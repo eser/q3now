@@ -194,6 +194,10 @@ typedef struct centity_s {
 	/* Last flash timestamp whose exact tag_flash transform produced the
 	 * one-shot WiredFX muzzle occurrence. Keeps view/world passes idempotent. */
 	int wiredFxMuzzleTime;
+	/* Fire mode paired with muzzleFlashTime. The exact tag_flash transform is
+	 * resolved later by the view/world weapon pass, so retain which authored
+	 * shotgun presentation that transform must instantiate. */
+	qboolean wiredFxMuzzleSecondary;
 	int previousEvent;
 	int teleportFlag;
 

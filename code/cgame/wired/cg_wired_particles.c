@@ -533,7 +533,7 @@ void CG_RegisterRocketTrailParticleClass( void )
 
 	// Grenade-only classic trail.  The original Quake grenade recipe uses the
 	// dark half of its fire ramp, a roughly 3-unit path cadence, small spawn
-	// jitter and a short upward-drifting lifetime.  Quake II's diminishing
+	// jitter and an upward-drifting lifetime.  Quake II's diminishing
 	// grenade trail similarly uses dark palette particles with positional and
 	// velocity jitter.  Represent that character with small solid particles,
 	// not smokePuff billboards; the shared emitter uses a pragmatic 4-unit
@@ -546,15 +546,17 @@ void CG_RegisterRocketTrailParticleClass( void )
 	cls.scatterMagnitude   = 3.0f;
 	cls.velocityShape      = VEL_PURE_CUBE;
 	cls.cubeJitter         = 6.0f;
-	cls.lifetimeMean       = 0.72f;
-	cls.lifetimeJitter     = 0.16f;
+	/* Preserve the authored point size and scatter, but keep the chain readable
+	 * a little longer for competitive trajectory tracking. */
+	cls.lifetimeMean       = 0.90f;
+	cls.lifetimeJitter     = 0.18f;
 	cls.paletteCount       = 8;
 	for ( int i = 0; i < cls.paletteCount; ++i ) {
-		const float grey = 0.12f + 0.02f * (float)i;
+		const float grey = 0.18f + 0.03f * (float)i;
 		cls.colorPalette[i][0] = grey;
 		cls.colorPalette[i][1] = grey * 0.96f;
 		cls.colorPalette[i][2] = grey * 0.88f;
-		cls.colorPalette[i][3] = 0.85f;
+		cls.colorPalette[i][3] = 0.90f;
 	}
 	cls.colorEndMult[0] = 0.25f;
 	cls.colorEndMult[1] = 0.25f;
@@ -808,26 +810,29 @@ void CG_RegisterExplosionParticleClasses( void )
 	// recipe counts live at the composition point in cg_weapons.c and mirror
 	// the concrete/default/electronics families in q4base pak001.pk4.
 	memset( &cls, 0, sizeof( cls ) );
-	cls.shader             = trap_R_RegisterShader( "rocketExhaustGlow" );
-	cls.renderFlags        = PRIM_FLAG_ADDITIVE;
+	cls.shader             = trap_R_RegisterShader( "gfx/misc/tracer" );
+	cls.renderFlags        = PRIM_FLAG_ADDITIVE | PRIM_FLAG_PARTICLE_MOTION_TRAIL;
 	cls.emitMode           = EMIT_POINT;
 	cls.scatterShape       = SCATTER_NONE;
 	cls.velocityShape      = VEL_CONE;
-	cls.axialSpeed         = 260.0f;
-	cls.speedJitter        = 90.0f;
+	/* q4base impact_default.fx: velocity 50..300, lifetime .35..50,
+	 * gravity .5..1 and a 0.1 s / three-sample motion trail. The renderer
+	 * reconstructs the continuous equivalent of those samples from velocity. */
+	cls.axialSpeed         = 175.0f;
+	cls.speedJitter        = 125.0f;
 	cls.coneHalfAngle      = 0.70f;
-	cls.lifetimeMean       = 0.42f;
-	cls.lifetimeJitter     = 0.08f;
+	cls.lifetimeMean       = 0.425f;
+	cls.lifetimeJitter     = 0.075f;
 	cls.paletteCount       = 3;
 	Vector4Set( cls.colorPalette[0], 1.00f, 0.95f, 0.74f, 1.00f );
 	Vector4Set( cls.colorPalette[1], 1.00f, 0.68f, 0.20f, 0.96f );
 	Vector4Set( cls.colorPalette[2], 0.92f, 0.34f, 0.05f, 0.88f );
 	Vector4Set( cls.colorEndMult, 0.65f, 0.08f, 0.01f, 0.0f );
-	cls.sizeStart          = 0.52f;
-	cls.sizeEnd            = 0.08f;
-	cls.sizeJitter         = 0.18f;
-	cls.gravityScale       = 0.40f;
-	cls.drag               = 0.45f;
+	cls.sizeStart          = 0.75f;
+	cls.sizeEnd            = 0.25f;
+	cls.sizeJitter         = 0.25f;
+	cls.gravityScale       = 0.75f;
+	cls.drag               = 0.0f;
 	cgs.media.hitscanMetalSparkClass =
 		(qhandle_t)CG_RegisterParticleClass( "hitscan_metal_sparks", &cls );
 
@@ -857,12 +862,21 @@ void CG_RegisterExplosionParticleClasses( void )
 
 	memset( &cls, 0, sizeof( cls ) );
 	cls.shader             = cgs.media.smokePuffShader;
-	cls.renderFlags        = 0;
+	// Impact dust begins immediately in front of the struck surface. Generic
+	// soft-particle fading would erase the billboard at that intersection and
+	// leave the already-composited bullet mark visible through the centre of the
+	// smoke. Preserve normal depth testing, but identify this class as deliberately
+	// surface-anchored so the renderer keeps its authored opacity there.
+	cls.renderFlags        = PRIM_FLAG_PARTICLE_SURFACE_ANCHORED;
 	cls.emitMode           = EMIT_POINT;
 	cls.scatterShape       = SCATTER_NONE;
 	cls.velocityShape      = VEL_CONE;
-	cls.axialSpeed         = 24.0f;
-	cls.speedJitter        = 12.0f;
+	// This layer visually veils the persistent impact mark, so its centre must
+	// remain registered to that mark.  Normal/global-Z velocity made a floor hit
+	// visibly crawl upward during the puff's one-second lifetime.  Expansion and
+	// alpha decay provide the smoke motion without translating the impact centre.
+	cls.axialSpeed         = 0.0f;
+	cls.speedJitter        = 0.0f;
 	cls.coneHalfAngle      = 1.15f;
 	cls.lifetimeMean       = 1.10f;
 	cls.lifetimeJitter     = 0.20f;
@@ -876,7 +890,7 @@ void CG_RegisterExplosionParticleClasses( void )
 	cls.sizeJitter         = 0.35f;
 	cls.gravityScale       = 0.0f;
 	cls.drag               = 0.80f;
-	cls.velocityBias[2]    = 10.0f;
+	cls.velocityBias[2]    = 0.0f;
 	cgs.media.hitscanDustClass =
 		(qhandle_t)CG_RegisterParticleClass( "hitscan_dust_puff", &cls );
 

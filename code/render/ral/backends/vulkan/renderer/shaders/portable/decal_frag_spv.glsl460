@@ -7,6 +7,9 @@ struct SurfaceClimateTile
     vec4 climate;
 };
 
+layout(constant_id = 0) const uint DECAL_BLEND_MODE = 0u;
+const bool _398 = (DECAL_BLEND_MODE == 2u);
+
 layout(binding = 0, std140) uniform DecalFrame
 {
     mat4 mvp;
@@ -108,18 +111,12 @@ void main()
 {
     vec2 decalUV = fragUV;
     vec4 localSurfaceClimate = vec4(0.0);
-    bool _188 = _73.reconParams.z > 0.5;
-    bool _195;
-    if (_188)
+    if (fragNoProject == 0u)
     {
-        _195 = fragNoProject == 0u;
-    }
-    else
-    {
-        _195 = _188;
-    }
-    if (_195)
-    {
+        if (_73.reconParams.z <= 0.5)
+        {
+            discard;
+        }
         vec2 screenUV = gl_FragCoord.xy * _73.reconParams.xy;
         float sceneDepth = texture(sceneDepthTex, screenUV).x;
         if (sceneDepth <= 0.0)
@@ -184,7 +181,17 @@ void main()
     float luminance = dot(rgb, vec3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
     rgb *= mix(1.0, 0.86000001430511474609375, localWetness);
     rgb = mix(rgb, vec3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), vec3(localFrost * 0.449999988079071044921875));
-    alpha *= mix(1.0, 0.64999997615814208984375, localSnow);
-    outColor = vec4(rgb, alpha);
+    float accumulationVisibility = mix(1.0, 0.64999997615814208984375, localSnow);
+    alpha *= accumulationVisibility;
+    if (_398)
+    {
+        float coverage = max(rgb.x, max(rgb.y, rgb.z));
+        coverage = clamp((coverage * fragColor.w) * accumulationVisibility, 0.0, 0.4199999868869781494140625);
+        outColor = vec4(0.0, 0.0, 0.0, coverage);
+    }
+    else
+    {
+        outColor = vec4(rgb, alpha);
+    }
 }
 

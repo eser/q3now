@@ -1026,10 +1026,18 @@ static uint32_t R_ResolveDecalTextureSlot( qhandle_t shaderHandle ) {
 // bits so the cgame descriptor carries no blend state:
 //   DECAL_BLEND_ALPHA    = blood     SRC_ALPHA / ONE_MINUS_SRC_ALPHA
 //   DECAL_BLEND_ADDITIVE = burn      SRC_ALPHA / ONE
-//   DECAL_BLEND_COLOUR   = bullet    ZERO / ONE_MINUS_SRC_COLOR (shape in RGB)
+//   DECAL_BLEND_COLOUR   = bullet    RGB coverage translated to bounded alpha-darken
 #define DECAL_BLEND_ALPHA      0u
 #define DECAL_BLEND_ADDITIVE   1u
 #define DECAL_BLEND_COLOUR     2u
+
+// Repeated hits at effectively the same surface point must not compound a
+// colour-mask decal back toward mathematical black. Search only the recent
+// tail of the CPU shadow ring at spawn time: this is bounded event work, adds
+// no per-frame/GPU cost, and covers more than twenty full shotgun volleys.
+#define DECAL_COALESCE_LOOKBACK       256u
+#define DECAL_COALESCE_NORMAL_DOT      0.98f
+#define DECAL_COALESCE_RADIUS_FRAC     0.50f
 
 // Resolve a decal mark shader to its blend mode by reading the destination-blend
 // bits of the shader's first stage. ONE_MINUS_SRC_COLOR → colour-blend (bullet),
@@ -1051,6 +1059,58 @@ static uint32_t R_ResolveDecalBlendMode( qhandle_t shaderHandle ) {
 	if ( dstBlend == GLS_DSTBLEND_ONE )
 		return DECAL_BLEND_ADDITIVE;
 	return DECAL_BLEND_ALPHA;
+}
+
+static qboolean R_FindCoalescedColourDecalSlot( const decalGPU_t *decal,
+		uint32_t *outSlot ) {
+	uint32_t lookback;
+
+	if ( decal == NULL || outSlot == NULL
+			|| decal->blendMode != DECAL_BLEND_COLOUR ) {
+		return qfalse;
+	}
+
+	for ( lookback = 1u; lookback <= DECAL_COALESCE_LOOKBACK; ++lookback ) {
+		decalGPU_t candidate;
+		vec3_t delta;
+		float minRadius;
+		float maxRadius;
+		float mergeRadius;
+		uint32_t slot = ( vk.decal.nextSlot + DECALS_PER_POOL - lookback )
+			% DECALS_PER_POOL;
+
+		if ( !vk_decal_shadow_read( slot, &candidate ) )
+			continue;
+		if ( candidate.blendMode != decal->blendMode
+				|| candidate.textureIndex != decal->textureIndex )
+			continue;
+		if ( candidate.spawnTime == 0.0f && candidate.lifetimeInv == 0.0f )
+			continue;
+		if ( candidate.lifetimeInv > 0.0f
+				&& ( (float)tr.refdef.floatTime - candidate.spawnTime )
+					* candidate.lifetimeInv >= 1.0f )
+			continue;
+		if ( DotProduct( candidate.normalOrient, decal->normalOrient )
+				< DECAL_COALESCE_NORMAL_DOT )
+			continue;
+
+		minRadius = candidate.originRadius[3] < decal->originRadius[3]
+			? candidate.originRadius[3] : decal->originRadius[3];
+		maxRadius = candidate.originRadius[3] > decal->originRadius[3]
+			? candidate.originRadius[3] : decal->originRadius[3];
+		if ( minRadius <= 0.0f || maxRadius > minRadius * 1.25f )
+			continue;
+
+		VectorSubtract( candidate.originRadius, decal->originRadius, delta );
+		mergeRadius = minRadius * DECAL_COALESCE_RADIUS_FRAC;
+		if ( DotProduct( delta, delta ) > mergeRadius * mergeRadius )
+			continue;
+
+		*outSlot = slot;
+		return qtrue;
+	}
+
+	return qfalse;
 }
 
 // Spawn-time write into the GPU decal ring. The front-end (cgame via the trap)
@@ -1115,9 +1175,13 @@ void RE_AddDecalToScene( const decalDesc_t *desc ) {
 	// matching projector pipeline (the vertex shader culls non-matching modes).
 	d.blendMode   = R_ResolveDecalBlendMode( desc->shader );
 
-	// Round-robin slot allocation; wrap-around overwrites the oldest decal.
-	slot              = vk.decal.nextSlot;
-	vk.decal.nextSlot = ( slot + 1 ) % DECALS_PER_POOL;
+	// Refresh a visually indistinguishable recent colour mark instead of
+	// allowing repeated bullet/pellet hits to compound indefinitely. Distinct
+	// impacts still consume the round-robin ring normally.
+	if ( !R_FindCoalescedColourDecalSlot( &d, &slot ) ) {
+		slot              = vk.decal.nextSlot;
+		vk.decal.nextSlot = ( slot + 1 ) % DECALS_PER_POOL;
+	}
 
 	if ( !vk_decal_shadow_write( slot, &d ) ) {
 		ri.Terminate( TERM_UNRECOVERABLE,

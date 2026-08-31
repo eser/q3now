@@ -275,8 +275,8 @@ static qboolean CompleteScreenshot( void ) {
 	if ( !rgb || !outputWidth || !outputHeight
 			|| outputWidth > INT_MAX || outputHeight > INT_MAX
 			|| ( ( outputWidth != width || outputHeight != height ) && !scaled )
-			|| !R_SavePNG( s_module.screenshotName, rgb,
-				(int)outputWidth, (int)outputHeight ) ) {
+			|| !R_SaveScreenshotPNG( s_module.screenshotName, rgb,
+				(int)outputWidth, (int)outputHeight, "metal" ) ) {
 		free( scaled );
 		s_module.screenshotPending = qfalse;
 		if ( s_module.imports.LogCh && s_module.initLogChannel >= 0 )
@@ -495,7 +495,9 @@ static qhandle_t RegisterMaterialImageSourceInternal( renderAssetKind_t kind,
 	}
 	if ( imageName && imageName[0] != '*'
 			&& RenderImage_DecodeRgba8( imageName, &pixels, &width, &height, resolved ) ) {
-		const char *identityName = scripted.name[0] ? name : resolved;
+		/* Decoding may resolve an extension or a VFS alias, but the material
+		 * identity remains the authored name used by BSP/model batches. */
+		const char *identityName = name && name[0] ? name : resolved;
 		handle = RenderSubmission_RegisterMaterialImage( &s_module.frontend,
 			kind, identityName, clampToEdge, pixels, width, height );
 		ri.Free( pixels );
@@ -513,7 +515,10 @@ static qhandle_t RegisterMaterialImageSourceInternal( renderAssetKind_t kind,
 		const char *remapped = s_module.imports.MetaRemap_Lookup(
 			(int)REMAP_KIND_SHADER, name );
 		if ( remapped && remapped[0] && strcasecmp( remapped, name ) )
-			return RegisterMaterialImageSourceInternal( kind, remapped,
+			/* A VFS/meta remap changes the physical image source, never the
+			 * frontend material identity. World batches retain the authored BSP
+			 * shader name and must resolve that same handle after registration. */
+			return RegisterMaterialImageSourceInternal( kind, name,
 				remapped, clampToEdge, qfalse );
 	}
 	if ( imageName && imageName[0] != '*' && s_module.imports.LogCh
@@ -1153,18 +1158,18 @@ static void BeginRegistration( glconfig_t *config ) {
 		if ( !ri.Cvar_Get || !ri.Cvar_CheckRange ) {
 			memset( &s_module.brightnessFallback, 0,
 				sizeof( s_module.brightnessFallback ) );
-			s_module.brightnessFallback.value = 1.0f;
+			s_module.brightnessFallback.value = 1.4f;
 			s_module.brightnessFallback.integer = 1;
 			s_module.brightness = &s_module.brightnessFallback;
 		} else {
-			s_module.brightness = ri.Cvar_Get( "r_brightness", "1",
+			s_module.brightness = ri.Cvar_Get( "r_brightness", "1.4",
 				CVAR_ARCHIVE | CVAR_NODEFAULT );
 			if ( !s_module.brightness ) {
 				MarkFailed( "display-visibility-cvar" ); return;
 			}
 			ri.Cvar_CheckRange( s_module.brightness, "0", "32", CV_FLOAT );
 			if ( ri.Cvar_SetDescription ) ri.Cvar_SetDescription( s_module.brightness,
-				"Continuous display visibility scalar; 1.0 is authored identity, fractional values are preserved." );
+				"Continuous display visibility scalar; default 1.4, 1.0 is authored identity, fractional values are preserved." );
 			if ( ri.Cvar_SetGroup ) ri.Cvar_SetGroup( s_module.brightness, CVG_RENDERER );
 		}
 	}

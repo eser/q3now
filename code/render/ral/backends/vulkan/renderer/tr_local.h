@@ -2349,6 +2349,7 @@ qboolean vk_particle_shadow_write_class( uint32_t classIndex,
 // shader claims a slot. Publication rebuilds the current immutable RAL group.
 void vk_decal_set_texture_image( int slot, struct image_s *image );
 qboolean vk_decal_flush_pending_images( void );
+qboolean vk_decal_shadow_read( uint32_t slot, decalGPU_t *decal );
 qboolean vk_decal_shadow_write( uint32_t slot, const decalGPU_t *decal );
 
 // vk.c — phase 5: eager populate the per-class sampler array

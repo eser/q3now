@@ -72,12 +72,15 @@ const uint FRAME_SLOT_NONE = 0xFFFFFFFFu;
 // lens consumers sample. Used for the soft-particle depth fade.
 layout(set = 0, binding = 4) uniform sampler2D sceneDepthTex;
 
+layout(location = 6) flat in uint particleRenderFlags;
+
 layout(location = 0) out vec4 outColor;
 
 // Soft-particle fade band in raw reversed-Z NDC depth units. Mirrors gen_frag's
 // dfade (depth_fade_scale * 0.0005); a particle dissolves over this depth gap as
 // it approaches the geometry behind it. Larger = softer, wider dissolve.
 const float PARTICLE_DEPTH_FADE_BAND = 2.0 * 0.0005;
+const uint PRIM_FLAG_PARTICLE_SURFACE_ANCHORED = 0x0080u;
 
 // Soft-particle depth fade: dissolve the alpha as the fragment nears the world
 // geometry behind it, so billboards melt into surfaces instead of hard-clipping.
@@ -166,13 +169,15 @@ void main() {
 	// additive RGB contribution — a fade→0 makes an additive particle
 	// disappear, not just soften.
 	//
-	// Flipbook particles (frameSlot0 != FRAME_SLOT_NONE — today only the
-	// explosion_fire impact burst) are EXEMPT: they are emitted FLUSH on the
-	// impact surface (depthDiff ≈ 0), where the fade would ramp to ~0 and
-	// erase the whole fireball. An impact burst is meant to sit on the
-	// surface it hit, so it must not soft-dissolve. Static particles keep the
-	// fade unchanged (byte-identical to before).
-	float fade = ( frameSlot0 != FRAME_SLOT_NONE ) ? 1.0 : softParticleFade();
+	// Flipbook impact bursts and explicitly surface-anchored particles are
+	// exempt. Both are intentionally emitted flush with an impact surface;
+	// fading them at depthDiff≈0 erases their centre and makes the underlying
+	// decal appear to have been drawn over the particle. This exemption does not
+	// disable depth testing and therefore cannot turn smoke into an overlay.
+	bool surfaceAnchored =
+		( particleRenderFlags & PRIM_FLAG_PARTICLE_SURFACE_ANCHORED ) != 0u;
+	float fade = ( frameSlot0 != FRAME_SLOT_NONE || surfaceAnchored )
+		? 1.0 : softParticleFade();
 
 	// Exposure-invariant additive intensity for the flipbook (explosion) path —
 	// the flare-hdr-retune F1 convention (vk_flares.c). The additive fireball is

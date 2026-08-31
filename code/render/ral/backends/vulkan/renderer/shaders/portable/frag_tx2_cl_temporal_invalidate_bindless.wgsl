@@ -113,6 +113,27 @@ fn wired_advanced_fog_amount_u0028_() -> f32 {
     return clamp((1f - exp(-((_e115 * _e116)))), 0f, 1f);
 }
 
+fn wired_boost_legacy_lightmap_u0028_vf3_u003b(rgb: ptr<function, vec3<f32>>) -> vec3<f32> {
+    var boosted: vec3<f32>;
+    var peak: f32;
+
+    let _e79 = (*rgb);
+    let _e82 = unnamed.worldLightParams[0u];
+    boosted = (_e79 * _e82);
+    let _e85 = boosted[0u];
+    let _e87 = boosted[1u];
+    let _e89 = boosted[2u];
+    peak = max(_e85, max(_e87, _e89));
+    let _e92 = peak;
+    if (_e92 > 1f) {
+        let _e94 = peak;
+        let _e95 = boosted;
+        boosted = (_e95 / vec3(_e94));
+    }
+    let _e98 = boosted;
+    return _e98;
+}
+
 fn sRGBToLinear_u0028_vf3_u003b(c: ptr<function, vec3<f32>>) -> vec3<f32> {
     var cutoff: vec3<bool>;
     var lo: vec3<f32>;
@@ -135,147 +156,148 @@ fn sRGBToLinear_u0028_vf3_u003b(c: ptr<function, vec3<f32>>) -> vec3<f32> {
 fn wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b(role: ptr<function, u32>, uv: ptr<function, vec2<f32>>, slot: ptr<function, i32>) -> vec4<f32> {
     var c_1: vec4<f32>;
     var param: vec3<f32>;
+    var param_1: vec3<f32>;
 
-    let _e81 = (*role);
-    let _e83 = (*role);
-    let _e88 = unnamed.packed_indices[(_e81 / 4u)][(_e83 % 4u)];
-    let _e91 = (*role);
-    let _e93 = (*role);
-    let _e98 = unnamed.packed_indices[(_e91 / 4u)][(_e93 % 4u)];
-    let _e103 = (*uv);
-    let _e104 = textureSample(wired_bindless_images[(_e88 & 4095u)], wired_bindless_samplers[((_e98 >> bitcast<u32>(12i)) & 255u)], _e103);
-    c_1 = _e104;
-    let _e105 = (*slot);
-    if ((tex_domain & (1i << bitcast<u32>(_e105))) == 0i) {
-        let _e110 = c_1;
-        param = _e110.xyz;
-        let _e112 = sRGBToLinear_u0028_vf3_u003b((&param));
-        c_1[0u] = _e112.x;
-        c_1[1u] = _e112.y;
-        c_1[2u] = _e112.z;
+    let _e82 = (*role);
+    let _e84 = (*role);
+    let _e89 = unnamed.packed_indices[(_e82 / 4u)][(_e84 % 4u)];
+    let _e92 = (*role);
+    let _e94 = (*role);
+    let _e99 = unnamed.packed_indices[(_e92 / 4u)][(_e94 % 4u)];
+    let _e104 = (*uv);
+    let _e105 = textureSample(wired_bindless_images[(_e89 & 4095u)], wired_bindless_samplers[((_e99 >> bitcast<u32>(12i)) & 255u)], _e104);
+    c_1 = _e105;
+    let _e106 = (*slot);
+    if ((tex_domain & (1i << bitcast<u32>(_e106))) == 0i) {
+        let _e111 = c_1;
+        param = _e111.xyz;
+        let _e113 = sRGBToLinear_u0028_vf3_u003b((&param));
+        c_1[0u] = _e113.x;
+        c_1[1u] = _e113.y;
+        c_1[2u] = _e113.z;
     }
-    let _e119 = (*slot);
-    if (lightmap_slot == (_e119 + 1i)) {
-        let _e124 = unnamed.worldLightParams[0u];
-        let _e125 = c_1;
-        let _e127 = (_e125.xyz * _e124);
-        c_1[0u] = _e127.x;
-        c_1[1u] = _e127.y;
-        c_1[2u] = _e127.z;
+    let _e120 = (*slot);
+    if (lightmap_slot == (_e120 + 1i)) {
+        let _e123 = c_1;
+        param_1 = _e123.xyz;
+        let _e125 = wired_boost_legacy_lightmap_u0028_vf3_u003b((&param_1));
+        c_1[0u] = _e125.x;
+        c_1[1u] = _e125.y;
+        c_1[2u] = _e125.z;
     }
-    let _e134 = c_1;
-    return _e134;
+    let _e132 = c_1;
+    return _e132;
 }
 
 fn main_1() {
     var frag_color0_: vec4<f32>;
-    var param_1: vec3<f32>;
-    var frag_color1_: vec4<f32>;
     var param_2: vec3<f32>;
-    var frag_color2_: vec4<f32>;
+    var frag_color1_: vec4<f32>;
     var param_3: vec3<f32>;
+    var frag_color2_: vec4<f32>;
+    var param_4: vec3<f32>;
     var color0_: vec4<f32>;
-    var param_4: u32;
-    var param_5: vec2<f32>;
-    var param_6: i32;
+    var param_5: u32;
+    var param_6: vec2<f32>;
+    var param_7: i32;
     var color1_: vec4<f32>;
-    var param_7: u32;
-    var param_8: vec2<f32>;
-    var param_9: i32;
+    var param_8: u32;
+    var param_9: vec2<f32>;
+    var param_10: i32;
     var color2_: vec4<f32>;
-    var param_10: u32;
-    var param_11: vec2<f32>;
-    var param_12: i32;
+    var param_11: u32;
+    var param_12: vec2<f32>;
+    var param_13: i32;
     var base: vec4<f32>;
     var color1_1: vec4<f32>;
-    var param_13: u32;
-    var param_14: vec2<f32>;
-    var param_15: i32;
+    var param_14: u32;
+    var param_15: vec2<f32>;
+    var param_16: i32;
     var color2_1: vec4<f32>;
-    var param_16: u32;
-    var param_17: vec2<f32>;
-    var param_18: i32;
+    var param_17: u32;
+    var param_18: vec2<f32>;
+    var param_19: i32;
     var color1_2: vec4<f32>;
-    var param_19: u32;
-    var param_20: vec2<f32>;
-    var param_21: i32;
+    var param_20: u32;
+    var param_21: vec2<f32>;
+    var param_22: i32;
     var color2_2: vec4<f32>;
-    var param_22: u32;
-    var param_23: vec2<f32>;
-    var param_24: i32;
+    var param_23: u32;
+    var param_24: vec2<f32>;
+    var param_25: i32;
     var color1_3: vec4<f32>;
-    var param_25: u32;
-    var param_26: vec2<f32>;
-    var param_27: i32;
+    var param_26: u32;
+    var param_27: vec2<f32>;
+    var param_28: i32;
     var color2_3: vec4<f32>;
-    var param_28: u32;
-    var param_29: vec2<f32>;
-    var param_30: i32;
+    var param_29: u32;
+    var param_30: vec2<f32>;
+    var param_31: i32;
     var color1_4: vec4<f32>;
-    var param_31: u32;
-    var param_32: vec2<f32>;
-    var param_33: i32;
+    var param_32: u32;
+    var param_33: vec2<f32>;
+    var param_34: i32;
     var color2_4: vec4<f32>;
-    var param_34: u32;
-    var param_35: vec2<f32>;
-    var param_36: i32;
+    var param_35: u32;
+    var param_36: vec2<f32>;
+    var param_37: i32;
     var color1_5: vec4<f32>;
-    var param_37: u32;
-    var param_38: vec2<f32>;
-    var param_39: i32;
+    var param_38: u32;
+    var param_39: vec2<f32>;
+    var param_40: i32;
     var color2_5: vec4<f32>;
-    var param_40: u32;
-    var param_41: vec2<f32>;
-    var param_42: i32;
+    var param_41: u32;
+    var param_42: vec2<f32>;
+    var param_43: i32;
     var color1_6: vec4<f32>;
-    var param_43: u32;
-    var param_44: vec2<f32>;
-    var param_45: i32;
+    var param_44: u32;
+    var param_45: vec2<f32>;
+    var param_46: i32;
     var color2_6: vec4<f32>;
-    var param_46: u32;
-    var param_47: vec2<f32>;
-    var param_48: i32;
+    var param_47: u32;
+    var param_48: vec2<f32>;
+    var param_49: i32;
     var wetness: f32;
     var frost: f32;
     var luminance: f32;
     var fogAmount: f32;
-    var param_49: f32;
+    var param_50: f32;
 
     let _e148 = frag_color0In_1;
-    param_1 = _e148.xyz;
-    let _e150 = sRGBToLinear_u0028_vf3_u003b((&param_1));
+    param_2 = _e148.xyz;
+    let _e150 = sRGBToLinear_u0028_vf3_u003b((&param_2));
     let _e152 = frag_color0In_1[3u];
     frag_color0_ = vec4<f32>(_e150.x, _e150.y, _e150.z, _e152);
     let _e157 = frag_color1In_1;
-    param_2 = _e157.xyz;
-    let _e159 = sRGBToLinear_u0028_vf3_u003b((&param_2));
+    param_3 = _e157.xyz;
+    let _e159 = sRGBToLinear_u0028_vf3_u003b((&param_3));
     let _e161 = frag_color1In_1[3u];
     frag_color1_ = vec4<f32>(_e159.x, _e159.y, _e159.z, _e161);
     let _e166 = frag_color2In_1;
-    param_3 = _e166.xyz;
-    let _e168 = sRGBToLinear_u0028_vf3_u003b((&param_3));
+    param_4 = _e166.xyz;
+    let _e168 = sRGBToLinear_u0028_vf3_u003b((&param_4));
     let _e170 = frag_color2In_1[3u];
     frag_color2_ = vec4<f32>(_e168.x, _e168.y, _e168.z, _e170);
-    param_4 = 0u;
+    param_5 = 0u;
     let _e175 = frag_tex_coord0_1;
-    param_5 = _e175;
-    param_6 = 0i;
-    let _e176 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_4), (&param_5), (&param_6));
+    param_6 = _e175;
+    param_7 = 0i;
+    let _e176 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_5), (&param_6), (&param_7));
     let _e177 = frag_color0_;
     color0_ = (_e176 * _e177);
     if override_type_4_2 {
-        param_7 = 1u;
+        param_8 = 1u;
         let _e179 = frag_tex_coord1_1;
-        param_8 = _e179;
-        param_9 = 1i;
-        let _e180 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_7), (&param_8), (&param_9));
+        param_9 = _e179;
+        param_10 = 1i;
+        let _e180 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_8), (&param_9), (&param_10));
         let _e181 = frag_color1_;
         color1_ = (_e180 * _e181);
-        param_10 = 2u;
+        param_11 = 2u;
         let _e183 = frag_tex_coord2_1;
-        param_11 = _e183;
-        param_12 = 2i;
-        let _e184 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_10), (&param_11), (&param_12));
+        param_12 = _e183;
+        param_13 = 2i;
+        let _e184 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_11), (&param_12), (&param_13));
         let _e185 = frag_color2_;
         color2_ = (_e184 * _e185);
         let _e187 = color0_;
@@ -288,18 +310,18 @@ fn main_1() {
         base = vec4<f32>(_e194.x, _e194.y, _e194.z, ((_e196 * _e198) * _e201));
     } else {
         if override_type_4_3 {
-            param_13 = 1u;
+            param_14 = 1u;
             let _e207 = frag_tex_coord1_1;
-            param_14 = _e207;
-            param_15 = 1i;
-            let _e208 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_13), (&param_14), (&param_15));
+            param_15 = _e207;
+            param_16 = 1i;
+            let _e208 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_14), (&param_15), (&param_16));
             let _e209 = frag_color1_;
             color1_1 = (_e208 * _e209);
-            param_16 = 2u;
+            param_17 = 2u;
             let _e211 = frag_tex_coord2_1;
-            param_17 = _e211;
-            param_18 = 2i;
-            let _e212 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_16), (&param_17), (&param_18));
+            param_18 = _e211;
+            param_19 = 2i;
+            let _e212 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_17), (&param_18), (&param_19));
             let _e213 = frag_color2_;
             color2_1 = (_e212 * _e213);
             let _e216 = color0_[3u];
@@ -321,18 +343,18 @@ fn main_1() {
             base = vec4<f32>(_e234.x, _e234.y, _e234.z, ((_e236 * _e238) * _e241));
         } else {
             if override_type_4_4 {
-                param_19 = 1u;
+                param_20 = 1u;
                 let _e247 = frag_tex_coord1_1;
-                param_20 = _e247;
-                param_21 = 1i;
-                let _e248 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_19), (&param_20), (&param_21));
+                param_21 = _e247;
+                param_22 = 1i;
+                let _e248 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_20), (&param_21), (&param_22));
                 let _e249 = frag_color1_;
                 color1_2 = (_e248 * _e249);
-                param_22 = 2u;
+                param_23 = 2u;
                 let _e251 = frag_tex_coord2_1;
-                param_23 = _e251;
-                param_24 = 2i;
-                let _e252 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_22), (&param_23), (&param_24));
+                param_24 = _e251;
+                param_25 = 2i;
+                let _e252 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_23), (&param_24), (&param_25));
                 let _e253 = frag_color2_;
                 color2_2 = (_e252 * _e253);
                 let _e256 = color0_[3u];
@@ -354,18 +376,18 @@ fn main_1() {
                 base = vec4<f32>(_e277.x, _e277.y, _e277.z, ((_e279 * _e281) * _e284));
             } else {
                 if override_type_4_5 {
-                    param_25 = 1u;
+                    param_26 = 1u;
                     let _e290 = frag_tex_coord1_1;
-                    param_26 = _e290;
-                    param_27 = 1i;
-                    let _e291 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_25), (&param_26), (&param_27));
+                    param_27 = _e290;
+                    param_28 = 1i;
+                    let _e291 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_26), (&param_27), (&param_28));
                     let _e292 = frag_color1_;
                     color1_3 = (_e291 * _e292);
-                    param_28 = 2u;
+                    param_29 = 2u;
                     let _e294 = frag_tex_coord2_1;
-                    param_29 = _e294;
-                    param_30 = 2i;
-                    let _e295 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_28), (&param_29), (&param_30));
+                    param_30 = _e294;
+                    param_31 = 2i;
+                    let _e295 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_29), (&param_30), (&param_31));
                     let _e296 = frag_color2_;
                     color2_3 = (_e295 * _e296);
                     let _e298 = color0_;
@@ -376,18 +398,18 @@ fn main_1() {
                     base = mix(mix(_e298, _e299, vec4(_e301)), _e304, vec4(_e306));
                 } else {
                     if override_type_4_6 {
-                        param_31 = 1u;
+                        param_32 = 1u;
                         let _e309 = frag_tex_coord1_1;
-                        param_32 = _e309;
-                        param_33 = 1i;
-                        let _e310 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_31), (&param_32), (&param_33));
+                        param_33 = _e309;
+                        param_34 = 1i;
+                        let _e310 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_32), (&param_33), (&param_34));
                         let _e311 = frag_color1_;
                         color1_4 = (_e310 * _e311);
-                        param_34 = 2u;
+                        param_35 = 2u;
                         let _e313 = frag_tex_coord2_1;
-                        param_35 = _e313;
-                        param_36 = 2i;
-                        let _e314 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_34), (&param_35), (&param_36));
+                        param_36 = _e313;
+                        param_37 = 2i;
+                        let _e314 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_35), (&param_36), (&param_37));
                         let _e315 = frag_color2_;
                         color2_4 = (_e314 * _e315);
                         let _e317 = color2_4;
@@ -398,18 +420,18 @@ fn main_1() {
                         base = mix(_e317, mix(_e318, _e319, vec4(_e321)), vec4(_e325));
                     } else {
                         if override_type_4_7 {
-                            param_37 = 1u;
+                            param_38 = 1u;
                             let _e328 = frag_tex_coord1_1;
-                            param_38 = _e328;
-                            param_39 = 1i;
-                            let _e329 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_37), (&param_38), (&param_39));
+                            param_39 = _e328;
+                            param_40 = 1i;
+                            let _e329 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_38), (&param_39), (&param_40));
                             let _e330 = frag_color1_;
                             color1_5 = (_e329 * _e330);
-                            param_40 = 2u;
+                            param_41 = 2u;
                             let _e332 = frag_tex_coord2_1;
-                            param_41 = _e332;
-                            param_42 = 2i;
-                            let _e333 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_40), (&param_41), (&param_42));
+                            param_42 = _e332;
+                            param_43 = 2i;
+                            let _e333 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_41), (&param_42), (&param_43));
                             let _e334 = frag_color2_;
                             color2_5 = (_e333 * _e334);
                             let _e336 = color2_5;
@@ -419,18 +441,18 @@ fn main_1() {
                             let _e347 = color0_;
                             base = (((_e336 + vec4(_e338)) * (_e341 + vec4(_e343))) * _e347);
                         } else {
-                            param_43 = 1u;
+                            param_44 = 1u;
                             let _e349 = frag_tex_coord1_1;
-                            param_44 = _e349;
-                            param_45 = 1i;
-                            let _e350 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_43), (&param_44), (&param_45));
+                            param_45 = _e349;
+                            param_46 = 1i;
+                            let _e350 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_44), (&param_45), (&param_46));
                             let _e351 = frag_color1_;
                             color1_6 = (_e350 * _e351);
-                            param_46 = 2u;
+                            param_47 = 2u;
                             let _e353 = frag_tex_coord2_1;
-                            param_47 = _e353;
-                            param_48 = 2i;
-                            let _e354 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_46), (&param_47), (&param_48));
+                            param_48 = _e353;
+                            param_49 = 2i;
+                            let _e354 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_47), (&param_48), (&param_49));
                             let _e355 = frag_color2_;
                             color2_6 = (_e354 * _e355);
                             let _e357 = color0_;
@@ -508,8 +530,8 @@ fn main_1() {
     }
     let _e460 = base;
     out_color = _e460;
-    param_49 = 1f;
-    wiredTemporalWriteAux_u0028_f1_u003b((&param_49));
+    param_50 = 1f;
+    wiredTemporalWriteAux_u0028_f1_u003b((&param_50));
     return;
 }
 

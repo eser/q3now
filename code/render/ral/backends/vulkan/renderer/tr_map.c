@@ -251,10 +251,9 @@ R_ColorShiftLightingBytes — decode Q3 BSP byte data.
 
 `linearLightmap == qtrue` (the lightmap-texel call sites): copy the byte verbatim. The ×2
 q3map2-overbright doubling is done in the world fragment shader as a
-linear-domain `× LIGHTMAP_BOOST` (gen_frag.tmpl, modulate-default
-branches, after sampleColorTex's sRGB → linear decode) — colorimetrically
-correct, unlike the byte-space `<< 1` (byte 128 doubled to 255 is ~4×
-linear light, not 2×).
+linear-domain `× LIGHTMAP_BOOST` followed by the legacy hue-preserving
+peak normalization (gen_frag.tmpl, after sampleColorTex's sRGB → linear
+decode). This keeps baked lightmaps LDR while authored emission remains HDR.
 
 `linearLightmap == qfalse` (the vertex-light-colour and light-grid
 call sites): apply the byte-space `<< 1` overbright shift + preserve-hue
@@ -277,8 +276,8 @@ void R_ColorShiftLightingBytes( const byte in[4], byte out[4], qboolean hasAlpha
 	int r, g, b;
 
 	if ( linearLightmap ) {
-		// Byte verbatim; the world shader applies LIGHTMAP_BOOST (× 2.0)
-		// in linear domain post-sRGB-decode.
+		// Byte verbatim; the world shader applies the bounded
+		// LIGHTMAP_BOOST in linear domain post-sRGB-decode.
 		r = in[0];
 		g = in[1];
 		b = in[2];
