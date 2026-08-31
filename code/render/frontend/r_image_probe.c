@@ -5,7 +5,7 @@
 //
 // Mirrors R_FindImageFile's extension-fallback behavior (without
 // loading pixel data). Intentionally header-light: pulls only
-// qcommon for FS_* + Q_* + COM_StripExtension. No renderer-internal
+// qcommon for FS_* + Q_*. No renderer-internal
 // state, no GL/Vulkan dependencies. Linked into every renderer DLL
 // (via AUX_SOURCE_DIRECTORY) and into extract-meta's qcommon_tool.
 
@@ -25,26 +25,25 @@ qboolean R_ImageResolves( const char *name ) {
 
 	if ( !name || !*name ) return qfalse;
 
-	// If the name already has a known image extension, probe that
-	// exact path first. (Engine R_FindImageFile uses the extension
-	// to pick the matching loader before fallback.)
+	// Explicit extensions are exact. Format/path compatibility is declared in
+	// fs-aliases.lua and resolved by FS_FOpenFileRead; only extensionless legacy
+	// material references use the bounded codec probe below.
 	const char *ext = COM_GetExtension( name );
 	if ( *ext ) {
+		fsResolvedResource_t resolved;
+		if ( !FS_ResolveResource( name, &resolved ) ) {
+			return qfalse;
+		}
+		ext = COM_GetExtension( resolved.canonicalPath );
 		for ( const char **e = r_image_extensions; *e; e++ ) {
 			if ( !Q_stricmp( ext, *e ) ) {
-				fileHandle_t f;
-				if ( FS_FOpenFileRead( name, &f, qtrue ) > 0 ) {
-					FS_FCloseFile( f );
-					return qtrue;
-				}
-				break;
+				return qtrue;
 			}
 		}
+		return qfalse;
 	}
 
-	// Strip extension (if any) and try each codec extension in
-	// priority order.
-	COM_StripExtension( name, localName, sizeof( localName ) );
+	Q_strncpyz( localName, name, sizeof( localName ) );
 
 	for ( const char **e = r_image_extensions; *e; e++ ) {
 		fileHandle_t f;

@@ -335,10 +335,15 @@ void RE_RegisterFont(const char *fontName, int pointSize, fontInfo_t *font) {
 	void *faceData;
 	int i, len;
 	char name[1024];
+	char canonicalFontName[MAX_QPATH];
 
 	if (!fontName) {
 		R_LOG( rch_assets, SEV_INFO, "RE_RegisterFont: called with empty name\n");
 		return;
+	}
+	if ( ri.FS_ResolveResource && ri.FS_ResolveResource( fontName,
+			canonicalFontName, sizeof( canonicalFontName ), NULL, NULL, NULL ) ) {
+		fontName = canonicalFontName;
 	}
 
 	if (pointSize <= 0) {

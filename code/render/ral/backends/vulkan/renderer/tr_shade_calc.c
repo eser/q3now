@@ -354,10 +354,15 @@ static void AutospriteDeform( void ) {
 	vec3_t	leftDir, upDir;
 
 	if ( tess.numVertexes & 3 ) {
-		R_LOG( rch_cmd, SEV_WARN, "Autosprite shader %s had odd vertex count\n", tess.shader->name );
+		R_LOG( rch_cmd, SEV_WARN,
+			"Autosprite shader %s had odd vertex count %d (indexes %d)\n",
+			tess.shader->name, tess.numVertexes, tess.numIndexes );
 	}
 	if ( tess.numIndexes != ( tess.numVertexes >> 2 ) * 6 ) {
-		R_LOG( rch_cmd, SEV_WARN, "Autosprite shader %s had odd index count\n", tess.shader->name );
+		R_LOG( rch_cmd, SEV_WARN,
+			"Autosprite shader %s had odd index count %d (vertices %d, expected %d)\n",
+			tess.shader->name, tess.numIndexes, tess.numVertexes,
+			( tess.numVertexes >> 2 ) * 6 );
 	}
 
 	oldVerts = tess.numVertexes;

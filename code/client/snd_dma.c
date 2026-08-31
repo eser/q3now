@@ -218,7 +218,8 @@ S_FindName
 Will allocate a new sfx if it isn't found
 ==================
 */
-static sfx_t *S_FindName( const char *name ) {
+static sfx_t *S_FindName( const char *name, uint64_t sourceId,
+		unsigned fsGeneration ) {
 	if ( !name ) {
 		Com_Terminate( TERM_UNRECOVERABLE, "Sound name is NULL" );
 	}
@@ -243,7 +244,9 @@ static sfx_t *S_FindName( const char *name ) {
 	sfx_t	*sfx = sfxHash[hash];
 	// see if already loaded
 	while (sfx) {
-		if (!Q_stricmp(sfx->soundName, name) ) {
+		if ( !Q_stricmp( sfx->soundName, name )
+				&& sfx->resourceSourceId == sourceId
+				&& sfx->resourceFsGeneration == fsGeneration ) {
 			return sfx;
 		}
 		sfx = sfx->next;
@@ -267,6 +270,8 @@ static sfx_t *S_FindName( const char *name ) {
 	sfx = &s_knownSfx[i];
 	memset (sfx, 0, sizeof(*sfx));
 	sfx->soundName = CopyString( name );
+	sfx->resourceSourceId = sourceId;
+	sfx->resourceFsGeneration = fsGeneration;
 
 	sfx->next = sfxHash[hash];
 	sfxHash[hash] = sfx;
@@ -299,6 +304,10 @@ Creates a default buzz sound if the file can't be loaded
 */
 static sfxHandle_t S_Base_RegisterSound( const char *name, qboolean compressed ) {
 	sfx_t	*sfx;
+	fsResolvedResource_t resolved;
+	const char *identityName = name;
+	uint64_t sourceId = 0;
+	unsigned fsGeneration = 0;
 
 	compressed = qfalse;
 	if (!s_soundStarted) {
@@ -310,7 +319,14 @@ static sfxHandle_t S_Base_RegisterSound( const char *name, qboolean compressed )
 		return 0;
 	}
 
-	sfx = S_FindName( name );
+	/* Compatibility spellings and their canonical target share one decoded
+	 * sound record. FS_FOpenFileRead still returns independent cursors. */
+	if ( FS_ResolveResource( name, &resolved ) ) {
+		identityName = resolved.canonicalPath;
+		sourceId = resolved.sourceId;
+		fsGeneration = resolved.fsGeneration;
+	}
+	sfx = S_FindName( identityName, sourceId, fsGeneration );
 	if ( !sfx ) {
 		return 0;
 	}
@@ -328,6 +344,9 @@ static sfxHandle_t S_Base_RegisterSound( const char *name, qboolean compressed )
 	S_memoryLoad( sfx );
 
 	if ( sfx->defaultSound ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_sound),
+			"S_RegisterSound probe miss '%s' (resolved as '%s')\n",
+			name, identityName );
 		return 0;
 	}
 

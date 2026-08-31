@@ -1110,7 +1110,10 @@ void ClientThink_real( gentity_t *ent ) {
 	{
 		vec3_t weaponAimAngles;
 		if ( G_ResolveWeaponAimAngles( ent, weaponAimAngles ) ) {
-			VectorCopy( weaponAimAngles, ent->s.apos.trBase );
+			/* Weapon pitch is camera-to-muzzle convergence, not a presentation
+			 * pose. Preserve view pitch for the torso while publishing aim yaw so
+			 * remote and predicted player models face the same target. */
+			ent->s.apos.trBase[YAW] = weaponAimAngles[YAW];
 		}
 	}
 	SendPendingPredictableEvents( &ent->client->ps );

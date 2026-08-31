@@ -970,6 +970,9 @@ typedef enum {
 // May set other cvars (inline dispatch); re-entrancy is guarded.
 typedef void (*cvarCallback_t)( struct cvar_s *self );
 
+typedef uint32_t cvarScopeId_t;
+#define CVAR_SCOPE_GLOBAL ((cvarScopeId_t)0u)
+
 // nothing outside the Cvar_*() functions should modify these fields!
 typedef struct cvar_s cvar_t;
 
@@ -993,6 +996,7 @@ struct cvar_s {
 	cvar_t		*hashPrev;
 	int			hashIndex;
 	cvarGroup_t	group;				// to track changes
+	cvarScopeId_t ownerScopeId;		// 0 = process-global; non-zero = lifecycle-owned mod scope
 
 	// --- typed registration fields (set by Cvar_Register; zero for Cvar_Get cvars) ---
 	cvarType_t      type;           // value type; CVT_STRING=0 for all legacy cvars

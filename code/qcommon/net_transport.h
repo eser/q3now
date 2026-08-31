@@ -79,6 +79,7 @@ typedef enum {
 	WN_BOOTSTRAP_SEC_CONFIGSTRINGS = 3,
 	WN_BOOTSTRAP_SEC_BASELINES = 4,
 	WN_BOOTSTRAP_SEC_CLIENT_INFO = 5,
+	WN_BOOTSTRAP_SEC_CONTENT_MANIFESTS = 6,
 } wn_bootstrap_section_t;
 
 typedef enum {

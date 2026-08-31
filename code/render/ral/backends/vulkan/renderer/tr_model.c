@@ -268,6 +268,7 @@ qhandle_t RE_RegisterModel( const char *name ) {
 	char		localName[ MAX_QPATH ];
 	const char	*ext;
 	char		altName[ MAX_QPATH ];
+	char		canonicalName[ MAX_QPATH ];
 
 	if ( !name || !name[0] ) {
 		R_LOG( rch_assets, SEV_INFO, "RE_RegisterModel: NULL name\n" );
@@ -277,6 +278,10 @@ qhandle_t RE_RegisterModel( const char *name ) {
 	if ( strlen( name ) >= MAX_QPATH ) {
 		R_LOG( rch_assets, SEV_INFO, "Model name exceeds MAX_QPATH\n" );
 		return 0;
+	}
+	if ( ri.FS_ResolveResource && ri.FS_ResolveResource( name, canonicalName,
+			sizeof( canonicalName ), NULL, NULL, NULL ) ) {
+		name = canonicalName;
 	}
 
 	//

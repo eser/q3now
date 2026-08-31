@@ -34,15 +34,6 @@ rocketExhaustGlow
 	}
 }
 
-// ── crosshair shaders (fix: rgbGen exactVertex enables SetColor tinting) ──
-// Q3 vanilla uses rgbGen identity which ignores SetColor → crosshair always white.
-// q3now fixed this with rgbGen exactVertex. We override all 10 crosshairs here.
-gfx/2d/crosshairMelee   { nopicmip { map gfx/2d/crosshairMelee.tga    blendfunc blend  rgbGen exactVertex } }
-gfx/2d/crosshairBullet  { nopicmip { map gfx/2d/crosshairBullet.tga   blendfunc blend  rgbGen exactVertex } }
-gfx/2d/crosshairBurst   { nopicmip { map gfx/2d/crosshairBurst.tga    blendfunc blend  rgbGen exactVertex } }
-gfx/2d/crosshairMissile { nopicmip { map gfx/2d/crosshairMissile.tga  blendfunc blend  rgbGen exactVertex } }
-gfx/2d/crosshairDefault    { nopicmip { map gfx/2d/crosshairDefault.png     blendfunc blend  rgbGen exactVertex } }
-
 // ── q3now lens flare shaders ────────────────────────────────────────
 // Alternatives inspired by JJ Abrams / cinematic lens flare references.
 // All use sort nearest + additive alpha blend for proper compositing.
@@ -237,7 +228,7 @@ powerups/spawnProtect
 {
 	deformVertexes wave 100 sin 0.5 0.5 0 0.5
 	{
-		map textures/effects/envmap.tga
+		map textures/effects/envmap.jpg
 		tcGen environment
 		rgbGen const ( 1.0 1.0 1.0 )
 		blendFunc GL_ONE GL_ONE
@@ -311,10 +302,8 @@ q3now/railDebris
 // Two-layer scrolling clouds with dark blue tint. Used as fullscreen
 // background behind floating menu panels.
 
-// Available sky textures:
-//   bluedimclouds.jpg, dimclouds.jpg, inteldimclouds.jpg,
-//   intelredclouds.jpg, killsky_1.jpg, killsky_2.jpg,
-//   pjbasesky.jpg, topclouds.jpg
+// Required pax01 sky textures:
+//   inteldimclouds.jpg, intelredclouds.jpg, killsky_1.jpg, killsky_2.jpg
 
 wiredui/clouds
 {
@@ -327,7 +316,7 @@ wiredui/clouds
 	}
 	{
 		// layer 1 — blue clouds, slow drift right
-		map textures/skies/bluedimclouds.jpg
+		map textures/skies/inteldimclouds.jpg
 		blendfunc gl_one gl_one
 		rgbgen const ( 0.35 0.35 0.55 )
 		tcmod scale 1.5 1.5
@@ -335,7 +324,7 @@ wiredui/clouds
 	}
 	{
 		// layer 2 — warm clouds, counter-drift left, parallax depth
-		map textures/skies/dimclouds.jpg
+		map textures/skies/intelredclouds.jpg
 		blendfunc gl_one gl_one
 		rgbgen const ( 0.40 0.28 0.45 )
 		tcmod scale 2.5 2.0
@@ -343,7 +332,7 @@ wiredui/clouds
 	}
 	{
 		// layer 3 — high wisps, diagonal drift
-		map textures/skies/topclouds.jpg
+		map textures/skies/killsky_1.jpg
 		blendfunc gl_one gl_one
 		rgbgen const ( 0.20 0.20 0.30 )
 		tcmod scale 4 3
@@ -355,7 +344,7 @@ models/powerups/health/red
 {
 
 	{
-		map textures/effects/envmapred.tga
+		map textures/effects/envmapred.jpg
         tcGen environment
 	}
 }
@@ -363,7 +352,7 @@ models/powerups/health/red
 models/powerups/health/red_sphere
 {
 	{
-		map textures/effects/tinfx2b.tga
+		map textures/effects/tinfx2b.png
 		tcGen environment
 		blendfunc GL_ONE GL_ONE
 	}
@@ -442,7 +431,7 @@ pushTrail
 {
 	cull none
 	{
-		map textures/effects/invismap.tga
+		map textures/effects/invismap.png
 		blendfunc add
 		rgbGen vertex
 		alphaGen vertex
@@ -450,7 +439,7 @@ pushTrail
 		tcMod scroll -1.5 0.3
 	}
 	{
-		map textures/effects/invismap.tga
+		map textures/effects/invismap.png
 		blendfunc add
 		rgbGen vertex
 		alphaGen vertex
@@ -486,7 +475,7 @@ powerups/glassCloaking
 powerups/glassCloakingSpecular
 {
 	{
-		map textures/effects/invismap.tga
+		map textures/effects/invismap.png
 		blendfunc gl_src_alpha gl_one
 		alphagen entity
 		tcmod turb 0 0.15 0 0.25
@@ -577,12 +566,12 @@ textures/liquids/lavacrust
 models/powerups/armor/newgreen
 {
     {
-		map textures/sfx/specular.tga
+		map textures/sfx/specular.png
 		tcGen environment
 		rgbGen identity
 	}
 	{
-		map models/powerups/armor/newgreen.tga
+		map models/powerups/armor/newgreen.png
 		blendFunc blend
 		rgbGen entity
 	}
@@ -595,7 +584,7 @@ models/powerups/armor/energy_gre1
     nomipmaps
 
 	{
-		map models/powerups/armor/energy_gre1.tga
+		map models/powerups/armor/energy_base1.jpg
 		blendFunc add
 		rgbGen entity
 		tcMod scroll 7.4 1.3
@@ -605,12 +594,12 @@ models/powerups/armor/energy_gre1
 models/powerups/armor/newbase
 {
     {
-		map textures/sfx/specular.tga
+		map textures/sfx/specular.png
 		tcGen environment
 		rgbGen identity
 	}
 	{
-		map models/powerups/armor/newbase.tga
+		map models/powerups/armor/newbase.png
 		blendFunc blend
 		rgbGen entity
 	}
@@ -623,7 +612,7 @@ models/powerups/armor/energy_base1
     nomipmaps
 
 	{
-		map models/powerups/armor/energy_base1.tga
+		map models/powerups/armor/energy_base1.jpg
 		blendFunc add
 		rgbGen entity
 		tcMod scroll 7.4 1.3
@@ -633,7 +622,7 @@ models/powerups/armor/energy_base1
 models/powerups/health/green
 {
 	{
-		map textures/effects/envmapgreen.tga
+		map textures/effects/envmapgreen.jpg
 		tcGen environment
 	}
 }
@@ -642,7 +631,7 @@ models/powerups/armor/energy_grn1
 {
 	deformVertexes wave 100 sin 2 0 0 0
 	{
-		map textures/effects/envmapgreen.tga
+		map textures/effects/envmapgreen.jpg
 		blendFunc GL_ONE GL_ONE
 		tcGen environment
 		tcmod rotate 30

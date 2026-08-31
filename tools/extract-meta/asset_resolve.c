@@ -32,13 +32,10 @@ qboolean Asset_IsAvailable(const needed_asset_t *a,
 		if ( ShaderIndex_Has( idx, a->path ) ) return qtrue;
 		return R_ImageResolves( a->path );
 	case ASSET_KIND_TEXTURE:
-		// A "texture" path is also satisfied by a shader entry of the
-		// same name (textures/common/caulk, textures/common/clip,
-		// model/mapobjects/spotlamp/*, etc. exist only as shaders, no
-		// matching .tga). Inventory stores extension-less paths so
-		// the lookup can be done literally — same convention the
-		// engine's R_FindShader uses after COM_StripExtension.
-		if ( ShaderIndex_Has( idx, a->path ) ) return qtrue;
+		// Only extensionless material references may resolve through a
+		// same-named shader. An explicit image extension is an exact VFS
+		// identity and must name a packaged file or a static fs alias.
+		if ( !*COM_GetExtension( a->path ) && ShaderIndex_Has( idx, a->path ) ) return qtrue;
 		return R_ImageResolves( a->path );
 	case ASSET_KIND_SOUND:
 	case ASSET_KIND_MUSIC:

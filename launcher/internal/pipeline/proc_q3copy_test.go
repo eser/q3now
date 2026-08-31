@@ -211,24 +211,21 @@ func TestQ3CopyProcessor_Finalize(t *testing.T) {
 	}
 }
 
-// TestQ3CopyProcessor_OneSourceManyTargets is the regression test for the Q1
-// monster invisibility fix: a single source (progs/dog.mdl) declared by two
-// entries (creatures/dog/dog.mdl + characters/dog/models/body.mdl) must emit
-// BOTH outputs, not just one. Before the fix, byPackIndex was source→one-key and
-// the second entry silently overwrote the first, so one of the two was dropped.
+// TestQ3CopyProcessor_OneSourceManyTargets verifies the processor's generic
+// fan-out contract independently of any particular asset namespace.
 func TestQ3CopyProcessor_OneSourceManyTargets(t *testing.T) {
 	proc := &Q3CopyProcessor{
 		Entries: map[string]ProcessorEntry{
-			"creatures/dog/dog.mdl":          {Pack: "id1/pak0.pak", PackIndex: "progs/dog.mdl"},
-			"characters/dog/models/body.mdl": {Pack: "id1/pak0.pak", PackIndex: "progs/dog.mdl"},
+			"sounds/canonical/first.opus":  {Pack: "source/pak0.pak", PackIndex: "sound/shared.wav"},
+			"sounds/canonical/second.opus": {Pack: "source/pak0.pak", PackIndex: "sound/shared.wav"},
 		},
 	}
 
 	// One scan of the single source progs/dog.mdl (as it appears once in pak0).
 	entry := AssetEntry{
-		Origin:      "q1_base",
-		Path:        "progs/dog.mdl",
-		SourcePak:   "id1/pak0.pak",
+		Origin:      "fixture",
+		Path:        "sound/shared.wav",
+		SourcePak:   "source/pak0.pak",
 		SourceIndex: 42,
 		UncompSize:  1234,
 	}
@@ -262,7 +259,7 @@ func TestQ3CopyProcessor_OneSourceManyTargets(t *testing.T) {
 		}
 	}
 
-	for _, want := range []string{"creatures/dog/dog.mdl", "characters/dog/models/body.mdl"} {
+	for _, want := range []string{"sounds/canonical/first.opus", "sounds/canonical/second.opus"} {
 		if !got[want] {
 			t.Errorf("output %q was not emitted from the single progs/dog.mdl scan", want)
 		}
@@ -278,11 +275,11 @@ func TestQ3CopyProcessor_OneSourceManyTargets(t *testing.T) {
 func TestQ3CopyProcessor_FanoutMatchedNoFalseMissing(t *testing.T) {
 	proc := &Q3CopyProcessor{
 		Entries: map[string]ProcessorEntry{
-			"creatures/dog/dog.mdl":          {Pack: "id1/pak0.pak", PackIndex: "progs/dog.mdl"},
-			"characters/dog/models/body.mdl": {Pack: "id1/pak0.pak", PackIndex: "progs/dog.mdl"},
+			"sounds/canonical/first.opus":  {Pack: "source/pak0.pak", PackIndex: "sound/shared.wav"},
+			"sounds/canonical/second.opus": {Pack: "source/pak0.pak", PackIndex: "sound/shared.wav"},
 		},
 	}
-	entry := AssetEntry{Origin: "q1_base", Path: "progs/dog.mdl", SourcePak: "id1/pak0.pak", SourceIndex: 1}
+	entry := AssetEntry{Origin: "fixture", Path: "sound/shared.wav", SourcePak: "source/pak0.pak", SourceIndex: 1}
 	if _, err := proc.Process(entry, nil); err != nil {
 		t.Fatalf("Process: %v", err)
 	}

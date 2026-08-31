@@ -492,6 +492,168 @@ void WiredScript_ExecFile( const char *filename ) {
 	(void) WiredScript_TryExecFile( filename );
 }
 
+static qboolean WiredScript_AppendFileAliasManifest( lua_State *L,
+	const char *manifestPath, wired_fs_alias_pair_t *pairs,
+	size_t *pairCount ) {
+	fileHandle_t file = FS_INVALID_HANDLE;
+	char *source = NULL;
+	int base = lua_gettop( L );
+	int length;
+	int status;
+	int filesIndex;
+	qboolean success = qfalse;
+
+	length = FS_FOpenFileRead( manifestPath, &file, qfalse );
+	if ( length < 0 || file == FS_INVALID_HANDLE ) {
+		return qtrue;
+	}
+
+	source = Z_Malloc( (size_t)length + 1 );
+	if ( FS_Read( source, length, file ) != length ) {
+		COM_ERROR( LOG_CH(ch_scripting),
+			"WiredCore/VFS: short read for %s; previous alias generation retained\n",
+			manifestPath );
+		goto cleanup;
+	}
+	source[length] = '\0';
+	FS_FCloseFile( file );
+	file = FS_INVALID_HANDLE;
+
+	status = luaL_loadbuffer( L, source, (size_t)length, manifestPath );
+	if ( status != 0 ) {
+		COM_ERROR( LOG_CH(ch_scripting),
+			"WiredCore/VFS: alias manifest compile failed (%s): %s\n",
+			manifestPath, lua_tostring( L, -1 ) );
+		goto cleanup;
+	}
+	status = lua_pcall( L, 0, 1, 0 );
+	if ( status != 0 ) {
+		COM_ERROR( LOG_CH(ch_scripting),
+			"WiredCore/VFS: alias manifest execution failed (%s): %s\n",
+			manifestPath, lua_tostring( L, -1 ) );
+		goto cleanup;
+	}
+	if ( !lua_istable( L, -1 ) ) {
+		COM_ERROR( LOG_CH(ch_scripting),
+			"WiredCore/VFS: %s must return a table\n", manifestPath );
+		goto cleanup;
+	}
+	lua_getfield( L, -1, "files" );
+	if ( !lua_istable( L, -1 ) ) {
+		COM_ERROR( LOG_CH(ch_scripting),
+			"WiredCore/VFS: %s must return a table with a files table\n",
+			manifestPath );
+		goto cleanup;
+	}
+	filesIndex = lua_gettop( L );
+	lua_pushnil( L );
+	while ( lua_next( L, filesIndex ) != 0 ) {
+		const char *sourcePath;
+		const char *targetPath;
+		size_t i;
+		qboolean duplicate = qfalse;
+
+		if ( lua_type( L, -2 ) != LUA_TSTRING
+			|| lua_type( L, -1 ) != LUA_TSTRING ) {
+			COM_ERROR( LOG_CH(ch_scripting),
+				"WiredCore/VFS: %s files entries must be string qpath pairs\n",
+				manifestPath );
+			goto cleanup;
+		}
+		sourcePath = lua_tostring( L, -2 );
+		targetPath = lua_tostring( L, -1 );
+		if ( strlen( sourcePath ) >= sizeof( pairs[0].source )
+			|| strlen( targetPath ) >= sizeof( pairs[0].target ) ) {
+			COM_ERROR( LOG_CH(ch_scripting),
+				"WiredCore/VFS: alias qpath exceeds %d bytes in %s\n",
+				WIRED_FS_ALIAS_PATH_MAX - 1, manifestPath );
+			goto cleanup;
+		}
+		for ( i = 0; i < *pairCount; i++ ) {
+			if ( Q_stricmp( pairs[i].source, sourcePath ) ) {
+				continue;
+			}
+			if ( Q_stricmp( pairs[i].target, targetPath ) ) {
+				COM_ERROR( LOG_CH(ch_scripting),
+					"WiredCore/VFS: conflicting file alias source '%s' in %s\n",
+					sourcePath, manifestPath );
+				goto cleanup;
+			}
+			duplicate = qtrue;
+			break;
+		}
+		if ( !duplicate ) {
+			if ( *pairCount >= WIRED_FS_ALIAS_MAX_ENTRIES ) {
+				COM_ERROR( LOG_CH(ch_scripting),
+					"WiredCore/VFS: merged alias manifests exceed %d entries\n",
+					WIRED_FS_ALIAS_MAX_ENTRIES );
+				goto cleanup;
+			}
+			Q_strncpyz( pairs[*pairCount].source, sourcePath,
+				sizeof( pairs[*pairCount].source ) );
+			Q_strncpyz( pairs[*pairCount].target, targetPath,
+				sizeof( pairs[*pairCount].target ) );
+			( *pairCount )++;
+		}
+		lua_pop( L, 1 );
+	}
+	success = qtrue;
+
+cleanup:
+	if ( file != FS_INVALID_HANDLE ) {
+		FS_FCloseFile( file );
+	}
+	if ( source ) {
+		Z_Free( source );
+	}
+	lua_settop( L, base );
+	return success;
+}
+
+qboolean WiredScript_ReloadFileAliases( void ) {
+	static const char *const manifestPaths[] = {
+		"fs-aliases.lua"
+	};
+	lua_State *L;
+	wired_fs_alias_pair_t *pairs = NULL;
+	char error[256];
+	int base;
+	size_t i;
+	size_t pairCount = 0;
+	qboolean success = qfalse;
+
+	if ( !s_ws || !s_ws->lua ) {
+		return qfalse;
+	}
+	L = s_ws->lua;
+	base = lua_gettop( L );
+	pairs = Z_Malloc( sizeof( *pairs ) * WIRED_FS_ALIAS_MAX_ENTRIES );
+	for ( i = 0; i < ARRAY_LEN( manifestPaths ); i++ ) {
+		if ( !WiredScript_AppendFileAliasManifest( L, manifestPaths[i], pairs,
+			&pairCount ) ) {
+			goto cleanup;
+		}
+	}
+
+	if ( !FS_InstallFileAliases( pairs, pairCount, error, sizeof( error ) ) ) {
+		COM_ERROR( LOG_CH(ch_scripting),
+			"WiredCore/VFS: alias catalog rejected (%s); previous generation retained\n",
+			error[0] ? error : "unknown validation failure" );
+		goto cleanup;
+	}
+	Com_Log( SEV_INFO, LOG_CH(ch_scripting),
+		"WiredCore/VFS: published alias generation %u with %zu exact mapping(s)\n",
+		FS_FileAliasGeneration(), pairCount );
+	success = qtrue;
+
+cleanup:
+	if ( pairs ) {
+		Z_Free( pairs );
+	}
+	lua_settop( L, base );
+	return success;
+}
+
 /* ---- Binding registration --------------------------------------------- */
 
 void WiredScript_RegisterBindings( WiredScript_BindingFn fn ) {

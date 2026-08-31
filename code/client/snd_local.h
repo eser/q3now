@@ -47,6 +47,8 @@ typedef struct sfx_s {
 	// Heap-owned path string. Set once via CopyString() in S_FindName,
 	// freed in S_Base_Shutdown. NULL only for unused slots.
 	const char		*soundName;
+	uint64_t		resourceSourceId;		// immutable VFS origin identity
+	unsigned		resourceFsGeneration;	// loose-file/reload invalidation
 	int				lastTimeUsed;
 	struct sfx_s	*next;
 

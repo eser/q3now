@@ -348,6 +348,9 @@ static qboolean SV_GetValue( char* value, int valueSize, const char* key )
 			if ( Q_stricmp( field, "display_name" ) == 0 ) {
 				return SV_Lua_GetCharacterDisplayName( charName, value, valueSize );
 			}
+			if ( Q_stricmp( field, "primary_model" ) == 0 ) {
+				return SV_Lua_GetCharacterPrimaryModel( charName, value, valueSize );
+			}
 			if ( Q_stricmp( field, "bbox" ) == 0 ) {
 				return SV_Lua_GetCharacterBBox( charName, value, valueSize );
 			}
@@ -2040,17 +2043,26 @@ static intptr_t QDECL SV_DllSyscall( intptr_t arg, ... ) {
 ===============
 SV_ShutdownGameProgs
 
-Called every time a map changes
+Full App-lifetime teardown.  Normal map changes call
+SV_ShutdownGameLevel so the VM module and its vmArena stay resident.
 ===============
 */
+void SV_ShutdownGameLevel( void ) {
+	if ( !gvm || !svs.gameLevelActive ) {
+		return;
+	}
+	VM_Call( gvm, 1, GAME_SHUTDOWN, qfalse );
+	svs.gameLevelActive = qfalse;
+	FS_VM_CloseFiles( H_QAGAME, 0 );
+}
+
 void SV_ShutdownGameProgs( void ) {
 	if ( !gvm ) {
 		return;
 	}
-	VM_Call( gvm, 1, GAME_SHUTDOWN, qfalse );
+	SV_ShutdownGameLevel();
 	VM_Free( gvm );
 	gvm = NULL;
-	FS_VM_CloseFiles( H_QAGAME, 0 );   // game VM is host-wide, not per-app (slot 0)
 }
 
 
@@ -2058,7 +2070,7 @@ void SV_ShutdownGameProgs( void ) {
 ==================
 SV_InitGameVM
 
-Called for both a full init and a restart
+Initializes one Level lifetime inside the App-owned game VM.
 ==================
 */
 static void SV_InitGameVM( qboolean restart ) {
@@ -2096,24 +2108,13 @@ Called on a map_restart, but not on a normal map change
 ===================
 */
 void SV_RestartGameProgs( void ) {
-	vm_t *restarting;
-
 	if ( !gvm ) {
 		return;
 	}
 	VM_Call( gvm, 1, GAME_SHUTDOWN, qtrue );
-
-	// VM_Restart is destructive: clear the published pointer before entering it
-	// so a load failure/longjmp cannot leave a freed VM reachable through gvm.
-	restarting = gvm;
-	gvm = NULL;
-	restarting = VM_Restart( restarting );
-	if ( !restarting ) {
-		Com_Terminate( TERM_CLIENT_DROP, "VM_Restart on game failed" );
-	}
-	gvm = restarting;
-
+	svs.gameLevelActive = qfalse;
 	SV_InitGameVM( qtrue );
+	svs.gameLevelActive = qtrue;
 
 	// load userinfo filters
 	SV_LoadFilters( sv_filter->string );
@@ -2139,16 +2140,18 @@ void SV_InitGameProgs( void ) {
 		bot_enable = 0;
 	}
 
-	// owner = an engine-owned token for the single server game VM (VM_GAME never
-	// multiplies). Pointer identity only; NOT clc.clientNum (tier rule).
-	static char sv_gameAppPrimary;
+	// The server App lifetime context is also the VM owner token. VM_GAME never
+	// multiplies; pointer identity is sufficient and carries no protocol identity.
 	// cgameInstance arg (0) is ignored for VM_GAME — the server game VM never multiplies.
-	gvm = VM_Create( VM_GAME, 0, &sv_gameAppPrimary, SV_GameSystemCalls, SV_DllSyscall, Cvar_VariableIntegerValue( "vm_game" ) );
 	if ( !gvm ) {
-		Com_Terminate( TERM_CLIENT_DROP, "VM_Create on game failed" );
+		gvm = VM_Create( VM_GAME, 0, &svs.memory, SV_GameSystemCalls, SV_DllSyscall, Cvar_VariableIntegerValue( "vm_game" ) );
+		if ( !gvm ) {
+			Com_Terminate( TERM_CLIENT_DROP, "VM_Create on game failed" );
+		}
 	}
 
 	SV_InitGameVM( qfalse );
+	svs.gameLevelActive = qtrue;
 
 	// load userinfo filters
 	SV_LoadFilters( sv_filter->string );

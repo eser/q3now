@@ -1953,11 +1953,6 @@ qboolean Hunk_CheckMark( void ) {
 	return qfalse;
 }
 
-void CL_ShutdownCGame( struct clientApp_s *app );
-void CL_ShutdownUI( void );
-int  CL_ActiveCgameInstance( void );
-void SV_ShutdownGameProgs( void );
-
 /*
 =================
 Hunk_ClearLevel
@@ -1968,21 +1963,8 @@ backEndData) live outside the hunk and are NOT affected by this call.
 =================
 */
 void Hunk_ClearLevel( void ) {
-
-#ifndef HEADLESS
-	// Scope the level-transition VM teardown to the active app (its cgame slot ==
-	// its cgameInstance). Captured before CL_ShutdownCGame frees the VM; the index
-	// is stable either way. At N>1 this leaves co-resident apps' cgame VMs intact.
-	const int activeCgameInstance = CL_ActiveCgameInstance();
-	CL_ShutdownCGame( CL_ActiveApp() );
-	CL_ShutdownUI();
-#else
-	const int activeCgameInstance = 0;
-#endif
-	SV_ShutdownGameProgs();
-#ifndef HEADLESS
-	CIN_CloseAllVideos();
-#endif
+	/* Allocation only.  App/VM/UI/video teardown belongs to their explicit
+	 * lifecycle owners and must never be hidden inside a Level allocator reset. */
 	hunk_low.mark = 0;
 	hunk_low.permanent = 0;
 	hunk_low.temp = 0;
@@ -2004,7 +1986,6 @@ void Hunk_ClearLevel( void ) {
 #endif
 
 	Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Hunk_ClearLevel: reset the hunk ok\n" );
-	VM_ClearApp( activeCgameInstance );
 #ifdef HUNK_DEBUG
 	hunkblocks = NULL;
 #endif

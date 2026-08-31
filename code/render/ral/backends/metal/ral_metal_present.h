@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define RAL_METAL_PRESENT_SCHEMA_VERSION 17u
+#define RAL_METAL_PRESENT_SCHEMA_VERSION 18u
 
 typedef struct ralMetalPresent_s ralMetalPresent_t;
 typedef struct renderSubmissionState_s renderSubmissionState_t;
@@ -96,6 +96,7 @@ typedef struct {
 	uint32_t loweredEffectSpriteCount;
 	uint32_t loweredEffectDecalCount;
 	uint32_t loweredEffectRibbonCount;
+	uint32_t loweredEffectBeamCount;
 	uint32_t effectEmitterDispatchCount;
 	uint32_t effectParticleDrawCount;
 	uint32_t effectPrimitiveDroppedCount;

@@ -746,6 +746,24 @@ qboolean RenderSubmission_GetParticleClass( const renderSubmissionState_t *state
 	return qtrue;
 }
 
+qboolean RenderSubmission_ResetEffectRegistries( renderSubmissionState_t *state )
+{
+	if ( !state || !state->initialized || !state->atmosphereReady || state->frameOpen ||
+		 state->atmosphereProfileGeneration == UINT64_MAX || state->particleClassGeneration == UINT64_MAX )
+		return qfalse;
+	memset( state->atmosphereProfiles, 0, sizeof( state->atmosphereProfiles ) );
+	memset( state->atmosphereProfileRegistered, 0, sizeof( state->atmosphereProfileRegistered ) );
+	memset( state->particleClasses, 0, sizeof( state->particleClasses ) );
+	memset( state->particleClassRegistered, 0, sizeof( state->particleClassRegistered ) );
+	state->atmosphereProfileCount = 0u;
+	state->particleClassCount = 0u;
+	state->atmosphereProfileDigest = ATMOSPHERE_FNV_OFFSET;
+	state->particleClassDigest = ATMOSPHERE_FNV_OFFSET;
+	state->atmosphereProfileGeneration++;
+	state->particleClassGeneration++;
+	return qtrue;
+}
+
 qboolean RenderSubmission_AtmosphereEffectWorkloadSnapshot( const renderSubmissionState_t *state, uint32_t maxParticles,
 															renderAtmosphereEffectWorkloadSnapshot_t *out )
 {
@@ -1126,6 +1144,37 @@ qboolean RenderSubmission_AddEffectRibbon( renderSubmissionState_t *state,
 	return qtrue;
 }
 
+qboolean RenderSubmission_AddEffectBeam( renderSubmissionState_t *state,
+		const beamDesc_t *beam )
+{
+	beamDesc_t *target;
+	if ( !state || !state->initialized || !state->frameOpen || !beam
+			|| beam->shader <= 0
+			|| state->effectBeamCount >= RENDER_SUBMISSION_MAX_EFFECT_BEAMS
+			|| !EffectVectorFinite( beam->start, 3u )
+			|| !EffectVectorFinite( beam->end, 3u )
+			|| !EffectVectorFinite( beam->startOffset, 3u )
+			|| !EffectVectorFinite( beam->endOffset, 3u )
+			|| !EffectVectorFinite( beam->uvScroll, 2u )
+			|| !isfinite( beam->startWidth ) || beam->startWidth <= 0.0f
+			|| !isfinite( beam->endWidth ) || beam->endWidth < 0.0f
+			|| !EffectColorValid( beam->startColor )
+			|| !EffectColorValid( beam->endColor )
+			|| !isfinite( beam->duration ) || beam->duration < 0.0f
+			|| !isfinite( beam->fadeIn ) || beam->fadeIn < 0.0f
+			|| !isfinite( beam->fadeOut ) || beam->fadeOut < 0.0f )
+		return EffectDrop( state );
+	target = &state->effectBeams[state->effectBeamCount++];
+	*target = *beam;
+	if ( target->axialCopies < 1 ) target->axialCopies = 1;
+	if ( target->axialCopies > 8 ) target->axialCopies = 8;
+	target->flags &= ~PRIM_FLAG_TRANSIENT;
+	if ( target->duration <= 0.0f ) target->flags |= PRIM_FLAG_TRANSIENT;
+	state->effectPrimitiveDigest = AtmosphereHashBytes(
+		state->effectPrimitiveDigest, target, sizeof( *target ) );
+	return qtrue;
+}
+
 qboolean RenderSubmission_EffectPrimitiveSnapshots(
 		const renderSubmissionState_t *state,
 		renderEffectPrimitiveSnapshot_t *outSnapshot,
@@ -1133,12 +1182,13 @@ qboolean RenderSubmission_EffectPrimitiveSnapshots(
 		const emitterDesc_t **outEmitters,
 		const decalDesc_t **outDecals,
 		const renderEffectRibbonCommand_t **outRibbons,
-		const ribbonPoint_t **outRibbonPoints )
+		const ribbonPoint_t **outRibbonPoints,
+		const beamDesc_t **outBeams )
 {
 	if ( !state || !state->initialized
 			|| ( !state->frameOpen && !state->frameSealed ) || !outSnapshot
 			|| !outSprites || !outEmitters || !outDecals || !outRibbons
-			|| !outRibbonPoints ) return qfalse;
+			|| !outRibbonPoints || !outBeams ) return qfalse;
 	memset( outSnapshot, 0, sizeof( *outSnapshot ) );
 	outSnapshot->digest = state->effectPrimitiveDigest;
 	outSnapshot->spriteCount = state->effectSpriteCount;
@@ -1146,12 +1196,14 @@ qboolean RenderSubmission_EffectPrimitiveSnapshots(
 	outSnapshot->decalCount = state->effectDecalCount;
 	outSnapshot->ribbonCount = state->effectRibbonCount;
 	outSnapshot->ribbonPointCount = state->effectRibbonPointCount;
+	outSnapshot->beamCount = state->effectBeamCount;
 	outSnapshot->droppedCount = state->effectPrimitiveDroppedCount;
 	*outSprites = state->effectSprites;
 	*outEmitters = state->effectEmitters;
 	*outDecals = state->effectDecals;
 	*outRibbons = state->effectRibbons;
 	*outRibbonPoints = state->effectRibbonPoints;
+	*outBeams = state->effectBeams;
 	return qtrue;
 }
 

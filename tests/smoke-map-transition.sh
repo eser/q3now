@@ -62,6 +62,12 @@ if [ ! -x "$PNG2RAW" ]; then
     echo "FAIL: png2raw decoder not found at $PNG2RAW (build it: make png2raw)"
     exit 1
 fi
+# All pixel gates operate in a logical 1280x720 comparison space. SDL's
+# HIGH_PIXEL_DENSITY window flag produces 2560x1440 screenshots on a 2x Retina
+# display even though the requested window is 1280x720. Decode every capture
+# through the same normalisation so row strides, split regions and golden
+# comparisons mean the same thing on 1x, 1.25x and 2x displays.
+PNG2RAW_COMPARE=( "$PNG2RAW" --size 1280x720 )
 
 # ── --self-test: prove the Phase-2 golden gate has TEETH without an engine
 # launch. Sources the REAL tiled_diff (extracted from this same file) + the real
@@ -88,7 +94,8 @@ if [ "${1:-}" = "--self-test" ]; then
     fi
 
     GOLDEN_DIR="$SMOKE_SCRIPT_DIR/golden"
-    PERTURB="${PERTURB:-$REPO_ROOT/tools/png-perturb/png-perturb.exe}"
+    PERTURB="${PERTURB:-$REPO_ROOT/tools/png-perturb/png-perturb}"
+    if [ ! -x "$PERTURB" ] && [ -x "$PERTURB.exe" ]; then PERTURB="$PERTURB.exe"; fi
     TILE_RATIO=1.5; TILE_MARGIN=5.0; TILE_FLOOR=60.0
     DIFF_TOLERANCE=30; GRID_W=8; GRID_H=8; SAMPLE_COLS=40; SAMPLE_ROWS=720
     # source the REAL tiled_diff() definition from this very file (the block
@@ -261,6 +268,10 @@ have_paks "$Q3DIR" \
 
 JSONL="$SMOKE_HOME/qconsole.jsonl"
 SCREENSHOT_DIR="$SMOKE_HOME/base/screenshots"
+SMOKE_REVIEW_DIR="${SMOKE_REVIEW_DIR:-}"
+if [ -n "$SMOKE_REVIEW_DIR" ]; then
+    mkdir -p "$SMOKE_REVIEW_DIR"
+fi
 
 # ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -271,7 +282,7 @@ SCREENSHOT_DIR="$SMOKE_HOME/base/screenshots"
 pixel_histogram() {
     local shot="$1"
     if [ ! -s "$shot" ]; then echo "zero%=100.00 mean=0.00"; return; fi
-    "$PNG2RAW" "$shot" \
+    "${PNG2RAW_COMPARE[@]}" "$shot" \
       | wired_od_bytes \
       | awk 'BEGIN{tot=0;zero=0;sum=0}
              { for (i=1;i<=NF;i++) { tot++; sum+=$i; if($i==0)zero++ } }
@@ -314,7 +325,7 @@ pixel_histogram_region() {
     local shot="$1" region="$2"
     local width="${SMOKE_FRAME_WIDTH:-1280}"
     if [ ! -s "$shot" ]; then echo "zero%=100.00 mean=0.00"; return; fi
-    "$PNG2RAW" "$shot" \
+    "${PNG2RAW_COMPARE[@]}" "$shot" \
       | wired_od_bytes \
       | awk -v region="$region" -v stride="$((width*3))" '
              BEGIN{tot=0;zero=0;sum=0;half=int(stride/2);idx=0}
@@ -385,8 +396,8 @@ SAMPLE_ROWS=720
 tiled_diff() {
     local a="$1" b="$2"
     paste -d ' ' \
-        <("$PNG2RAW" "$a" | wired_od_sample_rgb 32) \
-        <("$PNG2RAW" "$b" | wired_od_sample_rgb 32) \
+        <("${PNG2RAW_COMPARE[@]}" "$a" | wired_od_sample_rgb 32) \
+        <("${PNG2RAW_COMPARE[@]}" "$b" | wired_od_sample_rgb 32) \
       | awk -v tol="$DIFF_TOLERANCE" -v W="$SAMPLE_COLS" -v H="$SAMPLE_ROWS" \
             -v GW="$GRID_W" -v GH="$GRID_H" '
             BEGIN {
@@ -491,6 +502,7 @@ run_wired() {
             +set vm_game 0 \
             +set vm_cgame 0 \
             +set log_file_mode overwrite_synced \
+            +set con_notifytime 0 \
             +set r_mode -1 \
             +set r_customwidth 1280 \
             +set r_customheight 720 \
@@ -562,6 +574,8 @@ capture_viewpoint() {
 # no VUIDs, no FATAL). Echoes summary lines; sets FAIL_PHASE_1 on fail.
 check_jsonl_invariants() {
     local expected_markers="$1"
+    local launch_tag="${2:-}"
+    local runtime_log="$SMT_TMP/smoke-mt-$launch_tag.log"
     local fail=0
     local count
     count="$(grep -c "FIRST GAMEPLAY FRAME" "$JSONL" || true)"
@@ -570,6 +584,18 @@ check_jsonl_invariants() {
         fail=1
     else
         echo "  markers           : $count OK"
+    fi
+    # Every successfully activated map must have crossed the Level ownership
+    # barrier first. This pins the current fresh-level contract: the previous
+    # map's hunk offsets are retired and subsequent Hunk_Alloc calls rebuild
+    # zeroed state, while App/connection scopes remain alive.
+    local level_resets
+    level_resets="$(grep -c 'Hunk_ClearLevel: reset the hunk ok' "$JSONL" || true)"
+    if [ "$level_resets" -lt "$expected_markers" ]; then
+        echo "FAIL: expected at least $expected_markers Hunk_ClearLevel reset(s), got $level_resets"
+        fail=1
+    else
+        echo "  level resets      : $level_resets OK"
     fi
     if grep -q '"sev":"FATAL"' "$JSONL"; then
         echo "FAIL: engine emitted SEV_FATAL — Com_Terminate fired during the run:"
@@ -597,6 +623,45 @@ check_jsonl_invariants() {
         echo "FAIL: VM errors detected:"
         grep -E '^ERROR:|VM_Create.*failed|VM syscall error|trap_[[:alnum:]_]+[[:space:]]+syscall[[:space:]]+error' "$JSONL" | head -3 | sed 's/^/    /'
         fail=1
+    fi
+    # The visual witness is meaningful only when it uses the same role package
+    # set as run-game.  The macOS build-tree app is an intermediate skeleton;
+    # when the harness accidentally launched it, pax21-client/server and the
+    # static alias catalog were absent. Maps still reached CA_ACTIVE but drew
+    # hundreds of default-image surfaces, so the old pixel/golden gates scored
+    # a different product configuration as if it were the user's game.
+    local role_pak
+    for role_pak in pax21.sw3z pax21-client.sw3z pax21-server.sw3z; do
+        # Archive discovery precedes qconsole.jsonl creation; the per-launch
+        # stdout log is therefore the authoritative role-package witness.
+        if [ -z "$launch_tag" ] || ! grep -q "SW3Z: loaded .*${role_pak}" "$runtime_log"; then
+            echo "FAIL: canonical role package was not loaded: $role_pak"
+            fail=1
+        fi
+    done
+    if ! grep -Eq 'VFS: published alias generation [0-9]+ with [1-9][0-9]* exact mapping' "$JSONL"; then
+        echo "FAIL: fs-aliases.lua was not published (zero/missing exact mappings)"
+        fail=1
+    fi
+    if grep -qE 'R_FindImageFile could not find|R_FindShader could not find material image|CG_LoadCharacter: .* not found|sounds/.* not found, using default|s_enginePlay: could not load' "$JSONL"; then
+        echo "FAIL: runtime media fallback detected:"
+        grep -E 'R_FindImageFile could not find|R_FindShader could not find material image|CG_LoadCharacter: .* not found|sounds/.* not found, using default|s_enginePlay: could not load' "$JSONL" \
+            | head -8 | sed 's/^/    /'
+        fail=1
+    else
+        echo "  runtime media     : canonical (no image/sound fallback)"
+    fi
+    # A second gamestate legitimately replays the connection's immutable
+    # package receipt and pure policy while level-owned resources still hold
+    # scoped file handles. Exact replay must be a read-only success; a rejected
+    # receipt here means the map transition retired or mutated App/connection
+    # ownership even if a later fallback happened to render a frame.
+    if grep -qE 'client content receipt rejected|Server content failure|package receipt scope (missing|busy)' "$JSONL"; then
+        echo "FAIL: connection content scope was rejected during map transition:"
+        grep -E 'client content receipt rejected|Server content failure|package receipt scope (missing|busy)' "$JSONL" | head -3 | sed 's/^/    /'
+        fail=1
+    else
+        echo "  content scope     : retained"
     fi
     return $fail
 }
@@ -647,7 +712,7 @@ if ! run_wired "phase1" 240 \
     +quit; then
     FAIL=1
 else
-    if ! check_jsonl_invariants 2; then
+    if ! check_jsonl_invariants 2 phase1; then
         FAIL=1
     fi
     # Two screenshots expected (arena1 spawn + arena17 spawn). Both must pass C1.
@@ -659,6 +724,9 @@ else
         for i in 0 1; do
             map_label="$([ "$i" = 0 ] && echo arena1 || echo arena17)"
             check_pixel_gate "${P1_SHOTS[$i]}" "phase1 $map_label spawn" || FAIL=1
+            if [ -n "$SMOKE_REVIEW_DIR" ]; then
+                cp "${P1_SHOTS[$i]}" "$SMOKE_REVIEW_DIR/phase1_${map_label}.png"
+            fi
         done
     fi
 fi
@@ -692,7 +760,7 @@ if ! run_wired "phase1b" 240 \
     +quit; then
     FAIL=1
 else
-    if ! check_jsonl_invariants 1; then
+    if ! check_jsonl_invariants 1 phase1b; then
         FAIL=1
     fi
     mapfile -t P1B_SHOTS < <(find "$SCREENSHOT_DIR" -name '*.png' -newer "$P1B_MARKER" | sort)
@@ -703,6 +771,9 @@ else
         SPLIT_SHOT="${P1B_SHOTS[-1]}"
         check_pixel_gate_region "$SPLIT_SHOT" left  "phase1b arena1 split" || FAIL=1
         check_pixel_gate_region "$SPLIT_SHOT" right "phase1b arena1 split" || FAIL=1
+        if [ -n "$SMOKE_REVIEW_DIR" ]; then
+            cp "$SPLIT_SHOT" "$SMOKE_REVIEW_DIR/phase1b_arena1_split.png"
+        fi
     fi
 fi
 
@@ -728,16 +799,17 @@ echo "==> Phase 2 — golden-baseline parity at 5 viewpoints"
 # console echo only; the player is never teleported), so all 5 were really the
 # SAME spawn frame (cross-diff ~0.5). capture_viewpoint() now uses the real-
 # teleport recipe (+cmd noclip + +cmd setviewpos + r_pinFrameTime); each commanded
-# position was verified to actually teleport (+cmd where confirms origin) and to
-# frame distinct, non-black geometry. E_low was moved off arena17 (488 1096 200
-# -90) — that differed from D_spawn only in Z (same x,y,yaw → cross-diff 27) — to
-# (488 200 200 0), a genuinely different camera (cross-diff 217 from D_spawn).
+# position is an authored deathmatch spawn or a separately verified in-bounds
+# camera. Do not use elevated/out-of-bounds points here: a mostly-void frame can
+# pass the coarse black-pixel gate thanks to HUD/gun pixels while providing no
+# useful world/material regression coverage. B_spawn2 and E_spawn2 use distinct
+# deathmatch origins from arena1.ent / arena17.bsp respectively.
 VPS=(
     "arena1  1052 1432 50  135   A_spawn"
-    "arena1  1052 1432 300 0     B_high"
+    "arena1  216  1328 50  0     B_spawn2"
     "arena1  500  500  50  0     C_far"
     "arena17 488  1096 378 -90   D_spawn"
-    "arena17 488  200  200 0     E_low"
+    "arena17 488  -968 378 90    E_spawn2"
 )
 
 # Golden fixture directory — repo-relative.
@@ -747,6 +819,9 @@ SMOKE_UPDATE_GOLDEN="${SMOKE_UPDATE_GOLDEN:-0}"
 if [ "$SMOKE_UPDATE_GOLDEN" = "1" ]; then
     mkdir -p "$GOLDEN_DIR"
     echo "  SMOKE_UPDATE_GOLDEN=1 — re-capturing goldens into $GOLDEN_DIR (NOT diffing)"
+fi
+if [ -n "$SMOKE_REVIEW_DIR" ]; then
+    echo "  SMOKE_REVIEW_DIR — exporting current captures into $SMOKE_REVIEW_DIR (goldens untouched)"
 fi
 
 # Per-viewpoint capture protocol: THREE same-path captures. The MAX pairwise
@@ -814,7 +889,7 @@ TILE_NOISE_CEILING="${TILE_NOISE_CEILING:-35.0}"
 # ungated. The other 315 tiles still gate every viewpoint — the gate
 # remains a real regression detector everywhere except this one
 # top-mid-right cell.
-TILE_EXCLUDE="${TILE_EXCLUDE:-A_spawn:14 B_high:14 C_far:14 D_spawn:14 E_low:14}"
+TILE_EXCLUDE="${TILE_EXCLUDE:-A_spawn:14 B_spawn2:14 C_far:14 D_spawn:14 E_spawn2:14}"
 TILE_EXCLUDE_MAX="${TILE_EXCLUDE_MAX:-16}"
 
 echo "  per-tile threshold (BGR-L1 mean shift): max(tile_noise * ${TILE_RATIO} + ${TILE_MARGIN}, ${TILE_FLOOR}) where tile_noise = max pairwise meanDiff among 3 legacy captures — ANY non-excluded tile over its threshold ⇒ FAIL"
@@ -844,6 +919,14 @@ for entry in "${VPS[@]}"; do
         FAIL=1; continue
     fi
     check_pixel_gate "$shot_a" "phase2 $id current" || FAIL=1
+
+    # Review mode is intentionally orthogonal to re-blessing: preserve one
+    # current frame after the isolated homepath is retired, but never modify
+    # the committed golden fixtures.  This gives a human-ratifiable artifact
+    # for visual changes whose old baseline is known to encode broken output.
+    if [ -n "$SMOKE_REVIEW_DIR" ]; then
+        cp "$shot_a" "$SMOKE_REVIEW_DIR/${id}.png"
+    fi
 
     # Re-bless mode: overwrite the golden with the first capture, skip diff.
     # We use shot_a (not a vote-of-three) — animation phase is irrelevant to

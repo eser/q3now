@@ -45,12 +45,17 @@ require_text("code/qcommon/msg.c" "to->aimMode = MSG_ReadDeltaKey")
 require_text("code/qcommon/msg.c" "to->aimMode = from->aimMode;")
 
 # Server-authoritative primary/alt/offhand dispatch shares the same validated
-# direction and near-wall muzzle clamp. Player pose consumes that direction too.
+# direction and near-wall muzzle clamp. Pose follows aim yaw while retaining
+# authored view pitch; convergence pitch must not fold the player torso.
 require_text("code/game/g_weapon.c" "THIRD_PERSON_CENTER_AIM_MAX_DELTA")
 require_text("code/game/g_weapon.c" "G_WeaponAimVectors( ent, forward, right, up );")
 require_text("code/game/g_weapon.c" "G_ClampWeaponMuzzle( ent, ent->client->oldOrigin, muzzle );")
 require_text("code/game/weapons/g_gauntlet.c" "G_WeaponAimVectors( ent, forward, right, up );")
 require_text("code/game/weapons/g_grappling_hook.c" "G_WeaponAimVectors( ent, forward, right, up );")
 require_text("code/game/g_active.c" "G_ResolveWeaponAimAngles( ent, weaponAimAngles )")
+require_text("code/game/g_active.c" "ent->s.apos.trBase[YAW] = weaponAimAngles[YAW];")
+require_text("code/cgame/cg_ents.c" "cg.predictedPlayerEntity.currentState.apos.trBase[YAW] =")
+forbid_text("code/game/g_active.c" "VectorCopy( weaponAimAngles, ent->s.apos.trBase );")
+forbid_text("code/cgame/cg_ents.c" "VectorCopy( cg.thirdPersonCenterAimAngles,")
 
 message(STATUS "fixed-center third-person camera-to-muzzle aim policy: PASS")

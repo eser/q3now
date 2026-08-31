@@ -47,10 +47,18 @@ if [ ! -x "$SW3Z_TOOL" ]; then
 fi
 
 # ── build fixture under build/test-fixtures/dedup/ ──────────────────
-FIXTURE_ROOT="${FIXTURE_ROOT:-build/test-fixtures/dedup}"
+FIXTURE_ROOT="${FIXTURE_ROOT:-$WIRED_SOURCE/build/test-fixtures/dedup}"
 BASEPATH="$FIXTURE_ROOT/basepath"
 HOMEPATH="$FIXTURE_ROOT/homepath"
 SEED="$FIXTURE_ROOT/seed"
+PAK0_SEED="$FIXTURE_ROOT/pak0-seed"
+PAK8_SEED="$FIXTURE_ROOT/pak8-seed"
+PAX01_SEED="$FIXTURE_ROOT/pax01-seed"
+PAX21_SEED="$FIXTURE_ROOT/pax21-seed"
+SAME_PK3_SEED="$FIXTURE_ROOT/same-pk3-seed"
+SAME_SW3Z_SEED="$FIXTURE_ROOT/same-sw3z-seed"
+ROOT_INSTALL_SEED="$FIXTURE_ROOT/root-install-seed"
+ROOT_HOME_SEED="$FIXTURE_ROOT/root-home-seed"
 
 # fs_installpath is the application root. On macOS the VFS intentionally scans
 # its bundle resource root, not <install>/base; mirroring the real product
@@ -61,7 +69,11 @@ case "$(uname -s)" in
 esac
 
 rm -rf "$FIXTURE_ROOT"
-mkdir -p "$INSTALL_RESOURCE/base" "$HOMEPATH/base" "$SEED"
+mkdir -p "$INSTALL_RESOURCE/base" "$HOMEPATH/base/order" "$SEED" \
+  "$PAK0_SEED/order" "$PAK8_SEED/order" \
+  "$PAX01_SEED/order" "$PAX21_SEED/order" \
+  "$SAME_PK3_SEED/order" "$SAME_SW3Z_SEED/order" \
+  "$ROOT_INSTALL_SEED/order" "$ROOT_HOME_SEED/order"
 
 # Minimal SW3Z content: needs default.cfg so FS_Restart's
 # `FS_ReadFile("default.cfg")` post-check passes; otherwise engine
@@ -72,6 +84,35 @@ echo "// regression fixture marker — empty default.cfg" > "$SEED/default.cfg"
 echo "regression fixture for FS_DeduplicateArchives" > "$SEED/dummy.txt"
 "$SW3Z_TOOL" a "$INSTALL_RESOURCE/base/regression_dup.sw3z" "$SEED" >/dev/null
 cp "$INSTALL_RESOURCE/base/regression_dup.sw3z" "$HOMEPATH/base/regression_dup.sw3z"
+
+# Quake 3-compatible global search order matrix. Archive names sort descending;
+# equal basenames retain discovery priority (SW3Z over PK3, home over install),
+# and archives remain ahead of loose files.
+echo "echo pak0-loses" > "$PAK0_SEED/order/q3-pak.cfg"
+( cd "$PAK0_SEED" && cmake -E tar cf \
+  "$INSTALL_RESOURCE/base/pak0.pk3" --format=zip order/q3-pak.cfg )
+echo "echo pak8-wins" > "$PAK8_SEED/order/q3-pak.cfg"
+echo "echo pak-loses" > "$PAK8_SEED/order/pax-over-pak.cfg"
+( cd "$PAK8_SEED" && cmake -E tar cf \
+  "$INSTALL_RESOURCE/base/pak8.pk3" --format=zip \
+  order/q3-pak.cfg order/pax-over-pak.cfg )
+echo "echo pax01-loses" > "$PAX01_SEED/order/pax.cfg"
+"$SW3Z_TOOL" a "$INSTALL_RESOURCE/base/pax01.sw3z" "$PAX01_SEED" >/dev/null
+echo "echo pax21-wins" > "$PAX21_SEED/order/pax.cfg"
+echo "echo pax-wins" > "$PAX21_SEED/order/pax-over-pak.cfg"
+echo "echo archive-wins" > "$PAX21_SEED/order/archive-over-loose.cfg"
+"$SW3Z_TOOL" a "$INSTALL_RESOURCE/base/pax21.sw3z" "$PAX21_SEED" >/dev/null
+echo "echo pk3-loses" > "$SAME_PK3_SEED/order/container.cfg"
+( cd "$SAME_PK3_SEED" && cmake -E tar cf \
+  "$HOMEPATH/base/same.pk3" --format=zip order/container.cfg )
+echo "echo sw3z-wins" > "$SAME_SW3Z_SEED/order/container.cfg"
+"$SW3Z_TOOL" a "$HOMEPATH/base/same.sw3z" "$SAME_SW3Z_SEED" >/dev/null
+echo "echo install-loses" > "$ROOT_INSTALL_SEED/order/root.cfg"
+"$SW3Z_TOOL" a "$INSTALL_RESOURCE/base/zzroot.sw3z" \
+  "$ROOT_INSTALL_SEED" >/dev/null
+echo "echo home-wins" > "$ROOT_HOME_SEED/order/root.cfg"
+"$SW3Z_TOOL" a "$HOMEPATH/base/zzroot.sw3z" "$ROOT_HOME_SEED" >/dev/null
+echo "echo loose-loses" > "$HOMEPATH/base/order/archive-over-loose.cfg"
 
 # ── convert to engine-readable paths ────────────────────────────────────────
 # Engine on Windows expects Windows-native paths; on Unix accepts as-is.
@@ -100,6 +141,13 @@ set +e
 "$DED" \
   +set fs_installpath "$BASEPATH_NATIVE" \
   +set fs_homepath "$HOMEPATH_NATIVE" \
+  +set fs_debug 1 \
+  +exec order/q3-pak.cfg \
+  +exec order/pax.cfg \
+  +exec order/pax-over-pak.cfg \
+  +exec order/container.cfg \
+  +exec order/root.cfg \
+  +exec order/archive-over-loose.cfg \
   +quit \
   >"$LOGFILE" 2>&1
 EC=$?
@@ -134,9 +182,21 @@ fi
 # (a-extended) dedup log line MUST be present — proves we exercised the
 # FS_DeduplicateArchives code path with an actual duplicate.
 # Exact format from files.c: "FS_Precedence: removed N duplicate archives, M unique remain"
-if ! grep -qE "FS_Precedence: removed 1 duplicate archives" "$LOGFILE"; then
-  fail "expected 'FS_Precedence: removed 1 duplicate archives' log line not found"
+if ! grep -qE "FS_Precedence: removed [1-9][0-9]* duplicate archives" "$LOGFILE"; then
+  fail "expected archive-deduplication log line not found"
 fi
 
-echo "PASS: FS dedup smoke — clean exit, dedup line present, no Z_Free crash"
+for expected in \
+  "FS_FOpenFileRead: order/q3-pak.cfg.*pak8.pk3" \
+  "FS_FOpenFileRead: order/pax.cfg.*pax21.sw3z" \
+  "FS_FOpenFileRead: order/pax-over-pak.cfg.*pax21.sw3z" \
+  "FS_FOpenFileRead: order/container.cfg.*same.sw3z" \
+  "FS_FOpenFileRead: order/root.cfg.*homepath.*zzroot.sw3z" \
+  "FS_FOpenFileRead: order/archive-over-loose.cfg.*pax21.sw3z"; do
+  if ! grep -q "$expected" "$LOGFILE"; then
+    fail "global archive precedence mismatch: $expected"
+  fi
+done
+
+echo "PASS: FS global archive order/dedup — Q3 basename, container/root tie and archive precedence"
 exit 0

@@ -9,6 +9,7 @@
 #include <setjmp.h>
 #include "cm_public.h"
 #include "q_feats.h"
+#include "wired/core/vfs/fs_alias.h"
 #include "wired/core/time/time.h"   /* Sys_NanoTime, Sys_Microseconds, Sys_Milliseconds,
                                        Com_RealTime, Com_RealTimeMs, Com_FormatTimestamp */
 
@@ -377,7 +378,6 @@ void	VM_Free( vm_t *vm );
 typedef void (*vmTeardownCallback_t)( void *owner );
 void	VM_RegisterTeardownCallback( vm_t *vm, void *owner, vmTeardownCallback_t cleanup );
 
-void	VM_ClearApp(int cgameInstance);
 void	VM_Forced_Unload_Start(void);
 void	VM_Forced_Unload_Done(void);
 vm_t	*VM_Restart( vm_t *vm );
@@ -604,8 +604,18 @@ cvar_t *Cvar_Get( const char *var_name, const char *value, int flags );
 // that allows variables to be unarchived without needing bitflags
 // if value is "", the value will not override a previously set value.
 
+cvar_t *Cvar_GetScoped( cvarScopeId_t scopeId, const char *var_name,
+	const char *value, int flags );
+// Lifecycle-only registration for mod-owned cvars. A scope may adopt a
+// console/config-created placeholder, but never a global or foreign registered
+// cvar. Name lookup remains the existing single global hash lookup.
+
 void	Cvar_VM_Register( vmCvar_t *vmCvar, const char *varName, const char *defaultValue, int flags, int privateFlag );
 // slightly modified Cvar_Get for the interpreted modules (game/cgame VM syscall path)
+
+void	Cvar_VM_RegisterScoped( cvarScopeId_t scopeId, vmCvar_t *vmCvar,
+	const char *varName, const char *defaultValue, int flags, int privateFlag );
+// scoped variant used when a VM is attached to a non-global mod lifecycle.
 
 cvar_t *Cvar_Register( const cvarDesc_t *desc );
 // single-call typed registration: name, default, description, flags, type, range,
@@ -661,6 +671,10 @@ void	Cvar_CommandCompletion( void(*callback)(const char *s) );
 
 void 	Cvar_Reset( const char *var_name );
 void 	Cvar_ForceReset(const char *var_name);
+
+unsigned Cvar_UnsetScope( cvarScopeId_t scopeId );
+// Removes every cvar owned by scopeId in one lifecycle sweep. Call only after
+// the owning VM/script modules have detached; scope 0 is rejected.
 
 void	Cvar_CheatsWereDisabled( void );
 // reset all testing vars to a safe value
@@ -768,6 +782,91 @@ typedef struct fileInPack_s {
 } fileInPack_t;
 
 qboolean FS_Initialized( void );
+
+typedef enum {
+	FS_RESOURCE_SOURCE_LOOSE = 0,
+	FS_RESOURCE_SOURCE_PK3,
+	FS_RESOURCE_SOURCE_SW3Z
+} fsResourceSourceKind_t;
+
+typedef struct {
+	char canonicalPath[MAX_VFS_PATH];
+	uint64_t sourceId;
+	uint64_t size;
+	unsigned fsGeneration;
+	fsResourceSourceKind_t sourceKind;
+} fsResolvedResource_t;
+
+typedef uint32_t fsMountScopeId_t;
+#define FS_MOUNT_SCOPE_GLOBAL ((fsMountScopeId_t)0u)
+
+typedef enum {
+	FS_MOUNT_ROLE_GLOBAL = 0,
+	FS_MOUNT_ROLE_RUNTIME,
+	FS_MOUNT_ROLE_TOOLCHAIN,
+	FS_MOUNT_ROLE_SERVER,
+	FS_MOUNT_ROLE_CLIENT,
+	FS_MOUNT_ROLE_SHARED,
+	FS_MOUNT_ROLE_COSMETIC
+} fsMountRole_t;
+
+typedef enum {
+	FS_MOUNT_OK = 0,
+	FS_MOUNT_INVALID_ARGUMENT,
+	FS_MOUNT_SCOPE_ALREADY_EXISTS,
+	FS_MOUNT_SCOPE_NOT_FOUND,
+	FS_MOUNT_SCOPE_BUSY,
+	FS_MOUNT_LIFECYCLE_UNAVAILABLE,
+	FS_MOUNT_ALIAS_RELOAD_FAILED
+} fsMountResult_t;
+
+/* A scope policy can only narrow the process-global pure policy. The checksum
+ * array is copied during the lifecycle call and may be released on return. */
+typedef struct {
+	const int *approvedChecksums;
+	size_t approvedChecksumCount;
+	qboolean denyLoose;
+} fsMountPurePolicy_t;
+
+typedef struct {
+	const char *archivePath;
+	const char *sha256;
+	uint64_t size;
+	fsMountRole_t role;
+	qboolean clientApproved;
+} fsMountPackageReceipt_t;
+
+/* Resolve aliases and searchpath precedence before a file-backed resource
+ * registry hashes its key. This does not open a mutable file cursor. */
+qboolean FS_ResolveResource( const char *qpath, fsResolvedResource_t *out );
+
+/* Transactional catalog publication used by the trusted Lua manifest loader. */
+qboolean FS_InstallFileAliases( const wired_fs_alias_pair_t *pairs,
+	size_t pairCount, char *error, size_t errorSize );
+void FS_ClearFileAliases( void );
+unsigned FS_FileAliasGeneration( void );
+
+/* Lifecycle-bound scoped mutation. Callers must use a non-global scope and
+ * perform registration/retirement outside the frame hot path. Unmount and
+ * changed receipt/policy publication are fail-closed while the scope owns an
+ * open file handle; exact immutable receipt/policy replay is a read-only,
+ * idempotent operation and is therefore legal during a map transition. */
+fsMountResult_t FS_MountLayer( const char *path, const char *dir,
+	fsMountScopeId_t scopeId, fsMountRole_t role );
+fsMountResult_t FS_UnmountScope( fsMountScopeId_t scopeId,
+	unsigned *outLiveHandleCount );
+fsMountResult_t FS_SetScopePurePolicy( fsMountScopeId_t scopeId,
+	const fsMountPurePolicy_t *policy, unsigned *outLiveHandleCount );
+qboolean FS_ApplyScopePackageReceipts( fsMountScopeId_t scopeId,
+	const fsMountPackageReceipt_t *receipts, size_t receiptCount,
+	int *approvedChecksums, size_t approvedCapacity, size_t *outApprovedCount,
+	size_t *outScopedArchiveCount, char *error, size_t errorSize );
+qboolean FS_ApplyGlobalPackageReceipts( const fsMountPackageReceipt_t *receipts,
+	size_t receiptCount, char *error, size_t errorSize );
+/* Apply a server-provided pure checksum feed without rebuilding the VFS.
+ * This is a lifecycle operation owned by the focused connection; it updates
+ * already-mounted archives in one bounded searchpath sweep. */
+void FS_SetPureChecksumFeed( int checksumFeed );
 
 void	FS_InitFilesystem ( void );
 void	FS_Shutdown( qboolean closemfp );
@@ -892,6 +991,8 @@ qboolean FS_FilenameCompare( const char *s1, const char *s2 );
 
 const char *FS_LoadedPakNames( void );
 const char *FS_LoadedPakChecksums( qboolean *overflowed );
+const char *FS_LoadedPakChecksumsForRole( fsMountRole_t consumer,
+	qboolean *overflowed );
 // Returns a space separated string containing the checksums of all loaded pk3 files.
 // Servers with sv_pure set will get this string and pass it to clients.
 
@@ -1327,6 +1428,7 @@ unsigned int Com_TouchMemory( void );
 /* Per-subsystem persistent arena allocators.
    Use instead of Hunk_Alloc for state that must survive Hunk_ClearLevel(). */
 #include "arena.h"
+#include "app_memory.h"
 
 // commandLine should not include the executable name (argv[0])
 void Com_Init( char *commandLine );
@@ -1362,7 +1464,9 @@ void CL_Characters_Init( void );  // must run before SV_Init (before BotLua prel
 void CL_AbortFrame( void );
 qboolean CL_DemoPlaying( void );
 qboolean CL_Disconnect( struct clientApp_s *app, qboolean showMainMenu );
-void CL_ResetOldGame( void );
+/* Preserve a recoverable pre-CA_ACTIVE failure across renderer/UI teardown.
+ * Returns qtrue only when the focused app is in a connection/loading state. */
+qboolean CL_DeferLoadingErrorPopup( struct clientApp_s *app, const char *message );
 void CL_Shutdown( const char *finalmsg, qboolean quit );
 void CL_Frame( int msec, int realMsec );
 void CL_DownloadsComplete_Tick( void ); /* advance one phase of the async load state machine */

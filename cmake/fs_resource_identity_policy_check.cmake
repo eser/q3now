@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
+if(NOT DEFINED SOURCE_ROOT)
+	message(FATAL_ERROR "SOURCE_ROOT is required")
+endif()
+
+function(require_text relative needle)
+	file(READ "${SOURCE_ROOT}/${relative}" text)
+	string(FIND "${text}" "${needle}" found)
+	if(found EQUAL -1)
+		message(FATAL_ERROR "${relative} lost canonical resource identity seam: ${needle}")
+	endif()
+endfunction()
+
+function(reject_text relative needle)
+	file(READ "${SOURCE_ROOT}/${relative}" text)
+	string(FIND "${text}" "${needle}" found)
+	if(NOT found EQUAL -1)
+		message(FATAL_ERROR "${relative} retained implicit resource spelling: ${needle}")
+	endif()
+endfunction()
+
+require_text("code/qcommon/qcommon.h" "qboolean FS_ResolveResource(")
+require_text("code/qcommon/wired/core/vfs/files.c" "FS_ResolveResourceDirect")
+require_text("code/qcommon/wired/core/vfs/files.c" "fs_aliasCatalogMutex")
+require_text("code/qcommon/wired/core/vfs/files.c" "FS_LockAliasCatalog")
+require_text("code/qcommon/wired/core/vfs/files.c" "Sys_MutexDestroy( &fs_aliasCatalogMutex )")
+require_text("code/client/snd_dma.c" "resourceSourceId")
+require_text("code/client/snd_codec.c" "FS_ResolveResource( filename, &resolved )")
+require_text("code/render/frontend/tr_public.h" "(*FS_ResolveResource)")
+require_text("code/client/cl_main.c" "rimp.FS_ResolveResource = CL_RefResolveResource")
+require_text("code/render/ral/backends/vulkan/renderer/tr_image.c" "ri.FS_ResolveResource")
+require_text("code/render/ral/backends/vulkan/renderer/tr_model.c" "ri.FS_ResolveResource")
+require_text("code/render/ral/backends/opengl/ral_opengl_module.c" "FS_ResolveResource")
+require_text("code/render/ral/backends/metal/ral_metal_module.mm" "FS_ResolveResource")
+require_text("code/render/ral/backends/webgpu/ral_webgpu_renderer_module.c" "FS_ResolveResource")
+require_text("code/render/frontend/tr_font.c" "ri.FS_ResolveResource")
+require_text("code/client/wired/ui/cl_wired_parse.c" "FS_ResolveResource")
+reject_text("code/client/snd_codec.c" "COM_StripExtension")
+reject_text("code/render/frontend/r_image_probe.c" "COM_StripExtension")
+
+file(READ "${SOURCE_ROOT}/code/qcommon/wired/core/vfs/files.c" vfs)
+string(REGEX MATCHALL "wired_fs_alias_resolve" resolver_uses "${vfs}")
+list(LENGTH resolver_uses resolver_use_count)
+if(NOT resolver_use_count EQUAL 2)
+	message(FATAL_ERROR
+		"read aliases must remain confined to resolve/read paths; expected 2 resolver calls, got ${resolver_use_count}")
+endif()
+
+message(STATUS "canonical VFS resource identity policy: PASS")

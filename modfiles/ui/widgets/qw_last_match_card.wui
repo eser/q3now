@@ -115,7 +115,7 @@ itemDef {
 			alignY center
 			gap 0.004
 			grow 0
-			itemDef { type 0 width FIXED 1.6vw height FIXED 2.4vh height FIT width PERCENT 1.6vw background "ui/assets/medal_excellent" decoration visible 1 grow 0 }
+				itemDef { type 0 width FIXED 1.6vw height FIXED 2.4vh height FIT width PERCENT 1.6vw background "ui/assets/medal_excellent.png" decoration visible 1 grow 0 }
 			itemDef { type 0 width FIXED 14vw height FIXED 2vh height FIT width PERCENT 14vw  text "EXCELLENT" textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
 		}
 		itemDef {
@@ -126,7 +126,7 @@ itemDef {
 			alignY center
 			gap 0.004
 			grow 0
-			itemDef { type 0 width FIXED 1.6vw height FIXED 2.4vh height FIT width PERCENT 1.6vw background "ui/assets/medal_accuracy" decoration visible 1 grow 0 }
+				itemDef { type 0 width FIXED 1.6vw height FIXED 2.4vh height FIT width PERCENT 1.6vw background "ui/assets/medal_accuracy.png" decoration visible 1 grow 0 }
 			itemDef { type 0 width FIXED 14vw height FIXED 2vh height FIT width PERCENT 14vw  text "HEADSHOT"  textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
 		}
 		itemDef {
@@ -137,7 +137,7 @@ itemDef {
 			alignY center
 			gap 0.004
 			grow 0
-			itemDef { type 0 width FIXED 1.6vw height FIXED 2.4vh height FIT width PERCENT 1.6vw background "ui/assets/medal_perfect" decoration visible 1 grow 0 }
+				itemDef { type 0 width FIXED 1.6vw height FIXED 2.4vh height FIT width PERCENT 1.6vw background "ui/assets/medal_perfect.png" decoration visible 1 grow 0 }
 			itemDef { type 0 width FIXED 14vw height FIXED 2vh height FIT width PERCENT 14vw  text "PERFECT"   textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
 		}
 	}

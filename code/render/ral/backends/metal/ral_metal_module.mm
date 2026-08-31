@@ -39,7 +39,10 @@ typedef struct {
 	ralMetalLighting_t *directionalLighting;
 	ralMetalLightingReceipt_t directionalLightingReceipt;
 	const mapFile_t *loadedWorld;
+	const mapFile_t *loadedWorlds[MAX_RENDER_WORLDS];
 	const char *entityParsePoint;
+	const char *entityParsePoints[MAX_RENDER_WORLDS];
+	int activeWorldIndex;
 	glconfig_t config;
 	uint64_t moduleGeneration;
 	uint64_t nextGeneration;
@@ -492,8 +495,9 @@ static qhandle_t RegisterMaterialImageSourceInternal( renderAssetKind_t kind,
 	}
 	if ( imageName && imageName[0] != '*'
 			&& RenderImage_DecodeRgba8( imageName, &pixels, &width, &height, resolved ) ) {
+		const char *identityName = scripted.name[0] ? name : resolved;
 		handle = RenderSubmission_RegisterMaterialImage( &s_module.frontend,
-			kind, name, clampToEdge, pixels, width, height );
+			kind, identityName, clampToEdge, pixels, width, height );
 		ri.Free( pixels );
 		/* Keep valid geometry renderable when the bounded CPU material snapshot
 		 * budget is exhausted. The unresolved image path already uses a neutral
@@ -558,6 +562,7 @@ static qhandle_t RegisterModel( const char *name ) {
 	renderModelSnapshot_t model;
 	qhandle_t handle;
 	int byteCount;
+	char canonical[MAX_QPATH];
 	if ( !name || !name[0] ) return 0;
 	if ( name[0] == '*' && s_module.loadedWorld ) {
 		char *end = NULL;
@@ -569,6 +574,8 @@ static qhandle_t RegisterModel( const char *name ) {
 				(uint32_t)model->firstSurface, (uint32_t)model->numSurfaces );
 		}
 	}
+	if ( ri.FS_ResolveResource && ri.FS_ResolveResource( name, canonical,
+			sizeof( canonical ), NULL, NULL, NULL ) ) name = canonical;
 	if ( !ri.FS_ReadFile || !ri.FS_FreeFile )
 		return RegisterAsset( RENDER_ASSET_MODEL, name );
 	byteCount = ri.FS_ReadFile( name, &bytes );
@@ -715,9 +722,36 @@ static void SubmitWorld( const mapFile_t *bsp, int worldIndex ) {
 			|| !UploadDirectionalLighting() )
 		MarkFailed( "frontend-world" );
 	else {
+		s_module.loadedWorlds[worldIndex] = bsp;
+		s_module.entityParsePoints[worldIndex] = bsp ? bsp->entityString : NULL;
+		s_module.activeWorldIndex = worldIndex;
 		s_module.loadedWorld = bsp;
 		s_module.entityParsePoint = bsp ? bsp->entityString : NULL;
 	}
+}
+static qboolean SelectWorld( int worldIndex ) {
+	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS
+			|| !s_module.loadedWorlds[worldIndex]
+			|| !RenderSubmission_SelectWorld( &s_module.frontend, worldIndex ) ) return qfalse;
+	s_module.activeWorldIndex = worldIndex;
+	s_module.loadedWorld = s_module.loadedWorlds[worldIndex];
+	s_module.entityParsePoint = s_module.entityParsePoints[worldIndex];
+	return qtrue;
+}
+static qboolean UnloadWorld( int worldIndex ) {
+	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS
+			|| !RenderSubmission_UnloadWorld( &s_module.frontend, worldIndex ) ) return qfalse;
+	s_module.loadedWorlds[worldIndex] = NULL;
+	s_module.entityParsePoints[worldIndex] = NULL;
+	if ( s_module.activeWorldIndex == worldIndex ) {
+		s_module.loadedWorld = NULL; s_module.entityParsePoint = NULL;
+		for ( int i = 0; i < MAX_RENDER_WORLDS; ++i )
+			if ( s_module.loadedWorlds[i] ) { (void)SelectWorld( i ); break; }
+	}
+	return qtrue;
+}
+static int ResidentWorldCount( void ) {
+	return RenderSubmission_ResidentWorldCount( &s_module.frontend );
 }
 static qboolean CookLightingProject( const char *derivedRoot ) {
 	renderLightingProjectCookRequest_t request;
@@ -832,7 +866,10 @@ static void SubmitRibbon( const ribbonDesc_t *desc ) {
 		MarkFailed( "frontend-effect-ribbon" );
 }
 static void NoopRailRibbon( const railRibbonDesc_t *desc ) { (void)desc; }
-static void NoopBeam( const beamDesc_t *desc ) { (void)desc; }
+static void SubmitBeam( const beamDesc_t *desc ) {
+	if ( !RenderSubmission_AddEffectBeam( &s_module.frontend, desc ) )
+		MarkFailed( "frontend-effect-beam" );
+}
 static void SubmitSprite( const spriteDesc_t *desc ) {
 	if ( !RenderSubmission_AddEffectSprite( &s_module.frontend, desc ) )
 		MarkFailed( "frontend-effect-sprite" );
@@ -1525,6 +1562,8 @@ static void Shutdown( refShutdownCode_t code ) {
 	if ( code == REF_LEVEL_ONLY ) {
 		s_module.loadedWorld = NULL;
 		s_module.entityParsePoint = NULL;
+		if ( !RenderSubmission_ResetEffectRegistries( &s_module.frontend ) )
+			MarkFailed( "level-effect-registry-reset" );
 		return;
 	}
 	s_module.registered = qfalse;
@@ -1676,11 +1715,13 @@ static void FillExports( refexport_t *exports ) {
 	exports->RegisterShaderLightMap = RegisterLightMap; exports->RegisterMSDFShader = RegisterMsdf;
 	exports->RegisterPrimitiveShader = RegisterPrimitiveMaterial; exports->PinShaderImages = NoopHandle;
 	exports->LoadWorld = SubmitWorld; exports->SetWorldVisData = NoopBytes;
+	exports->SelectWorld = SelectWorld; exports->UnloadWorld = UnloadWorld;
+	exports->ResidentWorldCount = ResidentWorldCount;
 	exports->EndRegistration = EndRegistration; exports->ClearScene = SubmitClearScene;
 	exports->AddRefEntityToScene = SubmitEntity; exports->AddPolyToScene = SubmitPoly;
 	exports->LightForPoint = NoLight; exports->AddLightToScene = NoopLight;
 	exports->AddAdditiveLightToScene = NoopLight; exports->AddLinearLightToScene = NoopLinearLight;
-	exports->AddRibbonToScene = SubmitRibbon; exports->AddBeamToScene = NoopBeam;
+	exports->AddRibbonToScene = SubmitRibbon; exports->AddBeamToScene = SubmitBeam;
 	exports->AddSpriteToScene = SubmitSprite; exports->EmitParticles = SubmitEmitter;
 	exports->AddDecalToScene = SubmitDecal; exports->RegisterParticleClass = SubmitParticleClass;
 	exports->SetAtmosphere = SubmitAtmosphere; exports->SetAtmosphereHeightgrid = NoopHeightgrid;

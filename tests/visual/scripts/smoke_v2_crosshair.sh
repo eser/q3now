@@ -2,7 +2,7 @@
 # Dispatch 5.30 S2: crosshair live-play functional smoke.
 # Boots arena1 and screenshots the LIVE player view (NO setviewpos) so the
 # crosshair draws (the frozen setviewpos capture state suppresses it). Confirms
-# the 5.29 S2 filled asset + S3 cg_crosshairColor amber actually render.
+# the Lua-authored procedural reticle and cg_crosshairColor amber actually render.
 set -euo pipefail
 MODE="${MODE:-dark}"
 ACCENT="${ACCENT:-cyan}"

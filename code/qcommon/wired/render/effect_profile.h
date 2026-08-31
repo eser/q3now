@@ -15,7 +15,7 @@ profile can cross the native/WASM seam once at registration time.
 #include "../../q_shared.h"
 
 #define WIRED_FX_PROFILE_SCHEMA_VERSION 1u
-#define WIRED_FX_EVENT_SCHEMA_VERSION 1u
+#define WIRED_FX_EVENT_SCHEMA_VERSION 3u
 #define WIRED_FX_MAX_ACTIONS 32u
 #define WIRED_FX_MAX_PROFILES 64u
 #define WIRED_FX_MAX_ENV_RENDER_PARMS 16u
@@ -26,6 +26,27 @@ profile can cross the native/WASM seam once at registration time.
 #define WIRED_FX_PROFILE_ROCKET_EXPLOSION 1u
 #define WIRED_FX_PROFILE_ROCKET_DETONATION 2u
 #define WIRED_FX_PROFILE_ROCKET_UNDERWATER 3u
+#define WIRED_FX_PROFILE_ROCKET_TRAIL 4u
+#define WIRED_FX_PROFILE_GRENADE_TRAIL 5u
+#define WIRED_FX_PROFILE_GRENADE_EXPLOSION 6u
+#define WIRED_FX_PROFILE_GRENADE_UNDERWATER 7u
+#define WIRED_FX_PROFILE_MACHINEGUN_IMPACT 8u
+#define WIRED_FX_PROFILE_MACHINEGUN_IMPACT_REDUCED 9u
+#define WIRED_FX_PROFILE_SHOTGUN_IMPACT 10u
+#define WIRED_FX_PROFILE_SHOTGUN_IMPACT_REDUCED 11u
+#define WIRED_FX_PROFILE_MACHINEGUN_TRACER 12u
+#define WIRED_FX_PROFILE_MACHINEGUN_FIRE 13u
+#define WIRED_FX_PROFILE_SHOTGUN_FIRE 14u
+#define WIRED_FX_PROFILE_SHOTGUN_FIRE_WIDE 15u
+#define WIRED_FX_PROFILE_GRENADE_FIRE 16u
+#define WIRED_FX_PROFILE_ROCKET_FIRE 17u
+#define WIRED_FX_PROFILE_WEAPON_WATER_TRAIL 18u
+#define WIRED_FX_PROFILE_WEAPON_WATER_SPLASH 19u
+#define WIRED_FX_PROFILE_ROCKET_FLIGHT 20u
+#define WIRED_FX_PROFILE_GRENADE_BOUNCE 21u
+#define WIRED_FX_PROFILE_SHOTGUN_SMOKE 22u
+#define WIRED_FX_PROFILE_SHOTGUN_SMOKE_WIDE 23u
+#define WIRED_FX_PROFILE_WORLD_EARTHQUAKE 24u
 
 typedef enum {
 	WIRED_FX_ACTION_LIGHT = 0,
@@ -45,6 +66,10 @@ typedef enum {
 	WIRED_FX_ACTION_RIBBON,
 	WIRED_FX_ACTION_FADE_PARENT,
 	WIRED_FX_ACTION_GODRAY,
+	WIRED_FX_ACTION_SPRITE,
+	/* Wired extension: a two-point, engine-managed persistent primitive. Unlike
+	 * transient ribbon strips, a beam is submitted once and owns its lifetime. */
+	WIRED_FX_ACTION_BEAM,
 	WIRED_FX_ACTION_COUNT
 } wiredFxActionType_t;
 
@@ -52,7 +77,8 @@ typedef enum {
 	WIRED_FX_ORIGIN_START = 0,
 	WIRED_FX_ORIGIN_TRACK,
 	WIRED_FX_ORIGIN_TRACK_LOCAL,
-	WIRED_FX_ORIGIN_EXTERNAL
+	WIRED_FX_ORIGIN_EXTERNAL,
+	WIRED_FX_ORIGIN_MIDPOINT
 } wiredFxOriginType_t;
 
 typedef enum {
@@ -66,6 +92,13 @@ typedef enum {
 	WIRED_FX_ROTATION_EXPLICIT_CURVES_LOCAL,
 	WIRED_FX_ROTATION_EXTERNAL
 } wiredFxRotationType_t;
+
+typedef enum {
+	WIRED_FX_PATH_SAMPLING_CENTERED = 0,
+	WIRED_FX_PATH_SAMPLING_ENDPOINT,
+	WIRED_FX_PATH_SAMPLING_RANDOM_SPACING,
+	WIRED_FX_PATH_SAMPLING_COUNT
+} wiredFxPathSampling_t;
 
 #define WIRED_FX_ACTION_RESTART                 0x00000001u
 #define WIRED_FX_ACTION_LOOP                    0x00000002u
@@ -84,6 +117,16 @@ typedef struct {
 	uint32_t material;
 	float radius[3];
 	float intensity;
+	float radiusJitter;
+	/* Optional presentation lifetime. Zero inherits the profile duration. */
+	float lifetime;
+	/* Optional backdated start, shared with sprite timing for legacy
+	 * explosion recipes whose visual and light lived on one local entity. */
+	float startTimeJitter;
+	/* Zero keeps continuous sampling; values >= 2 quantize the inclusive
+	 * [0, radiusJitter] range for legacy recipes that used integer jitter. */
+	uint32_t radiusJitterSteps;
+	uint32_t startTimeJitterSteps;
 } wiredFxLightAction_t;
 
 typedef struct {
@@ -94,7 +137,8 @@ typedef struct {
 	float spawnRate;
 	float trailSpacing;
 	float screenExcludeAngle;
-	uint32_t reserved;
+	uint32_t rateBoundaryAligned;
+	uint32_t pathSampling;
 } wiredFxParticleAction_t;
 
 typedef struct {
@@ -112,6 +156,10 @@ typedef struct {
 typedef struct {
 	uint32_t sound;
 	int32_t channel;
+	uint32_t looping; // entity-bound looping sound; zero remains one-shot
+	/* One-shot spatialization follows the event source entity instead of using
+	 * the event's fixed world origin. Requires HAS_SOURCE_ENTITY at dispatch. */
+	uint32_t sourceBound;
 } wiredFxSoundAction_t;
 
 typedef struct {
@@ -119,6 +167,9 @@ typedef struct {
 	float controllerScale;
 	float maxAngles[3];
 	float maxOffset[3];
+	float radius;
+	float decayExponent;
+	uint32_t mode;
 } wiredFxScreenShakeAction_t;
 
 typedef struct {
@@ -158,7 +209,31 @@ typedef struct {
 
 typedef struct {
 	uint32_t ribbon;
+	float width;
+	float endWidth;
+	uint32_t count;
+	float length[2];
+	float normalScale[2];
+	float spread;
+	float lifetime;
+	float fadeOut;
+	float startColor[4];
+	float endColor[4];
 } wiredFxRibbonAction_t;
+
+typedef struct {
+	uint32_t material;
+	float radius[2];
+	float velocity[3];
+	/* Optional action-local visual lifetime. Zero inherits profile duration. */
+	float lifetime;
+	/* Advances the complete sprite lifecycle, matching legacy explosion start-time
+	 * skew without making the shader clock disagree with radius/alpha. */
+	float startTimeJitter;
+	/* Zero keeps continuous sampling; values >= 2 quantize the inclusive range. */
+	uint32_t startTimeJitterSteps;
+	uint32_t randomRotation;
+} wiredFxSpriteAction_t;
 
 typedef struct {
 	uint32_t material;
@@ -183,6 +258,7 @@ typedef union {
 	wiredFxRadialBlurAction_t radialBlur;
 	wiredFxRibbonAction_t ribbon;
 	wiredFxGodrayAction_t godray;
+	wiredFxSpriteAction_t sprite;
 } wiredFxActionPayload_t;
 
 typedef struct {
@@ -233,12 +309,24 @@ typedef struct {
 #define WIRED_FX_EVENT_HAS_VELOCITY   0x00000002u
 #define WIRED_FX_EVENT_UNDERWATER     0x00000004u
 #define WIRED_FX_EVENT_FREE_AIR       0x00000008u
+#define WIRED_FX_EVENT_HAS_SOURCE_ENTITY 0x00000010u
+#define WIRED_FX_EVENT_HAS_SHAKE_OVERRIDE 0x00000020u
 
 #define WIRED_FX_CONDITION_MATERIAL_DEFAULT 0x0000000000000001ull
 #define WIRED_FX_CONDITION_MATERIAL_METAL   0x0000000000000002ull
 #define WIRED_FX_CONDITION_MATERIAL_FLESH   0x0000000000000004ull
 #define WIRED_FX_CONDITION_UNDERWATER       0x0000000000000008ull
 #define WIRED_FX_CONDITION_FREE_AIR         0x0000000000000010ull
+#define WIRED_FX_CONDITION_MATERIAL_DUST    0x0000000000000020ull
+#define WIRED_FX_CONDITION_VARIANT_0        0x0000000000000040ull
+#define WIRED_FX_CONDITION_VARIANT_1        0x0000000000000080ull
+#define WIRED_FX_CONDITION_VARIANT_2        0x0000000000000100ull
+#define WIRED_FX_CONDITION_VARIANT_3        0x0000000000000200ull
+#define WIRED_FX_CONDITION_RICOCHET         0x0000000000000400ull
+#define WIRED_FX_CONDITION_LOCAL_VIEW       0x0000000000000800ull
+#define WIRED_FX_CONDITION_FIRE_ONESHOT      0x0000000000001000ull
+#define WIRED_FX_CONDITION_MUZZLE_PRESENT    0x0000000000002000ull
+#define WIRED_FX_CONDITION_DRY_SECONDARY     0x0000000000004000ull
 
 /*
 One semantic effect occurrence. The event carries only per-occurrence state;
@@ -263,7 +351,16 @@ typedef struct {
 	float color[4];
 	float intensity;
 	float sizeScale;
-	uint32_t reserved[8];
+	int32_t sourceEntityNum;  // valid when HAS_SOURCE_ENTITY is set
+	uint32_t variant;         // authored event selection/debug identity
+	float pathSpacing;        // zero uses the action's authored spacing
+	float timeSpanSeconds;    // bounded emission interval for spawnRate actions
+	/* Optional per-occurrence values for semantic world earthquakes. Ordinary
+	 * authored effects keep these zero and use their screenShake action values. */
+	float shakeDurationSeconds;
+	float shakeFadeInSeconds;
+	float shakeFadeOutSeconds;
+	float shakeRadius;
 } wiredFxEvent_t;
 
 /*

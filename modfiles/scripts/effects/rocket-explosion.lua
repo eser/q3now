@@ -1,5 +1,5 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
--- First complete WiredFX consumer: staged Quake 4-inspired rocket impact.
+-- Preserve the pre-migration Wired rocket recipe exactly.
 return {
     schemaVersion = 1,
     maxActiveActions = 10,
@@ -50,6 +50,7 @@ return {
         {
             type = "screenShake", id = "impact-shake", duration = 0.48,
             magnitude = 0.6, controllerScale = 0.5,
+            radius = 600, decayExponent = 1, mode = 0,
             maxAngles = { 0.5, 0.5, 0.3 }, maxOffset = { 0.6, 0.6, 0.3 },
         },
         {

@@ -253,6 +253,8 @@ typedef struct {
 // this structure will be cleared only when the game dll changes
 typedef struct {
 	qboolean	initialized;				// sv_init has completed
+	/* Server app lifetime: survives map changes, dies at SV_Shutdown. */
+	appMemory_t	memory;
 
 	int			time;						// will be strictly increasing across level changes
 	int			msgTime;					// will be used as precise sent time
@@ -274,6 +276,7 @@ typedef struct {
 	int			lastValidFrame;			// updated with each snapshot built
 	snapshotFrame_t	snapFrames[ NUM_SNAPSHOT_FRAMES ];
 	snapshotFrame_t	*currFrame; // current frame that clients can refer
+	qboolean	gameLevelActive;		// GAME_INIT has a matching GAME_SHUTDOWN pending
 	rconSession_t rconSessions[ MAX_RCON_SESSIONS ];
 	rconLua_t rconLua;
 
@@ -439,6 +442,8 @@ void SV_SendMessageToClient( msg_t *msg, client_t *client );
 void SV_SendClientMessages( void );
 void SV_SendClientSnapshot( client_t *client );
 void SV_SendClientGameState( client_t *client );
+void SV_ContentManifestCatalogReset( void );
+qboolean SV_BuildContentManifestCatalog( void );
 
 void SV_InitSnapshotStorage( void );
 void SV_IssueNewSnapshot( void );
@@ -454,6 +459,7 @@ playerState_t *SV_GameClientNum( int num );
 svEntity_t	*SV_SvEntityForGentity( sharedEntity_t *gEnt );
 sharedEntity_t *SV_GEntityForSvEntity( svEntity_t *svEnt );
 void		SV_InitGameProgs ( void );
+void		SV_ShutdownGameLevel ( void );
 void		SV_ShutdownGameProgs ( void );
 void		SV_RestartGameProgs( void );
 qboolean	SV_inPVS (const vec3_t p1, const vec3_t p2);

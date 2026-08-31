@@ -767,20 +767,6 @@ void VM_Free( vm_t *vm ) {
 }
 
 
-// App-scoped level-transition teardown: free the host-wide game VM plus ONLY the
-// owning app's cgame slot, leaving every other app's cgame VM intact. A mass sweep
-// over every cgame slot would be fine at N=1 (one app, slot 0) but at N>1 would
-// wrongly tear down a co-resident app's still-live cgame. At N=1 cgameInstance is
-// 0, so this frees the game slot + slot 0 — the only two slots in use there.
-void VM_ClearApp( int cgameInstance ) {
-	VM_Free( &vmTable_game[ VM_GAME ] );
-#ifndef HEADLESS
-	if ( cgameInstance >= 0 && cgameInstance < MAX_LOCAL_CGAME_VMS )
-		VM_Free( &vmTable_cgame[ cgameInstance ] );
-#endif
-}
-
-
 void VM_Forced_Unload_Start(void) {
 	forced_unload = 1;
 }

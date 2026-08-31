@@ -3083,6 +3083,14 @@ qboolean WiredUI_LoadMenuFile( const char *filename ) {
 	pc_token_t  token;
 	const char *ext;
 	qboolean    ok = qtrue;
+	fsResolvedResource_t resolved;
+	const char *requestedFilename = filename;
+	const char *identityFilename = filename;
+
+	if ( filename && FS_ResolveResource( filename, &resolved ) ) {
+		identityFilename = resolved.canonicalPath;
+	}
+	filename = identityFilename;
 
 	/* .wui is the unified extension; .wmenu / .whud are retired. */
 	ext = filename ? strrchr( filename, '.' ) : NULL;
@@ -3099,7 +3107,7 @@ qboolean WiredUI_LoadMenuFile( const char *filename ) {
 	 * `padding $spacing_md`, etc.) resolve to the canonical palette /
 	 * spacing / typography literals declared in `ui/_tokens.wui`. The
 	 * function below short-circuits on second-and-after calls. */
-	WiredUI_LoadTokensIfNeeded( filename );
+	WiredUI_LoadTokensIfNeeded( requestedFilename );
 
 	int handle = WiredPC_LoadSource( filename );
 	if ( !handle ) {
@@ -3302,8 +3310,12 @@ wiredMenuDef_t *WiredUI_FindMenu( const char *name ) {
  * MENU/POPUP layers use) — added alongside, not a repurpose. Used by the
  * LOADING layer's state→named-UI emit. NULL if no loaded menu matches. */
 wiredMenuDef_t *WiredUI_FindMenuByPath( const char *path ) {
+	fsResolvedResource_t resolved;
 	if ( !path || !*path ) {
 		return NULL;
+	}
+	if ( FS_ResolveResource( path, &resolved ) ) {
+		path = resolved.canonicalPath;
 	}
 	for ( int i = 0; i < wui_menuCount; i++ ) {
 		if ( !Q_stricmp( wui_menus[i]->sourcePath, path ) ) {

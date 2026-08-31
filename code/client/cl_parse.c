@@ -332,6 +332,7 @@ void CL_SystemInfoChanged( clientApp_t *app, qboolean onlyGame ) {
 	const char		*s, *t;
 	char			key[BIG_INFO_KEY];
 	char			value[BIG_INFO_VALUE];
+	char			gameDir[MAX_QPATH];
 
 	/* The process-global filesystem + pure state (cl_connectedToPureServer,
 	 * fs_game, FS_PureServer*, the systeminfo→cvar mirror, cheat flag) is owned by
@@ -339,6 +340,7 @@ void CL_SystemInfoChanged( clientApp_t *app, qboolean onlyGame ) {
 	 * process filesystem, which the focused client already configured, so it must
 	 * read its own serverId/demo state but NEVER drive these globals. */
 	qboolean drivesGlobalState = ( app == clientActiveApp );
+	(void)onlyGame; /* retained for the Step-6 global restart caller ABI */
 
 	systemInfo = app->cl.gameState.stringData + app->cl.gameState.stringOffsets[ CS_SYSTEMINFO ];
 	// NOTE TTimo:
@@ -352,33 +354,37 @@ void CL_SystemInfoChanged( clientApp_t *app, qboolean onlyGame ) {
 		return;
 	}
 
-	// An additional in-process client does not touch the shared fs/pure globals.
+	/* The focused connection owns the compatibility pure globals. Apply the
+	 * server feed before mounting its content scope so cached and newly loaded
+	 * archives derive the same pure checksums as the server. This replaces the
+	 * checksum-only side effect of the former full FS_Restart path. */
+	if ( drivesGlobalState ) {
+		FS_SetPureChecksumFeed( app->clc.checksumFeed );
+	}
+
+	// Resolve server content into this connection's lifecycle scope. The client
+	// no longer writes the process-global fs_game cvar.
+	s = Info_ValueForKey( systemInfo, "fs_game" );
+
+	if ( FS_InvalidGameDir( s ) ) {
+		Com_Terminate( TERM_CLIENT_DROP, "Server sent invalid fs_game value %s", s );
+		return;
+	}
+	Q_strncpyz( gameDir, s, sizeof( gameDir ) );
+	if ( !CL_ConfigureContentScope( app, gameDir ) ) {
+		Com_Terminate( TERM_CLIENT_DROP,
+			"Could not configure content scope for fs_game '%s'", gameDir );
+		return;
+	}
+
+	// An additional in-process client owns its mount receipt but does not touch
+	// the focused client's pure compatibility globals/systeminfo mirror.
 	if ( !drivesGlobalState ) {
 		return;
 	}
 
 	s = Info_ValueForKey( systemInfo, "sv_pure" );
 	cl_connectedToPureServer = atoi( s );
-
-	// parse/update fs_game in first place
-	s = Info_ValueForKey( systemInfo, "fs_game" );
-
-	if ( FS_InvalidGameDir( s ) ) {
-		COM_WARN( LOG_CH(ch_client), "Server sent invalid fs_game value %s\n", s );
-	} else {
-		Cvar_Set( "fs_game", s );
-	}
-
-	// if game folder should not be set and it is set at the client side
-	if ( *s == '\0' && *Cvar_VariableString( "fs_game" ) != '\0' ) {
-		Cvar_Set( "fs_game", "" );
-	}
-
-	if ( onlyGame && Cvar_Flags( "fs_game" ) & CVAR_MODIFIED ) {
-		// game directory change is needed
-		// return early to avoid systeminfo-cvar pollution in current fs_game
-		return;
-	}
 
 	s = Info_ValueForKey( systemInfo, "sv_cheats" );
 	cl_connectedToCheatServer = atoi( s );
@@ -427,7 +433,8 @@ void CL_SystemInfoChanged( clientApp_t *app, qboolean onlyGame ) {
 		}
 
 		if ( ( cvar_flags = Cvar_Flags( key ) ) == CVAR_NONEXISTENT )
-			Cvar_Get( key, value, CVAR_SERVER_CREATED | CVAR_ROM );
+			Cvar_GetScoped( (cvarScopeId_t)app->contentScopeId, key, value,
+				CVAR_SERVER_CREATED | CVAR_ROM );
 		else
 		{
 			// If this cvar may not be modified by a server discard the value.
@@ -572,10 +579,6 @@ static void CL_ParseGamestate( clientApp_t *app, msg_t *msg ) {
 	// read the checksum feed
 	app->clc.checksumFeed = MSG_ReadLong( msg );
 
-	// save old gamedir
-	char			oldGame[ MAX_QPATH ];
-	Cvar_VariableStringBuffer( "fs_game", oldGame, sizeof( oldGame ) );
-
 	// parse useful values out of CS_SERVERINFO — route to THIS gamestate's app
 	// (CL_ParseServerInfo is threaded and `app` is in scope here; NOT a pull-escape).
 	CL_ParseServerInfo( app );
@@ -585,11 +588,8 @@ static void CL_ParseGamestate( clientApp_t *app, msg_t *msg ) {
 	// (gated inside CL_SystemInfoChanged on app == clientActiveApp).
 	CL_SystemInfoChanged( app, qtrue );
 
-	// The demo-record stop, the fs_game / pure restart, the old-game bookkeeping
-	// and the cl_paused reset all act on process-global state owned by the
-	// input-focused client. A non-focused in-process client shares the already-
-	// configured filesystem, so it skips this block and only finalizes its own
-	// download/state via CL_InitDownloads below (mirrors CL_WiredNetBootstrapFinalize).
+	// Demo recording and pause remain focused-screen policy. Content selection
+	// was already applied to app->contentScope by CL_SystemInfoChanged.
 	if ( app == clientActiveApp ) {
 		// stop recording now so the demo won't have an unnecessary level load at the end.
 		if ( cl_autoRecordDemo->integer && app->clc.demorecording ) {
@@ -598,32 +598,6 @@ static void CL_ParseGamestate( clientApp_t *app, msg_t *msg ) {
 			}
 		}
 
-		qboolean		gamedirModified = ( Cvar_Flags( "fs_game" ) & CVAR_MODIFIED ) ? qtrue : qfalse;
-
-		if ( !cl_oldGameSet && gamedirModified ) {
-			cl_oldGameSet = qtrue;
-			Q_strncpyz( cl_oldGame, oldGame, sizeof( cl_oldGame ) );
-		}
-
-		// try to keep gamestate and connection state during game switch
-		app->gameSwitch = gamedirModified;
-
-		// preserve \cl_reconnectAgrs between online game directory changes
-		// so after mod switch \reconnect will not restore old value from config but use new one
-		char			reconnectArgs[ MAX_CVAR_VALUE_STRING ];
-		if ( gamedirModified ) {
-			Cvar_VariableStringBuffer( "cl_reconnectArgs", reconnectArgs, sizeof( reconnectArgs ) );
-		}
-
-		// reinitialize the filesystem if the game directory has changed
-		FS_ConditionalRestart( app->clc.checksumFeed, gamedirModified );
-
-		// restore \cl_reconnectAgrs
-		if ( gamedirModified ) {
-			Cvar_Set( "cl_reconnectArgs", reconnectArgs );
-		}
-
-		app->gameSwitch = qfalse;
 	}
 
 	// This used to call CL_StartHunkUsers, but now we enter the download state before loading the cgame
@@ -943,6 +917,7 @@ static void CL_WiredNetBootstrapResetState( clientApp_t *app )
 	 * (via CL_InitDownloads → CA_LOADING/CA_CONNECTED) drives the console close in
 	 * CL_OnClientStateChanged, which is also correctly gated on the focused app. */
 	app->clc.connectPacketCount = 0;
+	CL_ClearContentManifestReceipt( app );
 	Com_ClearLastError();
 	CL_ClearState( app );
 	for ( int i = 0; i < MAX_RELIABLE_COMMANDS; i++ ) {
@@ -955,6 +930,44 @@ static void CL_WiredNetBootstrapResetState( clientApp_t *app )
 	app->cl.gameState.dataCount = 1;
 	memset( app->cl.baselineUsed, 0, sizeof( app->cl.baselineUsed ) );
 	memset( app->cl.entityBaselines, 0, sizeof( app->cl.entityBaselines ) );
+}
+
+static qboolean CL_WiredNetReadContentManifests( const byte *buf, int sectionEnd,
+	int *offset, wiredPackageManifest_t **outManifests, size_t *outCount ) {
+	uint16_t count;
+	wiredPackageManifest_t *candidate = NULL;
+	char error[256];
+	if ( !CL_WiredNetReadU16( buf, sectionEnd, offset, &count ) || count > WIRED_PACKAGE_SET_MAX ) return qfalse;
+	if ( count ) {
+		candidate = Z_Malloc( (size_t)count * sizeof( *candidate ) );
+		memset( candidate, 0, (size_t)count * sizeof( *candidate ) );
+	}
+	for ( uint16_t i = 0; i < count; ++i ) {
+		uint16_t stringLength;
+		const char *json;
+		if ( !CL_WiredNetReadU16( buf, sectionEnd, offset, &stringLength )
+			|| stringLength <= 1 || *offset > sectionEnd - stringLength
+			|| buf[*offset + stringLength - 1] != '\0' ) {
+			if ( candidate ) Z_Free( candidate );
+			return qfalse;
+		}
+		json = (const char *)buf + *offset;
+		if ( !WiredPackageManifest_Parse( json, (size_t)stringLength - 1u,
+			&candidate[i], error, sizeof( error ) ) ) {
+			COM_WARN( LOG_CH(ch_client), "server content manifest rejected: %s\n", error );
+			Z_Free( candidate );
+			return qfalse;
+		}
+		*offset += stringLength;
+	}
+	if ( count && !WiredPackageManifest_ValidateSet( candidate, count, error, sizeof( error ) ) ) {
+		COM_WARN( LOG_CH(ch_client), "server content manifest set rejected: %s\n", error );
+		Z_Free( candidate );
+		return qfalse;
+	}
+	*outManifests = candidate;
+	*outCount = count;
+	return qtrue;
 }
 
 static qboolean CL_WiredNetApplyServerCommand( clientApp_t *app, int seq, const char *s )
@@ -998,39 +1011,22 @@ static qboolean CL_WiredNetApplyBaseline( clientApp_t *app, int entityNum, const
 
 static void CL_WiredNetBootstrapFinalize( clientApp_t *app, int clientNum, int checksumFeed )
 {
-	char oldGame[MAX_QPATH];
-	char reconnectArgs[MAX_CVAR_VALUE_STRING];
-	qboolean gamedirModified;
 	app->clc.eventMask |= EM_GAMESTATE;
 	app->clc.clientNum = clientNum;
 	app->clc.checksumFeed = checksumFeed;
 	CL_ParseServerInfo( app );
 	CL_SystemInfoChanged( app, qtrue );
+	if ( !CL_ApplyContentManifestReceipt( app ) ) {
+		Com_Terminate( TERM_CLIENT_DROP, "Server content manifest receipt failed" );
+		return;
+	}
 
-	/* The fs_game / pure restart, the old-game bookkeeping, the demo-record stop
-	 * and the cl_paused reset all act on process-global state owned by the
-	 * input-focused client. An additional in-process client shares the already-
-	 * configured filesystem, so it skips this block and only finalizes its own
-	 * download/state via CL_InitDownloads below. */
+	/* Content selection is connection-scoped in CL_SystemInfoChanged. Only
+	 * focused-screen recording/pause policy remains here. */
 	if ( app == clientActiveApp ) {
-		Cvar_VariableStringBuffer( "fs_game", oldGame, sizeof( oldGame ) );
 		if ( cl_autoRecordDemo->integer && app->clc.demorecording && !app->clc.demoplaying ) {
 			CL_StopRecord_f();
 		}
-		gamedirModified = ( Cvar_Flags( "fs_game" ) & CVAR_MODIFIED ) ? qtrue : qfalse;
-		if ( !cl_oldGameSet && gamedirModified ) {
-			cl_oldGameSet = qtrue;
-			Q_strncpyz( cl_oldGame, oldGame, sizeof( cl_oldGame ) );
-		}
-		app->gameSwitch = gamedirModified;
-		if ( gamedirModified ) {
-			Cvar_VariableStringBuffer( "cl_reconnectArgs", reconnectArgs, sizeof( reconnectArgs ) );
-		}
-		FS_ConditionalRestart( app->clc.checksumFeed, gamedirModified );
-		if ( gamedirModified ) {
-			Cvar_Set( "cl_reconnectArgs", reconnectArgs );
-		}
-		app->gameSwitch = qfalse;
 	}
 
 	CL_InitDownloads( app );
@@ -1045,15 +1041,18 @@ static void CL_ParseTypedBootstrap( clientApp_t *app, const byte *buf, int len )
 	int offset = 0;
 	qboolean sawAck = qfalse;
 	qboolean sawCmds = qfalse;
+	qboolean sawContent = qfalse;
 	qboolean sawConfig = qfalse;
 	qboolean sawBaselines = qfalse;
 	qboolean sawClientInfo = qfalse;
+	wiredPackageManifest_t *contentManifests = NULL;
+	size_t contentManifestCount = 0;
 	int clientNum = -1;
 	int checksumFeed = 0;
 
 	if ( len < 1 || buf[0] != WN_BOOTSTRAP_MSG_STATE ) {
 		COM_WARN( LOG_CH(ch_client), "WiredNet bootstrap: invalid message\n" );
-		return;
+		goto fail;
 	}
 	CL_WiredNetBootstrapResetState( app );
 	offset = 1;
@@ -1064,7 +1063,7 @@ static void CL_ParseTypedBootstrap( clientApp_t *app, const byte *buf, int len )
 		uint16_t count;
 		if ( !CL_WiredNetReadU32( buf, len, &offset, &sectionLen ) ) {
 			COM_WARN( LOG_CH(ch_client), "WiredNet bootstrap: short section header\n" );
-			return;
+			goto fail;
 		}
 		// sectionLen is an untrusted uint32. Compare it against the remaining
 		// bytes in UNSIGNED, overflow-free arithmetic before forming sectionEnd:
@@ -1073,42 +1072,48 @@ static void CL_ParseTypedBootstrap( clientApp_t *app, const byte *buf, int len )
 		// the section bound bogus for every downstream read.
 		if ( offset < 0 || offset > len || sectionLen > (uint32_t)( len - offset ) ) {
 			COM_WARN( LOG_CH(ch_client), "WiredNet bootstrap: truncated section\n" );
-			return;
+			goto fail;
 		}
 		sectionEnd = offset + (int)sectionLen;
 		switch ( sectionType ) {
 		case WN_BOOTSTRAP_SEC_ACK:
-			if ( sawAck || !CL_WiredNetReadS32( buf, sectionEnd, &offset, &app->clc.reliableAcknowledge ) ) return;
+			if ( sawAck || !CL_WiredNetReadS32( buf, sectionEnd, &offset, &app->clc.reliableAcknowledge ) ) goto fail;
 			sawAck = qtrue;
 			break;
 		case WN_BOOTSTRAP_SEC_SERVER_CMDS:
-			if ( sawCmds || !CL_WiredNetReadU16( buf, sectionEnd, &offset, &count ) ) return;
+			if ( sawCmds || !CL_WiredNetReadU16( buf, sectionEnd, &offset, &count ) ) goto fail;
 			while ( count-- ) {
 				int seq;
 				char cmd[MAX_STRING_CHARS];
 				if ( !CL_WiredNetReadS32( buf, sectionEnd, &offset, &seq ) ||
 					!CL_WiredNetReadString( buf, sectionEnd, &offset, cmd, sizeof( cmd ) ) ||
 					!CL_WiredNetApplyServerCommand( app, seq, cmd ) ) {
-					return;
+					goto fail;
 				}
 			}
 			sawCmds = qtrue;
 			break;
 		case WN_BOOTSTRAP_SEC_CONFIGSTRINGS:
-			if ( sawConfig || !CL_WiredNetReadU16( buf, sectionEnd, &offset, &count ) ) return;
+			if ( sawConfig || !CL_WiredNetReadU16( buf, sectionEnd, &offset, &count ) ) goto fail;
 			while ( count-- ) {
 				uint16_t index;
 				char value[BIG_INFO_STRING];
 				if ( !CL_WiredNetReadU16( buf, sectionEnd, &offset, &index ) ||
 					!CL_WiredNetReadString( buf, sectionEnd, &offset, value, sizeof( value ) ) ||
 					!CL_WiredNetApplyConfigstring( app, index, value ) ) {
-					return;
+					goto fail;
 				}
 			}
 			sawConfig = qtrue;
 			break;
+		case WN_BOOTSTRAP_SEC_CONTENT_MANIFESTS:
+			if ( sawContent || sectionLen > WIRED_PACKAGE_RECEIPT_BYTES_MAX ||
+				!CL_WiredNetReadContentManifests( buf, sectionEnd, &offset,
+					&contentManifests, &contentManifestCount ) ) goto fail;
+			sawContent = qtrue;
+			break;
 		case WN_BOOTSTRAP_SEC_BASELINES:
-			if ( sawBaselines || !CL_WiredNetReadU16( buf, sectionEnd, &offset, &count ) ) return;
+			if ( sawBaselines || !CL_WiredNetReadU16( buf, sectionEnd, &offset, &count ) ) goto fail;
 			while ( count-- ) {
 				uint16_t entityNum;
 				entityState_t es;
@@ -1116,7 +1121,7 @@ static void CL_ParseTypedBootstrap( clientApp_t *app, const byte *buf, int len )
 				if ( !CL_WiredNetReadU16( buf, sectionEnd, &offset, &entityNum ) ||
 					!CL_WiredNetReadEntityState( buf, sectionEnd, &offset, &es ) ||
 					!CL_WiredNetApplyBaseline( app, entityNum, &es ) ) {
-					return;
+					goto fail;
 				}
 			}
 			sawBaselines = qtrue;
@@ -1125,24 +1130,36 @@ static void CL_ParseTypedBootstrap( clientApp_t *app, const byte *buf, int len )
 			if ( sawClientInfo ||
 				!CL_WiredNetReadS32( buf, sectionEnd, &offset, &clientNum ) ||
 				!CL_WiredNetReadS32( buf, sectionEnd, &offset, &checksumFeed ) ) {
-				return;
+				goto fail;
 			}
 			sawClientInfo = qtrue;
 			break;
 		default:
 			COM_WARN( LOG_CH(ch_client), "WiredNet bootstrap: unknown section %d\n", sectionType );
-			return;
+			goto fail;
 		}
 		if ( offset != sectionEnd ) {
 			COM_WARN( LOG_CH(ch_client), "WiredNet bootstrap: section length mismatch\n" );
-			return;
+			goto fail;
 		}
 	}
-	if ( !sawAck || !sawCmds || !sawConfig || !sawBaselines || !sawClientInfo ) {
+	if ( !sawAck || !sawCmds || !sawContent || !sawConfig || !sawBaselines || !sawClientInfo ) {
 		COM_WARN( LOG_CH(ch_client), "WiredNet bootstrap: missing required section\n" );
-		return;
+		goto fail;
 	}
+	CL_ClearContentManifestReceipt( app );
+	app->contentManifests = contentManifests;
+	app->contentManifestCount = contentManifestCount;
+	app->contentManifestReceived = qtrue;
+	contentManifests = NULL;
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "WiredNet content receipt accepted: %zu manifest(s)\n",
+		app->contentManifestCount );
 	CL_WiredNetBootstrapFinalize( app, clientNum, checksumFeed );
+	return;
+
+fail:
+	if ( contentManifests ) Z_Free( contentManifests );
+	CL_ClearContentManifestReceipt( app );
 }
 
 static void CL_ParseTypedDownload( clientApp_t *app, const byte *buf, int len )

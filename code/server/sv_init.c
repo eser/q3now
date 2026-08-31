@@ -285,7 +285,15 @@ static void SV_Startup( void ) {
 		Com_Terminate( TERM_UNRECOVERABLE, "SV_Startup: svs.initialized" );
 	}
 
+	/* One server application owns one persistent App arena and one resettable
+	 * Level arena.  Both are lazy with server startup: a process that never
+	 * hosts a game pays no reservation. */
+	AppMemory_Init( &svs.memory, "server", 16u * 1024u * 1024u,
+		128u * 1024u * 1024u );
+
 	SV_AllocClients( sv_maxclients->integer );
+	svs.snapshotEntities = App_AllocArray( &svs.memory, entityState_t,
+		svs.numSnapshotEntities );
 
 	svs.initialized = qtrue;
 
@@ -402,7 +410,7 @@ phase so Com_Frame can run CL_Frame -> SCR_UpdateScreen between phases,
 keeping the console live during map load.
 
 Phase order:
-  P1  Teardown + setup   (ShutdownGameProgs, CL_ShutdownLevel, Hunk_ClearLevel)
+  P1  Teardown + setup   (ShutdownGameLevel, CL_ShutdownLevel, Level_Reset)
   P2  BSP load           (CM_LoadMap — single bounded hitch, acceptable)
   P3  Game VM init       (SV_InitGameProgs — single bounded hitch, acceptable)
   P4  Settle + baseline  (3x GAME_RUN_FRAME, SV_CreateBaseline)
@@ -420,7 +428,7 @@ void SV_SpawnServer_Tick( void ) {
 	{
 		const char *mapname = svs.spawn.mapname;
 
-		SV_ShutdownGameProgs();
+		SV_ShutdownGameLevel();
 #if FEAT_RECAST_NAVMESH
 		/* The bake worker traces against the current collision world. Join it
 		 * before Hunk_ClearLevel/CM_ClearMap invalidate that world; waiting until
@@ -448,7 +456,8 @@ void SV_SpawnServer_Tick( void ) {
 		CL_ShutdownLevel();
 #endif
 
-		Hunk_ClearLevel();
+		Level_Reset( &svs.memory );
+		Hunk_ClearLevel(); /* legacy Level allocations; retired incrementally */
 		CM_ClearMap();
 
 		Cvar_CheckRange( com_timescale, "0.001", NULL, CV_FLOAT );
@@ -474,7 +483,6 @@ void SV_SpawnServer_Tick( void ) {
 
 		FS_ClearPakReferences( 0 );
 
-		svs.snapshotEntities = Hunk_Alloc( sizeof(entityState_t)*svs.numSnapshotEntities, h_high );
 		SV_InitSnapshotStorage();
 
 		svs.snapFlagServerBit ^= SNAPFLAG_SERVERCOUNT;
@@ -527,7 +535,12 @@ void SV_SpawnServer_Tick( void ) {
 
 		srand( Com_Milliseconds() );
 		Com_RandomBytes( (byte*)&sv.checksumFeed, sizeof( sv.checksumFeed ) );
-		FS_Restart( sv.checksumFeed );
+		/* A map transition changes the pure challenge, not the mounted content
+		 * namespace. Rebuilding the entire VFS here retired the connected client's
+		 * App/connection scope between P1 and the new gamestate, leaving the second
+		 * map with stale scope ownership. Update every mounted archive in place;
+		 * operator fs_game changes remain the only full restart authority. */
+		FS_SetPureChecksumFeed( sv.checksumFeed );
 
 		// Resolve per-map metadata BEFORE CM_LoadMap.
 		// CM_LoadMap triggers RE_RegisterShader on the client, and the
@@ -669,7 +682,11 @@ void SV_SpawnServer_Tick( void ) {
 			qboolean overflowed = qfalse;
 			qboolean infoTruncated = qfalse;
 
-			p = FS_LoadedPakChecksums( &overflowed );
+			if ( !SV_BuildContentManifestCatalog() ) {
+				Com_Terminate( TERM_CLIENT_DROP, "Could not publish content package roles" );
+				return;
+			}
+			p = FS_LoadedPakChecksumsForRole( FS_MOUNT_ROLE_CLIENT, &overflowed );
 
 			pakslen = strlen( p ) + 9;
 			freespace = SV_RemainingGameState();
@@ -1118,6 +1135,7 @@ void SV_Shutdown( const char *finalmsg ) {
 	}
 
 	SV_RemoveOperatorCommands();
+	SV_ContentManifestCatalogReset();
 	SV_MasterShutdown();
 	SV_ShutdownGameProgs();
 	SV_Lua_Shutdown();
@@ -1126,6 +1144,7 @@ void SV_Shutdown( const char *finalmsg ) {
 #if FEAT_RECAST_NAVMESH
 	Nav_Shutdown();
 #endif
+	AppMemory_Destroy( &svs.memory );
 
 	// Clear the active remap set; the tables themselves live in
 	// Maps_Arena and get reclaimed on the next FS_Restart / shutdown.

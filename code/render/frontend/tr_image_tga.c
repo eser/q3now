@@ -93,17 +93,21 @@ void R_LoadTGA ( const char *name, byte **pic, int *width, int *height)
 		&& targa_header.image_type!=10
 		&& targa_header.image_type != 3 )
 	{
-		ri.Terminate( TERM_CLIENT_DROP, "LoadTGA: Only type 2 (RGB), 3 (gray), and 10 (RGB) TGA images supported");
+		ri.Terminate( TERM_CLIENT_DROP,
+			"LoadTGA: %s has unsupported image type %u; expected 2 (RGB), 3 (gray), or 10 (RLE RGB)",
+			name, (unsigned)targa_header.image_type );
 	}
 
 	if ( targa_header.colormap_type != 0 )
 	{
-		ri.Terminate( TERM_CLIENT_DROP, "LoadTGA: colormaps not supported" );
+		ri.Terminate( TERM_CLIENT_DROP, "LoadTGA: %s uses an unsupported colormap", name );
 	}
 
 	if ( ( targa_header.pixel_size != 32 && targa_header.pixel_size != 24 ) && targa_header.image_type != 3 )
 	{
-		ri.Terminate( TERM_CLIENT_DROP, "LoadTGA: Only 32 or 24 bit images supported (no colormaps)");
+		ri.Terminate( TERM_CLIENT_DROP,
+			"LoadTGA: %s uses unsupported %u-bit pixels; expected 24 or 32",
+			name, (unsigned)targa_header.pixel_size );
 	}
 
 	columns = targa_header.width;

@@ -43,13 +43,13 @@ run_case() {
   [[ $(grep -Fc "$recursive_row" <<<"$output" || true) == 1 ]] \
     || fail "$uname_s recursive bundle did not receive the exact frozen tuple"
 
-  pack_recursive_row="build/base/pax21.sw3z VERSION=\"$PROBE_VERSION\" SOURCE_VERSION=\"$PROBE_SOURCE\" BUILD_DATE_ISO=\"$PROBE_DATE\""
+  pack_recursive_row="build/base/pax21.sw3z build/base/pax21-client.sw3z build/base/pax21-server.sw3z VERSION=\"$PROBE_VERSION\" SOURCE_VERSION=\"$PROBE_SOURCE\" BUILD_DATE_ISO=\"$PROBE_DATE\""
   [[ $(grep -Fc "$pack_recursive_row" <<<"$output" || true) -ge 1 ]] \
     || fail "$uname_s recursive pack did not receive the exact frozen tuple"
 
   description_rows=$(grep -F 'description.txt' <<<"$output" || true)
   [[ -n $description_rows ]] || fail "$uname_s emitted no pack description recipe"
-  if grep -Fv "echo \"q3now-preview $PROBE_SOURCE ($PROBE_DATE)\" > build/pak-staging/description.txt" \
+  if grep -Fv "echo \"q3now-preview $PROBE_SOURCE ($PROBE_DATE)\" > build/pak-staging/shared/description.txt" \
       <<<"$description_rows" >/dev/null; then
     fail "$uname_s pack description recomputed or changed source provenance"
   fi
@@ -99,7 +99,7 @@ if [[ $SELF_TEST == 1 ]]; then
   }
 
   expect_reject missing-source-forward 's/ SOURCE_VERSION="$(SOURCE_VERSION)"//g'
-  expect_reject missing-pack-source-forward '/$(MAKE) $(PAK_OUT)/s/ SOURCE_VERSION="$(SOURCE_VERSION)"//'
+  expect_reject missing-pack-source-forward '/$(MAKE) $(PAK_OUTPUTS)/s/ SOURCE_VERSION="$(SOURCE_VERSION)"//'
   expect_reject stale-pack-stamp 's/echo "$(APP_NAME) $(SOURCE_VERSION) ($(BUILD_DATE_ISO))"/echo "$(APP_NAME) stale-source (stale-date)"/'
   expect_reject missing-artifact-postcondition '/expected release artifact missing/d'
   expect_reject missing-macos-base-filter "/--filter='H \/Contents\/MacOS\/base\/'/d"

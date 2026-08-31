@@ -1,5 +1,5 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
--- Fuse/free-air rocket detonation: radial, with no fabricated surface decal.
+-- Preserve the pre-migration free-air recipe exactly.
 return {
     schemaVersion = 1,
     maxActiveActions = 9,
@@ -45,6 +45,7 @@ return {
         {
             type = "screenShake", id = "air-shake", duration = 0.5,
             magnitude = 0.65, controllerScale = 0.5,
+            radius = 600, decayExponent = 1, mode = 0,
             maxAngles = { 0.55, 0.55, 0.35 }, maxOffset = { 0.7, 0.7, 0.35 },
         },
         {

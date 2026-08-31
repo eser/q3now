@@ -182,19 +182,6 @@ typedef struct {
 	animation_t anims[MANIM_COUNT]; // frame range per monster anim code
 } monsterAnimSet_t;
 
-#if FEAT_EARTHQUAKE_SYSTEM
-typedef struct {
-	vec3_t origin;
-	float  radius; // negative = global (no distance attenuation)
-	float  amplitude;
-	int	   startTime;
-	int	   endTime;
-	int	   fadeInTime;
-	int	   fadeOutTime;
-} earthquake_t;
-#define MAX_EARTHQUAKES 64
-#endif
-
 // centity_t have a direct corespondence with gentity_t in the game, but
 // only the entityState_t is directly communicated to the cgame
 typedef struct centity_s {
@@ -204,6 +191,9 @@ typedef struct centity_s {
 	qboolean	  currentValid; // true if cg.frame holds this entity
 
 	int muzzleFlashTime; // move to playerEntity?
+	/* Last flash timestamp whose exact tag_flash transform produced the
+	 * one-shot WiredFX muzzle occurrence. Keeps view/world passes idempotent. */
+	int wiredFxMuzzleTime;
 	int previousEvent;
 	int teleportFlag;
 
@@ -725,7 +715,6 @@ typedef struct {
 	float damageTime;
 	float damageX, damageY, damageValue;
 
-	int doubleBlastKickTime; // time of last double-blast kick
 
 	int lastArcTarget; // entity number of last chain arc target (-1 = none)
 	int lastArcTime;   // time of last arc connection
@@ -775,11 +764,6 @@ typedef struct {
 
 #if FEAT_SHOTGUN_PUMP
 	int sgPumpTime; // timestamp when pump animation started
-#endif
-
-#if FEAT_EARTHQUAKE_SYSTEM
-	earthquake_t earthquakes[MAX_EARTHQUAKES];
-	float		 additionalTremble;
 #endif
 
 #if FEAT_SCREENSHOT_TOOLS
@@ -951,20 +935,14 @@ typedef struct {
 	qhandle_t selectShader;
 	qhandle_t viewBloodShader;
 	qhandle_t tracerShader;
-	qhandle_t tracerShaderPrim; // primitive-shader handle of the same tracer art, for
-								// the beam pipeline (CG_Tracer emits a transient beam, not a
-								// poly). The regular tracerShader handle maps to whiteImage
-								// through the beam's primitive-shader registry — beams need a
-								// trap_R_RegisterPrimitiveShader handle (see cgs.media.lightningShaderPrim).
+	qhandle_t tracerShaderPrim; // primitive-shader handle consumed by the
+								// machinegun-tracer WiredFX ribbon recipe. The regular shader
+								// handle maps to whiteImage in the primitive registry, so the
+								// recipe resolves this registered primitive handle instead.
 	qhandle_t lagometerShader;
 	qhandle_t backTileShader;
 	qhandle_t noammoShader;
 
-	qhandle_t crosshairMeleeShader;
-	qhandle_t crosshairBulletShader;
-	qhandle_t crosshairBurstShader;
-	qhandle_t crosshairMissileShader;
-	qhandle_t crosshairDefaultShader;
 
 	qhandle_t smokePuffShader;
 	qhandle_t smokePuffRageProShader;
@@ -1103,10 +1081,6 @@ typedef struct {
 	sfxHandle_t fallSound;
 	sfxHandle_t gurpSound[2];
 	sfxHandle_t jumpPadSound;
-#if FEAT_EARTHQUAKE_SYSTEM
-	sfxHandle_t earthquakeSound;
-#endif
-
 	sfxHandle_t oneMinuteSound;
 	sfxHandle_t fiveMinuteSound;
 	sfxHandle_t suddenDeathSound;
@@ -1202,8 +1176,6 @@ typedef struct {
 	sfxHandle_t regenSound;
 	sfxHandle_t protectSound;
 	sfxHandle_t n_healthSound;
-	sfxHandle_t hgrenb1aSound;
-	sfxHandle_t hgrenb2aSound;
 
 	qhandle_t backpackModel;
 	qhandle_t backpackIcon;
@@ -1714,13 +1686,6 @@ void		CG_EntityEvent( centity_t *cent, vec3_t position );
 void		CG_PainEvent( centity_t *cent, int health );
 int			CG_WaterLevel( centity_t *cent );
 
-#if FEAT_EARTHQUAKE_SYSTEM
-void CG_AddEarthquake( const vec3_t origin, float radius, float duration, float fadeIn, float fadeOut,
-					   float amplitude );
-void CG_AdjustEarthquakes( const vec3_t delta );
-#endif
-
-
 //
 // cg_ents.c
 //
@@ -1759,7 +1724,7 @@ void CG_WeaponGrabbed_f( void );
 void CG_RegisterWeapon( int weaponNum );
 void CG_RegisterItemVisuals( int itemNum );
 
-void CG_FireWeapon( centity_t *cent );
+void CG_FireWeapon( centity_t *cent, qboolean secondary );
 qboolean
 	 CG_CalcMuzzlePoint( int	entityNum,
 						 vec3_t muzzle ); // muzzle = fire origin (local: ps.origin+viewheight+14u along ps.viewangles)
@@ -1767,11 +1732,17 @@ void CG_MissileHitWall( int pType, int clientNum, vec3_t origin, vec3_t dir, imp
 		int sourceEntityNum );
 void CG_WiredFx_RocketExplosion( const vec3_t origin, const vec3_t normal,
 		impactSound_t material, qboolean freeAir, qboolean forceUnderwater );
+void CG_WiredFx_InitEvent( wiredFxEvent_t *event, uint32_t profile,
+		const vec3_t origin, const vec3_t direction );
+void CG_WiredFx_EmitPath( uint32_t profile, const vec3_t start,
+		const vec3_t end, float timeSpanSeconds, float pathSpacing,
+		uint64_t conditionMask );
 void CG_MissileHitPlayer( int pType, vec3_t origin, vec3_t dir, int entityNum );
 void CG_ShotgunFire( entityState_t *es );
 void CG_ShotgunFireWide( entityState_t *es );
 void CG_Bullet( vec3_t origin, int sourceEntityNum, vec3_t normal, qboolean flesh, int fleshEntityNum,
 				hitscanImpactMaterial_t material );
+void CG_TestHitscanImpact( int pType, hitscanImpactMaterial_t material );
 void CG_ExplosionShrapnel( int pType, vec3_t origin, vec3_t dir );
 
 void CG_RailTrail( clientInfo_t *ci, vec3_t start, vec3_t end );

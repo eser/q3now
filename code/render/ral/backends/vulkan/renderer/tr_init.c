@@ -248,6 +248,7 @@ cvar_t *r_nocurves;
 static refexport_t				 s_re;
 static renderSubmissionState_t	 s_frontendSubmission;
 static const mapFile_t			*s_frontendLoadedWorld;
+static const mapFile_t             *s_frontendLoadedWorlds[MAX_RENDER_WORLDS];
 static renderMaterialScriptCatalog_t s_frontendMaterialScripts;
 static renderLightingSidecarReceipt_t s_frontendLightingSidecar;
 static renderIrradianceSidecarReceipt_t s_frontendIrradianceSidecar;
@@ -3156,6 +3157,13 @@ void R_Init( void )
 	// so its binding-2 array can only be populated here, against tr.whiteImage.
 	vk_init_decal_textures();
 
+	// Atmospheric render descriptors borrow the same shared scene-depth view as
+	// particles and decals.  On cold boot that view is published by
+	// vk_init_descriptors before R_InitImages, while the image registry itself is
+	// only complete here.  Build the atmospheric cohort at this common, stable
+	// boundary instead of speculatively during the earlier descriptor pass.
+	vk_atmospheric_write_descriptors();
+
 	// Same eager-init pattern for the shared primitive-shader image
 	// registry consumed by the ribbon pipeline (binding 2). All 64
 	// slots default to tr.whiteImage; per-shader registrations via
@@ -3436,9 +3444,14 @@ static qboolean FrontendUploadDirectionalLighting( void ) {
 static void FrontendShutdown( refShutdownCode_t code )
 {
 	s_frontendLoadedWorld = NULL;
+	if ( s_frontendSubmission.frameOpen )
+		RenderSubmission_CancelFrame( &s_frontendSubmission );
 	FrontendDestroyDirectionalLighting();
 	RE_Shutdown( code );
+	if ( code == REF_LEVEL_ONLY && !RenderSubmission_ResetEffectRegistries( &s_frontendSubmission ) )
+		R_LOG( rch_init, SEV_WARN, "RAL frontend effect registry reset failed during level shutdown\n" );
 	if ( code != REF_LEVEL_ONLY ) {
+		memset( s_frontendLoadedWorlds, 0, sizeof( s_frontendLoadedWorlds ) );
 		RenderSubmission_Reset( &s_frontendSubmission );
 		memset( &s_frontendPublished, 0, sizeof( s_frontendPublished ) );
 		s_frontendLastLoggedWorldDigest = 0u;
@@ -3501,6 +3514,9 @@ static qhandle_t FrontendRegister( renderAssetKind_t kind, const char *name, qha
 
 static qhandle_t FrontendRegisterModel( const char *name )
 {
+	char canonical[MAX_QPATH];
+	if ( ri.FS_ResolveResource && ri.FS_ResolveResource( name, canonical,
+			sizeof( canonical ), NULL, NULL, NULL ) ) name = canonical;
 	return FrontendRegister( RENDER_ASSET_MODEL, name, RE_RegisterModel( name ) );
 }
 static qhandle_t FrontendRegisterSkin( const char *name )
@@ -3545,7 +3561,41 @@ static void FrontendLoadWorld( const mapFile_t *bsp, int worldIndex )
 	FrontendDecline( RenderLightingSidecar_LoadIrradiance( &s_frontendSubmission,
 		&ri, bsp->name, &s_frontendIrradianceSidecar ), "irradiance-lighting-sidecar" );
 	FrontendDecline( FrontendUploadDirectionalLighting(), "directional-lighting-upload" );
-	if ( !s_re.initFailed ) s_frontendLoadedWorld = bsp;
+	if ( !s_re.initFailed ) {
+		s_frontendLoadedWorlds[worldIndex] = bsp;
+		s_frontendLoadedWorld = bsp;
+	}
+}
+
+static qboolean FrontendSelectWorld( int worldIndex )
+{
+	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS
+			|| !s_frontendLoadedWorlds[worldIndex]
+			|| !R_WorldSlotResident( worldIndex )
+			|| !RenderSubmission_SelectWorld( &s_frontendSubmission, worldIndex ) ) return qfalse;
+	R_SetWorldSlot( worldIndex );
+	s_frontendLoadedWorld = s_frontendLoadedWorlds[worldIndex];
+	return qtrue;
+}
+
+static qboolean FrontendUnloadWorld( int worldIndex )
+{
+	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS
+			|| !RenderSubmission_UnloadWorld( &s_frontendSubmission, worldIndex )
+			|| !R_UnloadWorldSlot( worldIndex ) ) return qfalse;
+	s_frontendLoadedWorlds[worldIndex] = NULL;
+	s_frontendLoadedWorld = NULL;
+	for ( int replacement = 0; replacement < MAX_RENDER_WORLDS; ++replacement )
+		if ( s_frontendLoadedWorlds[replacement] ) {
+			(void)FrontendSelectWorld( replacement );
+			break;
+		}
+	return qtrue;
+}
+
+static int FrontendResidentWorldCount( void )
+{
+	return RenderSubmission_ResidentWorldCount( &s_frontendSubmission );
 }
 
 static qboolean FrontendCookLightingProject( const char *derivedRoot )
@@ -4486,6 +4536,9 @@ refexport_t *GetRefAPI( int apiVersion, refimport_t *rimp )
 	re.RegisterPrimitiveShader = FrontendRegisterPrimitive;
 	re.PinShaderImages		   = RE_PinShaderImages;
 	re.LoadWorld			   = FrontendLoadWorld;
+	re.SelectWorld             = FrontendSelectWorld;
+	re.UnloadWorld             = FrontendUnloadWorld;
+	re.ResidentWorldCount      = FrontendResidentWorldCount;
 	re.SetWorldVisData		   = RE_SetWorldVisData;
 	re.EndRegistration		   = RE_EndRegistration;
 

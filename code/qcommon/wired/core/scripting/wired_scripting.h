@@ -50,6 +50,10 @@ void WiredScript_EnumerateGlobalsAndMembers(
 qboolean WiredScript_TryExecFile( const char *filename );
 void WiredScript_ExecFile( const char *filename );
 
+/* Load the trusted VFS alias manifest and candidate-first publish its exact
+ * files table. Missing manifests publish an empty catalog. */
+qboolean WiredScript_ReloadFileAliases( void );
+
 /* ---- Binding registration -------------------------------------------- */
 
 /* Callback signature for subsystem binding registrars.

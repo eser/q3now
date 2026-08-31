@@ -252,10 +252,21 @@ SW3Z_SRC := $(shell find $(SW3Z_DIR) -name '*.go' -o -name 'go.mod' -o -name 'go
 # VM backend toggle (moved to top, before ifeq)
 # USE_WASM is defined near other cmake flags above
 
-# Pak output (always from Release build — VM modules are always Release)
+# Role-split runtime package output. Keep pax21.sw3z as the shared-content
+# archive so content-only harnesses and existing installs retain one stable
+# identity; client/server VM bytecode lives in distinct role archives.
 PAK_STAGING := $(BUILD_DIR)/pak-staging
+PAK_SHARED_STAGING := $(PAK_STAGING)/shared
+PAK_CLIENT_STAGING := $(PAK_STAGING)/client
+PAK_SERVER_STAGING := $(PAK_STAGING)/server
 PAK_OUT := $(BUILD_DIR)/base/pax21.sw3z
+PAK_CLIENT_OUT := $(BUILD_DIR)/base/pax21-client.sw3z
+PAK_SERVER_OUT := $(BUILD_DIR)/base/pax21-server.sw3z
+PAK_OUTPUTS := $(PAK_OUT) $(PAK_CLIENT_OUT) $(PAK_SERVER_OUT)
 PAK_MANIFEST := $(PAK_OUT).manifest.json
+PAK_CLIENT_MANIFEST := $(PAK_CLIENT_OUT).manifest.json
+PAK_SERVER_MANIFEST := $(PAK_SERVER_OUT).manifest.json
+PAK_MANIFESTS := $(PAK_MANIFEST) $(PAK_CLIENT_MANIFEST) $(PAK_SERVER_MANIFEST)
 CONTENT_TOOL_ID ?= wired.q3map2
 CONTENT_TOOL_VERSION ?= $(SOURCE_VERSION)
 CONTENT_TOOL_TARGET_OS ?= $(shell uname -s | tr '[:upper:]' '[:lower:]')
@@ -376,7 +387,7 @@ build-web-client: create-packs
 		-DCONFIG="$(abspath $(PAK_STAGING))/default.cfg" \
 		-DVISOR_ANIMATION="$(abspath $(WEB_VISOR_ANIMATION))" \
 		-DAUTHORED_CONTENT="$(abspath $(WEB_AUTHORED_CONTENT))" \
-		-DFONT_DIR="$(abspath $(PAK_STAGING))/fonts" \
+		-DFONT_DIR="$(abspath $(PAK_SHARED_STAGING))/fonts" \
 		-DUI_DIR="$(abspath modfiles/ui)" \
 		-P cmake/wired_web_content_manifest.cmake
 
@@ -393,7 +404,7 @@ ifdef WIRED_PREBUILT
 build:
 	@test -f "$(ENGINE_BIN)" || { echo "ERROR: WIRED_PREBUILT set but engine binary missing: $(ENGINE_BIN)"; exit 1; }
 	@echo "==> WIRED_PREBUILT: using externally built engine binaries"
-	$(MAKE) $(PAK_OUT) VERSION="$(VERSION)" SOURCE_VERSION="$(SOURCE_VERSION)" BUILD_DATE_ISO="$(BUILD_DATE_ISO)"
+	$(MAKE) $(PAK_OUTPUTS) VERSION="$(VERSION)" SOURCE_VERSION="$(SOURCE_VERSION)" BUILD_DATE_ISO="$(BUILD_DATE_ISO)"
 else
 build: _build-stamp configure
 	$(CMAKE_BUILD)
@@ -404,14 +415,13 @@ build: _build-stamp configure
 	# from the same header revision as the engine — a layout mismatch reads
 	# the provider struct at the wrong offsets and crashes.
 	cmake --build $(BUILD_DIR) --target gamecl_base gamesv_base
-	# Deploy the freshly-compiled VM modules into the pak so a bare `make build`
-	# leaves engine + pak in lockstep — the server loads gamesv.wasm FROM the pak
+	# Deploy the freshly-compiled VM modules into their role paks so a bare
+	# `make build` leaves engine + package set in lockstep — the server loads gamesv.wasm FROM the server pak
 	# (sv_pure + vm_game=2), so a build that refreshes the WASM object but not the
 	# pak silently ships a stale game module and every measurement interrogates a
-	# stale witness (the 2026-07-23/24 stale-pak trap, twice).  $(PAK_OUT) is a
-	# file target keyed on the VM modules, so this repacks ONLY when they changed
-	# (idempotent) and, being the same target create-packs uses, never double-packs.
-	$(MAKE) $(PAK_OUT) VERSION="$(VERSION)" SOURCE_VERSION="$(SOURCE_VERSION)" BUILD_DATE_ISO="$(BUILD_DATE_ISO)"
+	# stale witness (the 2026-07-23/24 stale-pak trap, twice). Each role archive
+	# is keyed on its exact inputs, so this repacks only the changed role.
+	$(MAKE) $(PAK_OUTPUTS) VERSION="$(VERSION)" SOURCE_VERSION="$(SOURCE_VERSION)" BUILD_DATE_ISO="$(BUILD_DATE_ISO)"
 endif
 
 # ── per-build stamp (content-gated counter + timestamp) ───────────────────────
@@ -519,47 +529,48 @@ _wails-build:
 	  exit 1; }
 
 # ── create-packs ──────────────────────────────────────────────────────────────
-# Packages modfiles/ + VM modules into the mod pack (pax21.sw3z).
-# "pax21" sorts after pak0–pak8, ensuring highest override priority.
-# VM modules here override the stock 1999 bytecode in the base pack.
+# Packages shared modfiles plus role-specific VM modules. pax21.sw3z remains
+# shared content; pax21-client/server contain only their corresponding module.
 
 $(SW3Z_BIN): $(SW3Z_SRC)
 	cd $(SW3Z_DIR) && go build -o $(CURDIR)/$(SW3Z_BIN) ./cmd/sw3z
 
-# The VM modules the pak SHIPS.  Keying $(PAK_OUT) on these files (not on the
-# `build` phony) is what makes the repack re-fire whenever the game WASM changes
-# — and, crucially, NON-cyclic: the pak depends on the compiled artifacts, the
-# compile (build) triggers the pak, and no edge points back from the artifacts to
-# `build`.  These are the exact files create-packs copies into the pak below, so a
-# stale pak over a fresh WASM (the 2026-07-23/24 stale-pak trap) is now a rebuilt
-# prerequisite, not a discipline the caller must remember.
-PAK_VM_MODULES := $(MODULE_DIR)/vm/gamesv.wasm $(MODULE_DIR)/vm/gamecl.wasm
+PAK_CLIENT_VM := $(MODULE_DIR)/vm/gamecl.wasm
+PAK_SERVER_VM := $(MODULE_DIR)/vm/gamesv.wasm
+PAK_VM_MODULES := $(PAK_CLIENT_VM) $(PAK_SERVER_VM)
 # All packed source content: any modfiles/ edit also invalidates the pak.
 PAK_CONTENT_SRC := $(shell find modfiles -type f 2>/dev/null)
 
-# $(PAK_OUT) — the deployable mod pack as a FILE target.  It repacks iff any of
-# its inputs (the just-compiled VM modules, the packed modfiles, or the archiver)
-# is newer than the pak.  `build` runs this after compiling (see the build recipe)
-# so `make build` alone leaves engine + pak in lockstep; create-packs / copy-* /
-# run-* reach the same file target, and Make de-duplicates it within one
-# invocation, so `make all` (build -> pak, then create-packs -> pak-already-fresh)
-# repacks EXACTLY once — no double-repack, no cycle.
-$(PAK_OUT): Makefile $(PAK_VM_MODULES) $(PAK_CONTENT_SRC) $(SW3Z_BIN)
-	@echo "==> Staging pak contents..."
-	rm -rf $(PAK_STAGING)
-	mkdir -p $(PAK_STAGING) $(BUILD_DIR)/base
-	cp -R modfiles/. $(PAK_STAGING)/
-	@echo "==> Copying VM modules into pak..."
-	# Package exactly the declared prerequisites.  AOT is intentionally excluded
-	# until it has its own freshness/removal contract; recursively copying vm/
-	# can otherwise ship stale .aot files that runtime mode 2 prefers over WASM.
-	mkdir -p $(PAK_STAGING)/vm
-	cp $(PAK_VM_MODULES) $(PAK_STAGING)/vm/
+# Each deployable archive is a file target keyed on exactly the content it owns.
+# Shared-data edits do not churn VM archives; a client VM edit cannot churn the
+# server archive (and vice versa). Make de-duplicates these targets across
+# build/create-packs so one invocation never repacks a role twice.
+$(PAK_OUT): Makefile $(PAK_CONTENT_SRC) $(SW3Z_BIN)
+	@echo "==> Staging shared pak contents..."
+	rm -rf $(PAK_SHARED_STAGING)
+	mkdir -p $(PAK_SHARED_STAGING) $(BUILD_DIR)/base
+	cp -R modfiles/. $(PAK_SHARED_STAGING)/
 	@echo "==> Stamping version..."
-	echo "$(APP_NAME) $(SOURCE_VERSION) ($(BUILD_DATE_ISO))" > $(PAK_STAGING)/description.txt
+	echo "$(APP_NAME) $(SOURCE_VERSION) ($(BUILD_DATE_ISO))" > $(PAK_SHARED_STAGING)/description.txt
 	@echo "==> Creating $(PAK_OUT)..."
-	$(SW3Z_BIN) a -x "**/.DS_Store" -x ".DS_Store" "$(PAK_OUT)" $(PAK_STAGING)
+	$(SW3Z_BIN) a -x "**/.DS_Store" -x ".DS_Store" "$(PAK_OUT)" $(PAK_SHARED_STAGING)
 	@echo "==> $(PAK_OUT) ready"
+
+$(PAK_CLIENT_OUT): Makefile $(PAK_CLIENT_VM) $(SW3Z_BIN)
+	@echo "==> Staging client-role pak contents..."
+	rm -rf $(PAK_CLIENT_STAGING)
+	mkdir -p $(PAK_CLIENT_STAGING)/vm $(BUILD_DIR)/base
+	cp $(PAK_CLIENT_VM) $(PAK_CLIENT_STAGING)/vm/
+	$(SW3Z_BIN) a "$(PAK_CLIENT_OUT)" $(PAK_CLIENT_STAGING)
+	@echo "==> $(PAK_CLIENT_OUT) ready"
+
+$(PAK_SERVER_OUT): Makefile $(PAK_SERVER_VM) $(SW3Z_BIN)
+	@echo "==> Staging server-role pak contents..."
+	rm -rf $(PAK_SERVER_STAGING)
+	mkdir -p $(PAK_SERVER_STAGING)/vm $(BUILD_DIR)/base
+	cp $(PAK_SERVER_VM) $(PAK_SERVER_STAGING)/vm/
+	$(SW3Z_BIN) a "$(PAK_SERVER_OUT)" $(PAK_SERVER_STAGING)
+	@echo "==> $(PAK_SERVER_OUT) ready"
 
 # Sidecar lifecycle manifest. It inventories the exact staging working set and
 # is validated by the same package used by the launcher. Keeping it beside the
@@ -569,20 +580,40 @@ $(PAK_MANIFEST): $(PAK_OUT) $(SW3Z_BIN)
 		--id q3now.content.core \
 		--version "$(SOURCE_VERSION)" \
 		--owner q3now \
-		--role runtime \
+		--role shared \
 		--os any --arch any --abi wired-content-v1 \
 		--provides q3now.content \
 		--file "pax21.sw3z=$(PAK_OUT)" \
 		--out "$(PAK_MANIFEST)"
 	$(SW3Z_BIN) manifest validate "$(PAK_MANIFEST)"
 
-# create-packs — public alias for "produce a fresh deployable pak".  Depends on
-# `build` (so the VM modules are compiled first) and on the $(PAK_OUT) file target
-# (which repacks iff the modules/content changed).  Because build's own recipe
-# already brings $(PAK_OUT) current, the pak is up-to-date by the time Make
-# evaluates it here, so this adds no second repack.
-create-packs: build $(PAK_OUT) $(PAK_MANIFEST)
-	@:
+$(PAK_CLIENT_MANIFEST): $(PAK_CLIENT_OUT) $(SW3Z_BIN)
+	$(SW3Z_BIN) manifest create \
+		--id q3now.content.client \
+		--version "$(SOURCE_VERSION)" \
+		--owner q3now \
+		--role client \
+		--os any --arch any --abi wired-content-v1 \
+		--depends q3now.content.core \
+		--provides q3now.vm.client \
+		--file "pax21-client.sw3z=$(PAK_CLIENT_OUT)" \
+		--out "$(PAK_CLIENT_MANIFEST)"
+
+$(PAK_SERVER_MANIFEST): $(PAK_SERVER_OUT) $(SW3Z_BIN)
+	$(SW3Z_BIN) manifest create \
+		--id q3now.content.server \
+		--version "$(SOURCE_VERSION)" \
+		--owner q3now \
+		--role server \
+		--os any --arch any --abi wired-content-v1 \
+		--depends q3now.content.core \
+		--provides q3now.vm.server \
+		--file "pax21-server.sw3z=$(PAK_SERVER_OUT)" \
+		--out "$(PAK_SERVER_MANIFEST)"
+
+# create-packs — public alias for a fresh deployable role package set.
+create-packs: build $(PAK_OUTPUTS) $(PAK_MANIFESTS)
+	$(SW3Z_BIN) manifest validate $(PAK_MANIFESTS)
 
 # Package q3map2 or another content compiler as a lifecycle-distinct toolchain
 # artifact. Callers provide the built binary explicitly; runtime and toolchain
@@ -871,12 +902,12 @@ define install_libs
 endef
 endif
 
-# install_pack($(1)=dstdata) — copies the mod pack into $(1).
+# install_pack($(1)=dstdata) — copies the role-split package set into $(1).
 define install_pack
-	@echo "==> Installing mod pack into $(1) ..."
+	@echo "==> Installing role-split mod packages into $(1) ..."
 	@mkdir -p "$(1)"
-	cp "$(PAK_OUT)" "$(1)/"
-	cp "$(PAK_MANIFEST)" "$(1)/"
+	cp $(PAK_OUTPUTS) "$(1)/"
+	cp $(PAK_MANIFESTS) "$(1)/"
 endef
 
 # ── copy-build ───────────────────────────────────────────────────────────────
@@ -1240,6 +1271,15 @@ check: create-packs test-sw3z-lifecycle $(if $(SKIP_HOST_TESTS),,test-host)
 test-sw3z-lifecycle:
 	cd $(SW3Z_DIR) && go test ./...
 	cd $(LAUNCHER_DIR) && go test ./internal/manifest ./internal/subcommands
+
+# Audits every physical BSP in pax01. Imported id .shader files are accepted
+# verbatim through the static alias catalog; modfiles shaders must be canonical.
+test-shader-resource-audit: $(SW3Z_BIN) $(PAK_OUT)
+	WIRED_BASE_CONTENT="$${WIRED_BASE_CONTENT:-$(HOME)/wired/$(APP_NAME)/base/pax01.sw3z}" \
+	WIRED_SW3Z="$(CURDIR)/$(SW3Z_BIN)" \
+	bash tests/shader-resource-audit-check.sh
+
+.PHONY: test-shader-resource-audit
 
 # ── smoke ────────────────────────────────────────────────────────────────────
 # Headless gameplay smoke test. Requires Q3DIR with base game pack.
@@ -2143,8 +2183,12 @@ visual-compare-all: build $(VCOMPARE_BIN)
 
 smoke-map-transition: $(_RUN_GAME_DEP) $(PNG2RAW_BIN)
 ifeq ($(UNAME_S),Darwin)
+	@# bundle-codesign assembles the canonical runnable app under Q3DIR.  The
+	@# CMake build-tree .app is only an intermediate skeleton: it does not carry
+	@# the freshly generated role paks/manifests, so launching it silently drops
+	@# fs-aliases.lua and exercises a different content set than run-game.
 	@Q3DIR="$(Q3DIR)" bash tests/smoke-map-transition.sh \
-		"$(BUILD_DIR)/$(APP_NAME)$(BINEXT).app/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)"
+		"$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)"
 else
 	@Q3DIR="$(Q3DIR)" bash tests/smoke-map-transition.sh \
 		"$(BUILD_DIR)/$(CMAKE_APP_NAME)$(BINEXT)$(EXEEXT)"

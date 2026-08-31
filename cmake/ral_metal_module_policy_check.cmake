@@ -25,10 +25,10 @@ file(READ "${P}" PUBLIC_ABI)
 file(READ "${I}" IMAGE_SOURCE)
 file(READ "${M}" MODEL_HEADER)
 file(READ "${MS}" MODEL_SOURCE)
-string(REGEX MATCH "#[ \t]*define[ \t]+REF_API_VERSION[ \t]+28([^0-9]|$)"
-	ref_api_28 "${PUBLIC_ABI}")
-if(NOT ref_api_28)
-	message(FATAL_ERROR "Metal renderer module no longer targets REF_API_VERSION 28")
+string(REGEX MATCH "#[ \t]*define[ \t]+REF_API_VERSION[ \t]+29([^0-9]|$)"
+	ref_api_29 "${PUBLIC_ABI}")
+if(NOT ref_api_29)
+	message(FATAL_ERROR "Metal renderer module no longer targets REF_API_VERSION 29")
 endif()
 
 foreach(forbidden IN ITEMS "CAMetalLayer" "MTLDevice" "SDL_Window" "SDL_MetalView"

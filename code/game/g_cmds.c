@@ -2041,10 +2041,10 @@ gentity_t *G_SpawnBehaviorMonster( const vec3_t origin, int enemyNum, int startH
 	if ( !mob )
 		return NULL;
 
-	// One name drives the monster's whole identity: its model (creatures/<name>/<name>.mdl),
-	// its render character (characters/<name>/tag), and its collision hull (the character
-	// manifest's bbox). A caller that passes no name gets the soldier, so every existing
-	// spawn stays identical; a caller that passes "dog" gets the dog with zero new code.
+	// One name drives the monster's whole identity: its primary model and collision hull
+	// come from the character manifest, while characters/<name>/tag carries the explicit
+	// render identity to cgame. A caller that passes no name gets the soldier; a caller
+	// that passes "dog" gets the dog with zero asset-path knowledge in the game module.
 	const char *monsterName = ( characterName && characterName[0] ) ? characterName : "soldier";
 
 	mob->classname = "monster_behavior";
@@ -2121,12 +2121,19 @@ gentity_t *G_SpawnBehaviorMonster( const vec3_t origin, int enemyNum, int startH
 	mob->health		= startHealth < 1 ? 1 : startHealth;
 	mob->die		= Behavior_MonsterDie; /* else G_Damage NULL-derefs on kill */
 
-	// Give the monster its visible model — the Q1 .mdl at creatures/<name>/<name>.mdl.
-	// The .mdl loads via the MDL loader (its frame names drive the client-side animation),
-	// and s.legsAnim carries the animation CODE the client resolves to a frame range.
+	// Publish the exact primary model selected from the merged character manifest. The
+	// Q1 .mdl frame names still drive client-side MANIM derivation, but the authoritative
+	// asset now has one canonical characters/ path instead of a duplicated package copy.
 	{
 		char modelPath[MAX_QPATH];
-		Com_sprintf( modelPath, sizeof( modelPath ), "creatures/%s/%s.mdl", monsterName, monsterName );
+		char key[MAX_QPATH];
+		Com_sprintf( key, sizeof( key ), "char:%s:primary_model", monsterName );
+		if ( !trap_GetValue( modelPath, sizeof( modelPath ), key ) || !modelPath[0] ) {
+			Com_Log( SEV_WARN, LOG_CH( ch_game ),
+				"monster '%s': character manifest has no loadable primary model\n", monsterName );
+			G_FreeEntity( mob );
+			return NULL;
+		}
 		mob->s.modelindex = G_ModelIndex( modelPath );
 	}
 	mob->s.legsAnim = MANIM_STAND;

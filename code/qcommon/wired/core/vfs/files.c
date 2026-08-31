@@ -17,6 +17,8 @@
 #include "q_feats.h"
 #include "maps/meta.h"
 #include "fs_qpath.h"
+#include "util/crypto.h"
+#include "wired/core/scripting/wired_scripting.h"
 
 #if FEAT_SW3Z
 #include "sw3z.h"
@@ -225,11 +227,17 @@ typedef enum {
 	DIR_DENY
 } dirPolicy_t;
 
+typedef struct fsMountScopeState_s fsMountScopeState_t;
+
 typedef struct searchpath_s {
 	struct searchpath_s *next;
 	pack_t		*pack;		// only one of pack / dir will be non NULL
 	directory_t	*dir;
 	dirPolicy_t	policy;
+	qboolean scopeShadowed;
+	fsMountScopeId_t scopeId;
+	fsMountRole_t role;
+	fsMountScopeState_t *scopeState;
 } searchpath_t;
 
 static	char		fs_gamedir[MAX_OSPATH];	// this will be a single file name with no separators
@@ -283,6 +291,8 @@ typedef struct {
 	// single-app case and for non-cgame owners (H_SYSTEM/H_QAGAME), so N=1 is
 	// byte-identical to the class-only key.
 	int			ownerAppSlot;
+	fsMountScopeId_t mountScopeId;
+	fsMountRole_t mountRole;
 	int			pakIndex;
 	pack_t		*pak;
 #if FEAT_SW3Z
@@ -312,6 +322,20 @@ qboolean fs_skipExecDefaults = qfalse;
 
 #define MAX_REF_PAKS	MAX_STRING_TOKENS
 
+struct fsMountScopeState_s {
+	fsMountScopeId_t scopeId;
+	fsMountRole_t role;
+	unsigned purePolicyGeneration;
+	qboolean packageReceiptConfigured;
+	byte packageReceiptDigest[COM_SHA256_DIGEST_LEN];
+	qboolean purePolicyConfigured;
+	qboolean denyLoose;
+	size_t approvedChecksumCount;
+	int approvedChecksums[];
+};
+
+static unsigned fs_purePolicyGeneration = 1u;
+
 // never load anything from pk3 files that are not present at the server when pure
 static int		fs_numServerPaks = 0;
 static int		fs_serverPaks[MAX_REF_PAKS];			// checksums
@@ -334,13 +358,108 @@ int	fs_lastPakIndex;
 static qboolean		fs_sw3z_deferOpen = qfalse;
 #endif
 
+static wired_fs_alias_entry_t
+	fs_aliasEntries[2][WIRED_FS_ALIAS_MAX_ENTRIES];
+static wired_fs_alias_catalog_t fs_aliasCatalog = {
+	1, 0, WIRED_FS_ALIAS_MAX_ENTRIES, fs_aliasEntries[0]
+};
+static int fs_aliasCatalogIndex;
+static sys_mutex_t fs_aliasCatalogMutex;
+static qboolean fs_aliasCatalogMutexInitialized;
+static unsigned fs_resourceGeneration = 1;
+static uint64_t fs_resourceResolveRequests;
+static uint64_t fs_resourceResolveAliasHits;
+static uint64_t fs_fileOpenAliasHits;
+
 #ifdef FS_MISSING
 static FILE*		missingFiles = NULL;
 #endif
 
 static int FS_GetModList( char *listbuf, int bufsize );
 static void FS_CheckIdPaks( void );
+static qboolean FS_ResolveResourceDirect( const char *qpath,
+	fsResolvedResource_t *out, unsigned generation );
 void FS_Reload( void );
+
+static unsigned FS_NextResourceGeneration( void ) {
+	fs_resourceGeneration++;
+	if ( fs_resourceGeneration == 0 ) {
+		fs_resourceGeneration = 1;
+	}
+	return fs_resourceGeneration;
+}
+
+static void FS_LockAliasCatalog( void ) {
+	if ( fs_aliasCatalogMutexInitialized ) {
+		Sys_MutexLock( &fs_aliasCatalogMutex );
+	}
+}
+
+static void FS_UnlockAliasCatalog( void ) {
+	if ( fs_aliasCatalogMutexInitialized ) {
+		Sys_MutexUnlock( &fs_aliasCatalogMutex );
+	}
+}
+
+static bool FS_AliasTargetExists( const char *qpath, void *ctx ) {
+	fsResolvedResource_t resolved;
+	(void)ctx;
+	return FS_ResolveResourceDirect( qpath, &resolved,
+		fs_resourceGeneration ) == qtrue;
+}
+
+qboolean FS_InstallFileAliases( const wired_fs_alias_pair_t *pairs,
+	size_t pairCount, char *error, size_t errorSize ) {
+	wired_fs_alias_catalog_t candidate;
+	int candidateIndex;
+	unsigned previousGeneration;
+	unsigned generation;
+
+	FS_LockAliasCatalog();
+	candidateIndex = 1 - fs_aliasCatalogIndex;
+	previousGeneration = fs_resourceGeneration;
+	generation = FS_NextResourceGeneration();
+
+	if ( !wired_fs_alias_build( pairs, pairCount, generation,
+		FS_AliasTargetExists, NULL, fs_aliasEntries[candidateIndex],
+		WIRED_FS_ALIAS_MAX_ENTRIES, &candidate, error, errorSize ) ) {
+		/* Candidate-first publication: the previous catalog remains live. */
+		fs_resourceGeneration = previousGeneration;
+		FS_UnlockAliasCatalog();
+		return qfalse;
+	}
+
+	fs_aliasCatalogIndex = candidateIndex;
+	fs_aliasCatalog = candidate;
+	FS_UnlockAliasCatalog();
+	return qtrue;
+}
+
+void FS_ClearFileAliases( void ) {
+	int candidateIndex;
+	unsigned generation;
+
+	FS_LockAliasCatalog();
+	candidateIndex = 1 - fs_aliasCatalogIndex;
+	generation = FS_NextResourceGeneration();
+
+	memset( fs_aliasEntries[candidateIndex], 0,
+		sizeof( fs_aliasEntries[candidateIndex] ) );
+	fs_aliasCatalogIndex = candidateIndex;
+	fs_aliasCatalog.generation = generation;
+	fs_aliasCatalog.count = 0;
+	fs_aliasCatalog.capacity = WIRED_FS_ALIAS_MAX_ENTRIES;
+	fs_aliasCatalog.entries = fs_aliasEntries[candidateIndex];
+	FS_UnlockAliasCatalog();
+}
+
+unsigned FS_FileAliasGeneration( void ) {
+	unsigned generation;
+	FS_LockAliasCatalog();
+	generation = fs_aliasCatalog.generation;
+	FS_UnlockAliasCatalog();
+	return generation;
+}
 
 
 /*
@@ -358,7 +477,7 @@ qboolean FS_Initialized( void ) {
 FS_PakIsPure
 =================
 */
-static qboolean FS_PakIsPure( const pack_t *pack ) {
+static qboolean FS_GlobalPakIsPure( const pack_t *pack ) {
 #ifndef HEADLESS
 	if ( fs_numServerPaks ) {
 		for ( int i = 0 ; i < fs_numServerPaks ; i++ ) {
@@ -373,6 +492,49 @@ static qboolean FS_PakIsPure( const pack_t *pack ) {
 	}
 #endif
 	return qtrue;
+}
+
+static qboolean FS_RoleAllowedForScope( fsMountRole_t consumer,
+		fsMountRole_t packageRole ) {
+	switch ( consumer ) {
+	case FS_MOUNT_ROLE_CLIENT:
+		return packageRole == FS_MOUNT_ROLE_RUNTIME
+			|| packageRole == FS_MOUNT_ROLE_CLIENT
+			|| packageRole == FS_MOUNT_ROLE_SHARED
+			|| packageRole == FS_MOUNT_ROLE_COSMETIC;
+	case FS_MOUNT_ROLE_SERVER:
+		return packageRole == FS_MOUNT_ROLE_RUNTIME
+			|| packageRole == FS_MOUNT_ROLE_SERVER
+			|| packageRole == FS_MOUNT_ROLE_SHARED;
+	case FS_MOUNT_ROLE_TOOLCHAIN:
+		return packageRole == FS_MOUNT_ROLE_RUNTIME
+			|| packageRole == FS_MOUNT_ROLE_TOOLCHAIN
+			|| packageRole == FS_MOUNT_ROLE_SHARED;
+	default:
+		return qtrue;
+	}
+}
+
+static qboolean FS_PakIsPure( const searchpath_t *search ) {
+	const fsMountScopeState_t *state;
+
+	if ( !search || !search->pack || search->scopeShadowed
+			|| !FS_GlobalPakIsPure( search->pack ) ) {
+		return qfalse;
+	}
+	state = search->scopeState;
+	if ( state && !FS_RoleAllowedForScope( state->role, search->role ) ) {
+		return qfalse;
+	}
+	if ( !state || !state->purePolicyConfigured ) {
+		return qtrue;
+	}
+	for ( size_t i = 0; i < state->approvedChecksumCount; ++i ) {
+		if ( search->pack->checksum == state->approvedChecksums[i] ) {
+			return qtrue;
+		}
+	}
+	return qfalse;
 }
 
 /* FS_SW3ZPakIsPure removed — FS_PakIsPure now handles both types */
@@ -813,6 +975,8 @@ FS_InitHandle
 */
 static void FS_InitHandle( fileHandleData_t *fd ) {
 	fd->pak = NULL;
+	fd->mountScopeId = FS_MOUNT_SCOPE_GLOBAL;
+	fd->mountRole = FS_MOUNT_ROLE_GLOBAL;
 	fd->pakIndex = -1;
 	fs_lastPakIndex = -1;
 #if FEAT_SW3Z
@@ -1605,11 +1769,15 @@ static qboolean FS_GeneralRef( const char *filename )
  * one place prevents PK3, SW3Z, and the explicit touch path from disagreeing
  * about the same qpath. gamesv retains the existing non-general policy above. */
 static void FS_MarkPakReferenced( pack_t *pak, const char *filename ) {
+	/* The client module is represented by the dedicated cgame slot in the cp
+	 * protocol. Marking the same archive as GENERAL as well emits its checksum
+	 * twice and is correctly rejected by the server's anti-duplication guard. */
+	if ( !strcmp( filename, "vm/gamecl.wasm" ) ) {
+		pak->referenced |= FS_CGAME_REF;
+		return;
+	}
 	if ( !( pak->referenced & FS_GENERAL_REF ) && FS_GeneralRef( filename ) ) {
 		pak->referenced |= FS_GENERAL_REF;
-	}
-	if ( !( pak->referenced & FS_CGAME_REF ) && !strcmp( filename, "vm/gamecl.wasm" ) ) {
-		pak->referenced |= FS_CGAME_REF;
 	}
 }
 
@@ -1843,6 +2011,138 @@ extern qboolean		com_fullyInitialized;
 // serve banned config files (autoexec.cfg / WIRED_CONFIG_CFG) out of non-static dirs
 static qboolean FS_BannedPakFile( const char *filename );
 
+static uint64_t FS_ResourceHashBytes( uint64_t hash, const void *bytes,
+	size_t byteCount ) {
+	const unsigned char *cursor = (const unsigned char *)bytes;
+	size_t i;
+	for ( i = 0; i < byteCount; i++ ) {
+		hash ^= cursor[i];
+		hash *= UINT64_C( 1099511628211 );
+	}
+	return hash;
+}
+
+static uint64_t FS_ResourceHashPath( uint64_t hash, const char *path ) {
+	while ( path && *path ) {
+		unsigned char c = (unsigned char)*path++;
+		if ( c == '\\' ) {
+			c = '/';
+		}
+		c = (unsigned char)tolower( c );
+		hash = FS_ResourceHashBytes( hash, &c, 1 );
+	}
+	return hash;
+}
+
+static qboolean FS_ResolveResourceDirect( const char *qpath,
+	fsResolvedResource_t *out, unsigned generation ) {
+	const searchpath_t *search;
+	long fullHash;
+
+	if ( !qpath || !out || !fs_searchpaths ) {
+		return qfalse;
+	}
+	if ( qpath[0] == '/' || qpath[0] == '\\' ) {
+		qpath++;
+	}
+	if ( !qpath[0] || FS_CheckDirTraversal( qpath ) ) {
+		return qfalse;
+	}
+
+	fullHash = FS_HashFileName( qpath, 0U );
+	for ( search = fs_searchpaths; search; search = search->next ) {
+		if ( search->pack ) {
+			long hash = fullHash & (search->pack->hashSize - 1);
+			fileInPack_t *pakFile = search->pack->hashTable[hash];
+			if ( !pakFile || !FS_PakIsPure( search ) ) {
+				continue;
+			}
+			do {
+				if ( !FS_FilenameCompare( pakFile->name, qpath ) ) {
+					uint64_t sourceId = UINT64_C( 1469598103934665603 );
+					unsigned char kind = (unsigned char)search->pack->type;
+					memset( out, 0, sizeof( *out ) );
+					Q_strncpyz( out->canonicalPath, pakFile->name,
+						sizeof( out->canonicalPath ) );
+					sourceId = FS_ResourceHashBytes( sourceId, &kind,
+						sizeof( kind ) );
+					sourceId = FS_ResourceHashBytes( sourceId,
+						&search->pack->checksum,
+						sizeof( search->pack->checksum ) );
+					sourceId = FS_ResourceHashPath( sourceId, pakFile->name );
+					out->sourceId = sourceId;
+					out->size = pakFile->size;
+					out->fsGeneration = generation;
+#if FEAT_SW3Z
+					out->sourceKind = search->pack->type == PACK_SW3Z
+						? FS_RESOURCE_SOURCE_SW3Z : FS_RESOURCE_SOURCE_PK3;
+#else
+					out->sourceKind = FS_RESOURCE_SOURCE_PK3;
+#endif
+					return qtrue;
+				}
+				pakFile = pakFile->next;
+			} while ( pakFile );
+		} else if ( search->dir && search->policy != DIR_DENY ) {
+			char *netpath;
+			FILE *file;
+			int length;
+			uint64_t sourceId;
+
+			if ( search->policy != DIR_STATIC && FS_BannedPakFile( qpath ) ) {
+				continue;
+			}
+			netpath = FS_BuildOSPath( search->dir->path,
+				search->dir->gamedir, qpath );
+			file = Sys_FOpen( netpath, "rb" );
+			if ( !file ) {
+				continue;
+			}
+			length = FS_FileLength( file );
+			fclose( file );
+			sourceId = FS_ResourceHashPath( UINT64_C( 1469598103934665603 ),
+				netpath );
+			memset( out, 0, sizeof( *out ) );
+			Q_strncpyz( out->canonicalPath, qpath,
+				sizeof( out->canonicalPath ) );
+			out->sourceId = sourceId;
+			out->size = (uint64_t)length;
+			out->fsGeneration = generation;
+			out->sourceKind = FS_RESOURCE_SOURCE_LOOSE;
+			return qtrue;
+		}
+	}
+	return qfalse;
+}
+
+qboolean FS_ResolveResource( const char *qpath, fsResolvedResource_t *out ) {
+	char canonical[WIRED_FS_ALIAS_PATH_MAX];
+	const char *resolvedPath = qpath;
+	unsigned generation;
+
+	if ( !qpath || !out ) {
+		return qfalse;
+	}
+	FS_LockAliasCatalog();
+	fs_resourceResolveRequests++;
+	if ( qpath[0] == '/' || qpath[0] == '\\' ) {
+		qpath++;
+		resolvedPath = qpath;
+	}
+	if ( FS_CheckDirTraversal( qpath ) ) {
+		FS_UnlockAliasCatalog();
+		return qfalse;
+	}
+	if ( wired_fs_alias_resolve( &fs_aliasCatalog, qpath, canonical,
+		sizeof( canonical ) ) ) {
+		resolvedPath = canonical;
+		fs_resourceResolveAliasHits++;
+	}
+	generation = fs_resourceGeneration;
+	FS_UnlockAliasCatalog();
+	return FS_ResolveResourceDirect( resolvedPath, out, generation );
+}
+
 int FS_FOpenFileRead( const char *filename, fileHandle_t *file, qboolean uniqueFILE ) {
 	const searchpath_t	*search;
 	char			*netpath;
@@ -1854,6 +2154,8 @@ int FS_FOpenFileRead( const char *filename, fileHandle_t *file, qboolean uniqueF
 	FILE			*temp;
 	int				length;
 	fileHandleData_t *f;
+	char			aliasPath[WIRED_FS_ALIAS_PATH_MAX];
+	qboolean		aliasHit = qfalse;
 
 	if ( !fs_searchpaths ) {
 		Com_Terminate( TERM_UNRECOVERABLE, "Filesystem call made without initialization" );
@@ -1878,6 +2180,21 @@ int FS_FOpenFileRead( const char *filename, fileHandle_t *file, qboolean uniqueF
 		return -1;
 	}
 
+	/* Read-only aliasing happens before hashing/opening. Writes, deletes and
+	 * renames never call this resolver. */
+	FS_LockAliasCatalog();
+	if ( wired_fs_alias_resolve( &fs_aliasCatalog, filename, aliasPath,
+		sizeof( aliasPath ) ) ) {
+		fs_fileOpenAliasHits++;
+		aliasHit = qtrue;
+		filename = aliasPath;
+	}
+	FS_UnlockAliasCatalog();
+	if ( aliasHit && fs_debug && fs_debug->integer ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_filesystem),
+			"FS alias: %s\n", aliasPath );
+	}
+
 	// we will calculate full hash only once then just mask it by current pack->hashSize
 	// we can do that as long as we know properties of our hash function
 	fullHash = FS_HashFileName( filename, 0U );
@@ -1888,7 +2205,7 @@ int FS_FOpenFileRead( const char *filename, fileHandle_t *file, qboolean uniqueF
 			// is the element a pak file?
 			if ( search->pack && search->pack->hashTable[ (hash = fullHash & (search->pack->hashSize-1)) ] ) {
 				// skip non-pure files
-				if ( !FS_PakIsPure( search->pack ) )
+				if ( !FS_PakIsPure( search ) )
 					continue;
 				// look through all the pak file elements
 				pak = search->pack;
@@ -1928,7 +2245,7 @@ int FS_FOpenFileRead( const char *filename, fileHandle_t *file, qboolean uniqueF
 		// is the element a pak file?
 		if ( search->pack && search->pack->hashTable[ (hash = fullHash & (search->pack->hashSize-1)) ] ) {
 			// disregard if it doesn't match one of the allowed pure pak files
-			if ( !FS_PakIsPure( search->pack ) ) {
+			if ( !FS_PakIsPure( search ) ) {
 				continue;
 			}
 			// look through all the pak file elements
@@ -1939,10 +2256,23 @@ int FS_FOpenFileRead( const char *filename, fileHandle_t *file, qboolean uniqueF
 				if ( !FS_FilenameCompare( pakFile->name, filename ) ) {
 					// found it!
 #if FEAT_SW3Z
-					if ( pak->type == PACK_SW3Z )
-						return FS_OpenFileInSW3Z( file, pak, pakFile );
+					if ( pak->type == PACK_SW3Z ) {
+						int result = FS_OpenFileInSW3Z( file, pak, pakFile );
+						if ( *file != FS_INVALID_HANDLE ) {
+							fsh[*file].mountScopeId = search->scopeId;
+							fsh[*file].mountRole = search->role;
+						}
+						return result;
+					}
 #endif
-					return FS_OpenFileInPak( file, pak, pakFile, uniqueFILE );
+					{
+						int result = FS_OpenFileInPak( file, pak, pakFile, uniqueFILE );
+						if ( *file != FS_INVALID_HANDLE ) {
+							fsh[*file].mountScopeId = search->scopeId;
+							fsh[*file].mountRole = search->role;
+						}
+						return result;
+					}
 				}
 				pakFile = pakFile->next;
 			} while ( pakFile != NULL );
@@ -1966,6 +2296,8 @@ int FS_FOpenFileRead( const char *filename, fileHandle_t *file, qboolean uniqueF
 			*file = FS_HandleForFile();
 			f = &fsh[ *file ];
 			FS_InitHandle( f );
+			f->mountScopeId = search->scopeId;
+			f->mountRole = search->role;
 
 			f->handleFiles.file.o = temp;
 			Q_strncpyz( f->name, filename, sizeof( f->name ) );
@@ -2836,6 +3168,24 @@ static void FS_InsertPakToCache( pack_t *pak )
 	{
 		FS_AddToCache( pak );
 		pak->touched = qtrue;
+	}
+}
+
+static void FS_UpdatePakPureChecksum( pack_t *pak, int checksumFeed ) {
+	if ( !pak || pak->checksumFeed == checksumFeed ) return;
+	pak->headerLongs[0] = LittleLong( checksumFeed );
+	pak->pure_checksum = Com_BlockChecksum( pak->headerLongs,
+		sizeof( pak->headerLongs[0] ) * pak->numHeaderLongs );
+	pak->pure_checksum = LittleLong( pak->pure_checksum );
+	pak->checksumFeed = checksumFeed;
+}
+
+void FS_SetPureChecksumFeed( int checksumFeed ) {
+	searchpath_t *search;
+	if ( fs_checksumFeed == checksumFeed ) return;
+	fs_checksumFeed = checksumFeed;
+	for ( search = fs_searchpaths; search; search = search->next ) {
+		FS_UpdatePakPureChecksum( search->pack, checksumFeed );
 	}
 }
 
@@ -3958,7 +4308,7 @@ static char **FS_ListFilteredFiles( const char *path, const char *extension, con
 
 			//ZOID:  If we are pure, don't search for files on paks that
 			// aren't on the pure list
-			if ( !FS_PakIsPure( search->pack ) && !( flags & FS_MATCH_UNPURE ) ) {
+			if ( !FS_PakIsPure( search ) && !( flags & FS_MATCH_UNPURE ) ) {
 				continue;
 			}
 
@@ -4631,7 +4981,7 @@ static void FS_Path_f( void ) {
 			Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "%s (%i files)\n", s->pack->pakFilename, s->pack->numfiles );
 #endif
 			if ( fs_numServerPaks ) {
-				if ( !FS_PakIsPure( s->pack ) ) {
+				if ( !FS_PakIsPure( s ) ) {
 					COM_WARN( LOG_CH(ch_filesystem), "    not on the pure list\n" );
 				} else {
 					Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "    on the pure list\n" );
@@ -4778,7 +5128,9 @@ Sets fs_gamedir, adds the directory to the head of the path,
 then loads the zip headers
 ================
 */
-static void FS_AddGameDirectory( const char *path, const char *dir ) {
+static void FS_AddGameDirectoryScoped( const char *path, const char *dir,
+		fsMountScopeId_t scopeId, fsMountRole_t role,
+		fsMountScopeState_t *scopeState ) {
 	const searchpath_t *sp;
 	int				len;
 	searchpath_t	*search;
@@ -4797,12 +5149,16 @@ static void FS_AddGameDirectory( const char *path, const char *dir ) {
 	int				dir_len;
 
 	for ( sp = fs_searchpaths ; sp ; sp = sp->next ) {
-		if ( sp->dir && !Q_stricmp( sp->dir->path, path ) && !Q_stricmp( sp->dir->gamedir, dir )) {
+		if ( sp->dir && sp->scopeId == scopeId && sp->role == role
+				&& !Q_stricmp( sp->dir->path, path )
+				&& !Q_stricmp( sp->dir->gamedir, dir ) ) {
 			return;	// we've already got this one
 		}
 	}
 
-	Q_strncpyz( fs_gamedir, dir, sizeof( fs_gamedir ) );
+	if ( scopeId == FS_MOUNT_SCOPE_GLOBAL ) {
+		Q_strncpyz( fs_gamedir, dir, sizeof( fs_gamedir ) );
+	}
 
 	//
 	// add the directory to the search path
@@ -4815,6 +5171,11 @@ static void FS_AddGameDirectory( const char *path, const char *dir ) {
 
 	search = Z_TagMalloc( len, TAG_SEARCH_PATH );
 	memset( search, 0, len );
+	search->scopeId = scopeId;
+	search->role = role;
+	search->scopeState = scopeState;
+	search->policy = scopeId == FS_MOUNT_SCOPE_GLOBAL
+		? DIR_STATIC : ( fs_numServerPaks ? DIR_DENY : DIR_ALLOW );
 	search->dir = (directory_t*)( search + 1 );
 	search->dir->path = (char*)( search->dir + 1 );
 	search->dir->gamedir = (char*)( search->dir->path + path_len );
@@ -4825,7 +5186,8 @@ static void FS_AddGameDirectory( const char *path, const char *dir ) {
 
 	search->next = fs_searchpaths;
 	fs_searchpaths = search;
-	fs_dirCount++;
+	if ( search->policy == DIR_STATIC ) fs_dirCount++;
+	else fs_pk3dirCount++;
 
 	// find all pak files in this directory
 	Q_strncpyz( curpath, FS_BuildOSPath( path, dir, NULL ), sizeof( curpath ) );
@@ -4884,7 +5246,8 @@ static void FS_AddGameDirectory( const char *path, const char *dir ) {
 			}
 
 			// store the game name for downloading
-			pak->pakGamename = gamedir;
+			Q_strncpyz( pak->pakGamename, gamedir,
+				sizeof( pak->pakGamename ) );
 
 			pak->index = fs_packCount;
 			pak->referenced = 0;
@@ -4895,6 +5258,9 @@ static void FS_AddGameDirectory( const char *path, const char *dir ) {
 
 			search = Z_TagMalloc( sizeof( *search ), TAG_SEARCH_PACK );
 			memset( search, 0, sizeof( *search ) );
+			search->scopeId = scopeId;
+			search->role = role;
+			search->scopeState = scopeState;
 			search->pack = pak;
 
 			search->next = fs_searchpaths;
@@ -4921,6 +5287,9 @@ static void FS_AddGameDirectory( const char *path, const char *dir ) {
 
 			search = Z_TagMalloc( len, TAG_SEARCH_DIR );
 			memset( search, 0, len );
+			search->scopeId = scopeId;
+			search->role = role;
+			search->scopeState = scopeState;
 			search->dir = (directory_t*)(search + 1);
 			search->dir->path = (char*)( search->dir + 1 );
 			search->dir->gamedir = (char*)( search->dir->path + path_len );
@@ -5009,7 +5378,8 @@ static void FS_AddGameDirectory( const char *path, const char *dir ) {
 #endif
 			}
 
-			pak->pakGamename = gamedir;
+			Q_strncpyz( pak->pakGamename, gamedir,
+				sizeof( pak->pakGamename ) );
 			pak->index = fs_packCount;
 			pak->referenced = 0;
 			pak->exclude = qfalse;
@@ -5019,6 +5389,9 @@ static void FS_AddGameDirectory( const char *path, const char *dir ) {
 
 			search = Z_TagMalloc( sizeof( *search ), TAG_SEARCH_PACK );
 			memset( search, 0, sizeof( *search ) );
+			search->scopeId = scopeId;
+			search->role = role;
+			search->scopeState = scopeState;
 			search->pack = pak;
 
 			search->next = fs_searchpaths;
@@ -5027,6 +5400,728 @@ static void FS_AddGameDirectory( const char *path, const char *dir ) {
 		Sys_FreeFileList( sw3zfiles );
 	}
 #endif
+}
+
+static void FS_AddGameDirectory( const char *path, const char *dir ) {
+	FS_AddGameDirectoryScoped( path, dir, FS_MOUNT_SCOPE_GLOBAL,
+		FS_MOUNT_ROLE_GLOBAL, NULL );
+}
+
+static unsigned FS_NextPurePolicyGeneration( void ) {
+	fs_purePolicyGeneration++;
+	if ( fs_purePolicyGeneration == 0u ) fs_purePolicyGeneration = 1u;
+	return fs_purePolicyGeneration;
+}
+
+static fsMountScopeState_t *FS_AllocScopeState( fsMountScopeId_t scopeId,
+		fsMountRole_t role, const fsMountPurePolicy_t *policy,
+		const fsMountScopeState_t *inherit ) {
+	size_t checksumCount = policy ? policy->approvedChecksumCount : 0u;
+	size_t bytes = sizeof( fsMountScopeState_t )
+		+ checksumCount * sizeof( int );
+	fsMountScopeState_t *state = Z_TagMalloc( bytes, TAG_SEARCH_PATH );
+	memset( state, 0, bytes );
+	state->scopeId = scopeId;
+	state->role = role;
+	state->purePolicyGeneration = FS_NextPurePolicyGeneration();
+	if ( inherit && inherit->packageReceiptConfigured ) {
+		state->packageReceiptConfigured = qtrue;
+		memcpy( state->packageReceiptDigest, inherit->packageReceiptDigest,
+			sizeof( state->packageReceiptDigest ) );
+	}
+	state->purePolicyConfigured = policy ? qtrue : qfalse;
+	state->denyLoose = policy ? policy->denyLoose : qfalse;
+	state->approvedChecksumCount = checksumCount;
+	if ( checksumCount ) {
+		memcpy( state->approvedChecksums, policy->approvedChecksums,
+			checksumCount * sizeof( int ) );
+	}
+	return state;
+}
+
+static fsMountScopeState_t *FS_FindScopeState( fsMountScopeId_t scopeId ) {
+	const searchpath_t *search;
+	for ( search = fs_searchpaths; search; search = search->next ) {
+		if ( search->scopeId == scopeId ) return search->scopeState;
+	}
+	return NULL;
+}
+
+static void FS_AssignScopeState( fsMountScopeId_t scopeId,
+		fsMountScopeState_t *state ) {
+	searchpath_t *search;
+	for ( search = fs_searchpaths; search; search = search->next ) {
+		if ( search->scopeId == scopeId ) search->scopeState = state;
+	}
+}
+
+static void FS_ApplyScopeDirPolicy( fsMountScopeId_t scopeId,
+		const fsMountScopeState_t *state ) {
+	searchpath_t *search;
+	dirPolicy_t policy = fs_numServerPaks
+		|| ( state && state->purePolicyConfigured && state->denyLoose )
+		? DIR_DENY : DIR_ALLOW;
+	for ( search = fs_searchpaths; search; search = search->next ) {
+		if ( search->scopeId == scopeId && search->dir
+				&& search->policy != DIR_STATIC ) {
+			search->policy = policy;
+		}
+	}
+}
+
+static qboolean FS_ScopeMounted( fsMountScopeId_t scopeId ) {
+	const searchpath_t *search;
+	for ( search = fs_searchpaths; search; search = search->next ) {
+		if ( search->scopeId == scopeId ) return qtrue;
+	}
+	return qfalse;
+}
+
+static unsigned FS_CountScopeHandles( fsMountScopeId_t scopeId ) {
+	unsigned count = 0u;
+	for ( int i = 1; i < MAX_FILE_HANDLES; ++i ) {
+		if ( fsh[i].name[0] && fsh[i].mountScopeId == scopeId ) count++;
+	}
+	return count;
+}
+
+typedef struct {
+	char archivePath[MAX_OSPATH];
+	char sha256[COM_SHA256_HEX_LEN + 1];
+	uint64_t size;
+	uint32_t role;
+	uint32_t clientApproved;
+} fsMountReceiptFingerprintEntry_t;
+
+static int FS_CompareMountReceiptFingerprintEntries( const void *left,
+		const void *right ) {
+	const fsMountReceiptFingerprintEntry_t *a = left;
+	const fsMountReceiptFingerprintEntry_t *b = right;
+	int order = strcmp( a->archivePath, b->archivePath );
+	if ( order ) return order;
+	order = strcmp( a->sha256, b->sha256 );
+	if ( order ) return order;
+	if ( a->size != b->size ) return a->size < b->size ? -1 : 1;
+	if ( a->role != b->role ) return a->role < b->role ? -1 : 1;
+	if ( a->clientApproved != b->clientApproved )
+		return a->clientApproved < b->clientApproved ? -1 : 1;
+	return 0;
+}
+
+/* Receipt identity is semantic rather than wire-order dependent. The digest is
+ * process-local lifecycle state: it makes an exact replay a read-only no-op,
+ * while any changed package set still has to cross the zero-live-handle
+ * mutation barrier and repeat full integrity validation. */
+static qboolean FS_MountReceiptDigest( const fsMountPackageReceipt_t *receipts,
+		size_t receiptCount, byte digest[COM_SHA256_DIGEST_LEN],
+		char *error, size_t errorSize ) {
+	const size_t headerSize = sizeof( uint64_t );
+	const size_t bytes = headerSize
+		+ receiptCount * sizeof( fsMountReceiptFingerprintEntry_t );
+	byte *serialized = Z_Malloc( bytes );
+	fsMountReceiptFingerprintEntry_t *entries =
+		(fsMountReceiptFingerprintEntry_t *)( serialized + headerSize );
+	uint64_t encodedCount = (uint64_t)receiptCount;
+	memset( serialized, 0, bytes );
+	memcpy( serialized, &encodedCount, sizeof( encodedCount ) );
+	for ( size_t i = 0; i < receiptCount; ++i ) {
+		const fsMountPackageReceipt_t *receipt = &receipts[i];
+		fsMountReceiptFingerprintEntry_t *entry = &entries[i];
+		if ( !receipt->archivePath || !receipt->archivePath[0]
+				|| strlen( receipt->archivePath ) >= sizeof( entry->archivePath )
+				|| strchr( receipt->archivePath, '/' )
+				|| strchr( receipt->archivePath, '\\' )
+				|| !receipt->sha256
+				|| strlen( receipt->sha256 ) != COM_SHA256_HEX_LEN
+				|| receipt->role <= FS_MOUNT_ROLE_GLOBAL
+				|| receipt->role > FS_MOUNT_ROLE_COSMETIC ) {
+			if ( error && errorSize ) Com_sprintf( error, (int)errorSize,
+				"invalid package receipt entry" );
+			Z_Free( serialized );
+			return qfalse;
+		}
+		Q_strncpyz( entry->archivePath, receipt->archivePath,
+			sizeof( entry->archivePath ) );
+		Q_strncpyz( entry->sha256, receipt->sha256, sizeof( entry->sha256 ) );
+		for ( char *cursor = entry->archivePath; *cursor; ++cursor )
+			*cursor = (char)tolower( (unsigned char)*cursor );
+		for ( char *cursor = entry->sha256; *cursor; ++cursor )
+			*cursor = (char)tolower( (unsigned char)*cursor );
+		entry->size = receipt->size;
+		entry->role = (uint32_t)receipt->role;
+		entry->clientApproved = receipt->clientApproved ? 1u : 0u;
+	}
+	qsort( entries, receiptCount, sizeof( *entries ),
+		FS_CompareMountReceiptFingerprintEntries );
+	Com_SHA256( serialized, (unsigned int)bytes, digest );
+	Z_Free( serialized );
+	return qtrue;
+}
+
+static qboolean FS_CollectScopeReceiptOutputs( fsMountScopeId_t scopeId,
+		const fsMountPackageReceipt_t *receipts, size_t receiptCount,
+		int *approvedChecksums, size_t approvedCapacity,
+		size_t *outApprovedCount, size_t *outScopedArchiveCount,
+		char *error, size_t errorSize ) {
+	searchpath_t *search;
+	size_t approvedCount = 0u;
+	size_t archiveCount = 0u;
+	for ( search = fs_searchpaths; search; search = search->next ) {
+		searchpath_t *earlier;
+		qboolean duplicate = qfalse;
+		const char *name;
+		if ( search->scopeId != scopeId || !search->pack ) continue;
+		name = COM_SkipPath( search->pack->pakFilename );
+		for ( earlier = fs_searchpaths; earlier != search; earlier = earlier->next ) {
+			if ( earlier->scopeId == scopeId && earlier->pack
+					&& !Q_stricmp( COM_SkipPath( earlier->pack->pakFilename ), name ) ) {
+				duplicate = qtrue;
+				break;
+			}
+		}
+		if ( !duplicate ) archiveCount++;
+	}
+	for ( size_t i = 0; i < receiptCount; ++i ) {
+		if ( !receipts[i].clientApproved ) continue;
+		for ( search = fs_searchpaths; search; search = search->next ) {
+			qboolean seen = qfalse;
+			if ( search->scopeId != scopeId || !search->pack
+					|| Q_stricmp( COM_SkipPath( search->pack->pakFilename ),
+						receipts[i].archivePath ) ) continue;
+			for ( size_t c = 0; c < approvedCount; ++c )
+				if ( approvedChecksums[c] == search->pack->checksum ) seen = qtrue;
+			if ( seen ) continue;
+			if ( approvedCount >= approvedCapacity ) {
+				if ( error && errorSize ) Com_sprintf( error, (int)errorSize,
+					"approved checksum capacity exceeded" );
+				return qfalse;
+			}
+			approvedChecksums[approvedCount++] = search->pack->checksum;
+		}
+	}
+	if ( outApprovedCount ) *outApprovedCount = approvedCount;
+	if ( outScopedArchiveCount ) *outScopedArchiveCount = archiveCount;
+	return qtrue;
+}
+
+static searchpath_t *FS_DetachScopeBlock( fsMountScopeId_t scopeId,
+		searchpath_t ***outInsertionLink, searchpath_t **outAfter ) {
+	searchpath_t **link = &fs_searchpaths;
+	searchpath_t *first, *tail;
+	while ( *link && (*link)->scopeId != scopeId ) link = &(*link)->next;
+	if ( !*link ) return NULL;
+	first = *link;
+	tail = first;
+	while ( tail->next && tail->next->scopeId == scopeId ) tail = tail->next;
+	*outAfter = tail->next;
+	tail->next = NULL;
+	*link = *outAfter;
+	*outInsertionLink = link;
+	return first;
+}
+
+static void FS_RestoreScopeBlock( searchpath_t **insertionLink,
+		searchpath_t *first, searchpath_t *after ) {
+	searchpath_t *tail = first;
+	while ( tail->next ) tail = tail->next;
+	tail->next = after;
+	*insertionLink = first;
+}
+
+static qboolean FS_SearchPathsUsePack( const pack_t *pak ) {
+	const searchpath_t *search;
+	for ( search = fs_searchpaths; search; search = search->next ) {
+		if ( search->pack == pak ) return qtrue;
+	}
+	return qfalse;
+}
+
+/* A scoped lifecycle owns precedence for every archive identity it mounts.
+ * Precompute global fallthrough suppression here, never in the read hot path.
+ * This prevents a role-denied scoped package from being reopened through the
+ * legacy global/base copy while keeping lookup cost to one boolean branch. */
+static void FS_RefreshGlobalScopeShadows( void ) {
+	searchpath_t *global;
+	const searchpath_t *scoped;
+	for ( global = fs_searchpaths; global; global = global->next ) {
+		if ( global->scopeId != FS_MOUNT_SCOPE_GLOBAL || !global->pack ) continue;
+		global->scopeShadowed = qfalse;
+		for ( scoped = fs_searchpaths; scoped; scoped = scoped->next ) {
+			if ( scoped->scopeId == FS_MOUNT_SCOPE_GLOBAL || !scoped->pack ) continue;
+			if ( scoped->pack->checksum == global->pack->checksum
+					&& !Q_stricmp( scoped->pack->pakBasename,
+						global->pack->pakBasename ) ) {
+				global->scopeShadowed = qtrue;
+				break;
+			}
+		}
+	}
+}
+
+/* One canonical archive comparator for both process-global startup and
+ * lifecycle scopes.  Equal basenames deliberately retain their existing
+ * order: that stable tie is what preserves container/root precedence already
+ * established while discovering archives (SW3Z before PK3, home before
+ * install). */
+static qboolean FS_ArchivePrecedesOrEquals( const searchpath_t *left,
+		const searchpath_t *right ) {
+	const char *leftName = left && left->pack ? left->pack->pakBasename : "";
+	const char *rightName = right && right->pack ? right->pack->pakBasename : "";
+	return Q_stricmp( leftName, rightName ) >= 0;
+}
+
+/* Keep a lifecycle scope's lookup order identical to the process-global VFS:
+ * archives override loose directories and archive basenames sort descending.
+ * The insertion sort is stable, so two physical copies with the same basename
+ * retain root priority (the later-mounted home root remains ahead of install).
+ * This runs only while mounting a scope; it adds no work to file lookup. */
+static void FS_OrderScopePrefix( fsMountScopeId_t scopeId ) {
+	searchpath_t *archives = NULL;
+	searchpath_t *dynamicDirs = NULL, *dynamicTail = NULL;
+	searchpath_t *staticDirs = NULL, *staticTail = NULL;
+	searchpath_t *search, *after, *next, *ordered, *tail;
+
+	if ( !fs_searchpaths || fs_searchpaths->scopeId != scopeId ) return;
+
+	search = fs_searchpaths;
+	while ( search && search->scopeId == scopeId ) {
+		next = search->next;
+		search->next = NULL;
+		if ( search->pack ) {
+			searchpath_t **insert = &archives;
+			while ( *insert && FS_ArchivePrecedesOrEquals( *insert, search ) ) {
+				insert = &(*insert)->next;
+			}
+			search->next = *insert;
+			*insert = search;
+		} else if ( search->policy != DIR_STATIC ) {
+			if ( dynamicTail ) dynamicTail->next = search;
+			else dynamicDirs = search;
+			dynamicTail = search;
+		} else {
+			if ( staticTail ) staticTail->next = search;
+			else staticDirs = search;
+			staticTail = search;
+		}
+		search = next;
+	}
+	after = search;
+
+	ordered = archives ? archives : ( dynamicDirs ? dynamicDirs : staticDirs );
+	if ( archives ) {
+		tail = archives;
+		while ( tail->next ) tail = tail->next;
+		tail->next = dynamicDirs ? dynamicDirs : staticDirs;
+	}
+	if ( dynamicDirs ) dynamicTail->next = staticDirs;
+	if ( staticDirs ) staticTail->next = after;
+	else if ( dynamicDirs ) dynamicTail->next = after;
+	else if ( archives ) tail->next = after;
+
+	fs_searchpaths = ordered ? ordered : after;
+}
+
+/* Capture the nodes added by one FS_AddGameDirectoryScoped call before scope
+ * ordering interleaves them with the existing prefix.  If alias publication
+ * fails, these exact nodes can be retired without disturbing the old scope. */
+static searchpath_t **FS_CaptureMountPrefix( searchpath_t *previousHead,
+		size_t *outCount ) {
+	searchpath_t *search;
+	searchpath_t **nodes;
+	size_t count = 0u, index = 0u;
+
+	for ( search = fs_searchpaths; search && search != previousHead;
+			search = search->next ) count++;
+	if ( search != previousHead || count == 0u ) {
+		*outCount = 0u;
+		return NULL;
+	}
+	nodes = Z_Malloc( count * sizeof( *nodes ) );
+	for ( search = fs_searchpaths; search != previousHead;
+			search = search->next ) nodes[index++] = search;
+	*outCount = count;
+	return nodes;
+}
+
+static searchpath_t *FS_DetachCapturedMountNodes( searchpath_t **nodes,
+		size_t nodeCount ) {
+	searchpath_t **link = &fs_searchpaths;
+	searchpath_t *detached = NULL, *tail = NULL;
+
+	while ( *link ) {
+		searchpath_t *candidate = *link;
+		qboolean captured = qfalse;
+		for ( size_t i = 0; i < nodeCount; ++i ) {
+			if ( nodes[i] == candidate ) {
+				captured = qtrue;
+				break;
+			}
+		}
+		if ( !captured ) {
+			link = &candidate->next;
+			continue;
+		}
+		*link = candidate->next;
+		candidate->next = NULL;
+		if ( tail ) tail->next = candidate;
+		else detached = candidate;
+		tail = candidate;
+	}
+	return detached;
+}
+
+static void FS_FreeScopeBlock( searchpath_t *block, qboolean freeScopeState ) {
+	fsMountScopeState_t *scopeState = block ? block->scopeState : NULL;
+	while ( block ) {
+		searchpath_t *next = block->next;
+		if ( block->pack ) {
+			fs_packFiles -= block->pack->numfiles;
+			fs_packCount--;
+#ifndef USE_PAK_CACHE
+			FS_FreePak( block->pack );
+#else
+			if ( !FS_SearchPathsUsePack( block->pack )
+					&& FS_FindInCache( block->pack->pakFilename ) == block->pack ) {
+				FS_RemoveFromCache( block->pack );
+				FS_FreePak( block->pack );
+			}
+#endif
+			block->pack = NULL;
+		} else if ( block->dir ) {
+			if ( block->policy == DIR_STATIC ) fs_dirCount--;
+			else fs_pk3dirCount--;
+		}
+		Z_Free( block );
+		block = next;
+	}
+	if ( freeScopeState && scopeState ) Z_Free( scopeState );
+}
+
+fsMountResult_t FS_MountLayer( const char *path, const char *dir,
+		fsMountScopeId_t scopeId, fsMountRole_t role ) {
+	searchpath_t *block, *previousHead;
+	searchpath_t **addedNodes;
+	fsMountScopeState_t *scopeState;
+	size_t addedNodeCount;
+	qboolean existingScope;
+	if ( !path || !path[0] || !dir || !dir[0]
+			|| scopeId == FS_MOUNT_SCOPE_GLOBAL
+			|| role <= FS_MOUNT_ROLE_GLOBAL || role > FS_MOUNT_ROLE_COSMETIC
+			|| FS_CheckDirTraversal( dir ) || strchr( dir, '/' )
+			|| strchr( dir, '\\' ) || strchr( dir, ':' ) )
+		return FS_MOUNT_INVALID_ARGUMENT;
+	if ( !WiredScript_GetState() ) return FS_MOUNT_LIFECYCLE_UNAVAILABLE;
+	existingScope = FS_ScopeMounted( scopeId );
+	scopeState = existingScope ? FS_FindScopeState( scopeId ) : NULL;
+	/* One lifecycle scope may contain multiple physical roots (normally the
+	 * install resource root followed by the writable home root). Keep every
+	 * layer contiguous at the searchpath head so unmount remains one bounded
+	 * detach and the immutable scope policy has exactly one owner. Interleaved
+	 * or role-changing extensions are rejected rather than silently widening
+	 * another scope's authority. */
+	if ( existingScope ) {
+		if ( !scopeState || scopeState->role != role
+				|| !fs_searchpaths || fs_searchpaths->scopeId != scopeId ) {
+			return FS_MOUNT_SCOPE_ALREADY_EXISTS;
+		}
+		if ( FS_CountScopeHandles( scopeId ) ) return FS_MOUNT_SCOPE_BUSY;
+	} else {
+		scopeState = FS_AllocScopeState( scopeId, role, NULL, NULL );
+	}
+	previousHead = fs_searchpaths;
+	FS_AddGameDirectoryScoped( path, dir, scopeId, role, scopeState );
+	if ( fs_searchpaths == previousHead ) {
+		/* Exact duplicate layer: idempotent lifecycle replay. */
+		if ( existingScope ) return FS_MOUNT_OK;
+		Z_Free( scopeState );
+		return FS_MOUNT_INVALID_ARGUMENT;
+	}
+	addedNodes = FS_CaptureMountPrefix( previousHead, &addedNodeCount );
+	if ( !addedNodes || addedNodeCount == 0u ) {
+		if ( !existingScope ) Z_Free( scopeState );
+		return FS_MOUNT_INVALID_ARGUMENT;
+	}
+	FS_OrderScopePrefix( scopeId );
+	if ( !WiredScript_ReloadFileAliases() ) {
+		/* Ordering may interleave the new root with an existing scope. Retire
+		 * the exact captured nodes rather than assuming they remain a prefix. */
+		block = FS_DetachCapturedMountNodes( addedNodes, addedNodeCount );
+		Z_Free( addedNodes );
+		if ( block ) FS_FreeScopeBlock( block, existingScope ? qfalse : qtrue );
+		return FS_MOUNT_ALIAS_RELOAD_FAILED;
+	}
+	Z_Free( addedNodes );
+	/* A real layer extension changes the package candidate set. The next receipt
+	 * must validate it again; an exact duplicate returned above without clearing
+	 * the already-published identity. */
+	if ( existingScope ) scopeState->packageReceiptConfigured = qfalse;
+	FS_RefreshGlobalScopeShadows();
+	return FS_MOUNT_OK;
+}
+
+qboolean FS_ApplyScopePackageReceipts( fsMountScopeId_t scopeId,
+		const fsMountPackageReceipt_t *receipts, size_t receiptCount,
+		int *approvedChecksums, size_t approvedCapacity, size_t *outApprovedCount,
+		size_t *outScopedArchiveCount, char *error, size_t errorSize ) {
+	searchpath_t *search;
+	fsMountScopeState_t *scopeState;
+	byte receiptDigest[COM_SHA256_DIGEST_LEN];
+	size_t approvedCount = 0;
+	size_t archiveCount = 0;
+	if ( outApprovedCount ) *outApprovedCount = 0;
+	if ( outScopedArchiveCount ) *outScopedArchiveCount = 0;
+	if ( error && errorSize ) error[0] = '\0';
+	if ( scopeId == FS_MOUNT_SCOPE_GLOBAL || receiptCount > MAX_REF_PAKS
+			|| ( receiptCount && !receipts )
+			|| ( approvedCapacity && !approvedChecksums ) ) {
+		if ( error && errorSize ) Com_sprintf( error, (int)errorSize, "invalid package receipt arguments" );
+		return qfalse;
+	}
+	if ( !FS_MountReceiptDigest( receipts, receiptCount, receiptDigest,
+			error, errorSize ) ) return qfalse;
+	scopeState = FS_FindScopeState( scopeId );
+	if ( !scopeState ) {
+		if ( error && errorSize ) Com_sprintf( error, (int)errorSize,
+			"package receipt scope missing" );
+		return qfalse;
+	}
+	if ( scopeState->packageReceiptConfigured
+			&& memcmp( scopeState->packageReceiptDigest, receiptDigest,
+				sizeof( receiptDigest ) ) == 0 ) {
+		return FS_CollectScopeReceiptOutputs( scopeId, receipts, receiptCount,
+			approvedChecksums, approvedCapacity, outApprovedCount,
+			outScopedArchiveCount, error, errorSize );
+	}
+	if ( FS_CountScopeHandles( scopeId ) ) {
+		if ( error && errorSize ) Com_sprintf( error, (int)errorSize,
+			"changed package receipt scope busy" );
+		return qfalse;
+	}
+
+	/* Count archive identities, not duplicate install/home search nodes. */
+	for ( search = fs_searchpaths; search; search = search->next ) {
+		searchpath_t *earlier;
+		const char *name;
+		qboolean duplicate = qfalse;
+		if ( search->scopeId != scopeId || !search->pack ) continue;
+		name = COM_SkipPath( search->pack->pakFilename );
+		for ( earlier = fs_searchpaths; earlier != search; earlier = earlier->next ) {
+			if ( earlier->scopeId == scopeId && earlier->pack
+					&& !Q_stricmp( COM_SkipPath( earlier->pack->pakFilename ), name ) ) {
+				duplicate = qtrue;
+				break;
+			}
+		}
+		if ( !duplicate ) archiveCount++;
+	}
+
+	/* Validate every physical copy before publishing role metadata. A lower
+	 * precedence duplicate may still satisfy a file absent from the upper pack,
+	 * so accepting only the first match would leave an integrity bypass. */
+	for ( size_t i = 0; i < receiptCount; ++i ) {
+		const fsMountPackageReceipt_t *receipt = &receipts[i];
+		qboolean matched = qfalse;
+		if ( !receipt->archivePath || !receipt->archivePath[0]
+				|| strchr( receipt->archivePath, '/' ) || strchr( receipt->archivePath, '\\' )
+				|| !receipt->sha256 || strlen( receipt->sha256 ) != COM_SHA256_HEX_LEN
+				|| receipt->role <= FS_MOUNT_ROLE_GLOBAL || receipt->role > FS_MOUNT_ROLE_COSMETIC ) {
+			if ( error && errorSize ) Com_sprintf( error, (int)errorSize, "invalid package receipt entry" );
+			return qfalse;
+		}
+		for ( search = fs_searchpaths; search; search = search->next ) {
+			uint64_t actualSize;
+			pack_t *pack;
+			qboolean checksumSeen = qfalse;
+			if ( search->scopeId != scopeId || !search->pack
+					|| Q_stricmp( COM_SkipPath( search->pack->pakFilename ), receipt->archivePath ) ) continue;
+			pack = search->pack;
+			matched = qtrue;
+			if ( !pack->contentSha256Valid ) {
+				if ( !Com_SHA256FileHex( pack->pakFilename, pack->contentSha256, &actualSize ) ) {
+					if ( error && errorSize ) Com_sprintf( error, (int)errorSize,
+						"could not hash package %s", receipt->archivePath );
+					return qfalse;
+				}
+				pack->contentSha256Valid = qtrue;
+			} else {
+				actualSize = (uint64_t)pack->size;
+			}
+			if ( actualSize != receipt->size || Q_stricmp( pack->contentSha256, receipt->sha256 ) ) {
+				if ( error && errorSize ) Com_sprintf( error, (int)errorSize,
+					"package integrity mismatch: %s", receipt->archivePath );
+				return qfalse;
+			}
+			if ( receipt->clientApproved ) {
+				for ( size_t c = 0; c < approvedCount; ++c )
+					if ( approvedChecksums[c] == pack->checksum ) checksumSeen = qtrue;
+				if ( !checksumSeen ) {
+					if ( approvedCount >= approvedCapacity ) {
+						if ( error && errorSize ) Com_sprintf( error, (int)errorSize, "approved checksum capacity exceeded" );
+						return qfalse;
+					}
+					approvedChecksums[approvedCount++] = pack->checksum;
+				}
+			}
+		}
+		if ( !matched ) {
+			if ( error && errorSize ) Com_sprintf( error, (int)errorSize,
+				"advertised package not mounted: %s", receipt->archivePath );
+			return qfalse;
+		}
+	}
+
+	for ( size_t i = 0; i < receiptCount; ++i ) {
+		const fsMountPackageReceipt_t *receipt = &receipts[i];
+		for ( search = fs_searchpaths; search; search = search->next ) {
+			if ( search->scopeId != scopeId || !search->pack
+					|| Q_stricmp( COM_SkipPath( search->pack->pakFilename ), receipt->archivePath ) ) continue;
+			search->role = receipt->role;
+		}
+	}
+	FS_RefreshGlobalScopeShadows();
+	scopeState->packageReceiptConfigured = qtrue;
+	memcpy( scopeState->packageReceiptDigest, receiptDigest,
+		sizeof( scopeState->packageReceiptDigest ) );
+	if ( outApprovedCount ) *outApprovedCount = approvedCount;
+	if ( outScopedArchiveCount ) *outScopedArchiveCount = archiveCount;
+	return qtrue;
+}
+
+qboolean FS_ApplyGlobalPackageReceipts( const fsMountPackageReceipt_t *receipts,
+		size_t receiptCount, char *error, size_t errorSize ) {
+	searchpath_t *search;
+	if ( error && errorSize ) error[0] = '\0';
+	if ( receiptCount > MAX_REF_PAKS || ( receiptCount && !receipts ) ) {
+		if ( error && errorSize ) Com_sprintf( error, (int)errorSize,
+			"invalid global package receipt arguments" );
+		return qfalse;
+	}
+
+	/* Validate the complete candidate set before publishing any role. */
+	for ( size_t i = 0; i < receiptCount; ++i ) {
+		const fsMountPackageReceipt_t *receipt = &receipts[i];
+		qboolean matched = qfalse;
+		if ( !receipt->archivePath || !receipt->archivePath[0]
+				|| strchr( receipt->archivePath, '/' ) || strchr( receipt->archivePath, '\\' )
+				|| !receipt->sha256 || strlen( receipt->sha256 ) != COM_SHA256_HEX_LEN
+				|| receipt->role <= FS_MOUNT_ROLE_GLOBAL
+				|| receipt->role > FS_MOUNT_ROLE_COSMETIC ) {
+			if ( error && errorSize ) Com_sprintf( error, (int)errorSize,
+				"invalid global package receipt entry" );
+			return qfalse;
+		}
+		for ( search = fs_searchpaths; search; search = search->next ) {
+			uint64_t actualSize;
+			pack_t *pack;
+			if ( search->scopeId != FS_MOUNT_SCOPE_GLOBAL || !search->pack
+					|| Q_stricmp( COM_SkipPath( search->pack->pakFilename ),
+						receipt->archivePath ) ) continue;
+			pack = search->pack;
+			matched = qtrue;
+			if ( !pack->contentSha256Valid ) {
+				if ( !Com_SHA256FileHex( pack->pakFilename, pack->contentSha256,
+						&actualSize ) ) {
+					if ( error && errorSize ) Com_sprintf( error, (int)errorSize,
+						"could not hash global package %s", receipt->archivePath );
+					return qfalse;
+				}
+				pack->contentSha256Valid = qtrue;
+			} else {
+				actualSize = (uint64_t)pack->size;
+			}
+			if ( actualSize != receipt->size
+					|| Q_stricmp( pack->contentSha256, receipt->sha256 ) ) {
+				if ( error && errorSize ) Com_sprintf( error, (int)errorSize,
+					"global package integrity mismatch: %s", receipt->archivePath );
+				return qfalse;
+			}
+		}
+		if ( !matched ) {
+			if ( error && errorSize ) Com_sprintf( error, (int)errorSize,
+				"global package not mounted: %s", receipt->archivePath );
+			return qfalse;
+		}
+	}
+
+	for ( size_t i = 0; i < receiptCount; ++i ) {
+		for ( search = fs_searchpaths; search; search = search->next ) {
+			if ( search->scopeId == FS_MOUNT_SCOPE_GLOBAL && search->pack
+					&& !Q_stricmp( COM_SkipPath( search->pack->pakFilename ),
+						receipts[i].archivePath ) ) search->role = receipts[i].role;
+		}
+	}
+	return qtrue;
+}
+
+static qboolean FS_ScopePurePolicyMatches( const fsMountScopeState_t *state,
+		const fsMountPurePolicy_t *policy ) {
+	if ( !state->purePolicyConfigured || state->denyLoose != policy->denyLoose
+			|| state->approvedChecksumCount != policy->approvedChecksumCount ) {
+		return qfalse;
+	}
+	return policy->approvedChecksumCount == 0u
+		|| memcmp( state->approvedChecksums, policy->approvedChecksums,
+			policy->approvedChecksumCount * sizeof( int ) ) == 0;
+}
+
+fsMountResult_t FS_SetScopePurePolicy( fsMountScopeId_t scopeId,
+		const fsMountPurePolicy_t *policy, unsigned *outLiveHandleCount ) {
+	fsMountScopeState_t *previous, *candidate;
+	unsigned liveHandles;
+	if ( outLiveHandleCount ) *outLiveHandleCount = 0u;
+	if ( scopeId == FS_MOUNT_SCOPE_GLOBAL || !policy
+			|| policy->approvedChecksumCount > MAX_REF_PAKS
+			|| ( policy->approvedChecksumCount && !policy->approvedChecksums ) ) {
+		return FS_MOUNT_INVALID_ARGUMENT;
+	}
+	if ( !WiredScript_GetState() ) return FS_MOUNT_LIFECYCLE_UNAVAILABLE;
+	previous = FS_FindScopeState( scopeId );
+	if ( !previous ) return FS_MOUNT_SCOPE_NOT_FOUND;
+	/* A gamestate/receipt may be replayed for every map on one connection.
+	 * Identical immutable policy is already published and therefore requires no
+	 * searchpath mutation, alias reload or zero-handle barrier. */
+	if ( FS_ScopePurePolicyMatches( previous, policy ) ) return FS_MOUNT_OK;
+	liveHandles = FS_CountScopeHandles( scopeId );
+	if ( liveHandles ) {
+		if ( outLiveHandleCount ) *outLiveHandleCount = liveHandles;
+		return FS_MOUNT_SCOPE_BUSY;
+	}
+	candidate = FS_AllocScopeState( scopeId, previous->role, policy, previous );
+	FS_AssignScopeState( scopeId, candidate );
+	FS_ApplyScopeDirPolicy( scopeId, candidate );
+	if ( !WiredScript_ReloadFileAliases() ) {
+		FS_AssignScopeState( scopeId, previous );
+		FS_ApplyScopeDirPolicy( scopeId, previous );
+		Z_Free( candidate );
+		return FS_MOUNT_ALIAS_RELOAD_FAILED;
+	}
+	Z_Free( previous );
+	return FS_MOUNT_OK;
+}
+
+fsMountResult_t FS_UnmountScope( fsMountScopeId_t scopeId,
+		unsigned *outLiveHandleCount ) {
+	searchpath_t **insertionLink = NULL;
+	searchpath_t *block, *after = NULL;
+	unsigned liveHandles;
+	if ( outLiveHandleCount ) *outLiveHandleCount = 0u;
+	if ( scopeId == FS_MOUNT_SCOPE_GLOBAL ) return FS_MOUNT_INVALID_ARGUMENT;
+	if ( !WiredScript_GetState() ) return FS_MOUNT_LIFECYCLE_UNAVAILABLE;
+	if ( !FS_ScopeMounted( scopeId ) ) return FS_MOUNT_SCOPE_NOT_FOUND;
+	liveHandles = FS_CountScopeHandles( scopeId );
+	if ( liveHandles ) {
+		if ( outLiveHandleCount ) *outLiveHandleCount = liveHandles;
+		return FS_MOUNT_SCOPE_BUSY;
+	}
+	block = FS_DetachScopeBlock( scopeId, &insertionLink, &after );
+	if ( !block ) return FS_MOUNT_SCOPE_NOT_FOUND;
+	if ( !WiredScript_ReloadFileAliases() ) {
+		FS_RestoreScopeBlock( insertionLink, block, after );
+		return FS_MOUNT_ALIAS_RELOAD_FAILED;
+	}
+	FS_FreeScopeBlock( block, qtrue );
+	FS_RefreshGlobalScopeShadows();
+	return FS_MOUNT_OK;
 }
 
 
@@ -5215,6 +6310,8 @@ Frees all resources.
 */
 void FS_Shutdown( qboolean closemfp )
 {
+	FS_ClearFileAliases();
+
 	// close opened files
 	if ( closemfp )
 	{
@@ -5283,6 +6380,17 @@ void FS_Shutdown( qboolean closemfp )
 	Cmd_RemoveCommand( "which" );
 	Cmd_RemoveCommand( "lsof" );
 	Cmd_RemoveCommand( "fs_restart" );
+	Cmd_RemoveCommand( "fs_alias_stats" );
+	Cmd_RemoveCommand( "fs_resolve" );
+	Cmd_RemoveCommand( "fs_alias_verify" );
+	Cmd_RemoveCommand( "fs_scope_verify" );
+	Cmd_RemoveCommand( "fs_scope_pure_verify" );
+	Cmd_RemoveCommand( "fs_scope_role_verify" );
+
+	if ( closemfp && fs_aliasCatalogMutexInitialized ) {
+		Sys_MutexDestroy( &fs_aliasCatalogMutex );
+		fs_aliasCatalogMutexInitialized = qfalse;
+	}
 }
 
 #if !FEAT_FS_PRECEDENCE
@@ -5344,12 +6452,19 @@ static void FS_ReorderPurePaks( void )
 	if ( !fs_numServerPaks )
 		return;
 
-	searchpath_t **p_insert_index = &fs_searchpaths; // we insert in order at the beginning of the list
+	/* Scoped overlays stay ahead of the process-global tail and remain one
+	 * retirement block. Pure-server ordering only permutes global packs. */
+	searchpath_t **p_insert_index = &fs_searchpaths;
+	while ( *p_insert_index
+			&& (*p_insert_index)->scopeId != FS_MOUNT_SCOPE_GLOBAL ) {
+		p_insert_index = &(*p_insert_index)->next;
+	}
 	for ( int i = 0 ; i < fs_numServerPaks ; i++ ) {
 		searchpath_t **p_previous = p_insert_index; // track the pointer-to-current-item
 		for (searchpath_t *s = *p_insert_index; s; s = s->next) {
 			// the part of the list before p_insert_index has been sorted already
-			if (s->pack && fs_serverPaks[i] == s->pack->checksum) {
+			if (s->scopeId == FS_MOUNT_SCOPE_GLOBAL && s->pack
+					&& fs_serverPaks[i] == s->pack->checksum) {
 				fs_reordered = qtrue;
 				// move this element to the insert list
 				*p_previous = s->next;
@@ -5378,6 +6493,26 @@ static const char *FS_OwnerName( handleOwner_t owner )
 	return s[owner];
 }
 
+static const char *FS_HandleSourceName( const fileHandleData_t *fh ) {
+#if FEAT_SW3Z
+	if ( fh->sw3zData || fh->sw3zEntryIdx >= 0 ) return "sw3z";
+#endif
+	if ( fh->zipFile ) return "pk3";
+	return "loose";
+}
+
+static const char *FS_MountRoleName( fsMountRole_t role ) {
+	switch ( role ) {
+	case FS_MOUNT_ROLE_RUNTIME: return "runtime";
+	case FS_MOUNT_ROLE_TOOLCHAIN: return "toolchain";
+	case FS_MOUNT_ROLE_SERVER: return "server";
+	case FS_MOUNT_ROLE_CLIENT: return "client";
+	case FS_MOUNT_ROLE_SHARED: return "shared";
+	case FS_MOUNT_ROLE_COSMETIC: return "cosmetic";
+	default: return "global";
+	}
+}
+
 
 /*
 ================
@@ -5387,10 +6522,333 @@ FS_ListOpenFiles
 static void FS_ListOpenFiles_f( void ) {
 	fileHandleData_t *fh = fsh;
 	for ( int i = 0; i < MAX_FILE_HANDLES; i++, fh++ ) {
-		if ( !fh->handleFiles.file.v )
-			continue;
-		Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "%2i %2s %s\n", i, FS_OwnerName(fh->owner), fh->name );
+		/* Memory-backed and deferred SW3Z cursors deliberately have no FILE*.
+		 * The handle name is the allocation authority used by lifecycle BUSY
+		 * checks, so diagnostics must use the same predicate. */
+		if ( !fh->name[0] ) continue;
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem),
+			"%2i %2s source=%s scope=%u role=%s %s\n", i,
+			FS_OwnerName( fh->owner ), FS_HandleSourceName( fh ),
+			(unsigned)fh->mountScopeId, FS_MountRoleName( fh->mountRole ),
+			fh->name );
 	}
+}
+
+static void FS_AliasStats_f( void ) {
+	unsigned generation;
+	size_t count;
+	uint64_t resolveRequests, resolveAliasHits, openAliasHits;
+	FS_LockAliasCatalog();
+	generation = fs_aliasCatalog.generation;
+	count = fs_aliasCatalog.count;
+	resolveRequests = fs_resourceResolveRequests;
+	resolveAliasHits = fs_resourceResolveAliasHits;
+	openAliasHits = fs_fileOpenAliasHits;
+	FS_UnlockAliasCatalog();
+	Com_Log( SEV_INFO, LOG_CH(ch_filesystem),
+		"VFS aliases: generation=%u entries=%zu resolve_requests=%llu resolve_alias_hits=%llu open_alias_hits=%llu\n",
+		generation, count, (unsigned long long)resolveRequests,
+		(unsigned long long)resolveAliasHits,
+		(unsigned long long)openAliasHits );
+}
+
+static const char *FS_ResourceSourceKindName( fsResourceSourceKind_t kind ) {
+	switch ( kind ) {
+	case FS_RESOURCE_SOURCE_LOOSE: return "loose";
+	case FS_RESOURCE_SOURCE_PK3: return "pk3";
+	case FS_RESOURCE_SOURCE_SW3Z: return "sw3z";
+	default: return "unknown";
+	}
+}
+
+static void FS_Resolve_f( void ) {
+	fsResolvedResource_t resolved;
+	const char *requested;
+	if ( Cmd_Argc() != 2 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "usage: fs_resolve <qpath>\n" );
+		return;
+	}
+	requested = Cmd_Argv( 1 );
+	if ( !FS_ResolveResource( requested, &resolved ) ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem),
+			"VFS resolve: requested=%s missing\n", requested );
+		return;
+	}
+	Com_Log( SEV_INFO, LOG_CH(ch_filesystem),
+		"VFS resolve: requested=%s canonical=%s source=%s source_id=%llu size=%llu generation=%u\n",
+		requested, resolved.canonicalPath,
+		FS_ResourceSourceKindName( resolved.sourceKind ),
+		(unsigned long long)resolved.sourceId,
+		(unsigned long long)resolved.size, resolved.fsGeneration );
+}
+
+static void FS_AliasVerify_f( void ) {
+	fsResolvedResource_t source, target;
+	fileHandle_t sourceFile = FS_INVALID_HANDLE;
+	fileHandle_t targetFile = FS_INVALID_HANDLE;
+	byte sourcePrefix[2], targetPrefix[2];
+	const char *sourcePath;
+	const char *targetPath;
+	qboolean passed = qfalse;
+
+	if ( Cmd_Argc() != 3 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem),
+			"usage: fs_alias_verify <alias-qpath> <canonical-qpath>\n" );
+		return;
+	}
+	sourcePath = Cmd_Argv( 1 );
+	targetPath = Cmd_Argv( 2 );
+	if ( !FS_ResolveResource( sourcePath, &source )
+			|| !FS_ResolveResource( targetPath, &target )
+			|| strcmp( source.canonicalPath, target.canonicalPath ) != 0
+			|| source.sourceId != target.sourceId
+			|| source.size != target.size
+			|| FS_FOpenFileRead( sourcePath, &sourceFile, qtrue ) < 2
+			|| FS_FOpenFileRead( targetPath, &targetFile, qtrue ) < 2
+			|| sourceFile == targetFile
+			|| FS_Read( sourcePrefix, sizeof( sourcePrefix ), sourceFile )
+				!= (int)sizeof( sourcePrefix )
+			|| FS_Read( targetPrefix, sizeof( targetPrefix ), targetFile )
+				!= (int)sizeof( targetPrefix )
+			|| memcmp( sourcePrefix, targetPrefix, sizeof( sourcePrefix ) ) != 0 ) {
+		goto done;
+	}
+	passed = qtrue;
+done:
+	if ( sourceFile != FS_INVALID_HANDLE ) FS_FCloseFile( sourceFile );
+	if ( targetFile != FS_INVALID_HANDLE ) FS_FCloseFile( targetFile );
+	Com_Log( passed ? SEV_INFO : SEV_ERROR, LOG_CH(ch_filesystem),
+		"VFS alias verify: %s alias=%s canonical=%s independent_cursors=%u\n",
+		passed ? "PASS" : "FAIL", sourcePath, targetPath, passed ? 1u : 0u );
+}
+
+static void FS_ScopeVerify_f( void ) {
+	static const fsMountScopeId_t probeScope = UINT32_MAX - 1u;
+	const char *rootName, *path, *secondPath, *dir, *qpath;
+	fileHandle_t file = FS_INVALID_HANDLE;
+	fsMountResult_t mountResult, secondMountResult, busyResult, unmountResult;
+	unsigned liveHandles = 0u;
+	qboolean passed = qfalse;
+	if ( Cmd_Argc() != 4 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem),
+			"usage: fs_scope_verify <home|install> <dir> <qpath>\n" );
+		return;
+	}
+	rootName = Cmd_Argv( 1 );
+	dir = Cmd_Argv( 2 );
+	qpath = Cmd_Argv( 3 );
+	if ( !strcmp( rootName, "home" ) ) path = fs_homepath->string;
+	else if ( !strcmp( rootName, "install" ) ) path = FS_GetInstallResourcePath();
+	else {
+		Com_Log( SEV_ERROR, LOG_CH(ch_filesystem),
+			"VFS scope verify: invalid root '%s'\n", rootName );
+		return;
+	}
+	secondPath = !strcmp( rootName, "home" )
+		? FS_GetInstallResourcePath() : fs_homepath->string;
+	mountResult = FS_MountLayer( path, dir, probeScope, FS_MOUNT_ROLE_SHARED );
+	if ( mountResult != FS_MOUNT_OK ) goto done;
+	secondMountResult = FS_MountLayer( secondPath, dir, probeScope,
+		FS_MOUNT_ROLE_SHARED );
+	if ( secondMountResult != FS_MOUNT_OK ) goto done;
+	if ( FS_FOpenFileRead( qpath, &file, qtrue ) < 0
+			|| file == FS_INVALID_HANDLE
+			|| fsh[file].mountScopeId != probeScope ) goto done;
+	busyResult = FS_UnmountScope( probeScope, &liveHandles );
+	if ( busyResult != FS_MOUNT_SCOPE_BUSY || liveHandles != 1u ) goto done;
+	FS_FCloseFile( file );
+	file = FS_INVALID_HANDLE;
+	unmountResult = FS_UnmountScope( probeScope, &liveHandles );
+	if ( unmountResult != FS_MOUNT_OK || liveHandles != 0u ) goto done;
+	passed = qtrue;
+done:
+	if ( file != FS_INVALID_HANDLE ) FS_FCloseFile( file );
+	if ( FS_ScopeMounted( probeScope ) )
+		(void)FS_UnmountScope( probeScope, &liveHandles );
+	Com_Log( passed ? SEV_INFO : SEV_ERROR, LOG_CH(ch_filesystem),
+		"VFS scope verify: %s root=%s dir=%s qpath=%s layers=2 alias_generation=%u\n",
+		passed ? "PASS" : "FAIL", rootName, dir, qpath,
+		FS_FileAliasGeneration() );
+}
+
+static pack_t *FS_FirstScopePack( fsMountScopeId_t scopeId ) {
+	searchpath_t *search;
+	for ( search = fs_searchpaths; search; search = search->next ) {
+		if ( search->scopeId == scopeId && search->pack ) return search->pack;
+	}
+	return NULL;
+}
+
+static void FS_ScopePureVerify_f( void ) {
+	static const fsMountScopeId_t allowScope = UINT32_MAX - 2u;
+	static const fsMountScopeId_t denyScope = UINT32_MAX - 3u;
+	const char *rootName, *path, *allowDir, *allowQpath, *denyDir, *denyQpath;
+	fsMountPurePolicy_t policy;
+	fsMountPurePolicy_t changedPolicy;
+	fsMountPackageReceipt_t receipt;
+	fsMountResult_t result;
+	pack_t *allowPack, *denyPack;
+	fileHandle_t file = FS_INVALID_HANDLE;
+	unsigned liveHandles = 0u;
+	int approvedChecksum, rejectedChecksum, receiptApproved[MAX_REF_PAKS];
+	size_t receiptApprovedCount = 0u, receiptArchiveCount = 0u;
+	uint64_t receiptSize = 0u;
+	char receiptSha256[COM_SHA256_HEX_LEN + 1];
+	char receiptError[128];
+	qboolean passed = qfalse;
+
+	if ( Cmd_Argc() != 6 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem),
+			"usage: fs_scope_pure_verify <home|install> <allow-dir> <allow-qpath> <deny-dir> <deny-qpath>\n" );
+		return;
+	}
+	rootName = Cmd_Argv( 1 );
+	allowDir = Cmd_Argv( 2 );
+	allowQpath = Cmd_Argv( 3 );
+	denyDir = Cmd_Argv( 4 );
+	denyQpath = Cmd_Argv( 5 );
+	if ( !strcmp( rootName, "home" ) ) path = fs_homepath->string;
+	else if ( !strcmp( rootName, "install" ) ) path = FS_GetInstallResourcePath();
+	else goto done;
+
+	result = FS_MountLayer( path, allowDir, allowScope, FS_MOUNT_ROLE_CLIENT );
+	if ( result != FS_MOUNT_OK ) goto done;
+	allowPack = FS_FirstScopePack( allowScope );
+	if ( !allowPack || allowPack->type != PACK_PK3 ) goto done;
+	if ( !Com_SHA256FileHex( allowPack->pakFilename, receiptSha256,
+			&receiptSize ) ) goto done;
+	memset( &receipt, 0, sizeof( receipt ) );
+	receipt.archivePath = COM_SkipPath( allowPack->pakFilename );
+	receipt.sha256 = receiptSha256;
+	receipt.size = receiptSize;
+	receipt.role = FS_MOUNT_ROLE_CLIENT;
+	receipt.clientApproved = qtrue;
+	if ( !FS_ApplyScopePackageReceipts( allowScope, &receipt, 1u,
+			receiptApproved, ARRAY_LEN( receiptApproved ),
+			&receiptApprovedCount, &receiptArchiveCount,
+			receiptError, sizeof( receiptError ) )
+			|| receiptApprovedCount != 1u || receiptArchiveCount != 1u ) goto done;
+	approvedChecksum = allowPack->checksum;
+	memset( &policy, 0, sizeof( policy ) );
+	policy.approvedChecksums = &approvedChecksum;
+	policy.approvedChecksumCount = 1u;
+	policy.denyLoose = qtrue;
+	result = FS_SetScopePurePolicy( allowScope, &policy, &liveHandles );
+	if ( result != FS_MOUNT_OK || liveHandles != 0u ) goto done;
+	if ( FS_FOpenFileRead( allowQpath, &file, qtrue ) < 0
+			|| file == FS_INVALID_HANDLE
+			|| fsh[file].mountScopeId != allowScope ) goto done;
+	/* Exact receipt/policy replay is read-only and remains legal while a level
+	 * owns scoped resources. Any changed candidate still fails closed. */
+	if ( !FS_ApplyScopePackageReceipts( allowScope, &receipt, 1u,
+			receiptApproved, ARRAY_LEN( receiptApproved ),
+			&receiptApprovedCount, &receiptArchiveCount,
+			receiptError, sizeof( receiptError ) )
+			|| receiptApprovedCount != 1u || receiptArchiveCount != 1u ) goto done;
+	result = FS_SetScopePurePolicy( allowScope, &policy, &liveHandles );
+	if ( result != FS_MOUNT_OK || liveHandles != 0u ) goto done;
+	changedPolicy = policy;
+	changedPolicy.denyLoose = qfalse;
+	result = FS_SetScopePurePolicy( allowScope, &changedPolicy, &liveHandles );
+	if ( result != FS_MOUNT_SCOPE_BUSY || liveHandles != 1u ) goto done;
+	receipt.clientApproved = qfalse;
+	if ( FS_ApplyScopePackageReceipts( allowScope, &receipt, 1u,
+			receiptApproved, ARRAY_LEN( receiptApproved ),
+			&receiptApprovedCount, &receiptArchiveCount,
+			receiptError, sizeof( receiptError ) )
+			|| strcmp( receiptError, "changed package receipt scope busy" ) ) goto done;
+	receipt.clientApproved = qtrue;
+	FS_FCloseFile( file );
+	file = FS_INVALID_HANDLE;
+
+	result = FS_MountLayer( path, denyDir, denyScope, FS_MOUNT_ROLE_COSMETIC );
+	if ( result != FS_MOUNT_OK ) goto done;
+	denyPack = FS_FirstScopePack( denyScope );
+#if FEAT_SW3Z
+	if ( !denyPack || denyPack->type != PACK_SW3Z ) goto done;
+#else
+	if ( !denyPack ) goto done;
+#endif
+	rejectedChecksum = denyPack->checksum ^ 0x5a5a5a5a;
+	memset( &policy, 0, sizeof( policy ) );
+	policy.approvedChecksums = &rejectedChecksum;
+	policy.approvedChecksumCount = 1u;
+	policy.denyLoose = qtrue;
+	result = FS_SetScopePurePolicy( denyScope, &policy, &liveHandles );
+	if ( result != FS_MOUNT_OK || liveHandles != 0u ) goto done;
+	if ( FS_FOpenFileRead( denyQpath, &file, qtrue ) >= 0
+			|| file != FS_INVALID_HANDLE ) goto done;
+	if ( FS_FOpenFileRead( allowQpath, &file, qtrue ) < 0
+			|| file == FS_INVALID_HANDLE
+			|| fsh[file].mountScopeId != allowScope ) goto done;
+	FS_FCloseFile( file );
+	file = FS_INVALID_HANDLE;
+	passed = qtrue;
+
+done:
+	if ( file != FS_INVALID_HANDLE ) FS_FCloseFile( file );
+	if ( FS_ScopeMounted( denyScope ) )
+		(void)FS_UnmountScope( denyScope, &liveHandles );
+	if ( FS_ScopeMounted( allowScope ) )
+		(void)FS_UnmountScope( allowScope, &liveHandles );
+	Com_Log( passed ? SEV_INFO : SEV_ERROR, LOG_CH(ch_filesystem),
+		"VFS scope pure verify: %s allow_role=client deny_role=cosmetic containers=pk3+sw3z\n",
+		passed ? "PASS" : "FAIL" );
+}
+
+static void FS_ScopeRoleVerify_f( void ) {
+	static const fsMountScopeId_t roleScope = UINT32_MAX - 4u;
+	const char *rootName, *path, *dir, *qpath;
+	fileHandle_t file = FS_INVALID_HANDLE;
+	fsMountResult_t result;
+	unsigned liveHandles = 0u;
+	qboolean initialScoped = qfalse;
+	qboolean roleDenied = qfalse;
+	qboolean globalRestored = qfalse;
+	qboolean passed = qfalse;
+
+	if ( Cmd_Argc() != 4 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem),
+			"usage: fs_scope_role_verify <home|install> <dir> <qpath>\n" );
+		return;
+	}
+	rootName = Cmd_Argv( 1 );
+	dir = Cmd_Argv( 2 );
+	qpath = Cmd_Argv( 3 );
+	if ( !strcmp( rootName, "home" ) ) path = fs_homepath->string;
+	else if ( !strcmp( rootName, "install" ) ) path = FS_GetInstallResourcePath();
+	else goto done;
+
+	result = FS_MountLayer( path, dir, roleScope, FS_MOUNT_ROLE_CLIENT );
+	if ( result != FS_MOUNT_OK ) goto done;
+	if ( FS_FOpenFileRead( qpath, &file, qtrue ) < 0
+			|| file == FS_INVALID_HANDLE || fsh[file].mountScopeId != roleScope ) goto done;
+	initialScoped = qtrue;
+	FS_FCloseFile( file );
+	file = FS_INVALID_HANDLE;
+	for ( searchpath_t *search = fs_searchpaths; search; search = search->next ) {
+		if ( search->scopeId == roleScope && search->pack ) {
+			search->role = FS_MOUNT_ROLE_SERVER;
+		}
+	}
+	if ( FS_FOpenFileRead( qpath, &file, qtrue ) < 0
+			&& file == FS_INVALID_HANDLE ) roleDenied = qtrue;
+	else goto done;
+	result = FS_UnmountScope( roleScope, &liveHandles );
+	if ( result != FS_MOUNT_OK || liveHandles != 0u ) goto done;
+	if ( FS_FOpenFileRead( qpath, &file, qtrue ) < 0
+			|| file == FS_INVALID_HANDLE
+			|| fsh[file].mountScopeId != FS_MOUNT_SCOPE_GLOBAL ) goto done;
+	globalRestored = qtrue;
+	passed = qtrue;
+
+done:
+	if ( file != FS_INVALID_HANDLE ) FS_FCloseFile( file );
+	if ( FS_ScopeMounted( roleScope ) )
+		(void)FS_UnmountScope( roleScope, &liveHandles );
+	Com_Log( passed ? SEV_INFO : SEV_ERROR, LOG_CH(ch_filesystem),
+		"VFS scope role verify: %s initial_scoped=%u server_denied=%u global_restored=%u\n",
+		passed ? "PASS" : "FAIL", initialScoped, roleDenied, globalRestored );
 }
 
 
@@ -5583,12 +7041,10 @@ static void FS_DeduplicateArchives( void )
 	/* simple insertion sort — MAX_DEDUP_ARCHIVES is small */
 	for ( i = 1; i < numArchives; i++ ) {
 		searchpath_t *key = archives[i];
-		const char *keyName = key->pack ? key->pack->pakBasename : "";
 		int j = i - 1;
 		while ( j >= 0 ) {
-			const char *jName = archives[j]->pack ? archives[j]->pack->pakBasename : "";
-			if ( Q_stricmp( jName, keyName ) >= 0 )
-				break; /* jName >= keyName → already in descending order */
+			if ( FS_ArchivePrecedesOrEquals( archives[j], key ) )
+				break; /* already in descending, stable order */
 			archives[j + 1] = archives[j];
 			j--;
 		}
@@ -5739,6 +7195,12 @@ static void FS_Startup( void ) {
  	Cmd_AddCommand( "which", FS_Which_f );
 	Cmd_SetCommandCompletionFunc( "which", FS_CompleteFileName );
 	Cmd_AddCommand( "fs_restart", FS_Reload );
+	Cmd_AddCommand( "fs_alias_stats", FS_AliasStats_f );
+	Cmd_AddCommand( "fs_resolve", FS_Resolve_f );
+	Cmd_AddCommand( "fs_alias_verify", FS_AliasVerify_f );
+	Cmd_AddCommand( "fs_scope_verify", FS_ScopeVerify_f );
+	Cmd_AddCommand( "fs_scope_pure_verify", FS_ScopePureVerify_f );
+	Cmd_AddCommand( "fs_scope_role_verify", FS_ScopeRoleVerify_f );
 
 	// print the current search paths
 	//FS_Path_f();
@@ -5893,7 +7355,8 @@ Returns a space separated string containing the checksums of all loaded pk3 file
 Servers with sv_pure set will get this string and pass it to clients.
 =====================
 */
-const char *FS_LoadedPakChecksums( qboolean *overflowed ) {
+const char *FS_LoadedPakChecksumsForRole( fsMountRole_t consumer,
+		qboolean *overflowed ) {
 	static char	info[BIG_INFO_STRING];
 	const searchpath_t *search;
 	char buf[ 32 ];
@@ -5908,6 +7371,9 @@ const char *FS_LoadedPakChecksums( qboolean *overflowed ) {
 	for ( search = fs_searchpaths ; search ; search = search->next ) {
 		// is the element a pak file?
 		if ( search->pack ) {
+			if ( search->scopeId != FS_MOUNT_SCOPE_GLOBAL ) continue;
+			if ( search->role != FS_MOUNT_ROLE_GLOBAL
+					&& !FS_RoleAllowedForScope( consumer, search->role ) ) continue;
 			if ( search->pack->exclude )
 				continue;
 
@@ -5926,6 +7392,10 @@ const char *FS_LoadedPakChecksums( qboolean *overflowed ) {
 	}
 
 	return info;
+}
+
+const char *FS_LoadedPakChecksums( qboolean *overflowed ) {
+	return FS_LoadedPakChecksumsForRole( FS_MOUNT_ROLE_GLOBAL, overflowed );
 }
 
 
@@ -6018,6 +7488,8 @@ const char *FS_ReferencedPakPureChecksums( int maxlen ) {
 	char *s, *max;
 	const searchpath_t	*search;
 	int nFlags, numPaks, checksum;
+	int emitted[MAX_REF_PAKS];
+	int emittedCount = 0;
 
 	max = info + maxlen; // maxlen is always smaller than MAX_STRING_CHARS so we can overflow a bit
 	s = info;
@@ -6033,8 +7505,23 @@ const char *FS_ReferencedPakPureChecksums( int maxlen ) {
 				break;
 		}
 		for ( search = fs_searchpaths ; search ; search = search->next ) {
+			qboolean duplicate = qfalse;
 			// is the element a pak file and has it been referenced based on flag?
 			if ( search->pack && (search->pack->referenced & nFlags)) {
+				/* Install/home and global/scoped searchpaths may expose the same
+				 * immutable archive more than once. The wire protocol identifies
+				 * packages by pure checksum and rejects duplicates, so publish each
+				 * identity once across the dedicated and general sections. */
+				for ( int i = 0; i < emittedCount; ++i ) {
+					if ( emitted[i] == search->pack->pure_checksum ) {
+						duplicate = qtrue;
+						break;
+					}
+				}
+				if ( duplicate ) continue;
+				if ( emittedCount < ARRAY_LEN( emitted ) ) {
+					emitted[emittedCount++] = search->pack->pure_checksum;
+				}
 				s = Q_stradd( s, va( "%i ", search->pack->pure_checksum ) );
 				if ( s > max ) // client-side overflow
 					break;
@@ -6166,7 +7653,13 @@ static void FS_SetDirPolicy( dirPolicy_t policy ) {
 
 	for ( search = fs_searchpaths ; search ; search = search->next ) {
 		if ( search->dir && search->policy != DIR_STATIC ) {
-			search->policy = policy;
+			if ( search->scopeState
+					&& search->scopeState->purePolicyConfigured
+					&& search->scopeState->denyLoose ) {
+				search->policy = DIR_DENY;
+			} else {
+				search->policy = policy;
+			}
 		}
 	}
 }
@@ -6301,6 +7794,14 @@ is resetting due to a game change
 ================
 */
 void FS_InitFilesystem( void ) {
+	if ( !fs_aliasCatalogMutexInitialized ) {
+		if ( !Sys_MutexInit( &fs_aliasCatalogMutex ) ) {
+			Com_Terminate( TERM_UNRECOVERABLE,
+				"FS_InitFilesystem: alias catalog mutex initialization failed" );
+		}
+		fs_aliasCatalogMutexInitialized = qtrue;
+	}
+
 	// allow command line parms to override our defaults
 	// we have to specially handle this, because normal command
 	// line variable sets don't happen until after the filesystem
@@ -6390,6 +7891,13 @@ void FS_Restart( int checksumFeed ) {
 
 	Q_strncpyz( lastValidGame, fs_gamedirvar->string, sizeof( lastValidGame ) );
 
+	/* Initial startup reaches here before WiredCore/Lua exists. Later
+	 * FS_Restart calls atomically rebuild aliases against the new searchpath
+	 * generation before any refreshed asset registration. */
+	if ( WiredScript_GetState() ) {
+		WiredScript_ReloadFileAliases();
+	}
+
 	// Refresh the map roster after the search path is rebuilt. Fresh paks
 	// can introduce new maps; deleted paks can remove them. Both maps_list[]
 	// and the Maps_Arena (remap tables) are reset here.
@@ -6436,8 +7944,9 @@ qboolean FS_ConditionalRestart( int checksumFeed, qboolean clientRestart )
 		return qtrue;
 	}
 	if ( checksumFeed != fs_checksumFeed ) {
-		FS_Restart( checksumFeed );
-		return qtrue;
+		/* Pure challenge rotation does not change fs_game or mounted content.
+		 * Preserve App/connection scopes and update archive checksums in place. */
+		FS_SetPureChecksumFeed( checksumFeed );
 	}
 	if ( fs_numServerPaks && !fs_reordered ) {
 		FS_ReorderPurePaks();

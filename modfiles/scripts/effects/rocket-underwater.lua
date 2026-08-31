@@ -40,6 +40,7 @@ return {
         {
             type = "screenShake", id = "water-shake", duration = 0.42,
             magnitude = 0.45, controllerScale = 0.4,
+            radius = 600, decayExponent = 1, mode = 0,
             maxAngles = { 0.35, 0.35, 0.2 }, maxOffset = { 0.45, 0.45, 0.2 },
         },
     },

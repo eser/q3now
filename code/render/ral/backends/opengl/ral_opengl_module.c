@@ -32,6 +32,8 @@ typedef struct {
 	ralOpenGlModuleFrameReceipt_t published;
 	glconfig_t					  config;
 	const mapFile_t				 *loadedWorld;
+	const mapFile_t				 *loadedWorlds[MAX_RENDER_WORLDS];
+	int                               activeWorldIndex;
 	uint64_t					  moduleGeneration;
 	uint64_t					  nextGeneration;
 	uint64_t					  currentFrameGeneration;
@@ -182,7 +184,9 @@ static qhandle_t RegisterImageSource( renderAssetKind_t kind, const char *name, 
 	if ( name && ( name[0] == '*' || !strcmp( name, "noshader" ) ) )
 		return RenderSubmission_RegisterMaterialImage( &s_module.frontend, kind, name, qtrue, white, 1u, 1u );
 	if ( imageName && RenderImage_DecodeRgba8( imageName, &pixels, &width, &height, resolved ) ) {
-		handle = RenderSubmission_RegisterMaterialImage( &s_module.frontend, kind, name, clamp, pixels, width, height );
+		const char *identityName = scripted.name[0] ? name : resolved;
+		handle = RenderSubmission_RegisterMaterialImage( &s_module.frontend, kind,
+			identityName, clamp, pixels, width, height );
 		ri.Free( pixels );
 		if ( handle && scripted.name[0] &&
 			 !RenderSubmission_SetMaterialRasterPolicy( &s_module.frontend, handle, scripted.alphaMode,
@@ -207,6 +211,7 @@ static qhandle_t RegisterModel( const char *name )
 	renderModelSnapshot_t model;
 	qhandle_t			  handle;
 	int					  byteCount;
+	char				  canonical[MAX_QPATH];
 	if ( !name || !name[0] )
 		return 0;
 	if ( name[0] == '*' && s_module.loadedWorld ) {
@@ -218,6 +223,9 @@ static qhandle_t RegisterModel( const char *name )
 														 (uint32_t)source->numSurfaces );
 		}
 	}
+	if ( s_module.imports.FS_ResolveResource
+			&& s_module.imports.FS_ResolveResource( name, canonical,
+				sizeof( canonical ), NULL, NULL, NULL ) ) name = canonical;
 	if ( !s_module.imports.FS_ReadFile || !s_module.imports.FS_FreeFile )
 		return 0;
 	byteCount = s_module.imports.FS_ReadFile( name, &bytes );
@@ -403,8 +411,39 @@ static void LoadWorld( const mapFile_t *bsp, int worldIndex )
 		LogFailure( "frontend-irradiance-lighting-sidecar" );
 	else if ( !UploadDirectionalLighting() )
 		LogFailure( "native-directional-lighting-upload" );
-	else
+	else {
+		s_module.loadedWorlds[worldIndex] = bsp;
+		s_module.activeWorldIndex = worldIndex;
 		s_module.loadedWorld = bsp;
+	}
+}
+
+static qboolean SelectWorld( int worldIndex )
+{
+	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS
+			|| !s_module.loadedWorlds[worldIndex]
+			|| !RenderSubmission_SelectWorld( &s_module.frontend, worldIndex ) ) return qfalse;
+	s_module.activeWorldIndex = worldIndex;
+	s_module.loadedWorld = s_module.loadedWorlds[worldIndex];
+	return qtrue;
+}
+
+static qboolean UnloadWorld( int worldIndex )
+{
+	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS
+			|| !RenderSubmission_UnloadWorld( &s_module.frontend, worldIndex ) ) return qfalse;
+	s_module.loadedWorlds[worldIndex] = NULL;
+	if ( s_module.activeWorldIndex == worldIndex ) {
+		s_module.loadedWorld = NULL;
+		for ( int i = 0; i < MAX_RENDER_WORLDS; ++i )
+			if ( s_module.loadedWorlds[i] ) { (void)SelectWorld( i ); break; }
+	}
+	return qtrue;
+}
+
+static int ResidentWorldCount( void )
+{
+	return RenderSubmission_ResidentWorldCount( &s_module.frontend );
 }
 
 static qboolean CookLightingProject( const char *derivedRoot )
@@ -658,8 +697,11 @@ static void Shutdown( refShutdownCode_t code )
 	s_module.currentFrameGeneration = 0u;
 	s_module.loadedWorld			= NULL;
 	DestroyDirectionalLighting();
-	if ( code == REF_LEVEL_ONLY )
+	if ( code == REF_LEVEL_ONLY ) {
+		if ( !RenderSubmission_ResetEffectRegistries( &s_module.frontend ) )
+			LogFailure( "level-effect-registry-reset" );
 		return;
+	}
 	if ( s_module.screenshotCommandsRegistered && ri.Cmd_RemoveCommand ) {
 		R_ScreenshotUnregisterCommands();
 		s_module.screenshotCommandsRegistered = qfalse;
@@ -1056,6 +1098,9 @@ static void FillExports( refexport_t *e )
 	e->RegisterPrimitiveShader		   = RegisterPrimitive;
 	e->PinShaderImages				   = NoopHandle;
 	e->LoadWorld					   = LoadWorld;
+	e->SelectWorld                  = SelectWorld;
+	e->UnloadWorld                  = UnloadWorld;
+	e->ResidentWorldCount           = ResidentWorldCount;
 	e->SetWorldVisData				   = NoopBytes;
 	e->EndRegistration				   = EndRegistration;
 	e->ClearScene					   = ClearScene;

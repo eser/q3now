@@ -10,10 +10,24 @@ file(READ "${ROOT}/code/cgame/cg_weapons.c" WEAPONS)
 file(READ "${ROOT}/code/cgame/cg_main.c" CG_MAIN)
 file(READ "${ROOT}/code/cgame/cg_utils.c" UTILS)
 file(READ "${ROOT}/code/cgame/cg_ents.c" ENTS)
+file(READ "${ROOT}/code/cgame/cg_event.c" EVENTS)
+file(READ "${ROOT}/code/cgame/cg_local.h" CG_LOCAL)
 file(READ "${ROOT}/code/cgame/cg_q1_particles.c" Q1_TRAILS)
 file(READ "${ROOT}/code/cgame/wired/cg_wired_particles.c" PARTICLE_CLASSES)
+file(READ "${ROOT}/code/client/cl_wired_fx.c" FX_CLIENT)
 file(READ "${ROOT}/code/game/g_weapon.c" GAME_WEAPONS)
 file(READ "${ROOT}/modfiles/scripts/q3now.shader" Q3NOW_SHADERS)
+file(READ "${ROOT}/modfiles/scripts/effects/rocket-trail.lua" ROCKET_PROFILE)
+file(READ "${ROOT}/modfiles/scripts/effects/grenade-trail.lua" GRENADE_PROFILE)
+file(READ "${ROOT}/modfiles/scripts/effects/grenade-explosion.lua" GRENADE_EXPLOSION_PROFILE)
+file(READ "${ROOT}/modfiles/scripts/effects/weapon-water-trail.lua" WATER_PROFILE)
+file(READ "${ROOT}/modfiles/scripts/effects/rocket-flight.lua" ROCKET_FLIGHT_PROFILE)
+file(READ "${ROOT}/modfiles/scripts/effects/grenade-bounce.lua" GRENADE_BOUNCE_PROFILE)
+file(READ "${ROOT}/modfiles/scripts/effects/machinegun-fire.lua" MACHINEGUN_FIRE_PROFILE)
+file(READ "${ROOT}/modfiles/scripts/effects/shotgun-fire.lua" SHOTGUN_FIRE_PROFILE)
+file(READ "${ROOT}/modfiles/scripts/effects/grenade-fire.lua" GRENADE_FIRE_PROFILE)
+file(READ "${ROOT}/modfiles/scripts/effects/rocket-fire.lua" ROCKET_FIRE_PROFILE)
+file(READ "${ROOT}/modfiles/scripts/effects/manifest.lua" FX_MANIFEST)
 
 function(require_text source needle label)
 	string(FIND "${${source}}" "${needle}" position)
@@ -29,24 +43,17 @@ function(forbid_text source needle label)
 	endif()
 endfunction()
 
-# Projectile prediction/nudging changes cent->lerpOrigin after evaluating the
-# server trajectory. The whole historical trail segment must receive that same
-# offset so rocket/grenade smoke, bubbles and water crossings stay attached.
+# Gameplay owns trajectory and liquid classification; WiredFX owns trail
+# composition, rates, budgets and endpoint-inclusive GPU path sampling.
 require_text(GAME_WEAPONS
 	"VectorCopy( origin, muzzlePoint );"
 	"caller-authoritative lag-compensated projectile muzzle origin")
 require_text(UTILS
 	"VectorSubtract( cent->lerpOrigin, rawNow, visualOffset );"
 	"shared rendered-projectile visual offset")
-require_text(UTILS
-	"CG_ProjectileTrailStepForSpacing"
-	"speed-bounded projectile trail spacing")
 require_text(WEAPONS
 	"CG_EvaluateVisualTrajectory( ent, startTime, lastPos );"
 	"liquid and crossing segment alignment")
-require_text(WEAPONS
-	"VectorScale( axis, 0.5f / (float)count, pathShift );"
-	"shared endpoint-inclusive projectile path sampling")
 require_text(WEAPONS
 	"weaponInfo->missileTrailAnchor = missileMins[0];"
 	"model-derived rocket nozzle attachment")
@@ -54,41 +61,106 @@ require_text(WEAPONS
 	"VectorMA( trailOrigin, wi->missileTrailAnchor, trailDirection, trailOrigin );"
 	"projectile trail attachment transform")
 require_text(WEAPONS
-	"VectorAdd( end, pathShift, emitter.end );"
-	"rendered-projectile endpoint attachment")
+	"WIRED_FX_PROFILE_GRENADE_TRAIL : WIRED_FX_PROFILE_ROCKET_TRAIL"
+	"semantic dry-trail dispatch")
+require_text(FX_CLIENT
+	"event->pathSpacing > 0.0f ? event->pathSpacing"
+	"central authored path spacing")
+require_text(FX_CLIENT
+	"action->payload.particle.spawnRate * event->timeSpanSeconds"
+	"FPS-independent authored rate")
+require_text(FX_CLIENT
+	"VectorScale( path, 0.5f / (float)count, shift );"
+	"central endpoint-inclusive sampling")
+require_text(ROCKET_PROFILE "particle=\"rocket_exhaust_core\"" "rocket exhaust recipe")
+require_text(ROCKET_PROFILE "spawnRate=50" "rocket smoke cadence")
+require_text(ROCKET_PROFILE "spawnRate=25" "rocket ember cadence")
+require_text(GRENADE_PROFILE "particle=\"grenade_classic_trail\"" "classic grenade recipe")
 require_text(WEAPONS
-	"int count = (int)ceilf( distance / 4.0f );"
-	"grenade-only classic point spacing")
-require_text(WEAPONS
-	"CG_EmitProjectileTrailLayer( cgs.media.grenadeTrailClass, count,"
-	"dedicated classic grenade layer")
-require_text(WEAPONS
-	"int coreCount  = (int)ceilf( distance / 8.0f );"
-	"bounded rocket exhaust subdivision")
-require_text(WEAPONS
-	"int smokeCount = cg.time / 20 - startTime / 20; // 50 Hz"
-	"FPS-independent rocket smoke cadence")
-require_text(WEAPONS
-	"int emberCount = cg.time / 40 - startTime / 40; // 25 Hz"
-	"FPS-independent sparse rocket ember cadence")
-require_text(WEAPONS
-	"if ( coreCount > 8 ) coreCount = 8;"
-	"rocket exhaust hitch bound")
-require_text(WEAPONS
-	"if ( smokeCount > 6 ) smokeCount = 6;"
-	"rocket smoke hitch bound")
-require_text(WEAPONS
-	"if ( emberCount > 3 ) emberCount = 3;"
-	"rocket ember hitch bound")
-require_text(WEAPONS
-	"CG_EmitProjectileTrailLayer( cgs.media.rocketExhaustClass, coreCount,"
-	"Q4-style rocket exhaust layer")
-require_text(WEAPONS
-	"CG_EmitProjectileTrailLayer( cgs.media.rocketSmokeClass, smokeCount,"
-	"Q4-style rocket smoke layer")
-require_text(WEAPONS
-	"CG_EmitProjectileTrailLayer( cgs.media.rocketEmberClass, emberCount,"
-	"Q4-style rocket ember layer")
+	"CG_WiredFx_InitEvent( &event, WIRED_FX_PROFILE_GRENADE_EXPLOSION,"
+	"medium-independent pre-migration grenade detonation recipe")
+forbid_text(WEAPONS
+	"underwater ? WIRED_FX_PROFILE_GRENADE_UNDERWATER"
+	"medium-specific grenade presentation substitution")
+require_text(GRENADE_EXPLOSION_PROFILE
+	"offset={0,0,16}"
+	"grenade sprite-attached light origin")
+require_text(GRENADE_EXPLOSION_PROFILE
+	"startTimeJitter=.063,startTimeJitterSteps=64"
+	"grenade sprite-attached light shared legacy start-time skew")
+require_text(GRENADE_EXPLOSION_PROFILE
+	"duration=.001,fadeOut=.3"
+	"grenade sprite-attached light lifetime")
+forbid_text(GRENADE_EXPLOSION_PROFILE "lodFar="
+	"migration-only finite-distance grenade detonation cull")
+require_text(GRENADE_EXPLOSION_PROFILE "maxInstances=128"
+	"global-runtime-sized grenade detonation admission")
+require_text(GRENADE_EXPLOSION_PROFILE
+	"particle=\"explosion_hot_shrapnel\",maxInstances=12,maxParticles=12,offset={0,0,2}"
+	"pre-migration grenade detonation shrapnel")
+require_text(ROCKET_PROFILE "maxInstances=128"
+	"global-runtime-sized rocket trail admission")
+require_text(GRENADE_PROFILE "maxInstances=1024,maxParticles=1024"
+	"unclipped pre-migration grenade trail population")
+require_text(WATER_PROFILE "particle=\"weapon_water_bubble_trail\"" "shared liquid recipe")
+require_text(WATER_PROFILE "maxInstances=1024,maxParticles=1024"
+	"unclipped pre-migration water trail population")
+require_text(ROCKET_FLIGHT_PROFILE "type=\"light\"" "authored rocket flight light")
+require_text(ROCKET_FLIGHT_PROFILE "maxInstances=128"
+	"global-runtime-sized rocket flight admission")
+require_text(ROCKET_FLIGHT_PROFILE "looping=1" "entity-bound rocket flight loop")
+require_text(FX_MANIFEST
+	"{ handle = 20, path = \"scripts/effects/rocket-flight.lua\" }"
+	"stable rocket flight profile handle")
+require_text(FX_MANIFEST
+	"{ handle = 21, path = \"scripts/effects/grenade-bounce.lua\" }"
+	"stable grenade bounce profile handle")
+require_text(ENTS "WIRED_FX_PROFILE_ROCKET_FLIGHT" "semantic rocket flight occurrence")
+require_text(ENTS
+	"WIRED_FX_EVENT_HAS_SOURCE_ENTITY | WIRED_FX_EVENT_HAS_VELOCITY"
+	"rocket flight sound identity and Doppler payload")
+require_text(ENTS
+	"if ( !wiredFxOwnsFlight && weapon->missileDlight )"
+	"non-WiredFX missile light fallback boundary")
+require_text(ENTS
+	"if ( !wiredFxOwnsFlight && weapon->missileSound )"
+	"non-WiredFX missile sound fallback boundary")
+require_text(FX_CLIENT "S_AddLoopingSound( event->sourceEntityNum"
+	"looping sound lowering")
+require_text(WEAPONS "CG_WiredFx_WeaponMuzzlePresent( cent, weaponNum, flash.origin, flash.axis[0] );"
+	"exact oriented tag_flash WiredFX muzzle presentation")
+require_text(WEAPONS "cent->wiredFxMuzzleTime == cent->muzzleFlashTime"
+	"idempotent one-shot muzzle occurrence across view/world passes")
+require_text(WEAPONS "event.conditionMask = WIRED_FX_CONDITION_MUZZLE_PRESENT;"
+	"muzzle-light-only presentation occurrence")
+require_text(FX_CLIENT
+	"S_StartSound( NULL, event->sourceEntityNum,"
+	"declarative entity-bound one-shot sound lowering")
+require_text(FX_CLIENT
+	"S_StartSound( origin, ENTITYNUM_WORLD,"
+	"declarative world-positioned one-shot sound lowering")
+require_text(MACHINEGUN_FIRE_PROFILE "id=\"muzzle-light\"" "machinegun authored muzzle light")
+require_text(SHOTGUN_FIRE_PROFILE "id=\"muzzle-light\"" "shotgun authored muzzle light")
+require_text(GRENADE_FIRE_PROFILE "id=\"muzzle-light\"" "grenade launcher authored muzzle light")
+require_text(ROCKET_FIRE_PROFILE "id=\"muzzle-light\"" "rocket launcher authored muzzle light")
+require_text(EVENTS "WIRED_FX_PROFILE_GRENADE_BOUNCE"
+	"semantic grenade bounce occurrence")
+require_text(EVENTS "WIRED_FX_CONDITION_VARIANT_0 << variant"
+	"deterministic grenade bounce sound variant")
+require_text(GRENADE_BOUNCE_PROFILE "sound=\"sound/weapons/grenade/hgrenb1a.opus\""
+	"authored grenade bounce sound variant zero")
+require_text(GRENADE_BOUNCE_PROFILE "sound=\"sound/weapons/grenade/hgrenb2a.opus\""
+	"authored grenade bounce sound variant one")
+require_text(GRENADE_BOUNCE_PROFILE "sourceBound=1"
+	"entity-bound grenade bounce spatialization")
+require_text(GRENADE_BOUNCE_PROFILE "maxInstances=128"
+	"global-runtime-sized grenade bounce admission")
+forbid_text(EVENTS "hgrenb1aSound" "direct grenade bounce sound choreography")
+forbid_text(EVENTS "hgrenb2aSound" "direct grenade bounce sound choreography")
+forbid_text(CG_MAIN "hgrenb1aSound" "obsolete grenade bounce sound registration")
+forbid_text(CG_MAIN "hgrenb2aSound" "obsolete grenade bounce sound registration")
+forbid_text(CG_LOCAL "hgrenb1aSound" "obsolete grenade bounce media handle")
+forbid_text(CG_LOCAL "hgrenb2aSound" "obsolete grenade bounce media handle")
 require_text(WEAPONS
 	"ent->trailTime = cg.time;"
 	"per-visual-frame projectile endpoint cursor")
@@ -149,20 +221,14 @@ require_text(PARTICLE_CLASSES
 require_text(Q3NOW_SHADERS
 	"rocketExhaustGlow"
 	"rocket-specific additive soft-core material")
-require_text(WEAPONS
-	"CG_ExplosionShrapnel( pType, origin, dir );"
-	"rocket and grenade impact shrapnel dispatch")
-require_text(WEAPONS
-	"count = 18;"
-	"bounded rocket impact shard count")
-require_text(WEAPONS
-	"count = 12;"
-	"bounded grenade impact shard count")
 forbid_text(WEAPONS
 	"CG_ExplosionParticles"
 	"CPU sprite-and-per-particle-light impact burst")
+forbid_text(WEAPONS "CG_EmitProjectileTrailLayer" "cgame particle choreography")
+forbid_text(WEAPONS "cgs.media.rocketExhaustClass, coreCount" "direct rocket emission")
+forbid_text(WEAPONS "cgs.media.grenadeTrailClass, count" "direct grenade emission")
 require_text(Q1_TRAILS "case PROJ_SPIKE:" "Q1 spike missile dispatch")
 require_text(Q1_TRAILS "case PROJ_LASER:" "Q1 laser missile dispatch")
 require_text(Q1_TRAILS "case PROJ_LAVABALL:" "Q1 lavaball missile dispatch")
 
-message(STATUS "cgame projectile trail visual-origin policy: PASS")
+message(STATUS "cgame projectile trail WiredFX policy: PASS")

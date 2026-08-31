@@ -581,6 +581,13 @@ void CL_ShutdownCGame( clientApp_t *app ) {
 	app->cl.cgameAimAngles[YAW] = 0;
 
 	if ( !app->cgvm ) {
+		if ( app->cgameBsp ) {
+			if ( re.UnloadWorld ) {
+				(void)re.UnloadWorld( (int)( app - clientApps ) );
+			}
+			Map_Free( app->cgameBsp );
+			app->cgameBsp = NULL;
+		}
 		return;
 	}
 
@@ -602,6 +609,12 @@ void CL_ShutdownCGame( clientApp_t *app ) {
 	app->cgvm = NULL;
 
 	if ( app->cgameBsp ) {
+		/* The renderer may retain the parsed BSP through its per-app world slot.
+		 * Retire that slot before releasing the map backing store; global renderer
+		 * level teardown remains owned by CL_ShutdownLevel. */
+		if ( re.UnloadWorld ) {
+			(void)re.UnloadWorld( (int)( app - clientApps ) );
+		}
 		Map_Free( app->cgameBsp );
 		app->cgameBsp = NULL;
 	}
@@ -1357,9 +1370,17 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		return Sys_Milliseconds();
 	case CG_CVAR_REGISTER: {
 		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		clientApp_t *app = CL_AppForActiveCgame();
 		CL_UnmarshalCgame( &cl_desc_CG_CVAR_REGISTER, args, t );
 		CL_TYPED_PARITY( CG_CVAR_REGISTER, args, t );
-		Cvar_VM_Register( t[0].p, t[1].p, t[2].p, (int)t[3].i, VM_ActiveNativeVM()->privateFlag );
+		if ( app->contentScopeId != FS_MOUNT_SCOPE_GLOBAL ) {
+			Cvar_VM_RegisterScoped( (cvarScopeId_t)app->contentScopeId,
+				t[0].p, t[1].p, t[2].p, (int)t[3].i,
+				VM_ActiveNativeVM()->privateFlag );
+		} else {
+			Cvar_VM_Register( t[0].p, t[1].p, t[2].p, (int)t[3].i,
+				VM_ActiveNativeVM()->privateFlag );
+		}
 		return 0;
 	}
 	case CG_CVAR_UPDATE: {
@@ -2439,16 +2460,14 @@ void CL_InitCGame( clientApp_t *app ) {
 			interpret = VMI_COMPILED;
 	}
 
-	// owner = an engine-owned per-app token (pointer identity only; one per
-	// client-app so app[i]'s cgame VM has a distinct owner and lands in its own
+	// owner = the engine-owned per-app lifetime context (pointer identity only;
+	// one per client-app so app[i]'s cgame VM has a distinct owner and lands in its own
 	// vmTable_cgame[i] without tripping the owner-mismatch dedup guard). NOT
 	// clientActiveApp->clc.clientNum (tier rule: the VM tier never reads
 	// client-protocol identity). cgameInstance = the app's slot index; at N=1
-	// appIdx==0 -> vmTable_cgame[0] + owner[0], byte-identical to the prior
-	// single sentinel.
-	static char cl_cgameAppOwner[MAX_LOCAL_CGAME_VMS];
+	// appIdx==0 -> vmTable_cgame[0], byte-identical to the prior single slot.
 	int appIdx = (int)( app - clientApps );
-	app->cgvm = VM_Create( VM_CGAME, appIdx, &cl_cgameAppOwner[appIdx], CL_CgameSystemCalls, CL_DllSyscall, interpret );
+	app->cgvm = VM_Create( VM_CGAME, appIdx, &app->memory, CL_CgameSystemCalls, CL_DllSyscall, interpret );
 	if ( !app->cgvm ) {
 		Com_Terminate( TERM_CLIENT_DROP, "VM_Create on cgame failed" );
 	}
@@ -2581,6 +2600,8 @@ CL_CGameRendering
 =====================
 */
 void CL_CGameRendering( stereoFrame_t stereo ) {
+	if ( re.SelectWorld )
+		(void)re.SelectWorld( (int)( clientActiveApp - clientApps ) );
 	VM_Call( clientActiveApp->cgvm, 3, CG_DRAW_ACTIVE_FRAME, clientActiveApp->cl.serverTime, stereo, clientActiveApp->clc.demoplaying );
 #ifdef DEBUG
 	VM_Debug( 0 );
@@ -2609,9 +2630,13 @@ VM (not the focused app's) renders each app's own scene into its viewport.
 */
 void CL_RenderCGameViewport( void *ownerCgvm, int vmKey, int x, int y, int w, int h ) {
 	vm_t *cgvm = (vm_t *)ownerCgvm;
+	int worldIndex;
 	if ( !cgvm ) {
 		return;
 	}
+	worldIndex = VM_CgameInstance( cgvm );
+	if ( worldIndex < 0 || worldIndex >= MAX_LOCAL_CGAME_VMS ) return;
+	if ( re.SelectWorld ) (void)re.SelectWorld( worldIndex );
 	/* Publish this viewport's on-screen rect so the scene-render syscall clips
 	 * the cgame's fullscreen refdef to it. Cleared after — the VM_Call is
 	 * synchronous on the single-threaded compositor walk, so exactly one
@@ -2728,11 +2753,6 @@ static void CL_FirstSnapshot( clientApp_t *app ) {
 		WiredUI_SetLoadingMenu( NULL );  // loading over — clear the bound loading UI
 #endif
 	}
-
-	// clear old game so we will not switch back to old mod on disconnect
-	// (host-global fs_game bookkeeping — only the focused client owns it)
-	if ( isFocused )
-		CL_ResetOldGame();
 
 	// set the timedelta so we are exactly on this first frame
 	app->cl.serverTimeDelta = app->cl.snap.serverTime - cls.realtime;

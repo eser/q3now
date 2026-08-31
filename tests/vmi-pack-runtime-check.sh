@@ -47,27 +47,34 @@ for number,line in enumerate(open(manifest_path,encoding="utf-8",errors="strict"
  manifest.append(item)
 if not manifest:raise SystemExit("FAIL pack-runtime empty manifest")
 scenario=manifest[0]
-if set(scenario)!={"kind","schema","name","map","vm_game","vm_cgame","sv_pure","endpoint","server_pax21","server_pax21_bytes","server_pax21_sha256","client_pax21","client_pax21_bytes","client_pax21_sha256","vm_members"} or any(scenario.get(k)!=v for k,v in {"kind":"scenario","schema":1,"name":"vmi-pack-runtime","map":"arena7","vm_game":2,"vm_cgame":2,"sv_pure":1}.items()) or re.fullmatch(r"127\.0\.0\.1:[1-9][0-9]*",str(scenario.get("endpoint",""))) is None:raise SystemExit("FAIL pack-runtime scenario")
-for prefix in ("server","client"):
- path=scenario[prefix+"_pax21"];data=open(path,"rb").read()
- if len(data)!=scenario[prefix+"_pax21_bytes"] or hashlib.sha256(data).hexdigest()!=scenario[prefix+"_pax21_sha256"]:raise SystemExit(f"FAIL pack-runtime staged {prefix} pax21 changed")
+if set(scenario)!={"kind","schema","name","map","vm_game","vm_cgame","sv_pure","endpoint","packages","vm_members"} or any(scenario.get(k)!=v for k,v in {"kind":"scenario","schema":2,"name":"vmi-pack-runtime","map":"arena7","vm_game":2,"vm_cgame":2,"sv_pure":1}.items()) or re.fullmatch(r"127\.0\.0\.1:[1-9][0-9]*",str(scenario.get("endpoint",""))) is None:raise SystemExit("FAIL pack-runtime scenario")
+packages=scenario["packages"]
+expected_pairs=[("server","shared"),("server","client"),("server","server"),("client","shared"),("client","client"),("client","server")]
+if not isinstance(packages,list) or [(x.get("consumer"),x.get("role")) for x in packages]!=expected_pairs:raise SystemExit("FAIL pack-runtime package-copy inventory")
+for item in packages:
+ if set(item)!={"consumer","role","path","bytes","sha256"} or not isinstance(item["bytes"],int) or item["bytes"]<=0 or re.fullmatch(r"[0-9a-f]{64}",str(item["sha256"])) is None:raise SystemExit("FAIL pack-runtime package-copy schema")
+ data=open(item["path"],"rb").read()
+ if len(data)!=item["bytes"] or hashlib.sha256(data).hexdigest()!=item["sha256"]:raise SystemExit(f"FAIL pack-runtime staged {item['consumer']}/{item['role']} changed")
 members=scenario["vm_members"]
-if not isinstance(members,list) or [x.get("path") for x in members]!=["vm/gamecl.wasm","vm/gamesv.wasm"]:raise SystemExit("FAIL pack-runtime VM inventory")
+if not isinstance(members,list) or [(x.get("role"),x.get("path")) for x in members]!=[("client","vm/gamecl.wasm"),("server","vm/gamesv.wasm")]:raise SystemExit("FAIL pack-runtime VM inventory")
 for item in members:
- if set(item)!={"path","extracted","bytes","sha256"} or not isinstance(item["bytes"],int) or item["bytes"]<=0 or re.fullmatch(r"[0-9a-f]{64}",str(item["sha256"])) is None:raise SystemExit("FAIL pack-runtime member schema")
+ if set(item)!={"role","path","extracted","bytes","sha256"} or not isinstance(item["bytes"],int) or item["bytes"]<=0 or re.fullmatch(r"[0-9a-f]{64}",str(item["sha256"])) is None:raise SystemExit("FAIL pack-runtime member schema")
  data=open(item["extracted"],"rb").read()
  if len(data)!=item["bytes"] or hashlib.sha256(data).hexdigest()!=item["sha256"]:raise SystemExit("FAIL pack-runtime member rehash")
 provenance=manifest[1:-1]
-if [x.get("role") for x in provenance] != ["gui","headless","pax01","pax21","sw3z","harness"]:raise SystemExit("FAIL pack-runtime provenance roles")
+if [x.get("role") for x in provenance] != ["gui","headless","pax01","pax21-shared","pax21-client","pax21-server","sw3z","harness"]:raise SystemExit("FAIL pack-runtime provenance roles")
 for item in provenance:
  if set(item)!={"kind","role","path","bytes","sha256"} or item.get("kind")!="provenance" or not isinstance(item.get("bytes"),int) or item["bytes"]<=0 or re.fullmatch(r"[0-9a-f]{64}",str(item.get("sha256",""))) is None:raise SystemExit("FAIL pack-runtime provenance schema")
  data=open(item["path"],"rb").read()
  if len(data)!=item["bytes"] or hashlib.sha256(data).hexdigest()!=item["sha256"]:raise SystemExit("FAIL pack-runtime provenance rehash")
-source_pax=next(item for item in provenance if item["role"]=="pax21")
-if source_pax["bytes"]!=scenario["server_pax21_bytes"] or source_pax["bytes"]!=scenario["client_pax21_bytes"] or source_pax["sha256"]!=scenario["server_pax21_sha256"] or source_pax["sha256"]!=scenario["client_pax21_sha256"]:raise SystemExit("FAIL pack-runtime source/staged pax21 identity")
+for role in ("shared","client","server"):
+ source=next(item for item in provenance if item["role"]=="pax21-"+role)
+ copies=[item for item in packages if item["role"]==role]
+ if any(source["bytes"]!=item["bytes"] or source["sha256"]!=item["sha256"] for item in copies):raise SystemExit(f"FAIL pack-runtime source/staged {role} identity")
 result=manifest[-1]
 if set(result)!={"kind","client_controller_pid","server_pid","client_rc","server_rc","timeout","forced"} or result.get("kind")!="result" or not all(isinstance(result.get(k),int) and result[k]>0 for k in ("client_controller_pid","server_pid")) or result["client_controller_pid"]==result["server_pid"] or result.get("client_rc")!=0 or result.get("server_rc")!=0 or result.get("timeout") is not False or result.get("forced") is not False:raise SystemExit("FAIL pack-runtime result")
-server_pax,client_pax=scenario["server_pax21"],scenario["client_pax21"]
+server_pax=next(item["path"] for item in packages if item["consumer"]=="server" and item["role"]=="server")
+client_pax=next(item["path"] for item in packages if item["consumer"]=="client" and item["role"]=="client")
 endpoint=scenario["endpoint"];port=endpoint.rsplit(":",1)[1]
 gs,_=exact(server,sv,"vm/gamesv.",r"vm/gamesv\.wasm loaded as WASM interpreter \([0-9]+ KB memory, [0-9]+ ms\)","INFO","system","gamesv load")
 gp,_=exact(server,sv,"VM_Create policy module=gamesv ",r"VM_Create policy module=gamesv requested=2 effective=2 backend=wasm-interpreter","DEBUG","system","gamesv policy")
@@ -109,7 +116,7 @@ write_self() {
 python3 - "$1" "$2" "$3" "$4" <<'PYEOF'
 import hashlib,json,os,sys
 client_path,server_path,manifest_path,mode=sys.argv[1:]
-root=os.path.dirname(manifest_path);server_pax=root+"/server/base/pax21.sw3z";client_pax=root+"/client/base/pax21.sw3z";endpoint="127.0.0.1:30123"
+root=os.path.dirname(manifest_path);server_pax=root+"/server/base/pax21-server.sw3z";client_pax=root+"/client/base/pax21-client.sw3z";endpoint="127.0.0.1:30123"
 def row(sev,cat,msg):return {"sev":sev,"cat":cat,"msg":msg+"\n"}
 server=[row("INFO","network","WiredNet: listening on port 30123 (IPv4), ALPN: q3now"),row("INFO","system","vm/gamesv.wasm loaded as WASM interpreter (4096 KB memory, 3 ms)"),row("DEBUG","system","VM_Create policy module=gamesv requested=2 effective=2 backend=wasm-interpreter"),row("DEBUG","server","SV_OnPlayerConnect: conn=17"),row("INFO","game","ClientConnect: 0"),row("DEBUG","server","SV_VerifyPaks: accepted client=PaxWitness"),row("INFO","game","ClientBegin: 0"),row("INFO","system","Q0_VMI_PACK_SERVER_SYSINFO_REQUESTED"),row("INFO","system",f"  game        Aug 12 2026         abcdef      {server_pax} :: vm/gamesv.wasm"),row("INFO","system","Q0_VMI_PACK_SERVER_SYSINFO_DONE"),row("INFO","game","say: PaxWitness: Q0_VMI_PACK_PURE_CONTINUITY"),row("INFO","server","----- Server Shutdown (Server quit) -----"),row("INFO","game","==== ShutdownGame ===="),row("INFO","game","ShutdownGame:")]
 client=[row("INFO","client",f"{endpoint} resolved to {endpoint}"),row("DEBUG","filesystem","Connected to a pure server."),row("DEBUG","network","QUIC client: TLV ACCEPT received"),row("INFO","system","vm/gamecl.wasm loaded as WASM interpreter (4096 KB memory, 2 ms)"),row("DEBUG","system","VM_Create policy module=gamecl requested=2 effective=2 backend=wasm-interpreter"),row("INFO","client","cls.state: -> CA_ACTIVE (FIRST GAMEPLAY FRAME mapname=maps/arena7.bsp serverTime=100 numEntities=2 framecount=3)"),row("INFO","cgame","1 2 3 4 5"),row("INFO","system",f"  cgame       Aug 12 2026         abcdef      {client_pax} :: vm/gamecl.wasm"),row("INFO","system","Q0_VMI_PACK_CLIENT_SYSINFO_DONE")]
@@ -149,18 +156,22 @@ for path,rows in ((client_path,client),(server_path,server)):
  with open(path,"w") as out:
   for item in rows:out.write(json.dumps(item)+"\n")
 members=[]
-for name in ("vm/gamecl.wasm","vm/gamesv.wasm"):
- path=root+"/extract/"+name;os.makedirs(os.path.dirname(path),exist_ok=True);data=("member-"+name).encode();open(path,"wb").write(data);members.append({"path":name,"extracted":path,"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()})
-for path in (server_pax,client_pax):os.makedirs(os.path.dirname(path),exist_ok=True);open(path,"wb").write(b"staged-pax21")
-items=[{"kind":"scenario","schema":1,"name":"vmi-pack-runtime","map":"arena7","vm_game":2,"vm_cgame":2,"sv_pure":1,"endpoint":endpoint,"server_pax21":server_pax,"server_pax21_bytes":12,"server_pax21_sha256":hashlib.sha256(b"staged-pax21").hexdigest(),"client_pax21":client_pax,"client_pax21_bytes":12,"client_pax21_sha256":hashlib.sha256(b"staged-pax21").hexdigest(),"vm_members":members}]
-for role in ("gui","headless","pax01","pax21","sw3z","harness"):
- path=root+"/"+role;data=b"staged-pax21" if role=="pax21" else ("fixture-"+role).encode();os.makedirs(os.path.dirname(path),exist_ok=True);open(path,"wb").write(data);items.append({"kind":"provenance","role":role,"path":path,"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()})
+for role,name in (("client","vm/gamecl.wasm"),("server","vm/gamesv.wasm")):
+ path=root+"/extract/"+role+"/"+name;os.makedirs(os.path.dirname(path),exist_ok=True);data=("member-"+name).encode();open(path,"wb").write(data);members.append({"role":role,"path":name,"extracted":path,"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()})
+source_data={role:("staged-"+role).encode() for role in ("shared","client","server")}
+package_specs=[("server","shared","pax21.sw3z"),("server","client","pax21-client.sw3z"),("server","server","pax21-server.sw3z"),("client","shared","pax21.sw3z"),("client","client","pax21-client.sw3z"),("client","server","pax21-server.sw3z")]
+packages=[]
+for consumer,role,name in package_specs:
+ path=f"{root}/{consumer}/base/{name}";data=source_data[role];os.makedirs(os.path.dirname(path),exist_ok=True);open(path,"wb").write(data);packages.append({"consumer":consumer,"role":role,"path":path,"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()})
+items=[{"kind":"scenario","schema":2,"name":"vmi-pack-runtime","map":"arena7","vm_game":2,"vm_cgame":2,"sv_pure":1,"endpoint":endpoint,"packages":packages,"vm_members":members}]
+for role in ("gui","headless","pax01","pax21-shared","pax21-client","pax21-server","sw3z","harness"):
+ package_role=role.removeprefix("pax21-");data=source_data[package_role] if role.startswith("pax21-") else ("fixture-"+role).encode();path=root+"/"+role;os.makedirs(os.path.dirname(path),exist_ok=True);open(path,"wb").write(data);items.append({"kind":"provenance","role":role,"path":path,"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()})
 items.append({"kind":"result","client_controller_pid":101,"server_pid":102,"client_rc":0,"server_rc":0,"timeout":False,"forced":False})
 if mode=="inventory":items[0]["vm_members"].append(dict(members[0]))
 elif mode=="member-hash":items[0]["vm_members"][0]["sha256"]="0"*64
 elif mode=="manifest":items[2]["sha256"]="0"*64
 elif mode=="result":items[-1]["client_rc"]=1
-elif mode=="source-pax":items[0]["server_pax21_sha256"]="0"*64
+elif mode=="source-pax":items[0]["packages"][0]["sha256"]="0"*64
 with open(manifest_path,"w") as out:
  for item in items:out.write(json.dumps(item,sort_keys=True)+"\n")
 PYEOF
@@ -181,50 +192,57 @@ WIRED="${1:-}";[ -n "$WIRED" ] && [ -x "$WIRED" ] || { echo "usage: $0 /absolute
 WIRED="$(cd "$(dirname "$WIRED")" && pwd)/$(basename "$WIRED")";WD="$(dirname "$WIRED")"
 HEADLESS="${WIRED_BINARY_HEADLESS:-}";if [ -z "$HEADLESS" ];then suffix="$(basename "$WIRED")";suffix="${suffix#wired}";for candidate in "$WD/wired-headless$suffix" "$WD/wired-headless.arm64" "$WD/wired-headless.x86_64" "$WD/../../../wired-headless$suffix";do [ -x "$candidate" ] && HEADLESS="$candidate" && break;done;fi
 [ -n "$HEADLESS" ] && [ -x "$HEADLESS" ] || { echo "SKIP: sibling wired-headless unavailable";exit 77; };HEADLESS="$(cd "$(dirname "$HEADLESS")" && pwd)/$(basename "$HEADLESS")"
-PACK="";for candidate in "$WD" "$WD/../Resources" "$WD/../../..";do [ -f "$candidate/base/pax21.sw3z" ] && PACK="$(cd "$candidate" && pwd)" && break;done;[ -n "$PACK" ] || { echo "SKIP: pax21 unavailable beside assembled binary";exit 77; }
-PAX21="$PACK/base/pax21.sw3z";PAX01="";for candidate in "${WIRED_CONTENT_ROOT:-}" "$PACK";do [ -n "$candidate" ] && [ -f "$candidate/base/pax01.sw3z" ] && PAX01="$(cd "$candidate/base" && pwd)/pax01.sw3z" && break;done;[ -n "$PAX01" ] || { echo "SKIP: shipped pax01.sw3z unavailable (set WIRED_CONTENT_ROOT)";exit 77; }
+PACK="";for candidate in "$WD" "$WD/../Resources" "$WD/../../..";do [ -f "$candidate/base/pax21.sw3z" ] && [ -f "$candidate/base/pax21-client.sw3z" ] && [ -f "$candidate/base/pax21-server.sw3z" ] && PACK="$(cd "$candidate" && pwd)" && break;done;[ -n "$PACK" ] || { echo "SKIP: role-split pax21 package set unavailable beside assembled binary";exit 77; }
+PAX_SHARED="$PACK/base/pax21.sw3z";PAX_CLIENT="$PACK/base/pax21-client.sw3z";PAX_SERVER="$PACK/base/pax21-server.sw3z";PAX01="";for candidate in "${WIRED_CONTENT_ROOT:-}" "$PACK";do [ -n "$candidate" ] && [ -f "$candidate/base/pax01.sw3z" ] && PAX01="$(cd "$candidate/base" && pwd)/pax01.sw3z" && break;done;[ -n "$PAX01" ] || { echo "SKIP: shipped pax01.sw3z unavailable (set WIRED_CONTENT_ROOT)";exit 77; }
 SW3Z="${SW3Z_TOOL:-$WD/../../../tools/sw3z-archiver/cmd/sw3z/sw3z}";[ -x "$SW3Z" ] || SW3Z="$SCRIPT_DIR/../tools/sw3z-archiver/cmd/sw3z/sw3z";[ -x "$SW3Z" ] || { echo "SKIP: sw3z tool unavailable";exit 77; };SW3Z="$(cd "$(dirname "$SW3Z")" && pwd)/$(basename "$SW3Z")"
 ROOT="$(mktemp -d -t vmi-pack-runtime-XXXXXX 2>/dev/null || mktemp -d)";CLIENT_HOME="$ROOT/client/q3now-preview";SERVER_HOME="$ROOT/server/q3now-preview";EXTRACT="$ROOT/extract";FIFO="$ROOT/server.stdin";SERVER_PID="";OPEN=0;FORCED=0
 cleanup(){ local status=$?;trap - EXIT INT TERM;[ "$OPEN" -eq 1 ] && exec 9>&- || true;[ -n "$SERVER_PID" ] && kill -TERM "$SERVER_PID" 2>/dev/null || true;[ -n "$SERVER_PID" ] && wait "$SERVER_PID" 2>/dev/null || true;[ "${WIRED_KEEP_ARTIFACTS:-0}" = 1 ] || rm -rf "$ROOT";exit "$status";};trap cleanup EXIT;trap 'exit 130' INT;trap 'exit 143' TERM
-mkdir -p "$CLIENT_HOME/base" "$SERVER_HOME/base" "$EXTRACT";for home in "$CLIENT_HOME" "$SERVER_HOME";do cp "$PAX01" "$home/base/pax01.sw3z" || exit 1;cp "$PAX21" "$home/base/pax21.sw3z" || exit 1;[ ! -e "$home/base/vm" ] || { echo "FAIL loose VM directory staged";exit 1; };done
-for home in "$CLIENT_HOME" "$SERVER_HOME";do [ "$(find "$home/base" -type f | wc -l | tr -d ' ')" = 2 ] && [ -f "$home/base/pax01.sw3z" ] && [ -f "$home/base/pax21.sw3z" ] || { echo "FAIL non-pax file staged";exit 1; };done
-"$SW3Z" t "$PAX21" >"$ROOT/sw3z-test.txt" || exit 1;"$SW3Z" l "$PAX21" >"$ROOT/sw3z-list.txt" || exit 1
-python3 - "$ROOT/sw3z-list.txt" <<'PYEOF' || exit 1
+mkdir -p "$CLIENT_HOME/base" "$SERVER_HOME/base" "$EXTRACT";cp "$PAX01" "$PAX_SHARED" "$PAX_CLIENT" "$PAX_SERVER" "$CLIENT_HOME/base/" || exit 1;cp "$PAX01" "$PAX_SHARED" "$PAX_CLIENT" "$PAX_SERVER" "$SERVER_HOME/base/" || exit 1
+for home in "$CLIENT_HOME" "$SERVER_HOME";do [ ! -e "$home/base/vm" ] || { echo "FAIL loose VM directory staged";exit 1; };done
+[ "$(find "$CLIENT_HOME/base" -type f | wc -l | tr -d ' ')" = 4 ] && [ "$(find "$SERVER_HOME/base" -type f | wc -l | tr -d ' ')" = 4 ] || { echo "FAIL role package staging inventory";exit 1; }
+for package in "$PAX_SHARED" "$PAX_CLIENT" "$PAX_SERVER";do "$SW3Z" t "$package" >>"$ROOT/sw3z-test.txt" || exit 1;done
+"$SW3Z" l "$PAX_SHARED" >"$ROOT/sw3z-list-shared.txt" || exit 1;"$SW3Z" l "$PAX_CLIENT" >"$ROOT/sw3z-list-client.txt" || exit 1;"$SW3Z" l "$PAX_SERVER" >"$ROOT/sw3z-list-server.txt" || exit 1
+python3 - "$ROOT/sw3z-list-shared.txt" "$ROOT/sw3z-list-client.txt" "$ROOT/sw3z-list-server.txt" <<'PYEOF' || exit 1
 import re,sys
-members=[]
-for line in open(sys.argv[1]):
- match=re.fullmatch(r"(.*?)\s+([0-9]+)\s+([0-9]+)\s+(?:Store|LZ4)\s+[0-9A-Fa-f]{8}\s*",line)
- if match:
-  path=match.group(1).strip()
-  if path.split("/",1)[0].casefold()=="vm":members.append(path)
-if members != ["vm/gamecl.wasm","vm/gamesv.wasm"]:raise SystemExit(f"FAIL VM inventory {members}")
+expected=[[],["vm/gamecl.wasm"],["vm/gamesv.wasm"]]
+for source,want in zip(sys.argv[1:],expected):
+ members=[]
+ for line in open(source):
+  match=re.fullmatch(r"(.*?)\s+([0-9]+)\s+([0-9]+)\s+(?:Store|LZ4)\s+[0-9A-Fa-f]{8}\s*",line)
+  if match:
+   path=match.group(1).strip()
+   if path.split("/",1)[0].casefold()=="vm":members.append(path)
+ if members!=want:raise SystemExit(f"FAIL role VM inventory {source}: {members}")
 PYEOF
-"$SW3Z" x "$PAX21" "$EXTRACT" >"$ROOT/sw3z-extract.txt" || exit 1
-[ -f "$EXTRACT/vm/gamecl.wasm" ] && [ -f "$EXTRACT/vm/gamesv.wasm" ] || { echo "FAIL extracted VM members";exit 1; }
+"$SW3Z" x "$PAX_CLIENT" "$EXTRACT/client" >"$ROOT/sw3z-extract-client.txt" || exit 1;"$SW3Z" x "$PAX_SERVER" "$EXTRACT/server" >"$ROOT/sw3z-extract-server.txt" || exit 1
+[ -f "$EXTRACT/client/vm/gamecl.wasm" ] && [ -f "$EXTRACT/server/vm/gamesv.wasm" ] || { echo "FAIL extracted role VM members";exit 1; }
 python3 - "$EXTRACT" <<'PYEOF' || exit 1
 import os,sys
 root=sys.argv[1];found=[]
 for current,_,files in os.walk(root):
  for name in files:
   path=os.path.relpath(os.path.join(current,name),root).replace(os.sep,"/")
-  if path.split("/",1)[0].casefold()=="vm":found.append(path)
-if sorted(found)!=["vm/gamecl.wasm","vm/gamesv.wasm"]:raise SystemExit(f"FAIL extracted VM inventory {found}")
+  if "/vm/" in path:found.append(path)
+if sorted(found)!=["client/vm/gamecl.wasm","server/vm/gamesv.wasm"]:raise SystemExit(f"FAIL extracted VM inventory {found}")
 PYEOF
 PORT="$(python3 - <<'PYEOF'
 import socket
 s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()
 PYEOF
 )";ENDPOINT="127.0.0.1:$PORT";MANIFEST="$ROOT/manifest.jsonl"
-python3 - "$MANIFEST" "$WIRED" "$HEADLESS" "$PAX01" "$PAX21" "$SW3Z" "$0" "$SERVER_HOME/base/pax21.sw3z" "$CLIENT_HOME/base/pax21.sw3z" "$EXTRACT/vm/gamecl.wasm" "$EXTRACT/vm/gamesv.wasm" "$ENDPOINT" <<'PYEOF'
+python3 - "$MANIFEST" "$WIRED" "$HEADLESS" "$PAX01" "$PAX_SHARED" "$PAX_CLIENT" "$PAX_SERVER" "$SW3Z" "$0" "$SERVER_HOME/base/pax21.sw3z" "$SERVER_HOME/base/pax21-client.sw3z" "$SERVER_HOME/base/pax21-server.sw3z" "$CLIENT_HOME/base/pax21.sw3z" "$CLIENT_HOME/base/pax21-client.sw3z" "$CLIENT_HOME/base/pax21-server.sw3z" "$EXTRACT/client/vm/gamecl.wasm" "$EXTRACT/server/vm/gamesv.wasm" "$ENDPOINT" <<'PYEOF'
 import hashlib,json,os,sys
-manifest,*args=sys.argv[1:];server_pax,client_pax=args[-5:-3];member_paths=args[-3:-1];endpoint=args[-1]
+manifest,*args=sys.argv[1:];source_paths=args[:8];staged_paths=args[8:14];member_paths=args[14:16];endpoint=args[16]
 members=[]
-for name,path in zip(("vm/gamecl.wasm","vm/gamesv.wasm"),member_paths):
- data=open(path,"rb").read();members.append({"path":name,"extracted":os.path.abspath(path),"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()})
+for role,name,path in zip(("client","server"),("vm/gamecl.wasm","vm/gamesv.wasm"),member_paths):
+ data=open(path,"rb").read();members.append({"role":role,"path":name,"extracted":os.path.abspath(path),"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()})
+package_specs=zip(("server","server","server","client","client","client"),("shared","client","server","shared","client","server"),staged_paths)
+packages=[]
+for consumer,role,path in package_specs:
+ data=open(path,"rb").read();packages.append({"consumer":consumer,"role":role,"path":os.path.abspath(path),"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()})
 with open(manifest,"w") as out:
- server_data=open(server_pax,"rb").read();client_data=open(client_pax,"rb").read()
- out.write(json.dumps({"kind":"scenario","schema":1,"name":"vmi-pack-runtime","map":"arena7","vm_game":2,"vm_cgame":2,"sv_pure":1,"endpoint":endpoint,"server_pax21":os.path.abspath(server_pax),"server_pax21_bytes":len(server_data),"server_pax21_sha256":hashlib.sha256(server_data).hexdigest(),"client_pax21":os.path.abspath(client_pax),"client_pax21_bytes":len(client_data),"client_pax21_sha256":hashlib.sha256(client_data).hexdigest(),"vm_members":members},sort_keys=True)+"\n")
- for role,path in zip(("gui","headless","pax01","pax21","sw3z","harness"),args[:6]):
+ out.write(json.dumps({"kind":"scenario","schema":2,"name":"vmi-pack-runtime","map":"arena7","vm_game":2,"vm_cgame":2,"sv_pure":1,"endpoint":endpoint,"packages":packages,"vm_members":members},sort_keys=True)+"\n")
+ for role,path in zip(("gui","headless","pax01","pax21-shared","pax21-client","pax21-server","sw3z","harness"),source_paths):
   data=open(path,"rb").read();out.write(json.dumps({"kind":"provenance","role":role,"path":os.path.abspath(path),"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()},sort_keys=True)+"\n")
 PYEOF
 mkfifo "$FIFO";exec 9<>"$FIFO";OPEN=1

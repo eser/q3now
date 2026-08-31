@@ -13,7 +13,7 @@ function(require_text path needle)
   endif()
 endfunction()
 
-require_text("code/render/frontend/tr_public.h" "#define\tREF_API_VERSION\t\t28")
+require_text("code/render/frontend/tr_public.h" "#define\tREF_API_VERSION\t\t29")
 require_text("code/render/frontend/tr_public.h" "AddRefEntityToSceneTemporal")
 require_text("code/cgame/cg_public.h" "CG_R_ADDREFENTITYTOSCENETEMPORAL = 232")
 require_text("code/client/cl_cgame.c" "&& re.AddRefEntityToSceneTemporal")

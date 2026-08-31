@@ -196,15 +196,11 @@ qboolean MapInventory_Build(const char *mapname,
 		if ( def && def->stage_map_count > 0 ) {
 			for ( int s = 0; s < def->stage_map_count; s++ ) {
 				if ( !def->stage_maps[s] ) continue;
-				// Normalize on intake: strip the literal image
-				// extension so downstream Asset_IsAvailable can do
-				// extension-less shader lookups directly. Mirrors
-				// the engine's R_FindShader which COM_StripExtension's
-				// image references before its hash lookup.
-				char stripped[ MAX_QPATH ];
-				COM_StripExtension( def->stage_maps[s],
-				                    stripped, sizeof( stripped ) );
-				InventoryAdd( out, ASSET_KIND_TEXTURE, stripped );
+				// Preserve the authored spelling. Explicit image extensions
+				// are exact under the VFS contract and may resolve only through
+				// a declared fs-alias; stripping here hid broken imported shader
+				// references from the offline audit.
+				InventoryAdd( out, ASSET_KIND_TEXTURE, def->stage_maps[s] );
 			}
 		}
 	}

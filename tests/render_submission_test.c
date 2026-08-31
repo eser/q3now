@@ -45,6 +45,20 @@ static int MaterialScriptReadFile( const char *name, void **bytes ) {
 
 static void MaterialScriptFreeFile( void *bytes ) { (void)bytes; }
 
+static qboolean MaterialScriptResolveResource( const char *name,
+		char *canonicalPath, size_t canonicalCapacity, uint64_t *sourceId,
+		uint64_t *size, unsigned *generation ) {
+	if ( !name || !canonicalPath || !canonicalCapacity || !sourceId || !size
+			|| !generation || strcmp( name, "scripts/lighting.shader" ) )
+		return qfalse;
+	if ( snprintf( canonicalPath, canonicalCapacity, "%s", name ) < 0
+			|| strlen( name ) >= canonicalCapacity ) return qfalse;
+	*sourceId = UINT64_C( 0x4c49474854494e47 );
+	*size = s_materialScriptText ? (uint64_t)strlen( s_materialScriptText ) : 0u;
+	*generation = 1u;
+	return qtrue;
+}
+
 static int TestMaterialScriptLighting( void ) {
 	static const char validScript[] =
 		"textures/test/lava { cull disable sort 4.25\n"
@@ -81,6 +95,7 @@ static int TestMaterialScriptLighting( void ) {
 	imports.FS_FreeFileList = MaterialScriptFreeFileList;
 	imports.FS_ReadFile = MaterialScriptReadFile;
 	imports.FS_FreeFile = MaterialScriptFreeFile;
+	imports.FS_ResolveResource = MaterialScriptResolveResource;
 	s_materialScriptText = validScript;
 	CHECK( RenderMaterialScript_Load( &catalog, &imports ) );
 	CHECK( catalog.ready && catalog.count == 6u );
@@ -88,6 +103,9 @@ static int TestMaterialScriptLighting( void ) {
 	CHECK( entry.hasLighting && !strcmp( entry.imageName, "textures/test/lava_d" )
 		&& entry.cullMode == RENDER_CULL_NONE && entry.sortExplicit
 		&& fabsf( entry.sort - 4.25f ) < 0.0001f );
+	CHECK( entry.declarationLine == 1u && entry.declarationColumn == 1u );
+	CHECK( entry.stageCount == 1u && entry.stages[0].sourceLine == 3u
+		&& entry.stages[0].sourceColumn == 2u );
 	CHECK( entry.lighting.emissiveMobility == RAL_LIGHT_MOBILITY_STATIONARY );
 	CHECK( entry.lighting.emissiveRequestedProxyCount == 3 );
 	CHECK( entry.lighting.emissiveInjectsAtmosphere == 1 );
@@ -323,16 +341,17 @@ static int TestIrradianceVolumeOwner( void )
 	ralIrradianceVolumePlacement_t placement;
 	ralLightVec3Q16_t normal = { 0, 0, RAL_LIGHT_Q16_ONE };
 	int32_t fallback[3] = { RAL_LIGHT_Q16_ONE / 4, RAL_LIGHT_Q16_ONE / 2, RAL_LIGHT_Q16_ONE };
-	uint8_t coefficients[8u * 24u] = { 0 }, validity[8], artifact[512], corrupt[512];
+	uint8_t coefficients[8u * 24u] = { 0 }, validity[8], artifact[512], artifactBackup[512], corrupt[512];
 	uint8_t sidecar[1024], corruptSidecar[1024];
-	uint8_t directionalRadiance[16] = { 0 }, directionalDirection[8] = { 0 }, directionalArtifact[512];
+	uint8_t directionalRadiance[16] = { 0 }, directionalDirection[8] = { 0 };
+	uint8_t directionalArtifact[512], directionalArtifactBackup[512];
 	refEntity_t entity;
 	refdef_t view;
 	renderSubmissionReceipt_t receipt;
 	const renderIrradianceVolumeRecord_t *volumeSnapshot;
 	uint32_t volumeCount;
 	uint64_t volumeDigest;
-	uint64_t sidecarLength, sidecarManifest, loadedDigest;
+	uint64_t sidecarLength, sidecarManifest, loadedDigest, directionalArtifactLength = 0u;
 	renderIrradianceVolumeSource_t source;
 	renderIrradianceSidecarReceipt_t sidecarReceipt, untouchedSidecarReceipt;
 	refimport_t imports;
@@ -358,6 +377,7 @@ static int TestIrradianceVolumeOwner( void )
 		sizeof( coefficients ) };
 	payloads[1] = (ralLightingPayloadView_t){ RAL_LIGHTING_PAYLOAD_PROBE_VALIDITY, validity, sizeof( validity ) };
 	CHECK( Ral_LightingArtifactWrite( &definition, payloads, artifact, sizeof( artifact ), &artifactReceipt ) );
+	memcpy( artifactBackup, artifact, sizeof( artifactBackup ) );
 	{
 		ralLightingArtifactDefinition_t directionalDefinition;
 		ralLightingPayloadView_t directionalPayloads[2];
@@ -379,6 +399,9 @@ static int TestIrradianceVolumeOwner( void )
 			directionalDirection, sizeof( directionalDirection ) };
 		CHECK( Ral_LightingArtifactWrite( &directionalDefinition, directionalPayloads, directionalArtifact,
 			sizeof( directionalArtifact ), &directionalReceipt ) );
+		directionalArtifactLength = directionalReceipt.byteLength;
+		memcpy( directionalArtifactBackup, directionalArtifact,
+			sizeof( directionalArtifactBackup ) );
 		CHECK( RenderSubmission_Init( &state, 71u ) );
 		CHECK( RenderSubmission_RegisterDirectionalLighting( &state, directionalArtifact,
 			directionalReceipt.byteLength ) );
@@ -467,6 +490,43 @@ static int TestIrradianceVolumeOwner( void )
 	RenderSubmission_CancelFrame( &state );
 	CHECK( RenderSubmission_ClearIrradianceVolumes( &state ) && state.irradianceVolumeCount == 0u );
 	CHECK( RenderSubmission_ClearDirectionalLighting( &state ) && state.directionalLightingCount == 0u );
+	{
+		mapFile_t worldA, worldB;
+		uint64_t worldAIrradianceDigest, worldADirectionalDigest;
+		memset( &worldA, 0, sizeof( worldA ) );
+		memset( &worldB, 0, sizeof( worldB ) );
+		strcpy( worldA.name, "maps/world-a.bsp" );
+		strcpy( worldB.name, "maps/world-b.bsp" );
+		CHECK( RenderSubmission_LoadWorld( &state, &worldA, 0 ) );
+		placement.volumeId = 70u;
+		CHECK( RenderSubmission_RegisterIrradianceVolume( &state, &placement,
+			artifactBackup, artifactReceipt.byteLength ) );
+		CHECK( RenderSubmission_RegisterDirectionalLighting( &state,
+			directionalArtifactBackup, directionalArtifactLength ) );
+		worldAIrradianceDigest = state.irradianceVolumeDigest;
+		worldADirectionalDigest = state.directionalLightingDigest;
+		CHECK( RenderSubmission_LoadWorld( &state, &worldB, 1 )
+			&& state.irradianceVolumeCount == 0u
+			&& state.directionalLightingCount == 0u );
+		placement.volumeId = 71u;
+		CHECK( RenderSubmission_RegisterIrradianceVolume( &state, &placement,
+			artifactBackup, artifactReceipt.byteLength ) );
+		CHECK( RenderSubmission_SelectWorld( &state, 0 )
+			&& state.irradianceVolumeCount == 1u
+			&& state.directionalLightingCount == 1u
+			&& state.irradianceVolumeDigest == worldAIrradianceDigest
+			&& state.directionalLightingDigest == worldADirectionalDigest
+			&& state.irradianceVolumes[0].placement.volumeId == 70u );
+		CHECK( RenderSubmission_SelectWorld( &state, 1 )
+			&& state.irradianceVolumeCount == 1u
+			&& state.directionalLightingCount == 0u
+			&& state.irradianceVolumes[0].placement.volumeId == 71u );
+		CHECK( RenderSubmission_UnloadWorld( &state, 0 )
+			&& RenderSubmission_WorldResident( &state, 1 )
+			&& state.irradianceVolumes[0].placement.volumeId == 71u );
+		CHECK( RenderSubmission_UnloadWorld( &state, 1 )
+			&& RenderSubmission_ResidentWorldCount( &state ) == 0 );
+	}
 	RenderSubmission_Reset( &state );
 	return 0;
 }
@@ -769,12 +829,14 @@ int main( int argc, char **argv )
 	decalDesc_t effectDecal = { 0 };
 	ribbonPoint_t effectRibbonPointsIn[2] = { 0 };
 	ribbonDesc_t effectRibbon = { 0 };
+	beamDesc_t effectBeam = { 0 };
 	renderEffectPrimitiveSnapshot_t effectPrimitiveSnapshot;
 	const spriteDesc_t *effectSprites;
 	const emitterDesc_t *effectEmitters;
 	const decalDesc_t *effectDecals;
 	const renderEffectRibbonCommand_t *effectRibbons;
 	const ribbonPoint_t *effectRibbonPointsOut;
+	const beamDesc_t *effectBeams;
 	memset( &world, 0, sizeof( world ) );
 	strcpy( world.name, "maps/arena1.bsp" );
 	world.checksum		 = 0x12345678;
@@ -1147,24 +1209,40 @@ int main( int argc, char **argv )
 	effectRibbon.numPoints = 2;
 	effectRibbon.shader = material;
 	CHECK( RenderSubmission_AddEffectRibbon( &state, &effectRibbon ) );
+	effectBeam.start[0] = 4.0f;
+	effectBeam.end[0] = 12.0f;
+	effectBeam.startWidth = 2.0f;
+	effectBeam.endWidth = 1.0f;
+	effectBeam.startColor[0] = effectBeam.startColor[1]
+		= effectBeam.startColor[2] = effectBeam.startColor[3] = 1.0f;
+	effectBeam.endColor[0] = effectBeam.endColor[1]
+		= effectBeam.endColor[2] = effectBeam.endColor[3] = 1.0f;
+	effectBeam.shader = material;
+	effectBeam.duration = 0.25f;
+	effectBeam.fadeOut = 0.1f;
+	effectBeam.axialCopies = 1;
+	effectBeam.startEntityNum = effectBeam.endEntityNum = -1;
+	CHECK( RenderSubmission_AddEffectBeam( &state, &effectBeam ) );
 	effectSprite.radius = 0.0f;
 	CHECK( !RenderSubmission_AddEffectSprite( &state, &effectSprite ) );
 	CHECK( RenderSubmission_EffectPrimitiveSnapshots( &state,
 		&effectPrimitiveSnapshot, &effectSprites, &effectEmitters,
-		&effectDecals, &effectRibbons, &effectRibbonPointsOut )
+		&effectDecals, &effectRibbons, &effectRibbonPointsOut, &effectBeams )
 		&& effectPrimitiveSnapshot.digest != 0u
 		&& effectPrimitiveSnapshot.spriteCount == 1u
 		&& effectPrimitiveSnapshot.emitterCount == 1u
 		&& effectPrimitiveSnapshot.decalCount == 1u
 		&& effectPrimitiveSnapshot.ribbonCount == 1u
 		&& effectPrimitiveSnapshot.ribbonPointCount == 2u
+		&& effectPrimitiveSnapshot.beamCount == 1u
 		&& effectPrimitiveSnapshot.droppedCount == 1u
 		&& effectSprites[0].radius == 8.0f
 		&& effectEmitters[0].count == 8
 		&& effectDecals[0].lifetime == 4.0f
 		&& effectRibbons[0].firstPoint == 0u
 		&& effectRibbons[0].pointCount == 2u
-		&& effectRibbonPointsOut[1].pos[0] == 12.0f );
+		&& effectRibbonPointsOut[1].pos[0] == 12.0f
+		&& effectBeams[0].duration == 0.25f );
 	{
 		atmosphereFrameState_t snowAtmosphere = atmosphere;
 		snowAtmosphere.timelineSeconds		  = 10.0f;
@@ -1390,6 +1468,7 @@ int main( int argc, char **argv )
 		   receipt.effectSpriteCount == 1u && receipt.effectEmitterCount == 1u &&
 		   receipt.effectDecalCount == 1u && receipt.effectRibbonCount == 1u &&
 		   receipt.effectRibbonPointCount == 2u &&
+		   receipt.effectBeamCount == 1u &&
 		   receipt.effectPrimitiveDroppedCount == 1u );
 	CHECK( RenderSubmission_EffectSnapshots( &state, &effectPolygons, &effectPolygonCommands, &effectVertices,
 											 &effectVertexCount, &effectLights, &effectLightCount ) &&
@@ -1404,12 +1483,13 @@ int main( int argc, char **argv )
 	CHECK( RenderSubmission_BeginFrame( &state, 43u ) );
 	CHECK( RenderSubmission_EffectPrimitiveSnapshots( &state,
 		&effectPrimitiveSnapshot, &effectSprites, &effectEmitters,
-		&effectDecals, &effectRibbons, &effectRibbonPointsOut )
+		&effectDecals, &effectRibbons, &effectRibbonPointsOut, &effectBeams )
 		&& effectPrimitiveSnapshot.spriteCount == 0u
 		&& effectPrimitiveSnapshot.emitterCount == 0u
 		&& effectPrimitiveSnapshot.decalCount == 0u
 		&& effectPrimitiveSnapshot.ribbonCount == 0u
 		&& effectPrimitiveSnapshot.ribbonPointCount == 0u
+		&& effectPrimitiveSnapshot.beamCount == 0u
 		&& effectPrimitiveSnapshot.droppedCount == 0u );
 	CHECK( RenderSubmission_AtmosphereSnapshot( &state, &atmosphereSnapshot, &atmosphereEmitters ) &&
 		   atmosphereSnapshot.emitterCount == 0u );
@@ -1507,6 +1587,60 @@ int main( int argc, char **argv )
 	RenderSubmission_CancelFrame( &state );
 	patchSurface.patchWidth = 4;
 	CHECK( !RenderSubmission_LoadWorld( &state, &patchWorld, 0 ) );
+	{
+		mapFile_t secondWorld = world;
+		drawVert_t secondVertices[3];
+		renderWorldSnapshot_t firstSnapshot, secondSnapshot;
+		uint64_t firstDigest, secondDigest;
+		memcpy( secondVertices, vertices, sizeof( secondVertices ) );
+		secondVertices[1].xyz[0] = 7.0f;
+		secondWorld.drawVerts = secondVertices;
+		secondWorld.checksum = 0x7a11ce02;
+		strcpy( secondWorld.name, "maps/second-resident.bsp" );
+		CHECK( RenderSubmission_LoadWorld( &state, &world, 0 ) );
+		firstDigest = state.worlds[0].digest;
+		CHECK( RenderSubmission_LoadWorld( &state, &secondWorld, 1 ) );
+		secondDigest = state.worlds[1].digest;
+		CHECK( firstDigest && secondDigest && firstDigest != secondDigest );
+		CHECK( RenderSubmission_WorldResident( &state, 0 )
+			&& RenderSubmission_WorldResident( &state, 1 ) );
+		CHECK( RenderSubmission_BeginFrame( &state, 46u )
+			&& RenderSubmission_RenderScene( &state, &view, 0 )
+			&& RenderSubmission_WorldSnapshot( &state, &firstSnapshot )
+			&& firstSnapshot.vertices[1].position[0] == vertices[1].xyz[0] );
+		RenderSubmission_CancelFrame( &state );
+		CHECK( RenderSubmission_BeginFrame( &state, 47u )
+			&& RenderSubmission_RenderScene( &state, &view, 1 )
+			&& RenderSubmission_WorldSnapshot( &state, &secondSnapshot )
+			&& secondSnapshot.vertices[1].position[0] == 7.0f );
+		RenderSubmission_CancelFrame( &state );
+		CHECK( firstSnapshot.vertices != secondSnapshot.vertices );
+		CHECK( RenderSubmission_UnloadWorld( &state, 0 )
+			&& !RenderSubmission_WorldResident( &state, 0 )
+			&& RenderSubmission_WorldResident( &state, 1 )
+			&& RenderSubmission_SelectWorld( &state, 1 )
+			&& state.worldDigest == secondDigest );
+		CHECK( RenderSubmission_UnloadWorld( &state, 1 )
+			&& !state.worldLoaded && state.activeWorldIndex == -1
+			&& state.irradianceVolumeDigest != 0u
+			&& state.directionalLightingDigest != 0u );
+		CHECK( RenderSubmission_BeginFrame( &state, 48u )
+			&& RenderSubmission_EndFrame( &state, 48u, &receipt )
+			&& !receipt.worldLoaded );
+	}
+	{
+		const uint64_t profileGeneration = state.atmosphereProfileGeneration;
+		const uint64_t classGeneration = state.particleClassGeneration;
+		CHECK( RenderSubmission_ResetEffectRegistries( &state ) );
+		CHECK( state.atmosphereProfileCount == 0u && state.particleClassCount == 0u );
+		CHECK( state.atmosphereProfileGeneration == profileGeneration + 1u &&
+			   state.particleClassGeneration == classGeneration + 1u );
+		CHECK( !RenderSubmission_GetAtmosphereEffectProfile( &state, 1u, &resolvedProfile ) );
+		CHECK( !RenderSubmission_GetParticleClass( &state, 1, &resolvedParticleClass ) );
+		atmosphereParticleClass.sizeEnd = 10.0f;
+		CHECK( RenderSubmission_RegisterParticleClass( &state, 1, &atmosphereParticleClass ) );
+		CHECK( RenderSubmission_RegisterAtmosphereEffectProfile( &state, 1u, &atmosphereProfile ) );
+	}
 	RenderSubmission_Reset( &state );
 	puts( "render frontend submission: PASS" );
 	return 0;

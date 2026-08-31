@@ -158,6 +158,36 @@ void Com_SHA256( const byte *data, unsigned int len, byte out[ COM_SHA256_DIGEST
 	SHA256_Final( &ctx, out );
 }
 
+qboolean Com_SHA256FileHex( const char *path,
+		char outHex[ COM_SHA256_HEX_LEN + 1 ], uint64_t *outSize ) {
+	byte buffer[64 * 1024];
+	byte digest[COM_SHA256_DIGEST_LEN];
+	sha256_ctx_t ctx;
+	FILE *file;
+	uint64_t total = 0;
+	size_t count;
+	if ( outSize ) *outSize = 0;
+	if ( !path || !path[0] || !outHex ) return qfalse;
+	file = fopen( path, "rb" );
+	if ( !file ) return qfalse;
+	SHA256_Init( &ctx );
+	while ( ( count = fread( buffer, 1, sizeof( buffer ), file ) ) != 0 ) {
+		SHA256_Update( &ctx, buffer, (unsigned int)count );
+		total += count;
+	}
+	if ( ferror( file ) ) {
+		fclose( file );
+		return qfalse;
+	}
+	fclose( file );
+	SHA256_Final( &ctx, digest );
+	for ( unsigned int i = 0; i < COM_SHA256_DIGEST_LEN; ++i )
+		Com_sprintf( outHex + i * 2, 3, "%02x", digest[i] );
+	outHex[COM_SHA256_HEX_LEN] = '\0';
+	if ( outSize ) *outSize = total;
+	return qtrue;
+}
+
 void Com_HMAC_SHA256( const byte *key, unsigned int keyLen, const byte *data, unsigned int dataLen, byte out[ COM_SHA256_DIGEST_LEN ] ) {
 	const byte *workKey = key;
 	unsigned int workKeyLen = keyLen;

@@ -81,7 +81,7 @@ strip_c_comments("${vk_header}" vk_header_code)
 strip_c_comments("${vk_buffer_shadow}" vk_buffer_shadow_code)
 strip_c_comments("${vk_buffer_shadow_header}" vk_buffer_shadow_header_code)
 
-require_text("${public_abi}" "#define\tREF_API_VERSION\t\t28" "renderer ABI generation")
+require_text("${public_abi}" "#define\tREF_API_VERSION\t\t29" "renderer ABI generation")
 require_text("${public_abi}" "(*VK_GetInstanceProcAddr)( void *nativeInstance, const char *name )" "opaque proc-loader callback")
 require_text("${public_abi}" "(*VK_CreateSurface)( void *nativeInstance, uint64_t *outNativeSurface )" "fixed-width surface callback")
 require_text("${client}" "VK_GetInstanceProcAddr( void *nativeInstance, const char *name )" "client opaque proc-loader declaration")

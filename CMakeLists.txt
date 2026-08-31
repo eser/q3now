@@ -627,6 +627,53 @@ SET_TESTS_PROPERTIES(fs_dedup_process_smoke PROPERTIES
 	RESOURCE_LOCK wired_net_port
 )
 
+ADD_TEST(NAME fs_alias_process_smoke
+	COMMAND bash ${CMAKE_SOURCE_DIR}/tests/smoke-fs-alias.sh
+		$<TARGET_FILE:${DNAME}${BINEXT}>
+)
+SET_TESTS_PROPERTIES(fs_alias_process_smoke PROPERTIES
+	LABELS "process;owner.wired-vfs;owner.wired-cvars;failure.lifecycle;failure.security-contract;feature.always"
+	SKIP_RETURN_CODE 77
+	TIMEOUT 60
+	RESOURCE_LOCK wired_net_port
+)
+
+ADD_TEST(NAME fs_mount_scope_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/fs_mount_scope_policy_check.cmake
+)
+SET_TESTS_PROPERTIES(fs_mount_scope_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.wired-vfs;failure.architecture-contract;feature.always"
+	TIMEOUT 30
+)
+
+ADD_TEST(NAME cvar_scope_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/cvar_scope_policy_check.cmake
+)
+SET_TESTS_PROPERTIES(cvar_scope_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.wired-cvars;failure.architecture-contract;feature.always"
+	TIMEOUT 30
+)
+
+ADD_TEST(NAME client_content_scope_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/client_content_scope_policy_check.cmake
+)
+
+ADD_TEST(NAME game_restart_scope_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/game_restart_scope_policy_check.cmake
+)
+SET_TESTS_PROPERTIES(game_restart_scope_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.q3now-core;owner.wired-vfs;failure.architecture-contract;feature.always"
+	TIMEOUT 30
+)
+SET_TESTS_PROPERTIES(client_content_scope_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.wired-vfs;owner.wired-cvars;failure.architecture-contract;feature.always"
+	TIMEOUT 30
+)
+
 # wired_playtest.jsonl consumer contract (TASK-120 #3). The map-race harness is
 # the artefact's first real consumer, and what it must do is decide whether a
 # session can be reconstructed from the evidence file alone: v1 envelope on
@@ -815,6 +862,25 @@ ADD_TEST(NAME ral_raw_api_boundary_source_policy_contract
 		-DSOURCE_ROOT=${CMAKE_SOURCE_DIR}
 		-P ${CMAKE_SOURCE_DIR}/cmake/ral_raw_api_boundary_policy_check.cmake
 )
+
+ADD_TEST(NAME vk_world_state_scope_source_policy_contract
+	COMMAND ${CMAKE_COMMAND}
+		-DSOURCE_ROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/vk_world_state_scope_policy_check.cmake
+)
+SET_TESTS_PROPERTIES(vk_world_state_scope_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.renderer;failure.contract;backend.vulkan"
+	TIMEOUT 30
+)
+ADD_TEST(NAME render_world_level_owner_source_policy_contract
+	COMMAND ${CMAKE_COMMAND}
+		-DSOURCE_ROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/render_world_level_owner_policy_check.cmake
+)
+SET_TESTS_PROPERTIES(render_world_level_owner_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.renderer;owner.q3now-client;failure.contract"
+	TIMEOUT 30
+)
 SET_TESTS_PROPERTIES(ral_raw_api_boundary_source_policy_contract PROPERTIES
 	LABELS "host-only;infrastructure;owner.ral;failure.contract;backend.webgpu"
 	TIMEOUT 90
@@ -862,6 +928,22 @@ FUNCTION(WIRED_CONFIGURE_HOST_TEST target test_name)
 			"ASAN_OPTIONS=abort_on_error=1:detect_leaks=0;UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1")
 	ENDIF()
 ENDFUNCTION()
+
+# TASK-96 explicit App/Level lifetime contract.  The test compiles the real
+# allocators with logger/error stubs so it remains a small host-only ownership
+# check instead of pulling an engine executable into CTest.
+ADD_EXECUTABLE(app_memory_test
+	tests/app_memory_test.c
+	code/qcommon/app_memory.c
+	code/qcommon/arena.c
+)
+TARGET_INCLUDE_DIRECTORIES(app_memory_test PRIVATE code/qcommon)
+ADD_TEST(NAME app_memory_contract COMMAND app_memory_test)
+SET_TESTS_PROPERTIES(app_memory_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.qcommon;failure.contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(app_memory_test app_memory_contract)
 
 # GoogleTest counterpart of WIRED_CONFIGURE_HOST_TEST.
 #
@@ -1473,6 +1555,38 @@ SET_TESTS_PROPERTIES(ral_material_contract PROPERTIES
 	LABELS "host-only;subsystem;owner.ral;owner.material;failure.contract;backend.webgpu;feature.always"
 	TIMEOUT 30)
 WIRED_CONFIGURE_HOST_TEST(ral_material_test ral_material_contract)
+ADD_EXECUTABLE(ral_material_source_test
+	tests/ral_material_source_test.c
+	code/render/ral/core/ral_material_source.c)
+FIND_PACKAGE(Threads REQUIRED)
+TARGET_INCLUDE_DIRECTORIES(ral_material_source_test PRIVATE
+	code/qcommon code/render/ral/core code/render/frontend)
+TARGET_COMPILE_OPTIONS(ral_material_source_test PRIVATE -Wall -Wextra -Werror)
+TARGET_LINK_LIBRARIES(ral_material_source_test PRIVATE Threads::Threads)
+ADD_TEST(NAME ral_material_source_ir_contract COMMAND ral_material_source_test)
+SET_TESTS_PROPERTIES(ral_material_source_ir_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.material;failure.contract;backend.webgpu;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_material_source_test ral_material_source_ir_contract)
+ADD_EXECUTABLE(render_material_script_source_test
+	tests/render_material_script_source_test.c
+	code/render/frontend/render_material_script.c
+	code/render/ral/core/ral_material_source.c)
+TARGET_INCLUDE_DIRECTORIES(render_material_script_source_test PRIVATE
+	code/qcommon code/render/ral/core code/render/frontend)
+TARGET_COMPILE_OPTIONS(render_material_script_source_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME render_material_script_source_contract
+	COMMAND render_material_script_source_test)
+SET_TESTS_PROPERTIES(render_material_script_source_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.material;failure.contract;backend.webgpu;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(render_material_script_source_test render_material_script_source_contract)
+ADD_TEST(NAME ral_material_source_ir_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_material_source_ir_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_material_source_ir_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.material;failure.contract;backend.webgpu"
+	TIMEOUT 30)
 ADD_TEST(NAME ral_material_source_policy_contract
 	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
 		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_material_policy_check.cmake)
@@ -1870,6 +1984,7 @@ ADD_LIBRARY(ral_opengl STATIC
 	code/render/ral/core/ral_capability.c
 	code/render/ral/core/ral_command_lifecycle.c
 	code/render/ral/core/ral_display_visibility.c
+	code/render/ral/core/ral_material_source.c
 	code/render/ral/core/ral_memory_recovery.c
 	code/render/ral/core/ral_presentation_host.c
 	code/render/ral/core/ral_shader_abi.c
@@ -1918,6 +2033,7 @@ ADD_LIBRARY(ral_webgpu STATIC
 	code/render/ral/core/ral_capability.c
 	code/render/ral/core/ral_command_lifecycle.c
 	code/render/ral/core/ral_display_visibility.c
+	code/render/ral/core/ral_material_source.c
 	code/render/ral/core/ral_memory_recovery.c
 	code/render/ral/core/ral_shader_abi.c
 	code/render/ral/core/ral_transfer.c)
@@ -2444,6 +2560,7 @@ IF(APPLE)
 		code/render/ral/core/ral_display_visibility.c
 		code/render/ral/core/ral_frame_shell.c
 		code/render/ral/core/ral_material.c
+		code/render/ral/core/ral_material_source.c
 		code/render/ral/core/ral_material_proxy.c
 		code/render/ral/core/ral_material_reload.c
 		code/render/ral/core/ral_material_runtime.c
@@ -5300,6 +5417,67 @@ SET_TESTS_PROPERTIES(fs_qpath_contract PROPERTIES
 )
 WIRED_CONFIGURE_HOST_TEST(fs_qpath_test fs_qpath_contract)
 
+ADD_EXECUTABLE(fs_alias_test
+	tests/fs_alias_test.c
+	code/qcommon/wired/core/vfs/fs_alias.c
+)
+TARGET_COMPILE_OPTIONS(fs_alias_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME fs_alias_contract COMMAND fs_alias_test)
+SET_TESTS_PROPERTIES(fs_alias_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.wired-vfs;failure.security-contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(fs_alias_test fs_alias_contract)
+
+ADD_EXECUTABLE(mod_manifest_test
+	tests/mod_manifest_test.c
+	code/qcommon/mod_manifest.c
+)
+TARGET_COMPILE_OPTIONS(mod_manifest_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME mod_manifest_contract COMMAND mod_manifest_test)
+SET_TESTS_PROPERTIES(mod_manifest_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.wired-vfs;failure.security-contract;failure.architecture-contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(mod_manifest_test mod_manifest_contract)
+
+ADD_TEST(NAME mod_manifest_schema_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/mod_manifest_schema_policy_check.cmake
+)
+SET_TESTS_PROPERTIES(mod_manifest_schema_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.wired-vfs;failure.architecture-contract;feature.always"
+	TIMEOUT 30
+)
+
+ADD_TEST(NAME mod_manifest_bootstrap_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/mod_manifest_bootstrap_policy_check.cmake
+)
+SET_TESTS_PROPERTIES(mod_manifest_bootstrap_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.wired-vfs;owner.q3now-client;owner.q3now-server;failure.architecture-contract;feature.always"
+	TIMEOUT 30
+)
+
+ADD_TEST(NAME mod_role_package_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/mod_role_package_policy_check.cmake
+)
+SET_TESTS_PROPERTIES(mod_role_package_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.wired-vfs;owner.build;failure.package-provenance;failure.architecture-contract;feature.always"
+	TIMEOUT 30
+)
+
+ADD_TEST(NAME fs_resource_identity_policy_contract
+	COMMAND ${CMAKE_COMMAND}
+		-DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/fs_resource_identity_policy_check.cmake
+)
+SET_TESTS_PROPERTIES(fs_resource_identity_policy_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.wired-vfs;failure.architecture-contract;feature.always"
+	TIMEOUT 30
+)
+
 # Same seam, parameterised: one CTest entry per input instead of one for the
 # whole set, so a regression names the offending path. Kept ALONGSIDE the C
 # contract rather than replacing it — the C one is the dependency-free spelling
@@ -6262,6 +6440,9 @@ SET(RENDERER_LIGHTING_COMPAT_SRCS
 	code/render/ral/core/ral_irradiance_runtime.c
 	code/render/ral/core/ral_lighting_composition.c
 )
+SET(RENDERER_MATERIAL_SOURCE_COMPAT_SRCS
+	code/render/ral/core/ral_material_source.c
+)
 AUX_SOURCE_DIRECTORY(code/renderer RENDERER_GL_SRCS)
 AUX_SOURCE_DIRECTORY(code/renderer2 RENDERER_GL2_SRCS)
 AUX_SOURCE_DIRECTORY(code/render/ral/backends/vulkan/renderer RENDERER_VK_SRCS)
@@ -6320,6 +6501,7 @@ SET(RAL_VK_SRCS
 	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_display_visibility.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_legacy_material.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_material.c
+	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_material_source.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_material_proxy.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_material_reload.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_material_runtime.c
@@ -6575,12 +6757,12 @@ IF(USE_RENDERER_DLOPEN)
 	)
 	TARGET_COMPILE_DEFINITIONS(client PRIVATE USE_RENDERER_DLOPEN RENDERER_PREFIX="${RENDERER_PREFIX}" RENDERER_DEFAULT=${RENDERER_DEFAULT})
 
-	ADD_LIBRARY(${RENDERER_PREFIX}_opengl_legacy${RENDEXT} SHARED ${RENDERER_GL_SRCS} ${RENDERER_COMMON_SRCS} ${RENDERER_LIGHTING_COMPAT_SRCS} ${AUX_SRCS})
+	ADD_LIBRARY(${RENDERER_PREFIX}_opengl_legacy${RENDEXT} SHARED ${RENDERER_GL_SRCS} ${RENDERER_COMMON_SRCS} ${RENDERER_LIGHTING_COMPAT_SRCS} ${RENDERER_MATERIAL_SOURCE_COMPAT_SRCS} ${AUX_SRCS})
 	TARGET_COMPILE_DEFINITIONS(${RENDERER_PREFIX}_opengl_legacy${RENDEXT} PRIVATE USE_RENDERER_DLOPEN)
 	TARGET_INCLUDE_DIRECTORIES(${RENDERER_PREFIX}_opengl_legacy${RENDEXT} PRIVATE code/qcommon code/render/ral/core)
 	SET_TARGET_PROPERTIES(${RENDERER_PREFIX}_opengl_legacy${RENDEXT} PROPERTIES PREFIX "")
 
-	ADD_LIBRARY(${RENDERER_PREFIX}_opengl2${RENDEXT} SHARED ${RENDERER_GL2_SRCS} ${RENDERER_GL2_FALLBACK_SRCS} ${RENDERER_COMMON_SRCS} ${RENDERER_LIGHTING_COMPAT_SRCS} ${AUX_SRCS})
+	ADD_LIBRARY(${RENDERER_PREFIX}_opengl2${RENDEXT} SHARED ${RENDERER_GL2_SRCS} ${RENDERER_GL2_FALLBACK_SRCS} ${RENDERER_COMMON_SRCS} ${RENDERER_LIGHTING_COMPAT_SRCS} ${RENDERER_MATERIAL_SOURCE_COMPAT_SRCS} ${AUX_SRCS})
 	TARGET_COMPILE_DEFINITIONS(${RENDERER_PREFIX}_opengl2${RENDEXT} PRIVATE USE_RENDERER_DLOPEN)
 	TARGET_INCLUDE_DIRECTORIES(${RENDERER_PREFIX}_opengl2${RENDEXT} PRIVATE code/qcommon code/render/ral/core)
 	SET_TARGET_PROPERTIES(${RENDERER_PREFIX}_opengl2${RENDEXT} PROPERTIES PREFIX "")
@@ -6762,6 +6944,7 @@ IF(APPLE AND USE_RENDERER_DLOPEN)
 			code/render/ral/core/ral_display_visibility.c
 			code/render/ral/core/ral_frame_shell.c
 			code/render/ral/core/ral_material.c
+			code/render/ral/core/ral_material_source.c
 			code/render/ral/core/ral_material_proxy.c
 			code/render/ral/core/ral_material_reload.c
 			code/render/ral/core/ral_material_runtime.c
@@ -6877,6 +7060,7 @@ IF(APPLE AND USE_RENDERER_DLOPEN)
 		code/render/frontend/render_submission_world.c
 		code/render/frontend/render_material_script.c
 		code/render/frontend/render_material_script_lighting.c
+		code/render/ral/core/ral_material_source.c
 		code/render/frontend/render_lighting_sidecar.c
 		code/render/frontend/render_lighting_metadata.c
 		code/qcommon/wired/entity/metadata.c

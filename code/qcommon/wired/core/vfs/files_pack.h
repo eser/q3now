@@ -53,7 +53,7 @@ typedef struct pack_s {
 	packType_t		type;
 	char			*pakFilename;				// c:\quake3\base\pak0.pk3
 	char			*pakBasename;				// pak0
-	const char		*pakGamename;				// base
+	char			pakGamename[MAX_QPATH];		// base; pack-owned across scoped unmount/cache reuse
 #if FEAT_SW3Z
 	union {
 		unzFile		zip;
@@ -64,6 +64,8 @@ typedef struct pack_s {
 #endif
 	int				checksum;					// regular checksum
 	int				pure_checksum;				// checksum for pure
+	char			contentSha256[65];			// lazy lifecycle digest; never computed on read hot path
+	qboolean		contentSha256Valid;
 	int				numfiles;					// number of files in pk3
 	int				referenced;					// referenced file flags
 	qboolean		exclude;					// found in \fs_excludeReference list

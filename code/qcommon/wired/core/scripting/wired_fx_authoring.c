@@ -161,7 +161,7 @@ static int WiredFxAuthoring_ActionType( const char *name ) {
 	static const char *const names[WIRED_FX_ACTION_COUNT] = {
 		"light", "particle", "decal", "decal2", "model", "sound", "screenShake",
 		"controllerShake", "wind", "renderParm", "envOverride", "envChange", "flare",
-		"radialBlur", "ribbon", "fadeParent", "godray"
+		"radialBlur", "ribbon", "fadeParent", "godray", "sprite", "beam"
 	};
 	uint32_t i;
 	for ( i = 0u; i < WIRED_FX_ACTION_COUNT; ++i )
@@ -207,7 +207,7 @@ static qboolean WiredFxAuthoring_Flags( lua_State *L, int table, uint32_t *out )
 }
 
 static int WiredFxAuthoring_Origin( const char *name ) {
-	static const char *const names[] = { "start", "track", "trackLocal", "external" };
+	static const char *const names[] = { "start", "track", "trackLocal", "external", "midpoint" };
 	uint32_t i; for ( i = 0u; i < ARRAY_LEN( names ); ++i ) if ( !strcmp( name, names[i] ) ) return (int)i;
 	return -1;
 }
@@ -272,7 +272,13 @@ static qboolean WiredFxAuthoring_Payload( lua_State *L, int table, wiredFxAction
 	switch ( (wiredFxActionType_t)a->type ) {
 	case WIRED_FX_ACTION_LIGHT:
 		return FX_RES( "material", WIRED_FX_RESOURCE_MATERIAL, &a->payload.light.material ) &&
-			FX_VEC( "radius", a->payload.light.radius, 3u, one3 ) && FX_NUM( "intensity", 1, &a->payload.light.intensity );
+			FX_VEC( "radius", a->payload.light.radius, 3u, one3 ) &&
+			FX_NUM( "intensity", 1, &a->payload.light.intensity ) &&
+			FX_NUM( "radiusJitter", 0, &a->payload.light.radiusJitter ) &&
+			FX_NUM( "lightLifetime", 0, &a->payload.light.lifetime ) &&
+			FX_NUM( "startTimeJitter", 0, &a->payload.light.startTimeJitter ) &&
+			FX_U32( "radiusJitterSteps", 0, &a->payload.light.radiusJitterSteps ) &&
+			FX_U32( "startTimeJitterSteps", 0, &a->payload.light.startTimeJitterSteps );
 	case WIRED_FX_ACTION_PARTICLE:
 		return FX_RES( "particle", WIRED_FX_RESOURCE_PARTICLE_CLASS, &a->payload.particle.particleClass ) &&
 			FX_U32( "maxParticles", a->maxInstances, &a->payload.particle.maxParticles ) &&
@@ -280,7 +286,10 @@ static qboolean WiredFxAuthoring_Payload( lua_State *L, int table, wiredFxAction
 			FX_NUM( "minVelocity", 0, &a->payload.particle.minVelocity ) &&
 			FX_NUM( "spawnRate", 0, &a->payload.particle.spawnRate ) &&
 			FX_NUM( "trailSpacing", 0, &a->payload.particle.trailSpacing ) &&
-			FX_NUM( "screenExcludeAngle", 0, &a->payload.particle.screenExcludeAngle );
+			FX_NUM( "screenExcludeAngle", 0, &a->payload.particle.screenExcludeAngle ) &&
+			FX_U32( "rateBoundaryAligned", 0, &a->payload.particle.rateBoundaryAligned ) &&
+			FX_U32( "pathSampling", WIRED_FX_PATH_SAMPLING_CENTERED,
+				&a->payload.particle.pathSampling );
 	case WIRED_FX_ACTION_DECAL: case WIRED_FX_ACTION_DECAL2:
 		return FX_RES( "material", WIRED_FX_RESOURCE_MATERIAL, &a->payload.decal.material ) &&
 			FX_NUM( "angle", 0, &a->payload.decal.angle ) && FX_NUM( "depth", 1, &a->payload.decal.depth ) &&
@@ -290,12 +299,17 @@ static qboolean WiredFxAuthoring_Payload( lua_State *L, int table, wiredFxAction
 			FX_RES( "material", WIRED_FX_RESOURCE_MATERIAL, &a->payload.model.material );
 	case WIRED_FX_ACTION_SOUND:
 		return FX_RES( "sound", WIRED_FX_RESOURCE_SOUND, &a->payload.sound.sound ) &&
-			FX_U32( "channel", 0u, (uint32_t *)&a->payload.sound.channel );
+			FX_U32( "channel", 0u, (uint32_t *)&a->payload.sound.channel ) &&
+			FX_U32( "looping", 0u, &a->payload.sound.looping ) &&
+			FX_U32( "sourceBound", 0u, &a->payload.sound.sourceBound );
 	case WIRED_FX_ACTION_SCREEN_SHAKE:
 		return FX_NUM( "magnitude", 0, &a->payload.screenShake.magnitude ) &&
 			FX_NUM( "controllerScale", 0, &a->payload.screenShake.controllerScale ) &&
 			FX_VEC( "maxAngles", a->payload.screenShake.maxAngles, 3u, NULL ) &&
-			FX_VEC( "maxOffset", a->payload.screenShake.maxOffset, 3u, NULL );
+			FX_VEC( "maxOffset", a->payload.screenShake.maxOffset, 3u, NULL ) &&
+			FX_NUM( "radius", 0, &a->payload.screenShake.radius ) &&
+			FX_NUM( "decayExponent", 1, &a->payload.screenShake.decayExponent ) &&
+			FX_U32( "mode", 0, &a->payload.screenShake.mode );
 	case WIRED_FX_ACTION_CONTROLLER_SHAKE:
 		return FX_NUM( "highMagnitude", 0, &a->payload.controllerShake.highMagnitude ) &&
 			FX_NUM( "lowMagnitude", 0, &a->payload.controllerShake.lowMagnitude ) &&
@@ -334,13 +348,33 @@ static qboolean WiredFxAuthoring_Payload( lua_State *L, int table, wiredFxAction
 			FX_VEC( "position", a->payload.flare.position, 3u, NULL ) &&
 			FX_U32( "autosprite", 0, &a->payload.flare.autosprite );
 	case WIRED_FX_ACTION_RADIAL_BLUR: return FX_NUM( "maxScale", 0, &a->payload.radialBlur.maxScale );
-	case WIRED_FX_ACTION_RIBBON: return FX_RES( "ribbon", WIRED_FX_RESOURCE_RIBBON, &a->payload.ribbon.ribbon );
+	case WIRED_FX_ACTION_RIBBON:
+	case WIRED_FX_ACTION_BEAM:
+		return FX_RES( "ribbon", WIRED_FX_RESOURCE_RIBBON, &a->payload.ribbon.ribbon ) &&
+			FX_NUM( "width", 1, &a->payload.ribbon.width ) &&
+			FX_NUM( "endWidth", 1, &a->payload.ribbon.endWidth ) &&
+			FX_U32( "count", 1, &a->payload.ribbon.count ) &&
+			FX_VEC( "length", a->payload.ribbon.length, 2u, NULL ) &&
+			FX_VEC( "normalScale", a->payload.ribbon.normalScale, 2u, NULL ) &&
+			FX_NUM( "spread", 0, &a->payload.ribbon.spread ) &&
+			FX_NUM( "lifetime", 0, &a->payload.ribbon.lifetime ) &&
+			FX_NUM( "ribbonFadeOut", 0, &a->payload.ribbon.fadeOut ) &&
+			FX_VEC( "startColor", a->payload.ribbon.startColor, 4u, white ) &&
+			FX_VEC( "endColor", a->payload.ribbon.endColor, 4u, white );
 	case WIRED_FX_ACTION_FADE_PARENT: return qtrue;
 	case WIRED_FX_ACTION_GODRAY:
 		return FX_RES( "material", WIRED_FX_RESOURCE_MATERIAL, &a->payload.godray.material ) &&
 			FX_VEC( "godrayColor", a->payload.godray.color, 4u, white ) &&
 			FX_NUM( "colorScale", 1, &a->payload.godray.colorScale ) &&
 			FX_U32( "size", 1, &a->payload.godray.size ) && FX_U32( "sourceSize", 1, &a->payload.godray.sourceSize );
+	case WIRED_FX_ACTION_SPRITE:
+		return FX_RES( "material", WIRED_FX_RESOURCE_MATERIAL, &a->payload.sprite.material ) &&
+			FX_VEC( "radius", a->payload.sprite.radius, 2u, NULL ) &&
+			FX_VEC( "velocity", a->payload.sprite.velocity, 3u, NULL ) &&
+			FX_NUM( "spriteLifetime", 0, &a->payload.sprite.lifetime ) &&
+			FX_NUM( "startTimeJitter", 0, &a->payload.sprite.startTimeJitter ) &&
+			FX_U32( "startTimeJitterSteps", 0, &a->payload.sprite.startTimeJitterSteps ) &&
+			FX_U32( "randomRotation", 0, &a->payload.sprite.randomRotation );
 	default: return qfalse;
 	}
 }

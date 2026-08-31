@@ -39,6 +39,7 @@ typedef struct {
 #define RAL_METAL_EFFECT_SLOT_COUNT 8u
 #define RAL_METAL_EFFECT_PARTICLES_PER_SLOT 1024u
 #define RAL_METAL_EFFECT_DECAL_SLOT_COUNT 256u
+#define RAL_METAL_EFFECT_BEAM_SLOT_COUNT RENDER_SUBMISSION_MAX_EFFECT_BEAMS
 
 typedef struct {
 	qboolean active;
@@ -52,6 +53,14 @@ typedef struct {
 	decalDesc_t decal;
 	float expiresAt;
 } ralMetalEffectDecalSlot_t;
+
+typedef struct {
+	qboolean active;
+	qboolean transient;
+	beamDesc_t beam;
+	float spawnTime;
+	float expiresAt;
+} ralMetalEffectBeamSlot_t;
 
 struct ralMetalPresent_s {
 	ralMetalCore_t *core;
@@ -90,6 +99,8 @@ struct ralMetalPresent_s {
 	ralMetalEffectSlot_t effectSlots[RAL_METAL_EFFECT_SLOT_COUNT];
 	float effectDecalTimeline;
 	ralMetalEffectDecalSlot_t effectDecalSlots[RAL_METAL_EFFECT_DECAL_SLOT_COUNT];
+	float effectBeamTimeline;
+	ralMetalEffectBeamSlot_t effectBeamSlots[RAL_METAL_EFFECT_BEAM_SLOT_COUNT];
 	MTLPixelFormat weatherPixelFormat;
 	id<MTLDepthStencilState> worldDepthState;
 	id<MTLDepthStencilState> worldDepthReadState;
@@ -1036,12 +1047,13 @@ static qboolean UpdatePersistentEffectDecals( ralMetalPresent_t *present,
 	const decalDesc_t *decals;
 	const renderEffectRibbonCommand_t *ribbons;
 	const ribbonPoint_t *points;
+	const beamDesc_t *beams;
 	float now;
 	uint32_t activeCount = 0u, droppedCount = 0u;
 	if ( !present || !frontend || !outActiveCount || !outDroppedCount
 			|| !RenderSubmission_EffectPrimitiveSnapshots( frontend, &snapshot,
-				&sprites, &emitters, &decals, &ribbons, &points ) ) return qfalse;
-	(void)sprites; (void)emitters; (void)ribbons; (void)points;
+				&sprites, &emitters, &decals, &ribbons, &points, &beams ) ) return qfalse;
+	(void)sprites; (void)emitters; (void)ribbons; (void)points; (void)beams;
 	/* Loading and registration frames legitimately have no world view.  They
 	 * cannot author a new world-space decal, but an empty frame must remain
 	 * presentable and must not discard an already bounded persistent pool. */
@@ -1083,6 +1095,95 @@ static qboolean UpdatePersistentEffectDecals( ralMetalPresent_t *present,
 	return qtrue;
 }
 
+static qboolean UpdatePersistentEffectBeams( ralMetalPresent_t *present,
+		const renderSubmissionState_t *frontend, uint32_t *outActiveCount,
+		uint32_t *outDroppedCount ) {
+	renderEffectPrimitiveSnapshot_t snapshot;
+	renderWorldSnapshot_t view;
+	const spriteDesc_t *sprites;
+	const emitterDesc_t *emitters;
+	const decalDesc_t *decals;
+	const renderEffectRibbonCommand_t *ribbons;
+	const ribbonPoint_t *points;
+	const beamDesc_t *beams;
+	float now;
+	uint32_t activeCount = 0u, droppedCount = 0u;
+	if ( !present || !frontend || !outActiveCount || !outDroppedCount
+			|| !RenderSubmission_EffectPrimitiveSnapshots( frontend, &snapshot,
+				&sprites, &emitters, &decals, &ribbons, &points, &beams )
+			|| !RenderSubmission_ViewSnapshot( frontend, &view ) ) return qfalse;
+	(void)sprites; (void)emitters; (void)decals; (void)ribbons; (void)points;
+	now = (float)view.timeMs * 0.001f;
+	if ( !isfinite( now ) || now < 0.0f ) return qfalse;
+	if ( present->effectBeamTimeline > now )
+		memset( present->effectBeamSlots, 0, sizeof( present->effectBeamSlots ) );
+	for ( uint32_t slot = 0u; slot < RAL_METAL_EFFECT_BEAM_SLOT_COUNT; ++slot ) {
+		ralMetalEffectBeamSlot_t *active = &present->effectBeamSlots[slot];
+		if ( active->active && ( active->transient || now >= active->expiresAt ) )
+			active->active = qfalse;
+	}
+	for ( uint32_t beamIndex = 0u; beamIndex < snapshot.beamCount; ++beamIndex ) {
+		uint32_t slot;
+		for ( slot = 0u; slot < RAL_METAL_EFFECT_BEAM_SLOT_COUNT; ++slot )
+			if ( !present->effectBeamSlots[slot].active ) break;
+		if ( slot == RAL_METAL_EFFECT_BEAM_SLOT_COUNT ) {
+			droppedCount++; continue;
+		}
+		present->effectBeamSlots[slot].active = qtrue;
+		present->effectBeamSlots[slot].transient = beams[beamIndex].duration <= 0.0f
+			? qtrue : qfalse;
+		present->effectBeamSlots[slot].beam = beams[beamIndex];
+		present->effectBeamSlots[slot].spawnTime = now;
+		present->effectBeamSlots[slot].expiresAt = now
+			+ fmaxf( beams[beamIndex].duration, 1.0f / 60.0f );
+	}
+	for ( uint32_t slot = 0u; slot < RAL_METAL_EFFECT_BEAM_SLOT_COUNT; ++slot )
+		if ( present->effectBeamSlots[slot].active ) activeCount++;
+	present->effectBeamTimeline = now;
+	*outActiveCount = activeCount;
+	*outDroppedCount = droppedCount;
+	return qtrue;
+}
+
+static void ResolveEffectBeamEndpoint( const renderSubmissionState_t *frontend,
+		const beamDesc_t *beam, qboolean start, float out[3] ) {
+	const int entityNum = start ? beam->startEntityNum : beam->endEntityNum;
+	const float *position = start ? beam->start : beam->end;
+	const float *offset = start ? beam->startOffset : beam->endOffset;
+	if ( frontend && entityNum >= 0 && (uint32_t)entityNum < frontend->entityCount ) {
+		for ( uint32_t axis = 0u; axis < 3u; ++axis )
+			out[axis] = frontend->entities[entityNum].entity.origin[axis] + offset[axis];
+	} else {
+		memcpy( out, position, 3u * sizeof( float ) );
+	}
+}
+
+static float EffectBeamFade( const ralMetalEffectBeamSlot_t *slot, float now ) {
+	float fade = 1.0f;
+	float age;
+	if ( !slot || slot->transient || slot->beam.duration <= 0.0f ) return 1.0f;
+	age = fmaxf( now - slot->spawnTime, 0.0f );
+	if ( slot->beam.fadeIn > 0.0f ) fade = fminf( fade, age / slot->beam.fadeIn );
+	if ( slot->beam.fadeOut > 0.0f ) fade = fminf( fade,
+		fmaxf( slot->beam.duration - age, 0.0f ) / slot->beam.fadeOut );
+	return fminf( 1.0f, fmaxf( 0.0f, fade ) );
+}
+
+static void RotateEffectBeamAxis( const float vector[3], const float axis[3],
+		float angle, float out[3] ) {
+	const float cosine = cosf( angle ), sine = sinf( angle );
+	const float dot = vector[0] * axis[0] + vector[1] * axis[1]
+		+ vector[2] * axis[2];
+	const float cross[3] = {
+		axis[1] * vector[2] - axis[2] * vector[1],
+		axis[2] * vector[0] - axis[0] * vector[2],
+		axis[0] * vector[1] - axis[1] * vector[0]
+	};
+	for ( uint32_t component = 0u; component < 3u; ++component )
+		out[component] = vector[component] * cosine + cross[component] * sine
+			+ axis[component] * dot * ( 1.0f - cosine );
+}
+
 static qboolean BuildEntityVertices( const ralMetalPresent_t *present,
 		const renderSubmissionState_t *frontend,
 		ralMetalWorldVertex_t **outVertices, uint32_t **outIndices,
@@ -1098,9 +1199,11 @@ static qboolean BuildEntityVertices( const ralMetalPresent_t *present,
 	const decalDesc_t *effectDecals = NULL;
 	const renderEffectRibbonCommand_t *effectRibbons = NULL;
 	const ribbonPoint_t *effectRibbonPoints = NULL;
+	const beamDesc_t *effectBeams = NULL;
 	renderWorldSnapshot_t view;
 	uint32_t commandCount, vertexCount = 0u, indexCount = 0u, batchCount = 0u;
 	qboolean haveEffects = qfalse, havePersistentDecals = qfalse;
+	qboolean havePersistentBeams = qfalse;
 	if ( !outVertices || !outIndices || !outBatches || !outVertexCount
 			|| !outIndexCount || !outBatchCount || !outModelCount
 			|| !outPrimitiveCount || !outTemporalCount
@@ -1113,16 +1216,21 @@ static qboolean BuildEntityVertices( const ralMetalPresent_t *present,
 	memset( &effectSnapshot, 0, sizeof( effectSnapshot ) );
 	if ( frontend ) haveEffects = RenderSubmission_EffectPrimitiveSnapshots(
 		frontend, &effectSnapshot, &effectSprites, &effectEmitters,
-		&effectDecals, &effectRibbons, &effectRibbonPoints );
-	(void)effectEmitters;
+		&effectDecals, &effectRibbons, &effectRibbonPoints, &effectBeams );
+	(void)effectEmitters; (void)effectBeams;
 	if ( present ) for ( uint32_t slot = 0u;
 			slot < RAL_METAL_EFFECT_DECAL_SLOT_COUNT; ++slot )
 		if ( present->effectDecalSlots[slot].active ) {
 			havePersistentDecals = qtrue; break;
 		}
+	if ( present ) for ( uint32_t slot = 0u;
+			slot < RAL_METAL_EFFECT_BEAM_SLOT_COUNT; ++slot )
+		if ( present->effectBeamSlots[slot].active ) {
+			havePersistentBeams = qtrue; break;
+		}
 	if ( ( !commands || !commandCount ) && ( !haveEffects
 			|| ( !effectSnapshot.spriteCount && !havePersistentDecals
-				&& !effectSnapshot.ribbonCount ) ) ) return qtrue;
+				&& !effectSnapshot.ribbonCount && !havePersistentBeams ) ) ) return qtrue;
 	/* Entity-only UI subscenes are valid without a loaded BSP world. */
 	if ( !RenderSubmission_ViewSnapshot( frontend, &view ) ) return qfalse;
 	for ( uint32_t i = 0u; i < commandCount; ++i ) {
@@ -1197,6 +1305,17 @@ static qboolean BuildEntityVertices( const ralMetalPresent_t *present,
 					|| indexCount > RENDER_SUBMISSION_MAX_WORLD_INDICES - ribbonIndices
 					|| batchCount >= RENDER_SUBMISSION_MAX_WORLD_BATCHES ) return qfalse;
 			vertexCount += ribbonVertices; indexCount += ribbonIndices; batchCount++;
+		}
+		for ( uint32_t slot = 0u; present
+				&& slot < RAL_METAL_EFFECT_BEAM_SLOT_COUNT; ++slot ) {
+			if ( !present->effectBeamSlots[slot].active ) continue;
+			const uint32_t copies = (uint32_t)present->effectBeamSlots[slot].beam.axialCopies;
+			const uint32_t beamVertices = copies * 4u;
+			const uint32_t beamIndices = copies * 6u;
+			if ( vertexCount > RENDER_SUBMISSION_MAX_WORLD_VERTICES - beamVertices
+					|| indexCount > RENDER_SUBMISSION_MAX_WORLD_INDICES - beamIndices
+					|| batchCount >= RENDER_SUBMISSION_MAX_WORLD_BATCHES ) return qfalse;
+			vertexCount += beamVertices; indexCount += beamIndices; batchCount++;
 		}
 	}
 	if ( !indexCount ) return qtrue;
@@ -1497,6 +1616,99 @@ static qboolean BuildEntityVertices( const ralMetalPresent_t *present,
 			EntityBatchMaterial( frontend, ribbon->material, batch );
 			batch->cullMode = RENDER_CULL_NONE; batch->depthWrite = qfalse;
 			if ( ribbon->flags & PRIM_FLAG_ADDITIVE )
+				batch->alphaMode = RENDER_ALPHA_ADDITIVE;
+		}
+		for ( uint32_t slot = 0u; present
+				&& slot < RAL_METAL_EFFECT_BEAM_SLOT_COUNT; ++slot ) {
+			const ralMetalEffectBeamSlot_t *beamSlot = &present->effectBeamSlots[slot];
+			const beamDesc_t *beam;
+			float start[3], end[3], axis[3], baseExtrude[3], length, extrudeLength;
+			float age, fade;
+			uint32_t firstIndex, copies;
+			color4ub_t startColor, endColor;
+			if ( !beamSlot->active ) continue;
+			beam = &beamSlot->beam;
+			ResolveEffectBeamEndpoint( frontend, beam, qtrue, start );
+			ResolveEffectBeamEndpoint( frontend, beam, qfalse, end );
+			for ( uint32_t component = 0u; component < 3u; ++component )
+				axis[component] = end[component] - start[component];
+			length = sqrtf( axis[0] * axis[0] + axis[1] * axis[1]
+				+ axis[2] * axis[2] );
+			if ( length < 0.00001f ) continue;
+			for ( uint32_t component = 0u; component < 3u; ++component )
+				axis[component] /= length;
+			baseExtrude[0] = axis[1] * view.viewAxis[0][2]
+				- axis[2] * view.viewAxis[0][1];
+			baseExtrude[1] = axis[2] * view.viewAxis[0][0]
+				- axis[0] * view.viewAxis[0][2];
+			baseExtrude[2] = axis[0] * view.viewAxis[0][1]
+				- axis[1] * view.viewAxis[0][0];
+			extrudeLength = sqrtf( baseExtrude[0] * baseExtrude[0]
+				+ baseExtrude[1] * baseExtrude[1]
+				+ baseExtrude[2] * baseExtrude[2] );
+			if ( extrudeLength < 0.00001f ) {
+				baseExtrude[0] = axis[1] * view.viewAxis[2][2]
+					- axis[2] * view.viewAxis[2][1];
+				baseExtrude[1] = axis[2] * view.viewAxis[2][0]
+					- axis[0] * view.viewAxis[2][2];
+				baseExtrude[2] = axis[0] * view.viewAxis[2][1]
+					- axis[1] * view.viewAxis[2][0];
+				extrudeLength = sqrtf( baseExtrude[0] * baseExtrude[0]
+					+ baseExtrude[1] * baseExtrude[1]
+					+ baseExtrude[2] * baseExtrude[2] );
+			}
+			if ( extrudeLength < 0.00001f ) return qfalse;
+			for ( uint32_t component = 0u; component < 3u; ++component )
+				baseExtrude[component] /= extrudeLength;
+			age = fmaxf( (float)view.timeMs * 0.001f - beamSlot->spawnTime, 0.0f );
+			fade = EffectBeamFade( beamSlot, (float)view.timeMs * 0.001f );
+			for ( uint32_t channel = 0u; channel < 4u; ++channel ) {
+				const float startValue = beam->startColor[channel]
+					* ( channel == 3u ? fade : 1.0f );
+				const float endValue = beam->endColor[channel]
+					* ( channel == 3u ? fade : 1.0f );
+				startColor.rgba[channel] = (byte)fminf( 255.0f,
+					fmaxf( 0.0f, startValue * 255.0f ) );
+				endColor.rgba[channel] = (byte)fminf( 255.0f,
+					fmaxf( 0.0f, endValue * 255.0f ) );
+			}
+			firstIndex = indexBase;
+			copies = (uint32_t)beam->axialCopies;
+			for ( uint32_t copy = 0u; copy < copies; ++copy ) {
+				float extrude[3], corners[4][3];
+				const float angle = (float)M_PI * (float)copy / (float)copies;
+				const uint32_t firstVertex = vertexBase;
+				RotateEffectBeamAxis( baseExtrude, axis, angle, extrude );
+				for ( uint32_t component = 0u; component < 3u; ++component ) {
+					corners[0][component] = start[component]
+						+ extrude[component] * beam->startWidth;
+					corners[1][component] = start[component]
+						- extrude[component] * beam->startWidth;
+					corners[2][component] = end[component]
+						+ extrude[component] * beam->endWidth;
+					corners[3][component] = end[component]
+						- extrude[component] * beam->endWidth;
+				}
+				EntityVertex( &(*outVertices)[vertexBase++], &view, corners[0],
+					age * beam->uvScroll[0], age * beam->uvScroll[1], startColor );
+				EntityVertex( &(*outVertices)[vertexBase++], &view, corners[1],
+					age * beam->uvScroll[0], 1.0f + age * beam->uvScroll[1], startColor );
+				EntityVertex( &(*outVertices)[vertexBase++], &view, corners[2],
+					1.0f + age * beam->uvScroll[0], age * beam->uvScroll[1], endColor );
+				EntityVertex( &(*outVertices)[vertexBase++], &view, corners[3],
+					1.0f + age * beam->uvScroll[0], 1.0f + age * beam->uvScroll[1], endColor );
+				const uint32_t order[6] = { firstVertex, firstVertex + 1u,
+					firstVertex + 2u, firstVertex + 2u, firstVertex + 1u,
+					firstVertex + 3u };
+				memcpy( *outIndices + indexBase, order, sizeof( order ) );
+				indexBase += 6u;
+			}
+			ralMetalEntityBatch_t *batch = &(*outBatches)[batchBase++];
+			batch->firstIndex = firstIndex; batch->indexCount = copies * 6u;
+			batch->useVertexColor = qtrue; batch->visible = qtrue;
+			EntityBatchMaterial( frontend, beam->shader, batch );
+			batch->cullMode = RENDER_CULL_NONE; batch->depthWrite = qfalse;
+			if ( beam->flags & PRIM_FLAG_ADDITIVE )
 				batch->alphaMode = RENDER_ALPHA_ADDITIVE;
 		}
 	}
@@ -2155,12 +2367,14 @@ static qboolean GenericEffectsPending( const ralMetalPresent_t *present,
 	const decalDesc_t *decals;
 	const renderEffectRibbonCommand_t *ribbons;
 	const ribbonPoint_t *points;
+	const beamDesc_t *beams;
 	if ( present ) for ( uint32_t slot = 0u;
 			slot < RAL_METAL_EFFECT_SLOT_COUNT; ++slot )
 		if ( present->effectSlots[slot].active ) return qtrue;
 	if ( !frontend || !RenderSubmission_EffectPrimitiveSnapshots( frontend,
-			&snapshot, &sprites, &emitters, &decals, &ribbons, &points ) )
+			&snapshot, &sprites, &emitters, &decals, &ribbons, &points, &beams ) )
 		return qfalse;
+	(void)beams;
 	return snapshot.emitterCount ? qtrue : qfalse;
 }
 
@@ -2174,6 +2388,7 @@ static qboolean EncodeGenericEffects( ralMetalPresent_t *present,
 	const decalDesc_t *decals;
 	const renderEffectRibbonCommand_t *ribbons;
 	const ribbonPoint_t *points;
+	const beamDesc_t *beams;
 	ralMetalWeatherFrame_t frame;
 	float now, projectionX, projectionY;
 	uint32_t maxEnd = 0u, activeParticleCount = 0u, admitted = 0u, dropped = 0u;
@@ -2182,8 +2397,8 @@ static qboolean EncodeGenericEffects( ralMetalPresent_t *present,
 	if ( !present || !command || !frontend || !view || !outEmitterCount
 			|| !outParticleCount || !outDroppedCount
 			|| !RenderSubmission_EffectPrimitiveSnapshots( frontend, &snapshot,
-				&sprites, &emitters, &decals, &ribbons, &points ) ) return qfalse;
-	(void)sprites; (void)decals; (void)ribbons; (void)points;
+				&sprites, &emitters, &decals, &ribbons, &points, &beams ) ) return qfalse;
+	(void)sprites; (void)decals; (void)ribbons; (void)points; (void)beams;
 	now = (float)view->timeMs * 0.001f;
 	if ( !isfinite( now ) || now < 0.0f ) return qfalse;
 	if ( present->effectTimeline > now ) {
@@ -2953,6 +3168,7 @@ static qboolean PresentReceiptValid( const ralMetalPresentReceipt_t *r ) {
 		&& r->loweredEffectSpriteCount <= RENDER_SUBMISSION_MAX_EFFECT_SPRITES
 		&& r->loweredEffectDecalCount <= RENDER_SUBMISSION_MAX_EFFECT_DECALS
 		&& r->loweredEffectRibbonCount <= RENDER_SUBMISSION_MAX_EFFECT_RIBBONS
+		&& r->loweredEffectBeamCount <= RAL_METAL_EFFECT_BEAM_SLOT_COUNT
 		&& r->effectEmitterDispatchCount <= RENDER_SUBMISSION_MAX_EFFECT_EMITTERS
 		&& r->effectParticleDrawCount <= RAL_METAL_WEATHER_PARTICLE_CAPACITY
 		&& r->loweredUiPrimitiveCount <= RENDER_SUBMISSION_MAX_UI_PRIMITIVES
@@ -3012,6 +3228,7 @@ qboolean RalMetal_PresentReceiptExact( const ralMetalPresentReceipt_t *a,
 		&& a->loweredEffectSpriteCount == b->loweredEffectSpriteCount
 		&& a->loweredEffectDecalCount == b->loweredEffectDecalCount
 		&& a->loweredEffectRibbonCount == b->loweredEffectRibbonCount
+		&& a->loweredEffectBeamCount == b->loweredEffectBeamCount
 		&& a->effectEmitterDispatchCount == b->effectEmitterDispatchCount
 		&& a->effectParticleDrawCount == b->effectParticleDrawCount
 		&& a->effectPrimitiveDroppedCount == b->effectPrimitiveDroppedCount
@@ -3090,6 +3307,7 @@ qboolean RalMetal_PresentClearAndSubmit( ralMetalPresent_t *present,
 	const decalDesc_t *effectDecals;
 	const renderEffectRibbonCommand_t *effectRibbons;
 	const ribbonPoint_t *effectRibbonPoints;
+	const beamDesc_t *effectBeams;
 	uint32_t uiPrimitiveCount = 0u;
 	uint32_t worldVertexCount = 0u, worldIndexCount = 0u, worldBatchCount = 0u;
 	uint32_t entityVertexCount = 0u, entityIndexCount = 0u, entityBatchCount = 0u;
@@ -3105,6 +3323,8 @@ qboolean RalMetal_PresentClearAndSubmit( ralMetalPresent_t *present,
 	uint32_t genericEffectDroppedCount = 0u;
 	uint32_t persistentEffectDecalCount = 0u;
 	uint32_t persistentEffectDecalDroppedCount = 0u;
+	uint32_t persistentEffectBeamCount = 0u;
+	uint32_t persistentEffectBeamDroppedCount = 0u;
 	MTLPixelFormat worldColorFormat;
 	if ( !outReceipt || !clearColor || !OwnerMatches( present, coreReceipt, layerReceipt )
 			|| !present->drawable || !drawableReceipt
@@ -3185,6 +3405,12 @@ qboolean RalMetal_PresentClearAndSubmit( ralMetalPresent_t *present,
 		free( worldVertexBytes ); free( uiVertexBytes );
 		return PresentFailure( "effect-decals" );
 	}
+	if ( frontend && !UpdatePersistentEffectBeams( present, frontend,
+			&persistentEffectBeamCount,
+			&persistentEffectBeamDroppedCount ) ) {
+		free( worldVertexBytes ); free( uiVertexBytes );
+		return PresentFailure( "effect-beams" );
+	}
 	if ( !BuildEntityVertices( present, frontend, &entityVertexBytes, &entityIndexBytes,
 			&entityBatches, &entityVertexCount, &entityIndexCount,
 			&entityBatchCount, &receipt.modelEntityCount,
@@ -3196,18 +3422,19 @@ qboolean RalMetal_PresentClearAndSubmit( ralMetalPresent_t *present,
 	memset( &effectSnapshot, 0, sizeof( effectSnapshot ) );
 	if ( frontend && !RenderSubmission_EffectPrimitiveSnapshots( frontend,
 			&effectSnapshot, &effectSprites, &effectEmitters, &effectDecals,
-			&effectRibbons, &effectRibbonPoints ) ) {
+			&effectRibbons, &effectRibbonPoints, &effectBeams ) ) {
 		free( entityBatches ); free( entityIndexBytes ); free( entityVertexBytes );
 		free( worldVertexBytes ); free( uiVertexBytes );
 		return PresentFailure( "effect-snapshot" );
 	}
 	(void)effectSprites; (void)effectEmitters; (void)effectDecals;
-	(void)effectRibbons; (void)effectRibbonPoints;
+	(void)effectRibbons; (void)effectRibbonPoints; (void)effectBeams;
 	receipt.loweredEffectSpriteCount = effectSnapshot.spriteCount;
 	receipt.loweredEffectDecalCount = persistentEffectDecalCount;
 	receipt.loweredEffectRibbonCount = effectSnapshot.ribbonCount;
+	receipt.loweredEffectBeamCount = persistentEffectBeamCount;
 	receipt.effectPrimitiveDroppedCount = effectSnapshot.droppedCount
-		+ persistentEffectDecalDroppedCount;
+		+ persistentEffectDecalDroppedCount + persistentEffectBeamDroppedCount;
 	genericEffects = GenericEffectsPending( present, frontend );
 	if ( frontend && receipt.localIrradianceEntityCount
 			!= frontend->localIrradianceEntityCount ) {

@@ -75,8 +75,6 @@ cvar_t	*cl_guidServerUniq;
 
 cvar_t	*cl_dlURL;
 
-cvar_t	*cl_reconnectArgs;
-
 /* cl_matchAlerts
  *   Bit 1 = trigger alert even when the window is merely unfocused
  *           (without the bit, alerts fire only while minimized)
@@ -180,9 +178,7 @@ clLoadProgress_t	cl_loadProgress;
 // CL_ActiveApp()->cgvm. Deglobalized (zero-init by the clientApps
 // array's static storage).
 
-char				cl_oldGame[ MAX_QPATH ];
-qboolean			cl_oldGameSet;
-static	qboolean	noGameRestart = qfalse;
+static fsMountScopeId_t cl_nextContentScopeId = 0xC1000000u;
 
 
 // Structure containing functions exported from refresh DLL
@@ -1529,6 +1525,9 @@ void CL_ShutdownLevel( void ) {
 	if ( re.Shutdown ) {
 		re.Shutdown( REF_LEVEL_ONLY );
 	}
+	/* Retire only this app's map-owned CPU allocations.  App-owned connection,
+	 * VM/module and content-scope state remains valid. */
+	Level_Reset( &clientActiveApp->memory );
 	// Signal CL_StartHunkUsers → CL_InitRenderer → RE_BeginRegistration so the
 	// renderer is properly re-initialized (new backEndData, fresh shaders, new
 	// font atlas) for the incoming map.
@@ -1722,6 +1721,14 @@ void CL_ClearState( clientApp_t *app ) {
 	memset( &app->cl, 0, sizeof( app->cl ) );
 }
 
+void CL_ClearContentManifestReceipt( clientApp_t *app ) {
+	if ( !app ) return;
+	if ( app->contentManifests ) Z_Free( app->contentManifests );
+	app->contentManifests = NULL;
+	app->contentManifestCount = 0;
+	app->contentManifestReceived = qfalse;
+}
+
 
 /*
 ====================
@@ -1736,45 +1743,217 @@ static void CL_UpdateGUID( const char *prefix, int prefix_len )
 }
 
 
-/*
-=====================
-CL_ResetOldGame
-=====================
-*/
-void CL_ResetOldGame( void )
-{
-	cl_oldGameSet = qfalse;
-	cl_oldGame[0] = '\0';
+static fsMountScopeId_t CL_AllocateContentScopeId( void ) {
+	fsMountScopeId_t result = cl_nextContentScopeId++;
+	if ( result == FS_MOUNT_SCOPE_GLOBAL ) result = cl_nextContentScopeId++;
+	if ( cl_nextContentScopeId == FS_MOUNT_SCOPE_GLOBAL ) {
+		cl_nextContentScopeId = 0xC1000000u;
+	}
+	return result;
 }
 
-
-/*
-=====================
-CL_RestoreOldGame
-
-change back to previous fs_game
-=====================
-*/
-static qboolean CL_RestoreOldGame( void )
-{
-	if ( cl_oldGameSet )
-	{
-		// A running server owns fs_game for its lifetime. A client disconnect
-		// must NOT restore fs_game here (that would FS_ConditionalRestart ->
-		// Com_GameRestart -> SV_Shutdown, tearing the server down via the
-		// client's lifecycle). Defer: leave cl_oldGameSet/cl_oldGame intact so
-		// the restore still happens on a later disconnect when no server runs.
-		// (The server owns the gamedir; the client does not restore it out
-		// from under a live server.)
-		if ( com_sv_running && com_sv_running->integer )
-			return qfalse;
-
-		cl_oldGameSet = qfalse;
-		Cvar_Set( "fs_game", cl_oldGame );
-		FS_ConditionalRestart( clientActiveApp->clc.checksumFeed, qtrue );
+static qboolean CL_UnmountContentLayers( clientApp_t *app ) {
+	fsMountResult_t result;
+	unsigned liveHandles = 0u;
+	if ( !app->contentScopeMounted ) return qtrue;
+	result = FS_UnmountScope( app->contentScopeId, &liveHandles );
+	if ( result == FS_MOUNT_OK || result == FS_MOUNT_SCOPE_NOT_FOUND ) {
+		app->contentScopeMounted = qfalse;
 		return qtrue;
 	}
+	Com_Log( SEV_ERROR, LOG_CH(ch_client),
+		"content-scope unmount refused scope=%u result=%d live_handles=%u\n",
+		(unsigned)app->contentScopeId, (int)result, liveHandles );
 	return qfalse;
+}
+
+static qboolean CL_MountContentLayers( clientApp_t *app ) {
+	const char *installRoot;
+	const char *homeRoot;
+	fsMountResult_t result;
+	if ( !app->contentGameDir[0] ) return qtrue;
+	installRoot = FS_GetInstallResourcePath();
+	homeRoot = FS_GetHomePath();
+	result = FS_MountLayer( installRoot, app->contentGameDir,
+		app->contentScopeId, FS_MOUNT_ROLE_CLIENT );
+	if ( result != FS_MOUNT_OK ) {
+		Com_Log( SEV_ERROR, LOG_CH(ch_client),
+			"content-scope install mount failed scope=%u game=%s result=%d\n",
+			(unsigned)app->contentScopeId, app->contentGameDir, (int)result );
+		return qfalse;
+	}
+	app->contentScopeMounted = qtrue;
+	if ( Q_stricmp( installRoot, homeRoot ) ) {
+		result = FS_MountLayer( homeRoot, app->contentGameDir,
+			app->contentScopeId, FS_MOUNT_ROLE_CLIENT );
+		if ( result != FS_MOUNT_OK ) {
+			Com_Log( SEV_ERROR, LOG_CH(ch_client),
+				"content-scope home mount failed scope=%u game=%s result=%d\n",
+				(unsigned)app->contentScopeId, app->contentGameDir, (int)result );
+			(void)CL_UnmountContentLayers( app );
+			return qfalse;
+		}
+	}
+	Com_Log( SEV_INFO, LOG_CH(ch_client),
+		"content-scope mounted scope=%u game=%s roots=%u\n",
+		(unsigned)app->contentScopeId, app->contentGameDir,
+		Q_stricmp( installRoot, homeRoot ) ? 2u : 1u );
+	return qtrue;
+}
+
+static qboolean CL_IsPackageArchivePath( const char *path ) {
+	size_t length;
+	if ( !path ) return qfalse;
+	length = strlen( path );
+	return ( length > 5 && !Q_stricmp( path + length - 5, ".sw3z" ) )
+		|| ( length > 4 && !Q_stricmp( path + length - 4, ".pk3" ) );
+}
+
+static fsMountRole_t CL_PackageMountRole( wiredPackageRole_t role ) {
+	switch ( role ) {
+	case WIRED_PACKAGE_ROLE_RUNTIME: return FS_MOUNT_ROLE_RUNTIME;
+	case WIRED_PACKAGE_ROLE_TOOLCHAIN: return FS_MOUNT_ROLE_TOOLCHAIN;
+	case WIRED_PACKAGE_ROLE_SERVER: return FS_MOUNT_ROLE_SERVER;
+	case WIRED_PACKAGE_ROLE_CLIENT: return FS_MOUNT_ROLE_CLIENT;
+	case WIRED_PACKAGE_ROLE_SHARED: return FS_MOUNT_ROLE_SHARED;
+	case WIRED_PACKAGE_ROLE_COSMETIC: return FS_MOUNT_ROLE_COSMETIC;
+	default: return FS_MOUNT_ROLE_GLOBAL;
+	}
+}
+
+qboolean CL_ApplyContentManifestReceipt( clientApp_t *app ) {
+	fsMountPackageReceipt_t receipts[WIRED_PACKAGE_SET_MAX];
+	int approvedChecksums[WIRED_PACKAGE_SET_MAX];
+	fsMountPurePolicy_t policy;
+	size_t receiptCount = 0;
+	size_t approvedCount = 0;
+	size_t archiveCount = 0;
+	unsigned liveHandles = 0;
+	char error[256];
+	if ( !app || !app->contentManifestReceived ) return qtrue;
+	if ( app->contentScopeId == FS_MOUNT_SCOPE_GLOBAL ) return qfalse;
+	for ( size_t i = 0; i < app->contentManifestCount; ++i ) {
+		const wiredPackageManifest_t *manifest = &app->contentManifests[i];
+		fsMountRole_t role = CL_PackageMountRole( manifest->role );
+		/* Every mounted managed archive is verified and role-tagged. Server and
+		 * toolchain packages remain staged only while legacy sv_paks compatibility
+		 * requires them; the client scope denies those roles and shadows their
+		 * global duplicate without a read-path scan. */
+		if ( role == FS_MOUNT_ROLE_GLOBAL ) continue;
+		for ( size_t f = 0; f < manifest->fileCount; ++f ) {
+			const wiredPackageFile_t *file = &manifest->files[f];
+			if ( !CL_IsPackageArchivePath( file->path ) ) continue;
+			if ( receiptCount == ARRAY_LEN( receipts ) ) {
+				Com_Log( SEV_ERROR, LOG_CH(ch_client), "content receipt archive bound exceeded\n" );
+				return qfalse;
+			}
+			receipts[receiptCount].archivePath = file->path;
+			receipts[receiptCount].sha256 = file->sha256;
+			receipts[receiptCount].size = file->size;
+			receipts[receiptCount].role = role;
+			receipts[receiptCount].clientApproved = role == FS_MOUNT_ROLE_RUNTIME
+				|| role == FS_MOUNT_ROLE_CLIENT || role == FS_MOUNT_ROLE_SHARED
+				|| role == FS_MOUNT_ROLE_COSMETIC;
+			receiptCount++;
+		}
+	}
+	if ( !FS_ApplyScopePackageReceipts( app->contentScopeId, receipts, receiptCount,
+		approvedChecksums, ARRAY_LEN( approvedChecksums ), &approvedCount,
+		&archiveCount, error, sizeof( error ) ) ) {
+		Com_Log( SEV_ERROR, LOG_CH(ch_client), "content receipt rejected: %s\n", error );
+		return qfalse;
+	}
+	if ( archiveCount != receiptCount ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_client),
+			"content receipt verified: %zu/%zu archive identity(s); legacy archives keep compatibility pure policy\n",
+			receiptCount, archiveCount );
+		return qtrue;
+	}
+	policy.approvedChecksums = approvedChecksums;
+	policy.approvedChecksumCount = approvedCount;
+	policy.denyLoose = qtrue;
+	if ( FS_SetScopePurePolicy( app->contentScopeId, &policy, &liveHandles ) != FS_MOUNT_OK ) {
+		Com_Log( SEV_ERROR, LOG_CH(ch_client),
+			"content receipt pure policy failed scope=%u live_handles=%u\n",
+			(unsigned)app->contentScopeId, liveHandles );
+		return qfalse;
+	}
+	Com_Log( SEV_INFO, LOG_CH(ch_client),
+		"content receipt enforced: %zu role-approved archive(s), loose denied\n", approvedCount );
+	return qtrue;
+}
+
+qboolean CL_ConfigureContentScope( clientApp_t *app, const char *gameDir ) {
+	const char *effectiveGameDir;
+	if ( !app || !gameDir || FS_InvalidGameDir( gameDir ) ) return qfalse;
+	effectiveGameDir = gameDir[0] ? gameDir : BASEGAME;
+	if ( app->contentScopeId != FS_MOUNT_SCOPE_GLOBAL
+			&& !Q_stricmp( app->contentGameDir, effectiveGameDir ) ) {
+		return qtrue;
+	}
+	if ( app->contentScopeId != FS_MOUNT_SCOPE_GLOBAL ) {
+		if ( !CL_UnmountContentLayers( app ) ) return qfalse;
+		(void)Cvar_UnsetScope( (cvarScopeId_t)app->contentScopeId );
+	}
+	app->contentScopeId = CL_AllocateContentScopeId();
+	Q_strncpyz( app->contentGameDir, effectiveGameDir, sizeof( app->contentGameDir ) );
+	if ( !CL_MountContentLayers( app ) ) {
+		app->contentGameDir[0] = '\0';
+		(void)Cvar_UnsetScope( (cvarScopeId_t)app->contentScopeId );
+		app->contentScopeId = FS_MOUNT_SCOPE_GLOBAL;
+		return qfalse;
+	}
+	return qtrue;
+}
+
+qboolean CL_RefreshContentScope( clientApp_t *app ) {
+	if ( !app || app->contentScopeId == FS_MOUNT_SCOPE_GLOBAL ) return qfalse;
+	if ( !app->contentGameDir[0] ) return qtrue;
+	if ( !CL_UnmountContentLayers( app ) ) return qfalse;
+	return CL_MountContentLayers( app );
+}
+
+static void CL_QueueErrorPopup( clientApp_t *app, const char *title,
+		const char *message, qboolean retryable ) {
+	if ( !app || !message || !message[0] ) return;
+	Q_strncpyz( app->pendingErrorTitle,
+		title && title[0] ? title : "Error", sizeof( app->pendingErrorTitle ) );
+	Q_strncpyz( app->pendingErrorMessage, message,
+		sizeof( app->pendingErrorMessage ) );
+	app->pendingErrorRetryable = retryable;
+}
+
+qboolean CL_DeferLoadingErrorPopup( clientApp_t *app, const char *message ) {
+	/* Dialog state is host-screen state. Background apps must never overwrite
+	 * the focused app's UI, and active-play drops retain their existing policy. */
+	if ( !app || app != clientActiveApp
+			|| app->state <= CA_DISCONNECTED || app->state >= CA_ACTIVE
+			|| !message || !message[0] ) {
+		return qfalse;
+	}
+	CL_QueueErrorPopup( app, "Loading Failed", message, qfalse );
+	Com_Log( SEV_WARN, LOG_CH(ch_client),
+		"Deferred loading error popup state=%d message=%s\n",
+		(int)app->state, message );
+	return qtrue;
+}
+
+static qboolean CL_ReleaseContentScope( clientApp_t *app ) {
+	unsigned removed;
+	if ( !app || app->contentScopeId == FS_MOUNT_SCOPE_GLOBAL ) return qtrue;
+	if ( !CL_UnmountContentLayers( app ) ) {
+		/* The receipt remains attached to app and is retryable. This is an
+		 * owned live scope, not forgotten memory, and prevents a racing handle
+		 * from becoming a use-after-free. */
+		return qfalse;
+	}
+	removed = Cvar_UnsetScope( (cvarScopeId_t)app->contentScopeId );
+	Com_Log( SEV_INFO, LOG_CH(ch_client),
+		"content-scope released scope=%u cvars=%u\n",
+		(unsigned)app->contentScopeId, removed );
+	app->contentScopeId = FS_MOUNT_SCOPE_GLOBAL;
+	app->contentGameDir[0] = '\0';
+	return qtrue;
 }
 
 
@@ -1877,12 +2056,6 @@ qboolean CL_Disconnect( clientApp_t *app, qboolean showMainMenu ) {
 		FS_ClearPakReferences( FS_GENERAL_REF | FS_UI_REF | FS_CGAME_REF );
 	}
 
-	if ( CL_GameSwitch( app ) ) {
-		// keep current gamestate and connection
-		app->disconnecting = qfalse;
-		return qfalse;
-	}
-
 	// send a disconnect message to the server
 	// send it a few times in case one is dropped
 	if ( app->state >= CA_CONNECTED && app->state != CA_CINEMATIC && !app->clc.demoplaying ) {
@@ -1936,12 +2109,10 @@ qboolean CL_Disconnect( clientApp_t *app, qboolean showMainMenu ) {
 	// safe no-op kept for symmetry. Self-scopes by owner; runs unconditionally.
 	Cmd_RemoveCgameCommandsByOwner( app->cgvm );
 
-	if ( isFocused ) {
-		if ( noGameRestart )
-			noGameRestart = qfalse;
-		else
-			cl_restarted = CL_RestoreOldGame();
-	}
+	/* VM and file handles are closed above. Retire exactly this connection's
+	 * cvars and mount layers; never restart the process-wide filesystem. */
+	CL_ClearContentManifestReceipt( app );
+	(void)CL_ReleaseContentScope( app );
 
 	app->disconnecting = qfalse;
 
@@ -2147,9 +2318,14 @@ CL_Reconnect_f
 ================
 */
 static void CL_Reconnect_f( void ) {
-	if ( cl_reconnectArgs->string[0] == '\0' || Q_stricmp( cl_reconnectArgs->string, "localhost" ) == 0 )
+	const char *target = CL_ReconnectTarget();
+	if ( target[0] == '\0' || Q_stricmp( target, "localhost" ) == 0 )
 		return;
-	Cbuf_AddText( va( "connect %s\n", cl_reconnectArgs->string ) );
+	Cbuf_AddText( va( "connect %s\n", target ) );
+}
+
+const char *CL_ReconnectTarget( void ) {
+	return clientActiveApp->servername;
 }
 
 
@@ -2192,6 +2368,12 @@ static void CL_SpawnHeadlessApp_f( void ) {
 		return;
 	}
 	app = &clientApps[slot];
+	if ( !AppMemory_IsInitialized( &app->memory ) ) {
+		char memoryName[32];
+		Com_sprintf( memoryName, sizeof( memoryName ), "client%d", slot );
+		AppMemory_Init( &app->memory, memoryName, 16u * 1024u * 1024u,
+			128u * 1024u * 1024u );
+	}
 
 	/* Minimal userinfo for a non-rendering bot/MCP client. */
 	info[0] = '\0';
@@ -2320,14 +2502,10 @@ qboolean CL_NormalizeServerAddress( const char *input, netadrtype_t family,
 static qboolean CL_BeginResolvedConnect( const char *server, const netadr_t *resolved,
 	qboolean browserOrigin, const char *joinPassword, int selectionGeneration ) {
 	netadr_t addr;
-	// save arguments for reconnect
-	char args[ sizeof( clientActiveApp->servername ) + MAX_CVAR_VALUE_STRING ];
-
 	if ( !server || !server[0] || !resolved || resolved->type == NA_BAD ) {
 		return qfalse;
 	}
 	addr = *resolved;
-	Q_strncpyz( args, server, sizeof( args ) );
 
 	// if running a local server, kill it
 	if ( com_sv_running->integer && addr.type == NA_LOOPBACK ) {
@@ -2338,7 +2516,6 @@ static qboolean CL_BeginResolvedConnect( const char *server, const netadr_t *res
 	Cvar_Set( "sv_killserver", "1" );
 	SV_Frame( 0 );
 
-	noGameRestart = qtrue;
 	CL_Disconnect( clientActiveApp, qtrue );
 	// (Console close is delegated to the CA_CONNECTING transition below via
 	//  CL_OnClientStateChanged — \connect is a connection, not a UI action. This
@@ -2386,8 +2563,6 @@ static qboolean CL_BeginResolvedConnect( const char *server, const netadr_t *res
 	Key_SetCatcher( 0 );
 	clientActiveApp->clc.connectTime = cls.realtime - RECONNECT_TIMEOUT; // CL_CheckForResend() will fire immediately
 	clientActiveApp->clc.connectPacketCount = 0;
-
-	Cvar_Set( "cl_reconnectArgs", args );
 
 	// server connection string
 	Cvar_Set( "cl_currentServerAddress", server );
@@ -2743,7 +2918,13 @@ static void CL_DownloadsComplete( void ) {
 	if ( clientActiveApp->clc.downloadRestart ) {
 		clientActiveApp->clc.downloadRestart = qfalse;
 
-		FS_Restart(clientActiveApp->clc.checksumFeed); // We possibly downloaded a pak, restart the file system to load it
+		/* Rescan only this connection's content roots. No process-global
+		 * FS/Cvar restart is required after a downloaded package closes. */
+		if ( !CL_RefreshContentScope( clientActiveApp ) ) {
+			Com_Terminate( TERM_CLIENT_DROP,
+				"Could not refresh downloaded content scope" );
+			return;
+		}
 
 		// inform the server so we get new gamestate info
 		CL_AddReliableCommand( clientActiveApp, "donedl", qfalse );
@@ -3119,8 +3300,8 @@ static void CL_CheckForResend( void ) {
 					UI_CALL_SET_ACTIVE( UIMENU_MAIN );
 					CL_WiredUI_ShowError( "Connection Failed", productError, qtrue );
 				} else {
-					Q_strncpyz( CL_ActiveApp()->pendingConnectError, productError,
-						sizeof( CL_ActiveApp()->pendingConnectError ) );
+					CL_QueueErrorPopup( CL_ActiveApp(), "Connection Failed",
+						productError, qtrue );
 					CL_FlushMemory();
 				}
 				return;
@@ -3893,8 +4074,8 @@ Two cases after CL_Disconnect(qfalse):
       renderer and UI — the deferred check inside CL_StartHunkUsers fires
       and shows the dialog as soon as WiredUI is back up.
 */
-// cl_pendingConnectError relocated to clientApp_t.pendingConnectError —
-// per-app, in-process-queue L6. Accessed via CL_ActiveApp().
+// Deferred popup state is app-owned (in-process-queue L6), so one app's
+// recovery cannot overwrite another app's error.
 
 static void CL_CheckConnectError( void )
 {
@@ -3945,7 +4126,7 @@ static void CL_CheckConnectError( void )
 	} else {
 		// Renderer is down (SV_SpawnServer wiped it).  Restart everything
 		// and let the deferred check in CL_StartHunkUsers show the dialog.
-		Q_strncpyz( CL_ActiveApp()->pendingConnectError, msg, sizeof( CL_ActiveApp()->pendingConnectError ) );
+		CL_QueueErrorPopup( CL_ActiveApp(), "Connection Failed", msg, qtrue );
 		CL_FlushMemory();
 	}
 }
@@ -4423,10 +4604,17 @@ void CL_StartHunkUsers( void ) {
 
 		// Show any connect error that was deferred across the UI restart
 		// triggered by CL_Disconnect() inside CL_CheckConnectError.
-		if ( CL_ActiveApp()->pendingConnectError[0] ) {
+		if ( CL_ActiveApp()->pendingErrorMessage[0] ) {
+			char pendingTitle[64];
 			char pendingMsg[512];
-			Q_strncpyz( pendingMsg, CL_ActiveApp()->pendingConnectError, sizeof( pendingMsg ) );
-			CL_ActiveApp()->pendingConnectError[0] = '\0';
+			qboolean pendingRetryable = CL_ActiveApp()->pendingErrorRetryable;
+			Q_strncpyz( pendingTitle, CL_ActiveApp()->pendingErrorTitle,
+				sizeof( pendingTitle ) );
+			Q_strncpyz( pendingMsg, CL_ActiveApp()->pendingErrorMessage,
+				sizeof( pendingMsg ) );
+			CL_ActiveApp()->pendingErrorTitle[0] = '\0';
+			CL_ActiveApp()->pendingErrorMessage[0] = '\0';
+			CL_ActiveApp()->pendingErrorRetryable = qfalse;
 			UI_CALL_SET_ACTIVE( UIMENU_MAIN );
 			// Publish the message into com_errorMessage — the error_popup.wui
 			// dialog binds its text field to that cvar. It was set earlier by
@@ -4435,7 +4623,8 @@ void CL_StartHunkUsers( void ) {
 			// overwritten it, so set it explicitly to the message we are about
 			// to show. Without this the dialog appears with empty text.
 			Com_SetLastError( "%s", pendingMsg );
-			CL_WiredUI_ShowError( "Connection Failed", pendingMsg, qtrue );
+			CL_WiredUI_ShowError( pendingTitle[0] ? pendingTitle : "Error",
+				pendingMsg, pendingRetryable );
 		}
 	}
 }
@@ -4448,6 +4637,27 @@ CL_RefMalloc
 */
 static void *CL_RefMalloc( size_t size ) {
 	return Z_TagMalloc( size, TAG_RENDERER );
+}
+
+static void *CL_RefWorldLevelAlloc( int worldIndex, size_t size,
+	size_t alignment ) {
+	if ( worldIndex < 0 || worldIndex >= MAX_LOCAL_CGAME_VMS ) {
+		Com_Terminate( TERM_UNRECOVERABLE,
+			"CL_RefWorldLevelAlloc: invalid world owner %d", worldIndex );
+	}
+	if ( !AppMemory_IsInitialized( &clientApps[worldIndex].memory ) ) {
+		Com_Terminate( TERM_UNRECOVERABLE,
+			"CL_RefWorldLevelAlloc: world owner %d is not initialized", worldIndex );
+	}
+	return Level_Alloc( &clientApps[worldIndex].memory, size, alignment );
+}
+
+static size_t CL_RefWorldLevelUsed( int worldIndex ) {
+	if ( worldIndex < 0 || worldIndex >= MAX_LOCAL_CGAME_VMS ||
+		!AppMemory_IsInitialized( &clientApps[worldIndex].memory ) ) {
+		return 0;
+	}
+	return Arena_Used( clientApps[worldIndex].memory.levelArena );
 }
 
 
@@ -4541,6 +4751,23 @@ const char *CL_RendererLoadPath( void ) {
 #else
 	return "(static renderer)";
 #endif
+}
+
+static qboolean CL_RefResolveResource( const char *name, char *canonicalPath,
+		size_t canonicalPathSize, uint64_t *sourceId, uint64_t *byteSize,
+		unsigned *fsGeneration ) {
+	fsResolvedResource_t resolved;
+
+	if ( !canonicalPath || canonicalPathSize == 0
+			|| !FS_ResolveResource( name, &resolved )
+			|| strlen( resolved.canonicalPath ) >= canonicalPathSize ) {
+		return qfalse;
+	}
+	Q_strncpyz( canonicalPath, resolved.canonicalPath, canonicalPathSize );
+	if ( sourceId ) *sourceId = resolved.sourceId;
+	if ( byteSize ) *byteSize = resolved.size;
+	if ( fsGeneration ) *fsGeneration = resolved.fsGeneration;
+	return qtrue;
 }
 
 static void CL_InitRef( void ) {
@@ -4678,6 +4905,8 @@ static void CL_InitRef( void ) {
 	rimp.Arena_Create  = Arena_Create;
 	rimp.Arena_Destroy = Arena_Destroy;
 	rimp.Arena_Alloc   = Arena_Alloc;
+	rimp.WorldLevelAlloc = CL_RefWorldLevelAlloc;
+	rimp.WorldLevelUsed = CL_RefWorldLevelUsed;
 #ifdef HUNK_DEBUG
 	rimp.Hunk_AllocDebug = Hunk_AllocDebug;
 #else
@@ -4701,6 +4930,7 @@ static void CL_InitRef( void ) {
 	rimp.FS_ListFiles = FS_ListFiles;
 	//rimp.FS_FileIsInPAK = FS_FileIsInPAK;
 	rimp.FS_FileExists = FS_FileExists;
+	rimp.FS_ResolveResource = CL_RefResolveResource;
 
 	rimp.Map_Load = Map_Load;
 	rimp.Map_Free = Map_Free;
@@ -5130,8 +5360,7 @@ static const cvarDesc_t clInitDescs[] = {
 	/* 21 */ CVAR_BOOL(   "cl_lanForcePackets",       "1",   CVAR_ARCHIVE | CVAR_NODEFAULT,               "Bypass \\cl_maxpackets for LAN games, send packets every frame." ),
 	/* 22 */ CVAR_BOOL(   "cl_guidServerUniq",        "1",   CVAR_ARCHIVE | CVAR_NODEFAULT,               "Makes cl_guid unique for each server." ),
 	/* 23 */ CVAR_STRING( "cl_dlURL",                 "http://ws.q3df.org/maps/download/%1", CVAR_ARCHIVE | CVAR_NODEFAULT, "Cvar must point to download location." ),
-	/* 25 */ CVAR_STRING( "cl_reconnectArgs",         "",    CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_NOTABCOMPLETE, NULL ),
-	/* 26 */ CVAR_STRING( "cl_wiredRconPassword",     "",    CVAR_TEMP,                     "Wired RCON password used for challenge-response authentication." ),
+	/* 25 */ CVAR_STRING( "cl_wiredRconPassword",     "",    CVAR_TEMP,                     "Wired RCON password used for challenge-response authentication." ),
 };
 
 enum {
@@ -5143,7 +5372,7 @@ enum {
 	CLI_CONXOFFSET, CLI_CONYOFFSET, CLI_CONCOLOR,
 	CLI_MATCHALERTS, CLI_SERVERSTATUSRESENDTIME,
 	CLI_MOTDSTRING, CLI_LANFORCEPACKETS, CLI_GUIDSERVERUNIQ,
-	CLI_DLURL, CLI_RECONNECTARGS, CLI_WIREDRCONPASSWORD,
+	CLI_DLURL, CLI_WIREDRCONPASSWORD,
 	CLI_CVAR_COUNT
 };
 
@@ -5329,14 +5558,14 @@ CL_Init
 void CL_Init( void ) {
 	Com_Log( SEV_INFO, LOG_CH(ch_client), "----- Client Initialization -----\n" );
 	CL_ClearServerQueryTransactions();
+	AppMemory_Init( &clientApps[0].memory, "client0", 16u * 1024u * 1024u,
+		128u * 1024u * 1024u );
 
 	Con_Init();
 	Con_InitProjection();   /* UI presentation half (colors, fields, commands, close hook) */
 
 	CL_ClearState( clientActiveApp );
 	CL_SetState( clientActiveApp, CA_DISCONNECTED );	// no longer CA_UNINITIALIZED
-
-	CL_ResetOldGame();
 
 	cls.realtime = 0;
 
@@ -5413,7 +5642,6 @@ void CL_Init( void ) {
 	cl_lanForcePackets        = clInitHandles[CLI_LANFORCEPACKETS];
 	cl_guidServerUniq         = clInitHandles[CLI_GUIDSERVERUNIQ];
 	cl_dlURL                  = clInitHandles[CLI_DLURL];
-	cl_reconnectArgs          = clInitHandles[CLI_RECONNECTARGS];
 	cl_wiredRconPassword      = clInitHandles[CLI_WIREDRCONPASSWORD];
 
 	// Cold-menu master queries run before cgame has published its per-game
@@ -5554,7 +5782,6 @@ void CL_Shutdown( const char *finalmsg, qboolean quit ) {
 	}
 	recursive = qtrue;
 
-	noGameRestart = quit;
 	CL_Disconnect( clientActiveApp, qfalse );
 
 	// clear and mute all sounds until next registration
@@ -5631,7 +5858,6 @@ void CL_Shutdown( const char *finalmsg, qboolean quit ) {
 	// Zero exactly those fields here to preserve the former wholesale-wipe
 	// semantics (clientActiveApp->cl/clientActiveApp->clc are intentionally left untouched, as before).
 	CL_SetState( clientActiveApp, CA_UNINITIALIZED );
-	clientActiveApp->gameSwitch = qfalse;
 	clientActiveApp->servername[0] = '\0';
 	clientActiveApp->cgameStarted = qfalse;
 	clientActiveApp->startCgame = qfalse;
@@ -5641,6 +5867,11 @@ void CL_Shutdown( const char *finalmsg, qboolean quit ) {
 	memset( &clientActiveApp->dlcomplete, 0, sizeof( clientActiveApp->dlcomplete ) );
 	Key_SetCatcher( 0 );
 	CL_Characters_Shutdown();
+	for ( int appIndex = 0; appIndex < MAX_LOCAL_CGAME_VMS; appIndex++ ) {
+		if ( AppMemory_IsInitialized( &clientApps[appIndex].memory ) ) {
+			AppMemory_Destroy( &clientApps[appIndex].memory );
+		}
+	}
 	Com_Log( SEV_INFO, LOG_CH(ch_client), "-----------------------\n" );
 }
 
