@@ -757,6 +757,12 @@ static wiredFxDispatchResult_t CL_WiredFx_Dispatch( const wiredFxProfile_t *prof
 		entity.rotation = action->payload.sprite.randomRotation
 			? (float)( CL_WiredFx_RandomStep( &seed ) % 360u ) : 0.0f;
 		entity.shaderTime.f = startTime;
+		/* First-person weapon geometry owns the bounded weapon depth range.
+		 * View-attached muzzle sprites must opt into the same range or nearby
+		 * world decals can occlude smoke that physically starts at tag_flash. */
+		if ( ( action->flags & WIRED_FX_ACTION_VIEW_DEPTH_HACK ) &&
+				( event->conditionMask & WIRED_FX_CONDITION_LOCAL_VIEW ) )
+			entity.renderfx = RF_DEPTHHACK | RF_FIRST_PERSON;
 		VectorCopy( origin, entity.origin );
 		VectorMA( entity.origin, age, action->payload.sprite.velocity, entity.origin );
 		for ( int channel = 0; channel < 4; ++channel )

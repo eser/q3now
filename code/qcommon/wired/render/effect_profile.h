@@ -107,6 +107,7 @@ typedef enum {
 #define WIRED_FX_ACTION_OPTIONAL_RESOURCE       0x00000010u
 #define WIRED_FX_ACTION_TRACK_VELOCITY          0x00000020u
 #define WIRED_FX_ACTION_USE_GPU_LIFECYCLE       0x00000040u
+#define WIRED_FX_ACTION_VIEW_DEPTH_HACK          0x00000080u
 
 typedef struct {
 	uint32_t handle;

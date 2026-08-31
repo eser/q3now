@@ -25,10 +25,10 @@ file(READ "${P}" PUBLIC_ABI)
 file(READ "${I}" IMAGE_SOURCE)
 file(READ "${M}" MODEL_HEADER)
 file(READ "${MS}" MODEL_SOURCE)
-string(REGEX MATCH "#[ \t]*define[ \t]+REF_API_VERSION[ \t]+29([^0-9]|$)"
-	ref_api_29 "${PUBLIC_ABI}")
-if(NOT ref_api_29)
-	message(FATAL_ERROR "Metal renderer module no longer targets REF_API_VERSION 29")
+string(REGEX MATCH "#[ \t]*define[ \t]+REF_API_VERSION[ \t]+31([^0-9]|$)"
+	ref_api_31 "${PUBLIC_ABI}")
+if(NOT ref_api_31)
+	message(FATAL_ERROR "Metal renderer module no longer targets REF_API_VERSION 31")
 endif()
 
 foreach(forbidden IN ITEMS "CAMetalLayer" "MTLDevice" "SDL_Window" "SDL_MetalView"
@@ -50,7 +50,7 @@ foreach(needle IN ITEMS
 	"RenderSubmission_LoadWorld" "RenderSubmission_AddEntity"
 	"RenderSubmission_AddPoly" "RenderSubmission_RenderScene"
 	"RenderSubmission_AddUiQuad" "RenderSubmission_EndFrame"
-	"Cvar_Get( \"r_brightness\", \"1\""
+	"Cvar_Get( \"r_brightness\", \"1.4\""
 	"Cvar_CheckRange( s_module.brightness, \"0\", \"32\", CV_FLOAT )"
 	"Ral_DisplayVisibilityPlanBuild" "RalMetal_PresentSetDisplayVisibility"
 "RenderImage_DecodeRgba8" "RenderSubmission_RegisterMaterialImage"

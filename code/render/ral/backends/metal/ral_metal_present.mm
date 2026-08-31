@@ -281,6 +281,7 @@ typedef struct {
 	renderCullMode_t cullMode;
 	float alphaCutoff;
 	qboolean depthWrite;
+	qboolean surfaceDecal;
 	qboolean hasLocalIrradiance;
 	float localSh[4][3];
 } ralMetalEntityBatch_t;
@@ -1110,9 +1111,20 @@ static qboolean UpdatePersistentEffectBeams( ralMetalPresent_t *present,
 	uint32_t activeCount = 0u, droppedCount = 0u;
 	if ( !present || !frontend || !outActiveCount || !outDroppedCount
 			|| !RenderSubmission_EffectPrimitiveSnapshots( frontend, &snapshot,
-				&sprites, &emitters, &decals, &ribbons, &points, &beams )
-			|| !RenderSubmission_ViewSnapshot( frontend, &view ) ) return qfalse;
+				&sprites, &emitters, &decals, &ribbons, &points, &beams ) ) return qfalse;
 	(void)sprites; (void)emitters; (void)decals; (void)ribbons; (void)points;
+	/* A renderer switch and the menu/loading path can submit UI before a world
+	 * view exists. Match the persistent-decal contract: an empty viewless frame
+	 * is presentable and preserves the bounded backend pool; only reject a frame
+	 * that attempts to author new world-space beams without a view/timeline. */
+	if ( !RenderSubmission_ViewSnapshot( frontend, &view ) ) {
+		if ( snapshot.beamCount ) return qfalse;
+		for ( uint32_t slot = 0u; slot < RAL_METAL_EFFECT_BEAM_SLOT_COUNT; ++slot )
+			if ( present->effectBeamSlots[slot].active ) activeCount++;
+		*outActiveCount = activeCount;
+		*outDroppedCount = 0u;
+		return qtrue;
+	}
 	now = (float)view.timeMs * 0.001f;
 	if ( !isfinite( now ) || now < 0.0f ) return qfalse;
 	if ( present->effectBeamTimeline > now )
@@ -1556,6 +1568,7 @@ static qboolean BuildEntityVertices( const ralMetalPresent_t *present,
 			batch->useVertexColor = qtrue; batch->visible = qtrue;
 			EntityBatchMaterial( frontend, decal->shader, batch );
 			batch->cullMode = RENDER_CULL_NONE; batch->depthWrite = qfalse;
+			batch->surfaceDecal = qtrue;
 			vertexBase += 4u; indexBase += 6u;
 		}
 		for ( uint32_t i = 0u; i < effectSnapshot.ribbonCount; ++i ) {
@@ -1744,8 +1757,16 @@ static qboolean DrawEntityBatches( id<MTLRenderCommandEncoder> encoder,
 	[encoder setViewport:viewport];
 	[encoder setScissorRect:scissor];
 	[encoder setVertexBuffer:entityVertices offset:0u atIndex:0u];
-	for ( uint32_t batchIndex = 0u; batchIndex < entityBatchCount; ++batchIndex ) {
+	/* Match Vulkan's composition contract: depth-writing entity geometry first,
+	 * surface decals second, and translucent effects last. A smoke sprite does
+	 * not write depth, so submission order alone would otherwise let a later
+	 * bullet mark incorrectly composite over smoke that is physically nearer. */
+	for ( uint32_t drawIndex = 0u; drawIndex < entityBatchCount * 3u; ++drawIndex ) {
+		const uint32_t phase = drawIndex / entityBatchCount;
+		const uint32_t batchIndex = drawIndex % entityBatchCount;
 		const ralMetalEntityBatch_t *batch = &entityBatches[batchIndex];
+		const uint32_t batchPhase = batch->surfaceDecal ? 1u
+			: ( batch->depthWrite ? 0u : 2u );
 		id<MTLTexture> texture;
 		id<MTLSamplerState> sampler;
 		id<MTLTexture> stageTextures[RENDER_MATERIAL_MAX_STAGES];
@@ -1753,7 +1774,7 @@ static qboolean DrawEntityBatches( id<MTLRenderCommandEncoder> encoder,
 		qboolean textured, msdf;
 		ralMetalWorldMaterialParams_t params;
 		renderMaterialSnapshot_t materialSnapshot;
-		if ( !batch->visible ) continue;
+		if ( !batch->visible || batchPhase != phase ) continue;
 		if ( sceneView->rdflags & RDF_NOWORLDMODEL )
 			[encoder setCullMode:MTLCullModeNone];
 		else if ( batch->cullMode == RENDER_CULL_NONE )
@@ -3467,19 +3488,22 @@ qboolean RalMetal_PresentClearAndSubmit( ralMetalPresent_t *present,
 					&& !EnsureWeatherPipeline( present, worldColorFormat ) ) {
 				free( entityBatches ); free( entityIndexBytes ); free( entityVertexBytes );
 				[worldVertices release]; [worldIndices release];
-				free( worldVertexBytes ); free( uiVertexBytes ); return qfalse;
+				free( worldVertexBytes ); free( uiVertexBytes );
+				return PresentFailure( "weather-pipeline" );
 			}
 			if ( ( worldIndexCount || entityIndexCount )
 					&& !EnsureWorldPipeline( present, worldColorFormat ) ) {
 				free( entityBatches ); free( entityIndexBytes ); free( entityVertexBytes );
 				[worldVertices release]; [worldIndices release];
-				free( worldVertexBytes ); free( uiVertexBytes ); return qfalse;
+				free( worldVertexBytes ); free( uiVertexBytes );
+				return PresentFailure( "world-pipeline" );
 			}
 			if ( offscreenScene && ( !EnsureSceneColor( present, receipt.width,
 					receipt.height ) || !EnsureToneMapPipeline( present ) ) ) {
 				free( entityBatches ); free( entityIndexBytes ); free( entityVertexBytes );
 				[worldVertices release]; [worldIndices release];
-				free( worldVertexBytes ); free( uiVertexBytes ); return qfalse;
+				free( worldVertexBytes ); free( uiVertexBytes );
+				return PresentFailure( "scene-output" );
 			}
 			if ( entityIndexCount ) {
 				entityVertices = [RalMetal_CoreNativeDevice( present->core )
@@ -3524,7 +3548,7 @@ qboolean RalMetal_PresentClearAndSubmit( ralMetalPresent_t *present,
 			if ( !EnsureUiPipeline( present ) ) {
 				[worldVertices release]; [worldIndices release]; [worldDepth release];
 				[entityVertices release]; [entityIndices release]; free( entityBatches );
-				free( uiVertexBytes ); return qfalse;
+				free( uiVertexBytes ); return PresentFailure( "ui-pipeline" );
 			}
 			uiVertices = [RalMetal_CoreNativeDevice( present->core )
 				newBufferWithBytes:uiVertexBytes
@@ -3784,7 +3808,8 @@ qboolean RalMetal_PresentClearAndSubmit( ralMetalPresent_t *present,
 							&lightmapMsdf ) || baseMsdf || lightmapMsdf ) {
 					[encoder endEncoding];
 					[worldVertices release]; [worldIndices release]; [worldDepth release];
-					[uiVertices release]; [readback release]; return qfalse;
+					[uiVertices release]; [readback release];
+					return PresentFailure( "world-material-binding" );
 				}
 				if ( baseTextured ) receipt.texturedWorldBatchCount++;
 				if ( lightmapped ) receipt.lightmappedWorldBatchCount++;
@@ -3804,13 +3829,18 @@ qboolean RalMetal_PresentClearAndSubmit( ralMetalPresent_t *present,
 					: ( batch->lightmapIndex < 0 ? 2u : 0u );
 				params.alphaMode = (uint32_t)batch->alphaMode;
 				params.alphaCutoff = batch->alphaCutoff;
-				if ( !RenderSubmission_MaterialSnapshot( frontend,
-						batch->baseMaterial, &materialSnapshot ) ) {
-					[encoder endEncoding];
-					[worldVertices release]; [worldIndices release];
-					[worldDepth release]; [uiVertices release];
-					[readback release]; return qfalse;
-				}
+				/* Registration boundaries may legitimately leave a world batch with
+				 * no portable material snapshot for one frame (or permanently for
+				 * legacy content). Vulkan renders that surface through its default
+				 * material; Metal must degrade at the same per-surface boundary rather
+				 * than poisoning the entire present lifecycle. */
+				memset( &materialSnapshot, 0, sizeof( materialSnapshot ) );
+				materialSnapshot.skyScaleScroll[0] = 1.0f;
+				materialSnapshot.skyScaleScroll[1] = 1.0f;
+				materialSnapshot.skySecondaryScaleScroll[0] = 1.0f;
+				materialSnapshot.skySecondaryScaleScroll[1] = 1.0f;
+				(void)RenderSubmission_MaterialSnapshot( frontend,
+					batch->baseMaterial, &materialSnapshot );
 				if ( materialSnapshot.skyBox ) params.hasLightmap |= 16u;
 				if ( materialSnapshot.lighting.schemaVersion
 						== RENDER_MATERIAL_LIGHTING_SCHEMA_VERSION )
@@ -3866,7 +3896,8 @@ qboolean RalMetal_PresentClearAndSubmit( ralMetalPresent_t *present,
 							[encoder endEncoding];
 							[worldVertices release]; [worldIndices release];
 							[worldDepth release]; [uiVertices release];
-							[readback release]; return qfalse;
+							[readback release];
+							return PresentFailure( "world-stage-material" );
 						}
 					}
 				}
@@ -3881,7 +3912,8 @@ qboolean RalMetal_PresentClearAndSubmit( ralMetalPresent_t *present,
 						[encoder endEncoding];
 						[worldVertices release]; [worldIndices release];
 						[worldDepth release]; [uiVertices release];
-						[readback release]; return qfalse;
+						[readback release];
+						return PresentFailure( "world-sky-secondary" );
 					}
 					if ( skySecondaryTextured ) params.hasLightmap |= 8u;
 				}
@@ -3899,7 +3931,8 @@ qboolean RalMetal_PresentClearAndSubmit( ralMetalPresent_t *present,
 						[encoder endEncoding];
 						[worldVertices release]; [worldIndices release];
 						[worldDepth release]; [uiVertices release];
-						[readback release]; return qfalse;
+						[readback release];
+						return PresentFailure( "world-lighting-binding" );
 					}
 					binding = &surfaceLighting;
 				}
@@ -3980,7 +4013,8 @@ qboolean RalMetal_PresentClearAndSubmit( ralMetalPresent_t *present,
 			[encoder endEncoding];
 			[worldVertices release]; [worldIndices release]; [worldDepth release];
 			[entityVertices release]; [entityIndices release]; free( entityBatches );
-			[uiVertices release]; [readback release]; return qfalse;
+			[uiVertices release]; [readback release];
+			return PresentFailure( "entity-draw" );
 		}
 		if ( !weatherPlan.zeroWork ) {
 			[encoder setCullMode:MTLCullModeNone];
@@ -4056,7 +4090,8 @@ qboolean RalMetal_PresentClearAndSubmit( ralMetalPresent_t *present,
 			if ( !outputEncoder ) {
 				[worldVertices release]; [worldIndices release]; [worldDepth release];
 				[entityVertices release]; [entityIndices release]; free( entityBatches );
-				[uiVertices release]; [readback release]; return qfalse;
+				[uiVertices release]; [readback release];
+				return PresentFailure( "output-encoder" );
 			}
 			[outputEncoder setRenderPipelineState:present->toneMapPipeline];
 			[outputEncoder setFragmentTexture:present->sceneColorCache atIndex:0u];
@@ -4113,7 +4148,8 @@ qboolean RalMetal_PresentClearAndSubmit( ralMetalPresent_t *present,
 				&executable ) != ralSuccess ) {
 			[worldVertices release]; [worldIndices release]; [worldDepth release];
 			[entityVertices release]; [entityIndices release]; free( entityBatches );
-			[uiVertices release]; [captureReadback release]; [readback release]; return qfalse;
+			[uiVertices release]; [captureReadback release]; [readback release];
+			return PresentFailure( "command-publish" );
 		}
 		[command presentDrawable:present->drawable];
 		if ( readback ) {
@@ -4124,16 +4160,21 @@ qboolean RalMetal_PresentClearAndSubmit( ralMetalPresent_t *present,
 		[command commit];
 		if ( captureReadback || !present->lastReadbackReady )
 			[command waitUntilCompleted];
-		if ( !ReapReadbackRing( present, qfalse ) || !present->lastReadbackReady
-				|| !RalMetal_CorePublishSubmission( present->core, &lifecycle, &executable,
-					&receipt.submission ) ) {
+		qboolean readbackReaped = ReapReadbackRing( present, qfalse );
+		qboolean submissionPublished = readbackReaped && present->lastReadbackReady
+			? RalMetal_CorePublishSubmission( present->core, &lifecycle, &executable,
+				&receipt.submission ) : qfalse;
+		if ( !readbackReaped || !present->lastReadbackReady || !submissionPublished ) {
+			const char *failureStage = !readbackReaped ? "submission-readback-reap"
+				: ( !present->lastReadbackReady ? "submission-readback-ready"
+					: "submission-publish" );
 			[captureReadback release]; [readback release];
 			[worldVertices release]; [worldIndices release]; [worldDepth release];
 			[entityVertices release]; [entityIndices release]; free( entityBatches );
 			[uiVertices release];
 			[present->drawable release]; present->drawable = nil;
 			memset( &present->drawableReceipt, 0, sizeof( present->drawableReceipt ) );
-			return qfalse;
+			return PresentFailure( failureStage );
 		}
 		if ( captureReadback ) {
 			const byte *source = (const byte *)[captureReadback contents];
@@ -4182,7 +4223,7 @@ qboolean RalMetal_PresentClearAndSubmit( ralMetalPresent_t *present,
 	present->lastPresentGeneration = presentGeneration;
 	[present->drawable release]; present->drawable = nil;
 	memset( &present->drawableReceipt, 0, sizeof( present->drawableReceipt ) );
-	if ( !PresentReceiptValid( &receipt ) ) return qfalse;
+	if ( !PresentReceiptValid( &receipt ) ) return PresentFailure( "receipt" );
 	*outReceipt = receipt;
 	return qtrue;
 }

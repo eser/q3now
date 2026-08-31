@@ -36,6 +36,12 @@ layout(location = 7) flat in float fragDecalRadius;
 // at a caller-computed height with no solid beneath (the water-line wake).
 layout(location = 8) flat in uint fragNoProject;
 
+// This pipeline's host-resolved decal blend mode. The vertex stage uses the
+// same specialization constant to cull decals that belong to the other two
+// pipelines; the fragment stage uses it to translate legacy colour-modulate
+// marks into bounded, alpha-aware darkening.
+layout(constant_id = 0) const uint DECAL_BLEND_MODE = 0u;
+
 // Same UBO the vertex shader binds; the fragment shader now consumes invMvp +
 // reconParams to reconstruct the surface world position from scene depth.
 layout(set = 0, binding = 0) uniform DecalFrame {
@@ -65,6 +71,14 @@ layout(location = 0) out vec4 outColor;
 // painted — the box's half-thickness. A half-radius slab lets a mark wrap onto
 // a step beneath it without bleeding onto a wall well above the surface.
 const float DECAL_BOX_HALF_THICKNESS_FRAC = 0.5;
+
+// Legacy bullet marks use ZERO / ONE_MINUS_SRC_COLOR and store coverage in
+// RGB. That blend ignores alpha and lets a white texel turn the destination
+// mathematically black in one pass. A later translucent smoke particle cannot
+// visually veil that zero-valued background, which makes the mark look as if
+// it was drawn on top of the smoke. Preserve the authored RGB mask, but bound
+// its darkening strength so impact smoke can composite over it normally.
+const float DECAL_COLOUR_MAX_OPACITY = 0.42;
 
 // Precise piecewise sRGB → linear conversion. Duplicated per shader (the
 // compile.mjs preprocessor lacks #include); matches the other shader copies
@@ -98,24 +112,27 @@ vec4 surfaceClimateAt( vec2 worldXY ) {
 }
 
 void main() {
-	// Default to the legacy flat-quad UV; the box-projection path overrides it
-	// with the UV of the actual surface point beneath this fragment.
+	// Free quads use their authored flat UV. Projected decals replace it with the
+	// UV of the actual surface point beneath this fragment.
 	vec2 decalUV = fragUV;
 	vec4 localSurfaceClimate = vec4( 0.0 );
 
 	// Box-projection: reconstruct the surface world position from scene depth and
 	// keep only fragments whose underlying surface falls inside the decal's
-	// oriented box. Skipped (flat-quad fallback) when the depth copy is not fresh
-	// this frame (reconParams.z == 0), so a mark still appears rather than reading
-	// undefined depth. The engine uses reversed depth unconditionally: near≈1.0,
-	// far/cleared≈0.0.
+	// oriented box. A projected mark never falls back to flat-quad UVs: changing
+	// coordinate paths across frames makes persistent marks jump. If the host
+	// cannot provide fresh depth, fail closed for that projected fragment. The
+	// engine uses reversed depth unconditionally: near≈1.0, far/cleared≈0.0.
 	//
 	// A NO_PROJECT (free-quad) decal ALSO skips this block: it is drawn verbatim at
 	// its explicit world Z (the caller-computed water-line for the wake), sampling
 	// the flat-quad UV directly — no sceneDepth read, no discard-on-no-solid, no
 	// box test. Per-decal (fragNoProject from the SSBO), so projected impact marks
 	// and free wake quads coexist in the same draw / pipeline.
-	if ( reconParams.z > 0.5 && fragNoProject == 0u ) {
+	if ( fragNoProject == 0u ) {
+		if ( reconParams.z <= 0.5 ) {
+			discard;
+		}
 		vec2 screenUV = gl_FragCoord.xy * reconParams.xy;
 		float sceneDepth = texture( sceneDepthTex, screenUV ).r;
 
@@ -167,7 +184,19 @@ void main() {
 		localFrost * 0.45 );
 	// Fresh accumulation partially veils older marks. Footprint/impact events
 	// reduce the tile's snow first, so their own projected mark remains legible.
-	alpha *= mix( 1.0, 0.65, localSnow );
+	float accumulationVisibility = mix( 1.0, 0.65, localSnow );
+	alpha *= accumulationVisibility;
 
-	outColor = vec4( rgb, alpha );
+	if ( DECAL_BLEND_MODE == 2u ) {
+		// Colour-modulate decals encode their shape in RGB rather than alpha.
+		// Convert that mask into bounded black alpha-compositing. The vertex
+		// lifetime fade already scales fragColor.rgb, so coverage still dissolves
+		// through the final lifetime window without a second fade channel.
+		float coverage = max( rgb.r, max( rgb.g, rgb.b ) );
+		coverage = clamp( coverage * fragColor.a * accumulationVisibility,
+			0.0, DECAL_COLOUR_MAX_OPACITY );
+		outColor = vec4( 0.0, 0.0, 0.0, coverage );
+	} else {
+		outColor = vec4( rgb, alpha );
+	}
 }

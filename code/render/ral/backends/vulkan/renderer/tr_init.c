@@ -1150,7 +1150,8 @@ void RB_TakeScreenshotPNG( int x, int y, int width, int height, const char *file
 	// gamma correction (matches existing TGA/BMP path)
 	R_GammaCorrect( buffer, (size_t)width * 3 * height );
 
-	if ( !R_EncodePNG( buffer, width, height, &pngBytes, &pngLen ) ) {
+	if ( !R_EncodeScreenshotPNG( buffer, width, height, "vulkan",
+			&pngBytes, &pngLen ) ) {
 		R_LOG( rch_cmd, SEV_WARN, "RB_TakeScreenshotPNG: encode failed\n" );
 		ri.Hunk_FreeTempMemory( allbuf );
 		return;
@@ -1675,17 +1676,13 @@ static void R_Register( void )
 	// post-process pipeline spec constants on modificationCount change;
 	// no vid_restart required.
 	//
-	// default is 1.0 — the true
-	// identity for the now self-consistently linear pipeline. (During an
-	// earlier transition window the plan was an interim 0.85 to take
-	// the edge off the still-gamma-byte stock-map texel path; that window
-	// closed when the worldLinearize* / srgb gate was retired,
-	// so 1.0 is the committed value.) Eser tunes from console
-	// if the scene reads hot on visual verification.
-	r_brightness = ri.Cvar_Get( "r_brightness", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	// The authored mathematical identity remains 1.0; RAL renderers default to
+	// 1.4 as the preferred user-visible shadow/readability calibration. The value
+	// remains a continuous scalar and can always be tuned from the console.
+	r_brightness = ri.Cvar_Get( "r_brightness", "1.4", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_brightness, "0", "32", CV_FLOAT );
 	ri.Cvar_SetDescription( r_brightness, "Continuous user shadow-visibility scalar.\n"
-										  "Range 0-32, default 1.0 (authored identity).\n"
+										  "Range 0-32, default 1.4; 1.0 is authored identity.\n"
 										  "Fractional values such as 1.4 or 5.2 are preserved;\n"
 										  "there are no modes, steps or preset snapping.\n"
 										  "The bounded display curve\n"
@@ -1797,8 +1794,9 @@ static void R_Register( void )
 												  "Vid_restart required. Independent of\n"
 												  "r_mapSaturation and r_saturation." );
 
-	// World-lightmap overbright. The base-pass world shader multiplies
-	// diffuse × lightmap × r_lightmapBoost in LINEAR space. Vanilla Quake 3
+	// World-lightmap overbright. The base-pass world shader boosts the lightmap
+	// operand in LINEAR space, then applies vanilla's hue-preserving peak
+	// normalization before combining it with diffuse. Vanilla Quake 3
 	// applied its overbright (×2, or ×4 with r_overBrightBits) in GAMMA space,
 	// which — because the value is sRGB-encoded for display afterwards — yields a
 	// LARGER effective brightening than the same factor applied in linear space:
@@ -1811,8 +1809,8 @@ static void R_Register( void )
 	//   ~21  = vanilla ×4 (r_overBrightBits 2; usually too hot)
 	r_lightmapBoost = ri.Cvar_Get( "r_lightmapBoost", "4.6", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_lightmapBoost, "1", "24", CV_FLOAT );
-	ri.Cvar_SetDescription( r_lightmapBoost, "World-lightmap overbright (linear-domain boost equivalent of vanilla\n"
-											 "overbright-bits). diffuse × lightmap × this, in linear space.\n"
+	ri.Cvar_SetDescription( r_lightmapBoost, "World-lightmap overbright (linear-domain equivalent of vanilla\n"
+											 "overbright-bits). Boosts the LDR lightmap with hue-preserving saturation.\n"
 											 "  4.6  = vanilla ×2 (default; 2^2.2 — matches vanilla brightness)\n"
 											 "  ~21  = vanilla ×4 (usually too hot)\n"
 											 "  2.0  = the old under-brightened value (~1.46× darker than vanilla)\n"

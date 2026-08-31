@@ -757,6 +757,18 @@ qboolean vk_decal_shadow_write( uint32_t slot, const decalGPU_t *decal ) {
 		0u, slot, decal, sizeof( *decal ) );
 }
 
+qboolean vk_decal_shadow_read( uint32_t slot, decalGPU_t *decal ) {
+	const void *candidate = NULL;
+
+	if ( decal == NULL
+			|| !VK_RalShadowStorageReadElement( &vk_decal_pool_storage,
+				0u, slot, &candidate ) ) {
+		return qfalse;
+	}
+	memcpy( decal, candidate, sizeof( *decal ) );
+	return qtrue;
+}
+
 static struct {
 	vkHdrPostprocessSource_t current;
 	vkHdrPostprocessSource_t route;
@@ -8616,6 +8628,7 @@ void vk_init_decal( void )
 		stages[1].stage  = VK_SHADER_STAGE_FRAGMENT_BIT;
 		stages[1].module = vk.modules.decal_fs;
 		stages[1].pName  = "main";
+		stages[1].pSpecializationInfo = &specInfo;
 
 		memset( &vertexInput, 0, sizeof( vertexInput ) );
 		vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -8687,9 +8700,12 @@ void vk_init_decal( void )
 				blendAttach.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
 				blendAttach.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
 				break;
-			case 2: // colour-blend (bullet): ZERO / ONE_MINUS_SRC_COLOR (shape in RGB)
-				blendAttach.srcColorBlendFactor = VK_BLEND_FACTOR_ZERO;
-				blendAttach.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR;
+			case 2: // colour-mask (bullet): bounded alpha-aware darkening
+				// The legacy material stores coverage in RGB and requests ZERO /
+				// ONE_MINUS_SRC_COLOR. decal.frag converts that mask to black with a
+				// bounded alpha so later translucent impact smoke can actually veil it.
+				blendAttach.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+				blendAttach.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
 				break;
 			default: // alpha (blood): SRC_ALPHA / ONE_MINUS_SRC_ALPHA
 				blendAttach.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
@@ -9806,6 +9822,18 @@ void RB_DrawDecals( void )
 	  || !r_gpuDecals->integer )
 		return;
 
+	// Projected decals must use one coordinate path from their first visible
+	// frame onward. The sorted draw-surface seam normally publishes scene depth
+	// at SS_DECAL/SS_FOG, but a view whose list never crosses that seam reaches
+	// this standalone GPU-pool pass with copied == qfalse. Rendering that frame
+	// with flat quad UVs and switching to depth reconstruction on a later frame
+	// makes every persistent mark visibly jump. Make fresh scene depth an
+	// explicit precondition of this pass instead of depending on draw-list shape.
+	if ( vk.cmd->open_dynamic_pass != VK_DYN_PASS_NONE
+			&& vk.sceneDepth.active && !vk.sceneDepth.copied ) {
+		vk_scene_depth_copy();
+	}
+
 	frameIdx = vk.cmd_index;
 	if ( vk.decal.surfaceClimatePublished[frameIdx]
 			!= vk.decal.surfaceClimateGeneration ) {
@@ -9855,10 +9883,10 @@ void RB_DrawDecals( void )
 	// y-flipped mvp written above, so the fragment shader maps a sampled
 	// scene-depth NDC back to world space and projects it into the decal's
 	// oriented box. depthValid gates that path: only when the shared scene-depth
-	// copy is active AND was produced this frame (the decals registry row forces
-	// the early produce before SS_DECAL, so this is normally true) does the
-	// fragment box-project; otherwise it falls back to the flat-quad path so a
-	// mark still appears rather than reading undefined depth.
+	// copy is active AND was produced this frame. RB_DrawDecals forces the copy
+	// above when the sorted surface list did not cross its normal publish seam.
+	// The shader fails closed for projected marks if this invariant cannot be
+	// met; free quads remain independent of scene depth.
 	{
 		float    invMvp[16];
 		qboolean depthValid = ( vk.sceneDepth.active && vk.sceneDepth.copied

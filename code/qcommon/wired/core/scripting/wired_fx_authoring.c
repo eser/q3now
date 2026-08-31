@@ -177,6 +177,7 @@ static uint32_t WiredFxAuthoring_Flag( const char *name ) {
 	if ( !strcmp( name, "optionalResource" ) ) return WIRED_FX_ACTION_OPTIONAL_RESOURCE;
 	if ( !strcmp( name, "trackVelocity" ) ) return WIRED_FX_ACTION_TRACK_VELOCITY;
 	if ( !strcmp( name, "gpuLifecycle" ) ) return WIRED_FX_ACTION_USE_GPU_LIFECYCLE;
+	if ( !strcmp( name, "viewDepthHack" ) ) return WIRED_FX_ACTION_VIEW_DEPTH_HACK;
 	return 0u;
 }
 

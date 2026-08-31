@@ -307,9 +307,12 @@ int main( void ) {
 				}
 			}
 		}
-		if ( !strcmp( partOneProfiles[profileIndex], "shotgun-smoke.lua" ) ) {
+		if ( strstr( partOneProfiles[profileIndex], "shotgun-smoke" ) != NULL ) {
 			assert( profile.actionCount == 1u );
 			assert( profile.actions[0].type == WIRED_FX_ACTION_SPRITE );
+			assert( ( profile.actions[0].flags & WIRED_FX_ACTION_VIEW_DEPTH_HACK ) != 0u );
+		}
+		if ( !strcmp( partOneProfiles[profileIndex], "shotgun-smoke.lua" ) ) {
 			assert( profile.actions[0].payload.sprite.radius[0] == 16.0f );
 			assert( profile.actions[0].payload.sprite.radius[1] == 16.0f );
 			assert( profile.actions[0].payload.sprite.velocity[2] == 8.0f );

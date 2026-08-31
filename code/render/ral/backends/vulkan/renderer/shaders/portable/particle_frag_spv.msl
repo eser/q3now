@@ -43,6 +43,7 @@ struct main0_in
     uint frameSlot0 [[user(locn3)]];
     uint frameSlot1 [[user(locn4)]];
     float frameBlend [[user(locn5)]];
+    uint particleRenderFlags [[user(locn6)]];
 };
 
 static inline __attribute__((always_inline))
@@ -119,29 +120,30 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
             texel = t0;
         }
     }
-    float _209;
-    if (in.frameSlot0 != 4294967295u)
-    {
-        _209 = 1.0;
-    }
-    else
-    {
-        _209 = softParticleFade((*spvDescriptorSet0.m_28), gl_FragCoord, spvDescriptorSet0.sceneDepthTex, spvDescriptorSet0.sceneDepthTexSmplr);
-    }
-    float fade = _209;
+    bool surfaceAnchored = (in.particleRenderFlags & 128u) != 0u;
     float _218;
-    if (in.frameSlot0 != 4294967295u)
-    {
-        _218 = 0.699999988079071044921875 / fast::max((*spvDescriptorSet0.m_28).exposureBias, 0.001000000047497451305389404296875);
-    }
-    else
+    if ((in.frameSlot0 != 4294967295u) || surfaceAnchored)
     {
         _218 = 1.0;
     }
-    float rgbScale = _218;
+    else
+    {
+        _218 = softParticleFade((*spvDescriptorSet0.m_28), gl_FragCoord, spvDescriptorSet0.sceneDepthTex, spvDescriptorSet0.sceneDepthTexSmplr);
+    }
+    float fade = _218;
+    float _227;
+    if (in.frameSlot0 != 4294967295u)
+    {
+        _227 = 0.699999988079071044921875 / fast::max((*spvDescriptorSet0.m_28).exposureBias, 0.001000000047497451305389404296875);
+    }
+    else
+    {
+        _227 = 1.0;
+    }
+    float rgbScale = _227;
     float3 param_6 = in.fragColor.xyz;
-    float3 _237 = sRGBToLinear(param_6);
-    out.outColor = float4((texel.xyz * _237) * rgbScale, (texel.w * in.fragColor.w) * fade);
+    float3 _246 = sRGBToLinear(param_6);
+    out.outColor = float4((texel.xyz * _246) * rgbScale, (texel.w * in.fragColor.w) * fade);
     return out;
 }
 

@@ -121,6 +121,29 @@ typedef int particleClassHandle_t;
 		   //   spawnTime, 0), preserving   \
 		   //   phase-coherent scroll over  \
 		   //   the beam's lifetime.
+#define PRIM_FLAG_PARTICLE_MOTION_TRAIL       \
+	0x0040 // Particle-only. Stretch the       \
+		   //   billboard from its current       \
+		   //   position toward its recent       \
+		   //   ballistic history. This is a     \
+		   //   GPU vertex presentation flag:    \
+		   //   simulation stays one particle,   \
+		   //   with no CPU trail children or    \
+		   //   per-frame effect resubmission.   \
+		   //   Used for idTech-style motion     \
+		   //   trails on falling impact sparks.
+#define PRIM_FLAG_PARTICLE_SURFACE_ANCHORED    \
+	0x0080 // Particle-only. The emitter is     \
+		   //   intentionally anchored just in   \
+		   //   front of an impact surface. Keep  \
+		   //   depth testing, but do not apply   \
+		   //   soft-particle intersection fade: \
+		   //   that fade would punch a hole in   \
+		   //   impact smoke exactly where its    \
+		   //   underlying surface decal lives.   \
+		   //   This is not a draw-on-top flag;   \
+		   //   other geometry can still occlude  \
+		   //   the particle normally.
 
 // ── ribbon ──────────────────────────────────────────────────────────
 

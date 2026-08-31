@@ -73,7 +73,7 @@ struct ParticleClassGPU
 layout(constant_id = 0) const uint PIPELINE_BLEND_MASK = 0u;
 const float _606[6] = float[](1.0, 1.0, -1.0, -1.0, 1.0, -1.0);
 const float _613[6] = float[](-1.0, 1.0, -1.0, -1.0, 1.0, 1.0);
-const vec2 _730[6] = vec2[](vec2(0.0, 1.0), vec2(0.0), vec2(1.0), vec2(1.0), vec2(0.0), vec2(1.0, 0.0));
+const vec2 _860[6] = vec2[](vec2(0.0, 1.0), vec2(0.0), vec2(1.0), vec2(1.0), vec2(0.0), vec2(1.0, 0.0));
 
 layout(binding = 0, std140) uniform ParticleFrame
 {
@@ -395,9 +395,47 @@ void main()
         float _695 = parmEval(param_5, param_6, param_7);
         size = _695;
     }
-    vec3 worldPos = (p.pos + (_195.viewLeft.xyz * (sx * size))) + (_195.viewUp.xyz * (uy * size));
+    bool _700 = (c.renderFlags & 64u) != 0u;
+    bool _710;
+    if (_700)
+    {
+        _710 = dot(p.vel, p.vel) > 9.9999997473787516355514526367188e-05;
+    }
+    else
+    {
+        _710 = _700;
+    }
+    vec3 worldPos;
+    if (_710)
+    {
+        float ageSeconds = p.age / max(p.lifetimeInv, 9.9999999747524270787835121154785e-07);
+        float trailTime = min(ageSeconds, 0.100000001490116119384765625);
+        vec3 head = p.pos;
+        vec3 tail = head - (p.vel * trailTime);
+        tail.z -= (((400.0 * c.gravityScale) * trailTime) * trailTime);
+        vec3 motion = head - tail;
+        float motionLength = length(motion);
+        vec3 midpoint = (head + tail) * 0.5;
+        vec3 viewDirection = normalize(_195.eyeWorld.xyz - midpoint);
+        vec3 widthAxis = cross(motion / vec3(max(motionLength, 9.9999999747524270787835121154785e-07)), viewDirection);
+        float widthLength = length(widthAxis);
+        if ((motionLength > 0.001000000047497451305389404296875) && (widthLength > 0.001000000047497451305389404296875))
+        {
+            widthAxis /= vec3(widthLength);
+            float alongTrail = (uy + 1.0) * 0.5;
+            worldPos = mix(tail, head, vec3(alongTrail)) + (widthAxis * (sx * size));
+        }
+        else
+        {
+            worldPos = (p.pos + (_195.viewLeft.xyz * (sx * size))) + (_195.viewUp.xyz * (uy * size));
+        }
+    }
+    else
+    {
+        worldPos = (p.pos + (_195.viewLeft.xyz * (sx * size))) + (_195.viewUp.xyz * (uy * size));
+    }
     gl_Position = _195.mvp * vec4(worldPos, 1.0);
-    fragUV = _730[vertInQuad];
+    fragUV = _860[vertInQuad];
     fragColor = color;
     particleClassHandle = p.classHandle | (c.colorDomain << 31u);
     if (c.frameCount > 1u)
@@ -408,16 +446,16 @@ void main()
         uint frame1 = min((frame0 + 1u), last);
         frameSlot0 = c.frameSlots[frame0];
         frameSlot1 = c.frameSlots[frame1];
-        float _782;
+        float _912;
         if (c.frameBlend != 0u)
         {
-            _782 = fract(fr);
+            _912 = fract(fr);
         }
         else
         {
-            _782 = 0.0;
+            _912 = 0.0;
         }
-        frameBlend = _782;
+        frameBlend = _912;
     }
     else
     {

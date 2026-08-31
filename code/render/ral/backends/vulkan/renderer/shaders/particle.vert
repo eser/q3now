@@ -185,8 +185,15 @@ layout(location = 2) flat out uint particleClassHandle;
 layout(location = 3) flat out uint  frameSlot0;
 layout(location = 4) flat out uint  frameSlot1;
 layout(location = 5)      out float frameBlend;
+// Class presentation flags needed by fragment-only policies such as the
+// surface-anchored soft-depth exemption. Kept flat because all six vertices of
+// an instance share one class.
+layout(location = 6) flat out uint particleRenderFlags;
 
 const uint FRAME_SLOT_NONE = 0xFFFFFFFFu;
+const uint PRIM_FLAG_PARTICLE_MOTION_TRAIL = 0x0040u;
+const float PARTICLE_MOTION_TRAIL_SECONDS = 0.10;
+const float WORLD_GRAVITY = 800.0;
 
 out gl_PerVertex {
 	vec4 gl_Position;
@@ -215,6 +222,7 @@ void emitDegenerate() {
 	frameSlot0          = FRAME_SLOT_NONE;
 	frameSlot1          = FRAME_SLOT_NONE;
 	frameBlend          = 0.0;
+	particleRenderFlags = 0u;
 }
 
 void main() {
@@ -286,9 +294,34 @@ void main() {
 	if (!parmIsUnset(c.sizeParm))
 		size = parmEval(c.sizeParm, p.age, p.sizeJitterPick);
 
-	vec3 worldPos = p.pos
-	              + viewLeft.xyz * (sx * size)
-	              + viewUp.xyz   * (uy * size);
+	vec3 worldPos;
+	if ((c.renderFlags & PRIM_FLAG_PARTICLE_MOTION_TRAIL) != 0u
+			&& dot(p.vel, p.vel) > 0.0001) {
+		// Quake 4's impact `trailType motion` retains roughly the latest
+		// 0.1 seconds of a ballistic spark. Reconstruct that short history
+		// from the GPU-owned current velocity instead of spawning trail
+		// children: one particle remains one simulation and one draw instance.
+		float ageSeconds = p.age / max(p.lifetimeInv, 0.000001);
+		float trailTime = min(ageSeconds, PARTICLE_MOTION_TRAIL_SECONDS);
+		vec3 head = p.pos;
+		vec3 tail = head - p.vel * trailTime;
+		tail.z -= 0.5 * WORLD_GRAVITY * c.gravityScale * trailTime * trailTime;
+		vec3 motion = head - tail;
+		float motionLength = length(motion);
+		vec3 midpoint = (head + tail) * 0.5;
+		vec3 viewDirection = normalize(eyeWorld.xyz - midpoint);
+		vec3 widthAxis = cross(motion / max(motionLength, 0.000001), viewDirection);
+		float widthLength = length(widthAxis);
+		if (motionLength > 0.001 && widthLength > 0.001) {
+			widthAxis /= widthLength;
+			float alongTrail = (uy + 1.0) * 0.5;
+			worldPos = mix(tail, head, alongTrail) + widthAxis * (sx * size);
+		} else {
+			worldPos = p.pos + viewLeft.xyz * (sx * size) + viewUp.xyz * (uy * size);
+		}
+	} else {
+		worldPos = p.pos + viewLeft.xyz * (sx * size) + viewUp.xyz * (uy * size);
+	}
 
 	gl_Position         = mvp * vec4(worldPos, 1.0);
 	fragUV              = uvCorner[vertInQuad];
@@ -296,6 +329,7 @@ void main() {
 	// Block 5d-followup: low bits carry the class handle; bit 31 carries
 	// the resolved image's colour domain (c.colorDomain ∈ {0,1}).
 	particleClassHandle = p.classHandle | (c.colorDomain << 31u);
+	particleRenderFlags = c.renderFlags;
 
 	// Sprite-frame (flipbook) select. Static classes (frameCount <= 1)
 	// forward the NONE sentinel so the fragment keeps the class-handle
