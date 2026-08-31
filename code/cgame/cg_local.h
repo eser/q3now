@@ -906,10 +906,10 @@ typedef struct {
 	// CG_LightningSparks (GPU particle emit).
 	qhandle_t lgSparksClass;
 
-	// Particle class handle for the rocket-explosion fire core (rlboom
+	// Fallback particle-class handle for the rocket-explosion fire core (rlboom
 	// 8-frame flipbook). Registered via CG_RegisterExplosionParticleClasses();
-	// emitted unconditionally at PROJ_ROCKET impact (the GPU single path, W-51 —
-	// the legacy LE_ sprite explosion is retired for rockets).
+	// the ROCKET_FX_EXPLOSION=0 profiles retain it until the layered path is
+	// visually accepted and the fallback can be retired.
 	qhandle_t explosionFireClass;
 	// Shared rocket/grenade/lavaball impact shards. The class is a compact,
 	// warm GPU burst; projectile call sites only choose a bounded count.

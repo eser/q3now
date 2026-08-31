@@ -71,6 +71,12 @@
 #define FEAT_LEGACY_UI                    0   // legacy TA menu/HUD code paths (compile-time hard cut)
 #define FEAT_MUSIC_PLAYLIST               0   // playlist.cfg background music engine
 #define FEAT_SCREENSHOT_TOOLS             1   // spectator bullet-time freeze + timescale select
+#ifndef ROCKET_FX_EXPLOSION
+#define ROCKET_FX_EXPLOSION                1   // layered Q4-inspired WiredFX rocket explosion; 0 keeps rlboom flipbook
+#endif
+#ifndef GRENADE_FX_EXPLOSION
+#define GRENADE_FX_EXPLOSION               1   // reuse the accepted layered explosion for grenades; 0 keeps the classic dish flash
+#endif
 
 // ── engine internals (testing) ────────────────────────────────────────
 // These flags support CMake override via -DFEAT_X=0; use #ifndef so the

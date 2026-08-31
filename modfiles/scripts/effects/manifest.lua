@@ -27,4 +27,10 @@ return {
     { handle = 22, path = "scripts/effects/shotgun-smoke.lua" },
     { handle = 23, path = "scripts/effects/shotgun-smoke-wide.lua" },
     { handle = 24, path = "scripts/effects/world-earthquake.lua" },
+    { handle = 25, path = "scripts/effects/rocket-layered-explosion.lua" },
+    { handle = 26, path = "scripts/effects/rocket-layered-detonation.lua" },
+    { handle = 27, path = "scripts/effects/rocket-layered-underwater.lua" },
+    -- Intentional recipe alias: grenade keeps its own stable semantic handle
+    -- and feature gate while sharing the accepted explosion composition.
+    { handle = 28, path = "scripts/effects/rocket-layered-explosion.lua" },
 }

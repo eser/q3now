@@ -50,12 +50,15 @@ static wiredFxValidationError_t WiredFx_ValidatePayload( const wiredFxAction_t *
 		if ( !WiredFx_ResourcePresent( action, action->payload.light.material ) )
 			return WIRED_FX_INVALID_ACTION_RESOURCE;
 		if ( !WiredFx_FiniteArray( action->payload.light.radius, 3u ) ||
+			 !WiredFx_FiniteArray( action->payload.light.radiusEnd, 3u ) ||
 			 !WiredFx_Finite( action->payload.light.intensity ) ||
 			 !WiredFx_Finite( action->payload.light.radiusJitter ) ||
 			 !WiredFx_Finite( action->payload.light.lifetime ) ||
 			 !WiredFx_Finite( action->payload.light.startTimeJitter ) ||
 			 action->payload.light.radius[0] < 0.0f || action->payload.light.radius[1] < 0.0f ||
 			 action->payload.light.radius[2] < 0.0f || action->payload.light.intensity < 0.0f ||
+			 action->payload.light.radiusEnd[0] < 0.0f || action->payload.light.radiusEnd[1] < 0.0f ||
+			 action->payload.light.radiusEnd[2] < 0.0f ||
 			 action->payload.light.radiusJitter < 0.0f ||
 			 action->payload.light.lifetime < 0.0f ||
 			 action->payload.light.startTimeJitter < 0.0f ||

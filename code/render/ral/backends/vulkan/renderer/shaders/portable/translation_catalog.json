@@ -6,8 +6,8 @@
     "generation": 1,
     "byteCount": 859797,
     "digest": {
-      "lane0": "13f9f9e568c7d81c",
-      "lane1": "bdd4b818cda24ede"
+      "lane0": "f29ced36d994f855",
+      "lane1": "6b210b67d318ec77"
     }
   },
   "requiredTargets": [
@@ -515,35 +515,35 @@
       "symbol": "particle_vert_spv",
       "stage": "RAL_STAGE_VERTEX",
       "spirv": {
-        "byteCount": 27304,
+        "byteCount": 29196,
         "digest": {
-          "lane0": "45822fbe5c3b04c8",
-          "lane1": "aca86864d7d821b3"
+          "lane0": "b9a2d282bb2eb324",
+          "lane1": "aad68bd97d6c287f"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 23701,
+          "byteCount": 24730,
           "digest": {
-            "lane0": "149c70e7ad31acfd",
-            "lane1": "d17ec5eb100bc74a"
+            "lane0": "9abb6acce014e959",
+            "lane1": "18fe57fca9af34f8"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 16486,
+          "byteCount": 17484,
           "digest": {
-            "lane0": "72c2dd05935b16b4",
-            "lane1": "9987aff41848f5da"
+            "lane0": "e44c3082be9e1197",
+            "lane1": "dccc6e1f4bc6f719"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 22631,
+          "byteCount": 24623,
           "digest": {
-            "lane0": "9781da80d897bbe0",
-            "lane1": "c8dee85c5ab4d89a"
+            "lane0": "71f393890810d21d",
+            "lane1": "f7b3b7741c9f8009"
           }
         }
       ]
@@ -1427,35 +1427,35 @@
       "symbol": "particle_integrate_comp_spv",
       "stage": "RAL_STAGE_COMPUTE",
       "spirv": {
-        "byteCount": 75804,
+        "byteCount": 77148,
         "digest": {
-          "lane0": "b7dc739fc0853171",
-          "lane1": "9aef830348666201"
+          "lane0": "9e44482fbf3288ba",
+          "lane1": "11a11e067b050a28"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 65448,
+          "byteCount": 66688,
           "digest": {
-            "lane0": "851f06ae4ec03e95",
-            "lane1": "44cbbbcd1a4d6d9f"
+            "lane0": "5ad6bec659d7d60b",
+            "lane1": "89dadd442d942b0c"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 53672,
+          "byteCount": 54896,
           "digest": {
-            "lane0": "1986db5b8d241c64",
-            "lane1": "05bd52f33fd0f2be"
+            "lane0": "ac954365b90d6ff9",
+            "lane1": "c716068c56910c2c"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 75576,
+          "byteCount": 77838,
           "digest": {
-            "lane0": "bf488af318d8f297",
-            "lane1": "6a576e758171606b"
+            "lane0": "671a7edd84caa3c1",
+            "lane1": "24e159456d113ca7"
           }
         }
       ]

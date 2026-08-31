@@ -377,10 +377,25 @@ Particle buildSpawnParticle( ParticleSpawnRequest request, uint ordinal ) {
 		float phi = spawn01( request.seed, ordinal, 14u ) * 6.28318530718;
 		velocity = ( axis * z + tangent * ( radial * cos( phi ) )
 			+ bitangent * ( radial * sin( phi ) ) ) * speed;
-	} else {
+	} else if ( c.velocityShape == 3u ) {
 		velocity = vec3( spawnSigned( request.seed, ordinal, 15u ),
 			spawnSigned( request.seed, ordinal, 16u ),
 			spawnSigned( request.seed, ordinal, 17u ) ) * c.cubeJitter;
+	} else {
+		// Keep the spawn point and outward motion correlated. idTech-style
+		// oriented fire spheres place a card on a sphere surface and launch it
+		// along that surface normal; independent cube jitter collapses that
+		// structure into a camera-facing blob cloud.
+		vec3 radialDirection = scatter;
+		if ( dot( radialDirection, radialDirection ) <= 1e-8 ) {
+			float z = spawnSigned( request.seed, ordinal, 15u );
+			float phi = spawn01( request.seed, ordinal, 16u ) * 6.28318530718;
+			float radial = sqrt( max( 0.0, 1.0 - z * z ) );
+			radialDirection = vec3( radial * cos( phi ), radial * sin( phi ), z );
+		} else {
+			radialDirection = normalize( radialDirection );
+		}
+		velocity = radialDirection * speed;
 	}
 	velocity += c.velocityBias.xyz + vec3(
 		spawnSigned( request.seed, ordinal, 18u ),

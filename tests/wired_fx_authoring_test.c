@@ -27,7 +27,7 @@ int main( void ) {
 	static const char *const source =
 		"return { schemaVersion=1, maxActiveActions=19, maxInstances=128, seed=225,"
 		" duration=4, lodNear=0, lodFar=4096, boundsRadius=512, actions={"
-		"{type='light',id='core',fire='smoke',material='hot',radius={32,48,64},intensity=3,lightLifetime=.1,flags={'noShadows'},startCondition={3,1}},"
+		"{type='light',id='core',fire='smoke',material='hot',radius={32,48,64},radiusEnd={96,112,128},intensity=3,lightLifetime=.1,flags={'noShadows'},startCondition={3,1}},"
 		"{type='particle',id='smoke',parent='core',particle='smoke',maxInstances=64,maxParticles=64,spawnRate=20,velocityScale=1,flags={'gpuLifecycle'}},"
 		"{type='decal',id='mark1',material='burn',size=32,depth=4},"
 		"{type='decal2',id='mark2',material='scorch',size=48,depth=8},"
@@ -60,6 +60,7 @@ int main( void ) {
 	assert( profile.actionCount == WIRED_FX_ACTION_COUNT );
 	assert( profile.actions[0].fireAction == 1u );
 	assert( profile.actions[0].payload.light.lifetime == .1f );
+	assert( profile.actions[0].payload.light.radiusEnd[2] == 128.0f );
 	assert( profile.actions[0].startConditionMask == ( ( (uint64_t)1u << 32 ) | 3u ) );
 	assert( profile.actions[1].parentAction == 0u );
 	assert( profile.actions[1].payload.particle.maxParticles == 64u );
@@ -88,7 +89,9 @@ int main( void ) {
 		"machinegun-fire.lua", "shotgun-fire.lua", "shotgun-fire-wide.lua",
 		"grenade-fire.lua", "rocket-fire.lua", "weapon-water-trail.lua",
 		"weapon-water-splash.lua", "grenade-bounce.lua", "rocket-flight.lua",
-		"shotgun-smoke.lua", "shotgun-smoke-wide.lua"
+		"shotgun-smoke.lua", "shotgun-smoke-wide.lua",
+		"rocket-layered-explosion.lua", "rocket-layered-detonation.lua",
+		"rocket-layered-underwater.lua"
 	};
 	uint32_t profileIndex;
 	char profilePath[512];
@@ -102,6 +105,7 @@ int main( void ) {
 	assert( profile.actions[2].payload.particle.maxParticles == 1u );
 	assert( profile.actions[3].payload.particle.maxParticles == 24u );
 	assert( profile.actions[6].type == WIRED_FX_ACTION_LIGHT );
+	assert( profile.actions[6].payload.light.radiusEnd[0] == 300.0f );
 	assert( profile.actions[6].payload.light.lifetime == 0.0f );
 	assert( profile.actions[8].type == WIRED_FX_ACTION_SCREEN_SHAKE );
 	assert( profile.actions[8].payload.screenShake.radius == 600.0f );
@@ -180,6 +184,41 @@ int main( void ) {
 			assert( profile.actions[5].type == WIRED_FX_ACTION_DECAL );
 			assert( profile.actions[5].payload.decal.size == 64.0f );
 			assert( profile.actions[5].duration == 10.0f );
+		}
+		if ( !strcmp( partOneProfiles[profileIndex], "rocket-layered-explosion.lua" ) ) {
+			assert( profile.actionCount == 11u );
+			assert( profile.actions[0].type == WIRED_FX_ACTION_SPRITE );
+			assert( profile.actions[0].payload.sprite.lifetime == 0.72f );
+			assert( profile.actions[1].type == WIRED_FX_ACTION_PARTICLE );
+			assert( profile.actions[1].payload.particle.maxParticles == 40u );
+			assert( profile.actions[2].payload.particle.maxParticles == 4u );
+			assert( profile.actions[4].type == WIRED_FX_ACTION_BEAM );
+			assert( profile.actions[5].payload.particle.maxParticles == 15u );
+			assert( profile.actions[7].type == WIRED_FX_ACTION_LIGHT );
+			assert( profile.actions[7].payload.light.radius[0] == 96.0f );
+			assert( profile.actions[7].payload.light.radiusEnd[0] == 360.0f );
+			assert( profile.actions[7].payload.light.intensity == 1.25f );
+			assert( profile.actions[7].payload.light.lifetime == 1.0f );
+			assert( profile.actions[7].offset[2] == 12.0f );
+			assert( profile.actions[9].type == WIRED_FX_ACTION_SCREEN_SHAKE );
+			assert( profile.actions[10].type == WIRED_FX_ACTION_DECAL );
+		}
+		if ( !strcmp( partOneProfiles[profileIndex], "rocket-layered-detonation.lua" ) ) {
+			assert( profile.actionCount == 9u );
+			assert( profile.actions[1].payload.particle.maxParticles == 40u );
+			assert( profile.actions[2].payload.particle.maxParticles == 4u );
+			assert( profile.actions[3].payload.particle.maxParticles == 15u );
+			assert( profile.actions[5].type == WIRED_FX_ACTION_LIGHT );
+			assert( profile.actions[5].payload.light.radius[0] == 44.0f );
+			assert( profile.actions[5].payload.light.radiusEnd[0] == 380.0f );
+			assert( profile.actions[5].payload.light.lifetime == 1.0f );
+			assert( profile.actions[8].type == WIRED_FX_ACTION_RADIAL_BLUR );
+		}
+		if ( !strcmp( partOneProfiles[profileIndex], "rocket-layered-underwater.lua" ) ) {
+			assert( profile.actionCount == 7u );
+			assert( profile.actions[0].type == WIRED_FX_ACTION_SPRITE );
+			assert( profile.actions[1].payload.particle.maxParticles == 40u );
+			assert( profile.actions[6].type == WIRED_FX_ACTION_RADIAL_BLUR );
 		}
 		if ( !strcmp( partOneProfiles[profileIndex], "machinegun-tracer.lua" ) ) {
 			assert( profile.actionCount == 2u );
@@ -351,7 +390,15 @@ int main( void ) {
 	assert( luaL_loadfile( L, WIRED_SOURCE_DIR "/modfiles/scripts/effects/manifest.lua" ) == 0 );
 	assert( lua_pcall( L, 0, 1, 0 ) == 0 );
 	assert( lua_istable( L, -1 ) );
-	assert( lua_objlen( L, -1 ) == 24u );
+	assert( lua_objlen( L, -1 ) == 28u );
+	lua_rawgeti( L, -1, 28 );
+	assert( lua_istable( L, -1 ) );
+	lua_getfield( L, -1, "handle" );
+	assert( (uint32_t)lua_tointeger( L, -1 ) == WIRED_FX_PROFILE_GRENADE_LAYERED_EXPLOSION );
+	lua_pop( L, 1 );
+	lua_getfield( L, -1, "path" );
+	assert( !strcmp( lua_tostring( L, -1 ), "scripts/effects/rocket-layered-explosion.lua" ) );
+	lua_pop( L, 2 );
 	lua_pop( L, 1 );
 #endif
 

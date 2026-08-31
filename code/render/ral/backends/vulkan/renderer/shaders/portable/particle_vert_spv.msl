@@ -222,7 +222,7 @@ struct spvDescriptorSetBuffer0
 
 constant spvUnsafeArray<float, 6> _607 = spvUnsafeArray<float, 6>({ 1.0, 1.0, -1.0, -1.0, 1.0, -1.0 });
 constant spvUnsafeArray<float, 6> _614 = spvUnsafeArray<float, 6>({ -1.0, 1.0, -1.0, -1.0, 1.0, 1.0 });
-constant spvUnsafeArray<float2, 6> _861 = spvUnsafeArray<float2, 6>({ float2(0.0, 1.0), float2(0.0), float2(1.0), float2(1.0), float2(0.0), float2(1.0, 0.0) });
+constant spvUnsafeArray<float2, 6> _946 = spvUnsafeArray<float2, 6>({ float2(0.0, 1.0), float2(0.0), float2(1.0), float2(1.0), float2(0.0), float2(1.0, 0.0) });
 
 struct main0_out
 {
@@ -566,10 +566,36 @@ vertex main0_out main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [
     }
     else
     {
-        worldPos = (p.pos + ((*spvDescriptorSet0.m_197).viewLeft.xyz * (sx * size))) + ((*spvDescriptorSet0.m_197).viewUp.xyz * (uy * size));
+        bool _833 = (c.renderFlags & 256u) != 0u;
+        bool _842;
+        if (_833)
+        {
+            _842 = dot(p.vel, p.vel) > 9.9999997473787516355514526367188e-05;
+        }
+        else
+        {
+            _842 = _833;
+        }
+        if (_842)
+        {
+            float3 normal = fast::normalize(p.vel);
+            float3 reference = select(float3(0.0, 1.0, 0.0), float3(0.0, 0.0, 1.0), bool3(abs(normal.z) < 0.920000016689300537109375));
+            float3 tangent = fast::normalize(cross(reference, normal));
+            float3 bitangent = cross(normal, tangent);
+            float roll = float(p.pad3 & 1023u) * 0.0061359233222901821136474609375;
+            float cr = cos(roll);
+            float sr = sin(roll);
+            float3 rolledTangent = (tangent * cr) + (bitangent * sr);
+            float3 rolledBitangent = (bitangent * cr) - (tangent * sr);
+            worldPos = (p.pos + (rolledTangent * (sx * size))) + (rolledBitangent * (uy * size));
+        }
+        else
+        {
+            worldPos = (p.pos + ((*spvDescriptorSet0.m_197).viewLeft.xyz * (sx * size))) + ((*spvDescriptorSet0.m_197).viewUp.xyz * (uy * size));
+        }
     }
     out.gl_Position = (*spvDescriptorSet0.m_197).mvp * float4(worldPos, 1.0);
-    out.fragUV = _861[vertInQuad];
+    out.fragUV = _946[vertInQuad];
     out.fragColor = color;
     out.particleClassHandle = p.classHandle | (c.colorDomain << 31u);
     out.particleRenderFlags = c.renderFlags;
@@ -581,16 +607,16 @@ vertex main0_out main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [
         uint frame1 = min((frame0 + 1u), last);
         out.frameSlot0 = c.frameSlots[frame0];
         out.frameSlot1 = c.frameSlots[frame1];
-        float _915;
+        float _1000;
         if (c.frameBlend != 0u)
         {
-            _915 = fract(fr);
+            _1000 = fract(fr);
         }
         else
         {
-            _915 = 0.0;
+            _1000 = 0.0;
         }
-        out.frameBlend = _915;
+        out.frameBlend = _1000;
     }
     else
     {

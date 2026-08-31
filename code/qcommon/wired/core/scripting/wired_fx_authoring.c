@@ -274,6 +274,7 @@ static qboolean WiredFxAuthoring_Payload( lua_State *L, int table, wiredFxAction
 	case WIRED_FX_ACTION_LIGHT:
 		return FX_RES( "material", WIRED_FX_RESOURCE_MATERIAL, &a->payload.light.material ) &&
 			FX_VEC( "radius", a->payload.light.radius, 3u, one3 ) &&
+			FX_VEC( "radiusEnd", a->payload.light.radiusEnd, 3u, a->payload.light.radius ) &&
 			FX_NUM( "intensity", 1, &a->payload.light.intensity ) &&
 			FX_NUM( "radiusJitter", 0, &a->payload.light.radiusJitter ) &&
 			FX_NUM( "lightLifetime", 0, &a->payload.light.lifetime ) &&

@@ -4091,8 +4091,8 @@
     {
       "symbol": "particle_integrate_comp_spv",
       "spirvDigest": {
-        "lane0": "b7dc739fc0853171",
-        "lane1": "9aef830348666201"
+        "lane0": "9e44482fbf3288ba",
+        "lane1": "11a11e067b050a28"
       },
       "combinedSamplers": [
         {
@@ -4107,8 +4107,8 @@
     {
       "symbol": "particle_vert_spv",
       "spirvDigest": {
-        "lane0": "45822fbe5c3b04c8",
-        "lane1": "aca86864d7d821b3"
+        "lane0": "b9a2d282bb2eb324",
+        "lane1": "aad68bd97d6c287f"
       }
     },
     {

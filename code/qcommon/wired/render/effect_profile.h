@@ -47,6 +47,10 @@ profile can cross the native/WASM seam once at registration time.
 #define WIRED_FX_PROFILE_SHOTGUN_SMOKE 22u
 #define WIRED_FX_PROFILE_SHOTGUN_SMOKE_WIDE 23u
 #define WIRED_FX_PROFILE_WORLD_EARTHQUAKE 24u
+#define WIRED_FX_PROFILE_ROCKET_LAYERED_EXPLOSION 25u
+#define WIRED_FX_PROFILE_ROCKET_LAYERED_DETONATION 26u
+#define WIRED_FX_PROFILE_ROCKET_LAYERED_UNDERWATER 27u
+#define WIRED_FX_PROFILE_GRENADE_LAYERED_EXPLOSION 28u
 
 typedef enum {
 	WIRED_FX_ACTION_LIGHT = 0,
@@ -116,7 +120,11 @@ typedef struct {
 
 typedef struct {
 	uint32_t material;
+	/* `radius` is the initial extent. `radiusEnd` optionally animates that
+	 * extent over the light lifetime; an all-zero value preserves the legacy
+	 * constant-radius contract for programmatically constructed profiles. */
 	float radius[3];
+	float radiusEnd[3];
 	float intensity;
 	float radiusJitter;
 	/* Optional presentation lifetime. Zero inherits the profile duration. */

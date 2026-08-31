@@ -34,6 +34,46 @@ rocketExhaustGlow
 	}
 }
 
+// Layered rocket-explosion materials. These deliberately separate the flash,
+// irregular fire cards and pressure ring so the effect does not become a pile
+// of identical radial glows. rlboom_4 is used as one static, unanimated card;
+// the ROCKET_FX_EXPLOSION path never advances the legacy flipbook sequence.
+rocketExplosionFlash
+{
+	sort additive
+	nopicmip
+	{
+		clampmap gfx/misc/flare_modern.png
+		blendfunc GL_SRC_ALPHA GL_ONE
+		rgbGen vertex
+		alphaGen vertex
+	}
+}
+
+rocketExplosionFireCard
+{
+	sort additive
+	nopicmip
+	{
+		clampmap models/weaphits/rlboom/rlboom_4.png
+		blendfunc GL_SRC_ALPHA GL_ONE
+		rgbGen vertex
+		alphaGen vertex
+	}
+}
+
+rocketExplosionRing
+{
+	sort additive
+	nopicmip
+	{
+		clampmap sprites/bfglfring.tga
+		blendfunc GL_SRC_ALPHA GL_ONE
+		rgbGen vertex
+		alphaGen vertex
+	}
+}
+
 // ── q3now lens flare shaders ────────────────────────────────────────
 // Alternatives inspired by JJ Abrams / cinematic lens flare references.
 // All use sort nearest + additive alpha blend for proper compositing.

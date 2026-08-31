@@ -24,6 +24,7 @@ layout(location = 3) flat in uint frameSlot0;
 layout(location = 0) in vec2 fragUV;
 layout(location = 5) in float frameBlend;
 layout(location = 4) flat in uint frameSlot1;
+layout(location = 6) flat in uint particleRenderFlags;
 layout(location = 0) out vec4 outColor;
 layout(location = 1) in vec4 fragColor;
 
@@ -97,28 +98,29 @@ void main()
             texel = t0;
         }
     }
-    float _209;
-    if (frameSlot0 != 4294967295u)
-    {
-        _209 = 1.0;
-    }
-    else
-    {
-        _209 = softParticleFade();
-    }
-    float fade = _209;
+    bool surfaceAnchored = (particleRenderFlags & 128u) != 0u;
     float _218;
-    if (frameSlot0 != 4294967295u)
-    {
-        _218 = 0.699999988079071044921875 / max(_28.exposureBias, 0.001000000047497451305389404296875);
-    }
-    else
+    if ((frameSlot0 != 4294967295u) || surfaceAnchored)
     {
         _218 = 1.0;
     }
-    float rgbScale = _218;
+    else
+    {
+        _218 = softParticleFade();
+    }
+    float fade = _218;
+    float _227;
+    if (frameSlot0 != 4294967295u)
+    {
+        _227 = 0.699999988079071044921875 / max(_28.exposureBias, 0.001000000047497451305389404296875);
+    }
+    else
+    {
+        _227 = 1.0;
+    }
+    float rgbScale = _227;
     vec3 param_6 = fragColor.xyz;
-    vec3 _237 = sRGBToLinear(param_6);
-    outColor = vec4((texel.xyz * _237) * rgbScale, (texel.w * fragColor.w) * fade);
+    vec3 _246 = sRGBToLinear(param_6);
+    outColor = vec4((texel.xyz * _246) * rgbScale, (texel.w * fragColor.w) * fade);
 }
 

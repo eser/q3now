@@ -2243,9 +2243,17 @@ Caused by an EV_MISSILE_MISS event, or directly by local bullet tracing
 void CG_WiredFx_RocketExplosion( const vec3_t origin, const vec3_t normal,
 		impactSound_t material, qboolean freeAir, qboolean forceUnderwater ) {
 	wiredFxEvent_t event;
-	CG_WiredFx_InitEvent( &event,
-		freeAir ? WIRED_FX_PROFILE_ROCKET_DETONATION : WIRED_FX_PROFILE_ROCKET_EXPLOSION,
-		origin, normal );
+	uint32_t profile;
+#if ROCKET_FX_EXPLOSION
+	/* Q4's projectile path selects impact FX while grounded and detonate FX in
+	 * free air.  Keep the same semantic split while using Wired-owned assets. */
+	profile = freeAir ? WIRED_FX_PROFILE_ROCKET_LAYERED_DETONATION
+		: WIRED_FX_PROFILE_ROCKET_LAYERED_EXPLOSION;
+#else
+	profile = freeAir ? WIRED_FX_PROFILE_ROCKET_DETONATION
+		: WIRED_FX_PROFILE_ROCKET_EXPLOSION;
+#endif
+	CG_WiredFx_InitEvent( &event, profile, origin, normal );
 	event.materialClass = (uint32_t)material;
 	switch ( material ) {
 	case IMPACTSOUND_METAL: event.conditionMask = WIRED_FX_CONDITION_MATERIAL_METAL; break;
@@ -2254,7 +2262,11 @@ void CG_WiredFx_RocketExplosion( const vec3_t origin, const vec3_t normal,
 	}
 	if ( forceUnderwater || ( CG_PointContents( origin, 0 )
 			& ( CONTENTS_WATER | CONTENTS_SLIME | CONTENTS_LAVA ) ) ) {
+#if ROCKET_FX_EXPLOSION
+		event.profile = WIRED_FX_PROFILE_ROCKET_LAYERED_UNDERWATER;
+#else
 		event.profile = WIRED_FX_PROFILE_ROCKET_UNDERWATER;
+#endif
 		event.flags |= WIRED_FX_EVENT_UNDERWATER;
 		event.conditionMask |= WIRED_FX_CONDITION_UNDERWATER;
 	} else if ( freeAir ) {
@@ -2269,10 +2281,15 @@ static void CG_WiredFx_GrenadeExplosion( const vec3_t origin, const vec3_t norma
 	wiredFxEvent_t event;
 	qboolean underwater = ( CG_PointContents( origin, 0 )
 		& ( CONTENTS_WATER | CONTENTS_SLIME | CONTENTS_LAVA ) ) != 0;
-	/* Pre-migration grenades used one detonation recipe in every medium.  The
-	 * event still records the medium for authored conditions, but profile
-	 * selection must not silently replace that established presentation. */
-	CG_WiredFx_InitEvent( &event, WIRED_FX_PROFILE_GRENADE_EXPLOSION,
+	/* Keep a grenade-owned semantic handle even when it shares the accepted
+	 * layered rocket composition. This preserves independent feature rollback
+	 * and future weapon-specific tuning without duplicating the recipe. */
+	CG_WiredFx_InitEvent( &event,
+#if GRENADE_FX_EXPLOSION
+		WIRED_FX_PROFILE_GRENADE_LAYERED_EXPLOSION,
+#else
+		WIRED_FX_PROFILE_GRENADE_EXPLOSION,
+#endif
 		origin, normal );
 	event.materialClass = (uint32_t)material;
 	event.flags |= WIRED_FX_EVENT_HAS_SOURCE_ENTITY;

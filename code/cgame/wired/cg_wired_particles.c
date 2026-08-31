@@ -634,19 +634,41 @@ void CG_RegisterGibTrailParticleClass( void )
 ==========================
 CG_RegisterExplosionParticleClasses
 
-Rocket-explosion fire core as a GPU-ring flipbook (Track-C Stage-2 beat 1).
+Rocket-explosion fallback fire core plus flipbook-free layered primitives.
+The fallback is a GPU-ring flipbook (Track-C Stage-2 beat 1).
 The eight rlboom_1..8 frames (the same sequence the CPU rocketExplosion
 animmap played) become a frameCount-8 flipbook with sub-frame blend, so a
 single BURST particle at impact reads as the expanding fireball. One light
 core that stays put — the explosion grows through the flipbook frames, not
-motion. Emitted unconditionally from the PROJ_ROCKET impact (GPU single path,
-W-51 — the legacy LE_ sprite explosion is retired for rockets).
+motion. ROCKET_FX_EXPLOSION=0 keeps this as the reversible comparison path;
+the enabled layered profiles never reference it.
 ==========================
 */
 void CG_RegisterExplosionParticleClasses( void )
 {
 	particleClass_t cls;
 	int				i;
+	static const float rocketConvexSize[PARTICLE_CURVE_SAMPLES] = {
+		0.00f, 0.34f, 0.59f, 0.76f, 0.87f, 0.94f, 0.98f, 1.00f
+	};
+	static const float rocketHalfLinearSize[PARTICLE_CURVE_SAMPLES] = {
+		0.00f, 0.25f, 0.47f, 0.65f, 0.79f, 0.89f, 0.96f, 1.00f
+	};
+	static const float rocketFireAlpha[PARTICLE_CURVE_SAMPLES] = {
+		0.72f, 1.00f, 1.00f, 0.96f, 0.84f, 0.64f, 0.34f, 0.00f
+	};
+	static const float rocketSparkFlicker[PARTICLE_CURVE_SAMPLES] = {
+		1.00f, 0.48f, 0.92f, 0.36f, 0.76f, 0.24f, 0.46f, 0.00f
+	};
+	static const float rocketSmokeAlpha[PARTICLE_CURVE_SAMPLES] = {
+		0.00f, 0.52f, 0.82f, 0.96f, 0.92f, 0.72f, 0.38f, 0.00f
+	};
+
+	CG_RegisterParticleCurve( "rocket-convex-size", rocketConvexSize );
+	CG_RegisterParticleCurve( "rocket-halflinear-size", rocketHalfLinearSize );
+	CG_RegisterParticleCurve( "rocket-fire-alpha", rocketFireAlpha );
+	CG_RegisterParticleCurve( "rocket-spark-flicker", rocketSparkFlicker );
+	CG_RegisterParticleCurve( "rocket-smoke-alpha", rocketSmokeAlpha );
 
 	memset( &cls, 0, sizeof( cls ) );
 
@@ -751,6 +773,200 @@ void CG_RegisterExplosionParticleClasses( void )
 	cls.drag               = 0.65f;
 	cgs.media.explosionShrapnelClass =
 		(qhandle_t)CG_RegisterParticleClass( "explosion_hot_shrapnel", &cls );
+
+	/* Q4 MP's bright body lives for roughly one second: forty oriented cards
+	 * launch from a sphere surface along their own radial normal. The previous
+	 * approximation used unrelated cube velocity and camera billboards, which
+	 * collapsed into a short-lived stack of round glows. */
+	memset( &cls, 0, sizeof( cls ) );
+	cls.shader             = trap_R_RegisterShader( "rocketExplosionFireCard" );
+	cls.renderFlags        = PRIM_FLAG_ADDITIVE | PRIM_FLAG_PARTICLE_VELOCITY_ORIENTED;
+	cls.emitMode           = EMIT_POINT;
+	cls.scatterShape       = SCATTER_SPHERE;
+	cls.scatterMagnitude   = 10.0f;
+	cls.velocityShape      = VEL_RADIAL_FROM_SCATTER;
+	cls.axialSpeed         = 66.0f;
+	cls.speedJitter        = 16.0f;
+	cls.lifetimeMean       = 0.96f;
+	cls.lifetimeJitter     = 0.04f;
+	cls.paletteCount       = 4;
+	Vector4Set( cls.colorPalette[0], 1.00f, 0.91f, 0.60f, 1.00f );
+	Vector4Set( cls.colorPalette[1], 1.00f, 0.68f, 0.28f, 0.96f );
+	Vector4Set( cls.colorPalette[2], 1.00f, 0.42f, 0.08f, 0.92f );
+	Vector4Set( cls.colorPalette[3], 0.82f, 0.20f, 0.03f, 0.86f );
+	Vector4Set( cls.colorEndMult, 0.34f, 0.035f, 0.004f, 1.0f );
+	cls.sizeStart          = 9.0f;
+	cls.sizeEnd            = 36.0f;
+	cls.sizeJitter         = 2.5f;
+	cls.gravityScale       = 0.025f;
+	cls.drag               = 0.38f;
+	cls.sizeParm.calc      = PARM_CURVE;
+	cls.sizeParm.val0      = 9.0f;
+	cls.sizeParm.val1      = 36.0f;
+	cls.sizeParm.variance  = 1.0f;
+	CG_ResolveParticleParmCurve( &cls.sizeParm, "rocket-convex-size" );
+	cls.alphaParm.calc     = PARM_CURVE;
+	cls.alphaParm.val0     = 0.0f;
+	cls.alphaParm.val1     = 0.92f;
+	CG_ResolveParticleParmCurve( &cls.alphaParm, "rocket-fire-alpha" );
+	(void)CG_RegisterParticleClass( "rocket_layered_fire_sphere", &cls );
+
+	/* Four broad cards supply the persistent body that impact_mp/fire3 and
+	 * detonate_mp/fire4 carry independently from the oriented shell. */
+	memset( &cls, 0, sizeof( cls ) );
+	cls.shader             = trap_R_RegisterShader( "rocketExplosionFireCard" );
+	cls.renderFlags        = PRIM_FLAG_ADDITIVE;
+	cls.emitMode           = EMIT_POINT;
+	cls.scatterShape       = SCATTER_SPHERE;
+	cls.scatterMagnitude   = 12.0f;
+	cls.velocityShape      = VEL_RADIAL_FROM_SCATTER;
+	cls.axialSpeed         = 25.0f;
+	cls.speedJitter        = 9.0f;
+	cls.lifetimeMean       = 1.0f;
+	cls.lifetimeJitter     = 0.06f;
+	cls.paletteCount       = 3;
+	Vector4Set( cls.colorPalette[0], 1.00f, 0.76f, 0.38f, 0.88f );
+	Vector4Set( cls.colorPalette[1], 1.00f, 0.46f, 0.10f, 0.82f );
+	Vector4Set( cls.colorPalette[2], 0.78f, 0.18f, 0.025f, 0.74f );
+	Vector4Set( cls.colorEndMult, 0.24f, 0.025f, 0.003f, 1.0f );
+	cls.sizeStart          = 18.0f;
+	cls.sizeEnd            = 52.0f;
+	cls.sizeJitter         = 4.0f;
+	cls.gravityScale       = 0.02f;
+	cls.drag               = 0.7f;
+	cls.sizeParm.calc      = PARM_CURVE;
+	cls.sizeParm.val0      = 18.0f;
+	cls.sizeParm.val1      = 52.0f;
+	cls.sizeParm.variance  = 1.0f;
+	CG_ResolveParticleParmCurve( &cls.sizeParm, "rocket-halflinear-size" );
+	cls.alphaParm.calc     = PARM_CURVE;
+	cls.alphaParm.val0     = 0.0f;
+	cls.alphaParm.val1     = 0.82f;
+	CG_ResolveParticleParmCurve( &cls.alphaParm, "rocket-fire-alpha" );
+	(void)CG_RegisterParticleClass( "rocket_layered_fire_lobe", &cls );
+
+	/* The MP surface impact keeps its expanding ring for 0.75 seconds. */
+	memset( &cls, 0, sizeof( cls ) );
+	cls.shader             = trap_R_RegisterShader( "rocketExplosionRing" );
+	cls.renderFlags        = PRIM_FLAG_ADDITIVE;
+	cls.emitMode           = EMIT_POINT;
+	cls.scatterShape       = SCATTER_NONE;
+	cls.velocityShape      = VEL_AXIAL;
+	cls.lifetimeMean       = 0.74f;
+	cls.lifetimeJitter     = 0.01f;
+	cls.paletteCount       = 1;
+	Vector4Set( cls.colorPalette[0], 1.00f, 0.72f, 0.36f, 0.62f );
+	Vector4Set( cls.colorEndMult, 0.72f, 0.12f, 0.01f, 1.0f );
+	cls.sizeStart          = 13.0f;
+	cls.sizeEnd            = 94.0f;
+	cls.gravityScale       = 0.0f;
+	cls.drag               = 0.0f;
+	cls.sizeParm.calc      = PARM_CURVE;
+	cls.sizeParm.val0      = 13.0f;
+	cls.sizeParm.val1      = 94.0f;
+	CG_ResolveParticleParmCurve( &cls.sizeParm, "rocket-halflinear-size" );
+	cls.alphaParm.calc     = PARM_CURVE;
+	cls.alphaParm.val0     = 0.0f;
+	cls.alphaParm.val1     = 0.62f;
+	CG_ResolveParticleParmCurve( &cls.alphaParm, "rocket-fire-alpha" );
+	(void)CG_RegisterParticleClass( "rocket_layered_pressure_ring", &cls );
+
+	/* Surface-hit streaks inherit the impact normal.  Motion-trail rendering
+	 * turns each bounded particle into the short falling trace seen in Q4's
+	 * impact_mp sparks instead of a point that teleports away from the wall. */
+	memset( &cls, 0, sizeof( cls ) );
+	cls.shader             = trap_R_RegisterShader( "gfx/misc/tracer" );
+	cls.renderFlags        = PRIM_FLAG_ADDITIVE | PRIM_FLAG_PARTICLE_MOTION_TRAIL;
+	cls.emitMode           = EMIT_POINT;
+	cls.scatterShape       = SCATTER_SPHERE;
+	cls.scatterMagnitude   = 4.0f;
+	cls.velocityShape      = VEL_CONE;
+	cls.axialSpeed         = 92.0f;
+	cls.speedJitter        = 34.0f;
+	cls.coneHalfAngle      = 1.0f;
+	cls.lifetimeMean       = 1.25f;
+	cls.lifetimeJitter     = 0.25f;
+	cls.paletteCount       = 3;
+	Vector4Set( cls.colorPalette[0], 1.00f, 0.92f, 0.64f, 1.00f );
+	Vector4Set( cls.colorPalette[1], 1.00f, 0.58f, 0.14f, 0.96f );
+	Vector4Set( cls.colorPalette[2], 0.86f, 0.24f, 0.04f, 0.88f );
+	Vector4Set( cls.colorEndMult, 0.56f, 0.06f, 0.008f, 0.0f );
+	cls.sizeStart          = 0.9f;
+	cls.sizeEnd            = 0.18f;
+	cls.sizeJitter         = 0.25f;
+	cls.gravityScale       = 0.72f;
+	cls.drag               = 0.34f;
+	cls.alphaParm.calc     = PARM_CURVE;
+	cls.alphaParm.val0     = 0.0f;
+	cls.alphaParm.val1     = 1.0f;
+	CG_ResolveParticleParmCurve( &cls.alphaParm, "rocket-spark-flicker" );
+	(void)CG_RegisterParticleClass( "rocket_layered_impact_streak", &cls );
+
+	/* A free-air detonation has no surface normal to form a believable cone.
+	 * Use the same streak primitive with an isotropic velocity budget instead. */
+	memset( &cls, 0, sizeof( cls ) );
+	cls.shader             = trap_R_RegisterShader( "gfx/misc/tracer" );
+	cls.renderFlags        = PRIM_FLAG_ADDITIVE | PRIM_FLAG_PARTICLE_MOTION_TRAIL;
+	cls.emitMode           = EMIT_POINT;
+	cls.scatterShape       = SCATTER_SPHERE;
+	cls.scatterMagnitude   = 5.0f;
+	cls.velocityShape      = VEL_PURE_CUBE;
+	cls.cubeJitter         = 82.0f;
+	cls.velocityBias[2]    = 10.0f;
+	cls.velocityBiasJitter[2] = 7.0f;
+	cls.lifetimeMean       = 1.25f;
+	cls.lifetimeJitter     = 0.25f;
+	cls.paletteCount       = 3;
+	Vector4Set( cls.colorPalette[0], 1.00f, 0.92f, 0.64f, 1.00f );
+	Vector4Set( cls.colorPalette[1], 1.00f, 0.58f, 0.14f, 0.96f );
+	Vector4Set( cls.colorPalette[2], 0.86f, 0.24f, 0.04f, 0.88f );
+	Vector4Set( cls.colorEndMult, 0.56f, 0.06f, 0.008f, 0.0f );
+	cls.sizeStart          = 0.9f;
+	cls.sizeEnd            = 0.18f;
+	cls.sizeJitter         = 0.25f;
+	cls.gravityScale       = 0.65f;
+	cls.drag               = 0.30f;
+	cls.alphaParm.calc     = PARM_CURVE;
+	cls.alphaParm.val0     = 0.0f;
+	cls.alphaParm.val1     = 1.0f;
+	CG_ResolveParticleParmCurve( &cls.alphaParm, "rocket-spark-flicker" );
+	(void)CG_RegisterParticleClass( "rocket_layered_air_streak", &cls );
+
+	/* Q4 delays its hanging/upward smoke behind the flash.  Keep that delay in
+	 * the WiredFX recipe; the class only owns the slow expansion and lift. */
+	memset( &cls, 0, sizeof( cls ) );
+	cls.shader             = cgs.media.smokePuffShader;
+	cls.emitMode           = EMIT_POINT;
+	cls.scatterShape       = SCATTER_SPHERE;
+	cls.scatterMagnitude   = 6.0f;
+	cls.velocityShape      = VEL_CONE;
+	cls.axialSpeed         = 24.0f;
+	cls.speedJitter        = 10.0f;
+	cls.coneHalfAngle      = 1.05f;
+	cls.velocityBias[2]    = 12.0f;
+	cls.velocityBiasJitter[2] = 5.0f;
+	cls.lifetimeMean       = 1.0f;
+	cls.lifetimeJitter     = 0.20f;
+	cls.paletteCount       = 3;
+	Vector4Set( cls.colorPalette[0], 0.34f, 0.29f, 0.24f, 0.30f );
+	Vector4Set( cls.colorPalette[1], 0.25f, 0.23f, 0.21f, 0.26f );
+	Vector4Set( cls.colorPalette[2], 0.18f, 0.18f, 0.18f, 0.22f );
+	Vector4Set( cls.colorEndMult, 0.68f, 0.66f, 0.64f, 0.0f );
+	cls.sizeStart          = 12.0f;
+	cls.sizeEnd            = 42.0f;
+	cls.sizeJitter         = 4.0f;
+	cls.gravityScale       = -0.025f;
+	cls.drag               = 1.15f;
+	cls.sizeParm.calc      = PARM_CURVE;
+	cls.sizeParm.val0      = 12.0f;
+	cls.sizeParm.val1      = 42.0f;
+	cls.sizeParm.variance  = 1.0f;
+	CG_ResolveParticleParmCurve( &cls.sizeParm, "rocket-halflinear-size" );
+	cls.alphaParm.calc     = PARM_CURVE;
+	cls.alphaParm.val0     = 0.0f;
+	cls.alphaParm.val1     = 0.34f;
+	CG_ResolveParticleParmCurve( &cls.alphaParm, "rocket-smoke-alpha" );
+	(void)CG_RegisterParticleClass( "rocket_layered_smoke", &cls );
 
 	// Quake 4's authored impact effects open with a very short additive flash,
 	// followed by directional streaks plus surface-specific smoke/debris. Keep

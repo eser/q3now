@@ -73,7 +73,7 @@ struct ParticleClassGPU
 layout(constant_id = 0) const uint PIPELINE_BLEND_MASK = 0u;
 const float _607[6] = float[](1.0, 1.0, -1.0, -1.0, 1.0, -1.0);
 const float _614[6] = float[](-1.0, 1.0, -1.0, -1.0, 1.0, 1.0);
-const vec2 _861[6] = vec2[](vec2(0.0, 1.0), vec2(0.0), vec2(1.0), vec2(1.0), vec2(0.0), vec2(1.0, 0.0));
+const vec2 _946[6] = vec2[](vec2(0.0, 1.0), vec2(0.0), vec2(1.0), vec2(1.0), vec2(0.0), vec2(1.0, 0.0));
 
 layout(binding = 0, std140) uniform ParticleFrame
 {
@@ -434,10 +434,36 @@ void main()
     }
     else
     {
-        worldPos = (p.pos + (_197.viewLeft.xyz * (sx * size))) + (_197.viewUp.xyz * (uy * size));
+        bool _833 = (c.renderFlags & 256u) != 0u;
+        bool _842;
+        if (_833)
+        {
+            _842 = dot(p.vel, p.vel) > 9.9999997473787516355514526367188e-05;
+        }
+        else
+        {
+            _842 = _833;
+        }
+        if (_842)
+        {
+            vec3 normal = normalize(p.vel);
+            vec3 reference = mix(vec3(0.0, 1.0, 0.0), vec3(0.0, 0.0, 1.0), bvec3(abs(normal.z) < 0.920000016689300537109375));
+            vec3 tangent = normalize(cross(reference, normal));
+            vec3 bitangent = cross(normal, tangent);
+            float roll = float(p.pad3 & 1023u) * 0.0061359233222901821136474609375;
+            float cr = cos(roll);
+            float sr = sin(roll);
+            vec3 rolledTangent = (tangent * cr) + (bitangent * sr);
+            vec3 rolledBitangent = (bitangent * cr) - (tangent * sr);
+            worldPos = (p.pos + (rolledTangent * (sx * size))) + (rolledBitangent * (uy * size));
+        }
+        else
+        {
+            worldPos = (p.pos + (_197.viewLeft.xyz * (sx * size))) + (_197.viewUp.xyz * (uy * size));
+        }
     }
     gl_Position = _197.mvp * vec4(worldPos, 1.0);
-    fragUV = _861[vertInQuad];
+    fragUV = _946[vertInQuad];
     fragColor = color;
     particleClassHandle = p.classHandle | (c.colorDomain << 31u);
     particleRenderFlags = c.renderFlags;
@@ -449,16 +475,16 @@ void main()
         uint frame1 = min((frame0 + 1u), last);
         frameSlot0 = c.frameSlots[frame0];
         frameSlot1 = c.frameSlots[frame1];
-        float _915;
+        float _1000;
         if (c.frameBlend != 0u)
         {
-            _915 = fract(fr);
+            _1000 = fract(fr);
         }
         else
         {
-            _915 = 0.0;
+            _1000 = 0.0;
         }
-        frameBlend = _915;
+        frameBlend = _1000;
     }
     else
     {
