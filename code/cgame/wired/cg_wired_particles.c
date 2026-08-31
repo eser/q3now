@@ -699,10 +699,8 @@ void CG_RegisterExplosionParticleClasses( void )
 
 	cgs.media.explosionFireClass = (qhandle_t)CG_RegisterParticleClass( "explosion_fire", &cls );
 
-	/* Q4's impact/detonate recipes carry a short-lived expanding fire sphere in
-	 * addition to the animated core. Keep the design beat, not the proprietary
-	 * media or 40-sprite CPU implementation: one low-alpha additive particle
-	 * expands on the existing bounded GPU lifecycle. */
+	/* Preserve the pre-migration Wired recipe: one low-alpha expanding shell.
+	 * This class is presentation data, not a license to reinterpret the effect. */
 	memset( &cls, 0, sizeof( cls ) );
 	cls.shader             = trap_R_RegisterShader( "rocketExhaustGlow" );
 	cls.renderFlags        = PRIM_FLAG_ADDITIVE;
@@ -780,6 +778,32 @@ void CG_RegisterExplosionParticleClasses( void )
 	cgs.media.hitscanFlashClass =
 		(qhandle_t)CG_RegisterParticleClass( "hitscan_impact_flash", &cls );
 
+	// q4base's shotgun impact flash is authored at 8 units rather than the
+	// compact bullet card. Keep that silhouette as a distinct class so the
+	// shared pellet recipe does not have to scale every other particle layer.
+	memset( &cls, 0, sizeof( cls ) );
+	cls.shader             = trap_R_RegisterShader( "rocketExhaustGlow" );
+	cls.renderFlags        = PRIM_FLAG_ADDITIVE;
+	cls.emitMode           = EMIT_POINT;
+	cls.scatterShape       = SCATTER_SPHERE;
+	cls.scatterMagnitude   = 1.25f;
+	cls.velocityShape      = VEL_AXIAL;
+	cls.axialSpeed         = 4.0f;
+	cls.speedJitter        = 2.0f;
+	cls.lifetimeMean       = 0.10f;
+	cls.lifetimeJitter     = 0.015f;
+	cls.paletteCount       = 3;
+	Vector4Set( cls.colorPalette[0], 1.00f, 0.96f, 0.76f, 0.92f );
+	Vector4Set( cls.colorPalette[1], 1.00f, 0.70f, 0.24f, 0.86f );
+	Vector4Set( cls.colorPalette[2], 0.86f, 0.42f, 0.08f, 0.78f );
+	Vector4Set( cls.colorEndMult, 0.45f, 0.12f, 0.02f, 0.0f );
+	cls.sizeStart          = 8.0f;
+	cls.sizeEnd            = 0.30f;
+	cls.sizeJitter         = 1.25f;
+	cls.gravityScale       = 0.0f;
+	cls.drag               = 0.0f;
+	(void)CG_RegisterParticleClass( "shotgun_impact_flash", &cls );
+
 	// The remaining classes are generic GPU building blocks. Weapon/material
 	// recipe counts live at the composition point in cg_weapons.c and mirror
 	// the concrete/default/electronics families in q4base pak001.pk4.
@@ -855,6 +879,47 @@ void CG_RegisterExplosionParticleClasses( void )
 	cls.velocityBias[2]    = 10.0f;
 	cgs.media.hitscanDustClass =
 		(qhandle_t)CG_RegisterParticleClass( "hitscan_dust_puff", &cls );
+
+	/* Shared path bubbles and surface crown droplets cover the liquid branches
+	 * of all four Part-I weapons through authored profiles. */
+	memset( &cls, 0, sizeof( cls ) );
+	cls.shader             = cgs.media.waterBubbleShader;
+	cls.emitMode           = EMIT_PATH;
+	cls.scatterShape       = SCATTER_NONE;
+	cls.velocityShape      = VEL_PURE_CUBE;
+	cls.cubeJitter         = 5.0f;
+	cls.velocityBias[2]    = 6.0f;
+	cls.lifetimeMean       = 1.125f;
+	cls.lifetimeJitter     = 0.125f;
+	cls.paletteCount       = 1;
+	Vector4Set( cls.colorPalette[0], 1.0f, 1.0f, 1.0f, 1.0f );
+	Vector4Set( cls.colorEndMult, 1.0f, 1.0f, 1.0f, 0.0f );
+	cls.sizeStart          = 3.0f;
+	cls.sizeEnd            = 3.0f;
+	(void)CG_RegisterParticleClass( "weapon_water_bubble_trail", &cls );
+
+	memset( &cls, 0, sizeof( cls ) );
+	cls.shader             = cgs.media.waterBubbleShader;
+	cls.emitMode           = EMIT_POINT;
+	cls.scatterShape       = SCATTER_NONE;
+	cls.velocityShape      = VEL_AXIAL;
+	cls.axialSpeed         = 75.0f;
+	cls.speedJitter        = 25.0f;
+	cls.velocityBiasJitter[0] = 40.0f;
+	cls.velocityBiasJitter[1] = 40.0f;
+	cls.lifetimeMean       = 0.40f;
+	cls.lifetimeJitter     = 0.10f;
+	cls.paletteCount       = 1;
+	Vector4Set( cls.colorPalette[0], 1.0f, 1.0f, 1.0f, 1.0f );
+	Vector4Set( cls.colorEndMult, 1.0f, 1.0f, 1.0f, 0.0f );
+	cls.sizeStart          = 6.5f;
+	cls.sizeEnd            = 6.5f;
+	cls.sizeJitter         = 1.5f;
+	cls.sizeParm.calc      = PARM_CONSTANT;
+	cls.sizeParm.val0      = 6.5f;
+	cls.sizeParm.variance  = 1.0f;
+	cls.gravityScale       = 1.0f;
+	(void)CG_RegisterParticleClass( "weapon_water_splash", &cls );
 
 	/* Underwater rocket detonation owns a distinct rising-bubble family.  It is
 	 * registered by name for WiredFX and intentionally needs no cgame handle:

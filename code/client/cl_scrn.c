@@ -203,8 +203,8 @@ void SCR_UpdateScreen( void ) {
 	static int framecount;
 	static int next_frametime;
 
-	if ( !scr_initialized )
-		return; // not initialized yet
+	if ( !scr_initialized || !cls.rendererStarted )
+		return; // startup, shutdown, or async map-transition gap
 
 	if ( framecount == cls.framecount ) {
 		int ms = Sys_Milliseconds();

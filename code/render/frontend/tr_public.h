@@ -19,7 +19,7 @@ typedef struct mapFile_s mapFile_t;
  * (wired.x64). The renderer DLL only sees the opaque pointer. */
 typedef struct arena_s arena_t;
 
-#define	REF_API_VERSION		28	/* paint-time UI subtree transform */
+#define	REF_API_VERSION		31	/* explicit per-world level allocation owner */
 
 #define REF_UI_TRANSFORM_SCHEMA_VERSION 1u
 typedef struct {
@@ -315,6 +315,12 @@ typedef struct {
 	/* Explicit authoring cook. Writes derived .wlight/.wprobe sidecars only. */
 	qboolean (*CookLightingProject)( const char *derivedRoot );
 
+	/* Serialized per-app world selection. Selection changes no shared asset
+	 * handles; unload retires only the addressed app's map residency. */
+	qboolean (*SelectWorld)( int worldIndex );
+	qboolean (*UnloadWorld)( int worldIndex );
+	int (*ResidentWorldCount)( void );
+
 } refexport_t;
 
 //
@@ -405,6 +411,12 @@ typedef struct {
 	void	(*FS_FreeFileList)( char **filelist );
 	void	(*FS_WriteFile)( const char *qpath, const void *buffer, int size );
 	qboolean (*FS_FileExists)( const char *file );
+	/* Resolve exact VFS aliases and search-path precedence without opening a
+	 * mutable file cursor. File-backed renderer registries must hash the
+	 * returned canonical path/source id, not the caller's compatibility name. */
+	qboolean (*FS_ResolveResource)( const char *name, char *canonicalPath,
+		size_t canonicalPathSize, uint64_t *sourceId, uint64_t *byteSize,
+		unsigned *fsGeneration );
 
 	// BSP loading — used by R_RegisterBSP for standalone prop BSPs
 	qboolean (*Map_Load)( const char *name, mapFile_t **bspFile, unsigned flags );
@@ -480,6 +492,13 @@ typedef struct {
 	// only through this versioned cohort. No SDL, Vulkan, Metal or WebGPU type
 	// crosses the renderer ABI.
 	ralPresentationHostImports_t PresentationHost;
+
+	/* Explicit renderer-world → Level arena bridge.  Map-owned renderer data
+	 * must name its owner; it may not discover one through the process-global
+	 * active-app cursor.  The client resets this arena only after UnloadWorld
+	 * has retired the matching renderer slot. */
+	void *(*WorldLevelAlloc)( int worldIndex, size_t size, size_t alignment );
+	size_t (*WorldLevelUsed)( int worldIndex );
 
 } refimport_t;
 

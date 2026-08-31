@@ -14,6 +14,7 @@ Called from Com_Init / Com_Shutdown in common.c.
 void WiredCore_Init( void ) {
     WiredCoreEvents_Init();   // first — subsystems may subscribe during their own init
     WiredScript_Init();
+    WiredScript_ReloadFileAliases();
 }
 
 void WiredCore_Shutdown( void ) {

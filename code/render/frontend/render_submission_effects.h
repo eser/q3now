@@ -24,6 +24,7 @@ extern "C" {
 #define RENDER_SUBMISSION_MAX_EFFECT_DECALS               4096u
 #define RENDER_SUBMISSION_MAX_EFFECT_RIBBONS               512u
 #define RENDER_SUBMISSION_MAX_EFFECT_RIBBON_POINTS        8192u
+#define RENDER_SUBMISSION_MAX_EFFECT_BEAMS                  128u
 
 typedef struct {
 	qhandle_t material;
@@ -59,6 +60,7 @@ typedef struct {
 	uint32_t decalCount;
 	uint32_t ribbonCount;
 	uint32_t ribbonPointCount;
+	uint32_t beamCount;
 	uint32_t droppedCount;
 } renderEffectPrimitiveSnapshot_t;
 
@@ -143,6 +145,8 @@ qboolean RenderSubmission_AddEffectDecal( renderSubmissionState_t *state,
 	const decalDesc_t *decal );
 qboolean RenderSubmission_AddEffectRibbon( renderSubmissionState_t *state,
 	const ribbonDesc_t *ribbon );
+qboolean RenderSubmission_AddEffectBeam( renderSubmissionState_t *state,
+	const beamDesc_t *beam );
 qboolean RenderSubmission_EffectPrimitiveSnapshots(
 	const renderSubmissionState_t *state,
 	renderEffectPrimitiveSnapshot_t *outSnapshot,
@@ -150,7 +154,8 @@ qboolean RenderSubmission_EffectPrimitiveSnapshots(
 	const emitterDesc_t **outEmitters,
 	const decalDesc_t **outDecals,
 	const renderEffectRibbonCommand_t **outRibbons,
-	const ribbonPoint_t **outRibbonPoints );
+	const ribbonPoint_t **outRibbonPoints,
+	const beamDesc_t **outBeams );
 uint32_t RenderSubmission_AtmosphereLightCount( const renderSubmissionState_t *state );
 uint32_t RenderSubmission_AtmosphereShadowedLightCount( const renderSubmissionState_t *state );
 
@@ -163,7 +168,8 @@ qboolean RenderSubmission_GetAtmosphereEffectProfile( const renderSubmissionStat
 qboolean RenderSubmission_RegisterParticleClass( renderSubmissionState_t *state, particleClassHandle_t handle,
 												 const particleClass_t *particleClass );
 qboolean RenderSubmission_GetParticleClass( const renderSubmissionState_t *state, particleClassHandle_t handle,
-											particleClass_t *outParticleClass );
+										 particleClass_t *outParticleClass );
+qboolean RenderSubmission_ResetEffectRegistries( renderSubmissionState_t *state );
 qboolean RenderSubmission_AtmosphereEffectWorkloadSnapshot( const renderSubmissionState_t *state, uint32_t maxParticles,
 															renderAtmosphereEffectWorkloadSnapshot_t *outSnapshot );
 qboolean RenderSubmission_AtmosphereEffectGpuPayload(

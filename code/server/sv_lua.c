@@ -16,6 +16,7 @@ LOG_DECLARE_CHANNEL( ch_server, "server" );
 #define SV_WI_MAX_CHARACTERS 256
 #define SV_WI_MAX_INDEX 64
 #define SV_WI_MAX_ATTACKS 16
+#define SV_WI_MAX_MODEL_PARTS 16
 
 typedef struct {
 	int index;
@@ -33,6 +34,9 @@ typedef struct {
 	qboolean inuse;
 	char     name[MAX_QPATH];
 	char     displayName[64];
+	// Exact primary mesh selected from the merged character manifest. Cached at
+	// preload time so game-side spawns never reconstruct asset paths or probe VFS.
+	char     primaryModel[MAX_QPATH];
 	// Collision hull from the manifest's model.bbox (a creature/monster carries its own
 	// size). hasBBox is qfalse when the manifest omits it — the game then keeps its
 	// default hull. Cached here so a spawn reads it without a per-spawn Lua call.
@@ -53,6 +57,99 @@ typedef struct {
 	qboolean canActivateSet;
 	qboolean canActivate;
 } svLuaCharacterTemplate_t;
+
+static qboolean SV_Lua_IsSafeModelRoot( const char *root ) {
+	const char *segment;
+	const char *p;
+
+	if ( !root || !root[0] || root[0] == '/' || root[0] == '\\' ) return qfalse;
+	if ( strlen( root ) >= MAX_QPATH || strstr( root, "//" ) || strchr( root, '\\' ) ) return qfalse;
+	segment = root;
+	for ( p = root; ; p++ ) {
+		unsigned char ch = (unsigned char)*p;
+		if ( ch == '/' || ch == '\0' ) {
+			int length = (int)( p - segment );
+			if ( length == 0 || ( length == 1 && segment[0] == '.' )
+			  || ( length == 2 && segment[0] == '.' && segment[1] == '.' ) ) return qfalse;
+			if ( ch == '\0' ) break;
+			segment = p + 1;
+			continue;
+		}
+		if ( ch < 32 || ch == 127 || ch == ':' || ch == '"' || ch == ';' ) return qfalse;
+	}
+	return qtrue;
+}
+
+static qboolean SV_Lua_ModelFileExists( const char *path ) {
+	fileHandle_t f = FS_INVALID_HANDLE;
+	int length = FS_FOpenFileRead( path, &f, qfalse );
+
+	if ( length < 0 || f == FS_INVALID_HANDLE ) return qfalse;
+	FS_FCloseFile( f );
+	return qtrue;
+}
+
+static void SV_Lua_CachePrimaryModel( lua_State *L, int profileTableIndex,
+	const char *characterName, svLuaCharacterTemplate_t *tpl ) {
+	static const char * const primary[] = { "lower", "legs", "body" };
+	static const char * const extensions[] = { ".iqm", ".md3", ".mdl" };
+	char modelRoot[MAX_QPATH];
+	char candidate[MAX_QPATH];
+
+	if ( tpl->primaryModel[0] ) return;
+	Com_sprintf( modelRoot, sizeof( modelRoot ), "characters/%s/models", characterName );
+
+	lua_getfield( L, profileTableIndex, "model" );
+	if ( !lua_istable( L, -1 ) ) {
+		lua_pop( L, 1 );
+		return;
+	}
+	int modelIdx = lua_gettop( L );
+
+	lua_getfield( L, modelIdx, "root" );
+	if ( lua_isstring( L, -1 ) && lua_tostring( L, -1 )[0] ) {
+		const char *authoredRoot = lua_tostring( L, -1 );
+		if ( !SV_Lua_IsSafeModelRoot( authoredRoot ) ) {
+			COM_WARN( LOG_CH(ch_server), "BotLua: character '%s' has unsafe model.root\n", characterName );
+			lua_pop( L, 2 );
+			return;
+		}
+		Q_strncpyz( modelRoot, authoredRoot, sizeof( modelRoot ) );
+	}
+	lua_pop( L, 1 );
+
+	lua_getfield( L, modelIdx, "parts" );
+	if ( lua_istable( L, -1 ) ) {
+		int partsIdx = lua_gettop( L );
+		for ( int i = 1; i <= SV_WI_MAX_MODEL_PARTS && !tpl->primaryModel[0]; i++ ) {
+			lua_rawgeti( L, partsIdx, i );
+			if ( !lua_isstring( L, -1 ) ) {
+				lua_pop( L, 1 );
+				break;
+			}
+			const char *partName = lua_tostring( L, -1 );
+			qboolean isPrimary = qfalse;
+			for ( int p = 0; p < (int)( sizeof( primary ) / sizeof( primary[0] ) ); p++ ) {
+				if ( !Q_stricmp( partName, primary[p] ) ) {
+					isPrimary = qtrue;
+					break;
+				}
+			}
+			if ( isPrimary ) {
+				for ( int e = 0; e < (int)( sizeof( extensions ) / sizeof( extensions[0] ) ); e++ ) {
+					Com_sprintf( candidate, sizeof( candidate ), "%s/%s%s", modelRoot, partName, extensions[e] );
+					if ( SV_Lua_ModelFileExists( candidate ) ) {
+						Q_strncpyz( tpl->primaryModel, candidate, sizeof( tpl->primaryModel ) );
+						break;
+					}
+				}
+			}
+			lua_pop( L, 1 );
+		}
+	}
+	lua_pop( L, 1 );
+	lua_pop( L, 1 );
+}
 
 // Per-bot-session state, allocated by SV_Lua_LoadCharacter and freed by SV_Lua_FreeCharacter.
 // May have multiple live instances for the same character (different skill levels).
@@ -1186,6 +1283,12 @@ int SV_Lua_LoadCharacter( const char *characterName, float skillNormalized ) {
 		Q_strncpyz( s_templates[s_characters[handle].templateIdx].displayName,
 		            s_characters[handle].displayName,
 		            sizeof( s_templates[s_characters[handle].templateIdx].displayName ) );
+	}
+
+	if ( s_characters[handle].templateIdx >= 0 &&
+	     s_characters[handle].templateIdx < s_numTemplates ) {
+		SV_Lua_CachePrimaryModel( L, profileTableIndex, characterName,
+			&s_templates[s_characters[handle].templateIdx] );
 	}
 
 	// Cache the collision hull from model.bbox { mins = {x,y,z}, maxs = {x,y,z} } into the
@@ -2538,6 +2641,20 @@ qboolean SV_Lua_GetCharacterDisplayName( const char *name, char *out, int outSiz
 			Q_strncpyz( out,
 			            s_templates[i].displayName[0] ? s_templates[i].displayName : name,
 			            outSize );
+			return qtrue;
+		}
+	}
+	return qfalse;
+}
+
+qboolean SV_Lua_GetCharacterPrimaryModel( const char *name, char *out, int outSize ) {
+	int i;
+
+	out[0] = '\0';
+	for ( i = 0; i < s_numTemplates; i++ ) {
+		if ( s_templates[i].inuse && !Q_stricmp( s_templates[i].name, name ) ) {
+			if ( !s_templates[i].primaryModel[0] ) return qfalse;
+			Q_strncpyz( out, s_templates[i].primaryModel, outSize );
 			return qtrue;
 		}
 	}

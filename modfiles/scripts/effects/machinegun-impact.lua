@@ -1,0 +1,41 @@
+-- SPDX-License-Identifier: GPL-3.0-or-later
+-- Quake 4-inspired composition using only Wired-owned resources. Moving GPU
+-- sparks, short line sparks and the wider surface-locked streaks remain
+-- separate layers; this preserves their different motion and fade silhouettes.
+-- Machinegun and shotgun deliberately share the Q1-derived ricochet palette.
+local ricochetSoundRoot="weapons/machinegun/sounds/"
+local function lineSparks(id,count,condition)
+ return {type="beam",id=id,ribbon="gfx/misc/tracer",width=.15,endWidth=.025,
+  count=count,maxInstances=count,length={4,7},normalScale={.7,1},spread=.82,
+  lifetime=.42,ribbonFadeOut=.30,startColor={1,.96,.72,.92},endColor={1,.40,.06,0},
+  offset={0,0,1.5},startCondition=condition}
+end
+local function sideStreaks(id,count,condition)
+ return {type="beam",id=id,ribbon="gfx/misc/tracer",width=.24,endWidth=.035,
+  count=count,maxInstances=count,length={10,16},normalScale={.55,1},spread=.72,
+  lifetime=.16,ribbonFadeOut=.112,startColor={1,.90,.56,.82},endColor={1,.36,.05,0},
+  offset={0,0,1.5},startCondition=condition}
+end
+return {schemaVersion=1,maxActiveActions=21,maxInstances=128,duration=1.5,boundsRadius=64,actions={
+ {type="particle",id="default-flash",particle="hitscan_impact_flash",maxInstances=1,maxParticles=1,offset={0,0,1.5},startCondition=16385,flags={"gpuLifecycle"}},
+ {type="particle",id="default-moving-sparks",particle="hitscan_metal_sparks",maxInstances=3,maxParticles=3,offset={0,0,1.5},startCondition=16385,flags={"gpuLifecycle"}},
+ lineSparks("default-line-sparks",3,16385),
+ sideStreaks("default-side-streaks",6,16385),
+ {type="particle",id="default-smoke",particle="hitscan_dust_puff",maxInstances=1,maxParticles=1,delay={.1,.1},offset={0,0,1.5},startCondition=16385,flags={"gpuLifecycle"}},
+ {type="particle",id="metal-flash",particle="hitscan_impact_flash",maxInstances=1,maxParticles=1,offset={0,0,1.5},startCondition=16386,flags={"gpuLifecycle"}},
+ {type="particle",id="metal-moving-sparks",particle="hitscan_metal_sparks",maxInstances=4,maxParticles=4,offset={0,0,1.5},startCondition=16386,flags={"gpuLifecycle"}},
+ lineSparks("metal-line-sparks",3,16386),
+ sideStreaks("metal-side-streaks",6,16386),
+ {type="particle",id="metal-smoke",particle="hitscan_dust_puff",maxInstances=1,maxParticles=1,delay={.1,.1},offset={0,0,1.5},startCondition=16386,flags={"gpuLifecycle"}},
+ {type="particle",id="dust-flash",particle="hitscan_impact_flash",maxInstances=1,maxParticles=1,offset={0,0,1.5},startCondition=16416,flags={"gpuLifecycle"}},
+ {type="particle",id="dust-moving-sparks",particle="hitscan_metal_sparks",maxInstances=2,maxParticles=2,offset={0,0,1.5},startCondition=16416,flags={"gpuLifecycle"}},
+ lineSparks("dust-line-sparks",1,16416),
+ sideStreaks("dust-side-streaks",4,16416),
+ {type="particle",id="dust-smoke",particle="hitscan_dust_puff",maxInstances=2,maxParticles=2,delay={.1,.1},offset={0,0,1.5},startCondition=16416,flags={"gpuLifecycle"}},
+ {type="particle",id="dust-chips",particle="hitscan_surface_chips",maxInstances=4,maxParticles=4,delay={.04,.04},offset={0,0,1.5},startCondition=16416,flags={"gpuLifecycle"}},
+ {type="decal",id="mark",material="gfx/damage/bullet_mrk",size=5,depth=4,duration=10},
+ {type="beam",id="ricochet",ribbon="gfx/misc/tracer",width=.38,endWidth=.06,count=1,maxInstances=1,lifetime=.07,ribbonFadeOut=.04,startColor={1,.88,.52,.95},endColor={1,.32,.04,0},offset={0,0,1.75},startCondition=17408},
+ {type="sound",id="ricochet-sound-0",sound=ricochetSoundRoot.."ric1.opus",channel=0,startCondition=17472},
+ {type="sound",id="ricochet-sound-1",sound=ricochetSoundRoot.."ric2.opus",channel=0,startCondition=17536},
+ {type="sound",id="ricochet-sound-2",sound=ricochetSoundRoot.."ric3.opus",channel=0,startCondition=17664},
+}}

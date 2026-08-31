@@ -10,6 +10,7 @@
 #include "../qcommon/qcommon.h"
 #include "../qcommon/net_transport.h"
 #include "../qcommon/maps/map_format_registry.h"
+#include "../qcommon/mod_manifest.h"
 #include "../render/frontend/tr_public.h"
 #include "../qcommon/vm_local.h"
 #include "../cgame/cg_public.h"
@@ -424,13 +425,26 @@ typedef enum {
 } demoMessageAbortKind_t;
 
 typedef struct clientApp_s {
+	/* Explicit game-switch/map lifetime owner.  It is independent of input
+	 * focus and VM identity, so every future clientApps[N] receives its own
+	 * App + Level pair. */
+	appMemory_t		memory;
 	clientActive_t		cl;		// per-connection gameplay/frame state
 	clientConnection_t	clc;	// per-connection protocol/connection state
 
 	// per-connection "tail" relocated out of clientStatic_t
 	connstate_t	state;			// connection status
-	qboolean	gameSwitch;
+	qboolean	gameSwitch;		// legacy global restart guard; Step 6 retirement
 	char		servername[MAX_OSPATH];	// server from original connect (reconnect)
+	/* Connection-owned content receipt. The numeric mount/cvar scope is shared
+	 * deliberately: one teardown token retires both registries, while each
+	 * subsystem keeps its own typed API and storage. */
+	fsMountScopeId_t contentScopeId;
+	qboolean	contentScopeMounted;
+	char		contentGameDir[MAX_QPATH];
+	wiredPackageManifest_t *contentManifests;
+	size_t		contentManifestCount;
+	qboolean	contentManifestReceived;
 	qboolean	cgameStarted;
 	qboolean	startCgame;
 	mapFile_t	*cgameBsp;
@@ -443,7 +457,12 @@ typedef struct clientApp_s {
 	// per-connection CL_Frame-op state relocated out of cl_main.c file-statics
 	// (in-process-queue L6) so a 2nd live app does not collide. Zero-init matches
 	// the former static initializers; at N=1 only app[0]'s copy is touched.
-	char		pendingConnectError[512];	// was static cl_pendingConnectError
+	/* Recoverable connection/loading failures can destroy the renderer and UI
+	 * before a dialog is safe to display. Keep the product-facing error on the
+	 * app container so CL_StartHunkUsers can consume it after UI recovery. */
+	char		pendingErrorTitle[64];
+	char		pendingErrorMessage[512];
+	qboolean	pendingErrorRetryable;
 	int			lastWarmupValue;			// was static cl_lastWarmupValue
 	int			matchAlertExpire;			// was static cl_matchAlertExpire
 	qboolean	timeoutWasBothPaused;		// was static wasBothPaused (CL_CheckTimeout)
@@ -511,9 +530,6 @@ int CL_ActiveCgameInstance( void );
 // activate per owning-app rather than per input-focus. Returns a plain bool so
 // the WiredUI-tier policy consumes no clientApp_t* (tier-clean).
 qboolean CL_AnyViewportAppRenderable( void );
-
-extern	char		cl_oldGame[MAX_QPATH];
-extern	qboolean	cl_oldGameSet;
 
 // Loading screen progress tracking — updated from various load callsites,
 // read by cl_loading_ui.c to render progress bars
@@ -600,6 +616,9 @@ void CL_AddReliableCommand( clientApp_t *app, const char *cmd, qboolean isDiscon
  * and resolved `address`; no credential enters Cbuf, a cvar, or a log. */
 qboolean CL_ConnectBrowserServer( const char *target, const netadr_t *address,
 	const char *joinPassword, int selectionGeneration );
+const char *CL_ReconnectTarget( void );
+qboolean CL_ConfigureContentScope( clientApp_t *app, const char *gameDir );
+qboolean CL_RefreshContentScope( clientApp_t *app );
 
 void CL_StartHunkUsers( void );
 
@@ -623,6 +642,8 @@ void CL_GetPingInfo( int n, char *buf, int buflen );
 int CL_GetPingQueueCount( void );
 
 void CL_ClearState( clientApp_t *app );
+void CL_ClearContentManifestReceipt( clientApp_t *app );
+qboolean CL_ApplyContentManifestReceipt( clientApp_t *app );
 
 int CL_ServerStatus( const char *serverAddress, char *serverStatusString, int maxLen );
 qboolean CL_NormalizeServerAddress( const char *input, netadrtype_t family,

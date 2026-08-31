@@ -17,6 +17,19 @@
 
 static qboolean PositionQ16( float value, int32_t *outValue );
 
+static void PublishLightingScalars( renderSubmissionState_t *state )
+{
+	renderSubmissionWorldSlot_t *slot;
+	if ( !state || state->activeWorldIndex < 0
+			|| state->activeWorldIndex >= MAX_RENDER_WORLDS ) return;
+	slot = &state->worlds[state->activeWorldIndex];
+	if ( !slot->loaded ) return;
+	slot->irradianceVolumeDigest = state->irradianceVolumeDigest;
+	slot->directionalLightingDigest = state->directionalLightingDigest;
+	slot->irradianceVolumeCount = state->irradianceVolumeCount;
+	slot->directionalLightingCount = state->directionalLightingCount;
+}
+
 static uint64_t HashByte( uint64_t digest, uint8_t value )
 {
 	return ( digest ^ value ) * FNV_PRIME;
@@ -55,10 +68,11 @@ qboolean RenderSubmission_ClearDirectionalLighting( renderSubmissionState_t *sta
 {
 	if ( !state || state->frameOpen )
 		return qfalse;
-	free( state->directionalLighting.ownedArtifactBytes );
-	memset( &state->directionalLighting, 0, sizeof( state->directionalLighting ) );
+	free( state->directionalLighting->ownedArtifactBytes );
+	memset( state->directionalLighting, 0, sizeof( *state->directionalLighting ) );
 	state->directionalLightingCount = 0u;
 	state->directionalLightingDigest = FNV_OFFSET;
+	PublishLightingScalars( state );
 	return qtrue;
 }
 
@@ -84,14 +98,15 @@ qboolean RenderSubmission_RegisterDirectionalLighting(
 		free( ownedBytes );
 		return qfalse;
 	}
-	state->directionalLighting.artifact = ownedReceipt;
-	state->directionalLighting.ownedArtifactBytes = ownedBytes;
-	state->directionalLighting.artifactByteLength = artifactByteLength;
-	memcpy( state->directionalLighting.payloads, ownedPayloads, sizeof( ownedPayloads ) );
+	state->directionalLighting->artifact = ownedReceipt;
+	state->directionalLighting->ownedArtifactBytes = ownedBytes;
+	state->directionalLighting->artifactByteLength = artifactByteLength;
+	memcpy( state->directionalLighting->payloads, ownedPayloads, sizeof( ownedPayloads ) );
 	state->directionalLightingCount = 1u;
 	state->directionalLightingDigest = HashU64( HashU64( FNV_OFFSET, ownedReceipt.manifestHash ), artifactByteLength );
 	if ( !state->directionalLightingDigest )
 		state->directionalLightingDigest = 1u;
+	PublishLightingScalars( state );
 	return qtrue;
 }
 
@@ -102,7 +117,7 @@ qboolean RenderSubmission_DirectionalLightingSnapshot(
 	if ( !state || !state->initialized || !outLighting || !outDigest ||
 		 !state->directionalLightingDigest )
 		return qfalse;
-	*outLighting = state->directionalLightingCount ? &state->directionalLighting : NULL;
+	*outLighting = state->directionalLightingCount ? state->directionalLighting : NULL;
 	*outDigest = state->directionalLightingDigest;
 	return qtrue;
 }
@@ -114,9 +129,11 @@ qboolean RenderSubmission_ClearIrradianceVolumes( renderSubmissionState_t *state
 		return qfalse;
 	for ( index = 0u; index < state->irradianceVolumeCount; ++index )
 		free( state->irradianceVolumes[index].ownedArtifactBytes );
-	memset( state->irradianceVolumes, 0, sizeof( state->irradianceVolumes ) );
+	memset( state->irradianceVolumes, 0,
+		RENDER_SUBMISSION_MAX_IRRADIANCE_VOLUMES * sizeof( state->irradianceVolumes[0] ) );
 	state->irradianceVolumeCount = 0u;
 	state->irradianceVolumeDigest = FNV_OFFSET;
+	PublishLightingScalars( state );
 	return qtrue;
 }
 
@@ -204,6 +221,7 @@ qboolean RenderSubmission_ReplaceIrradianceVolumes(
 		(size_t)sourceCount * sizeof( records[0] ) );
 	state->irradianceVolumeCount = sourceCount;
 	RebuildIrradianceVolumeDigest( state );
+	PublishLightingScalars( state );
 	return qtrue;
 fail:
 	for ( index = 0u; index < built; ++index )
@@ -238,6 +256,7 @@ qboolean RenderSubmission_RegisterIrradianceVolume(
 	state->irradianceVolumes[insertAt] = record;
 	state->irradianceVolumeCount++;
 	RebuildIrradianceVolumeDigest( state );
+	PublishLightingScalars( state );
 	return qtrue;
 }
 

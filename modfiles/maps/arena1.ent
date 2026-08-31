@@ -1,6 +1,6 @@
 {
 "message" "Arena Gate Now"
-"music" "music\sonic5.wav"
+"music" "music/sonic1.opus"
 "classname" "worldspawn"
 "_color" "1.000000 0.776471 0.776471"
 "ambient" "5"

@@ -227,7 +227,7 @@
 		textscale SCALE \
 		forecolor TA_COLOR_BUTTON_FG \
 		style 3 \
-		background "ui/assets/button_back" \
+			background "ui/assets/button_back.png" \
 		visible 1 \
 		action { ACTION } \
 	}
@@ -243,7 +243,7 @@
 		textscale SCALE \
 		forecolor COLOR_WHITE \
 		style 3 \
-		background "ui/assets/button_red" \
+			background "ui/assets/button_red.png" \
 		visible 1 \
 		action { ACTION } \
 	}
@@ -283,7 +283,7 @@
 		type 0 \
 		width FIXED W height FIXED 2 marginLeft X marginTop Y \
 		style 3 \
-		background "ui/assets/gradientbar2" \
+			background "ui/assets/gradientbar2.png" \
 		backcolor 0.5 0.5 0.5 0.3 \
 		decoration \
 		visible 1 \

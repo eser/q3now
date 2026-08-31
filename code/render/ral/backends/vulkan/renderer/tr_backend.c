@@ -2185,7 +2185,7 @@ static const void *RB_DrawSurfs( const void *data ) {
 	// active weather type.
 	RB_DrawAtmospheric();
 
-	if ( r_drawSun->integer ) {
+	if ( r_drawSun->integer && tr.sunShader ) {
 		RB_DrawSun( 0.1f, tr.sunShader );
 	}
 

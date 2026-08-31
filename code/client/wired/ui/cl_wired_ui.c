@@ -1556,7 +1556,7 @@ void WiredUI_ResetAssetGlobalsDefaults( void ) {
 	memset( &wui_assetGlobals, 0, sizeof( wui_assetGlobals ) );
 
 	Q_strncpyz( wui_assetGlobals.cursor, "ui/assets/cursor", sizeof( wui_assetGlobals.cursor ) );
-	Q_strncpyz( wui_assetGlobals.gradientBar, "ui/assets/gradientbar2.tga", sizeof( wui_assetGlobals.gradientBar ) );
+	Q_strncpyz( wui_assetGlobals.gradientBar, "ui/assets/gradientbar2.png", sizeof( wui_assetGlobals.gradientBar ) );
 
 	Q_strncpyz( wui_assetGlobals.defaultSerifFontName, "sansman", sizeof( wui_assetGlobals.defaultSerifFontName ) );
 	Q_strncpyz( wui_assetGlobals.defaultSerifFontItalicName, "sansman-italic", sizeof( wui_assetGlobals.defaultSerifFontItalicName ) );
@@ -2569,7 +2569,7 @@ static void WiredUI_TestRepeat_f( void ) {
 static void WiredUI_TestRepeatImage_f( void ) {
 	wuiStoreEntry_t *e;
 	int              i;
-	const char *icons[2]  = { "levelshots/q3dm0",      "levelshots/q3dm1" };
+	const char *icons[2]  = { "levelshots/q3dm0",      "levelshots/arena1.jpg" };
 	const char *labels[2] = { "Award 1 — first icon", "Award 2 — second icon" };
 
 	e = WiredStore_Set( "test.image_list.count" );
@@ -6492,7 +6492,8 @@ void CL_WiredUI_ShowError( const char *title, const char *message, qboolean retr
 
 	if ( !cls.uiStarted ) {
 		// UI not initialised — best we can do is log
-		COM_ERROR( LOG_CH(ch_ui), "Connect error (UI not ready): %s\n",
+		COM_ERROR( LOG_CH(ch_ui), "UI error '%s' (UI not ready): %s\n",
+		            title ? title : "Error",
 		            message ? message : "unknown error" );
 		return;
 	}
@@ -6503,14 +6504,16 @@ void CL_WiredUI_ShowError( const char *title, const char *message, qboolean retr
 	// modal nobody can dismiss. Interactive runs (com_automated 0) still get
 	// the dialog with its message.
 	if ( com_automated && com_automated->integer ) {
-		COM_ERROR( LOG_CH(ch_ui), "Connect error (dialog suppressed, automated): %s\n",
+		COM_ERROR( LOG_CH(ch_ui),
+		            "UI error '%s' (dialog suppressed, automated): %s\n",
+		            title ? title : "Error",
 		            message ? message : "unknown error" );
 		return;
 	}
 
 	// Hide Retry if the caller says non-retryable, or if the last connect
 	// target was localhost (CL_Reconnect_f refuses it silently — B6 fix).
-	reconnectTarget = Cvar_VariableString( "cl_reconnectArgs" );
+	reconnectTarget = CL_ReconnectTarget();
 	hideRetry = !retryable
 	         || reconnectTarget[0] == '\0'
 	         || Q_stricmp( reconnectTarget, "localhost" ) == 0;

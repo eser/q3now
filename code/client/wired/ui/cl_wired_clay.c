@@ -5823,9 +5823,15 @@ static void wui_clay_dispatch_command( Clay_RenderCommand *rc )
 		  && cmd->name[ 6 ] == ':' )
 		{
 			float bgTime = 0.0f, bgMouseX = 0.0f, bgMouseY = 0.0f, bgTrans = 0.0f;
-			WUI_SceneBackdropParams( &bgTime, &bgMouseX, &bgMouseY, &bgTrans );
-			re.DrawMenuBackdrop( bb->x, bb->y, bb->width, bb->height,
-				bgTime, bgMouseX, bgMouseY, bgTrans );
+			/* Procedural menu backdrops are an optional renderer capability. A
+			 * level restart may render the loading UI after a backend reload, and
+			 * legacy/partial adapters legitimately leave this export NULL. Keep the
+			 * UI command a no-op there instead of calling address zero. */
+			if ( re.DrawMenuBackdrop ) {
+				WUI_SceneBackdropParams( &bgTime, &bgMouseX, &bgMouseY, &bgTrans );
+				re.DrawMenuBackdrop( bb->x, bb->y, bb->width, bb->height,
+					bgTime, bgMouseX, bgMouseY, bgTrans );
+			}
 			break;
 		}
 

@@ -14,7 +14,21 @@
 typedef struct {
 	const char *cursor;
 	const char *end;
+	uint32_t line;
+	uint32_t column;
+	uint32_t tokenLine;
+	uint32_t tokenColumn;
 } materialTokenizer_t;
+
+static void AdvanceTokenizer( materialTokenizer_t *parser ) {
+	if ( *parser->cursor == '\n' ) {
+		parser->line++;
+		parser->column = 1u;
+	} else {
+		parser->column++;
+	}
+	parser->cursor++;
+}
 
 static qboolean CopyToken( char *target, size_t size,
 		const char *start, size_t length ) {
@@ -29,43 +43,53 @@ static qboolean NextToken( materialTokenizer_t *parser,
 	if ( !parser || !token ) return qfalse;
 	for ( ;; ) {
 		while ( parser->cursor < parser->end
-				&& (unsigned char)*parser->cursor <= ' ' ) parser->cursor++;
+				&& (unsigned char)*parser->cursor <= ' ' )
+			AdvanceTokenizer( parser );
 		if ( parser->cursor + 1 < parser->end
 				&& parser->cursor[0] == '/' && parser->cursor[1] == '/' ) {
-			parser->cursor += 2;
+			AdvanceTokenizer( parser );
+			AdvanceTokenizer( parser );
 			while ( parser->cursor < parser->end
-					&& *parser->cursor != '\n' ) parser->cursor++;
+					&& *parser->cursor != '\n' ) AdvanceTokenizer( parser );
 			continue;
 		}
 		if ( parser->cursor + 1 < parser->end
 				&& parser->cursor[0] == '/' && parser->cursor[1] == '*' ) {
-			parser->cursor += 2;
+			AdvanceTokenizer( parser );
+			AdvanceTokenizer( parser );
 			while ( parser->cursor + 1 < parser->end
 					&& !( parser->cursor[0] == '*' && parser->cursor[1] == '/' ) )
-				parser->cursor++;
+				AdvanceTokenizer( parser );
 			if ( parser->cursor + 1 >= parser->end ) return qfalse;
-			parser->cursor += 2; continue;
+			AdvanceTokenizer( parser );
+			AdvanceTokenizer( parser );
+			continue;
 		}
 		break;
 	}
 	if ( parser->cursor >= parser->end ) return qfalse;
+	parser->tokenLine = parser->line;
+	parser->tokenColumn = parser->column;
 	if ( *parser->cursor == '{' || *parser->cursor == '}' ) {
-		token[0] = *parser->cursor++; token[1] = '\0'; return qtrue;
+		token[0] = *parser->cursor;
+		AdvanceTokenizer( parser );
+		token[1] = '\0'; return qtrue;
 	}
 	if ( *parser->cursor == '"' ) {
-		start = ++parser->cursor;
+		AdvanceTokenizer( parser );
+		start = parser->cursor;
 		while ( parser->cursor < parser->end && *parser->cursor != '"' )
-			parser->cursor++;
+			AdvanceTokenizer( parser );
 		if ( parser->cursor >= parser->end
 				|| !CopyToken( token, MAX_QPATH, start,
 					(size_t)( parser->cursor - start ) ) ) return qfalse;
-		parser->cursor++; return qtrue;
+		AdvanceTokenizer( parser ); return qtrue;
 	}
 	start = parser->cursor;
 	while ( parser->cursor < parser->end
 			&& (unsigned char)*parser->cursor > ' '
 			&& *parser->cursor != '{' && *parser->cursor != '}' )
-		parser->cursor++;
+		AdvanceTokenizer( parser );
 	return CopyToken( token, MAX_QPATH, start,
 		(size_t)( parser->cursor - start ) );
 }
@@ -170,8 +194,10 @@ static void StoreEntry( renderMaterialScriptCatalog_t *catalog,
 }
 
 static qboolean ParseFile( renderMaterialScriptCatalog_t *catalog,
-		const char *text, size_t size ) {
-	materialTokenizer_t parser = { text, text + size };
+		const char *text, size_t size, const char *declarationPath,
+		uint64_t declarationSourceId, uint64_t declarationSize,
+		unsigned declarationGeneration ) {
+	materialTokenizer_t parser = { text, text + size, 1u, 1u, 0u, 0u };
 	char token[MAX_QPATH], value[MAX_QPATH];
 	while ( NextToken( &parser, token ) ) {
 		renderMaterialScriptEntry_t entry;
@@ -181,6 +207,13 @@ static qboolean ParseFile( renderMaterialScriptCatalog_t *catalog,
 		char skyPrefix[MAX_QPATH] = "";
 		memset( &entry, 0, sizeof( entry ) );
 		(void)snprintf( entry.name, sizeof( entry.name ), "%s", token );
+		entry.declarationLine = parser.tokenLine;
+		entry.declarationColumn = parser.tokenColumn;
+		(void)snprintf( entry.declarationPath,
+			sizeof( entry.declarationPath ), "%s", declarationPath );
+		entry.declarationSourceId = declarationSourceId;
+		entry.declarationSize = declarationSize;
+		entry.declarationGeneration = declarationGeneration;
 		entry.alphaMode = RENDER_ALPHA_OPAQUE;
 		entry.secondaryAlphaMode = RENDER_ALPHA_OPAQUE;
 		entry.cullMode = RENDER_CULL_BACK;
@@ -207,6 +240,8 @@ static qboolean ParseFile( renderMaterialScriptCatalog_t *catalog,
 					if ( entry.stageCount < RENDER_MATERIAL_SCRIPT_MAX_STAGES ) {
 						currentStage = (int)entry.stageCount++;
 						stage = &entry.stages[currentStage];
+						stage->sourceLine = parser.tokenLine;
+						stage->sourceColumn = parser.tokenColumn;
 						stage->imageSource = RENDER_MATERIAL_STAGE_IMAGE;
 						stage->sourceBlend = RENDER_MATERIAL_BLEND_ONE;
 						stage->destinationBlend = RENDER_MATERIAL_BLEND_ZERO;
@@ -515,11 +550,21 @@ qboolean RenderMaterialScript_Load( renderMaterialScriptCatalog_t *catalog,
 	files = imports->FS_ListFiles( "scripts", ".shader", &count );
 	for ( int i = 0; files && i < count; ++i ) {
 		char path[MAX_QPATH]; void *text = NULL;
+		char canonicalPath[MAX_QPATH];
+		uint64_t sourceId = 0u, sourceSize = 0u;
+		unsigned sourceGeneration = 0u;
 		int bytes = snprintf( path, sizeof( path ), "scripts/%s", files[i] );
 		if ( bytes <= 0 || bytes >= (int)sizeof( path ) ) continue;
+		if ( !imports->FS_ResolveResource
+				|| !imports->FS_ResolveResource( path, canonicalPath,
+					sizeof( canonicalPath ), &sourceId, &sourceSize,
+					&sourceGeneration ) ) {
+			valid = qfalse; break;
+		}
 		bytes = imports->FS_ReadFile( path, &text );
 		if ( bytes > 0 && text && !ParseFile( catalog,
-			(const char *)text, (size_t)bytes ) ) valid = qfalse;
+			(const char *)text, (size_t)bytes, canonicalPath, sourceId,
+			sourceSize, sourceGeneration ) ) valid = qfalse;
 		if ( text ) imports->FS_FreeFile( text );
 		if ( !valid ) break;
 	}
@@ -560,4 +605,129 @@ qboolean RenderMaterialScript_Lookup(
 		}
 	}
 	return qfalse;
+}
+
+static uint64_t MaterialDependencyOptions( const renderMaterialScriptStage_t *stage ) {
+	uint64_t hash = UINT64_C( 14695981039346656037 );
+	const unsigned char options[] = {
+		(unsigned char)stage->clampToEdge,
+		(unsigned char)stage->imageSource,
+		(unsigned char)stage->tcGen
+	};
+	for ( uint32_t i = 0u; i < ARRAY_LEN( options ); ++i ) {
+		hash ^= options[i]; hash *= UINT64_C( 1099511628211 );
+	}
+	return hash ? hash : 1u;
+}
+
+static qboolean AddTcMod( ralMaterialSourceStage_t *target,
+		ralMaterialTcModType_t type, const float *parameters,
+		uint32_t parameterCount, ralMaterialSourceSpan_t span ) {
+	ralMaterialSourceTcMod_t *tcMod;
+	if ( target->tcModCount >= RAL_MATERIAL_SOURCE_MAX_TCMODS
+			|| parameterCount > ARRAY_LEN( target->tcMods[0].parameters ) )
+		return qfalse;
+	tcMod = &target->tcMods[target->tcModCount++];
+	tcMod->type = type;
+	tcMod->span = span;
+	memcpy( tcMod->parameters, parameters, parameterCount * sizeof( float ) );
+	return qtrue;
+}
+
+qboolean RenderMaterialScript_CompileSource(
+		const renderMaterialScriptEntry_t *entry, const refimport_t *imports,
+		uint64_t materialGeneration, ralMaterialSourceReceipt_t *outReceipt,
+		ralMaterialSourceDiagnostic_t *outDiagnostic ) {
+	ralMaterialSourceIr_t source;
+	if ( outDiagnostic ) memset( outDiagnostic, 0, sizeof( *outDiagnostic ) );
+	if ( !entry || !imports || !imports->FS_ResolveResource || !outReceipt
+			|| !materialGeneration || !entry->declarationSourceId
+			|| !entry->declarationGeneration ) return qfalse;
+	memset( &source, 0, sizeof( source ) );
+	source.schemaVersion = RAL_MATERIAL_SOURCE_IR_SCHEMA_VERSION;
+	source.generation = materialGeneration;
+	source.provenance = RAL_MATERIAL_PROVENANCE_Q3_SHADER;
+	source.declaration.sourceId = entry->declarationSourceId;
+	source.declaration.line = entry->declarationLine;
+	source.declaration.column = entry->declarationColumn;
+	(void)snprintf( source.semanticName, sizeof( source.semanticName ), "%s",
+		entry->name );
+	source.cullMode = (uint32_t)entry->cullMode;
+	source.sort = entry->sort;
+	source.sky = entry->sky;
+	source.noDraw = entry->noDraw;
+	source.skyCloudHeight = entry->skyCloudHeight;
+	memcpy( source.diffuseReflectance, entry->lighting.diffuseReflectance,
+		sizeof( source.diffuseReflectance ) );
+	memcpy( source.emissiveRadiance, entry->lighting.emissiveRadiance,
+		sizeof( source.emissiveRadiance ) );
+	source.emissiveRange = entry->lighting.emissiveInfluenceRange;
+	source.lightingFlags = entry->hasLighting ? 1u : 0u;
+	for ( uint32_t i = 0u; i < entry->stageCount; ++i ) {
+		const renderMaterialScriptStage_t *input = &entry->stages[i];
+		ralMaterialSourceStage_t *stage = &source.stages[source.stageCount];
+		ralMaterialSourceSpan_t stageSpan = {
+			entry->declarationSourceId, input->sourceLine, input->sourceColumn
+		};
+		uint64_t optionsHash = MaterialDependencyOptions( input );
+		stage->span = stageSpan;
+		stage->mapKind = input->imageSource == RENDER_MATERIAL_STAGE_LIGHTMAP
+			? RAL_MATERIAL_MAP_LIGHTMAP : input->imageSource == RENDER_MATERIAL_STAGE_WHITE
+			? RAL_MATERIAL_MAP_WHITE : RAL_MATERIAL_MAP_IMAGE;
+		stage->dependencyIndex = UINT32_MAX;
+		if ( stage->mapKind == RAL_MATERIAL_MAP_IMAGE ) {
+			char canonical[MAX_QPATH];
+			uint64_t sourceId = 0u, byteSize = 0u;
+			unsigned fsGeneration = 0u;
+			uint32_t dependencyIndex;
+			if ( !input->imageName[0] || !imports->FS_ResolveResource(
+					input->imageName, canonical, sizeof( canonical ), &sourceId,
+					&byteSize, &fsGeneration ) ) return qfalse;
+			for ( dependencyIndex = 0u;
+					dependencyIndex < source.dependencyCount; ++dependencyIndex ) {
+				ralMaterialSourceDependency_t *dependency =
+					&source.dependencies[dependencyIndex];
+				if ( dependency->sourceId == sourceId
+						&& dependency->creationOptionsHash == optionsHash ) break;
+			}
+			if ( dependencyIndex == source.dependencyCount ) {
+				ralMaterialSourceDependency_t *dependency;
+				if ( source.dependencyCount >= RAL_MATERIAL_SOURCE_MAX_DEPENDENCIES )
+					return qfalse;
+				dependency = &source.dependencies[source.dependencyCount++];
+				dependency->role = RAL_MATERIAL_DEPENDENCY_TEXTURE;
+				dependency->sourceId = sourceId;
+				dependency->fsGeneration = fsGeneration;
+				dependency->size = byteSize;
+				dependency->creationOptionsHash = optionsHash;
+				dependency->span = stageSpan;
+				(void)snprintf( dependency->canonicalPath,
+					sizeof( dependency->canonicalPath ), "%s", canonical );
+			}
+			stage->dependencyIndex = dependencyIndex;
+		}
+		stage->tcGen = (ralMaterialSourceTcGen_t)input->tcGen;
+		stage->sourceBlend = (uint32_t)input->sourceBlend;
+		stage->destinationBlend = (uint32_t)input->destinationBlend;
+		stage->alphaTest = (uint32_t)input->alphaTest;
+		stage->alphaCutoff = input->alphaCutoff;
+		stage->depthWrite = i == 0u ? entry->depthWrite : qfalse;
+		if ( input->scale[0] != 1.0f || input->scale[1] != 1.0f )
+			if ( !AddTcMod( stage, RAL_MATERIAL_TCMOD_SCALE,
+				input->scale, 2u, stageSpan ) ) return qfalse;
+		if ( input->scroll[0] != 0.0f || input->scroll[1] != 0.0f )
+			if ( !AddTcMod( stage, RAL_MATERIAL_TCMOD_SCROLL,
+				input->scroll, 2u, stageSpan ) ) return qfalse;
+		if ( input->rotateDegrees != 0.0f )
+			if ( !AddTcMod( stage, RAL_MATERIAL_TCMOD_ROTATE,
+				&input->rotateDegrees, 1u, stageSpan ) ) return qfalse;
+		if ( input->hasTurbulence )
+			if ( !AddTcMod( stage, RAL_MATERIAL_TCMOD_TURBULENCE,
+				input->turbulence, 4u, stageSpan ) ) return qfalse;
+		if ( input->hasStretch )
+			if ( !AddTcMod( stage, RAL_MATERIAL_TCMOD_STRETCH,
+				input->stretch, 4u, stageSpan ) ) return qfalse;
+		source.stageCount++;
+	}
+	return Ral_MaterialSourceCompile( &source, outReceipt, outDiagnostic );
 }

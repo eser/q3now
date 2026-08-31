@@ -63,6 +63,7 @@ static wiredFxProfile_t CompleteProfile( void ) {
 	profile.actions[WIRED_FX_ACTION_MODEL].payload.model.model = 4u;
 	profile.actions[WIRED_FX_ACTION_SOUND].payload.sound.sound = 5u;
 	profile.actions[WIRED_FX_ACTION_SCREEN_SHAKE].payload.screenShake.magnitude = 0.5f;
+	profile.actions[WIRED_FX_ACTION_SCREEN_SHAKE].payload.screenShake.decayExponent = 1.0f;
 	profile.actions[WIRED_FX_ACTION_CONTROLLER_SHAKE].payload.controllerShake.highDuration = 0.2f;
 	profile.actions[WIRED_FX_ACTION_CONTROLLER_SHAKE].payload.controllerShake.lowDuration = 0.4f;
 	profile.actions[WIRED_FX_ACTION_WIND].payload.wind.multiplier = 1.0f;
@@ -75,6 +76,17 @@ static wiredFxProfile_t CompleteProfile( void ) {
 	profile.actions[WIRED_FX_ACTION_FLARE].payload.flare.flare = 10u;
 	profile.actions[WIRED_FX_ACTION_RADIAL_BLUR].payload.radialBlur.maxScale = 0.3f;
 	profile.actions[WIRED_FX_ACTION_RIBBON].payload.ribbon.ribbon = 11u;
+	profile.actions[WIRED_FX_ACTION_RIBBON].payload.ribbon.width = 1.0f;
+	profile.actions[WIRED_FX_ACTION_RIBBON].payload.ribbon.endWidth = 1.0f;
+	profile.actions[WIRED_FX_ACTION_RIBBON].payload.ribbon.count = 1u;
+	profile.actions[WIRED_FX_ACTION_RIBBON].payload.ribbon.startColor[0] = 1.0f;
+	profile.actions[WIRED_FX_ACTION_RIBBON].payload.ribbon.startColor[1] = 1.0f;
+	profile.actions[WIRED_FX_ACTION_RIBBON].payload.ribbon.startColor[2] = 1.0f;
+	profile.actions[WIRED_FX_ACTION_RIBBON].payload.ribbon.startColor[3] = 1.0f;
+	profile.actions[WIRED_FX_ACTION_RIBBON].payload.ribbon.endColor[0] = 1.0f;
+	profile.actions[WIRED_FX_ACTION_RIBBON].payload.ribbon.endColor[1] = 1.0f;
+	profile.actions[WIRED_FX_ACTION_RIBBON].payload.ribbon.endColor[2] = 1.0f;
+	profile.actions[WIRED_FX_ACTION_RIBBON].payload.ribbon.endColor[3] = 1.0f;
 	profile.actions[WIRED_FX_ACTION_GODRAY].payload.godray.material = 12u;
 	profile.actions[WIRED_FX_ACTION_GODRAY].payload.godray.color[0] = 1.0f;
 	profile.actions[WIRED_FX_ACTION_GODRAY].payload.godray.color[1] = 0.8f;
@@ -83,6 +95,27 @@ static wiredFxProfile_t CompleteProfile( void ) {
 	profile.actions[WIRED_FX_ACTION_GODRAY].payload.godray.colorScale = 0.015f;
 	profile.actions[WIRED_FX_ACTION_GODRAY].payload.godray.size = 512u;
 	profile.actions[WIRED_FX_ACTION_GODRAY].payload.godray.sourceSize = 128u;
+	profile.actions[WIRED_FX_ACTION_SPRITE].payload.sprite.material = 13u;
+	profile.actions[WIRED_FX_ACTION_SPRITE].payload.sprite.radius[0] = 8.0f;
+	profile.actions[WIRED_FX_ACTION_SPRITE].payload.sprite.radius[1] = 16.0f;
+	profile.actions[WIRED_FX_ACTION_BEAM].payload.ribbon.ribbon = 14u;
+	profile.actions[WIRED_FX_ACTION_BEAM].payload.ribbon.width = 0.25f;
+	profile.actions[WIRED_FX_ACTION_BEAM].payload.ribbon.endWidth = 0.05f;
+	profile.actions[WIRED_FX_ACTION_BEAM].payload.ribbon.count = 3u;
+	profile.actions[WIRED_FX_ACTION_BEAM].payload.ribbon.length[0] = 10.0f;
+	profile.actions[WIRED_FX_ACTION_BEAM].payload.ribbon.length[1] = 20.0f;
+	profile.actions[WIRED_FX_ACTION_BEAM].payload.ribbon.normalScale[0] = 0.5f;
+	profile.actions[WIRED_FX_ACTION_BEAM].payload.ribbon.normalScale[1] = 1.0f;
+	profile.actions[WIRED_FX_ACTION_BEAM].payload.ribbon.lifetime = 0.16f;
+	profile.actions[WIRED_FX_ACTION_BEAM].payload.ribbon.fadeOut = 0.112f;
+	profile.actions[WIRED_FX_ACTION_BEAM].payload.ribbon.startColor[0] = 1.0f;
+	profile.actions[WIRED_FX_ACTION_BEAM].payload.ribbon.startColor[1] = 1.0f;
+	profile.actions[WIRED_FX_ACTION_BEAM].payload.ribbon.startColor[2] = 1.0f;
+	profile.actions[WIRED_FX_ACTION_BEAM].payload.ribbon.startColor[3] = 1.0f;
+	profile.actions[WIRED_FX_ACTION_BEAM].payload.ribbon.endColor[0] = 1.0f;
+	profile.actions[WIRED_FX_ACTION_BEAM].payload.ribbon.endColor[1] = 1.0f;
+	profile.actions[WIRED_FX_ACTION_BEAM].payload.ribbon.endColor[2] = 1.0f;
+	profile.actions[WIRED_FX_ACTION_BEAM].payload.ribbon.endColor[3] = 1.0f;
 	return profile;
 }
 
@@ -96,10 +129,10 @@ int main( void ) {
 	static const char *const expectedNames[WIRED_FX_ACTION_COUNT] = {
 		"light", "particle", "decal", "decal2", "model", "sound", "screenShake",
 		"controllerShake", "wind", "renderParm", "envOverride", "envChange", "flare",
-		"radialBlur", "ribbon", "fadeParent", "godray"
+		"radialBlur", "ribbon", "fadeParent", "godray", "sprite", "beam"
 	};
 
-	CHECK( WIRED_FX_ACTION_COUNT == 17u );
+	CHECK( WIRED_FX_ACTION_COUNT == 19u );
 	for ( i = 0u; i < WIRED_FX_ACTION_COUNT; ++i )
 		CHECK( strcmp( WiredFx_ActionTypeName( i ), expectedNames[i] ) == 0 );
 	CHECK( strcmp( WiredFx_ActionTypeName( WIRED_FX_ACTION_COUNT ), "invalid" ) == 0 );
@@ -155,10 +188,39 @@ int main( void ) {
 	event.intensity = 1.0f;
 	event.sizeScale = 1.0f;
 	CHECK( WiredFx_ValidateEvent( &registry, &event ) == WIRED_FX_VALID );
+	event.flags = WIRED_FX_EVENT_HAS_SHAKE_OVERRIDE;
+	event.shakeDurationSeconds = 2.0f;
+	event.shakeFadeInSeconds = 0.25f;
+	event.shakeFadeOutSeconds = 0.5f;
+	event.shakeRadius = 600.0f;
+	CHECK( WiredFx_ValidateEvent( &registry, &event ) == WIRED_FX_VALID );
+	event.shakeFadeOutSeconds = 2.0f;
+	CHECK( WiredFx_ValidateEvent( &registry, &event ) == WIRED_FX_INVALID_EVENT );
+	event.shakeFadeOutSeconds = 0.5f;
+	event.flags = 0u;
+	CHECK( WiredFx_ValidateEvent( &registry, &event ) == WIRED_FX_INVALID_EVENT );
+	event.shakeDurationSeconds = 0.0f;
+	event.shakeFadeInSeconds = 0.0f;
+	event.shakeFadeOutSeconds = 0.0f;
+	event.shakeRadius = 0.0f;
+	CHECK( WiredFx_ValidateEvent( &registry, &event ) == WIRED_FX_VALID );
 	event.profile = 3u;
 	CHECK( WiredFx_ValidateEvent( &registry, &event ) == WIRED_FX_INVALID_EVENT );
 	event.profile = 2u;
 	event.flags = 0x80000000u;
+	CHECK( WiredFx_ValidateEvent( &registry, &event ) == WIRED_FX_INVALID_EVENT );
+	event.flags = WIRED_FX_EVENT_HAS_SOURCE_ENTITY;
+	event.sourceEntityNum = MAX_GENTITIES - 1;
+	event.pathSpacing = 8.0f;
+	event.timeSpanSeconds = 0.25f;
+	CHECK( WiredFx_ValidateEvent( &registry, &event ) == WIRED_FX_VALID );
+	event.sourceEntityNum = MAX_GENTITIES;
+	CHECK( WiredFx_ValidateEvent( &registry, &event ) == WIRED_FX_INVALID_EVENT );
+	event.sourceEntityNum = 0;
+	event.pathSpacing = -1.0f;
+	CHECK( WiredFx_ValidateEvent( &registry, &event ) == WIRED_FX_INVALID_EVENT );
+	event.pathSpacing = 8.0f;
+	event.timeSpanSeconds = 1.01f;
 	CHECK( WiredFx_ValidateEvent( &registry, &event ) == WIRED_FX_INVALID_EVENT );
 
 	profile = CompleteProfile();
@@ -184,6 +246,19 @@ int main( void ) {
 	CHECK( WiredFx_ValidateProfile( &profile ) == WIRED_FX_VALID );
 	profile = CompleteProfile();
 	profile.actions[WIRED_FX_ACTION_PARTICLE].payload.particle.maxParticles = 65u;
+	CHECK( WiredFx_ValidateProfile( &profile ) == WIRED_FX_INVALID_ACTION_RANGE );
+	profile = CompleteProfile();
+	profile.actions[WIRED_FX_ACTION_PARTICLE].payload.particle.pathSampling =
+		WIRED_FX_PATH_SAMPLING_COUNT;
+	CHECK( WiredFx_ValidateProfile( &profile ) == WIRED_FX_INVALID_ACTION_RANGE );
+	profile = CompleteProfile();
+	profile.actions[WIRED_FX_ACTION_SOUND].payload.sound.looping = 2u;
+	CHECK( WiredFx_ValidateProfile( &profile ) == WIRED_FX_INVALID_ACTION_RANGE );
+	profile = CompleteProfile();
+	profile.actions[WIRED_FX_ACTION_LIGHT].payload.light.startTimeJitter = -0.001f;
+	CHECK( WiredFx_ValidateProfile( &profile ) == WIRED_FX_INVALID_ACTION_RANGE );
+	profile = CompleteProfile();
+	profile.actions[WIRED_FX_ACTION_LIGHT].payload.light.startTimeJitterSteps = 1u;
 	CHECK( WiredFx_ValidateProfile( &profile ) == WIRED_FX_INVALID_ACTION_RANGE );
 	profile = CompleteProfile();
 	profile.lodNear = 10.0f;

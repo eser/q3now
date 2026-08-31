@@ -14,6 +14,29 @@ RESULTS_DIR="$ROOT/visual/results/${ARTBOARD}_${MODE}_${ACCENT}/$TIMESTAMP"
 . "$ROOT/lib/wired_paths.sh"
 PREVIEW_BASE="${PREVIEW_BASE:-$WIRED_BASE}"
 ENGINE_BINARY="${ENGINE_BINARY:-$WIRED_BINARY}"
+
+# The capture recipe changes archived renderer/window cvars. Isolate its
+# fs_homepath so those values cannot leak into the player's next normal launch.
+CAPTURE_SOURCE_BASE="$PREVIEW_BASE"
+CAPTURE_HOME_PARENT="$(mktemp -d -t wired-visual-XXXXXX 2>/dev/null || mktemp -d)"
+CAPTURE_HOME="$CAPTURE_HOME_PARENT/$WIRED_APP"
+CAPTURE_BASE="$CAPTURE_HOME/base"
+trap 'rm -rf "$CAPTURE_HOME_PARENT"' EXIT INT TERM
+mkdir -p "$CAPTURE_BASE/screenshots"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) CAPTURE_HOME_NATIVE="$(cygpath -w "$CAPTURE_HOME")" ;;
+  *)                    CAPTURE_HOME_NATIVE="$CAPTURE_HOME" ;;
+esac
+shopt -s nullglob
+for pak in "$CAPTURE_SOURCE_BASE"/pak*.pk3 "$CAPTURE_SOURCE_BASE"/pa[xk]*.sw3z \
+           "$WIRED_GAMEDATA"/pak*.pk3 "$WIRED_GAMEDATA"/pa[xk]*.sw3z; do
+  [ -e "$CAPTURE_BASE/$(basename "$pak")" ] && continue
+  ln "$pak" "$CAPTURE_BASE/" 2>/dev/null \
+    || ln -s "$pak" "$CAPTURE_BASE/" 2>/dev/null \
+    || cp "$pak" "$CAPTURE_BASE/"
+done
+shopt -u nullglob
+PREVIEW_BASE="$CAPTURE_BASE"
 # Artboard-native — must stay in lockstep with regen_baseline.sh.
 # 2026-08-16: the 1280x720 move was reverted; the artboard is fixed-pixel
 # 1440x900 with overflow:hidden (qw-screens.jsx:1043), so a smaller root crops
@@ -114,8 +137,9 @@ quit
 EOF
 
 (
-  cd "$PREVIEW_BASE/.."
-  "$ENGINE_BINARY" +exec "$(basename "$CFG_PATH")" >/dev/null 2>&1 || true
+  cd "$WIRED_BINDIR"
+  "$ENGINE_BINARY" +set fs_homepath "$CAPTURE_HOME_NATIVE" \
+    +exec "$(basename "$CFG_PATH")" >/dev/null 2>&1 || true
 ) || true
 
 # Two shots, in order: impl.png (HUD on) then impl_nohud.png (HUD off).

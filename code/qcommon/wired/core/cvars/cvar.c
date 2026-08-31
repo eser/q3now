@@ -316,16 +316,18 @@ static const char *Cvar_Validate( cvar_t *var, const char *value, qboolean warn 
 
 /*
 ============
-Cvar_Get
+Cvar_GetInternal
 
 If the variable already exists, the value will not be set unless CVAR_ROM
 The flags will be or'ed in if the variable exists.
 ============
 */
-cvar_t *Cvar_Get( const char *var_name, const char *var_value, int flags ) {
+static cvar_t *Cvar_GetInternal( cvarScopeId_t ownerScopeId,
+		const char *var_name, const char *var_value, int flags ) {
 	cvar_t	*var;
 	long	hash;
 	int	index;
+	qboolean adoptScope = qfalse;
 
 	if ( !var_name || !var_value ) {
 		Com_Terminate( TERM_UNRECOVERABLE, "Cvar_Get: NULL parameter" );
@@ -348,6 +350,28 @@ cvar_t *Cvar_Get( const char *var_name, const char *var_value, int flags ) {
 	if(var)
 	{
 		int vm_created = (flags & CVAR_VM_CREATED);
+
+		if ( ownerScopeId != CVAR_SCOPE_GLOBAL ) {
+			if ( var->ownerScopeId == ownerScopeId ) {
+				/* Same lifecycle owner re-registering its own name. */
+			} else if ( var->ownerScopeId == CVAR_SCOPE_GLOBAL
+					&& ( var->flags & ( CVAR_USER_CREATED | CVAR_CMDLINE_CREATED ) ) ) {
+				/* Preserve a config/+set value while transferring its placeholder
+				 * to the first real scoped registration. */
+				adoptScope = qtrue;
+			} else {
+				Com_Log( SEV_WARN, LOG_CH(ch_system),
+					"Cvar_GetScoped: name '%s' already owned by scope %u (requested %u)\n",
+					var_name, (unsigned)var->ownerScopeId, (unsigned)ownerScopeId );
+				return NULL;
+			}
+		} else if ( var->ownerScopeId != CVAR_SCOPE_GLOBAL ) {
+			Com_Log( SEV_WARN, LOG_CH(ch_system),
+				"Cvar_Get: name '%s' is owned by scope %u\n",
+				var_name, (unsigned)var->ownerScopeId );
+			return NULL;
+		}
+
 		var_value = Cvar_Validate(var, var_value, qfalse);
 
 		// Make sure the game code cannot mark engine-added variables as gamecode vars
@@ -449,6 +473,7 @@ cvar_t *Cvar_Get( const char *var_name, const char *var_value, int flags ) {
 			cvar_modifiedFlags |= flags;
 		}
 
+		if ( adoptScope ) var->ownerScopeId = ownerScopeId;
 		return var;
 	}
 
@@ -485,6 +510,7 @@ cvar_t *Cvar_Get( const char *var_name, const char *var_value, int flags ) {
 	var->validator = CV_NONE;
 	var->description = NULL;
 	var->group = CVG_NONE;
+	var->ownerScopeId = ownerScopeId;
 	cvar_group[ var->group ] = 1;
 
 	// link the variable in
@@ -513,6 +539,22 @@ cvar_t *Cvar_Get( const char *var_name, const char *var_value, int flags ) {
 	cvar_sort = qtrue;
 
 	return var;
+}
+
+
+cvar_t *Cvar_Get( const char *var_name, const char *var_value, int flags ) {
+	return Cvar_GetInternal( CVAR_SCOPE_GLOBAL, var_name, var_value, flags );
+}
+
+
+cvar_t *Cvar_GetScoped( cvarScopeId_t scopeId, const char *var_name,
+		const char *var_value, int flags ) {
+	if ( scopeId == CVAR_SCOPE_GLOBAL ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_system),
+			"Cvar_GetScoped: global scope is not a lifecycle owner\n" );
+		return NULL;
+	}
+	return Cvar_GetInternal( scopeId, var_name, var_value, flags );
 }
 
 
@@ -1829,6 +1871,100 @@ static cvar_t *Cvar_Unset( cvar_t *cv )
 
 /*
 ============
+Cvar_UnsetScope
+
+Retires one mod lifecycle's cvars without resetting unrelated global or
+foreign-scope state. The cvar system is main-thread owned; callers detach the
+scope's VM/script users before this single teardown sweep.
+============
+*/
+unsigned Cvar_UnsetScope( cvarScopeId_t scopeId )
+{
+	cvar_t *curvar = cvar_vars;
+	unsigned removed = 0u;
+
+	if ( scopeId == CVAR_SCOPE_GLOBAL ) {
+		return 0u;
+	}
+
+	while ( curvar ) {
+		if ( curvar->ownerScopeId == scopeId ) {
+			curvar = Cvar_Unset( curvar );
+			removed++;
+			continue;
+		}
+		curvar = curvar->next;
+	}
+
+	return removed;
+}
+
+
+static void Cvar_ScopeVerify_f( void )
+{
+	static const cvarScopeId_t scopeA = (cvarScopeId_t)0xC0A1u;
+	static const cvarScopeId_t scopeB = (cvarScopeId_t)0xC0B2u;
+	static const char *globalName = "__wired_scope_verify_global";
+	static const char *scopeAName = "__wired_scope_verify_a";
+	static const char *scopeBName = "__wired_scope_verify_b";
+	static const char *adoptName = "__wired_scope_verify_adopt";
+	cvar_t *globalVar, *scopeAVar, *scopeBVar, *adoptVar;
+	unsigned removedA, removedB;
+
+	/* A prior interrupted verification must not contaminate this run. */
+	Cvar_UnsetScope( scopeA );
+	Cvar_UnsetScope( scopeB );
+	if ( ( globalVar = Cvar_FindVar( globalName ) ) != NULL ) Cvar_Unset( globalVar );
+	if ( ( adoptVar = Cvar_FindVar( adoptName ) ) != NULL ) Cvar_Unset( adoptVar );
+
+	globalVar = Cvar_Get( globalName, "global", CVAR_USER_CREATED );
+	scopeAVar = Cvar_GetScoped( scopeA, scopeAName, "alpha", CVAR_VM_CREATED );
+	scopeBVar = Cvar_GetScoped( scopeB, scopeBName, "beta", CVAR_VM_CREATED );
+	adoptVar = Cvar_Get( adoptName, "configured", CVAR_USER_CREATED );
+	adoptVar = Cvar_GetScoped( scopeA, adoptName, "default", CVAR_VM_CREATED );
+
+	if ( !globalVar || !scopeAVar || !scopeBVar || !adoptVar
+			|| scopeAVar->ownerScopeId != scopeA
+			|| scopeBVar->ownerScopeId != scopeB
+			|| adoptVar->ownerScopeId != scopeA
+			|| strcmp( adoptVar->string, "configured" ) != 0
+			|| Cvar_GetScoped( scopeB, scopeAName, "collision", CVAR_VM_CREATED ) != NULL
+			|| Cvar_Get( scopeAName, "global-collision", 0 ) != NULL ) {
+		Com_Log( SEV_ERROR, LOG_CH(ch_system),
+			"Cvar scope verify: FAIL stage=registration-or-collision\n" );
+		goto cleanup;
+	}
+
+	removedA = Cvar_UnsetScope( scopeA );
+	if ( removedA != 2u || Cvar_FindVar( scopeAName ) || Cvar_FindVar( adoptName )
+			|| Cvar_FindVar( globalName ) != globalVar
+			|| Cvar_FindVar( scopeBName ) != scopeBVar
+			|| Cvar_UnsetScope( CVAR_SCOPE_GLOBAL ) != 0u ) {
+		Com_Log( SEV_ERROR, LOG_CH(ch_system),
+			"Cvar scope verify: FAIL stage=isolated-teardown removed=%u\n", removedA );
+		goto cleanup;
+	}
+
+	removedB = Cvar_UnsetScope( scopeB );
+	if ( removedB != 1u || Cvar_FindVar( scopeBName ) ) {
+		Com_Log( SEV_ERROR, LOG_CH(ch_system),
+			"Cvar scope verify: FAIL stage=foreign-teardown removed=%u\n", removedB );
+		goto cleanup;
+	}
+
+	Com_Log( SEV_INFO, LOG_CH(ch_system),
+		"Cvar scope verify: PASS adopted=1 collision=closed removed_a=2 removed_b=1 global_preserved=1\n" );
+
+cleanup:
+	Cvar_UnsetScope( scopeA );
+	Cvar_UnsetScope( scopeB );
+	if ( ( globalVar = Cvar_FindVar( globalName ) ) != NULL ) Cvar_Unset( globalVar );
+	if ( ( adoptVar = Cvar_FindVar( adoptName ) ) != NULL ) Cvar_Unset( adoptVar );
+}
+
+
+/*
+============
 Cvar_Unset_f
 
 Unsets a userdefined cvar
@@ -2209,9 +2345,12 @@ Slightly modified Cvar_Get for the interpreted modules (game/cgame syscall path)
 =====================
 */
 #define INVALID_FLAGS ( CVAR_USER_CREATED | CVAR_SERVER_CREATED | CVAR_PROTECTED | CVAR_PRIVATE | CVAR_MODIFIED | CVAR_NONEXISTENT )
-void Cvar_VM_Register( vmCvar_t *vmCvar, const char *varName, const char *defaultValue, int flags, int privateFlag )
+static void Cvar_VM_RegisterInternal( cvarScopeId_t scopeId, vmCvar_t *vmCvar,
+		const char *varName, const char *defaultValue, int flags, int privateFlag )
 {
 	cvar_t	*cv;
+	qboolean ownerConflict = qfalse;
+	qboolean sharedEngineGlobal = qfalse;
 
 	// There is code in Cvar_Get to prevent CVAR_ROM cvars being changed by the
 	// user. In other words CVAR_ARCHIVE and CVAR_ROM are mutually exclusive
@@ -2230,9 +2369,28 @@ void Cvar_VM_Register( vmCvar_t *vmCvar, const char *varName, const char *defaul
 	}
 
 	cv = Cvar_FindVar( varName );
+	if ( scopeId != CVAR_SCOPE_GLOBAL && cv
+			&& cv->ownerScopeId == CVAR_SCOPE_GLOBAL
+			&& !( cv->flags & ( CVAR_USER_CREATED | CVAR_CMDLINE_CREATED ) ) ) {
+		/* A small engine-owned surface (for example the cg_* values preloaded for
+		 * UI before cgame starts) intentionally remains process-global. A scoped
+		 * VM may bind that established contract but cannot claim or retire it. */
+		sharedEngineGlobal = qtrue;
+	} else if ( scopeId != CVAR_SCOPE_GLOBAL && cv
+			&& cv->ownerScopeId != scopeId
+			&& !( cv->ownerScopeId == CVAR_SCOPE_GLOBAL
+				&& ( cv->flags & ( CVAR_USER_CREATED | CVAR_CMDLINE_CREATED ) ) ) ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_system),
+			"Cvar_VM_RegisterScoped: name '%s' already owned by scope %u (requested %u)\n",
+			varName, (unsigned)cv->ownerScopeId, (unsigned)scopeId );
+		ownerConflict = qtrue;
+		cv = NULL;
+	}
 
 	// Don't modify cvar if it's protected.
-	if ( cv && ( cv->flags & ( CVAR_PROTECTED | CVAR_PRIVATE ) ) ) {
+	if ( ownerConflict ) {
+		/* Fail closed without mutating the existing cvar or VM handle. */
+	} else if ( cv && ( cv->flags & ( CVAR_PROTECTED | CVAR_PRIVATE ) ) ) {
 		Com_Log( SEV_WARN, LOG_CH(ch_system), "VM tried to register protected cvar '%s' with value '%s'%s\n",
 			varName, defaultValue, ( flags & ~cv->flags ) != 0 ? " and new flags" : "" );
 		if ( cv->flags & CVAR_PRIVATE ) {
@@ -2241,7 +2399,9 @@ void Cvar_VM_Register( vmCvar_t *vmCvar, const char *varName, const char *defaul
 			}
 		}
 	} else {
-		cv = Cvar_Get( varName, defaultValue, flags | CVAR_VM_CREATED );
+		cv = scopeId == CVAR_SCOPE_GLOBAL || sharedEngineGlobal
+			? Cvar_Get( varName, defaultValue, flags | CVAR_VM_CREATED )
+			: Cvar_GetScoped( scopeId, varName, defaultValue, flags | CVAR_VM_CREATED );
 	}
 
 	if (!vmCvar)
@@ -2254,6 +2414,25 @@ void Cvar_VM_Register( vmCvar_t *vmCvar, const char *varName, const char *defaul
 	vmCvar->modificationCount = -1;
 
 	Cvar_Update( vmCvar, 0 );
+}
+
+
+void Cvar_VM_Register( vmCvar_t *vmCvar, const char *varName,
+		const char *defaultValue, int flags, int privateFlag ) {
+	Cvar_VM_RegisterInternal( CVAR_SCOPE_GLOBAL, vmCvar, varName,
+		defaultValue, flags, privateFlag );
+}
+
+
+void Cvar_VM_RegisterScoped( cvarScopeId_t scopeId, vmCvar_t *vmCvar,
+		const char *varName, const char *defaultValue, int flags, int privateFlag ) {
+	if ( scopeId == CVAR_SCOPE_GLOBAL ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_system),
+			"Cvar_VM_RegisterScoped: global scope is not a lifecycle owner\n" );
+		return;
+	}
+	Cvar_VM_RegisterInternal( scopeId, vmCvar, varName,
+		defaultValue, flags, privateFlag );
 }
 
 
@@ -2499,6 +2678,7 @@ void Cvar_Init (void)
 	/* cvar_restart takes a cvar name (optionally) */
 	Cmd_SetCommandCompletionFunc( "cvar_restart", Cvar_CompleteCvarName );
 	Cmd_AddCommand ("cvar_trim", Cvar_Trim_f);
+	Cmd_AddCommand ("cvar_scope_verify", Cvar_ScopeVerify_f);
 
 	Cmd_AddCommand( "writeconfig", Com_WriteConfig_f );
 	Cmd_SetCommandCompletionFunc( "writeconfig", Cmd_CompleteWriteCfgName );

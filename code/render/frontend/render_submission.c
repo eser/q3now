@@ -219,6 +219,9 @@ qboolean RenderSubmission_Init( renderSubmissionState_t *state, uint64_t ownerGe
 	if ( !state || ownerGeneration == 0u || ownerGeneration == UINT64_MAX )
 		return qfalse;
 	memset( state, 0, sizeof( *state ) );
+	state->irradianceVolumes = state->fallbackIrradianceVolumes;
+	state->directionalLighting = &state->fallbackDirectionalLighting;
+	state->activeWorldIndex       = -1;
 	state->ownerGeneration		  = ownerGeneration;
 	state->assetDigest			  = FNV_OFFSET;
 	state->materialDigest		  = FNV_OFFSET;
@@ -249,14 +252,130 @@ qboolean RenderSubmission_Init( renderSubmissionState_t *state, uint64_t ownerGe
 	state->effectRibbonPoints = (ribbonPoint_t *)calloc(
 		RENDER_SUBMISSION_MAX_EFFECT_RIBBON_POINTS,
 		sizeof( *state->effectRibbonPoints ) );
+	state->effectBeams = (beamDesc_t *)calloc(
+		RENDER_SUBMISSION_MAX_EFFECT_BEAMS, sizeof( *state->effectBeams ) );
 	if ( !state->uiPrimitives || !state->effectSprites || !state->effectEmitters
 			|| !state->effectDecals || !state->effectRibbons
-			|| !state->effectRibbonPoints ) {
+			|| !state->effectRibbonPoints || !state->effectBeams ) {
 		free( state->uiPrimitives ); free( state->effectSprites );
 		free( state->effectEmitters ); free( state->effectDecals );
 		free( state->effectRibbons ); free( state->effectRibbonPoints );
+		free( state->effectBeams );
 		memset( state, 0, sizeof( *state ) );
 		return qfalse;
+	}
+	return qtrue;
+}
+
+static void RenderSubmission_FreeWorldSlot( renderSubmissionWorldSlot_t *slot )
+{
+	uint32_t index;
+	if ( !slot ) return;
+	free( (void *)slot->snapshot.vertices );
+	free( (void *)slot->snapshot.indices );
+	free( (void *)slot->snapshot.batches );
+	free( slot->surfaceVisibility );
+	for ( index = 0u; index < slot->irradianceVolumeCount; ++index )
+		free( slot->irradianceVolumes[index].ownedArtifactBytes );
+	free( slot->directionalLighting.ownedArtifactBytes );
+	memset( slot, 0, sizeof( *slot ) );
+}
+
+static void RenderSubmission_ClearActiveWorld( renderSubmissionState_t *state )
+{
+	state->activeWorldIndex = -1;
+	state->worldMap = NULL;
+	state->worldSurfaceVisibility = NULL;
+	state->worldSurfaceVisibilityBytes = 0u;
+	memset( &state->worldSnapshot, 0, sizeof( state->worldSnapshot ) );
+	state->worldDigest = 0u;
+	state->worldSurfaceCount = 0u;
+	state->worldVertexCount = 0u;
+	state->worldIndexCount = 0u;
+	state->worldLoaded = qfalse;
+	state->irradianceVolumes = state->fallbackIrradianceVolumes;
+	state->directionalLighting = &state->fallbackDirectionalLighting;
+	state->irradianceVolumeCount = state->directionalLightingCount = 0u;
+	state->irradianceVolumeDigest = state->directionalLightingDigest = FNV_OFFSET;
+}
+
+static void RenderSubmission_CommitActiveWorld( renderSubmissionState_t *state )
+{
+	renderSubmissionWorldSlot_t *slot;
+	if ( !state || state->activeWorldIndex < 0
+			|| state->activeWorldIndex >= MAX_RENDER_WORLDS ) return;
+	slot = &state->worlds[state->activeWorldIndex];
+	if ( !slot->loaded ) return;
+	slot->snapshot = state->worldSnapshot;
+	slot->digest = state->worldDigest;
+	slot->surfaceCount = state->worldSurfaceCount;
+	slot->vertexCount = state->worldVertexCount;
+	slot->indexCount = state->worldIndexCount;
+	slot->irradianceVolumeDigest = state->irradianceVolumeDigest;
+	slot->directionalLightingDigest = state->directionalLightingDigest;
+	slot->irradianceVolumeCount = state->irradianceVolumeCount;
+	slot->directionalLightingCount = state->directionalLightingCount;
+}
+
+qboolean RenderSubmission_SelectWorld( renderSubmissionState_t *state, int worldIndex )
+{
+	renderSubmissionWorldSlot_t *slot;
+	if ( !state || !state->initialized || worldIndex < 0
+			|| worldIndex >= MAX_RENDER_WORLDS ) return qfalse;
+	slot = &state->worlds[worldIndex];
+	if ( !slot->loaded || !slot->map || !slot->snapshot.ready ) return qfalse;
+	RenderSubmission_CommitActiveWorld( state );
+	state->activeWorldIndex = worldIndex;
+	state->worldMap = slot->map;
+	state->worldSurfaceVisibility = slot->surfaceVisibility;
+	state->worldSurfaceVisibilityBytes = slot->surfaceVisibilityBytes;
+	state->worldSnapshot = slot->snapshot;
+	state->worldDigest = slot->digest;
+	state->worldSurfaceCount = slot->surfaceCount;
+	state->worldVertexCount = slot->vertexCount;
+	state->worldIndexCount = slot->indexCount;
+	state->irradianceVolumes = slot->irradianceVolumes;
+	state->directionalLighting = &slot->directionalLighting;
+	state->irradianceVolumeDigest = slot->irradianceVolumeDigest;
+	state->directionalLightingDigest = slot->directionalLightingDigest;
+	state->irradianceVolumeCount = slot->irradianceVolumeCount;
+	state->directionalLightingCount = slot->directionalLightingCount;
+	state->worldLoaded = qtrue;
+	return qtrue;
+}
+
+qboolean RenderSubmission_WorldResident( const renderSubmissionState_t *state,
+		int worldIndex )
+{
+	return state && state->initialized && worldIndex >= 0
+		&& worldIndex < MAX_RENDER_WORLDS
+		&& state->worlds[worldIndex].loaded ? qtrue : qfalse;
+}
+
+int RenderSubmission_ResidentWorldCount( const renderSubmissionState_t *state )
+{
+	int count = 0;
+	if ( !state || !state->initialized ) return 0;
+	for ( int worldIndex = 0; worldIndex < MAX_RENDER_WORLDS; ++worldIndex )
+		if ( state->worlds[worldIndex].loaded ) count++;
+	return count;
+}
+
+qboolean RenderSubmission_UnloadWorld( renderSubmissionState_t *state, int worldIndex )
+{
+	int replacement;
+	if ( !state || !state->initialized || state->frameOpen || worldIndex < 0
+			|| worldIndex >= MAX_RENDER_WORLDS ) return qfalse;
+	if ( !state->worlds[worldIndex].loaded ) return qtrue;
+	if ( state->activeWorldIndex == worldIndex )
+		RenderSubmission_ClearActiveWorld( state );
+	RenderSubmission_FreeWorldSlot( &state->worlds[worldIndex] );
+	if ( state->activeWorldIndex < 0 ) {
+		for ( replacement = 0; replacement < MAX_RENDER_WORLDS; ++replacement )
+			if ( state->worlds[replacement].loaded ) {
+				(void)RenderSubmission_SelectWorld( state, replacement );
+				break;
+			}
 	}
 	return qtrue;
 }
@@ -278,10 +397,8 @@ void RenderSubmission_Reset( renderSubmissionState_t *state )
 			free( (void *)state->models[i].snapshot.batches );
 			free( (void *)state->models[i].snapshot.tags );
 		}
-		free( (void *)state->worldSnapshot.vertices );
-		free( (void *)state->worldSnapshot.indices );
-		free( (void *)state->worldSnapshot.batches );
-		free( state->worldSurfaceVisibility );
+		for ( i = 0u; i < MAX_RENDER_WORLDS; ++i )
+			RenderSubmission_FreeWorldSlot( &state->worlds[i] );
 		free( state->polyCommands );
 		free( state->polyVertices );
 		free( state->lights );
@@ -291,6 +408,7 @@ void RenderSubmission_Reset( renderSubmissionState_t *state )
 		free( state->effectDecals );
 		free( state->effectRibbons );
 		free( state->effectRibbonPoints );
+		free( state->effectBeams );
 		memset( state, 0, sizeof( *state ) );
 	}
 }
@@ -748,8 +866,12 @@ qboolean RenderSubmission_LoadWorld( renderSubmissionState_t *state, const mapFi
 	renderWorldBatch_t	*batches	 = NULL;
 	uint32_t			 vertexCount = 0u, indexCount = 0u, batchCount = 0u;
 	uint32_t			 patchBatchCount = 0u, patchTriangleCount = 0u;
+	byte                *visibility = NULL;
+	uint32_t             visibilityBytes = 0u;
+	renderSubmissionWorldSlot_t *slot;
 	int				 surfaceFirst = 0, surfaceEnd;
-	if ( !state || !state->initialized || state->frameOpen || !bsp || worldIndex < 0 || bsp->numSurfaces < 0 || bsp->numDrawVerts < 0 ||
+	if ( !state || !state->initialized || state->frameOpen || !bsp || worldIndex < 0
+			|| worldIndex >= MAX_RENDER_WORLDS || bsp->numSurfaces < 0 || bsp->numDrawVerts < 0 ||
 		 bsp->numDrawIndexes < 0 || bsp->numShaders < 0 || ( bsp->numSurfaces && !bsp->surfaces ) ||
 		 ( bsp->numDrawVerts && !bsp->drawVerts ) || ( bsp->numDrawIndexes && !bsp->drawIndexes ) ||
 		 ( bsp->numShaders && !bsp->shaders ) || bsp->numSubModels < 0 ||
@@ -972,42 +1094,47 @@ qboolean RenderSubmission_LoadWorld( renderSubmissionState_t *state, const mapFi
 	}
 	if ( batchCount > 1u )
 		qsort( batches, batchCount, sizeof( *batches ), WorldBatchSortCompare );
-	free( (void *)state->worldSnapshot.vertices );
-	free( (void *)state->worldSnapshot.indices );
-	free( (void *)state->worldSnapshot.batches );
-	free( state->worldSurfaceVisibility );
-	state->worldSurfaceVisibility = NULL;
-	state->worldSurfaceVisibilityBytes = 0u;
 	if ( bsp->numSurfaces > 0 ) {
-		state->worldSurfaceVisibilityBytes =
-			( (uint32_t)bsp->numSurfaces + 7u ) / 8u;
-		state->worldSurfaceVisibility = (byte *)calloc(
-			state->worldSurfaceVisibilityBytes, 1u );
-		if ( !state->worldSurfaceVisibility ) {
+		visibilityBytes = ( (uint32_t)bsp->numSurfaces + 7u ) / 8u;
+		visibility = (byte *)calloc( visibilityBytes, 1u );
+		if ( !visibility ) {
 			free( batches ); free( indices ); free( vertices ); return qfalse;
 		}
 	}
-	(void)RenderSubmission_ClearIrradianceVolumes( state );
-	(void)RenderSubmission_ClearDirectionalLighting( state );
+	if ( state->activeWorldIndex < 0 ) {
+		(void)RenderSubmission_ClearIrradianceVolumes( state );
+		(void)RenderSubmission_ClearDirectionalLighting( state );
+	}
 	memset( state->emissiveRoutes, 0, sizeof( state->emissiveRoutes ) );
 	memset( state->emissiveProxyLights, 0, sizeof( state->emissiveProxyLights ) );
 	memset( &state->emissiveRouting, 0, sizeof( state->emissiveRouting ) );
-	memset( &state->worldSnapshot, 0, sizeof( state->worldSnapshot ) );
-	state->worldSnapshot.vertices			= vertices;
-	state->worldSnapshot.indices			= indices;
-	state->worldSnapshot.batches			= batches;
-	state->worldSnapshot.vertexCount		= vertexCount;
-	state->worldSnapshot.indexCount			= indexCount;
-	state->worldSnapshot.batchCount			= batchCount;
-	state->worldSnapshot.patchBatchCount	= patchBatchCount;
-	state->worldSnapshot.patchTriangleCount = patchTriangleCount;
-	state->worldSnapshot.ready				= qtrue;
-	state->worldMap						= bsp;
-	state->worldDigest						= digest;
-	state->worldSurfaceCount				= (uint32_t)bsp->numSurfaces;
-	state->worldVertexCount					= (uint32_t)bsp->numDrawVerts;
-	state->worldIndexCount					= (uint32_t)bsp->numDrawIndexes;
-	state->worldLoaded						= qtrue;
+	slot = &state->worlds[worldIndex];
+	if ( state->activeWorldIndex == worldIndex )
+		RenderSubmission_ClearActiveWorld( state );
+	RenderSubmission_FreeWorldSlot( slot );
+	slot->map = bsp;
+	slot->surfaceVisibility = visibility;
+	slot->surfaceVisibilityBytes = visibilityBytes;
+	slot->snapshot.vertices = vertices;
+	slot->snapshot.indices = indices;
+	slot->snapshot.batches = batches;
+	slot->snapshot.vertexCount = vertexCount;
+	slot->snapshot.indexCount = indexCount;
+	slot->snapshot.batchCount = batchCount;
+	slot->snapshot.patchBatchCount = patchBatchCount;
+	slot->snapshot.patchTriangleCount = patchTriangleCount;
+	slot->snapshot.ready = qtrue;
+	slot->digest = digest;
+	slot->surfaceCount = (uint32_t)bsp->numSurfaces;
+	slot->vertexCount = (uint32_t)bsp->numDrawVerts;
+	slot->indexCount = (uint32_t)bsp->numDrawIndexes;
+	slot->loaded = qtrue;
+	if ( !RenderSubmission_SelectWorld( state, worldIndex ) ) {
+		RenderSubmission_FreeWorldSlot( slot );
+		return qfalse;
+	}
+	(void)RenderSubmission_ClearIrradianceVolumes( state );
+	(void)RenderSubmission_ClearDirectionalLighting( state );
 	RenderSubmission_ResetAtmosphereSurface( state );
 	state->emissiveAuthorityDirty = RenderSubmission_RebuildEmissiveAuthority( state,
 		state->nextMaterialGeneration ) ? qfalse : qtrue;
@@ -1096,7 +1223,7 @@ qboolean RenderSubmission_BeginFrame( renderSubmissionState_t *state, uint64_t f
 	state->characterSkinCount = 0u;
 	state->polygonCount = state->lightCount = state->emissiveProxyFrameLightCount = 0u;
 	state->effectSpriteCount = state->effectEmitterCount = 0u;
-	state->effectDecalCount = state->effectRibbonCount = 0u;
+	state->effectDecalCount = state->effectRibbonCount = state->effectBeamCount = 0u;
 	state->effectRibbonPointCount = state->effectPrimitiveDroppedCount = 0u;
 	state->polyCommandCount = state->polyVertexCount = 0u;
 	state->uiPrimitiveCount							 = 0u;
@@ -1131,7 +1258,7 @@ qboolean RenderSubmission_ClearScene( renderSubmissionState_t *state )
 	state->characterSkinCount = 0u;
 	state->polygonCount = state->lightCount = state->emissiveProxyFrameLightCount = 0u;
 	state->effectSpriteCount = state->effectEmitterCount = 0u;
-	state->effectDecalCount = state->effectRibbonCount = 0u;
+	state->effectDecalCount = state->effectRibbonCount = state->effectBeamCount = 0u;
 	state->effectRibbonPointCount = state->effectPrimitiveDroppedCount = 0u;
 	state->effectPrimitiveDigest = FNV_OFFSET;
 	state->polyCommandCount = state->polyVertexCount = 0u;
@@ -1397,8 +1524,12 @@ qboolean RenderSubmission_RenderScene( renderSubmissionState_t *state, const ref
 	static const int32_t fallbackIrradiance[3] = {
 		RAL_LIGHT_Q16_ONE, RAL_LIGHT_Q16_ONE, RAL_LIGHT_Q16_ONE
 	};
-	if ( !state || !state->frameOpen || !view || worldIndex < 0 )
+	if ( !state || !state->frameOpen || !view || worldIndex < 0
+			|| worldIndex >= MAX_RENDER_WORLDS )
 		return qfalse;
+	if ( RenderSubmission_WorldResident( state, worldIndex ) ) {
+		if ( !RenderSubmission_SelectWorld( state, worldIndex ) ) return qfalse;
+	}
 	if ( !( view->rdflags & RDF_NOWORLDMODEL )
 			&& !RenderSubmission_UpdateWorldVisibility( state, view ) )
 		return qfalse;
@@ -1446,6 +1577,7 @@ qboolean RenderSubmission_RenderScene( renderSubmissionState_t *state, const ref
 	state->worldSnapshot.rdflags = (uint32_t)view->rdflags;
 	state->worldSnapshot.timeMs = view->time;
 	state->sceneRendered	  = qtrue;
+	RenderSubmission_CommitActiveWorld( state );
 	return qtrue;
 }
 
@@ -1583,6 +1715,8 @@ uint64_t RenderSubmission_FrameDigest( const renderSubmissionState_t *state )
 		sizeof( state->effectRibbonCount ) );
 	digest = HashBytes( digest, &state->effectRibbonPointCount,
 		sizeof( state->effectRibbonPointCount ) );
+	digest = HashBytes( digest, &state->effectBeamCount,
+		sizeof( state->effectBeamCount ) );
 	digest = HashBytes( digest, &state->effectPrimitiveDroppedCount,
 		sizeof( state->effectPrimitiveDroppedCount ) );
 	digest = HashBytes( digest, &state->uiDigest, sizeof( state->uiDigest ) );
@@ -1659,6 +1793,7 @@ qboolean RenderSubmission_EndFrame( renderSubmissionState_t *state, uint64_t fra
 	receipt.effectDecalCount           = state->effectDecalCount;
 	receipt.effectRibbonCount          = state->effectRibbonCount;
 	receipt.effectRibbonPointCount     = state->effectRibbonPointCount;
+	receipt.effectBeamCount            = state->effectBeamCount;
 	receipt.effectPrimitiveDroppedCount = state->effectPrimitiveDroppedCount;
 	receipt.atmosphereEmitterCount		= state->atmosphereEmitterCount;
 	receipt.atmosphereProfileCount		= state->atmosphereProfileCount;

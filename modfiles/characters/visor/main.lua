@@ -22,8 +22,8 @@ return {
                 h_head    = "./skin_default.png"
             },
             original  = "./skin_original.jpg",
-            deadlight = "./skin_deadlight.jpg",
-            shade     = "./skin_shade.jpg",
+            deadlight = "./skin_deadlight.png",
+            shade     = "./skin_shade.png",
         },
     },
 }

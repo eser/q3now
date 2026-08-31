@@ -425,6 +425,24 @@ static void CG_WiredFxTestRocket_f( void ) {
 	CG_WiredFx_RocketExplosion( origin, normal, material, freeAir, underwater );
 }
 
+static void CG_WiredFxTestHitscan_f( void ) {
+	hitscanImpactMaterial_t material = HITSCAN_IMPACT_DEFAULT;
+	const char *argument = CG_Argv( 1 );
+
+	if ( !Q_stricmp( argument, "metal" ) ) material = HITSCAN_IMPACT_METAL;
+	else if ( !Q_stricmp( argument, "dust" ) ) material = HITSCAN_IMPACT_DUST;
+	CG_TestHitscanImpact( PROJ_MACHINEGUN, material );
+}
+
+static void CG_WiredFxTestShotgun_f( void ) {
+	hitscanImpactMaterial_t material = HITSCAN_IMPACT_DEFAULT;
+	const char *argument = CG_Argv( 1 );
+
+	if ( !Q_stricmp( argument, "metal" ) ) material = HITSCAN_IMPACT_METAL;
+	else if ( !Q_stricmp( argument, "dust" ) ) material = HITSCAN_IMPACT_DUST;
+	CG_TestHitscanImpact( PROJ_SHOTGUN, material );
+}
+
 /*
 static void CG_Camera_f( void ) {
 	char name[1024];
@@ -496,6 +514,8 @@ static consoleCommand_t	commands[] = {
     { "spLose", CG_spLose_f },
 	{ "startOrbit", CG_StartOrbit_f },
 	{ "wiredFxTestRocket", CG_WiredFxTestRocket_f },
+	{ "wiredFxTestHitscan", CG_WiredFxTestHitscan_f },
+	{ "wiredFxTestShotgun", CG_WiredFxTestShotgun_f },
 	//{ "camera", CG_Camera_f },
 	{ "loaddeferred", CG_LoadDeferredPlayers },
 #if FEAT_CHAT_FILTER

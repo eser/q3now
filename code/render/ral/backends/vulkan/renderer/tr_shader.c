@@ -1967,6 +1967,8 @@ static qboolean ParseShader( ComParser *parser, const char **text )
 		}
 		// fogParms
 		else if ( !Q_stricmp( token, "fogParms" ) ) {
+			qboolean fogLineComplete = qfalse;
+
 			if ( !ParseVector( parser, text, 3, shader.fogParms.color ) ) {
 				return qfalse;
 			}
@@ -1980,7 +1982,13 @@ static qboolean ParseShader( ComParser *parser, const char **text )
 
 			// Optional Spearmint fog type: linear / exp / exp2 [density] [farClip]
 			token = COM_ParseExt( parser, text, qfalse );
-			if ( token[0] && !isdigit( (unsigned char)token[0] ) ) {
+			if ( !token[0] ) {
+				/* COM_ParseExt already consumed the line break. Calling
+				 * SkipRestOfLine here would discard the closing brace (or the
+				 * first token of the next shader) and corrupt the remaining
+				 * imported shader stream. */
+				fogLineComplete = qtrue;
+			} else if ( !isdigit( (unsigned char)token[0] ) ) {
 				if ( !Q_stricmp( token, "linear" ) ) {
 					shader.fogParms.type = FT_LINEAR;
 				} else if ( !Q_stricmp( token, "exp" ) ) {
@@ -1996,12 +2004,14 @@ static qboolean ParseShader( ComParser *parser, const char **text )
 					token					= COM_ParseExt( parser, text, qfalse );
 					if ( token[0] ) {
 						shader.fogParms.farClip = Q_atof( token );
-					}
+					} else fogLineComplete = qtrue;
 				}
+				else fogLineComplete = qtrue;
 			}
 
 			// skip any old gradient directions
-			SkipRestOfLine( parser, text );
+			if ( !fogLineComplete )
+				SkipRestOfLine( parser, text );
 			continue;
 		}
 		// portal
@@ -2623,7 +2633,6 @@ static void FixRenderCommandList( int newShader ) {
 			case RC_DRAW_SURFS:
 				{
 				drawSurf_t	*drawSurf;
-				shader_t	*sh;
 				int			fogNum;
 				int			entityNum;
 				int			dlightMap;
@@ -2632,10 +2641,16 @@ static void FixRenderCommandList( int newShader ) {
 
 				drawSurf = ds_cmd->drawSurfs;
 				for ( int i = 0; i < ds_cmd->numDrawSurfs; i++, drawSurf++ ) {
-					R_DecomposeSort( drawSurf->sort, &entityNum, &sh, &fogNum, &dlightMap );
+					entityNum = ( drawSurf->sort >> QSORT_REFENTITYNUM_SHIFT ) & REFENTITYNUM_MASK;
+					fogNum = ( drawSurf->sort >> QSORT_FOGNUM_SHIFT ) & FOGNUM_MASK;
+					dlightMap = drawSurf->sort & DLIGHT_MASK;
 					sortedIndex = (( drawSurf->sort >> QSORT_SHADERNUM_SHIFT ) & SHADERNUM_MASK);
 					if ( sortedIndex >= newShader ) {
-						sortedIndex = sh->sortedIndex;
+						/* SortNewShader has already shifted every old shader at and
+						 * after the insertion point by exactly one slot. Do not resolve
+						 * the stale key through the already-shifted table: that selects
+						 * the preceding shader for this frame. */
+						sortedIndex++;
 						drawSurf->sort = (sortedIndex << QSORT_SHADERNUM_SHIFT) | (entityNum << QSORT_REFENTITYNUM_SHIFT) | ( fogNum << QSORT_FOGNUM_SHIFT ) | (int)dlightMap;
 					}
 				}
@@ -4086,6 +4101,9 @@ shader_t *R_FindShader( const char *name, int lightmapIndex, qboolean mipRawImag
 					return result;
 				}
 			}
+			R_LOG( rch_shaders, SEV_WARN,
+				"WARNING: R_FindShader could not find material image '%s'; using default shader\n",
+				name );
 			shader.defaultShader = qtrue;
 			return FinishShader();
 		}

@@ -331,10 +331,10 @@ BotImport_HunkAlloc
 =================
 */
 static void *BotImport_HunkAlloc( size_t size ) {
-	if( Hunk_CheckMark() ) {
-		Com_Terminate( TERM_CLIENT_DROP, "%s(): Alloc with marks already set", __func__ );
-	}
-	return Hunk_Alloc( size, h_high );
+	/* Botlib's permanent/AAS material is permanent only for the current map.
+	 * Route it through the explicit server Level owner; a map transition now
+	 * retires it with Level_Reset instead of depending on global hunk marks. */
+	return Level_Alloc( &svs.memory, size, _Alignof( max_align_t ) );
 }
 
 /*

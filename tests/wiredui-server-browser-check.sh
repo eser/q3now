@@ -3039,7 +3039,6 @@ then exit 1; fi
 cat >"$WRONG_HOME/base/q0browser-wrong.cfg" <<CFGEOF
 set com_maxfps 60
 set password ""
-set cl_reconnectArgs "127.0.0.1:$SENTINEL_PORT"
 wait 100
 wui_push servers
 wait 30
@@ -3158,7 +3157,6 @@ cat >"$HOME_ROOT/base/q0browser.cfg" <<CFGEOF
 set activeAction "wait 60 ; quit"
 set com_maxfps 60
 set password ""
-set cl_reconnectArgs "127.0.0.1:$SENTINEL_PORT"
 wait 100
 wui_push servers
 wui_menu_nav focus btn_connect

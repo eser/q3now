@@ -639,9 +639,6 @@ static void CG_RegisterSounds( void )
 	cgs.media.countFightSound		= trap_S_RegisterSound( "sound/feedback/fight.opus", qtrue );
 	cgs.media.countPrepareSound		= trap_S_RegisterSound( "sound/feedback/prepare.opus", qtrue );
 	cgs.media.countPrepareTeamSound = trap_S_RegisterSound( "sound/feedback/prepare_team.opus", qtrue );
-#if FEAT_EARTHQUAKE_SYSTEM
-	cgs.media.earthquakeSound = trap_S_RegisterSound( "sound/world/earthquake.wav", qfalse );
-#endif
 	// water-surface crossing FX (Q1-map gated at use sites). Prefer
 	// Quake's misc/h2ohit1.wav; fall back to Q3's player/watr_in.wav; 0 (silent
 	// splash, no crash) if neither asset is present.
@@ -777,9 +774,9 @@ static void CG_RegisterSounds( void )
 	cgs.media.medkitSound  = trap_S_RegisterSound( "sound/items/use_medkit.opus", qfalse );
 	cgs.media.quadSound	   = trap_S_RegisterSound( "sound/items/damage3.opus", qfalse );
 	cgs.media.berserkSound = trap_S_RegisterSound( "sound/items/protect3.opus", qfalse );
-	cgs.media.sfx_ric1	   = trap_S_RegisterSound( "sound/weapons/machinegun/ric1.opus", qfalse );
-	cgs.media.sfx_ric2	   = trap_S_RegisterSound( "sound/weapons/machinegun/ric2.opus", qfalse );
-	cgs.media.sfx_ric3	   = trap_S_RegisterSound( "sound/weapons/machinegun/ric3.opus", qfalse );
+	cgs.media.sfx_ric1	   = trap_S_RegisterSound( "weapons/machinegun/sounds/ric1.opus", qfalse );
+	cgs.media.sfx_ric2	   = trap_S_RegisterSound( "weapons/machinegun/sounds/ric2.opus", qfalse );
+	cgs.media.sfx_ric3	   = trap_S_RegisterSound( "weapons/machinegun/sounds/ric3.opus", qfalse );
 	//cgs.media.sfx_railg = trap_S_RegisterSound ("sound/weapons/railgun/railgf1a.opus", qfalse);
 	cgs.media.sfx_rockexp		   = trap_S_RegisterSound( "sound/weapons/rocket/rocklx1a.opus", qfalse );
 	cgs.media.sfx_plasmaexp		   = trap_S_RegisterSound( "sound/weapons/plasma/plasmx1a.opus", qfalse );
@@ -801,8 +798,6 @@ static void CG_RegisterSounds( void )
 	cgs.media.regenSound	= trap_S_RegisterSound( "sound/items/regen.opus", qfalse );
 	cgs.media.protectSound	= trap_S_RegisterSound( "sound/items/protect3.opus", qfalse );
 	cgs.media.n_healthSound = trap_S_RegisterSound( "sound/items/n_health.opus", qfalse );
-	cgs.media.hgrenb1aSound = trap_S_RegisterSound( "sound/weapons/grenade/hgrenb1a.opus", qfalse );
-	cgs.media.hgrenb2aSound = trap_S_RegisterSound( "sound/weapons/grenade/hgrenb2a.opus", qfalse );
 }
 
 
@@ -837,7 +832,7 @@ static void CG_RegisterGraphics( void )
 
 	cgs.media.viewBloodShader = trap_R_RegisterShader( "viewBloodBlend" );
 
-	cgs.media.deferShader = trap_R_RegisterShaderNoMip( "gfx/2d/defer.tga" );
+	cgs.media.deferShader = trap_R_RegisterShaderNoMip( "gfx/2d/defer.png" );
 
 	cgs.media.smokePuffShader		 = trap_R_RegisterShader( "smokePuff" );
 	cgs.media.smokePuffRageProShader = trap_R_RegisterShader( "smokePuffRagePro" );
@@ -854,20 +849,13 @@ static void CG_RegisterGraphics( void )
 	cgs.media.waterBubbleShader = trap_R_RegisterShader( "waterBubble" );
 
 	cgs.media.tracerShader = trap_R_RegisterShader( "gfx/misc/tracer" );
-	// Same tracer art registered as a primitive shader so CG_Tracer can emit it
-	// through the beam pool (gfx/misc/tracer is `blendFunc GL_ONE GL_ONE` additive —
-	// the single blend the beam pipeline renders, so the look is preserved).
+	// Same tracer art registered as a primitive shader for the machinegun-tracer
+	// WiredFX ribbon recipe. The material is additive, preserving the old look.
 	cgs.media.tracerShaderPrim = trap_R_RegisterPrimitiveShader( "gfx/misc/tracer" );
 	cgs.media.selectShader	   = trap_R_RegisterShader( "gfx/2d/select" );
 
-	cgs.media.crosshairMeleeShader	 = trap_R_RegisterShader( "gfx/2d/crosshairMelee" );
-	cgs.media.crosshairBulletShader	 = trap_R_RegisterShader( "gfx/2d/crosshairBullet" );
-	cgs.media.crosshairBurstShader	 = trap_R_RegisterShader( "gfx/2d/crosshairBurst" );
-	cgs.media.crosshairMissileShader = trap_R_RegisterShader( "gfx/2d/crosshairMissile" );
-	cgs.media.crosshairDefaultShader = trap_R_RegisterShader( "gfx/2d/crosshairDefault" );
-
-	cgs.media.backTileShader = trap_R_RegisterShader( "gfx/2d/backtile" );
-	cgs.media.noammoShader	 = trap_R_RegisterShader( "icons/noammo" );
+	cgs.media.backTileShader = trap_R_RegisterShader( "gfx/2d/backtile.png" );
+	cgs.media.noammoShader	 = trap_R_RegisterShader( "icons/noammo.png" );
 
 	// powerup shaders
 	cgs.media.quadShader		  = trap_R_RegisterShader( "powerups/quad" );
@@ -885,8 +873,8 @@ static void CG_RegisterGraphics( void )
 	if ( cgs.gametype == GT_HARVESTER || cg_buildScript.integer ) {
 		cgs.media.redCubeModel	= trap_R_RegisterModel( "models/powerups/orb/r_orb.md3" );
 		cgs.media.blueCubeModel = trap_R_RegisterModel( "models/powerups/orb/b_orb.md3" );
-		cgs.media.redCubeIcon	= trap_R_RegisterShader( "icons/skull_red" );
-		cgs.media.blueCubeIcon	= trap_R_RegisterShader( "icons/skull_blue" );
+		cgs.media.redCubeIcon	= trap_R_RegisterShader( "icons/skull_red.png" );
+		cgs.media.blueCubeIcon	= trap_R_RegisterShader( "icons/skull_blue.png" );
 	}
 
 	if ( cgs.gametype == GT_CTF || cgs.gametype == GT_1FCTF || cgs.gametype == GT_HARVESTER ||
@@ -896,12 +884,12 @@ static void CG_RegisterGraphics( void )
 #endif
 		cgs.media.redFlagModel		= trap_R_RegisterModel( "models/flags/r_flag.md3" );
 		cgs.media.blueFlagModel		= trap_R_RegisterModel( "models/flags/b_flag.md3" );
-		cgs.media.redFlagShader[0]	= trap_R_RegisterShaderNoMip( "icons/iconf_red1" );
-		cgs.media.redFlagShader[1]	= trap_R_RegisterShaderNoMip( "icons/iconf_red2" );
-		cgs.media.redFlagShader[2]	= trap_R_RegisterShaderNoMip( "icons/iconf_red3" );
-		cgs.media.blueFlagShader[0] = trap_R_RegisterShaderNoMip( "icons/iconf_blu1" );
-		cgs.media.blueFlagShader[1] = trap_R_RegisterShaderNoMip( "icons/iconf_blu2" );
-		cgs.media.blueFlagShader[2] = trap_R_RegisterShaderNoMip( "icons/iconf_blu3" );
+		cgs.media.redFlagShader[0]	= trap_R_RegisterShaderNoMip( "icons/iconf_red1.png" );
+		cgs.media.redFlagShader[1]	= trap_R_RegisterShaderNoMip( "icons/iconf_red2.png" );
+		cgs.media.redFlagShader[2]	= trap_R_RegisterShaderNoMip( "icons/iconf_red3.png" );
+		cgs.media.blueFlagShader[0] = trap_R_RegisterShaderNoMip( "icons/iconf_blu1.png" );
+		cgs.media.blueFlagShader[1] = trap_R_RegisterShaderNoMip( "icons/iconf_blu2.png" );
+		cgs.media.blueFlagShader[2] = trap_R_RegisterShaderNoMip( "icons/iconf_blu3.png" );
 #if FEAT_TA_UI
 		cgs.media.flagPoleModel = trap_R_RegisterModel( "models/flag2/flagpole.md3" );
 		cgs.media.flagFlapModel = trap_R_RegisterModel( "models/flag2/flagflap3.md3" );
@@ -918,10 +906,10 @@ static void CG_RegisterGraphics( void )
 
 	if ( cgs.gametype == GT_1FCTF || cg_buildScript.integer ) {
 		cgs.media.neutralFlagModel = trap_R_RegisterModel( "models/flags/n_flag.md3" );
-		cgs.media.flagShader[0]	   = trap_R_RegisterShaderNoMip( "icons/iconf_neutral1" );
-		cgs.media.flagShader[1]	   = trap_R_RegisterShaderNoMip( "icons/iconf_red2" );
-		cgs.media.flagShader[2]	   = trap_R_RegisterShaderNoMip( "icons/iconf_blu2" );
-		cgs.media.flagShader[3]	   = trap_R_RegisterShaderNoMip( "icons/iconf_neutral3" );
+		cgs.media.flagShader[0]	   = trap_R_RegisterShaderNoMip( "icons/iconf_neutral1.png" );
+		cgs.media.flagShader[1]	   = trap_R_RegisterShaderNoMip( "icons/iconf_red2.png" );
+		cgs.media.flagShader[2]	   = trap_R_RegisterShaderNoMip( "icons/iconf_blu2.png" );
+		cgs.media.flagShader[3]	   = trap_R_RegisterShaderNoMip( "icons/iconf_neutral3.png" );
 	}
 
 #if FEAT_OVERLOAD
@@ -963,7 +951,7 @@ static void CG_RegisterGraphics( void )
 
 	if ( cgs.gametypeIsTeamGame || cg_buildScript.integer ) {
 		cgs.media.redQuadShader		 = trap_R_RegisterShader( "powerups/blueflag" );
-		cgs.media.teamStatusBar		 = trap_R_RegisterShader( "gfx/2d/colorbar.tga" );
+		cgs.media.teamStatusBar		 = trap_R_RegisterShader( "gfx/2d/colorbar.png" );
 		cgs.media.blueKamikazeShader = trap_R_RegisterShader( "models/weaphits/kamikblu" );
 	}
 
@@ -1014,7 +1002,7 @@ static void CG_RegisterGraphics( void )
 	cgs.media.deflectorJuicedModel	= trap_R_RegisterModel( "models/powerups/shield/juicer.md3" );
 	cgs.media.deflectorPowerupModel = trap_R_RegisterModel( "models/powerups/shield/shield.md3" );
 	cgs.media.medkitUsageModel		= trap_R_RegisterModel( "models/powerups/regen.md3" );
-	cgs.media.heartShader			= trap_R_RegisterShaderNoMip( "ui/assets/statusbar/selectedhealth.tga" );
+	cgs.media.heartShader			= trap_R_RegisterShaderNoMip( "ui/assets/statusbar/selectedhealth.png" );
 
 	cgs.media.medalImpressive	= trap_R_RegisterShaderNoMip( "medal_impressive" );
 	cgs.media.medalExcellent	= trap_R_RegisterShaderNoMip( "medal_excellent" );
@@ -1079,20 +1067,20 @@ static void CG_RegisterGraphics( void )
 
 #if FEAT_TA_UI
 	// new stuff
-	cgs.media.patrolShader	   = trap_R_RegisterShaderNoMip( "ui/assets/statusbar/patrol.tga" );
-	cgs.media.assaultShader	   = trap_R_RegisterShaderNoMip( "ui/assets/statusbar/assault.tga" );
-	cgs.media.campShader	   = trap_R_RegisterShaderNoMip( "ui/assets/statusbar/camp.tga" );
-	cgs.media.followShader	   = trap_R_RegisterShaderNoMip( "ui/assets/statusbar/follow.tga" );
-	cgs.media.defendShader	   = trap_R_RegisterShaderNoMip( "ui/assets/statusbar/defend.tga" );
-	cgs.media.teamLeaderShader = trap_R_RegisterShaderNoMip( "ui/assets/statusbar/team_leader.tga" );
-	cgs.media.retrieveShader   = trap_R_RegisterShaderNoMip( "ui/assets/statusbar/retrieve.tga" );
-	cgs.media.escortShader	   = trap_R_RegisterShaderNoMip( "ui/assets/statusbar/escort.tga" );
+	cgs.media.patrolShader	   = trap_R_RegisterShaderNoMip( "ui/assets/statusbar/patrol.png" );
+	cgs.media.assaultShader	   = trap_R_RegisterShaderNoMip( "ui/assets/statusbar/assault.png" );
+	cgs.media.campShader	   = trap_R_RegisterShaderNoMip( "ui/assets/statusbar/camp.png" );
+	cgs.media.followShader	   = trap_R_RegisterShaderNoMip( "ui/assets/statusbar/follow.png" );
+	cgs.media.defendShader	   = trap_R_RegisterShaderNoMip( "ui/assets/statusbar/defend.png" );
+	cgs.media.teamLeaderShader = trap_R_RegisterShaderNoMip( "ui/assets/statusbar/team_leader.png" );
+	cgs.media.retrieveShader   = trap_R_RegisterShaderNoMip( "ui/assets/statusbar/retrieve.png" );
+	cgs.media.escortShader	   = trap_R_RegisterShaderNoMip( "ui/assets/statusbar/escort.png" );
 	cgs.media.cursor		   = trap_R_RegisterShaderNoMip( "menu/art/3_cursor2" );
-	cgs.media.sizeCursor	   = trap_R_RegisterShaderNoMip( "ui/assets/sizecursor.tga" );
-	cgs.media.selectCursor	   = trap_R_RegisterShaderNoMip( "ui/assets/selectcursor.tga" );
-	cgs.media.flagShaders[0]   = trap_R_RegisterShaderNoMip( "ui/assets/statusbar/flag_in_base.tga" );
-	cgs.media.flagShaders[1]   = trap_R_RegisterShaderNoMip( "ui/assets/statusbar/flag_capture.tga" );
-	cgs.media.flagShaders[2]   = trap_R_RegisterShaderNoMip( "ui/assets/statusbar/flag_missing.tga" );
+	cgs.media.sizeCursor	   = trap_R_RegisterShaderNoMip( "ui/assets/sizecursor.png" );
+	cgs.media.selectCursor	   = trap_R_RegisterShaderNoMip( "ui/assets/selectcursor.png" );
+	cgs.media.flagShaders[0]   = trap_R_RegisterShaderNoMip( "ui/assets/statusbar/flag_in_base.png" );
+	cgs.media.flagShaders[1]   = trap_R_RegisterShaderNoMip( "ui/assets/statusbar/flag_capture.png" );
+	cgs.media.flagShaders[2]   = trap_R_RegisterShaderNoMip( "ui/assets/statusbar/flag_missing.png" );
 #endif
 
 	cgs.media.backpackModel = trap_R_RegisterModel( "models/powerups/armor/shard.md3" );
@@ -1100,7 +1088,7 @@ static void CG_RegisterGraphics( void )
 
 	cgs.media.lightningShaderPrim	 = trap_R_RegisterPrimitiveShader( "lightningBolt" );
 	cgs.media.lightningArcShaderPrim = trap_R_RegisterPrimitiveShader( "lightningArc" );
-	cgs.media.sfx_lightningArcLoop	 = trap_S_RegisterSound( "sound/weapons/lightning/lg_arc_loop.opus", qfalse );
+	cgs.media.sfx_lightningArcLoop	 = trap_S_RegisterSound( "sound/weapons/lightning/lg_hum.opus", qfalse );
 
 	// PTRAIL_PUSH visual assets — beam shader + particle
 	// class. Registered here alongside the other primitive shaders;

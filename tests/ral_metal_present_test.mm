@@ -84,6 +84,7 @@ int main( void ) {
 	decalDesc_t effectDecal;
 	ribbonDesc_t effectRibbon;
 	ribbonPoint_t effectRibbonPoints[2];
+	beamDesc_t effectBeam;
 	particleClass_t effectParticleClass;
 	refEntityMotion_t spriteMotion = { sizeof( spriteMotion ),
 		REF_ENTITY_MOTION_VERSION, 17u, 3u,
@@ -264,6 +265,16 @@ int main( void ) {
 	effectRibbon.numPoints = 2;
 	effectRibbon.shader = uiMaterial;
 	CHECK( RenderSubmission_AddEffectRibbon( &frontend, &effectRibbon ) );
+	memset( &effectBeam, 0, sizeof( effectBeam ) );
+	effectBeam.start[0] = effectBeam.end[0] = 8.0f;
+	effectBeam.start[1] = -1.0f; effectBeam.end[1] = 1.0f;
+	effectBeam.startWidth = 0.25f; effectBeam.endWidth = 0.1f;
+	effectBeam.startColor[0] = effectBeam.startColor[3] = 1.0f;
+	effectBeam.endColor[0] = effectBeam.endColor[3] = 1.0f;
+	effectBeam.shader = uiMaterial; effectBeam.duration = 1.0f;
+	effectBeam.fadeOut = 0.25f; effectBeam.axialCopies = 1;
+	effectBeam.startEntityNum = effectBeam.endEntityNum = -1;
+	CHECK( RenderSubmission_AddEffectBeam( &frontend, &effectBeam ) );
 	{
 		const float white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 		CHECK( RenderSubmission_SetColor( &frontend, white ) );
@@ -372,8 +383,8 @@ int main( void ) {
 		&& presentReceipt.maskedWorldBatchCount == 0u
 		&& presentReceipt.blendedWorldBatchCount == 1u
 		&& presentReceipt.depthWriteWorldBatchCount == 0u
-		&& presentReceipt.loweredEntityIndexCount == 63u
-		&& presentReceipt.loweredEntityBatchCount == 6u
+		&& presentReceipt.loweredEntityIndexCount == 69u
+		&& presentReceipt.loweredEntityBatchCount == 7u
 		&& presentReceipt.modelEntityCount == 1u
 		&& presentReceipt.primitiveEntityCount == 2u
 		&& presentReceipt.temporalEntityCount == 1u
@@ -383,6 +394,7 @@ int main( void ) {
 		&& presentReceipt.loweredEffectSpriteCount == 1u
 		&& presentReceipt.loweredEffectDecalCount == 1u
 		&& presentReceipt.loweredEffectRibbonCount == 1u
+		&& presentReceipt.loweredEffectBeamCount == 1u
 		&& presentReceipt.effectEmitterDispatchCount == 1u
 		&& presentReceipt.effectParticleDrawCount == 8u
 		&& presentReceipt.effectPrimitiveDroppedCount == 0u
@@ -409,11 +421,12 @@ int main( void ) {
 		&persistentDrawable ) );
 	CHECK( RalMetal_PresentClearAndSubmit( present, &coreReceipt, &layerReceipt,
 		&persistentDrawable, &frontend, sdrClear, 77u, &persistentReceipt ) );
-	CHECK( persistentReceipt.loweredEntityIndexCount == 6u
-		&& persistentReceipt.loweredEntityBatchCount == 1u
+	CHECK( persistentReceipt.loweredEntityIndexCount == 12u
+		&& persistentReceipt.loweredEntityBatchCount == 2u
 		&& persistentReceipt.loweredEffectSpriteCount == 0u
 		&& persistentReceipt.loweredEffectDecalCount == 1u
 		&& persistentReceipt.loweredEffectRibbonCount == 0u
+		&& persistentReceipt.loweredEffectBeamCount == 1u
 		&& persistentReceipt.effectEmitterDispatchCount == 0u
 		&& persistentReceipt.effectParticleDrawCount == 8u
 		&& persistentReceipt.effectPrimitiveDroppedCount == 0u );
@@ -489,6 +502,7 @@ int main( void ) {
 	MUTATE_PRESENT( loweredEffectSpriteCount );
 	MUTATE_PRESENT( loweredEffectDecalCount );
 	MUTATE_PRESENT( loweredEffectRibbonCount );
+	MUTATE_PRESENT( loweredEffectBeamCount );
 	MUTATE_PRESENT( effectEmitterDispatchCount );
 	MUTATE_PRESENT( effectParticleDrawCount );
 	MUTATE_PRESENT( effectPrimitiveDroppedCount );

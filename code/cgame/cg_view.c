@@ -463,19 +463,6 @@ static void CG_OffsetFirstPersonView( void ) {
 		angles[PITCH] += intensity * 0.3f * (((cg.time >> 3) & 1) ? 1.0f : -1.0f);
 	}
 
-	// shotgun double-blast: screen shake / recoil kick
-	if ( cg.doubleBlastKickTime > 0 ) {
-		float kickTime = (float)( cg.time - cg.doubleBlastKickTime );
-		if ( kickTime < 200.0f ) {
-			float intensity = 1.0f - ( kickTime / 200.0f );
-			intensity *= intensity;  // ease-out
-			angles[PITCH] -= 3.0f * intensity;  // pitch up
-			angles[ROLL] += 1.5f * intensity * ( ( cg.doubleBlastKickTime & 1 ) ? 1.0f : -1.0f );  // slight roll
-		} else {
-			cg.doubleBlastKickTime = 0;
-		}
-	}
-
 	// add pitch based on fall kick
 #if 0
 	ratio = ( cg.time - cg.landTime) / FALL_TIME;
@@ -779,95 +766,6 @@ static void CG_DamageBlendBlob( void ) {
 }
 
 
-#if FEAT_EARTHQUAKE_SYSTEM
-void CG_AddEarthquake(
-	const vec3_t origin, float radius,
-	float duration, float fadeIn, float fadeOut,
-	float amplitude
-) {
-	int i;
-
-	if ( duration <= 0 ) {
-		float a = amplitude / 100;
-
-		if ( radius > 0 ) {
-			float distance = Distance( cg.refdef.vieworg, origin );
-			if ( distance >= radius ) return;
-			a *= 1 - ( distance / radius );
-		}
-
-		cg.additionalTremble += a;
-		return;
-	}
-
-	for ( i = 0; i < MAX_EARTHQUAKES; i++ ) {
-		earthquake_t *quake = &cg.earthquakes[i];
-		if ( quake->startTime ) continue;
-
-		quake->startTime   = cg.time;
-		quake->endTime     = (int)floor( cg.time + 1000 * duration + 0.5f );
-		quake->fadeInTime  = (int)floor( 1000 * fadeIn + 0.5f );
-		quake->fadeOutTime = (int)floor( 1000 * fadeOut + 0.5f );
-		quake->amplitude   = amplitude;
-		VectorCopy( origin, quake->origin );
-		quake->radius = radius;
-		break;
-	}
-}
-
-void CG_AdjustEarthquakes( const vec3_t delta ) {
-	int i;
-
-	for ( i = 0; i < MAX_EARTHQUAKES; i++ ) {
-		earthquake_t *quake = &cg.earthquakes[i];
-		if ( !quake->startTime ) continue;
-		if ( quake->radius <= 0 ) continue;
-		VectorAdd( quake->origin, delta, quake->origin );
-	}
-}
-
-static void AddEarthquakeTremble( earthquake_t *quake ) {
-	float a;
-	const float offsetAmplitude = 0.2f;
-	const float angleAmplitude  = 0.2f;
-
-	if ( quake ) {
-		if ( cg.time >= quake->endTime ) {
-			memset( quake, 0, sizeof( *quake ) );
-			return;
-		}
-
-		if ( quake->radius > 0 ) {
-			float distance = Distance( cg.refdef.vieworg, quake->origin );
-			if ( distance >= quake->radius ) return;
-			a = 1 - ( distance / quake->radius );
-		} else {
-			a = 1;
-		}
-
-		{
-			int time = cg.time - quake->startTime;
-			a *= quake->amplitude / 100;
-			if ( time < quake->fadeInTime ) {
-				a *= (float)time / (float)quake->fadeInTime;
-			} else if ( cg.time > quake->endTime - quake->fadeOutTime ) {
-				a *= (float)( quake->endTime - cg.time ) / (float)quake->fadeOutTime;
-			}
-		}
-	} else {
-		a = cg.additionalTremble;
-	}
-
-	cg.refdef.vieworg[0]       += offsetAmplitude * a * crandom();
-	cg.refdef.vieworg[1]       += offsetAmplitude * a * crandom();
-	cg.refdef.vieworg[2]       += offsetAmplitude * a * crandom();
-	cg.refdefViewAngles[YAW]   += angleAmplitude  * a * crandom();
-	cg.refdefViewAngles[PITCH] += angleAmplitude  * a * crandom();
-	cg.refdefViewAngles[ROLL]  += angleAmplitude  * a * crandom();
-}
-#endif
-
-
 /*
 ===============
 CG_SceneActive
@@ -1090,17 +988,6 @@ static int CG_CalcViewValues( void ) {
 	// position eye relative to origin
 	AnglesToAxis( cg.refdefViewAngles, cg.refdef.viewaxis );
 
-#if FEAT_EARTHQUAKE_SYSTEM
-	{
-		for ( int i = 0; i < MAX_EARTHQUAKES; i++ ) {
-			earthquake_t *quake = &cg.earthquakes[i];
-			if ( !quake->startTime ) continue;
-			AddEarthquakeTremble( quake );
-		}
-		AddEarthquakeTremble( NULL );
-	}
-#endif
-
 	if ( cg.hyperspace ) {
 		cg.refdef.rdflags |= RDF_NOWORLDMODEL | RDF_HYPERSPACE;
 	}
@@ -1205,9 +1092,6 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 
 	cg.time = serverTime;
 	cg.demoPlayback = demoPlayback;
-#if FEAT_EARTHQUAKE_SYSTEM
-	cg.additionalTremble = 0;
-#endif
 #if FEAT_MUSIC_PLAYLIST
 	CG_RunPlayListFrame();
 #endif

@@ -6,6 +6,7 @@
 
 #include "render_submission_material.h"
 #include "render_lighting_metadata.h"
+#include "../ral/core/ral_material_source.h"
 #include "tr_public.h"
 
 #ifdef __cplusplus
@@ -37,6 +38,8 @@ typedef enum {
 
 typedef struct {
 	char imageName[MAX_QPATH];
+	uint32_t sourceLine;
+	uint32_t sourceColumn;
 	renderMaterialStageImageSource_t imageSource;
 	renderMaterialTcGen_t tcGen;
 	renderMaterialBlendFactor_t sourceBlend;
@@ -55,6 +58,12 @@ typedef struct {
 
 typedef struct {
 	char name[MAX_QPATH];
+	char declarationPath[MAX_QPATH];
+	uint64_t declarationSourceId;
+	uint64_t declarationSize;
+	unsigned declarationGeneration;
+	uint32_t declarationLine;
+	uint32_t declarationColumn;
 	char imageName[MAX_QPATH];
 	char skyBoxPrefix[MAX_QPATH];
 	char secondaryImageName[MAX_QPATH];
@@ -92,6 +101,10 @@ qboolean RenderMaterialScript_Load( renderMaterialScriptCatalog_t *catalog,
 qboolean RenderMaterialScript_Lookup(
 	const renderMaterialScriptCatalog_t *catalog, const char *name,
 	renderMaterialScriptEntry_t *outEntry );
+qboolean RenderMaterialScript_CompileSource(
+	const renderMaterialScriptEntry_t *entry, const refimport_t *imports,
+	uint64_t materialGeneration, ralMaterialSourceReceipt_t *outReceipt,
+	ralMaterialSourceDiagnostic_t *outDiagnostic );
 qboolean RenderMaterialScript_ApplyLighting(
 	const renderMaterialScriptCatalog_t *catalog, const char *name,
 	renderSubmissionState_t *submission, qhandle_t material );

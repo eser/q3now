@@ -54,11 +54,128 @@ void RE_LoadWorldMap( const mapFile_t *bsp, int worldIndex );
 // only slot 0 is ever used, and tr.world points at it exactly as before.
 static	world_t		s_worldData;
 static	world_t		s_worldDataSlots[ MAX_RENDER_WORLDS ];
+static	int			s_activeWorldIndex = -1;
+typedef struct {
+	const byte *externalVisData;
+	int numLightmaps;
+	image_t **lightmaps;
+	image_t **lightmapsStyle[3];
+	int numLightmapsStyle;
+	image_t **sunMaskAtlas;
+	image_t **propLightmaps;
+	int numPropLightmaps;
+	int maxPropLightmaps;
+	float lightstyleValues[64];
+	char lightstylePatterns[64][64];
+	qboolean mergeLightmaps;
+	float lightmapOffset[2];
+	float lightmapScale[2];
+	int lightmapMod;
+	int visCount;
+	int viewCluster;
+	vec3_t sunLight;
+	vec3_t sunDirection;
+	qboolean sunHasSource;
+	int numFogs;
+	int globalFog;
+	fogType_t globalFogType;
+	vec3_t globalFogColor;
+	float globalFogDepthForOpaque;
+	float globalFogDensity;
+	qboolean fogEnabled;
+	fogType_t fogTypeCurrent;
+	qboolean vertexLightingAllowed;
+} worldMapState_t;
+static	worldMapState_t s_worldMapStates[ MAX_RENDER_WORLDS ];
+static	const byte	*s_pendingWorldVisData;
 static	byte		*fileBase;
 // Q1 per-vertex style indices passed to ParseFace during R_LoadSurfaces
 static const byte	*lightstyleData = NULL;
 
 static int	c_gridVerts;
+
+static void R_SaveWorldMapState( int worldIndex ) {
+	worldMapState_t *state;
+	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS ) return;
+	state = &s_worldMapStates[worldIndex];
+	state->externalVisData = tr.externalVisData;
+	state->numLightmaps = tr.numLightmaps;
+	state->lightmaps = tr.lightmaps;
+	memcpy( state->lightmapsStyle, tr.lightmapsStyle, sizeof( state->lightmapsStyle ) );
+	state->numLightmapsStyle = tr.numLightmapsStyle;
+	state->sunMaskAtlas = tr.sunMaskAtlas;
+	state->propLightmaps = tr.propLightmaps;
+	state->numPropLightmaps = tr.numPropLightmaps;
+	state->maxPropLightmaps = tr.maxPropLightmaps;
+	memcpy( state->lightstyleValues, tr.lightstyleValues, sizeof( state->lightstyleValues ) );
+	memcpy( state->lightstylePatterns, tr.lightstylePatterns, sizeof( state->lightstylePatterns ) );
+	state->mergeLightmaps = tr.mergeLightmaps;
+	memcpy( state->lightmapOffset, tr.lightmapOffset, sizeof( state->lightmapOffset ) );
+	memcpy( state->lightmapScale, tr.lightmapScale, sizeof( state->lightmapScale ) );
+	state->lightmapMod = tr.lightmapMod;
+	state->visCount = tr.visCount;
+	state->viewCluster = tr.viewCluster;
+	VectorCopy( tr.sunLight, state->sunLight );
+	VectorCopy( tr.sunDirection, state->sunDirection );
+	state->sunHasSource = tr.sunHasSource;
+	state->numFogs = tr.numFogs;
+	state->globalFog = tr.globalFog;
+	state->globalFogType = tr.globalFogType;
+	VectorCopy( tr.globalFogColor, state->globalFogColor );
+	state->globalFogDepthForOpaque = tr.globalFogDepthForOpaque;
+	state->globalFogDensity = tr.globalFogDensity;
+	state->fogEnabled = tr.fogEnabled;
+	state->fogTypeCurrent = tr.fogTypeCurrent;
+	state->vertexLightingAllowed = tr.vertexLightingAllowed;
+}
+
+static void R_ApplyWorldMapStateValue( const worldMapState_t *state ) {
+	tr.externalVisData = state->externalVisData;
+	tr.numLightmaps = state->numLightmaps;
+	tr.lightmaps = state->lightmaps;
+	memcpy( tr.lightmapsStyle, state->lightmapsStyle, sizeof( tr.lightmapsStyle ) );
+	tr.numLightmapsStyle = state->numLightmapsStyle;
+	tr.sunMaskAtlas = state->sunMaskAtlas;
+	tr.propLightmaps = state->propLightmaps;
+	tr.numPropLightmaps = state->numPropLightmaps;
+	tr.maxPropLightmaps = state->maxPropLightmaps;
+	memcpy( tr.lightstyleValues, state->lightstyleValues, sizeof( tr.lightstyleValues ) );
+	memcpy( tr.lightstylePatterns, state->lightstylePatterns, sizeof( tr.lightstylePatterns ) );
+	tr.mergeLightmaps = state->mergeLightmaps;
+	memcpy( tr.lightmapOffset, state->lightmapOffset, sizeof( tr.lightmapOffset ) );
+	memcpy( tr.lightmapScale, state->lightmapScale, sizeof( tr.lightmapScale ) );
+	tr.lightmapMod = state->lightmapMod;
+	tr.visCount = state->visCount;
+	tr.viewCluster = state->viewCluster;
+	VectorCopy( state->sunLight, tr.sunLight );
+	VectorCopy( state->sunDirection, tr.sunDirection );
+	tr.sunHasSource = state->sunHasSource;
+	tr.numFogs = state->numFogs;
+	tr.globalFog = state->globalFog;
+	tr.globalFogType = state->globalFogType;
+	VectorCopy( state->globalFogColor, tr.globalFogColor );
+	tr.globalFogDepthForOpaque = state->globalFogDepthForOpaque;
+	tr.globalFogDensity = state->globalFogDensity;
+	tr.fogEnabled = state->fogEnabled;
+	tr.fogTypeCurrent = state->fogTypeCurrent;
+	tr.vertexLightingAllowed = state->vertexLightingAllowed;
+}
+
+static void R_ApplyWorldMapState( int worldIndex ) {
+	R_ApplyWorldMapStateValue( &s_worldMapStates[worldIndex] );
+}
+
+static void R_ClearWorldMapGlobals( const byte *externalVisData,
+		qboolean vertexLightingAllowed ) {
+	worldMapState_t empty;
+	memset( &empty, 0, sizeof( empty ) );
+	empty.externalVisData = externalVisData;
+	empty.vertexLightingAllowed = vertexLightingAllowed;
+	empty.viewCluster = -1;
+	empty.lightmapScale[0] = empty.lightmapScale[1] = 1.0f;
+	empty.lightmapMod = MAX_QINT;
+	R_ApplyWorldMapStateValue( &empty );
+}
 
 
 //===============================================================================
@@ -999,7 +1116,10 @@ space in big maps...
 =================
 */
 void RE_SetWorldVisData( const byte *vis ) {
-	tr.externalVisData = vis;
+	/* Visibility ownership is associated with the next world registration.  Do
+	 * not overwrite the currently selected sibling world's visibility alias. */
+	s_pendingWorldVisData = vis;
+	if ( s_activeWorldIndex < 0 ) tr.externalVisData = vis;
 }
 
 
@@ -3320,9 +3440,49 @@ app: only slot 0 is ever loaded, and tr.world already points there.
 void R_SetWorldSlot( int worldIndex ) {
 	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS )
 		worldIndex = 0;
-	tr.world = ( s_worldDataSlots[ worldIndex ].name[ 0 ] != '\0' )
-	           ? &s_worldDataSlots[ worldIndex ]
-	           : NULL;
+	if ( s_activeWorldIndex >= 0 && s_activeWorldIndex != worldIndex )
+		R_SaveWorldMapState( s_activeWorldIndex );
+	if ( R_WorldSlotResident( worldIndex ) ) {
+		s_activeWorldIndex = worldIndex;
+		tr.world = &s_worldDataSlots[worldIndex];
+		R_ApplyWorldMapState( worldIndex );
+	} else {
+		s_activeWorldIndex = -1;
+		tr.world = NULL;
+	}
+	tr.worldMapLoaded = R_ResidentWorldCount() > 0 ? qtrue : qfalse;
+}
+
+qboolean R_WorldSlotResident( int worldIndex ) {
+	return worldIndex >= 0 && worldIndex < MAX_RENDER_WORLDS
+		&& s_worldDataSlots[worldIndex].name[0] != '\0' ? qtrue : qfalse;
+}
+
+int R_ResidentWorldCount( void ) {
+	int count = 0;
+	for ( int worldIndex = 0; worldIndex < MAX_RENDER_WORLDS; ++worldIndex )
+		if ( R_WorldSlotResident( worldIndex ) ) count++;
+	return count;
+}
+
+qboolean R_UnloadWorldSlot( int worldIndex ) {
+	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS ) return qfalse;
+	if ( !R_WorldSlotResident( worldIndex ) ) return qtrue;
+	if ( s_activeWorldIndex == worldIndex ) {
+		tr.world = NULL;
+		s_activeWorldIndex = -1;
+	}
+	memset( &s_worldDataSlots[worldIndex], 0, sizeof( s_worldDataSlots[worldIndex] ) );
+	memset( &s_worldMapStates[worldIndex], 0, sizeof( s_worldMapStates[worldIndex] ) );
+	R_TemporalWorldLoaded( worldIndex );
+	tr.worldMapLoaded = R_ResidentWorldCount() > 0 ? qtrue : qfalse;
+	if ( !tr.world )
+		for ( int replacement = 0; replacement < MAX_RENDER_WORLDS; ++replacement )
+			if ( R_WorldSlotResident( replacement ) ) {
+				R_SetWorldSlot( replacement );
+				break;
+			}
+	return qtrue;
 }
 
 
@@ -3345,13 +3505,22 @@ void RE_LoadWorldMap( const mapFile_t *bsp, int worldIndex ) {
 	byte		*startMarker;
 
 
-	if ( tr.worldMapLoaded ) {
+	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS )
+		worldIndex = 0;
+	if ( R_WorldSlotResident( worldIndex ) ) {
 		ri.Terminate( TERM_CLIENT_DROP, "ERROR: attempted to redundantly load world map" );
 	}
 
 	if ( !bsp ) {
 		ri.Terminate( TERM_CLIENT_DROP, "%s: bsp is NULL", __func__ );
 	}
+	qboolean vertexLightingAllowed = tr.vertexLightingAllowed;
+	if ( s_activeWorldIndex >= 0 )
+		R_SaveWorldMapState( s_activeWorldIndex );
+	s_activeWorldIndex = -1;
+	tr.world = NULL;
+	R_ClearWorldMapGlobals( s_pendingWorldVisData, vertexLightingAllowed );
+	s_pendingWorldVisData = NULL;
 
 	name = bsp->name;
 	if ( !name[0] ) {
@@ -3472,10 +3641,9 @@ void RE_LoadWorldMap( const mapFile_t *bsp, int worldIndex ) {
 	// every reference valid. tr.world points at the slot, not the load scratch, so
 	// the active app's render reads its own world. Single app: slot 0, identical to
 	// pointing tr.world straight at the scratch as before.
-	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS )
-		worldIndex = 0;
 	s_worldDataSlots[ worldIndex ] = s_worldData;
 	tr.world = &s_worldDataSlots[ worldIndex ];
+	s_activeWorldIndex = worldIndex;
 	R_TemporalWorldLoaded( worldIndex );
 
 	// A real sun exists only if a shader's sun/q3map_sun keyword moved tr.sunDirection
@@ -3498,6 +3666,7 @@ void RE_LoadWorldMap( const mapFile_t *bsp, int worldIndex ) {
 	// (no-op unless r_shadows=1 and a shader set a real sun direction).
 	R_BuildSunMaskAtlas();
 #endif
+	R_SaveWorldMapState( worldIndex );
 
 	{
 		double   mapLoadMs = (double)( ri.Microseconds() - mapLoadStartUs ) / 1000.0;

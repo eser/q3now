@@ -35,6 +35,7 @@ void SV_BotVerifyCharacter_f( void );
 void SV_BotDebugWeapons_f( void );
 
 qboolean SV_Lua_GetCharacterDisplayName( const char *name, char *out, int outSize );
+qboolean SV_Lua_GetCharacterPrimaryModel( const char *name, char *out, int outSize );
 qboolean SV_Lua_GetCharacterBBox( const char *name, char *out, int outSize );
 qboolean SV_Lua_GetCharacterMovement( const char *name, char *out, int outSize );
 qboolean SV_Lua_GetCharacterAttack( const char *name, char *out, int outSize );

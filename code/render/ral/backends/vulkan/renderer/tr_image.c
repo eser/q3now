@@ -1601,6 +1601,43 @@ static const imageExtToLoaderMap_t imageLoaders[] =
 
 static const int numImageLoaders = ARRAY_LEN( imageLoaders );
 
+static qboolean R_LoadImageCandidate( const char *candidate,
+		void (*fallbackLoader)( const char *, unsigned char **, int *, int * ),
+		byte **pic, int *width, int *height, char *resolvedName,
+		size_t resolvedNameSize ) {
+	char canonicalName[ MAX_QPATH ];
+	const char *decodeName = candidate;
+	void (*loader)( const char *, unsigned char **, int *, int * ) = fallbackLoader;
+
+	if ( ri.FS_ResolveResource
+			&& ri.FS_ResolveResource( candidate, canonicalName,
+				sizeof( canonicalName ), NULL, NULL, NULL ) ) {
+		const char *canonicalExt = COM_GetExtension( canonicalName );
+		int i;
+
+		decodeName = canonicalName;
+		loader = NULL;
+		for ( i = 0; i < numImageLoaders; i++ ) {
+			if ( !Q_stricmp( canonicalExt, imageLoaders[i].ext ) ) {
+				loader = imageLoaders[i].ImageLoader;
+				break;
+			}
+		}
+		if ( !loader ) {
+			return qfalse;
+		}
+	}
+
+	loader( decodeName, pic, width, height );
+	if ( !*pic ) {
+		return qfalse;
+	}
+	if ( resolvedName != decodeName ) {
+		Q_strncpyz( resolvedName, decodeName, resolvedNameSize );
+	}
+	return qtrue;
+}
+
 static qboolean R_ShouldPreferLegacyImages( void ) {
 	char profile[16];
 	int version;
@@ -1628,9 +1665,8 @@ Loads any of the supported image types into a canonical
 static const char *R_LoadImage( const char *name, byte **pic, int *width, int *height )
 {
 	static char localName[ MAX_QPATH ];
-	const char *altName, *ext;
-	//qboolean orgNameFailed = qfalse;
-	int orgLoader = -1;
+	char candidateName[ MAX_QPATH ];
+	const char *ext;
 	int i;
 
 	*pic = NULL;
@@ -1647,10 +1683,12 @@ static const char *R_LoadImage( const char *name, byte **pic, int *width, int *h
 				continue;
 			}
 
-			altName = va( "%s.%s", localName, imageLoaders[i].ext );
-			imageLoaders[i].ImageLoader( altName, pic, width, height );
-			if ( *pic ) {
-				return altName;
+			Com_sprintf( candidateName, sizeof( candidateName ), "%s.%s",
+				localName, imageLoaders[i].ext );
+			if ( R_LoadImageCandidate( candidateName,
+					imageLoaders[i].ImageLoader, pic, width, height,
+					localName, sizeof( localName ) ) ) {
+				return localName;
 			}
 
 			break;
@@ -1665,52 +1703,28 @@ static const char *R_LoadImage( const char *name, byte **pic, int *width, int *h
 			if ( !Q_stricmp( ext, imageLoaders[ i ].ext ) )
 			{
 				// Load
-				imageLoaders[ i ].ImageLoader( localName, pic, width, height );
+				R_LoadImageCandidate( localName, imageLoaders[i].ImageLoader,
+					pic, width, height, localName, sizeof( localName ) );
 				break;
 			}
 		}
 
-		// A loader was found
-		if ( i < numImageLoaders )
-		{
-			if ( *pic == NULL )
-			{
-				// Loader failed, most likely because the file isn't there;
-				// try again without the extension
-				//orgNameFailed = qtrue;
-				orgLoader = i;
-				COM_StripExtension( name, localName, MAX_QPATH );
-			}
-			else
-			{
-				// Something loaded
-				return localName;
-			}
-		}
+		/* Explicit extensions are exact. FS_ResolveResource canonicalizes any
+		 * declared legacy spelling before this dispatcher is reached. */
+		return localName;
 	}
 
 	// Try and find a suitable match using all
 	// the image formats supported
 	for ( i = 0; i < numImageLoaders; i++ )
 	{
-		if ( i == orgLoader )
-			continue;
+		Com_sprintf( candidateName, sizeof( candidateName ), "%s.%s",
+			localName, imageLoaders[i].ext );
 
-		altName = va( "%s.%s", localName, imageLoaders[ i ].ext );
-
-		// Load
-		imageLoaders[ i ].ImageLoader( altName, pic, width, height );
-
-		if ( *pic )
+		if ( R_LoadImageCandidate( candidateName,
+				imageLoaders[i].ImageLoader, pic, width, height,
+				localName, sizeof( localName ) ) )
 		{
-#if 0
-			if ( orgNameFailed )
-			{
-				R_LOG( rch_assets, SEV_WARN, "WARNING: %s not present, using %s instead\n",
-						name, altName );
-			}
-#endif
-			Q_strncpyz( localName, altName, sizeof( localName ) );
 			break;
 		}
 	}
@@ -1900,9 +1914,15 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 	int		width, height;
 	byte	*pic;
 	int		hash;
+	char	canonicalName[ MAX_QPATH ];
 
 	if ( !name ) {
 		return NULL;
+	}
+	if ( name[0] != '*' && ri.FS_ResolveResource
+			&& ri.FS_ResolveResource( name, canonicalName,
+				sizeof( canonicalName ), NULL, NULL, NULL ) ) {
+		name = canonicalName;
 	}
 
 	hash = generateHashValue( name );

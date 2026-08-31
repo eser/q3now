@@ -51,19 +51,22 @@ then tries all supported codecs.
 static void *S_CodecGetSound( const char *filename, snd_info_t *info )
 {
 	snd_codec_t *codec;
-	snd_codec_t *orgCodec = NULL;
-	qboolean	orgNameFailed = qfalse;
 	char		localName[ MAX_VFS_PATH ];
 	const char	*ext;
 	char		altName[ MAX_VFS_PATH ];
 	void		*rtn = NULL;
 	char		normName[ MAX_VFS_PATH ];
+	fsResolvedResource_t resolved;
 
 	// normalize backslash separators (BSP/map music paths often use backslashes)
 	{
 		char *p;
 		Q_strncpyz( normName, filename, sizeof( normName ) );
 		for ( p = normName; *p; p++ ) { if ( *p == '\\' ) *p = '/'; }
+		filename = normName;
+	}
+	if ( FS_ResolveResource( filename, &resolved ) ) {
+		Q_strncpyz( normName, resolved.canonicalPath, sizeof( normName ) );
 		filename = normName;
 	}
 
@@ -87,23 +90,12 @@ static void *S_CodecGetSound( const char *filename, snd_info_t *info )
 			}
 		}
 
-		// A loader was found
-		if ( codec )
-		{
-			if ( !rtn )
-			{
-				// Loader failed, most likely because the file isn't there;
-				// try again without the extension
-				orgNameFailed = qtrue;
-				orgCodec = codec;
-				COM_StripExtension( filename, localName, sizeof( localName ) );
-			}
-			else
-			{
-				// Something loaded
-				return rtn;
-			}
-		}
+
+		/* Explicit extensions are exact. Compatibility format/path changes
+		 * belong in the VFS alias catalog, which S_Base_RegisterSound resolves
+		 * before codec dispatch. Never reinterpret Opus bytes as WAV (or vice
+		 * versa) by stripping and guessing a different suffix here. */
+		return rtn;
 	}
 
 	// Try and find a suitable match using all
@@ -135,9 +127,6 @@ static void *S_CodecGetSound( const char *filename, snd_info_t *info )
 	// the sound codecs supported
 	for ( codec = codecs; codec; codec = codec->next )
 	{
-		if ( codec == orgCodec )
-			continue;
-
 		Com_sprintf( altName, sizeof( altName ), "%s.%s", localName, codec->ext );
 
 		// Load
@@ -148,18 +137,6 @@ static void *S_CodecGetSound( const char *filename, snd_info_t *info )
 
 		if ( rtn )
 		{
-			if ( orgNameFailed )
-			{
-				if ( Q_stricmpn( localName, "characters/", 11 ) != 0 &&
-				     Q_stricmpn( localName, "music/", 6 ) != 0 )
-				{
-					char fbBuf[32];
-					Com_sprintf( fbBuf, sizeof( fbBuf ), "%s>%s",
-					             orgCodec ? orgCodec->ext : "?", codec->ext );
-					AssetLog_Event( "sound", localName, fbBuf, NULL, ASSET_LOG_INFO );
-				}
-			}
-
 			return rtn;
 		}
 	}
@@ -171,12 +148,7 @@ static void *S_CodecGetSound( const char *filename, snd_info_t *info )
 		const snd_codec_t *c;
 		qboolean first = qtrue;
 		extBuf[0] = '\0';
-		if ( orgCodec ) {
-			Q_strncpyz( extBuf, orgCodec->ext, sizeof( extBuf ) );
-			first = qfalse;
-		}
 		for ( c = codecs; c; c = c->next ) {
-			if ( c == orgCodec ) continue;
 			if ( !first )
 				strncat( extBuf, ",", sizeof( extBuf ) - strlen( extBuf ) - 1 );
 			strncat( extBuf, c->ext, sizeof( extBuf ) - strlen( extBuf ) - 1 );
@@ -214,7 +186,22 @@ qboolean S_CodecResolves( const char *name )
 		if ( *p == '\\' ) *p = '/';
 	}
 
-	COM_StripExtension( normName, localName, sizeof( localName ) );
+	if ( *COM_GetExtension( normName ) ) {
+		fsResolvedResource_t resolved;
+		const char *resolvedExt;
+		if ( !FS_ResolveResource( normName, &resolved ) ) {
+			return qfalse;
+		}
+		resolvedExt = COM_GetExtension( resolved.canonicalPath );
+		for ( const char **ext = s_codec_extensions; *ext; ext++ ) {
+			if ( !Q_stricmp( resolvedExt, *ext ) ) {
+				return qtrue;
+			}
+		}
+		return qfalse;
+	}
+
+	Q_strncpyz( localName, normName, sizeof( localName ) );
 
 	for ( const char **ext = s_codec_extensions; *ext; ext++ ) {
 		fileHandle_t f;

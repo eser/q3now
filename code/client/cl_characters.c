@@ -1165,7 +1165,9 @@ void CL_Characters_RegisterIcons( void ) {
 		if ( s_clCharacters[i].iconHandle ) continue;
 
 		s_clCharacters[i].iconHandle = CL_Characters_TryIconCandidates( &s_clCharacters[i] );
-		if ( !s_clCharacters[i].iconHandle ) {
+		// Icons are a player-selection requirement, not a creature-runtime
+		// requirement. Non-selectable NPC manifests intentionally omit them.
+		if ( !s_clCharacters[i].iconHandle && s_clCharacters[i].selectable ) {
 			COM_WARN( LOG_CH(ch_client),
 				"CL_Characters: '%s' has no icon — looked for %sicon_<skin>.{png,tga,jpg} in %d skin slot(s)\n",
 				s_clCharacters[i].dirname,

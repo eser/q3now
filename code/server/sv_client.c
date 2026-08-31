@@ -4,7 +4,11 @@
 // sv_client.c -- server code for dealing with clients
 
 #include "server.h"
+#include "../qcommon/mod_manifest.h"
 #include "../qcommon/wired/net/wn_public.h"
+
+LOG_DECLARE_CHANNEL( ch_server, "server" );
+LOG_DECLARE_CHANNEL( ch_network_server, "network.server" );
 
 /* WiredNet bootstrap is a reliable QUIC stream — no UDP MTU limit.
  * Size must hold all configstrings + entity baselines for the largest maps.
@@ -124,6 +128,146 @@ static void SV_WiredNetFinishSection( byte *buf, int lenPos, int sectionStart, i
 	buf[lenPos + 3] = (byte)( ( len >> 24 ) & 0xFF );
 }
 
+typedef struct {
+	qboolean built;
+	int checksumFeed;
+	wiredPackageManifest_t *manifests;
+	char **json;
+	int count;
+} svContentManifestCatalog_t;
+
+static svContentManifestCatalog_t svContentManifestCatalog;
+
+void SV_ContentManifestCatalogReset( void ) {
+	for ( int i = 0; i < svContentManifestCatalog.count; ++i )
+		if ( svContentManifestCatalog.json && svContentManifestCatalog.json[i] ) Z_Free( svContentManifestCatalog.json[i] );
+	if ( svContentManifestCatalog.json ) Z_Free( svContentManifestCatalog.json );
+	if ( svContentManifestCatalog.manifests ) Z_Free( svContentManifestCatalog.manifests );
+	memset( &svContentManifestCatalog, 0, sizeof( svContentManifestCatalog ) );
+}
+
+static int SV_ContentManifestNameCompare( const void *a, const void *b ) {
+	const char *const *left = (const char *const *)a;
+	const char *const *right = (const char *const *)b;
+	return Q_stricmp( *left, *right );
+}
+
+static fsMountRole_t SV_ContentManifestMountRole( wiredPackageRole_t role ) {
+	switch ( role ) {
+	case WIRED_PACKAGE_ROLE_RUNTIME: return FS_MOUNT_ROLE_RUNTIME;
+	case WIRED_PACKAGE_ROLE_TOOLCHAIN: return FS_MOUNT_ROLE_TOOLCHAIN;
+	case WIRED_PACKAGE_ROLE_SERVER: return FS_MOUNT_ROLE_SERVER;
+	case WIRED_PACKAGE_ROLE_CLIENT: return FS_MOUNT_ROLE_CLIENT;
+	case WIRED_PACKAGE_ROLE_SHARED: return FS_MOUNT_ROLE_SHARED;
+	case WIRED_PACKAGE_ROLE_COSMETIC: return FS_MOUNT_ROLE_COSMETIC;
+	default: return FS_MOUNT_ROLE_GLOBAL;
+	}
+}
+
+static qboolean SV_ContentManifestArchivePath( const char *path ) {
+	size_t length;
+	if ( !path ) return qfalse;
+	length = strlen( path );
+	return ( length > 5 && !Q_stricmp( path + length - 5, ".sw3z" ) )
+		|| ( length > 4 && !Q_stricmp( path + length - 4, ".pk3" ) );
+}
+
+static qboolean SV_ApplyContentManifestRoles( char *error, size_t errorSize ) {
+	fsMountPackageReceipt_t receipts[WIRED_PACKAGE_SET_MAX];
+	size_t receiptCount = 0;
+	for ( int i = 0; i < svContentManifestCatalog.count; ++i ) {
+		const wiredPackageManifest_t *manifest = &svContentManifestCatalog.manifests[i];
+		fsMountRole_t role = SV_ContentManifestMountRole( manifest->role );
+		if ( role == FS_MOUNT_ROLE_GLOBAL ) {
+			Com_sprintf( error, (int)errorSize, "invalid runtime package role" );
+			return qfalse;
+		}
+		for ( size_t f = 0; f < manifest->fileCount; ++f ) {
+			const wiredPackageFile_t *file = &manifest->files[f];
+			if ( !SV_ContentManifestArchivePath( file->path ) ) continue;
+			if ( receiptCount == ARRAY_LEN( receipts ) ) {
+				Com_sprintf( error, (int)errorSize, "global package receipt bound exceeded" );
+				return qfalse;
+			}
+			receipts[receiptCount].archivePath = file->path;
+			receipts[receiptCount].sha256 = file->sha256;
+			receipts[receiptCount].size = file->size;
+			receipts[receiptCount].role = role;
+			receipts[receiptCount].clientApproved = role == FS_MOUNT_ROLE_RUNTIME
+				|| role == FS_MOUNT_ROLE_CLIENT || role == FS_MOUNT_ROLE_SHARED
+				|| role == FS_MOUNT_ROLE_COSMETIC;
+			receiptCount++;
+		}
+	}
+	return FS_ApplyGlobalPackageReceipts( receipts, receiptCount, error, errorSize );
+}
+
+qboolean SV_BuildContentManifestCatalog( void ) {
+	char **names;
+	int count = 0;
+	size_t receiptBytes = 2;
+	char error[256];
+	if ( svContentManifestCatalog.built && svContentManifestCatalog.checksumFeed == sv.checksumFeed ) return qtrue;
+	SV_ContentManifestCatalogReset();
+	names = FS_ListFiles( "", ".sw3z.manifest.json", &count );
+	if ( count < 0 || count > WIRED_PACKAGE_SET_MAX ) {
+		if ( names ) FS_FreeFileList( names );
+		COM_WARN( LOG_CH(ch_server), "content manifest count exceeds runtime bound\n" );
+		return qfalse;
+	}
+	if ( count > 1 ) qsort( names, (size_t)count, sizeof( names[0] ), SV_ContentManifestNameCompare );
+	if ( count ) {
+		svContentManifestCatalog.manifests = Z_Malloc( (size_t)count * sizeof( *svContentManifestCatalog.manifests ) );
+		svContentManifestCatalog.json = Z_Malloc( (size_t)count * sizeof( *svContentManifestCatalog.json ) );
+		memset( svContentManifestCatalog.json, 0, (size_t)count * sizeof( *svContentManifestCatalog.json ) );
+	}
+	for ( int i = 0; i < count; ++i ) {
+		void *fileData = NULL;
+		int length = FS_ReadFile( names[i], &fileData );
+		error[0] = '\0';
+		if ( length <= 0 || length >= 65535 || receiptBytes + 2u + (size_t)length + 1u > WIRED_PACKAGE_RECEIPT_BYTES_MAX
+			|| !WiredPackageManifest_Parse( (const char *)fileData, (size_t)length,
+				&svContentManifestCatalog.manifests[i], error, sizeof( error ) ) ) {
+			COM_WARN( LOG_CH(ch_server), "content manifest rejected: %s (%s)\n", names[i], error[0] ? error : "size/read failure" );
+			if ( fileData ) FS_FreeFile( fileData );
+			FS_FreeFileList( names );
+			SV_ContentManifestCatalogReset();
+			return qfalse;
+		}
+		svContentManifestCatalog.json[i] = Z_Malloc( (size_t)length + 1u );
+		memcpy( svContentManifestCatalog.json[i], fileData, (size_t)length );
+		svContentManifestCatalog.json[i][length] = '\0';
+		receiptBytes += 2u + (size_t)length + 1u;
+		FS_FreeFile( fileData );
+		svContentManifestCatalog.count++;
+	}
+	FS_FreeFileList( names );
+	if ( count && !WiredPackageManifest_ValidateSet( svContentManifestCatalog.manifests,
+		(size_t)count, error, sizeof( error ) ) ) {
+		COM_WARN( LOG_CH(ch_server), "content manifest set rejected: %s\n", error );
+		SV_ContentManifestCatalogReset();
+		return qfalse;
+	}
+	svContentManifestCatalog.count = count;
+	if ( count && !SV_ApplyContentManifestRoles( error, sizeof( error ) ) ) {
+		COM_WARN( LOG_CH(ch_server), "content manifest role publication failed: %s\n", error );
+		SV_ContentManifestCatalogReset();
+		return qfalse;
+	}
+	svContentManifestCatalog.checksumFeed = sv.checksumFeed;
+	svContentManifestCatalog.built = qtrue;
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "WiredNet content catalog ready: %d manifest(s)\n", count );
+	return qtrue;
+}
+
+static qboolean SV_WiredNetWriteContentManifests( byte *buf, int bufsize, int *offset ) {
+	if ( !SV_BuildContentManifestCatalog()
+		|| !SV_WiredNetWriteU16( buf, bufsize, offset, (uint16_t)svContentManifestCatalog.count ) ) return qfalse;
+	for ( int i = 0; i < svContentManifestCatalog.count; ++i )
+		if ( !SV_WiredNetWriteString( buf, bufsize, offset, svContentManifestCatalog.json[i] ) ) return qfalse;
+	return qtrue;
+}
+
 static qboolean SV_WiredNetWriteBootstrap( client_t *client, byte *buf, int bufsize, int *outLen )
 {
 	int offset = 0;
@@ -153,6 +297,11 @@ static qboolean SV_WiredNetWriteBootstrap( client_t *client, byte *buf, int bufs
 			return qfalse;
 		}
 	}
+	SV_WiredNetFinishSection( buf, lenPos, sectionStart, offset );
+
+	if ( !SV_WiredNetBeginSection( buf, bufsize, &offset, WN_BOOTSTRAP_SEC_CONTENT_MANIFESTS, &lenPos ) ) return qfalse;
+	sectionStart = offset;
+	if ( !SV_WiredNetWriteContentManifests( buf, bufsize, &offset ) ) return qfalse;
 	SV_WiredNetFinishSection( buf, lenPos, sectionStart, offset );
 
 	if ( !SV_WiredNetBeginSection( buf, bufsize, &offset, WN_BOOTSTRAP_SEC_CONFIGSTRINGS, &lenPos ) ) return qfalse;
@@ -272,9 +421,6 @@ typedef struct tld_info_s {
 	const char *tld;
 	const char *country;
 } tld_info_t;
-
-LOG_DECLARE_CHANNEL( ch_server, "server" );
-LOG_DECLARE_CHANNEL( ch_network_server, "network.server" );
 
 static const tld_info_t tld_info[] = {
 #include "tlds.h"

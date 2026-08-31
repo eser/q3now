@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#define RENDER_SUBMISSION_SCHEMA_VERSION 23u
+#define RENDER_SUBMISSION_SCHEMA_VERSION 24u
 
 typedef enum {
 	RENDER_ASSET_MODEL = 1,
@@ -72,6 +72,7 @@ typedef struct {
 	uint32_t effectDecalCount;
 	uint32_t effectRibbonCount;
 	uint32_t effectRibbonPointCount;
+	uint32_t effectBeamCount;
 	uint32_t effectPrimitiveDroppedCount;
 	uint32_t atmosphereEmitterCount;
 	uint32_t atmosphereProfileCount;
@@ -87,6 +88,28 @@ typedef struct {
 	qboolean atmosphereActive;
 	qboolean ready;
 } renderSubmissionReceipt_t;
+
+/* One retained BSP lowering per client app.  The submission state remains a
+ * single serialized frame recorder, while map-owned geometry/visibility can
+ * stay resident independently for every app slot. */
+typedef struct {
+	const mapFile_t          *map;
+	byte                     *surfaceVisibility;
+	uint32_t                  surfaceVisibilityBytes;
+	renderWorldSnapshot_t     snapshot;
+	uint64_t                  digest;
+	uint32_t                  surfaceCount;
+	uint32_t                  vertexCount;
+	uint32_t                  indexCount;
+	/* Map-specific lighting artifacts are owned directly by the slot. */
+	renderIrradianceVolumeRecord_t irradianceVolumes[RENDER_SUBMISSION_MAX_IRRADIANCE_VOLUMES];
+	renderDirectionalLightingRecord_t directionalLighting;
+	uint64_t                  irradianceVolumeDigest;
+	uint64_t                  directionalLightingDigest;
+	uint32_t                  irradianceVolumeCount;
+	uint32_t                  directionalLightingCount;
+	qboolean                  loaded;
+} renderSubmissionWorldSlot_t;
 
 typedef struct renderSubmissionState_s {
 	uint64_t				   ownerGeneration;
@@ -132,6 +155,7 @@ typedef struct renderSubmissionState_s {
 	uint32_t                  effectDecalCount;
 	uint32_t                  effectRibbonCount;
 	uint32_t                  effectRibbonPointCount;
+	uint32_t                  effectBeamCount;
 	uint32_t                  effectPrimitiveDroppedCount;
 	uint32_t				   emissiveProxyFrameLightCount;
 	uint32_t				   atmosphereEmitterCount;
@@ -153,8 +177,13 @@ typedef struct renderSubmissionState_s {
 	renderModelRecord_t		   models[RENDER_SUBMISSION_MAX_MODELS];
 	renderEntityCommand_t	   entities[RENDER_SUBMISSION_MAX_ENTITIES];
 	renderCharacterSkinSnapshot_t characterSkins[RENDER_SUBMISSION_MAX_CHARACTER_SKINS];
-	renderIrradianceVolumeRecord_t irradianceVolumes[RENDER_SUBMISSION_MAX_IRRADIANCE_VOLUMES];
-	renderDirectionalLightingRecord_t directionalLighting;
+	/* These pointers address either the active world's slot-owned records or
+	 * the fallback records while no world is selected.  Ownership is never
+	 * duplicated between the active view and a slot. */
+	renderIrradianceVolumeRecord_t fallbackIrradianceVolumes[RENDER_SUBMISSION_MAX_IRRADIANCE_VOLUMES];
+	renderDirectionalLightingRecord_t fallbackDirectionalLighting;
+	renderIrradianceVolumeRecord_t *irradianceVolumes;
+	renderDirectionalLightingRecord_t *directionalLighting;
 	ralEmissiveRouteReceipt_t emissiveRoutes[RENDER_SUBMISSION_MAX_EMISSIVE_ROUTES];
 	ralLightDescription_t emissiveProxyLights[RENDER_SUBMISSION_MAX_EMISSIVE_PROXY_LIGHTS];
 	renderEmissiveRoutingReceipt_t emissiveRouting;
@@ -170,7 +199,12 @@ typedef struct renderSubmissionState_s {
 	decalDesc_t               *effectDecals;
 	renderEffectRibbonCommand_t *effectRibbons;
 	ribbonPoint_t             *effectRibbonPoints;
+	beamDesc_t                *effectBeams;
 	uint64_t                   effectPrimitiveDigest;
+	renderSubmissionWorldSlot_t worlds[MAX_RENDER_WORLDS];
+	int32_t                    activeWorldIndex;
+	/* Serialized active-slot aliases retained for existing frontend consumers.
+	 * SelectWorld changes only these aliases; ownership remains in worlds[]. */
 	const mapFile_t		  *worldMap;
 	byte				  *worldSurfaceVisibility;
 	uint32_t			   worldSurfaceVisibilityBytes;
@@ -234,6 +268,10 @@ qboolean  RenderSubmission_SetMaterialLighting( renderSubmissionState_t *state, 
 qboolean  RenderSubmission_RecordAsset( renderSubmissionState_t *state, renderAssetKind_t kind, const char *name,
 										qhandle_t handle );
 qboolean  RenderSubmission_LoadWorld( renderSubmissionState_t *state, const mapFile_t *bsp, int worldIndex );
+qboolean  RenderSubmission_SelectWorld( renderSubmissionState_t *state, int worldIndex );
+qboolean  RenderSubmission_UnloadWorld( renderSubmissionState_t *state, int worldIndex );
+qboolean  RenderSubmission_WorldResident( const renderSubmissionState_t *state, int worldIndex );
+int       RenderSubmission_ResidentWorldCount( const renderSubmissionState_t *state );
 qboolean  RenderSubmission_BeginFrame( renderSubmissionState_t *state, uint64_t frameGeneration );
 void	  RenderSubmission_CancelFrame( renderSubmissionState_t *state );
 qboolean  RenderSubmission_ClearScene( renderSubmissionState_t *state );

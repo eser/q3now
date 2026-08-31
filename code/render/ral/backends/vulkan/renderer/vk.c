@@ -5280,14 +5280,10 @@ void vk_init_descriptors( void )
 		vk.decal.numImages = 0;
 	}
 
-	// Atmospheric weather descriptor sets — same descriptor-pool-reset survival
-	// as the particle/decal blocks above. The pool/frame buffers, set/pipeline
-	// layouts, and the heightgrid image all survive the reset (dedicated
-	// memory); only the descriptor sets need re-alloc + re-write. The heightgrid
-	// view/sampler are unchanged, so binding 3 re-binds the same valid image.
-	if ( vk.atm.available ) {
-		vk_atmospheric_write_descriptors();
-	}
+	// Atmospheric render descriptors are rebuilt with the other image-backed
+	// cohorts after R_InitImages.  Doing it here on cold boot races the shared
+	// scene-depth/image publication boundary and can permanently suppress
+	// weather before the first map starts.
 
 	// Adopt every allocate-once VkDescriptorSet into
 	// a ralBindGroup_t with ownsSet=qfalse so the RAL command path can pass them through
@@ -20998,7 +20994,7 @@ qboolean vk_initialize( void )
 		pool_size[0].type = RAL_BIND_COMBINED_TEXTURE_SAMPLER;
 		pool_size[0].dynamicOffset = qfalse;
 		// MAX_DRAWIMAGES per-image samplers + post-process/FBO descriptors +
-		// particle's remaining 96-element combined array per command slot.
+		// complete particle/decal combined-sampler cohorts.
 		// Ribbon/rail/beam no longer consume combined descriptors: their portable
 		// ABI is a sampled texture array plus one common sampler (pool_size 5/6).
 		//
@@ -21015,8 +21011,16 @@ qboolean vk_initialize( void )
 		                             + VK_NUM_BLOOM_PASSES * 2 /* vk.bloom_image_descriptor[i] — ping-pong per pass */
 			                             + 5 /* direct RAL SMAA sampler groups: edges/blend/input/area/search */
 		                             + 5 /* direct RAL engine-resources group: shadowMap + BRDF-LUT + irradiance + radiance + GTAO */
-			                             + 12 /* atmosphere heightgrid + scene-depth + particle collision-heightgrid allocations */
-		                             + PARTICLE_SAMPLER_COUNT * NUM_COMMAND_BUFFERS;
+		                             + 12 /* atmosphere heightgrid + scene-depth + particle collision-heightgrid allocations */
+		                             // Particle render owns two ping-pong groups per
+		                             // command slot; each group carries the full
+		                             // image array plus one scene-depth sampler.
+		                             + ( PARTICLE_SAMPLER_COUNT + 1 )
+		                                 * NUM_COMMAND_BUFFERS * 2
+		                             // Decals own one full texture-array group per
+		                             // command slot, also with scene depth.
+		                             + ( MAX_DECAL_TEXTURES + 1 )
+		                                 * NUM_COMMAND_BUFFERS;
 
 		pool_size[1].type = RAL_BIND_UNIFORM_BUFFER;
 		pool_size[1].dynamicOffset = qtrue;

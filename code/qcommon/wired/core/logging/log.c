@@ -873,6 +873,10 @@ void NORETURN FORMAT_PRINTF(2, 3) QDECL Com_Terminate( terminationReason_t reaso
 		// the flag so we can honor the "nextdemo" cvar below.
 		const qboolean wasDemoPlaying = ( com_cl_running && com_cl_running->integer &&
 			CL_DemoPlaying() );
+		/* A drop raised while connecting/loading tears down the renderer and UI,
+		 * so a direct modal here would be unsafe. Preserve the exact message on
+		 * the focused app; CL_StartHunkUsers presents it after recovery. */
+		(void)CL_DeferLoadingErrorPopup( CL_FrameApp(), com_errorMessage );
 #endif
 		VM_Forced_Unload_Start();
 		SV_Shutdown( va( "Server crashed: %s", com_errorMessage ) );

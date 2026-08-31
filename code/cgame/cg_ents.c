@@ -463,10 +463,34 @@ static void CG_Item( centity_t *cent ) {
 CG_Missile
 ===============
 */
+static qboolean CG_WiredFx_MissileFlight( centity_t *cent ) {
+	wiredFxEvent_t event;
+	vec3_t velocity;
+	entityState_t *state = &cent->currentState;
+
+	if ( state->weapon != WP_ROCKET_LAUNCHER ) return qfalse;
+	BG_EvaluateTrajectoryDelta( &state->pos, cg.time, velocity );
+	CG_WiredFx_InitEvent( &event, WIRED_FX_PROFILE_ROCKET_FLIGHT,
+		cent->lerpOrigin, velocity );
+	event.flags |= WIRED_FX_EVENT_HAS_SOURCE_ENTITY | WIRED_FX_EVENT_HAS_VELOCITY;
+	event.sourceEntityNum = state->number;
+	VectorCopy( velocity, event.velocity );
+	if ( CG_PointContents( cent->lerpOrigin, state->number )
+			& ( CONTENTS_WATER | CONTENTS_SLIME | CONTENTS_LAVA ) ) {
+		event.flags |= WIRED_FX_EVENT_UNDERWATER;
+		event.conditionMask = WIRED_FX_CONDITION_UNDERWATER;
+	} else {
+		event.conditionMask = WIRED_FX_CONDITION_MATERIAL_DEFAULT;
+	}
+	trap_WiredFx_EmitEvent( &event );
+	return qtrue;
+}
+
 static void CG_Missile( centity_t *cent ) {
 	refEntity_t			ent;
 	entityState_t		*s1;
 	const weaponInfo_t		*weapon;
+	qboolean wiredFxOwnsFlight;
 //	int	col;
 
 	s1 = &cent->currentState;
@@ -498,31 +522,16 @@ static void CG_Missile( centity_t *cent ) {
 	{
 		weapon->missileTrailFunc( cent, weapon );
 	}
-/*
-	if ( cent->currentState.modelindex == TEAM_RED ) {
-		col = 1;
-	}
-	else if ( cent->currentState.modelindex == TEAM_BLUE ) {
-		col = 2;
-	}
-	else {
-		col = 0;
-	}
+	wiredFxOwnsFlight = CG_WiredFx_MissileFlight( cent );
 
 	// add dynamic light
-	if ( weapon->missileDlight ) {
-		trap_R_AddLightToScene(cent->lerpOrigin, weapon->missileDlight,
-			weapon->missileDlightColor[col][0], weapon->missileDlightColor[col][1], weapon->missileDlightColor[col][2] );
-	}
-*/
-	// add dynamic light
-	if ( weapon->missileDlight ) {
+	if ( !wiredFxOwnsFlight && weapon->missileDlight ) {
 		trap_R_AddLightToScene(cent->lerpOrigin, weapon->missileDlight,
 			weapon->missileDlightColor[0], weapon->missileDlightColor[1], weapon->missileDlightColor[2] );
 	}
 
 	// add missile sound
-	if ( weapon->missileSound ) {
+	if ( !wiredFxOwnsFlight && weapon->missileSound ) {
 		vec3_t	velocity;
 
 		BG_EvaluateTrajectoryDelta( &cent->currentState.pos, cg.time, velocity );
@@ -1191,8 +1200,12 @@ void CG_AddPacketEntities( void ) {
 	ps = &cg.predictedPlayerState;
 	BG_PlayerStateToEntityState( ps, &cg.predictedPlayerEntity.currentState, qfalse );
 	if ( cg.thirdPersonCenterAimActive ) {
-		VectorCopy( cg.thirdPersonCenterAimAngles,
-			cg.predictedPlayerEntity.currentState.apos.trBase );
+		/* Shoulder-camera convergence can produce a much steeper pitch than the
+		 * camera when the centered ray meets nearby ground. Feeding that pitch to
+		 * CG_PlayerAngles folds the whole torso toward the hit point. Keep the
+		 * model's authored view pitch, but let its facing follow center aim. */
+		cg.predictedPlayerEntity.currentState.apos.trBase[YAW] =
+			cg.thirdPersonCenterAimAngles[YAW];
 	}
 	CG_AddCEntity( &cg.predictedPlayerEntity );
 

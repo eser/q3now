@@ -143,6 +143,7 @@ Restart the server on a different map
 */
 static void SV_Map_f( void ) {
 	const char *map = Cmd_Argv(1);
+	fsResolvedResource_t resolved;
 	if ( !map || !*map ) {
 		return;
 	}
@@ -151,12 +152,20 @@ static void SV_Map_f( void ) {
 	// a typo at the server console won't end the game
 	char expanded[MAX_QPATH];
 	Com_sprintf( expanded, sizeof( expanded ), "maps/%s.bsp", map );
-	// bypass pure check so we can open downloaded map
+	// Bypass pure while resolving downloaded maps. Alias lookup is read-only;
+	// the resolved qpath becomes the authoritative map identity below.
 	FS_BypassPure();
-	int len = FS_FOpenFileRead( expanded, NULL, qfalse );
+	qboolean found = FS_ResolveResource( expanded, &resolved );
 	FS_RestorePure();
-	if ( len == -1 ) {
+	if ( !found ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_server), "Can't find map %s\n", expanded );
+		return;
+	}
+	if ( Q_stricmpn( resolved.canonicalPath, "maps/", 5 )
+			|| Q_stricmp( COM_GetExtension( resolved.canonicalPath ), "bsp" ) ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_server),
+			"Map %s resolved outside the BSP namespace: %s\n",
+			expanded, resolved.canonicalPath );
 		return;
 	}
 
@@ -166,7 +175,7 @@ static void SV_Map_f( void ) {
 	// save the map name here cause on a map restart we reload the config.cfg
 	// and thus nuke the arguments of the map command
 	char mapname[MAX_QPATH];
-	Q_strncpyz(mapname, map, sizeof(mapname));
+	COM_StripExtension( resolved.canonicalPath + 5, mapname, sizeof( mapname ) );
 
 	// start up the map
 	// FIXME(@eser) second argument "killBots" should be enabled in single player

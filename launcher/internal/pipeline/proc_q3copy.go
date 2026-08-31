@@ -15,9 +15,8 @@ import (
 // Used for all pax01-04 pipelines, each with its own entry map.
 //
 // One source → many targets: a single source path may be declared by more than
-// one entry (e.g. a Q1 monster's progs/<n>.mdl fans out to both
-// creatures/<n>/<n>.mdl and characters/<n>/models/body.mdl). The source appears
-// once in pak0, so it is scanned once. Process() emits the first matching output
+// one entry (for example, one legacy sound feeding multiple canonical variants).
+// The source appears once in its pack, so it is scanned once. Process() emits the first matching output
 // via its EntryDecision return; every additional matching output is stashed in
 // fanout and emitted from Finalize() (the existing synthetic-output channel) so
 // no single-source entry is silently dropped.

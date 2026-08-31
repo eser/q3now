@@ -8,11 +8,12 @@ set(H "${ROOT}/code/render/ral/backends/metal/ral_metal_present.h")
 set(S "${ROOT}/code/render/ral/backends/metal/ral_metal_present.mm")
 set(T "${ROOT}/tests/ral_metal_present_test.mm")
 set(MODULE_TEST "${ROOT}/tests/ral_metal_module_test.mm")
+set(MODULE "${ROOT}/code/render/ral/backends/metal/ral_metal_module.mm")
 set(MSL "${ROOT}/code/render/ral/backends/metal/shaders/ui_solid.msl")
 set(MATERIAL "${ROOT}/code/render/frontend/render_submission_material.h")
 set(MODEL "${ROOT}/code/render/frontend/render_submission_model.h")
 set(CMAKE_FILE "${ROOT}/CMakeLists.txt")
-foreach(path IN ITEMS "${H}" "${S}" "${T}" "${MODULE_TEST}" "${MSL}" "${MATERIAL}" "${MODEL}" "${CMAKE_FILE}")
+foreach(path IN ITEMS "${H}" "${S}" "${T}" "${MODULE_TEST}" "${MODULE}" "${MSL}" "${MATERIAL}" "${MODEL}" "${CMAKE_FILE}")
 	if(NOT EXISTS "${path}")
 		message(FATAL_ERROR "missing Metal presentation contract file: ${path}")
 	endif()
@@ -21,6 +22,7 @@ file(READ "${H}" HEADER)
 file(READ "${S}" SOURCE)
 file(READ "${T}" TEST)
 file(READ "${MODULE_TEST}" MODULE_TEST_SOURCE)
+file(READ "${MODULE}" MODULE_SOURCE)
 file(READ "${MSL}" SHADER)
 file(READ "${MATERIAL}" MATERIAL_HEADER)
 file(READ "${MODEL}" MODEL_HEADER)
@@ -48,6 +50,7 @@ foreach(needle IN ITEMS
 	"ralMetalWorldAtmosphereParams_t"
 	"RenderSubmission_EntityCommands" "RenderSubmission_ModelSnapshot"
 	"BuildEntityVertices" "loweredEntityIndexCount" "modelEntityCount"
+	"UpdatePersistentEffectBeams" "effectBeamSlots" "loweredEffectBeamCount"
 	"primitiveEntityCount" "temporalEntityCount" "unresolvedEntityCount"
 	"blendedCoefficientsQ16" "localSh[4][3]"
 	"PlanWeather" "RenderSubmission_ViewSnapshot" "EncodeWeather"
@@ -62,6 +65,16 @@ foreach(needle IN ITEMS
 		message(FATAL_ERROR "Metal presentation lost native/lifecycle seam: ${needle}")
 	endif()
 endforeach()
+foreach(needle IN ITEMS "RenderSubmission_AddEffectBeam" "AddBeamToScene = SubmitBeam")
+	string(FIND "${MODULE_SOURCE}" "${needle}" pos)
+	if(pos EQUAL -1)
+		message(FATAL_ERROR "Metal module lost beam submission seam: ${needle}")
+	endif()
+endforeach()
+string(FIND "${MODULE_SOURCE}" "AddBeamToScene = NoopBeam" noop_beam)
+if(NOT noop_beam EQUAL -1)
+	message(FATAL_ERROR "Metal module must not silently drop beam primitives")
+endif()
 foreach(needle IN ITEMS "RENDER_SUBMISSION_MAX_ENTITIES" "renderEntityCommand_t"
 	"renderModelSnapshot_t" "renderModelBatch_t")
 	string(FIND "${MODEL_HEADER}" "${needle}" pos)
@@ -147,13 +160,14 @@ foreach(needle IN ITEMS "RT_SPRITE" "RT_BEAM" "rotation = 45.0f"
 	"ATMOSPHERE_QUALITY_ANALYTIC" "atmosphere.mediaDensity = 0.1f"
 	"RenderSubmission_SetAtmosphere"
 	"RenderSubmission_RegisterInlineModel" "RenderSubmission_AddEntity"
-	"loweredEntityIndexCount == 63u" "loweredEntityBatchCount == 6u"
+	"loweredEntityIndexCount == 69u" "loweredEntityBatchCount == 7u"
 	"modelEntityCount == 1u" "primitiveEntityCount == 2u"
 	"temporalEntityCount == 1u" "unresolvedEntityCount == 0u"
 	"loweredEffectSpriteCount == 1u" "loweredEffectDecalCount == 1u"
-	"loweredEffectRibbonCount == 1u" "effectEmitterDispatchCount == 1u"
+	"loweredEffectRibbonCount == 1u" "loweredEffectBeamCount == 1u"
+	"effectEmitterDispatchCount == 1u"
 	"effectParticleDrawCount == 8u"
-	"persistentReceipt.loweredEntityIndexCount == 6u"
+	"persistentReceipt.loweredEntityIndexCount == 12u"
 	"persistentReceipt.loweredEffectDecalCount == 1u"
 	"MUTATE_PRESENT( loweredEntityIndexCount )")
 	string(FIND "${TEST}" "${needle}" pos)

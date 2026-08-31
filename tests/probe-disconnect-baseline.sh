@@ -4,9 +4,8 @@
 # Purpose-built minimal server-lifecycle probe (NOT the render-regression smoke
 # harness). ONE foreground launch, throwaway isolated home, auto-quit. Measures
 # whether a CLIENT-only `disconnect` at CA_ACTIVE on a listen server whose
-# fs_game != base triggers the gamedir-restore-on-disconnect coupling
-# (CL_RestoreOldGame -> FS_ConditionalRestart -> Com_GameRestart -> SV_Shutdown
-# "Game directory changed"). MEASURES ONLY — does not fix anything.
+# fs_game != base triggers the historical global gamedir restore/restart coupling
+# and its "Game directory changed" server shutdown. MEASURES ONLY.
 #
 # Desktop discipline: exactly one window, briefly, then +quit (+ a timeout guard).
 # Never touches the user's real homepath/install/paks.

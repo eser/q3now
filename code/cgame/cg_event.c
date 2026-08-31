@@ -839,26 +839,16 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		break;
 	case EV_FIRE_WEAPON_PRI:
 		DEBUGNAME("EV_FIRE_WEAPON_PRI");
-		CG_FireWeapon( cent );
+		CG_FireWeapon( cent, qfalse );
 		break;
 
 	case EV_FIRE_WEAPON_SEC:
 		DEBUGNAME("EV_FIRE_WEAPON_SEC");
-		CG_FireWeapon( cent );
+		CG_FireWeapon( cent, qtrue );
 		// gauntlet lunge: play whoosh sound
 		if ( cent->currentState.weapon == WP_GAUNTLET ) {
 			trap_S_StartSound( NULL, cent->currentState.number, CHAN_WEAPON,
 				trap_S_RegisterSound( "sound/weapons/melee/fstatck.opus", qfalse ) );
-		}
-		// shotgun double-blast: play sawed-off blast sound
-		if ( cent->currentState.weapon == WP_SHOTGUN ) {
-			// use existing shotgun sound as placeholder — distinct sound is v2
-			trap_S_StartSound( NULL, cent->currentState.number, CHAN_WEAPON,
-				trap_S_RegisterSound( "sound/weapons/shotgun/sshotf1b.opus", qfalse ) );
-			// trigger screen shake for local player
-			if ( cent->currentState.number == cg.snap->ps.clientNum ) {
-				cg.doubleBlastKickTime = cg.time;
-			}
 		}
 		break;
 
@@ -956,10 +946,17 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 
 	case EV_GRENADE_BOUNCE:
 		DEBUGNAME("EV_GRENADE_BOUNCE");
-		if ( rand() & 1 ) {
-			trap_S_StartSound (NULL, es->number, CHAN_AUTO, cgs.media.hgrenb1aSound );
-		} else {
-			trap_S_StartSound (NULL, es->number, CHAN_AUTO, cgs.media.hgrenb2aSound );
+		{
+			wiredFxEvent_t event;
+			uint32_t variant = (uint32_t)( rand() & 1 );
+
+			CG_WiredFx_InitEvent( &event, WIRED_FX_PROFILE_GRENADE_BOUNCE,
+				position, vec3_origin );
+			event.flags |= WIRED_FX_EVENT_HAS_SOURCE_ENTITY;
+			event.sourceEntityNum = es->number;
+			event.variant = variant;
+			event.conditionMask = WIRED_FX_CONDITION_VARIANT_0 << variant;
+			trap_WiredFx_EmitEvent( &event );
 		}
 		break;
 
@@ -1352,16 +1349,23 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 
 #if FEAT_EARTHQUAKE_SYSTEM
 	case EV_EARTHQUAKE:
+	{
+		wiredFxEvent_t event;
+		float duration;
 		DEBUGNAME("EV_EARTHQUAKE");
-		CG_AddEarthquake(
-			es->origin,
-			es->angles2[1],
-			es->angles[0],
-			es->angles[1],
-			es->angles[2],
-			es->angles2[0]
-		);
+		duration = MAX( es->angles[0], 0.001f );
+		CG_WiredFx_InitEvent( &event, WIRED_FX_PROFILE_WORLD_EARTHQUAKE,
+			es->origin, NULL );
+		event.flags |= WIRED_FX_EVENT_HAS_SHAKE_OVERRIDE;
+		event.intensity = MAX( es->angles2[0], 0.0f ) / 100.0f;
+		event.shakeDurationSeconds = duration;
+		event.shakeFadeInSeconds = Com_Clamp( 0.0f, duration, es->angles[1] );
+		event.shakeFadeOutSeconds = Com_Clamp( 0.0f,
+			duration - event.shakeFadeInSeconds, es->angles[2] );
+		event.shakeRadius = MAX( es->angles2[1], 0.0f );
+		trap_WiredFx_EmitEvent( &event );
 		break;
+	}
 #endif
 
 	default:
