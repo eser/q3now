@@ -192,6 +192,7 @@ layout(location = 6) flat out uint particleRenderFlags;
 
 const uint FRAME_SLOT_NONE = 0xFFFFFFFFu;
 const uint PRIM_FLAG_PARTICLE_MOTION_TRAIL = 0x0040u;
+const uint PRIM_FLAG_PARTICLE_VELOCITY_ORIENTED = 0x0100u;
 const float PARTICLE_MOTION_TRAIL_SECONDS = 0.10;
 const float WORLD_GRAVITY = 800.0;
 
@@ -319,6 +320,24 @@ void main() {
 		} else {
 			worldPos = p.pos + viewLeft.xyz * (sx * size) + viewUp.xyz * (uy * size);
 		}
+	} else if ((c.renderFlags & PRIM_FLAG_PARTICLE_VELOCITY_ORIENTED) != 0u
+			&& dot(p.vel, p.vel) > 0.0001) {
+		// A stable plane perpendicular to velocity mirrors an oriented+locked
+		// particle card. Choose the reference axis defensively near world-up so
+		// the basis never degenerates; p.pad3 provides a deterministic spawn
+		// roll, preventing all cards from exposing the same edge.
+		vec3 normal = normalize(p.vel);
+		vec3 reference = abs(normal.z) < 0.92
+			? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
+		vec3 tangent = normalize(cross(reference, normal));
+		vec3 bitangent = cross(normal, tangent);
+		float roll = float(p.pad3 & 1023u) * (6.28318530718 / 1024.0);
+		float cr = cos(roll);
+		float sr = sin(roll);
+		vec3 rolledTangent = tangent * cr + bitangent * sr;
+		vec3 rolledBitangent = bitangent * cr - tangent * sr;
+		worldPos = p.pos + rolledTangent * (sx * size)
+			+ rolledBitangent * (uy * size);
 	} else {
 		worldPos = p.pos + viewLeft.xyz * (sx * size) + viewUp.xyz * (uy * size);
 	}

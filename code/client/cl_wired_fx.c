@@ -433,6 +433,11 @@ static wiredFxDispatchResult_t CL_WiredFx_Dispatch( const wiredFxProfile_t *prof
 				? action->payload.light.lifetime : profile->duration;
 			float lightFade;
 			float jitter;
+			float startRadius;
+			float endRadius;
+			float lightRadius;
+			float radiusFraction;
+			qboolean animatedRadius;
 			if ( action->payload.light.startTimeJitterSteps >= 2u ) {
 				uint32_t step = CL_WiredFx_RandomStep( &timeSeed ) %
 					action->payload.light.startTimeJitterSteps;
@@ -453,10 +458,31 @@ static wiredFxDispatchResult_t CL_WiredFx_Dispatch( const wiredFxProfile_t *prof
 			} else {
 				jitter = action->payload.light.radiusJitter * CL_WiredFx_Random01( &jitterSeed );
 			}
-		re.AddLightToScene( origin,
-			action->payload.light.intensity * event->intensity *
-			( MAX( action->payload.light.radius[0], MAX( action->payload.light.radius[1], action->payload.light.radius[2] ) ) + jitter ) * lightFade,
-			color[0], color[1], color[2] );
+			startRadius = MAX( action->payload.light.radius[0],
+				MAX( action->payload.light.radius[1], action->payload.light.radius[2] ) );
+			endRadius = MAX( action->payload.light.radiusEnd[0],
+				MAX( action->payload.light.radiusEnd[1], action->payload.light.radiusEnd[2] ) );
+			/* Zero is the compatibility sentinel for profiles assembled directly in
+			 * C. Lua-authored actions inherit radius into radiusEnd when omitted. */
+			if ( endRadius == 0.0f ) endRadius = startRadius;
+			animatedRadius = endRadius != startRadius;
+			radiusFraction = lifetime > 0.0f
+				? Com_Clamp( 0.0f, 1.0f, age / lifetime ) : 1.0f;
+			lightRadius = startRadius + ( endRadius - startRadius ) * radiusFraction + jitter;
+			if ( animatedRadius ) {
+				/* Animated explosion lights expand spatially while their radiance
+				 * fades. Applying the envelope to radius would make the light collapse
+				 * back into the impact point instead of following the fire shell. */
+				re.AddLightToScene( origin,
+					action->payload.light.intensity * event->intensity * lightRadius,
+					color[0] * lightFade, color[1] * lightFade, color[2] * lightFade );
+			} else {
+				/* Preserve the established shrink-to-black behavior for every existing
+				 * light action that does not opt into radius animation. */
+				re.AddLightToScene( origin,
+					action->payload.light.intensity * event->intensity * lightRadius * lightFade,
+					color[0], color[1], color[2] );
+			}
 		return WIRED_FX_DISPATCH_EXECUTED;
 		}
 	case WIRED_FX_ACTION_PARTICLE: {

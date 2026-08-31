@@ -834,14 +834,14 @@
       "symbol": "particle_vert_spv",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
-        "lane0": "f13d50984c3315e4",
-        "lane1": "753201166031efbd"
+        "lane0": "297032dcc2ddfcb8",
+        "lane1": "2482dcfac233037f"
       },
       "spirv": {
-        "byteCount": 27304,
+        "byteCount": 29196,
         "digest": {
-          "lane0": "45822fbe5c3b04c8",
-          "lane1": "aca86864d7d821b3"
+          "lane0": "b9a2d282bb2eb324",
+          "lane1": "aad68bd97d6c287f"
         }
       },
       "reflection": {
@@ -2657,14 +2657,14 @@
       "symbol": "particle_integrate_comp_spv",
       "stage": "RAL_STAGE_COMPUTE",
       "sourceDigest": {
-        "lane0": "1d3d2251133fdee6",
-        "lane1": "8a3f860efaaa6dd1"
+        "lane0": "b4133fb8a852c67c",
+        "lane1": "bdaa16aeb40b3402"
       },
       "spirv": {
-        "byteCount": 75804,
+        "byteCount": 77148,
         "digest": {
-          "lane0": "b7dc739fc0853171",
-          "lane1": "9aef830348666201"
+          "lane0": "9e44482fbf3288ba",
+          "lane1": "11a11e067b050a28"
         }
       },
       "reflection": {

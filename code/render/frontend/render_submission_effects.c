@@ -684,7 +684,8 @@ static qboolean ParticleClassValid( const particleClass_t *value )
 {
 	if ( !value || value->shader <= 0 || value->emitMode < EMIT_POINT || value->emitMode > EMIT_PATH ||
 		 value->scatterShape < SCATTER_NONE || value->scatterShape > SCATTER_PERP_DISC ||
-		 value->velocityShape < VEL_AXIAL || value->velocityShape > VEL_PURE_CUBE || value->paletteCount < 1 ||
+		 value->velocityShape < VEL_AXIAL || value->velocityShape > VEL_RADIAL_FROM_SCATTER ||
+		 value->paletteCount < 1 ||
 		 value->paletteCount > PARTICLE_CLASS_MAX_PALETTE || value->frameCount < 0 ||
 		 value->frameCount > PARTICLE_CLASS_MAX_FRAMES || ( value->frameBlend != 0 && value->frameBlend != 1 ) )
 		return qfalse;

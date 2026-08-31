@@ -4,10 +4,10 @@
   "portableManifest": {
     "schemaVersion": 1,
     "generation": 1,
-    "byteCount": 859657,
+    "byteCount": 859797,
     "digest": {
-      "lane0": "19fb6eca2230dfae",
-      "lane1": "11f3969b96a3675e"
+      "lane0": "f29ced36d994f855",
+      "lane1": "6b210b67d318ec77"
     }
   },
   "requiredTargets": [
@@ -305,19 +305,19 @@
       "symbol": "particle_vert_spv",
       "stage": "RAL_STAGE_VERTEX",
       "spirv": {
-        "byteCount": 27168,
+        "byteCount": 29196,
         "digest": {
-          "lane0": "4240205ed861fc1a",
-          "lane1": "0743dec18d1bb2bd"
+          "lane0": "b9a2d282bb2eb324",
+          "lane1": "aad68bd97d6c287f"
         }
       },
       "artifacts": [
         {
           "target": "glsl460",
-          "byteCount": 16359,
+          "byteCount": 17484,
           "digest": {
-            "lane0": "8fc411e56a30b98a",
-            "lane1": "e272e295347ddc17"
+            "lane0": "e44c3082be9e1197",
+            "lane1": "dccc6e1f4bc6f719"
           }
         }
       ]
@@ -767,19 +767,19 @@
       "symbol": "particle_frag_spv",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 6584,
+        "byteCount": 6836,
         "digest": {
-          "lane0": "564fcffda5730e89",
-          "lane1": "34d11cf017c25977"
+          "lane0": "90b8d1d2b9f1c4c4",
+          "lane1": "e700ce4077f8104f"
         }
       },
       "artifacts": [
         {
           "target": "glsl460",
-          "byteCount": 3184,
+          "byteCount": 3323,
           "digest": {
-            "lane0": "9d9d2397dc9a8a92",
-            "lane1": "535acacdbd9406a3"
+            "lane0": "292172e668268504",
+            "lane1": "c82379cf2ebc7414"
           }
         }
       ]
@@ -789,19 +789,19 @@
       "symbol": "decal_frag_spv",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 10068,
+        "byteCount": 10700,
         "digest": {
-          "lane0": "f0ec37f383f84659",
-          "lane1": "19d2a0a674093f09"
+          "lane0": "ac265dfa614ba5bb",
+          "lane1": "aeab38d8abc8eac2"
         }
       },
       "artifacts": [
         {
           "target": "glsl460",
-          "byteCount": 5136,
+          "byteCount": 5500,
           "digest": {
-            "lane0": "4261bfbbf59fc980",
-            "lane1": "fd837208f4a8d582"
+            "lane0": "afbfa7d21d91c7ab",
+            "lane1": "c62212af0a799992"
           }
         }
       ]
@@ -833,19 +833,19 @@
       "symbol": "particle_integrate_comp_spv",
       "stage": "RAL_STAGE_COMPUTE",
       "spirv": {
-        "byteCount": 75804,
+        "byteCount": 77148,
         "digest": {
-          "lane0": "b7dc739fc0853171",
-          "lane1": "9aef830348666201"
+          "lane0": "9e44482fbf3288ba",
+          "lane1": "11a11e067b050a28"
         }
       },
       "artifacts": [
         {
           "target": "glsl460",
-          "byteCount": 53672,
+          "byteCount": 54896,
           "digest": {
-            "lane0": "1986db5b8d241c64",
-            "lane1": "05bd52f33fd0f2be"
+            "lane0": "ac954365b90d6ff9",
+            "lane1": "c716068c56910c2c"
           }
         }
       ]

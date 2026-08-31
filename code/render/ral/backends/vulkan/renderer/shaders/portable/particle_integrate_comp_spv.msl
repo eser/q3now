@@ -315,8 +315,8 @@ struct ParticleChildEvent_1
 
 constant uint PARTICLE_PASS_tmp [[function_constant(0)]];
 constant uint PARTICLE_PASS = is_function_constant_defined(PARTICLE_PASS_tmp) ? PARTICLE_PASS_tmp : 0u;
-constant bool _1837 = (PARTICLE_PASS == 3u);
-constant bool _1858 = (PARTICLE_PASS == 2u);
+constant bool _1891 = (PARTICLE_PASS == 3u);
+constant bool _1912 = (PARTICLE_PASS == 2u);
 
 struct Particle_1
 {
@@ -339,7 +339,7 @@ struct WritePool
     Particle_1 writeParticles[1];
 };
 
-constant bool _2116 = (PARTICLE_PASS == 1u);
+constant bool _2170 = (PARTICLE_PASS == 1u);
 
 struct ParticleSpawnRequest_1
 {
@@ -373,13 +373,13 @@ struct spvDescriptorSetBuffer0
 {
     constant ParticleFrame* m_322 [[id(0)]];
     device Classes* m_360 [[id(1)]];
-    device AtmosphereProfiles* m_1173 [[id(2)]];
-    device ChildEvents* m_1257 [[id(3)]];
+    device AtmosphereProfiles* m_1227 [[id(2)]];
+    device ChildEvents* m_1311 [[id(3)]];
     texture2d<float> collisionHeightgrid [[id(4)]];
     sampler collisionHeightgridSmplr [[id(5)]];
-    device WritePool* m_2080 [[id(6)]];
-    device SpawnRequests* m_2134 [[id(7)]];
-    device ReadPool* m_2172 [[id(8)]];
+    device WritePool* m_2134 [[id(6)]];
+    device SpawnRequests* m_2188 [[id(7)]];
+    device ReadPool* m_2226 [[id(8)]];
 };
 
 static inline __attribute__((always_inline))
@@ -730,54 +730,79 @@ Particle buildSpawnParticle(thread const ParticleSpawnRequest& request, thread c
             }
             else
             {
-                uint param_43 = request.seed;
-                uint param_44 = ordinal;
-                uint param_45 = 15u;
-                uint param_46 = request.seed;
-                uint param_47 = ordinal;
-                uint param_48 = 16u;
-                uint param_49 = request.seed;
-                uint param_50 = ordinal;
-                uint param_51 = 17u;
-                velocity = float3(spawnSigned(param_43, param_44, param_45), spawnSigned(param_46, param_47, param_48), spawnSigned(param_49, param_50, param_51)) * c.cubeJitter;
+                if (c.velocityShape == 3u)
+                {
+                    uint param_43 = request.seed;
+                    uint param_44 = ordinal;
+                    uint param_45 = 15u;
+                    uint param_46 = request.seed;
+                    uint param_47 = ordinal;
+                    uint param_48 = 16u;
+                    uint param_49 = request.seed;
+                    uint param_50 = ordinal;
+                    uint param_51 = 17u;
+                    velocity = float3(spawnSigned(param_43, param_44, param_45), spawnSigned(param_46, param_47, param_48), spawnSigned(param_49, param_50, param_51)) * c.cubeJitter;
+                }
+                else
+                {
+                    float3 radialDirection = scatter;
+                    if (dot(radialDirection, radialDirection) <= 9.9999999392252902907785028219223e-09)
+                    {
+                        uint param_52 = request.seed;
+                        uint param_53 = ordinal;
+                        uint param_54 = 15u;
+                        float z_2 = spawnSigned(param_52, param_53, param_54);
+                        uint param_55 = request.seed;
+                        uint param_56 = ordinal;
+                        uint param_57 = 16u;
+                        float phi_3 = spawn01(param_55, param_56, param_57) * 6.283185482025146484375;
+                        float radial_2 = sqrt(fast::max(0.0, 1.0 - (z_2 * z_2)));
+                        radialDirection = float3(radial_2 * cos(phi_3), radial_2 * sin(phi_3), z_2);
+                    }
+                    else
+                    {
+                        radialDirection = fast::normalize(radialDirection);
+                    }
+                    velocity = radialDirection * speed;
+                }
             }
         }
     }
-    uint param_52 = request.seed;
-    uint param_53 = ordinal;
-    uint param_54 = 18u;
-    uint param_55 = request.seed;
-    uint param_56 = ordinal;
-    uint param_57 = 19u;
     uint param_58 = request.seed;
     uint param_59 = ordinal;
-    uint param_60 = 20u;
-    velocity += (c.velocityBias.xyz + (float3(spawnSigned(param_52, param_53, param_54), spawnSigned(param_55, param_56, param_57), spawnSigned(param_58, param_59, param_60)) * c.velocityBiasJitter.xyz));
+    uint param_60 = 18u;
     uint param_61 = request.seed;
     uint param_62 = ordinal;
-    uint param_63 = 21u;
-    float lifetime = fast::max(0.001000000047497451305389404296875, c.lifetimeMean + (spawnSigned(param_61, param_62, param_63) * c.lifetimeJitter));
+    uint param_63 = 19u;
+    uint param_64 = request.seed;
+    uint param_65 = ordinal;
+    uint param_66 = 20u;
+    velocity += (c.velocityBias.xyz + (float3(spawnSigned(param_58, param_59, param_60), spawnSigned(param_61, param_62, param_63), spawnSigned(param_64, param_65, param_66)) * c.velocityBiasJitter.xyz));
+    uint param_67 = request.seed;
+    uint param_68 = ordinal;
+    uint param_69 = 21u;
+    float lifetime = fast::max(0.001000000047497451305389404296875, c.lifetimeMean + (spawnSigned(param_67, param_68, param_69) * c.lifetimeJitter));
     Particle p = deadParticle();
     p.pos = base + scatter;
     p.vel = velocity;
     p.lifetimeInv = 1.0 / lifetime;
     p.classHandle = request.classHandle;
-    uint _1089;
+    uint _1143;
     if (c.paletteCount > 1)
     {
-        uint param_64 = (request.seed ^ ordinal) ^ 2654435769u;
-        uint _1099 = spawnHash(param_64);
-        _1089 = _1099 % uint(c.paletteCount);
+        uint param_70 = (request.seed ^ ordinal) ^ 2654435769u;
+        uint _1153 = spawnHash(param_70);
+        _1143 = _1153 % uint(c.paletteCount);
     }
     else
     {
-        _1089 = 0u;
+        _1143 = 0u;
     }
-    p.paletteIndex = _1089;
-    uint param_65 = request.seed;
-    uint param_66 = ordinal;
-    uint param_67 = 22u;
-    p.sizeJitterPick = spawnSigned(param_65, param_66, param_67) * c.sizeJitter;
+    p.paletteIndex = _1143;
+    uint param_71 = request.seed;
+    uint param_72 = ordinal;
+    uint param_73 = 22u;
+    p.sizeJitterPick = spawnSigned(param_71, param_72, param_73) * c.sizeJitter;
     p.pad1 = request.profileHandle;
     p.pad2 = request.stageIndex;
     p.pad3 = request.seed ^ ordinal;
@@ -859,63 +884,63 @@ float parmEval(thread const ParticleParm& p, thread float& fraction, thread cons
 }
 
 static inline __attribute__((always_inline))
-bool particleHasCollisionChild(thread const Particle& p, device AtmosphereProfiles& _1173)
+bool particleHasCollisionChild(thread const Particle& p, device AtmosphereProfiles& _1227)
 {
-    bool _1145 = p.pad1 == 0u;
-    bool _1153;
-    if (!_1145)
+    bool _1199 = p.pad1 == 0u;
+    bool _1207;
+    if (!_1199)
     {
-        _1153 = p.pad1 > 64u;
+        _1207 = p.pad1 > 64u;
     }
     else
     {
-        _1153 = _1145;
+        _1207 = _1199;
     }
-    bool _1160;
-    if (!_1153)
+    bool _1214;
+    if (!_1207)
     {
-        _1160 = p.pad2 >= 8u;
+        _1214 = p.pad2 >= 8u;
     }
     else
     {
-        _1160 = _1153;
+        _1214 = _1207;
     }
-    if (_1160)
+    if (_1214)
     {
         return false;
     }
-    uint count = min(_1173.atmosphereProfiles[p.pad1 - 1u].stageCount, 8u);
+    uint count = min(_1227.atmosphereProfiles[p.pad1 - 1u].stageCount, 8u);
     AtmosphereEffectStage stage;
     for (uint i = 0u; i < count; i++)
     {
-        uint _1192 = p.pad1 - 1u;
-        stage.trigger = _1173.atmosphereProfiles[_1192].stages[i].trigger;
-        stage.particleClass = _1173.atmosphereProfiles[_1192].stages[i].particleClass;
-        stage.parentStage = _1173.atmosphereProfiles[_1192].stages[i].parentStage;
-        stage.flags = _1173.atmosphereProfiles[_1192].stages[i].flags;
-        stage.maxParticles = _1173.atmosphereProfiles[_1192].stages[i].maxParticles;
-        stage.burstCount = _1173.atmosphereProfiles[_1192].stages[i].burstCount;
-        stage.spawnRate = _1173.atmosphereProfiles[_1192].stages[i].spawnRate;
-        stage.delay = _1173.atmosphereProfiles[_1192].stages[i].delay;
-        stage.duration = _1173.atmosphereProfiles[_1192].stages[i].duration;
-        stage.lodNear = _1173.atmosphereProfiles[_1192].stages[i].lodNear;
-        stage.lodFar = _1173.atmosphereProfiles[_1192].stages[i].lodFar;
-        stage.boundsRadius = _1173.atmosphereProfiles[_1192].stages[i].boundsRadius;
-        stage.intensityScale = _1173.atmosphereProfiles[_1192].stages[i].intensityScale;
-        stage.reserved0 = _1173.atmosphereProfiles[_1192].stages[i].reserved0;
-        stage.reserved1 = _1173.atmosphereProfiles[_1192].stages[i].reserved1;
-        stage.reserved2 = _1173.atmosphereProfiles[_1192].stages[i].reserved2;
-        bool _1233 = stage.parentStage == p.pad2;
-        bool _1239;
-        if (_1233)
+        uint _1246 = p.pad1 - 1u;
+        stage.trigger = _1227.atmosphereProfiles[_1246].stages[i].trigger;
+        stage.particleClass = _1227.atmosphereProfiles[_1246].stages[i].particleClass;
+        stage.parentStage = _1227.atmosphereProfiles[_1246].stages[i].parentStage;
+        stage.flags = _1227.atmosphereProfiles[_1246].stages[i].flags;
+        stage.maxParticles = _1227.atmosphereProfiles[_1246].stages[i].maxParticles;
+        stage.burstCount = _1227.atmosphereProfiles[_1246].stages[i].burstCount;
+        stage.spawnRate = _1227.atmosphereProfiles[_1246].stages[i].spawnRate;
+        stage.delay = _1227.atmosphereProfiles[_1246].stages[i].delay;
+        stage.duration = _1227.atmosphereProfiles[_1246].stages[i].duration;
+        stage.lodNear = _1227.atmosphereProfiles[_1246].stages[i].lodNear;
+        stage.lodFar = _1227.atmosphereProfiles[_1246].stages[i].lodFar;
+        stage.boundsRadius = _1227.atmosphereProfiles[_1246].stages[i].boundsRadius;
+        stage.intensityScale = _1227.atmosphereProfiles[_1246].stages[i].intensityScale;
+        stage.reserved0 = _1227.atmosphereProfiles[_1246].stages[i].reserved0;
+        stage.reserved1 = _1227.atmosphereProfiles[_1246].stages[i].reserved1;
+        stage.reserved2 = _1227.atmosphereProfiles[_1246].stages[i].reserved2;
+        bool _1287 = stage.parentStage == p.pad2;
+        bool _1293;
+        if (_1287)
         {
-            _1239 = stage.trigger == 2u;
+            _1293 = stage.trigger == 2u;
         }
         else
         {
-            _1239 = _1233;
+            _1293 = _1287;
         }
-        if (_1239)
+        if (_1293)
         {
             return true;
         }
@@ -924,81 +949,81 @@ bool particleHasCollisionChild(thread const Particle& p, device AtmosphereProfil
 }
 
 static inline __attribute__((always_inline))
-bool particleCollided(thread const Particle& p, device ChildEvents& _1257, texture2d<float> collisionHeightgrid, sampler collisionHeightgridSmplr)
+bool particleCollided(thread const Particle& p, device ChildEvents& _1311, texture2d<float> collisionHeightgrid, sampler collisionHeightgridSmplr)
 {
-    if (_1257.collisionEnabled == 0u)
+    if (_1311.collisionEnabled == 0u)
     {
         return false;
     }
-    float2 extent = _1257.collisionWorldMaxs - _1257.collisionWorldMins;
-    bool _1276 = any(extent <= float2(0.0));
-    bool _1287;
-    if (!_1276)
+    float2 extent = _1311.collisionWorldMaxs - _1311.collisionWorldMins;
+    bool _1330 = any(extent <= float2(0.0));
+    bool _1341;
+    if (!_1330)
     {
-        _1287 = any(p.pos.xy < _1257.collisionWorldMins);
+        _1341 = any(p.pos.xy < _1311.collisionWorldMins);
     }
     else
     {
-        _1287 = _1276;
+        _1341 = _1330;
     }
-    bool _1298;
-    if (!_1287)
+    bool _1352;
+    if (!_1341)
     {
-        _1298 = any(p.pos.xy > _1257.collisionWorldMaxs);
+        _1352 = any(p.pos.xy > _1311.collisionWorldMaxs);
     }
     else
     {
-        _1298 = _1287;
+        _1352 = _1341;
     }
-    if (_1298)
+    if (_1352)
     {
         return false;
     }
-    float2 uv = fast::clamp((p.pos.xy - _1257.collisionWorldMins) / extent, float2(0.0), float2(1.0));
+    float2 uv = fast::clamp((p.pos.xy - _1311.collisionWorldMins) / extent, float2(0.0), float2(1.0));
     return p.pos.z <= collisionHeightgrid.sample(collisionHeightgridSmplr, uv, level(0.0)).x;
 }
 
 static inline __attribute__((always_inline))
 uint stageTriggerCount(thread const AtmosphereEffectStage& stage, thread const Particle& p, thread const float& previousAge, thread const float& currentAge, thread const bool& collided, thread const bool& died, constant ParticleFrame& _322)
 {
-    float _1330;
+    float _1384;
     if (p.lifetimeInv > 0.0)
     {
-        _1330 = 1.0 / p.lifetimeInv;
+        _1384 = 1.0 / p.lifetimeInv;
     }
     else
     {
-        _1330 = 0.0;
+        _1384 = 0.0;
     }
-    float lifetime = _1330;
+    float lifetime = _1384;
     float previousSeconds = previousAge * lifetime;
     float currentSeconds = currentAge * lifetime;
     uint count = 0u;
-    bool _1349 = stage.trigger == 0u;
-    bool _1356;
-    if (!_1349)
+    bool _1403 = stage.trigger == 0u;
+    bool _1410;
+    if (!_1403)
     {
-        _1356 = stage.trigger == 1u;
+        _1410 = stage.trigger == 1u;
     }
     else
     {
-        _1356 = _1349;
+        _1410 = _1403;
     }
-    if (_1356)
+    if (_1410)
     {
         float previousActive = fast::clamp(previousSeconds - stage.delay, 0.0, stage.duration);
         float currentActive = fast::clamp(currentSeconds - stage.delay, 0.0, stage.duration);
-        bool _1378 = previousSeconds <= stage.delay;
-        bool _1385;
-        if (_1378)
+        bool _1432 = previousSeconds <= stage.delay;
+        bool _1439;
+        if (_1432)
         {
-            _1385 = currentSeconds > stage.delay;
+            _1439 = currentSeconds > stage.delay;
         }
         else
         {
-            _1385 = _1378;
+            _1439 = _1432;
         }
-        if (_1385)
+        if (_1439)
         {
             count += stage.burstCount;
         }
@@ -1011,137 +1036,137 @@ uint stageTriggerCount(thread const AtmosphereEffectStage& stage, thread const P
     }
     else
     {
-        bool _1423 = (stage.trigger == 2u) && collided;
-        bool _1430;
-        if (_1423)
+        bool _1477 = (stage.trigger == 2u) && collided;
+        bool _1484;
+        if (_1477)
         {
-            _1430 = currentSeconds >= stage.delay;
+            _1484 = currentSeconds >= stage.delay;
         }
         else
         {
-            _1430 = _1423;
+            _1484 = _1477;
         }
-        bool _1440;
-        if (_1430)
+        bool _1494;
+        if (_1484)
         {
-            _1440 = currentSeconds <= (stage.delay + stage.duration);
+            _1494 = currentSeconds <= (stage.delay + stage.duration);
         }
         else
         {
-            _1440 = _1430;
+            _1494 = _1484;
         }
-        if (_1440)
+        if (_1494)
         {
             count = stage.burstCount + uint(ceil(stage.spawnRate * fast::min(_322.dt, stage.duration)));
         }
         else
         {
-            bool _1462 = (stage.trigger == 3u) && died;
-            bool _1469;
-            if (_1462)
+            bool _1516 = (stage.trigger == 3u) && died;
+            bool _1523;
+            if (_1516)
             {
-                _1469 = currentSeconds >= stage.delay;
+                _1523 = currentSeconds >= stage.delay;
             }
             else
             {
-                _1469 = _1462;
+                _1523 = _1516;
             }
-            bool _1479;
-            if (_1469)
+            bool _1533;
+            if (_1523)
             {
-                _1479 = currentSeconds <= (stage.delay + stage.duration);
+                _1533 = currentSeconds <= (stage.delay + stage.duration);
             }
             else
             {
-                _1479 = _1469;
+                _1533 = _1523;
             }
-            if (_1479)
+            if (_1533)
             {
                 count = stage.burstCount + uint(ceil(stage.spawnRate * fast::min(_322.dt, stage.duration)));
             }
         }
     }
     float4 parentTint = unpack_unorm4x8_to_float(p.pad5);
-    float _1504;
+    float _1558;
     if ((stage.flags & 8u) != 0u)
     {
-        _1504 = parentTint.w;
+        _1558 = parentTint.w;
     }
     else
     {
-        _1504 = 1.0;
+        _1558 = 1.0;
     }
-    float intensity = _1504;
+    float intensity = _1558;
     count = uint(ceil((float(count) * intensity) * stage.intensityScale));
     return min(min(count, stage.maxParticles), 64u);
 }
 
 static inline __attribute__((always_inline))
-void appendChildEvents(thread const Particle& p, thread const float& previousAge, thread const float& currentAge, thread const bool& collided, thread const bool& died, constant ParticleFrame& _322, device AtmosphereProfiles& _1173, device ChildEvents& _1257)
+void appendChildEvents(thread const Particle& p, thread const float& previousAge, thread const float& currentAge, thread const bool& collided, thread const bool& died, constant ParticleFrame& _322, device AtmosphereProfiles& _1227, device ChildEvents& _1311)
 {
-    bool _1529 = p.pad1 == 0u;
-    bool _1536;
-    if (!_1529)
+    bool _1583 = p.pad1 == 0u;
+    bool _1590;
+    if (!_1583)
     {
-        _1536 = p.pad1 > 64u;
+        _1590 = p.pad1 > 64u;
     }
     else
     {
-        _1536 = _1529;
+        _1590 = _1583;
     }
-    bool _1543;
-    if (!_1536)
+    bool _1597;
+    if (!_1590)
     {
-        _1543 = p.pad2 >= 8u;
+        _1597 = p.pad2 >= 8u;
     }
     else
     {
-        _1543 = _1536;
+        _1597 = _1590;
     }
-    if (_1543)
+    if (_1597)
     {
         return;
     }
-    uint stageCount = min(_1173.atmosphereProfiles[p.pad1 - 1u].stageCount, 8u);
+    uint stageCount = min(_1227.atmosphereProfiles[p.pad1 - 1u].stageCount, 8u);
     AtmosphereEffectStage stage;
-    uint _1665;
-    uint _1693;
+    uint _1719;
+    uint _1747;
     ParticleChildEvent_1 event;
-    float3 _1783;
+    float3 _1837;
     for (uint i = 0u; i < stageCount; i++)
     {
-        uint _1566 = p.pad1 - 1u;
-        stage.trigger = _1173.atmosphereProfiles[_1566].stages[i].trigger;
-        stage.particleClass = _1173.atmosphereProfiles[_1566].stages[i].particleClass;
-        stage.parentStage = _1173.atmosphereProfiles[_1566].stages[i].parentStage;
-        stage.flags = _1173.atmosphereProfiles[_1566].stages[i].flags;
-        stage.maxParticles = _1173.atmosphereProfiles[_1566].stages[i].maxParticles;
-        stage.burstCount = _1173.atmosphereProfiles[_1566].stages[i].burstCount;
-        stage.spawnRate = _1173.atmosphereProfiles[_1566].stages[i].spawnRate;
-        stage.delay = _1173.atmosphereProfiles[_1566].stages[i].delay;
-        stage.duration = _1173.atmosphereProfiles[_1566].stages[i].duration;
-        stage.lodNear = _1173.atmosphereProfiles[_1566].stages[i].lodNear;
-        stage.lodFar = _1173.atmosphereProfiles[_1566].stages[i].lodFar;
-        stage.boundsRadius = _1173.atmosphereProfiles[_1566].stages[i].boundsRadius;
-        stage.intensityScale = _1173.atmosphereProfiles[_1566].stages[i].intensityScale;
-        stage.reserved0 = _1173.atmosphereProfiles[_1566].stages[i].reserved0;
-        stage.reserved1 = _1173.atmosphereProfiles[_1566].stages[i].reserved1;
-        stage.reserved2 = _1173.atmosphereProfiles[_1566].stages[i].reserved2;
+        uint _1620 = p.pad1 - 1u;
+        stage.trigger = _1227.atmosphereProfiles[_1620].stages[i].trigger;
+        stage.particleClass = _1227.atmosphereProfiles[_1620].stages[i].particleClass;
+        stage.parentStage = _1227.atmosphereProfiles[_1620].stages[i].parentStage;
+        stage.flags = _1227.atmosphereProfiles[_1620].stages[i].flags;
+        stage.maxParticles = _1227.atmosphereProfiles[_1620].stages[i].maxParticles;
+        stage.burstCount = _1227.atmosphereProfiles[_1620].stages[i].burstCount;
+        stage.spawnRate = _1227.atmosphereProfiles[_1620].stages[i].spawnRate;
+        stage.delay = _1227.atmosphereProfiles[_1620].stages[i].delay;
+        stage.duration = _1227.atmosphereProfiles[_1620].stages[i].duration;
+        stage.lodNear = _1227.atmosphereProfiles[_1620].stages[i].lodNear;
+        stage.lodFar = _1227.atmosphereProfiles[_1620].stages[i].lodFar;
+        stage.boundsRadius = _1227.atmosphereProfiles[_1620].stages[i].boundsRadius;
+        stage.intensityScale = _1227.atmosphereProfiles[_1620].stages[i].intensityScale;
+        stage.reserved0 = _1227.atmosphereProfiles[_1620].stages[i].reserved0;
+        stage.reserved1 = _1227.atmosphereProfiles[_1620].stages[i].reserved1;
+        stage.reserved2 = _1227.atmosphereProfiles[_1620].stages[i].reserved2;
         if (stage.parentStage != p.pad2)
         {
             continue;
         }
-        bool _1612 = stage.lodFar > 0.0;
-        bool _1625;
-        if (_1612)
+        bool _1666 = stage.lodFar > 0.0;
+        bool _1679;
+        if (_1666)
         {
-            _1625 = distance(p.pos, _322.eyeWorld.xyz) > stage.lodFar;
+            _1679 = distance(p.pos, _322.eyeWorld.xyz) > stage.lodFar;
         }
         else
         {
-            _1625 = _1612;
+            _1679 = _1666;
         }
-        if (_1625)
+        if (_1679)
         {
             continue;
         }
@@ -1157,44 +1182,44 @@ void appendChildEvents(thread const Particle& p, thread const float& previousAge
             continue;
         }
         uint stageCounterIndex = ((p.pad1 - 1u) * 8u) + i;
-        uint _1659 = atomic_fetch_add_explicit((device atomic_uint*)&_1257.stageParticles[stageCounterIndex], count, memory_order_relaxed);
-        uint stageBefore = _1659;
+        uint _1713 = atomic_fetch_add_explicit((device atomic_uint*)&_1311.stageParticles[stageCounterIndex], count, memory_order_relaxed);
+        uint stageBefore = _1713;
         if (stageBefore < stage.maxParticles)
         {
-            _1665 = min(count, (stage.maxParticles - stageBefore));
+            _1719 = min(count, (stage.maxParticles - stageBefore));
         }
         else
         {
-            _1665 = 0u;
+            _1719 = 0u;
         }
-        uint stageAccepted = _1665;
-        uint _1682 = atomic_fetch_add_explicit((device atomic_uint*)&_1257.profileParticles[p.pad1 - 1u], stageAccepted, memory_order_relaxed);
-        uint profileBefore = _1682;
-        uint profileBudget = _1173.atmosphereProfiles[p.pad1 - 1u].maxParticles;
+        uint stageAccepted = _1719;
+        uint _1736 = atomic_fetch_add_explicit((device atomic_uint*)&_1311.profileParticles[p.pad1 - 1u], stageAccepted, memory_order_relaxed);
+        uint profileBefore = _1736;
+        uint profileBudget = _1227.atmosphereProfiles[p.pad1 - 1u].maxParticles;
         if (profileBefore < profileBudget)
         {
-            _1693 = min(stageAccepted, (profileBudget - profileBefore));
+            _1747 = min(stageAccepted, (profileBudget - profileBefore));
         }
         else
         {
-            _1693 = 0u;
+            _1747 = 0u;
         }
-        uint accepted = _1693;
+        uint accepted = _1747;
         if (accepted < count)
         {
-            uint _1712 = atomic_fetch_add_explicit((device atomic_uint*)&_1257.droppedParticles, count - accepted, memory_order_relaxed);
+            uint _1766 = atomic_fetch_add_explicit((device atomic_uint*)&_1311.droppedParticles, count - accepted, memory_order_relaxed);
         }
         count = accepted;
         if (count == 0u)
         {
             continue;
         }
-        uint _1721 = atomic_fetch_add_explicit((device atomic_uint*)&_1257.eventCount, 1u, memory_order_relaxed);
-        uint eventIndex = _1721;
-        if (eventIndex >= _1257.eventCapacity)
+        uint _1775 = atomic_fetch_add_explicit((device atomic_uint*)&_1311.eventCount, 1u, memory_order_relaxed);
+        uint eventIndex = _1775;
+        if (eventIndex >= _1311.eventCapacity)
         {
-            uint _1729 = atomic_fetch_add_explicit((device atomic_uint*)&_1257.droppedEvents, 1u, memory_order_relaxed);
-            uint _1732 = atomic_fetch_add_explicit((device atomic_uint*)&_1257.droppedParticles, count, memory_order_relaxed);
+            uint _1783 = atomic_fetch_add_explicit((device atomic_uint*)&_1311.droppedEvents, 1u, memory_order_relaxed);
+            uint _1786 = atomic_fetch_add_explicit((device atomic_uint*)&_1311.droppedParticles, count, memory_order_relaxed);
             continue;
         }
         float4 parentTint = unpack_unorm4x8_to_float(p.pad5);
@@ -1213,27 +1238,27 @@ void appendChildEvents(thread const Particle& p, thread const float& previousAge
         event.origin = float4(p.pos, 1.0);
         if ((stage.flags & 2u) != 0u)
         {
-            _1783 = p.vel;
+            _1837 = p.vel;
         }
         else
         {
-            _1783 = float3(0.0, 0.0, 1.0);
+            _1837 = float3(0.0, 0.0, 1.0);
         }
-        event.velocity = float4(_1783, 0.0);
+        event.velocity = float4(_1837, 0.0);
         event.colorTint = tint;
         event.profileHandle = p.pad1;
         event.stageIndex = i;
         event.count = count;
         uint param_6 = (p.pad3 ^ (i * 2246822519u)) ^ as_type<uint>(currentAge);
-        uint _1814 = spawnHash(param_6);
-        event.seed = _1814;
-        _1257.childEvents[eventIndex].origin = event.origin;
-        _1257.childEvents[eventIndex].velocity = event.velocity;
-        _1257.childEvents[eventIndex].colorTint = event.colorTint;
-        _1257.childEvents[eventIndex].profileHandle = event.profileHandle;
-        _1257.childEvents[eventIndex].stageIndex = event.stageIndex;
-        _1257.childEvents[eventIndex].count = event.count;
-        _1257.childEvents[eventIndex].seed = event.seed;
+        uint _1868 = spawnHash(param_6);
+        event.seed = _1868;
+        _1311.childEvents[eventIndex].origin = event.origin;
+        _1311.childEvents[eventIndex].velocity = event.velocity;
+        _1311.childEvents[eventIndex].colorTint = event.colorTint;
+        _1311.childEvents[eventIndex].profileHandle = event.profileHandle;
+        _1311.childEvents[eventIndex].stageIndex = event.stageIndex;
+        _1311.childEvents[eventIndex].count = event.count;
+        _1311.childEvents[eventIndex].seed = event.seed;
     }
 }
 
@@ -1241,100 +1266,100 @@ kernel void main0(device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]
 {
     threadgroup uint childFirstSlot;
     threadgroup uint childAcceptedCount;
-    if (_1837)
+    if (_1891)
     {
         if (gl_GlobalInvocationID.x == 0u)
         {
-            (*spvDescriptorSet0.m_1257).dispatchX = min((*spvDescriptorSet0.m_1257).eventCount, (*spvDescriptorSet0.m_1257).eventCapacity);
-            (*spvDescriptorSet0.m_1257).dispatchY = 1u;
-            (*spvDescriptorSet0.m_1257).dispatchZ = 1u;
+            (*spvDescriptorSet0.m_1311).dispatchX = min((*spvDescriptorSet0.m_1311).eventCount, (*spvDescriptorSet0.m_1311).eventCapacity);
+            (*spvDescriptorSet0.m_1311).dispatchY = 1u;
+            (*spvDescriptorSet0.m_1311).dispatchZ = 1u;
         }
         return;
     }
-    if (_1858)
+    if (_1912)
     {
         uint eventIndex = gl_WorkGroupID.x;
-        if (eventIndex >= min((*spvDescriptorSet0.m_1257).eventCount, (*spvDescriptorSet0.m_1257).eventCapacity))
+        if (eventIndex >= min((*spvDescriptorSet0.m_1311).eventCount, (*spvDescriptorSet0.m_1311).eventCapacity))
         {
             return;
         }
         ParticleChildEvent_1 event;
-        event.origin = (*spvDescriptorSet0.m_1257).childEvents[eventIndex].origin;
-        event.velocity = (*spvDescriptorSet0.m_1257).childEvents[eventIndex].velocity;
-        event.colorTint = (*spvDescriptorSet0.m_1257).childEvents[eventIndex].colorTint;
-        event.profileHandle = (*spvDescriptorSet0.m_1257).childEvents[eventIndex].profileHandle;
-        event.stageIndex = (*spvDescriptorSet0.m_1257).childEvents[eventIndex].stageIndex;
-        event.count = (*spvDescriptorSet0.m_1257).childEvents[eventIndex].count;
-        event.seed = (*spvDescriptorSet0.m_1257).childEvents[eventIndex].seed;
-        bool _1895 = event.profileHandle == 0u;
-        bool _1902;
-        if (!_1895)
+        event.origin = (*spvDescriptorSet0.m_1311).childEvents[eventIndex].origin;
+        event.velocity = (*spvDescriptorSet0.m_1311).childEvents[eventIndex].velocity;
+        event.colorTint = (*spvDescriptorSet0.m_1311).childEvents[eventIndex].colorTint;
+        event.profileHandle = (*spvDescriptorSet0.m_1311).childEvents[eventIndex].profileHandle;
+        event.stageIndex = (*spvDescriptorSet0.m_1311).childEvents[eventIndex].stageIndex;
+        event.count = (*spvDescriptorSet0.m_1311).childEvents[eventIndex].count;
+        event.seed = (*spvDescriptorSet0.m_1311).childEvents[eventIndex].seed;
+        bool _1949 = event.profileHandle == 0u;
+        bool _1956;
+        if (!_1949)
         {
-            _1902 = event.profileHandle > 64u;
+            _1956 = event.profileHandle > 64u;
         }
         else
         {
-            _1902 = _1895;
+            _1956 = _1949;
         }
-        bool _1909;
-        if (!_1902)
+        bool _1963;
+        if (!_1956)
         {
-            _1909 = event.stageIndex >= 8u;
+            _1963 = event.stageIndex >= 8u;
         }
         else
         {
-            _1909 = _1902;
+            _1963 = _1956;
         }
-        bool _1921;
-        if (!_1909)
+        bool _1975;
+        if (!_1963)
         {
-            _1921 = event.stageIndex >= (*spvDescriptorSet0.m_1173).atmosphereProfiles[event.profileHandle - 1u].stageCount;
+            _1975 = event.stageIndex >= (*spvDescriptorSet0.m_1227).atmosphereProfiles[event.profileHandle - 1u].stageCount;
         }
         else
         {
-            _1921 = _1909;
+            _1975 = _1963;
         }
-        if (_1921)
+        if (_1975)
         {
             return;
         }
-        uint _1928 = event.profileHandle - 1u;
+        uint _1982 = event.profileHandle - 1u;
         AtmosphereEffectStage stage;
-        stage.trigger = (*spvDescriptorSet0.m_1173).atmosphereProfiles[_1928].stages[event.stageIndex].trigger;
-        stage.particleClass = (*spvDescriptorSet0.m_1173).atmosphereProfiles[_1928].stages[event.stageIndex].particleClass;
-        stage.parentStage = (*spvDescriptorSet0.m_1173).atmosphereProfiles[_1928].stages[event.stageIndex].parentStage;
-        stage.flags = (*spvDescriptorSet0.m_1173).atmosphereProfiles[_1928].stages[event.stageIndex].flags;
-        stage.maxParticles = (*spvDescriptorSet0.m_1173).atmosphereProfiles[_1928].stages[event.stageIndex].maxParticles;
-        stage.burstCount = (*spvDescriptorSet0.m_1173).atmosphereProfiles[_1928].stages[event.stageIndex].burstCount;
-        stage.spawnRate = (*spvDescriptorSet0.m_1173).atmosphereProfiles[_1928].stages[event.stageIndex].spawnRate;
-        stage.delay = (*spvDescriptorSet0.m_1173).atmosphereProfiles[_1928].stages[event.stageIndex].delay;
-        stage.duration = (*spvDescriptorSet0.m_1173).atmosphereProfiles[_1928].stages[event.stageIndex].duration;
-        stage.lodNear = (*spvDescriptorSet0.m_1173).atmosphereProfiles[_1928].stages[event.stageIndex].lodNear;
-        stage.lodFar = (*spvDescriptorSet0.m_1173).atmosphereProfiles[_1928].stages[event.stageIndex].lodFar;
-        stage.boundsRadius = (*spvDescriptorSet0.m_1173).atmosphereProfiles[_1928].stages[event.stageIndex].boundsRadius;
-        stage.intensityScale = (*spvDescriptorSet0.m_1173).atmosphereProfiles[_1928].stages[event.stageIndex].intensityScale;
-        stage.reserved0 = (*spvDescriptorSet0.m_1173).atmosphereProfiles[_1928].stages[event.stageIndex].reserved0;
-        stage.reserved1 = (*spvDescriptorSet0.m_1173).atmosphereProfiles[_1928].stages[event.stageIndex].reserved1;
-        stage.reserved2 = (*spvDescriptorSet0.m_1173).atmosphereProfiles[_1928].stages[event.stageIndex].reserved2;
+        stage.trigger = (*spvDescriptorSet0.m_1227).atmosphereProfiles[_1982].stages[event.stageIndex].trigger;
+        stage.particleClass = (*spvDescriptorSet0.m_1227).atmosphereProfiles[_1982].stages[event.stageIndex].particleClass;
+        stage.parentStage = (*spvDescriptorSet0.m_1227).atmosphereProfiles[_1982].stages[event.stageIndex].parentStage;
+        stage.flags = (*spvDescriptorSet0.m_1227).atmosphereProfiles[_1982].stages[event.stageIndex].flags;
+        stage.maxParticles = (*spvDescriptorSet0.m_1227).atmosphereProfiles[_1982].stages[event.stageIndex].maxParticles;
+        stage.burstCount = (*spvDescriptorSet0.m_1227).atmosphereProfiles[_1982].stages[event.stageIndex].burstCount;
+        stage.spawnRate = (*spvDescriptorSet0.m_1227).atmosphereProfiles[_1982].stages[event.stageIndex].spawnRate;
+        stage.delay = (*spvDescriptorSet0.m_1227).atmosphereProfiles[_1982].stages[event.stageIndex].delay;
+        stage.duration = (*spvDescriptorSet0.m_1227).atmosphereProfiles[_1982].stages[event.stageIndex].duration;
+        stage.lodNear = (*spvDescriptorSet0.m_1227).atmosphereProfiles[_1982].stages[event.stageIndex].lodNear;
+        stage.lodFar = (*spvDescriptorSet0.m_1227).atmosphereProfiles[_1982].stages[event.stageIndex].lodFar;
+        stage.boundsRadius = (*spvDescriptorSet0.m_1227).atmosphereProfiles[_1982].stages[event.stageIndex].boundsRadius;
+        stage.intensityScale = (*spvDescriptorSet0.m_1227).atmosphereProfiles[_1982].stages[event.stageIndex].intensityScale;
+        stage.reserved0 = (*spvDescriptorSet0.m_1227).atmosphereProfiles[_1982].stages[event.stageIndex].reserved0;
+        stage.reserved1 = (*spvDescriptorSet0.m_1227).atmosphereProfiles[_1982].stages[event.stageIndex].reserved1;
+        stage.reserved2 = (*spvDescriptorSet0.m_1227).atmosphereProfiles[_1982].stages[event.stageIndex].reserved2;
         if (gl_LocalInvocationID.x == 0u)
         {
             uint requested = min(event.count, 64u);
-            uint _1978 = atomic_fetch_add_explicit((device atomic_uint*)&(*spvDescriptorSet0.m_1257).particleCursor, requested, memory_order_relaxed);
-            uint cursor = _1978;
-            childFirstSlot = ((*spvDescriptorSet0.m_1257).eventBaseSlot + cursor) % max((*spvDescriptorSet0.m_322).poolSize, 1u);
-            uint _1994;
-            if (cursor < (*spvDescriptorSet0.m_1257).particleBudget)
+            uint _2032 = atomic_fetch_add_explicit((device atomic_uint*)&(*spvDescriptorSet0.m_1311).particleCursor, requested, memory_order_relaxed);
+            uint cursor = _2032;
+            childFirstSlot = ((*spvDescriptorSet0.m_1311).eventBaseSlot + cursor) % max((*spvDescriptorSet0.m_322).poolSize, 1u);
+            uint _2048;
+            if (cursor < (*spvDescriptorSet0.m_1311).particleBudget)
             {
-                _1994 = min(requested, ((*spvDescriptorSet0.m_1257).particleBudget - cursor));
+                _2048 = min(requested, ((*spvDescriptorSet0.m_1311).particleBudget - cursor));
             }
             else
             {
-                _1994 = 0u;
+                _2048 = 0u;
             }
-            childAcceptedCount = _1994;
+            childAcceptedCount = _2048;
             if (childAcceptedCount < requested)
             {
-                uint _2014 = atomic_fetch_add_explicit((device atomic_uint*)&(*spvDescriptorSet0.m_1257).droppedParticles, requested - childAcceptedCount, memory_order_relaxed);
+                uint _2068 = atomic_fetch_add_explicit((device atomic_uint*)&(*spvDescriptorSet0.m_1311).droppedParticles, requested - childAcceptedCount, memory_order_relaxed);
             }
         }
         threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -1361,57 +1386,57 @@ kernel void main0(device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]
             {
                 child.vel += event.velocity.xyz;
             }
-            uint _2086 = (childFirstSlot + ordinal) % (*spvDescriptorSet0.m_322).poolSize;
-            (*spvDescriptorSet0.m_2080).writeParticles[_2086].pos = child.pos;
-            (*spvDescriptorSet0.m_2080).writeParticles[_2086].age = child.age;
-            (*spvDescriptorSet0.m_2080).writeParticles[_2086].vel = child.vel;
-            (*spvDescriptorSet0.m_2080).writeParticles[_2086].lifetimeInv = child.lifetimeInv;
-            (*spvDescriptorSet0.m_2080).writeParticles[_2086].classHandle = child.classHandle;
-            (*spvDescriptorSet0.m_2080).writeParticles[_2086].paletteIndex = child.paletteIndex;
-            (*spvDescriptorSet0.m_2080).writeParticles[_2086].sizeJitterPick = child.sizeJitterPick;
-            (*spvDescriptorSet0.m_2080).writeParticles[_2086].pad1 = child.pad1;
-            (*spvDescriptorSet0.m_2080).writeParticles[_2086].pad2 = child.pad2;
-            (*spvDescriptorSet0.m_2080).writeParticles[_2086].pad3 = child.pad3;
-            (*spvDescriptorSet0.m_2080).writeParticles[_2086].pad4 = child.pad4;
-            (*spvDescriptorSet0.m_2080).writeParticles[_2086].pad5 = child.pad5;
+            uint _2140 = (childFirstSlot + ordinal) % (*spvDescriptorSet0.m_322).poolSize;
+            (*spvDescriptorSet0.m_2134).writeParticles[_2140].pos = child.pos;
+            (*spvDescriptorSet0.m_2134).writeParticles[_2140].age = child.age;
+            (*spvDescriptorSet0.m_2134).writeParticles[_2140].vel = child.vel;
+            (*spvDescriptorSet0.m_2134).writeParticles[_2140].lifetimeInv = child.lifetimeInv;
+            (*spvDescriptorSet0.m_2134).writeParticles[_2140].classHandle = child.classHandle;
+            (*spvDescriptorSet0.m_2134).writeParticles[_2140].paletteIndex = child.paletteIndex;
+            (*spvDescriptorSet0.m_2134).writeParticles[_2140].sizeJitterPick = child.sizeJitterPick;
+            (*spvDescriptorSet0.m_2134).writeParticles[_2140].pad1 = child.pad1;
+            (*spvDescriptorSet0.m_2134).writeParticles[_2140].pad2 = child.pad2;
+            (*spvDescriptorSet0.m_2134).writeParticles[_2140].pad3 = child.pad3;
+            (*spvDescriptorSet0.m_2134).writeParticles[_2140].pad4 = child.pad4;
+            (*spvDescriptorSet0.m_2134).writeParticles[_2140].pad5 = child.pad5;
         }
         return;
     }
-    if (_2116)
+    if (_2170)
     {
         uint requestIndex = gl_WorkGroupID.x;
         uint ordinal_1 = (gl_WorkGroupID.y * 64u) + gl_LocalInvocationID.x;
         ParticleSpawnRequest request_1;
-        request_1.origin = (*spvDescriptorSet0.m_2134).spawnRequests[requestIndex].origin;
-        request_1.axis = (*spvDescriptorSet0.m_2134).spawnRequests[requestIndex].axis;
-        request_1.end = (*spvDescriptorSet0.m_2134).spawnRequests[requestIndex].end;
-        request_1.colorTint = (*spvDescriptorSet0.m_2134).spawnRequests[requestIndex].colorTint;
-        request_1.classHandle = (*spvDescriptorSet0.m_2134).spawnRequests[requestIndex].classHandle;
-        request_1.count = (*spvDescriptorSet0.m_2134).spawnRequests[requestIndex].count;
-        request_1.firstSlot = (*spvDescriptorSet0.m_2134).spawnRequests[requestIndex].firstSlot;
-        request_1.seed = (*spvDescriptorSet0.m_2134).spawnRequests[requestIndex].seed;
-        request_1.profileHandle = (*spvDescriptorSet0.m_2134).spawnRequests[requestIndex].profileHandle;
-        request_1.stageIndex = (*spvDescriptorSet0.m_2134).spawnRequests[requestIndex].stageIndex;
-        request_1.stageFlags = (*spvDescriptorSet0.m_2134).spawnRequests[requestIndex].stageFlags;
-        request_1.reserved = (*spvDescriptorSet0.m_2134).spawnRequests[requestIndex].reserved;
+        request_1.origin = (*spvDescriptorSet0.m_2188).spawnRequests[requestIndex].origin;
+        request_1.axis = (*spvDescriptorSet0.m_2188).spawnRequests[requestIndex].axis;
+        request_1.end = (*spvDescriptorSet0.m_2188).spawnRequests[requestIndex].end;
+        request_1.colorTint = (*spvDescriptorSet0.m_2188).spawnRequests[requestIndex].colorTint;
+        request_1.classHandle = (*spvDescriptorSet0.m_2188).spawnRequests[requestIndex].classHandle;
+        request_1.count = (*spvDescriptorSet0.m_2188).spawnRequests[requestIndex].count;
+        request_1.firstSlot = (*spvDescriptorSet0.m_2188).spawnRequests[requestIndex].firstSlot;
+        request_1.seed = (*spvDescriptorSet0.m_2188).spawnRequests[requestIndex].seed;
+        request_1.profileHandle = (*spvDescriptorSet0.m_2188).spawnRequests[requestIndex].profileHandle;
+        request_1.stageIndex = (*spvDescriptorSet0.m_2188).spawnRequests[requestIndex].stageIndex;
+        request_1.stageFlags = (*spvDescriptorSet0.m_2188).spawnRequests[requestIndex].stageFlags;
+        request_1.reserved = (*spvDescriptorSet0.m_2188).spawnRequests[requestIndex].reserved;
         if (ordinal_1 < request_1.count)
         {
-            uint _2179 = (request_1.firstSlot + ordinal_1) % (*spvDescriptorSet0.m_322).poolSize;
+            uint _2233 = (request_1.firstSlot + ordinal_1) % (*spvDescriptorSet0.m_322).poolSize;
             ParticleSpawnRequest param_2 = request_1;
             uint param_3 = ordinal_1;
-            Particle _2184 = buildSpawnParticle(param_2, param_3, (*spvDescriptorSet0.m_322), (*spvDescriptorSet0.m_360));
-            (*spvDescriptorSet0.m_2172).readParticles[_2179].pos = _2184.pos;
-            (*spvDescriptorSet0.m_2172).readParticles[_2179].age = _2184.age;
-            (*spvDescriptorSet0.m_2172).readParticles[_2179].vel = _2184.vel;
-            (*spvDescriptorSet0.m_2172).readParticles[_2179].lifetimeInv = _2184.lifetimeInv;
-            (*spvDescriptorSet0.m_2172).readParticles[_2179].classHandle = _2184.classHandle;
-            (*spvDescriptorSet0.m_2172).readParticles[_2179].paletteIndex = _2184.paletteIndex;
-            (*spvDescriptorSet0.m_2172).readParticles[_2179].sizeJitterPick = _2184.sizeJitterPick;
-            (*spvDescriptorSet0.m_2172).readParticles[_2179].pad1 = _2184.pad1;
-            (*spvDescriptorSet0.m_2172).readParticles[_2179].pad2 = _2184.pad2;
-            (*spvDescriptorSet0.m_2172).readParticles[_2179].pad3 = _2184.pad3;
-            (*spvDescriptorSet0.m_2172).readParticles[_2179].pad4 = _2184.pad4;
-            (*spvDescriptorSet0.m_2172).readParticles[_2179].pad5 = _2184.pad5;
+            Particle _2238 = buildSpawnParticle(param_2, param_3, (*spvDescriptorSet0.m_322), (*spvDescriptorSet0.m_360));
+            (*spvDescriptorSet0.m_2226).readParticles[_2233].pos = _2238.pos;
+            (*spvDescriptorSet0.m_2226).readParticles[_2233].age = _2238.age;
+            (*spvDescriptorSet0.m_2226).readParticles[_2233].vel = _2238.vel;
+            (*spvDescriptorSet0.m_2226).readParticles[_2233].lifetimeInv = _2238.lifetimeInv;
+            (*spvDescriptorSet0.m_2226).readParticles[_2233].classHandle = _2238.classHandle;
+            (*spvDescriptorSet0.m_2226).readParticles[_2233].paletteIndex = _2238.paletteIndex;
+            (*spvDescriptorSet0.m_2226).readParticles[_2233].sizeJitterPick = _2238.sizeJitterPick;
+            (*spvDescriptorSet0.m_2226).readParticles[_2233].pad1 = _2238.pad1;
+            (*spvDescriptorSet0.m_2226).readParticles[_2233].pad2 = _2238.pad2;
+            (*spvDescriptorSet0.m_2226).readParticles[_2233].pad3 = _2238.pad3;
+            (*spvDescriptorSet0.m_2226).readParticles[_2233].pad4 = _2238.pad4;
+            (*spvDescriptorSet0.m_2226).readParticles[_2233].pad5 = _2238.pad5;
         }
         return;
     }
@@ -1421,213 +1446,213 @@ kernel void main0(device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]
         return;
     }
     Particle p;
-    p.pos = float3((*spvDescriptorSet0.m_2172).readParticles[idx].pos);
-    p.age = (*spvDescriptorSet0.m_2172).readParticles[idx].age;
-    p.vel = float3((*spvDescriptorSet0.m_2172).readParticles[idx].vel);
-    p.lifetimeInv = (*spvDescriptorSet0.m_2172).readParticles[idx].lifetimeInv;
-    p.classHandle = (*spvDescriptorSet0.m_2172).readParticles[idx].classHandle;
-    p.paletteIndex = (*spvDescriptorSet0.m_2172).readParticles[idx].paletteIndex;
-    p.sizeJitterPick = (*spvDescriptorSet0.m_2172).readParticles[idx].sizeJitterPick;
-    p.pad1 = (*spvDescriptorSet0.m_2172).readParticles[idx].pad1;
-    p.pad2 = (*spvDescriptorSet0.m_2172).readParticles[idx].pad2;
-    p.pad3 = (*spvDescriptorSet0.m_2172).readParticles[idx].pad3;
-    p.pad4 = (*spvDescriptorSet0.m_2172).readParticles[idx].pad4;
-    p.pad5 = (*spvDescriptorSet0.m_2172).readParticles[idx].pad5;
-    bool _2251 = p.classHandle == 0u;
-    bool _2258;
-    if (!_2251)
+    p.pos = float3((*spvDescriptorSet0.m_2226).readParticles[idx].pos);
+    p.age = (*spvDescriptorSet0.m_2226).readParticles[idx].age;
+    p.vel = float3((*spvDescriptorSet0.m_2226).readParticles[idx].vel);
+    p.lifetimeInv = (*spvDescriptorSet0.m_2226).readParticles[idx].lifetimeInv;
+    p.classHandle = (*spvDescriptorSet0.m_2226).readParticles[idx].classHandle;
+    p.paletteIndex = (*spvDescriptorSet0.m_2226).readParticles[idx].paletteIndex;
+    p.sizeJitterPick = (*spvDescriptorSet0.m_2226).readParticles[idx].sizeJitterPick;
+    p.pad1 = (*spvDescriptorSet0.m_2226).readParticles[idx].pad1;
+    p.pad2 = (*spvDescriptorSet0.m_2226).readParticles[idx].pad2;
+    p.pad3 = (*spvDescriptorSet0.m_2226).readParticles[idx].pad3;
+    p.pad4 = (*spvDescriptorSet0.m_2226).readParticles[idx].pad4;
+    p.pad5 = (*spvDescriptorSet0.m_2226).readParticles[idx].pad5;
+    bool _2305 = p.classHandle == 0u;
+    bool _2312;
+    if (!_2305)
     {
-        _2258 = p.age >= 1.0;
+        _2312 = p.age >= 1.0;
     }
     else
     {
-        _2258 = _2251;
+        _2312 = _2305;
     }
-    bool _2267;
-    if (!_2258)
+    bool _2321;
+    if (!_2312)
     {
-        _2267 = p.classHandle > (*spvDescriptorSet0.m_322).numClasses;
+        _2321 = p.classHandle > (*spvDescriptorSet0.m_322).numClasses;
     }
     else
     {
-        _2267 = _2258;
+        _2321 = _2312;
     }
-    if (_2267)
+    if (_2321)
     {
-        Particle _2271 = deadParticle();
-        (*spvDescriptorSet0.m_2080).writeParticles[idx].pos = _2271.pos;
-        (*spvDescriptorSet0.m_2080).writeParticles[idx].age = _2271.age;
-        (*spvDescriptorSet0.m_2080).writeParticles[idx].vel = _2271.vel;
-        (*spvDescriptorSet0.m_2080).writeParticles[idx].lifetimeInv = _2271.lifetimeInv;
-        (*spvDescriptorSet0.m_2080).writeParticles[idx].classHandle = _2271.classHandle;
-        (*spvDescriptorSet0.m_2080).writeParticles[idx].paletteIndex = _2271.paletteIndex;
-        (*spvDescriptorSet0.m_2080).writeParticles[idx].sizeJitterPick = _2271.sizeJitterPick;
-        (*spvDescriptorSet0.m_2080).writeParticles[idx].pad1 = _2271.pad1;
-        (*spvDescriptorSet0.m_2080).writeParticles[idx].pad2 = _2271.pad2;
-        (*spvDescriptorSet0.m_2080).writeParticles[idx].pad3 = _2271.pad3;
-        (*spvDescriptorSet0.m_2080).writeParticles[idx].pad4 = _2271.pad4;
-        (*spvDescriptorSet0.m_2080).writeParticles[idx].pad5 = _2271.pad5;
+        Particle _2325 = deadParticle();
+        (*spvDescriptorSet0.m_2134).writeParticles[idx].pos = _2325.pos;
+        (*spvDescriptorSet0.m_2134).writeParticles[idx].age = _2325.age;
+        (*spvDescriptorSet0.m_2134).writeParticles[idx].vel = _2325.vel;
+        (*spvDescriptorSet0.m_2134).writeParticles[idx].lifetimeInv = _2325.lifetimeInv;
+        (*spvDescriptorSet0.m_2134).writeParticles[idx].classHandle = _2325.classHandle;
+        (*spvDescriptorSet0.m_2134).writeParticles[idx].paletteIndex = _2325.paletteIndex;
+        (*spvDescriptorSet0.m_2134).writeParticles[idx].sizeJitterPick = _2325.sizeJitterPick;
+        (*spvDescriptorSet0.m_2134).writeParticles[idx].pad1 = _2325.pad1;
+        (*spvDescriptorSet0.m_2134).writeParticles[idx].pad2 = _2325.pad2;
+        (*spvDescriptorSet0.m_2134).writeParticles[idx].pad3 = _2325.pad3;
+        (*spvDescriptorSet0.m_2134).writeParticles[idx].pad4 = _2325.pad4;
+        (*spvDescriptorSet0.m_2134).writeParticles[idx].pad5 = _2325.pad5;
         return;
     }
-    uint _2301 = p.classHandle - 1u;
+    uint _2355 = p.classHandle - 1u;
     ParticleClassGPU c;
-    c.shader = (*spvDescriptorSet0.m_360).classes[_2301].shader;
-    c.renderFlags = (*spvDescriptorSet0.m_360).classes[_2301].renderFlags;
-    c.emitMode = (*spvDescriptorSet0.m_360).classes[_2301].emitMode;
-    c.scatterShape = (*spvDescriptorSet0.m_360).classes[_2301].scatterShape;
-    c.scatterMagnitude = (*spvDescriptorSet0.m_360).classes[_2301].scatterMagnitude;
-    c.velocityShape = (*spvDescriptorSet0.m_360).classes[_2301].velocityShape;
-    c.axialSpeed = (*spvDescriptorSet0.m_360).classes[_2301].axialSpeed;
-    c.cubeJitter = (*spvDescriptorSet0.m_360).classes[_2301].cubeJitter;
-    c.coneHalfAngle = (*spvDescriptorSet0.m_360).classes[_2301].coneHalfAngle;
-    c.lifetimeMean = (*spvDescriptorSet0.m_360).classes[_2301].lifetimeMean;
-    c.lifetimeJitter = (*spvDescriptorSet0.m_360).classes[_2301].lifetimeJitter;
-    c.paletteCount = (*spvDescriptorSet0.m_360).classes[_2301].paletteCount;
-    c.colorPalette[0] = (*spvDescriptorSet0.m_360).classes[_2301].colorPalette[0];
-    c.colorPalette[1] = (*spvDescriptorSet0.m_360).classes[_2301].colorPalette[1];
-    c.colorPalette[2] = (*spvDescriptorSet0.m_360).classes[_2301].colorPalette[2];
-    c.colorPalette[3] = (*spvDescriptorSet0.m_360).classes[_2301].colorPalette[3];
-    c.colorPalette[4] = (*spvDescriptorSet0.m_360).classes[_2301].colorPalette[4];
-    c.colorPalette[5] = (*spvDescriptorSet0.m_360).classes[_2301].colorPalette[5];
-    c.colorPalette[6] = (*spvDescriptorSet0.m_360).classes[_2301].colorPalette[6];
-    c.colorPalette[7] = (*spvDescriptorSet0.m_360).classes[_2301].colorPalette[7];
-    c.colorPalette[8] = (*spvDescriptorSet0.m_360).classes[_2301].colorPalette[8];
-    c.colorPalette[9] = (*spvDescriptorSet0.m_360).classes[_2301].colorPalette[9];
-    c.colorPalette[10] = (*spvDescriptorSet0.m_360).classes[_2301].colorPalette[10];
-    c.colorPalette[11] = (*spvDescriptorSet0.m_360).classes[_2301].colorPalette[11];
-    c.colorPalette[12] = (*spvDescriptorSet0.m_360).classes[_2301].colorPalette[12];
-    c.colorPalette[13] = (*spvDescriptorSet0.m_360).classes[_2301].colorPalette[13];
-    c.colorPalette[14] = (*spvDescriptorSet0.m_360).classes[_2301].colorPalette[14];
-    c.colorPalette[15] = (*spvDescriptorSet0.m_360).classes[_2301].colorPalette[15];
-    c.colorEndMult = (*spvDescriptorSet0.m_360).classes[_2301].colorEndMult;
-    c.sizeStart = (*spvDescriptorSet0.m_360).classes[_2301].sizeStart;
-    c.sizeEnd = (*spvDescriptorSet0.m_360).classes[_2301].sizeEnd;
-    c.gravityScale = (*spvDescriptorSet0.m_360).classes[_2301].gravityScale;
-    c.drag = (*spvDescriptorSet0.m_360).classes[_2301].drag;
-    c.shaderBlendIsAdditive = (*spvDescriptorSet0.m_360).classes[_2301].shaderBlendIsAdditive;
-    c.pad1 = (*spvDescriptorSet0.m_360).classes[_2301].pad1;
-    c.pad2 = (*spvDescriptorSet0.m_360).classes[_2301].pad2;
-    c.pad3 = (*spvDescriptorSet0.m_360).classes[_2301].pad3;
-    c.velocityBias = (*spvDescriptorSet0.m_360).classes[_2301].velocityBias;
-    c.velocityBiasJitter = (*spvDescriptorSet0.m_360).classes[_2301].velocityBiasJitter;
-    c.speedJitter = (*spvDescriptorSet0.m_360).classes[_2301].speedJitter;
-    c.sizeJitter = (*spvDescriptorSet0.m_360).classes[_2301].sizeJitter;
-    c.colorDomain = (*spvDescriptorSet0.m_360).classes[_2301].colorDomain;
-    c.pad5 = (*spvDescriptorSet0.m_360).classes[_2301].pad5;
-    c.frameSlots[0] = (*spvDescriptorSet0.m_360).classes[_2301].frameSlots[0];
-    c.frameSlots[1] = (*spvDescriptorSet0.m_360).classes[_2301].frameSlots[1];
-    c.frameSlots[2] = (*spvDescriptorSet0.m_360).classes[_2301].frameSlots[2];
-    c.frameSlots[3] = (*spvDescriptorSet0.m_360).classes[_2301].frameSlots[3];
-    c.frameSlots[4] = (*spvDescriptorSet0.m_360).classes[_2301].frameSlots[4];
-    c.frameSlots[5] = (*spvDescriptorSet0.m_360).classes[_2301].frameSlots[5];
-    c.frameSlots[6] = (*spvDescriptorSet0.m_360).classes[_2301].frameSlots[6];
-    c.frameSlots[7] = (*spvDescriptorSet0.m_360).classes[_2301].frameSlots[7];
-    c.frameSlots[8] = (*spvDescriptorSet0.m_360).classes[_2301].frameSlots[8];
-    c.frameSlots[9] = (*spvDescriptorSet0.m_360).classes[_2301].frameSlots[9];
-    c.frameSlots[10] = (*spvDescriptorSet0.m_360).classes[_2301].frameSlots[10];
-    c.frameSlots[11] = (*spvDescriptorSet0.m_360).classes[_2301].frameSlots[11];
-    c.frameSlots[12] = (*spvDescriptorSet0.m_360).classes[_2301].frameSlots[12];
-    c.frameSlots[13] = (*spvDescriptorSet0.m_360).classes[_2301].frameSlots[13];
-    c.frameSlots[14] = (*spvDescriptorSet0.m_360).classes[_2301].frameSlots[14];
-    c.frameSlots[15] = (*spvDescriptorSet0.m_360).classes[_2301].frameSlots[15];
-    c.frameCount = (*spvDescriptorSet0.m_360).classes[_2301].frameCount;
-    c.frameBlend = (*spvDescriptorSet0.m_360).classes[_2301].frameBlend;
-    c.framePad0 = (*spvDescriptorSet0.m_360).classes[_2301].framePad0;
-    c.framePad1 = (*spvDescriptorSet0.m_360).classes[_2301].framePad1;
-    c.sizeParm.calc = (*spvDescriptorSet0.m_360).classes[_2301].sizeParm.calc;
-    c.sizeParm.hasCurve = (*spvDescriptorSet0.m_360).classes[_2301].sizeParm.hasCurve;
-    c.sizeParm.val0 = (*spvDescriptorSet0.m_360).classes[_2301].sizeParm.val0;
-    c.sizeParm.val1 = (*spvDescriptorSet0.m_360).classes[_2301].sizeParm.val1;
-    c.sizeParm.variance = (*spvDescriptorSet0.m_360).classes[_2301].sizeParm.variance;
-    c.sizeParm.parmPad0 = (*spvDescriptorSet0.m_360).classes[_2301].sizeParm.parmPad0;
-    c.sizeParm.parmPad1 = (*spvDescriptorSet0.m_360).classes[_2301].sizeParm.parmPad1;
-    c.sizeParm.parmPad2 = (*spvDescriptorSet0.m_360).classes[_2301].sizeParm.parmPad2;
-    c.sizeParm.samples[0] = (*spvDescriptorSet0.m_360).classes[_2301].sizeParm.samples[0];
-    c.sizeParm.samples[1] = (*spvDescriptorSet0.m_360).classes[_2301].sizeParm.samples[1];
-    c.sizeParm.samples[2] = (*spvDescriptorSet0.m_360).classes[_2301].sizeParm.samples[2];
-    c.sizeParm.samples[3] = (*spvDescriptorSet0.m_360).classes[_2301].sizeParm.samples[3];
-    c.sizeParm.samples[4] = (*spvDescriptorSet0.m_360).classes[_2301].sizeParm.samples[4];
-    c.sizeParm.samples[5] = (*spvDescriptorSet0.m_360).classes[_2301].sizeParm.samples[5];
-    c.sizeParm.samples[6] = (*spvDescriptorSet0.m_360).classes[_2301].sizeParm.samples[6];
-    c.sizeParm.samples[7] = (*spvDescriptorSet0.m_360).classes[_2301].sizeParm.samples[7];
-    c.alphaParm.calc = (*spvDescriptorSet0.m_360).classes[_2301].alphaParm.calc;
-    c.alphaParm.hasCurve = (*spvDescriptorSet0.m_360).classes[_2301].alphaParm.hasCurve;
-    c.alphaParm.val0 = (*spvDescriptorSet0.m_360).classes[_2301].alphaParm.val0;
-    c.alphaParm.val1 = (*spvDescriptorSet0.m_360).classes[_2301].alphaParm.val1;
-    c.alphaParm.variance = (*spvDescriptorSet0.m_360).classes[_2301].alphaParm.variance;
-    c.alphaParm.parmPad0 = (*spvDescriptorSet0.m_360).classes[_2301].alphaParm.parmPad0;
-    c.alphaParm.parmPad1 = (*spvDescriptorSet0.m_360).classes[_2301].alphaParm.parmPad1;
-    c.alphaParm.parmPad2 = (*spvDescriptorSet0.m_360).classes[_2301].alphaParm.parmPad2;
-    c.alphaParm.samples[0] = (*spvDescriptorSet0.m_360).classes[_2301].alphaParm.samples[0];
-    c.alphaParm.samples[1] = (*spvDescriptorSet0.m_360).classes[_2301].alphaParm.samples[1];
-    c.alphaParm.samples[2] = (*spvDescriptorSet0.m_360).classes[_2301].alphaParm.samples[2];
-    c.alphaParm.samples[3] = (*spvDescriptorSet0.m_360).classes[_2301].alphaParm.samples[3];
-    c.alphaParm.samples[4] = (*spvDescriptorSet0.m_360).classes[_2301].alphaParm.samples[4];
-    c.alphaParm.samples[5] = (*spvDescriptorSet0.m_360).classes[_2301].alphaParm.samples[5];
-    c.alphaParm.samples[6] = (*spvDescriptorSet0.m_360).classes[_2301].alphaParm.samples[6];
-    c.alphaParm.samples[7] = (*spvDescriptorSet0.m_360).classes[_2301].alphaParm.samples[7];
-    c.dragParm.calc = (*spvDescriptorSet0.m_360).classes[_2301].dragParm.calc;
-    c.dragParm.hasCurve = (*spvDescriptorSet0.m_360).classes[_2301].dragParm.hasCurve;
-    c.dragParm.val0 = (*spvDescriptorSet0.m_360).classes[_2301].dragParm.val0;
-    c.dragParm.val1 = (*spvDescriptorSet0.m_360).classes[_2301].dragParm.val1;
-    c.dragParm.variance = (*spvDescriptorSet0.m_360).classes[_2301].dragParm.variance;
-    c.dragParm.parmPad0 = (*spvDescriptorSet0.m_360).classes[_2301].dragParm.parmPad0;
-    c.dragParm.parmPad1 = (*spvDescriptorSet0.m_360).classes[_2301].dragParm.parmPad1;
-    c.dragParm.parmPad2 = (*spvDescriptorSet0.m_360).classes[_2301].dragParm.parmPad2;
-    c.dragParm.samples[0] = (*spvDescriptorSet0.m_360).classes[_2301].dragParm.samples[0];
-    c.dragParm.samples[1] = (*spvDescriptorSet0.m_360).classes[_2301].dragParm.samples[1];
-    c.dragParm.samples[2] = (*spvDescriptorSet0.m_360).classes[_2301].dragParm.samples[2];
-    c.dragParm.samples[3] = (*spvDescriptorSet0.m_360).classes[_2301].dragParm.samples[3];
-    c.dragParm.samples[4] = (*spvDescriptorSet0.m_360).classes[_2301].dragParm.samples[4];
-    c.dragParm.samples[5] = (*spvDescriptorSet0.m_360).classes[_2301].dragParm.samples[5];
-    c.dragParm.samples[6] = (*spvDescriptorSet0.m_360).classes[_2301].dragParm.samples[6];
-    c.dragParm.samples[7] = (*spvDescriptorSet0.m_360).classes[_2301].dragParm.samples[7];
-    c.gravityParm.calc = (*spvDescriptorSet0.m_360).classes[_2301].gravityParm.calc;
-    c.gravityParm.hasCurve = (*spvDescriptorSet0.m_360).classes[_2301].gravityParm.hasCurve;
-    c.gravityParm.val0 = (*spvDescriptorSet0.m_360).classes[_2301].gravityParm.val0;
-    c.gravityParm.val1 = (*spvDescriptorSet0.m_360).classes[_2301].gravityParm.val1;
-    c.gravityParm.variance = (*spvDescriptorSet0.m_360).classes[_2301].gravityParm.variance;
-    c.gravityParm.parmPad0 = (*spvDescriptorSet0.m_360).classes[_2301].gravityParm.parmPad0;
-    c.gravityParm.parmPad1 = (*spvDescriptorSet0.m_360).classes[_2301].gravityParm.parmPad1;
-    c.gravityParm.parmPad2 = (*spvDescriptorSet0.m_360).classes[_2301].gravityParm.parmPad2;
-    c.gravityParm.samples[0] = (*spvDescriptorSet0.m_360).classes[_2301].gravityParm.samples[0];
-    c.gravityParm.samples[1] = (*spvDescriptorSet0.m_360).classes[_2301].gravityParm.samples[1];
-    c.gravityParm.samples[2] = (*spvDescriptorSet0.m_360).classes[_2301].gravityParm.samples[2];
-    c.gravityParm.samples[3] = (*spvDescriptorSet0.m_360).classes[_2301].gravityParm.samples[3];
-    c.gravityParm.samples[4] = (*spvDescriptorSet0.m_360).classes[_2301].gravityParm.samples[4];
-    c.gravityParm.samples[5] = (*spvDescriptorSet0.m_360).classes[_2301].gravityParm.samples[5];
-    c.gravityParm.samples[6] = (*spvDescriptorSet0.m_360).classes[_2301].gravityParm.samples[6];
-    c.gravityParm.samples[7] = (*spvDescriptorSet0.m_360).classes[_2301].gravityParm.samples[7];
+    c.shader = (*spvDescriptorSet0.m_360).classes[_2355].shader;
+    c.renderFlags = (*spvDescriptorSet0.m_360).classes[_2355].renderFlags;
+    c.emitMode = (*spvDescriptorSet0.m_360).classes[_2355].emitMode;
+    c.scatterShape = (*spvDescriptorSet0.m_360).classes[_2355].scatterShape;
+    c.scatterMagnitude = (*spvDescriptorSet0.m_360).classes[_2355].scatterMagnitude;
+    c.velocityShape = (*spvDescriptorSet0.m_360).classes[_2355].velocityShape;
+    c.axialSpeed = (*spvDescriptorSet0.m_360).classes[_2355].axialSpeed;
+    c.cubeJitter = (*spvDescriptorSet0.m_360).classes[_2355].cubeJitter;
+    c.coneHalfAngle = (*spvDescriptorSet0.m_360).classes[_2355].coneHalfAngle;
+    c.lifetimeMean = (*spvDescriptorSet0.m_360).classes[_2355].lifetimeMean;
+    c.lifetimeJitter = (*spvDescriptorSet0.m_360).classes[_2355].lifetimeJitter;
+    c.paletteCount = (*spvDescriptorSet0.m_360).classes[_2355].paletteCount;
+    c.colorPalette[0] = (*spvDescriptorSet0.m_360).classes[_2355].colorPalette[0];
+    c.colorPalette[1] = (*spvDescriptorSet0.m_360).classes[_2355].colorPalette[1];
+    c.colorPalette[2] = (*spvDescriptorSet0.m_360).classes[_2355].colorPalette[2];
+    c.colorPalette[3] = (*spvDescriptorSet0.m_360).classes[_2355].colorPalette[3];
+    c.colorPalette[4] = (*spvDescriptorSet0.m_360).classes[_2355].colorPalette[4];
+    c.colorPalette[5] = (*spvDescriptorSet0.m_360).classes[_2355].colorPalette[5];
+    c.colorPalette[6] = (*spvDescriptorSet0.m_360).classes[_2355].colorPalette[6];
+    c.colorPalette[7] = (*spvDescriptorSet0.m_360).classes[_2355].colorPalette[7];
+    c.colorPalette[8] = (*spvDescriptorSet0.m_360).classes[_2355].colorPalette[8];
+    c.colorPalette[9] = (*spvDescriptorSet0.m_360).classes[_2355].colorPalette[9];
+    c.colorPalette[10] = (*spvDescriptorSet0.m_360).classes[_2355].colorPalette[10];
+    c.colorPalette[11] = (*spvDescriptorSet0.m_360).classes[_2355].colorPalette[11];
+    c.colorPalette[12] = (*spvDescriptorSet0.m_360).classes[_2355].colorPalette[12];
+    c.colorPalette[13] = (*spvDescriptorSet0.m_360).classes[_2355].colorPalette[13];
+    c.colorPalette[14] = (*spvDescriptorSet0.m_360).classes[_2355].colorPalette[14];
+    c.colorPalette[15] = (*spvDescriptorSet0.m_360).classes[_2355].colorPalette[15];
+    c.colorEndMult = (*spvDescriptorSet0.m_360).classes[_2355].colorEndMult;
+    c.sizeStart = (*spvDescriptorSet0.m_360).classes[_2355].sizeStart;
+    c.sizeEnd = (*spvDescriptorSet0.m_360).classes[_2355].sizeEnd;
+    c.gravityScale = (*spvDescriptorSet0.m_360).classes[_2355].gravityScale;
+    c.drag = (*spvDescriptorSet0.m_360).classes[_2355].drag;
+    c.shaderBlendIsAdditive = (*spvDescriptorSet0.m_360).classes[_2355].shaderBlendIsAdditive;
+    c.pad1 = (*spvDescriptorSet0.m_360).classes[_2355].pad1;
+    c.pad2 = (*spvDescriptorSet0.m_360).classes[_2355].pad2;
+    c.pad3 = (*spvDescriptorSet0.m_360).classes[_2355].pad3;
+    c.velocityBias = (*spvDescriptorSet0.m_360).classes[_2355].velocityBias;
+    c.velocityBiasJitter = (*spvDescriptorSet0.m_360).classes[_2355].velocityBiasJitter;
+    c.speedJitter = (*spvDescriptorSet0.m_360).classes[_2355].speedJitter;
+    c.sizeJitter = (*spvDescriptorSet0.m_360).classes[_2355].sizeJitter;
+    c.colorDomain = (*spvDescriptorSet0.m_360).classes[_2355].colorDomain;
+    c.pad5 = (*spvDescriptorSet0.m_360).classes[_2355].pad5;
+    c.frameSlots[0] = (*spvDescriptorSet0.m_360).classes[_2355].frameSlots[0];
+    c.frameSlots[1] = (*spvDescriptorSet0.m_360).classes[_2355].frameSlots[1];
+    c.frameSlots[2] = (*spvDescriptorSet0.m_360).classes[_2355].frameSlots[2];
+    c.frameSlots[3] = (*spvDescriptorSet0.m_360).classes[_2355].frameSlots[3];
+    c.frameSlots[4] = (*spvDescriptorSet0.m_360).classes[_2355].frameSlots[4];
+    c.frameSlots[5] = (*spvDescriptorSet0.m_360).classes[_2355].frameSlots[5];
+    c.frameSlots[6] = (*spvDescriptorSet0.m_360).classes[_2355].frameSlots[6];
+    c.frameSlots[7] = (*spvDescriptorSet0.m_360).classes[_2355].frameSlots[7];
+    c.frameSlots[8] = (*spvDescriptorSet0.m_360).classes[_2355].frameSlots[8];
+    c.frameSlots[9] = (*spvDescriptorSet0.m_360).classes[_2355].frameSlots[9];
+    c.frameSlots[10] = (*spvDescriptorSet0.m_360).classes[_2355].frameSlots[10];
+    c.frameSlots[11] = (*spvDescriptorSet0.m_360).classes[_2355].frameSlots[11];
+    c.frameSlots[12] = (*spvDescriptorSet0.m_360).classes[_2355].frameSlots[12];
+    c.frameSlots[13] = (*spvDescriptorSet0.m_360).classes[_2355].frameSlots[13];
+    c.frameSlots[14] = (*spvDescriptorSet0.m_360).classes[_2355].frameSlots[14];
+    c.frameSlots[15] = (*spvDescriptorSet0.m_360).classes[_2355].frameSlots[15];
+    c.frameCount = (*spvDescriptorSet0.m_360).classes[_2355].frameCount;
+    c.frameBlend = (*spvDescriptorSet0.m_360).classes[_2355].frameBlend;
+    c.framePad0 = (*spvDescriptorSet0.m_360).classes[_2355].framePad0;
+    c.framePad1 = (*spvDescriptorSet0.m_360).classes[_2355].framePad1;
+    c.sizeParm.calc = (*spvDescriptorSet0.m_360).classes[_2355].sizeParm.calc;
+    c.sizeParm.hasCurve = (*spvDescriptorSet0.m_360).classes[_2355].sizeParm.hasCurve;
+    c.sizeParm.val0 = (*spvDescriptorSet0.m_360).classes[_2355].sizeParm.val0;
+    c.sizeParm.val1 = (*spvDescriptorSet0.m_360).classes[_2355].sizeParm.val1;
+    c.sizeParm.variance = (*spvDescriptorSet0.m_360).classes[_2355].sizeParm.variance;
+    c.sizeParm.parmPad0 = (*spvDescriptorSet0.m_360).classes[_2355].sizeParm.parmPad0;
+    c.sizeParm.parmPad1 = (*spvDescriptorSet0.m_360).classes[_2355].sizeParm.parmPad1;
+    c.sizeParm.parmPad2 = (*spvDescriptorSet0.m_360).classes[_2355].sizeParm.parmPad2;
+    c.sizeParm.samples[0] = (*spvDescriptorSet0.m_360).classes[_2355].sizeParm.samples[0];
+    c.sizeParm.samples[1] = (*spvDescriptorSet0.m_360).classes[_2355].sizeParm.samples[1];
+    c.sizeParm.samples[2] = (*spvDescriptorSet0.m_360).classes[_2355].sizeParm.samples[2];
+    c.sizeParm.samples[3] = (*spvDescriptorSet0.m_360).classes[_2355].sizeParm.samples[3];
+    c.sizeParm.samples[4] = (*spvDescriptorSet0.m_360).classes[_2355].sizeParm.samples[4];
+    c.sizeParm.samples[5] = (*spvDescriptorSet0.m_360).classes[_2355].sizeParm.samples[5];
+    c.sizeParm.samples[6] = (*spvDescriptorSet0.m_360).classes[_2355].sizeParm.samples[6];
+    c.sizeParm.samples[7] = (*spvDescriptorSet0.m_360).classes[_2355].sizeParm.samples[7];
+    c.alphaParm.calc = (*spvDescriptorSet0.m_360).classes[_2355].alphaParm.calc;
+    c.alphaParm.hasCurve = (*spvDescriptorSet0.m_360).classes[_2355].alphaParm.hasCurve;
+    c.alphaParm.val0 = (*spvDescriptorSet0.m_360).classes[_2355].alphaParm.val0;
+    c.alphaParm.val1 = (*spvDescriptorSet0.m_360).classes[_2355].alphaParm.val1;
+    c.alphaParm.variance = (*spvDescriptorSet0.m_360).classes[_2355].alphaParm.variance;
+    c.alphaParm.parmPad0 = (*spvDescriptorSet0.m_360).classes[_2355].alphaParm.parmPad0;
+    c.alphaParm.parmPad1 = (*spvDescriptorSet0.m_360).classes[_2355].alphaParm.parmPad1;
+    c.alphaParm.parmPad2 = (*spvDescriptorSet0.m_360).classes[_2355].alphaParm.parmPad2;
+    c.alphaParm.samples[0] = (*spvDescriptorSet0.m_360).classes[_2355].alphaParm.samples[0];
+    c.alphaParm.samples[1] = (*spvDescriptorSet0.m_360).classes[_2355].alphaParm.samples[1];
+    c.alphaParm.samples[2] = (*spvDescriptorSet0.m_360).classes[_2355].alphaParm.samples[2];
+    c.alphaParm.samples[3] = (*spvDescriptorSet0.m_360).classes[_2355].alphaParm.samples[3];
+    c.alphaParm.samples[4] = (*spvDescriptorSet0.m_360).classes[_2355].alphaParm.samples[4];
+    c.alphaParm.samples[5] = (*spvDescriptorSet0.m_360).classes[_2355].alphaParm.samples[5];
+    c.alphaParm.samples[6] = (*spvDescriptorSet0.m_360).classes[_2355].alphaParm.samples[6];
+    c.alphaParm.samples[7] = (*spvDescriptorSet0.m_360).classes[_2355].alphaParm.samples[7];
+    c.dragParm.calc = (*spvDescriptorSet0.m_360).classes[_2355].dragParm.calc;
+    c.dragParm.hasCurve = (*spvDescriptorSet0.m_360).classes[_2355].dragParm.hasCurve;
+    c.dragParm.val0 = (*spvDescriptorSet0.m_360).classes[_2355].dragParm.val0;
+    c.dragParm.val1 = (*spvDescriptorSet0.m_360).classes[_2355].dragParm.val1;
+    c.dragParm.variance = (*spvDescriptorSet0.m_360).classes[_2355].dragParm.variance;
+    c.dragParm.parmPad0 = (*spvDescriptorSet0.m_360).classes[_2355].dragParm.parmPad0;
+    c.dragParm.parmPad1 = (*spvDescriptorSet0.m_360).classes[_2355].dragParm.parmPad1;
+    c.dragParm.parmPad2 = (*spvDescriptorSet0.m_360).classes[_2355].dragParm.parmPad2;
+    c.dragParm.samples[0] = (*spvDescriptorSet0.m_360).classes[_2355].dragParm.samples[0];
+    c.dragParm.samples[1] = (*spvDescriptorSet0.m_360).classes[_2355].dragParm.samples[1];
+    c.dragParm.samples[2] = (*spvDescriptorSet0.m_360).classes[_2355].dragParm.samples[2];
+    c.dragParm.samples[3] = (*spvDescriptorSet0.m_360).classes[_2355].dragParm.samples[3];
+    c.dragParm.samples[4] = (*spvDescriptorSet0.m_360).classes[_2355].dragParm.samples[4];
+    c.dragParm.samples[5] = (*spvDescriptorSet0.m_360).classes[_2355].dragParm.samples[5];
+    c.dragParm.samples[6] = (*spvDescriptorSet0.m_360).classes[_2355].dragParm.samples[6];
+    c.dragParm.samples[7] = (*spvDescriptorSet0.m_360).classes[_2355].dragParm.samples[7];
+    c.gravityParm.calc = (*spvDescriptorSet0.m_360).classes[_2355].gravityParm.calc;
+    c.gravityParm.hasCurve = (*spvDescriptorSet0.m_360).classes[_2355].gravityParm.hasCurve;
+    c.gravityParm.val0 = (*spvDescriptorSet0.m_360).classes[_2355].gravityParm.val0;
+    c.gravityParm.val1 = (*spvDescriptorSet0.m_360).classes[_2355].gravityParm.val1;
+    c.gravityParm.variance = (*spvDescriptorSet0.m_360).classes[_2355].gravityParm.variance;
+    c.gravityParm.parmPad0 = (*spvDescriptorSet0.m_360).classes[_2355].gravityParm.parmPad0;
+    c.gravityParm.parmPad1 = (*spvDescriptorSet0.m_360).classes[_2355].gravityParm.parmPad1;
+    c.gravityParm.parmPad2 = (*spvDescriptorSet0.m_360).classes[_2355].gravityParm.parmPad2;
+    c.gravityParm.samples[0] = (*spvDescriptorSet0.m_360).classes[_2355].gravityParm.samples[0];
+    c.gravityParm.samples[1] = (*spvDescriptorSet0.m_360).classes[_2355].gravityParm.samples[1];
+    c.gravityParm.samples[2] = (*spvDescriptorSet0.m_360).classes[_2355].gravityParm.samples[2];
+    c.gravityParm.samples[3] = (*spvDescriptorSet0.m_360).classes[_2355].gravityParm.samples[3];
+    c.gravityParm.samples[4] = (*spvDescriptorSet0.m_360).classes[_2355].gravityParm.samples[4];
+    c.gravityParm.samples[5] = (*spvDescriptorSet0.m_360).classes[_2355].gravityParm.samples[5];
+    c.gravityParm.samples[6] = (*spvDescriptorSet0.m_360).classes[_2355].gravityParm.samples[6];
+    c.gravityParm.samples[7] = (*spvDescriptorSet0.m_360).classes[_2355].gravityParm.samples[7];
     ParticleParm param_4 = c.gravityParm;
-    float _2583;
+    float _2637;
     if (parmIsUnset(param_4))
     {
-        _2583 = c.gravityScale;
+        _2637 = c.gravityScale;
     }
     else
     {
         ParticleParm param_5 = c.gravityParm;
         float param_6 = p.age;
         float param_7 = p.sizeJitterPick;
-        float _2598 = parmEval(param_5, param_6, param_7);
-        _2583 = _2598;
+        float _2652 = parmEval(param_5, param_6, param_7);
+        _2637 = _2652;
     }
-    float gScale = _2583;
+    float gScale = _2637;
     ParticleParm param_8 = c.dragParm;
-    float _2605;
+    float _2659;
     if (parmIsUnset(param_8))
     {
-        _2605 = c.drag;
+        _2659 = c.drag;
     }
     else
     {
         ParticleParm param_9 = c.dragParm;
         float param_10 = p.age;
         float param_11 = p.sizeJitterPick;
-        float _2620 = parmEval(param_9, param_10, param_11);
-        _2605 = _2620;
+        float _2674 = parmEval(param_9, param_10, param_11);
+        _2659 = _2674;
     }
-    float dragV = _2605;
+    float dragV = _2659;
     float previousAge = p.age;
     p.vel.z += (((-800.0) * gScale) * (*spvDescriptorSet0.m_322).dt);
     p.vel *= exp((-dragV) * (*spvDescriptorSet0.m_322).dt);
@@ -1635,52 +1660,52 @@ kernel void main0(device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]
     p.age += ((*spvDescriptorSet0.m_322).dt * p.lifetimeInv);
     bool died = p.age >= 1.0;
     Particle param_12 = p;
-    bool _2670 = particleHasCollisionChild(param_12, (*spvDescriptorSet0.m_1173));
-    bool _2676;
-    if (_2670)
+    bool _2724 = particleHasCollisionChild(param_12, (*spvDescriptorSet0.m_1227));
+    bool _2730;
+    if (_2724)
     {
         Particle param_13 = p;
-        _2676 = particleCollided(param_13, (*spvDescriptorSet0.m_1257), spvDescriptorSet0.collisionHeightgrid, spvDescriptorSet0.collisionHeightgridSmplr);
+        _2730 = particleCollided(param_13, (*spvDescriptorSet0.m_1311), spvDescriptorSet0.collisionHeightgrid, spvDescriptorSet0.collisionHeightgridSmplr);
     }
     else
     {
-        _2676 = _2670;
+        _2730 = _2724;
     }
-    bool collided = _2676;
+    bool collided = _2730;
     Particle param_14 = p;
     float param_15 = previousAge;
     float param_16 = p.age;
     bool param_17 = collided;
     bool param_18 = died || collided;
-    appendChildEvents(param_14, param_15, param_16, param_17, param_18, (*spvDescriptorSet0.m_322), (*spvDescriptorSet0.m_1173), (*spvDescriptorSet0.m_1257));
+    appendChildEvents(param_14, param_15, param_16, param_17, param_18, (*spvDescriptorSet0.m_322), (*spvDescriptorSet0.m_1227), (*spvDescriptorSet0.m_1311));
     if (died || collided)
     {
-        Particle _2697 = deadParticle();
-        (*spvDescriptorSet0.m_2080).writeParticles[idx].pos = _2697.pos;
-        (*spvDescriptorSet0.m_2080).writeParticles[idx].age = _2697.age;
-        (*spvDescriptorSet0.m_2080).writeParticles[idx].vel = _2697.vel;
-        (*spvDescriptorSet0.m_2080).writeParticles[idx].lifetimeInv = _2697.lifetimeInv;
-        (*spvDescriptorSet0.m_2080).writeParticles[idx].classHandle = _2697.classHandle;
-        (*spvDescriptorSet0.m_2080).writeParticles[idx].paletteIndex = _2697.paletteIndex;
-        (*spvDescriptorSet0.m_2080).writeParticles[idx].sizeJitterPick = _2697.sizeJitterPick;
-        (*spvDescriptorSet0.m_2080).writeParticles[idx].pad1 = _2697.pad1;
-        (*spvDescriptorSet0.m_2080).writeParticles[idx].pad2 = _2697.pad2;
-        (*spvDescriptorSet0.m_2080).writeParticles[idx].pad3 = _2697.pad3;
-        (*spvDescriptorSet0.m_2080).writeParticles[idx].pad4 = _2697.pad4;
-        (*spvDescriptorSet0.m_2080).writeParticles[idx].pad5 = _2697.pad5;
+        Particle _2751 = deadParticle();
+        (*spvDescriptorSet0.m_2134).writeParticles[idx].pos = _2751.pos;
+        (*spvDescriptorSet0.m_2134).writeParticles[idx].age = _2751.age;
+        (*spvDescriptorSet0.m_2134).writeParticles[idx].vel = _2751.vel;
+        (*spvDescriptorSet0.m_2134).writeParticles[idx].lifetimeInv = _2751.lifetimeInv;
+        (*spvDescriptorSet0.m_2134).writeParticles[idx].classHandle = _2751.classHandle;
+        (*spvDescriptorSet0.m_2134).writeParticles[idx].paletteIndex = _2751.paletteIndex;
+        (*spvDescriptorSet0.m_2134).writeParticles[idx].sizeJitterPick = _2751.sizeJitterPick;
+        (*spvDescriptorSet0.m_2134).writeParticles[idx].pad1 = _2751.pad1;
+        (*spvDescriptorSet0.m_2134).writeParticles[idx].pad2 = _2751.pad2;
+        (*spvDescriptorSet0.m_2134).writeParticles[idx].pad3 = _2751.pad3;
+        (*spvDescriptorSet0.m_2134).writeParticles[idx].pad4 = _2751.pad4;
+        (*spvDescriptorSet0.m_2134).writeParticles[idx].pad5 = _2751.pad5;
         return;
     }
-    (*spvDescriptorSet0.m_2080).writeParticles[idx].pos = p.pos;
-    (*spvDescriptorSet0.m_2080).writeParticles[idx].age = p.age;
-    (*spvDescriptorSet0.m_2080).writeParticles[idx].vel = p.vel;
-    (*spvDescriptorSet0.m_2080).writeParticles[idx].lifetimeInv = p.lifetimeInv;
-    (*spvDescriptorSet0.m_2080).writeParticles[idx].classHandle = p.classHandle;
-    (*spvDescriptorSet0.m_2080).writeParticles[idx].paletteIndex = p.paletteIndex;
-    (*spvDescriptorSet0.m_2080).writeParticles[idx].sizeJitterPick = p.sizeJitterPick;
-    (*spvDescriptorSet0.m_2080).writeParticles[idx].pad1 = p.pad1;
-    (*spvDescriptorSet0.m_2080).writeParticles[idx].pad2 = p.pad2;
-    (*spvDescriptorSet0.m_2080).writeParticles[idx].pad3 = p.pad3;
-    (*spvDescriptorSet0.m_2080).writeParticles[idx].pad4 = p.pad4;
-    (*spvDescriptorSet0.m_2080).writeParticles[idx].pad5 = p.pad5;
+    (*spvDescriptorSet0.m_2134).writeParticles[idx].pos = p.pos;
+    (*spvDescriptorSet0.m_2134).writeParticles[idx].age = p.age;
+    (*spvDescriptorSet0.m_2134).writeParticles[idx].vel = p.vel;
+    (*spvDescriptorSet0.m_2134).writeParticles[idx].lifetimeInv = p.lifetimeInv;
+    (*spvDescriptorSet0.m_2134).writeParticles[idx].classHandle = p.classHandle;
+    (*spvDescriptorSet0.m_2134).writeParticles[idx].paletteIndex = p.paletteIndex;
+    (*spvDescriptorSet0.m_2134).writeParticles[idx].sizeJitterPick = p.sizeJitterPick;
+    (*spvDescriptorSet0.m_2134).writeParticles[idx].pad1 = p.pad1;
+    (*spvDescriptorSet0.m_2134).writeParticles[idx].pad2 = p.pad2;
+    (*spvDescriptorSet0.m_2134).writeParticles[idx].pad3 = p.pad3;
+    (*spvDescriptorSet0.m_2134).writeParticles[idx].pad4 = p.pad4;
+    (*spvDescriptorSet0.m_2134).writeParticles[idx].pad5 = p.pad5;
 }
 

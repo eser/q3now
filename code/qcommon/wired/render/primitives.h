@@ -144,6 +144,11 @@ typedef int particleClassHandle_t;
 		   //   This is not a draw-on-top flag;   \
 		   //   other geometry can still occlude  \
 		   //   the particle normally.
+/* Particle-only. Build the sprite plane perpendicular to its current velocity
+ * instead of viewLeft/viewUp. Radial bursts therefore form a coherent
+ * expanding shell rather than a stack of camera-facing discs. Zero-velocity
+ * particles fall back to the ordinary camera billboard. */
+#define PRIM_FLAG_PARTICLE_VELOCITY_ORIENTED 0x0100
 
 // ── ribbon ──────────────────────────────────────────────────────────
 

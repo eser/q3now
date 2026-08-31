@@ -42,7 +42,10 @@ typedef enum {
 	VEL_AXIAL,              // axis * speed
 	VEL_AXIAL_PLUS_CUBE,    // axis*speed + crand()*jitter per axis
 	VEL_CONE,               // axis ± half-angle * speed
-	VEL_PURE_CUBE           // crand()*jitter per axis only
+	VEL_PURE_CUBE,          // crand()*jitter per axis only
+	VEL_RADIAL_FROM_SCATTER // normalized spawn scatter * speed; falls back to
+	                        // a deterministic random unit vector when the
+	                        // particle has no scatter. Used by expanding shells.
 } velocityShape_t;
 
 typedef enum {
@@ -168,7 +171,8 @@ typedef struct {
 	//   crandom() * speedJitter and added to axialSpeed before the
 	//   velocityShape consumes it. VEL_AXIAL with axialSpeed=200 and
 	//   speedJitter=100 produces uniform speed in [100, 300]. Has no
-	//   effect on VEL_PURE_CUBE (no axial component).
+	//   effect on VEL_PURE_CUBE (no axial component). VEL_RADIAL_FROM_SCATTER
+	//   consumes axialSpeed as its outward speed, including speedJitter.
 	// sizeJitter:
 	//   Per-particle sizeStart scatter, picked once at emit time as
 	//   crandom() * sizeJitter and stored on the particle. The size

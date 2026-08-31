@@ -261,12 +261,12 @@ fn stageTriggerCount_u0028_struct_u002d_AtmosphereEffectStage_u002d_u1_u002d_u1_
     var parentTint: vec4<f32>;
     var intensity: f32;
     var local_1: f32;
-    var phi_1356_: bool;
-    var phi_1385_: bool;
-    var phi_1430_: bool;
-    var phi_1440_: bool;
-    var phi_1469_: bool;
-    var phi_1479_: bool;
+    var phi_1410_: bool;
+    var phi_1439_: bool;
+    var phi_1484_: bool;
+    var phi_1494_: bool;
+    var phi_1523_: bool;
+    var phi_1533_: bool;
 
     let _e131 = (*p).lifetimeInv;
     if (_e131 > 0f) {
@@ -286,12 +286,12 @@ fn stageTriggerCount_u0028_struct_u002d_AtmosphereEffectStage_u002d_u1_u002d_u1_
     count = 0u;
     let _e144 = (*stage).trigger;
     let _e145 = (_e144 == 0u);
-    phi_1356_ = _e145;
+    phi_1410_ = _e145;
     if !(_e145) {
         let _e148 = (*stage).trigger;
-        phi_1356_ = (_e148 == 1u);
+        phi_1410_ = (_e148 == 1u);
     }
-    let _e151 = phi_1356_;
+    let _e151 = phi_1410_;
     if _e151 {
         let _e152 = previousSeconds;
         let _e154 = (*stage).delay;
@@ -304,13 +304,13 @@ fn stageTriggerCount_u0028_struct_u002d_AtmosphereEffectStage_u002d_u1_u002d_u1_
         let _e166 = previousSeconds;
         let _e168 = (*stage).delay;
         let _e169 = (_e166 <= _e168);
-        phi_1385_ = _e169;
+        phi_1439_ = _e169;
         if _e169 {
             let _e170 = currentSeconds;
             let _e172 = (*stage).delay;
-            phi_1385_ = (_e170 > _e172);
+            phi_1439_ = (_e170 > _e172);
         }
-        let _e175 = phi_1385_;
+        let _e175 = phi_1439_;
         if _e175 {
             let _e177 = (*stage).burstCount;
             let _e178 = count;
@@ -334,21 +334,21 @@ fn stageTriggerCount_u0028_struct_u002d_AtmosphereEffectStage_u002d_u1_u002d_u1_
         let _e202 = (*stage).trigger;
         let _e204 = (*collided);
         let _e205 = ((_e202 == 2u) && _e204);
-        phi_1430_ = _e205;
+        phi_1484_ = _e205;
         if _e205 {
             let _e206 = currentSeconds;
             let _e208 = (*stage).delay;
-            phi_1430_ = (_e206 >= _e208);
+            phi_1484_ = (_e206 >= _e208);
         }
-        let _e211 = phi_1430_;
-        phi_1440_ = _e211;
+        let _e211 = phi_1484_;
+        phi_1494_ = _e211;
         if _e211 {
             let _e212 = currentSeconds;
             let _e214 = (*stage).delay;
             let _e216 = (*stage).duration;
-            phi_1440_ = (_e212 <= (_e214 + _e216));
+            phi_1494_ = (_e212 <= (_e214 + _e216));
         }
-        let _e220 = phi_1440_;
+        let _e220 = phi_1494_;
         if _e220 {
             let _e222 = (*stage).burstCount;
             let _e224 = (*stage).spawnRate;
@@ -359,21 +359,21 @@ fn stageTriggerCount_u0028_struct_u002d_AtmosphereEffectStage_u002d_u1_u002d_u1_
             let _e235 = (*stage).trigger;
             let _e237 = (*died);
             let _e238 = ((_e235 == 3u) && _e237);
-            phi_1469_ = _e238;
+            phi_1523_ = _e238;
             if _e238 {
                 let _e239 = currentSeconds;
                 let _e241 = (*stage).delay;
-                phi_1469_ = (_e239 >= _e241);
+                phi_1523_ = (_e239 >= _e241);
             }
-            let _e244 = phi_1469_;
-            phi_1479_ = _e244;
+            let _e244 = phi_1523_;
+            phi_1533_ = _e244;
             if _e244 {
                 let _e245 = currentSeconds;
                 let _e247 = (*stage).delay;
                 let _e249 = (*stage).duration;
-                phi_1479_ = (_e245 <= (_e247 + _e249));
+                phi_1533_ = (_e245 <= (_e247 + _e249));
             }
-            let _e253 = phi_1479_;
+            let _e253 = phi_1533_;
             if _e253 {
                 let _e255 = (*stage).burstCount;
                 let _e257 = (*stage).spawnRate;
@@ -428,24 +428,24 @@ fn appendChildEvents_u0028_struct_u002d_Particle_u002d_vf3_u002d_f1_u002d_vf3_u0
     var event: ParticleChildEvent;
     var local_4: vec3<f32>;
     var param_6: u32;
-    var phi_1536_: bool;
-    var phi_1543_: bool;
-    var phi_1625_: bool;
+    var phi_1590_: bool;
+    var phi_1597_: bool;
+    var phi_1679_: bool;
 
     let _e142 = (*p_1).pad1_;
     let _e143 = (_e142 == 0u);
-    phi_1536_ = _e143;
+    phi_1590_ = _e143;
     if !(_e143) {
         let _e146 = (*p_1).pad1_;
-        phi_1536_ = (_e146 > 64u);
+        phi_1590_ = (_e146 > 64u);
     }
-    let _e149 = phi_1536_;
-    phi_1543_ = _e149;
+    let _e149 = phi_1590_;
+    phi_1597_ = _e149;
     if !(_e149) {
         let _e152 = (*p_1).pad2_;
-        phi_1543_ = (_e152 >= 8u);
+        phi_1597_ = (_e152 >= 8u);
     }
-    let _e155 = phi_1543_;
+    let _e155 = phi_1597_;
     if _e155 {
         return;
     }
@@ -483,14 +483,14 @@ fn appendChildEvents_u0028_struct_u002d_Particle_u002d_vf3_u002d_f1_u002d_vf3_u0
             }
             let _e214 = stage_1.lodFar;
             let _e215 = (_e214 > 0f);
-            phi_1625_ = _e215;
+            phi_1679_ = _e215;
             if _e215 {
                 let _e217 = (*p_1).pos;
                 let _e219 = unnamed.eyeWorld;
                 let _e223 = stage_1.lodFar;
-                phi_1625_ = (distance(_e217, _e219.xyz) > _e223);
+                phi_1679_ = (distance(_e217, _e219.xyz) > _e223);
             }
-            let _e226 = phi_1625_;
+            let _e226 = phi_1679_;
             if _e226 {
                 continue;
             }
@@ -641,8 +641,8 @@ fn appendChildEvents_u0028_struct_u002d_Particle_u002d_vf3_u002d_f1_u002d_vf3_u0
 fn particleCollided_u0028_struct_u002d_Particle_u002d_vf3_u002d_f1_u002d_vf3_u002d_f1_u002d_u1_u002d_u1_u002d_f1_u002d_u1_u002d_u1_u002d_u1_u002d_u1_u002d_u11_u003b(p_2: ptr<function, Particle>) -> bool {
     var extent: vec2<f32>;
     var uv: vec2<f32>;
-    var phi_1287_: bool;
-    var phi_1298_: bool;
+    var phi_1341_: bool;
+    var phi_1352_: bool;
 
     let _e116 = unnamed_3.collisionEnabled;
     if (_e116 == 0u) {
@@ -653,20 +653,20 @@ fn particleCollided_u0028_struct_u002d_Particle_u002d_vf3_u002d_f1_u002d_vf3_u00
     extent = (_e119 - _e121);
     let _e123 = extent;
     let _e125 = any((_e123 <= vec2<f32>(0f, 0f)));
-    phi_1287_ = _e125;
+    phi_1341_ = _e125;
     if !(_e125) {
         let _e128 = (*p_2).pos;
         let _e131 = unnamed_3.collisionWorldMins;
-        phi_1287_ = any((_e128.xy < _e131));
+        phi_1341_ = any((_e128.xy < _e131));
     }
-    let _e135 = phi_1287_;
-    phi_1298_ = _e135;
+    let _e135 = phi_1341_;
+    phi_1352_ = _e135;
     if !(_e135) {
         let _e138 = (*p_2).pos;
         let _e141 = unnamed_3.collisionWorldMaxs;
-        phi_1298_ = any((_e138.xy > _e141));
+        phi_1352_ = any((_e138.xy > _e141));
     }
-    let _e145 = phi_1298_;
+    let _e145 = phi_1352_;
     if _e145 {
         return false;
     }
@@ -684,24 +684,24 @@ fn particleHasCollisionChild_u0028_struct_u002d_Particle_u002d_vf3_u002d_f1_u002
     var count_2: u32;
     var i_1: u32;
     var stage_2: AtmosphereEffectStage;
-    var phi_1153_: bool;
-    var phi_1160_: bool;
-    var phi_1239_: bool;
+    var phi_1207_: bool;
+    var phi_1214_: bool;
+    var phi_1293_: bool;
 
     let _e117 = (*p_3).pad1_;
     let _e118 = (_e117 == 0u);
-    phi_1153_ = _e118;
+    phi_1207_ = _e118;
     if !(_e118) {
         let _e121 = (*p_3).pad1_;
-        phi_1153_ = (_e121 > 64u);
+        phi_1207_ = (_e121 > 64u);
     }
-    let _e124 = phi_1153_;
-    phi_1160_ = _e124;
+    let _e124 = phi_1207_;
+    phi_1214_ = _e124;
     if !(_e124) {
         let _e127 = (*p_3).pad2_;
-        phi_1160_ = (_e127 >= 8u);
+        phi_1214_ = (_e127 >= 8u);
     }
-    let _e130 = phi_1160_;
+    let _e130 = phi_1214_;
     if _e130 {
         return false;
     }
@@ -735,12 +735,12 @@ fn particleHasCollisionChild_u0028_struct_u002d_Particle_u002d_vf3_u002d_f1_u002
             let _e184 = stage_2.parentStage;
             let _e186 = (*p_3).pad2_;
             let _e187 = (_e184 == _e186);
-            phi_1239_ = _e187;
+            phi_1293_ = _e187;
             if _e187 {
                 let _e189 = stage_2.trigger;
-                phi_1239_ = (_e189 == 2u);
+                phi_1293_ = (_e189 == 2u);
             }
-            let _e192 = phi_1239_;
+            let _e192 = phi_1293_;
             if _e192 {
                 return true;
             }
@@ -997,482 +997,531 @@ fn buildSpawnParticle_u0028_struct_u002d_ParticleSpawnRequest_u002d_vf4_u002d_vf
     var param_64: u32;
     var param_65: u32;
     var param_66: u32;
+    var radialDirection: vec3<f32>;
+    var z_2: f32;
     var param_67: u32;
     var param_68: u32;
     var param_69: u32;
+    var phi_3: f32;
     var param_70: u32;
     var param_71: u32;
     var param_72: u32;
+    var radial_2: f32;
     var param_73: u32;
     var param_74: u32;
     var param_75: u32;
-    var lifetime_1: f32;
     var param_76: u32;
     var param_77: u32;
     var param_78: u32;
-    var p_8: Particle;
-    var local_8: u32;
     var param_79: u32;
     var param_80: u32;
     var param_81: u32;
+    var lifetime_1: f32;
     var param_82: u32;
+    var param_83: u32;
+    var param_84: u32;
+    var p_8: Particle;
+    var local_8: u32;
+    var param_85: u32;
+    var param_86: u32;
+    var param_87: u32;
+    var param_88: u32;
     var phi_327_: bool;
     var phi_334_: bool;
     var phi_341_: bool;
 
-    let _e209 = (*request).classHandle;
-    let _e210 = (_e209 == 0u);
-    phi_327_ = _e210;
-    if !(_e210) {
-        let _e213 = (*request).classHandle;
-        let _e215 = unnamed.numClasses;
-        phi_327_ = (_e213 > _e215);
+    let _e219 = (*request).classHandle;
+    let _e220 = (_e219 == 0u);
+    phi_327_ = _e220;
+    if !(_e220) {
+        let _e223 = (*request).classHandle;
+        let _e225 = unnamed.numClasses;
+        phi_327_ = (_e223 > _e225);
     }
-    let _e218 = phi_327_;
-    phi_334_ = _e218;
-    if !(_e218) {
-        let _e221 = (*request).count;
-        phi_334_ = (_e221 == 0u);
+    let _e228 = phi_327_;
+    phi_334_ = _e228;
+    if !(_e228) {
+        let _e231 = (*request).count;
+        phi_334_ = (_e231 == 0u);
     }
-    let _e224 = phi_334_;
-    phi_341_ = _e224;
-    if !(_e224) {
-        let _e227 = unnamed.poolSize;
-        phi_341_ = (_e227 == 0u);
+    let _e234 = phi_334_;
+    phi_341_ = _e234;
+    if !(_e234) {
+        let _e237 = unnamed.poolSize;
+        phi_341_ = (_e237 == 0u);
     }
-    let _e230 = phi_341_;
-    if _e230 {
-        let _e231 = deadParticle_u0028_();
-        return _e231;
+    let _e240 = phi_341_;
+    if _e240 {
+        let _e241 = deadParticle_u0028_();
+        return _e241;
     }
-    let _e233 = (*request).classHandle;
-    let _e237 = unnamed_1.classes[(_e233 - 1u)];
-    c.shader = _e237.shader;
-    c.renderFlags = _e237.renderFlags;
-    c.emitMode = _e237.emitMode;
-    c.scatterShape = _e237.scatterShape;
-    c.scatterMagnitude = _e237.scatterMagnitude;
-    c.velocityShape = _e237.velocityShape;
-    c.axialSpeed = _e237.axialSpeed;
-    c.cubeJitter = _e237.cubeJitter;
-    c.coneHalfAngle = _e237.coneHalfAngle;
-    c.lifetimeMean = _e237.lifetimeMean;
-    c.lifetimeJitter = _e237.lifetimeJitter;
-    c.paletteCount = _e237.paletteCount;
-    c.colorPalette[0i] = _e237.colorPalette[0];
-    c.colorPalette[1i] = _e237.colorPalette[1];
-    c.colorPalette[2i] = _e237.colorPalette[2];
-    c.colorPalette[3i] = _e237.colorPalette[3];
-    c.colorPalette[4i] = _e237.colorPalette[4];
-    c.colorPalette[5i] = _e237.colorPalette[5];
-    c.colorPalette[6i] = _e237.colorPalette[6];
-    c.colorPalette[7i] = _e237.colorPalette[7];
-    c.colorPalette[8i] = _e237.colorPalette[8];
-    c.colorPalette[9i] = _e237.colorPalette[9];
-    c.colorPalette[10i] = _e237.colorPalette[10];
-    c.colorPalette[11i] = _e237.colorPalette[11];
-    c.colorPalette[12i] = _e237.colorPalette[12];
-    c.colorPalette[13i] = _e237.colorPalette[13];
-    c.colorPalette[14i] = _e237.colorPalette[14];
-    c.colorPalette[15i] = _e237.colorPalette[15];
-    c.colorEndMult = _e237.colorEndMult;
-    c.sizeStart = _e237.sizeStart;
-    c.sizeEnd = _e237.sizeEnd;
-    c.gravityScale = _e237.gravityScale;
-    c.drag = _e237.drag;
-    c.shaderBlendIsAdditive = _e237.shaderBlendIsAdditive;
-    c.pad1_ = _e237.pad1_;
-    c.pad2_ = _e237.pad2_;
-    c.pad3_ = _e237.pad3_;
-    c.velocityBias = _e237.velocityBias;
-    c.velocityBiasJitter = _e237.velocityBiasJitter;
-    c.speedJitter = _e237.speedJitter;
-    c.sizeJitter = _e237.sizeJitter;
-    c.colorDomain = _e237.colorDomain;
-    c.pad5_ = _e237.pad5_;
-    c.frameSlots[0i] = _e237.frameSlots[0];
-    c.frameSlots[1i] = _e237.frameSlots[1];
-    c.frameSlots[2i] = _e237.frameSlots[2];
-    c.frameSlots[3i] = _e237.frameSlots[3];
-    c.frameSlots[4i] = _e237.frameSlots[4];
-    c.frameSlots[5i] = _e237.frameSlots[5];
-    c.frameSlots[6i] = _e237.frameSlots[6];
-    c.frameSlots[7i] = _e237.frameSlots[7];
-    c.frameSlots[8i] = _e237.frameSlots[8];
-    c.frameSlots[9i] = _e237.frameSlots[9];
-    c.frameSlots[10i] = _e237.frameSlots[10];
-    c.frameSlots[11i] = _e237.frameSlots[11];
-    c.frameSlots[12i] = _e237.frameSlots[12];
-    c.frameSlots[13i] = _e237.frameSlots[13];
-    c.frameSlots[14i] = _e237.frameSlots[14];
-    c.frameSlots[15i] = _e237.frameSlots[15];
-    c.frameCount = _e237.frameCount;
-    c.frameBlend = _e237.frameBlend;
-    c.framePad0_ = _e237.framePad0_;
-    c.framePad1_ = _e237.framePad1_;
-    c.sizeParm.calc = _e237.sizeParm.calc;
-    c.sizeParm.hasCurve = _e237.sizeParm.hasCurve;
-    c.sizeParm.val0_ = _e237.sizeParm.val0_;
-    c.sizeParm.val1_ = _e237.sizeParm.val1_;
-    c.sizeParm.variance = _e237.sizeParm.variance;
-    c.sizeParm.parmPad0_ = _e237.sizeParm.parmPad0_;
-    c.sizeParm.parmPad1_ = _e237.sizeParm.parmPad1_;
-    c.sizeParm.parmPad2_ = _e237.sizeParm.parmPad2_;
-    c.sizeParm.samples[0i] = _e237.sizeParm.samples[0];
-    c.sizeParm.samples[1i] = _e237.sizeParm.samples[1];
-    c.sizeParm.samples[2i] = _e237.sizeParm.samples[2];
-    c.sizeParm.samples[3i] = _e237.sizeParm.samples[3];
-    c.sizeParm.samples[4i] = _e237.sizeParm.samples[4];
-    c.sizeParm.samples[5i] = _e237.sizeParm.samples[5];
-    c.sizeParm.samples[6i] = _e237.sizeParm.samples[6];
-    c.sizeParm.samples[7i] = _e237.sizeParm.samples[7];
-    c.alphaParm.calc = _e237.alphaParm.calc;
-    c.alphaParm.hasCurve = _e237.alphaParm.hasCurve;
-    c.alphaParm.val0_ = _e237.alphaParm.val0_;
-    c.alphaParm.val1_ = _e237.alphaParm.val1_;
-    c.alphaParm.variance = _e237.alphaParm.variance;
-    c.alphaParm.parmPad0_ = _e237.alphaParm.parmPad0_;
-    c.alphaParm.parmPad1_ = _e237.alphaParm.parmPad1_;
-    c.alphaParm.parmPad2_ = _e237.alphaParm.parmPad2_;
-    c.alphaParm.samples[0i] = _e237.alphaParm.samples[0];
-    c.alphaParm.samples[1i] = _e237.alphaParm.samples[1];
-    c.alphaParm.samples[2i] = _e237.alphaParm.samples[2];
-    c.alphaParm.samples[3i] = _e237.alphaParm.samples[3];
-    c.alphaParm.samples[4i] = _e237.alphaParm.samples[4];
-    c.alphaParm.samples[5i] = _e237.alphaParm.samples[5];
-    c.alphaParm.samples[6i] = _e237.alphaParm.samples[6];
-    c.alphaParm.samples[7i] = _e237.alphaParm.samples[7];
-    c.dragParm.calc = _e237.dragParm.calc;
-    c.dragParm.hasCurve = _e237.dragParm.hasCurve;
-    c.dragParm.val0_ = _e237.dragParm.val0_;
-    c.dragParm.val1_ = _e237.dragParm.val1_;
-    c.dragParm.variance = _e237.dragParm.variance;
-    c.dragParm.parmPad0_ = _e237.dragParm.parmPad0_;
-    c.dragParm.parmPad1_ = _e237.dragParm.parmPad1_;
-    c.dragParm.parmPad2_ = _e237.dragParm.parmPad2_;
-    c.dragParm.samples[0i] = _e237.dragParm.samples[0];
-    c.dragParm.samples[1i] = _e237.dragParm.samples[1];
-    c.dragParm.samples[2i] = _e237.dragParm.samples[2];
-    c.dragParm.samples[3i] = _e237.dragParm.samples[3];
-    c.dragParm.samples[4i] = _e237.dragParm.samples[4];
-    c.dragParm.samples[5i] = _e237.dragParm.samples[5];
-    c.dragParm.samples[6i] = _e237.dragParm.samples[6];
-    c.dragParm.samples[7i] = _e237.dragParm.samples[7];
-    c.gravityParm.calc = _e237.gravityParm.calc;
-    c.gravityParm.hasCurve = _e237.gravityParm.hasCurve;
-    c.gravityParm.val0_ = _e237.gravityParm.val0_;
-    c.gravityParm.val1_ = _e237.gravityParm.val1_;
-    c.gravityParm.variance = _e237.gravityParm.variance;
-    c.gravityParm.parmPad0_ = _e237.gravityParm.parmPad0_;
-    c.gravityParm.parmPad1_ = _e237.gravityParm.parmPad1_;
-    c.gravityParm.parmPad2_ = _e237.gravityParm.parmPad2_;
-    c.gravityParm.samples[0i] = _e237.gravityParm.samples[0];
-    c.gravityParm.samples[1i] = _e237.gravityParm.samples[1];
-    c.gravityParm.samples[2i] = _e237.gravityParm.samples[2];
-    c.gravityParm.samples[3i] = _e237.gravityParm.samples[3];
-    c.gravityParm.samples[4i] = _e237.gravityParm.samples[4];
-    c.gravityParm.samples[5i] = _e237.gravityParm.samples[5];
-    c.gravityParm.samples[6i] = _e237.gravityParm.samples[6];
-    c.gravityParm.samples[7i] = _e237.gravityParm.samples[7];
-    let _e513 = (*request).axis;
-    param_15 = _e513.xyz;
-    let _e515 = spawnAxis_u0028_vf3_u003b((&param_15));
-    axis_1 = _e515;
-    let _e517 = (*request).origin;
-    base_1 = _e517.xyz;
-    let _e520 = c.emitMode;
-    if (_e520 != 0u) {
-        let _e522 = (*ordinal_2);
-        let _e526 = (*request).count;
-        pathFraction = ((f32(_e522) + 0.5f) / f32(_e526));
-        let _e530 = (*request).origin;
-        let _e533 = (*request).end;
-        let _e535 = pathFraction;
-        base_1 = mix(_e530.xyz, _e533.xyz, vec3(_e535));
+    let _e243 = (*request).classHandle;
+    let _e247 = unnamed_1.classes[(_e243 - 1u)];
+    c.shader = _e247.shader;
+    c.renderFlags = _e247.renderFlags;
+    c.emitMode = _e247.emitMode;
+    c.scatterShape = _e247.scatterShape;
+    c.scatterMagnitude = _e247.scatterMagnitude;
+    c.velocityShape = _e247.velocityShape;
+    c.axialSpeed = _e247.axialSpeed;
+    c.cubeJitter = _e247.cubeJitter;
+    c.coneHalfAngle = _e247.coneHalfAngle;
+    c.lifetimeMean = _e247.lifetimeMean;
+    c.lifetimeJitter = _e247.lifetimeJitter;
+    c.paletteCount = _e247.paletteCount;
+    c.colorPalette[0i] = _e247.colorPalette[0];
+    c.colorPalette[1i] = _e247.colorPalette[1];
+    c.colorPalette[2i] = _e247.colorPalette[2];
+    c.colorPalette[3i] = _e247.colorPalette[3];
+    c.colorPalette[4i] = _e247.colorPalette[4];
+    c.colorPalette[5i] = _e247.colorPalette[5];
+    c.colorPalette[6i] = _e247.colorPalette[6];
+    c.colorPalette[7i] = _e247.colorPalette[7];
+    c.colorPalette[8i] = _e247.colorPalette[8];
+    c.colorPalette[9i] = _e247.colorPalette[9];
+    c.colorPalette[10i] = _e247.colorPalette[10];
+    c.colorPalette[11i] = _e247.colorPalette[11];
+    c.colorPalette[12i] = _e247.colorPalette[12];
+    c.colorPalette[13i] = _e247.colorPalette[13];
+    c.colorPalette[14i] = _e247.colorPalette[14];
+    c.colorPalette[15i] = _e247.colorPalette[15];
+    c.colorEndMult = _e247.colorEndMult;
+    c.sizeStart = _e247.sizeStart;
+    c.sizeEnd = _e247.sizeEnd;
+    c.gravityScale = _e247.gravityScale;
+    c.drag = _e247.drag;
+    c.shaderBlendIsAdditive = _e247.shaderBlendIsAdditive;
+    c.pad1_ = _e247.pad1_;
+    c.pad2_ = _e247.pad2_;
+    c.pad3_ = _e247.pad3_;
+    c.velocityBias = _e247.velocityBias;
+    c.velocityBiasJitter = _e247.velocityBiasJitter;
+    c.speedJitter = _e247.speedJitter;
+    c.sizeJitter = _e247.sizeJitter;
+    c.colorDomain = _e247.colorDomain;
+    c.pad5_ = _e247.pad5_;
+    c.frameSlots[0i] = _e247.frameSlots[0];
+    c.frameSlots[1i] = _e247.frameSlots[1];
+    c.frameSlots[2i] = _e247.frameSlots[2];
+    c.frameSlots[3i] = _e247.frameSlots[3];
+    c.frameSlots[4i] = _e247.frameSlots[4];
+    c.frameSlots[5i] = _e247.frameSlots[5];
+    c.frameSlots[6i] = _e247.frameSlots[6];
+    c.frameSlots[7i] = _e247.frameSlots[7];
+    c.frameSlots[8i] = _e247.frameSlots[8];
+    c.frameSlots[9i] = _e247.frameSlots[9];
+    c.frameSlots[10i] = _e247.frameSlots[10];
+    c.frameSlots[11i] = _e247.frameSlots[11];
+    c.frameSlots[12i] = _e247.frameSlots[12];
+    c.frameSlots[13i] = _e247.frameSlots[13];
+    c.frameSlots[14i] = _e247.frameSlots[14];
+    c.frameSlots[15i] = _e247.frameSlots[15];
+    c.frameCount = _e247.frameCount;
+    c.frameBlend = _e247.frameBlend;
+    c.framePad0_ = _e247.framePad0_;
+    c.framePad1_ = _e247.framePad1_;
+    c.sizeParm.calc = _e247.sizeParm.calc;
+    c.sizeParm.hasCurve = _e247.sizeParm.hasCurve;
+    c.sizeParm.val0_ = _e247.sizeParm.val0_;
+    c.sizeParm.val1_ = _e247.sizeParm.val1_;
+    c.sizeParm.variance = _e247.sizeParm.variance;
+    c.sizeParm.parmPad0_ = _e247.sizeParm.parmPad0_;
+    c.sizeParm.parmPad1_ = _e247.sizeParm.parmPad1_;
+    c.sizeParm.parmPad2_ = _e247.sizeParm.parmPad2_;
+    c.sizeParm.samples[0i] = _e247.sizeParm.samples[0];
+    c.sizeParm.samples[1i] = _e247.sizeParm.samples[1];
+    c.sizeParm.samples[2i] = _e247.sizeParm.samples[2];
+    c.sizeParm.samples[3i] = _e247.sizeParm.samples[3];
+    c.sizeParm.samples[4i] = _e247.sizeParm.samples[4];
+    c.sizeParm.samples[5i] = _e247.sizeParm.samples[5];
+    c.sizeParm.samples[6i] = _e247.sizeParm.samples[6];
+    c.sizeParm.samples[7i] = _e247.sizeParm.samples[7];
+    c.alphaParm.calc = _e247.alphaParm.calc;
+    c.alphaParm.hasCurve = _e247.alphaParm.hasCurve;
+    c.alphaParm.val0_ = _e247.alphaParm.val0_;
+    c.alphaParm.val1_ = _e247.alphaParm.val1_;
+    c.alphaParm.variance = _e247.alphaParm.variance;
+    c.alphaParm.parmPad0_ = _e247.alphaParm.parmPad0_;
+    c.alphaParm.parmPad1_ = _e247.alphaParm.parmPad1_;
+    c.alphaParm.parmPad2_ = _e247.alphaParm.parmPad2_;
+    c.alphaParm.samples[0i] = _e247.alphaParm.samples[0];
+    c.alphaParm.samples[1i] = _e247.alphaParm.samples[1];
+    c.alphaParm.samples[2i] = _e247.alphaParm.samples[2];
+    c.alphaParm.samples[3i] = _e247.alphaParm.samples[3];
+    c.alphaParm.samples[4i] = _e247.alphaParm.samples[4];
+    c.alphaParm.samples[5i] = _e247.alphaParm.samples[5];
+    c.alphaParm.samples[6i] = _e247.alphaParm.samples[6];
+    c.alphaParm.samples[7i] = _e247.alphaParm.samples[7];
+    c.dragParm.calc = _e247.dragParm.calc;
+    c.dragParm.hasCurve = _e247.dragParm.hasCurve;
+    c.dragParm.val0_ = _e247.dragParm.val0_;
+    c.dragParm.val1_ = _e247.dragParm.val1_;
+    c.dragParm.variance = _e247.dragParm.variance;
+    c.dragParm.parmPad0_ = _e247.dragParm.parmPad0_;
+    c.dragParm.parmPad1_ = _e247.dragParm.parmPad1_;
+    c.dragParm.parmPad2_ = _e247.dragParm.parmPad2_;
+    c.dragParm.samples[0i] = _e247.dragParm.samples[0];
+    c.dragParm.samples[1i] = _e247.dragParm.samples[1];
+    c.dragParm.samples[2i] = _e247.dragParm.samples[2];
+    c.dragParm.samples[3i] = _e247.dragParm.samples[3];
+    c.dragParm.samples[4i] = _e247.dragParm.samples[4];
+    c.dragParm.samples[5i] = _e247.dragParm.samples[5];
+    c.dragParm.samples[6i] = _e247.dragParm.samples[6];
+    c.dragParm.samples[7i] = _e247.dragParm.samples[7];
+    c.gravityParm.calc = _e247.gravityParm.calc;
+    c.gravityParm.hasCurve = _e247.gravityParm.hasCurve;
+    c.gravityParm.val0_ = _e247.gravityParm.val0_;
+    c.gravityParm.val1_ = _e247.gravityParm.val1_;
+    c.gravityParm.variance = _e247.gravityParm.variance;
+    c.gravityParm.parmPad0_ = _e247.gravityParm.parmPad0_;
+    c.gravityParm.parmPad1_ = _e247.gravityParm.parmPad1_;
+    c.gravityParm.parmPad2_ = _e247.gravityParm.parmPad2_;
+    c.gravityParm.samples[0i] = _e247.gravityParm.samples[0];
+    c.gravityParm.samples[1i] = _e247.gravityParm.samples[1];
+    c.gravityParm.samples[2i] = _e247.gravityParm.samples[2];
+    c.gravityParm.samples[3i] = _e247.gravityParm.samples[3];
+    c.gravityParm.samples[4i] = _e247.gravityParm.samples[4];
+    c.gravityParm.samples[5i] = _e247.gravityParm.samples[5];
+    c.gravityParm.samples[6i] = _e247.gravityParm.samples[6];
+    c.gravityParm.samples[7i] = _e247.gravityParm.samples[7];
+    let _e523 = (*request).axis;
+    param_15 = _e523.xyz;
+    let _e525 = spawnAxis_u0028_vf3_u003b((&param_15));
+    axis_1 = _e525;
+    let _e527 = (*request).origin;
+    base_1 = _e527.xyz;
+    let _e530 = c.emitMode;
+    if (_e530 != 0u) {
+        let _e532 = (*ordinal_2);
+        let _e536 = (*request).count;
+        pathFraction = ((f32(_e532) + 0.5f) / f32(_e536));
+        let _e540 = (*request).origin;
+        let _e543 = (*request).end;
+        let _e545 = pathFraction;
+        base_1 = mix(_e540.xyz, _e543.xyz, vec3(_e545));
     }
     scatter = vec3<f32>(0f, 0f, 0f);
-    let _e539 = c.scatterShape;
-    if (_e539 == 1u) {
-        let _e542 = (*request).seed;
-        param_16 = _e542;
-        let _e543 = (*ordinal_2);
-        param_17 = _e543;
+    let _e549 = c.scatterShape;
+    if (_e549 == 1u) {
+        let _e552 = (*request).seed;
+        param_16 = _e552;
+        let _e553 = (*ordinal_2);
+        param_17 = _e553;
         param_18 = 1u;
-        let _e544 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_16), (&param_17), (&param_18));
-        let _e546 = (*request).seed;
-        param_19 = _e546;
-        let _e547 = (*ordinal_2);
-        param_20 = _e547;
+        let _e554 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_16), (&param_17), (&param_18));
+        let _e556 = (*request).seed;
+        param_19 = _e556;
+        let _e557 = (*ordinal_2);
+        param_20 = _e557;
         param_21 = 2u;
-        let _e548 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_19), (&param_20), (&param_21));
-        let _e550 = (*request).seed;
-        param_22 = _e550;
-        let _e551 = (*ordinal_2);
-        param_23 = _e551;
+        let _e558 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_19), (&param_20), (&param_21));
+        let _e560 = (*request).seed;
+        param_22 = _e560;
+        let _e561 = (*ordinal_2);
+        param_23 = _e561;
         param_24 = 3u;
-        let _e552 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_22), (&param_23), (&param_24));
-        let _e555 = c.scatterMagnitude;
-        scatter = (vec3<f32>(_e544, _e548, _e552) * _e555);
+        let _e562 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_22), (&param_23), (&param_24));
+        let _e565 = c.scatterMagnitude;
+        scatter = (vec3<f32>(_e554, _e558, _e562) * _e565);
     } else {
-        let _e558 = c.scatterShape;
-        if (_e558 == 2u) {
-            let _e561 = (*request).seed;
-            param_25 = _e561;
-            let _e562 = (*ordinal_2);
-            param_26 = _e562;
+        let _e568 = c.scatterShape;
+        if (_e568 == 2u) {
+            let _e571 = (*request).seed;
+            param_25 = _e571;
+            let _e572 = (*ordinal_2);
+            param_26 = _e572;
             param_27 = 4u;
-            let _e563 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_25), (&param_26), (&param_27));
-            z = _e563;
-            let _e565 = (*request).seed;
-            param_28 = _e565;
-            let _e566 = (*ordinal_2);
-            param_29 = _e566;
+            let _e573 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_25), (&param_26), (&param_27));
+            z = _e573;
+            let _e575 = (*request).seed;
+            param_28 = _e575;
+            let _e576 = (*ordinal_2);
+            param_29 = _e576;
             param_30 = 5u;
-            let _e567 = spawn01_u0028_u1_u003b_u1_u003b_u1_u003b((&param_28), (&param_29), (&param_30));
-            phi = (_e567 * 6.2831855f);
-            let _e569 = z;
-            let _e570 = z;
-            radial = sqrt(max(0f, (1f - (_e569 * _e570))));
-            let _e576 = (*request).seed;
-            param_31 = _e576;
-            let _e577 = (*ordinal_2);
-            param_32 = _e577;
+            let _e577 = spawn01_u0028_u1_u003b_u1_u003b_u1_u003b((&param_28), (&param_29), (&param_30));
+            phi = (_e577 * 6.2831855f);
+            let _e579 = z;
+            let _e580 = z;
+            radial = sqrt(max(0f, (1f - (_e579 * _e580))));
+            let _e586 = (*request).seed;
+            param_31 = _e586;
+            let _e587 = (*ordinal_2);
+            param_32 = _e587;
             param_33 = 6u;
-            let _e578 = spawn01_u0028_u1_u003b_u1_u003b_u1_u003b((&param_31), (&param_32), (&param_33));
-            let _e581 = c.scatterMagnitude;
-            radius = (pow(_e578, 0.33333334f) * _e581);
-            let _e583 = radial;
-            let _e584 = phi;
-            let _e587 = radial;
-            let _e588 = phi;
-            let _e591 = z;
-            let _e593 = radius;
-            scatter = (vec3<f32>((_e583 * cos(_e584)), (_e587 * sin(_e588)), _e591) * _e593);
+            let _e588 = spawn01_u0028_u1_u003b_u1_u003b_u1_u003b((&param_31), (&param_32), (&param_33));
+            let _e591 = c.scatterMagnitude;
+            radius = (pow(_e588, 0.33333334f) * _e591);
+            let _e593 = radial;
+            let _e594 = phi;
+            let _e597 = radial;
+            let _e598 = phi;
+            let _e601 = z;
+            let _e603 = radius;
+            scatter = (vec3<f32>((_e593 * cos(_e594)), (_e597 * sin(_e598)), _e601) * _e603);
         } else {
-            let _e596 = c.scatterShape;
-            if (_e596 == 3u) {
-                let _e599 = axis_1[2u];
-                if (abs(_e599) < 0.999f) {
-                    let _e602 = axis_1;
-                    local_6 = cross(_e602, vec3<f32>(0f, 0f, 1f));
+            let _e606 = c.scatterShape;
+            if (_e606 == 3u) {
+                let _e609 = axis_1[2u];
+                if (abs(_e609) < 0.999f) {
+                    let _e612 = axis_1;
+                    local_6 = cross(_e612, vec3<f32>(0f, 0f, 1f));
                 } else {
-                    let _e604 = axis_1;
-                    local_6 = cross(_e604, vec3<f32>(0f, 1f, 0f));
+                    let _e614 = axis_1;
+                    local_6 = cross(_e614, vec3<f32>(0f, 1f, 0f));
                 }
-                let _e606 = local_6;
-                tangent = normalize(_e606);
-                let _e608 = axis_1;
-                let _e609 = tangent;
-                bitangent = cross(_e608, _e609);
-                let _e612 = (*request).seed;
-                param_34 = _e612;
-                let _e613 = (*ordinal_2);
-                param_35 = _e613;
+                let _e616 = local_6;
+                tangent = normalize(_e616);
+                let _e618 = axis_1;
+                let _e619 = tangent;
+                bitangent = cross(_e618, _e619);
+                let _e622 = (*request).seed;
+                param_34 = _e622;
+                let _e623 = (*ordinal_2);
+                param_35 = _e623;
                 param_36 = 7u;
-                let _e614 = spawn01_u0028_u1_u003b_u1_u003b_u1_u003b((&param_34), (&param_35), (&param_36));
-                let _e617 = c.scatterMagnitude;
-                radius_1 = (sqrt(_e614) * _e617);
-                let _e620 = (*request).seed;
-                param_37 = _e620;
-                let _e621 = (*ordinal_2);
-                param_38 = _e621;
+                let _e624 = spawn01_u0028_u1_u003b_u1_u003b_u1_u003b((&param_34), (&param_35), (&param_36));
+                let _e627 = c.scatterMagnitude;
+                radius_1 = (sqrt(_e624) * _e627);
+                let _e630 = (*request).seed;
+                param_37 = _e630;
+                let _e631 = (*ordinal_2);
+                param_38 = _e631;
                 param_39 = 8u;
-                let _e622 = spawn01_u0028_u1_u003b_u1_u003b_u1_u003b((&param_37), (&param_38), (&param_39));
-                phi_1 = (_e622 * 6.2831855f);
-                let _e624 = tangent;
-                let _e625 = phi_1;
-                let _e628 = bitangent;
-                let _e629 = phi_1;
-                let _e633 = radius_1;
-                scatter = (((_e624 * cos(_e625)) + (_e628 * sin(_e629))) * _e633);
+                let _e632 = spawn01_u0028_u1_u003b_u1_u003b_u1_u003b((&param_37), (&param_38), (&param_39));
+                phi_1 = (_e632 * 6.2831855f);
+                let _e634 = tangent;
+                let _e635 = phi_1;
+                let _e638 = bitangent;
+                let _e639 = phi_1;
+                let _e643 = radius_1;
+                scatter = (((_e634 * cos(_e635)) + (_e638 * sin(_e639))) * _e643);
             }
         }
     }
-    let _e636 = c.axialSpeed;
-    let _e638 = (*request).seed;
-    param_40 = _e638;
-    let _e639 = (*ordinal_2);
-    param_41 = _e639;
+    let _e646 = c.axialSpeed;
+    let _e648 = (*request).seed;
+    param_40 = _e648;
+    let _e649 = (*ordinal_2);
+    param_41 = _e649;
     param_42 = 9u;
-    let _e640 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_40), (&param_41), (&param_42));
-    let _e642 = c.speedJitter;
-    speed = (_e636 + (_e640 * _e642));
-    let _e646 = c.velocityShape;
-    if (_e646 == 0u) {
-        let _e648 = axis_1;
-        let _e649 = speed;
-        velocity = (_e648 * _e649);
+    let _e650 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_40), (&param_41), (&param_42));
+    let _e652 = c.speedJitter;
+    speed = (_e646 + (_e650 * _e652));
+    let _e656 = c.velocityShape;
+    if (_e656 == 0u) {
+        let _e658 = axis_1;
+        let _e659 = speed;
+        velocity = (_e658 * _e659);
     } else {
-        let _e652 = c.velocityShape;
-        if (_e652 == 1u) {
-            let _e654 = axis_1;
-            let _e655 = speed;
-            let _e658 = (*request).seed;
-            param_43 = _e658;
-            let _e659 = (*ordinal_2);
-            param_44 = _e659;
+        let _e662 = c.velocityShape;
+        if (_e662 == 1u) {
+            let _e664 = axis_1;
+            let _e665 = speed;
+            let _e668 = (*request).seed;
+            param_43 = _e668;
+            let _e669 = (*ordinal_2);
+            param_44 = _e669;
             param_45 = 10u;
-            let _e660 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_43), (&param_44), (&param_45));
-            let _e662 = (*request).seed;
-            param_46 = _e662;
-            let _e663 = (*ordinal_2);
-            param_47 = _e663;
+            let _e670 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_43), (&param_44), (&param_45));
+            let _e672 = (*request).seed;
+            param_46 = _e672;
+            let _e673 = (*ordinal_2);
+            param_47 = _e673;
             param_48 = 11u;
-            let _e664 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_46), (&param_47), (&param_48));
-            let _e666 = (*request).seed;
-            param_49 = _e666;
-            let _e667 = (*ordinal_2);
-            param_50 = _e667;
+            let _e674 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_46), (&param_47), (&param_48));
+            let _e676 = (*request).seed;
+            param_49 = _e676;
+            let _e677 = (*ordinal_2);
+            param_50 = _e677;
             param_51 = 12u;
-            let _e668 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_49), (&param_50), (&param_51));
-            let _e671 = c.cubeJitter;
-            velocity = ((_e654 * _e655) + (vec3<f32>(_e660, _e664, _e668) * _e671));
+            let _e678 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_49), (&param_50), (&param_51));
+            let _e681 = c.cubeJitter;
+            velocity = ((_e664 * _e665) + (vec3<f32>(_e670, _e674, _e678) * _e681));
         } else {
-            let _e675 = c.velocityShape;
-            if (_e675 == 2u) {
-                let _e678 = axis_1[2u];
-                if (abs(_e678) < 0.999f) {
-                    let _e681 = axis_1;
-                    local_7 = cross(_e681, vec3<f32>(0f, 0f, 1f));
+            let _e685 = c.velocityShape;
+            if (_e685 == 2u) {
+                let _e688 = axis_1[2u];
+                if (abs(_e688) < 0.999f) {
+                    let _e691 = axis_1;
+                    local_7 = cross(_e691, vec3<f32>(0f, 0f, 1f));
                 } else {
-                    let _e683 = axis_1;
-                    local_7 = cross(_e683, vec3<f32>(0f, 1f, 0f));
+                    let _e693 = axis_1;
+                    local_7 = cross(_e693, vec3<f32>(0f, 1f, 0f));
                 }
-                let _e685 = local_7;
-                tangent_1 = normalize(_e685);
-                let _e687 = axis_1;
-                let _e688 = tangent_1;
-                bitangent_1 = cross(_e687, _e688);
-                let _e691 = c.coneHalfAngle;
-                cosHalf = cos(_e691);
-                let _e693 = cosHalf;
-                let _e695 = (*request).seed;
-                param_52 = _e695;
-                let _e696 = (*ordinal_2);
-                param_53 = _e696;
+                let _e695 = local_7;
+                tangent_1 = normalize(_e695);
+                let _e697 = axis_1;
+                let _e698 = tangent_1;
+                bitangent_1 = cross(_e697, _e698);
+                let _e701 = c.coneHalfAngle;
+                cosHalf = cos(_e701);
+                let _e703 = cosHalf;
+                let _e705 = (*request).seed;
+                param_52 = _e705;
+                let _e706 = (*ordinal_2);
+                param_53 = _e706;
                 param_54 = 13u;
-                let _e697 = spawn01_u0028_u1_u003b_u1_u003b_u1_u003b((&param_52), (&param_53), (&param_54));
-                z_1 = mix(_e693, 1f, _e697);
-                let _e699 = z_1;
-                let _e700 = z_1;
-                radial_1 = sqrt(max(0f, (1f - (_e699 * _e700))));
-                let _e706 = (*request).seed;
-                param_55 = _e706;
-                let _e707 = (*ordinal_2);
-                param_56 = _e707;
+                let _e707 = spawn01_u0028_u1_u003b_u1_u003b_u1_u003b((&param_52), (&param_53), (&param_54));
+                z_1 = mix(_e703, 1f, _e707);
+                let _e709 = z_1;
+                let _e710 = z_1;
+                radial_1 = sqrt(max(0f, (1f - (_e709 * _e710))));
+                let _e716 = (*request).seed;
+                param_55 = _e716;
+                let _e717 = (*ordinal_2);
+                param_56 = _e717;
                 param_57 = 14u;
-                let _e708 = spawn01_u0028_u1_u003b_u1_u003b_u1_u003b((&param_55), (&param_56), (&param_57));
-                phi_2 = (_e708 * 6.2831855f);
-                let _e710 = axis_1;
-                let _e711 = z_1;
-                let _e713 = tangent_1;
-                let _e714 = radial_1;
-                let _e715 = phi_2;
-                let _e720 = bitangent_1;
-                let _e721 = radial_1;
-                let _e722 = phi_2;
-                let _e727 = speed;
-                velocity = ((((_e710 * _e711) + (_e713 * (_e714 * cos(_e715)))) + (_e720 * (_e721 * sin(_e722)))) * _e727);
+                let _e718 = spawn01_u0028_u1_u003b_u1_u003b_u1_u003b((&param_55), (&param_56), (&param_57));
+                phi_2 = (_e718 * 6.2831855f);
+                let _e720 = axis_1;
+                let _e721 = z_1;
+                let _e723 = tangent_1;
+                let _e724 = radial_1;
+                let _e725 = phi_2;
+                let _e730 = bitangent_1;
+                let _e731 = radial_1;
+                let _e732 = phi_2;
+                let _e737 = speed;
+                velocity = ((((_e720 * _e721) + (_e723 * (_e724 * cos(_e725)))) + (_e730 * (_e731 * sin(_e732)))) * _e737);
             } else {
-                let _e730 = (*request).seed;
-                param_58 = _e730;
-                let _e731 = (*ordinal_2);
-                param_59 = _e731;
-                param_60 = 15u;
-                let _e732 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_58), (&param_59), (&param_60));
-                let _e734 = (*request).seed;
-                param_61 = _e734;
-                let _e735 = (*ordinal_2);
-                param_62 = _e735;
-                param_63 = 16u;
-                let _e736 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_61), (&param_62), (&param_63));
-                let _e738 = (*request).seed;
-                param_64 = _e738;
-                let _e739 = (*ordinal_2);
-                param_65 = _e739;
-                param_66 = 17u;
-                let _e740 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_64), (&param_65), (&param_66));
-                let _e743 = c.cubeJitter;
-                velocity = (vec3<f32>(_e732, _e736, _e740) * _e743);
+                let _e740 = c.velocityShape;
+                if (_e740 == 3u) {
+                    let _e743 = (*request).seed;
+                    param_58 = _e743;
+                    let _e744 = (*ordinal_2);
+                    param_59 = _e744;
+                    param_60 = 15u;
+                    let _e745 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_58), (&param_59), (&param_60));
+                    let _e747 = (*request).seed;
+                    param_61 = _e747;
+                    let _e748 = (*ordinal_2);
+                    param_62 = _e748;
+                    param_63 = 16u;
+                    let _e749 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_61), (&param_62), (&param_63));
+                    let _e751 = (*request).seed;
+                    param_64 = _e751;
+                    let _e752 = (*ordinal_2);
+                    param_65 = _e752;
+                    param_66 = 17u;
+                    let _e753 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_64), (&param_65), (&param_66));
+                    let _e756 = c.cubeJitter;
+                    velocity = (vec3<f32>(_e745, _e749, _e753) * _e756);
+                } else {
+                    let _e758 = scatter;
+                    radialDirection = _e758;
+                    let _e759 = radialDirection;
+                    let _e760 = radialDirection;
+                    if (dot(_e759, _e760) <= 0.00000001f) {
+                        let _e764 = (*request).seed;
+                        param_67 = _e764;
+                        let _e765 = (*ordinal_2);
+                        param_68 = _e765;
+                        param_69 = 15u;
+                        let _e766 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_67), (&param_68), (&param_69));
+                        z_2 = _e766;
+                        let _e768 = (*request).seed;
+                        param_70 = _e768;
+                        let _e769 = (*ordinal_2);
+                        param_71 = _e769;
+                        param_72 = 16u;
+                        let _e770 = spawn01_u0028_u1_u003b_u1_u003b_u1_u003b((&param_70), (&param_71), (&param_72));
+                        phi_3 = (_e770 * 6.2831855f);
+                        let _e772 = z_2;
+                        let _e773 = z_2;
+                        radial_2 = sqrt(max(0f, (1f - (_e772 * _e773))));
+                        let _e778 = radial_2;
+                        let _e779 = phi_3;
+                        let _e782 = radial_2;
+                        let _e783 = phi_3;
+                        let _e786 = z_2;
+                        radialDirection = vec3<f32>((_e778 * cos(_e779)), (_e782 * sin(_e783)), _e786);
+                    } else {
+                        let _e788 = radialDirection;
+                        radialDirection = normalize(_e788);
+                    }
+                    let _e790 = radialDirection;
+                    let _e791 = speed;
+                    velocity = (_e790 * _e791);
+                }
             }
         }
     }
-    let _e746 = c.velocityBias;
-    let _e749 = (*request).seed;
-    param_67 = _e749;
-    let _e750 = (*ordinal_2);
-    param_68 = _e750;
-    param_69 = 18u;
-    let _e751 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_67), (&param_68), (&param_69));
-    let _e753 = (*request).seed;
-    param_70 = _e753;
-    let _e754 = (*ordinal_2);
-    param_71 = _e754;
-    param_72 = 19u;
-    let _e755 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_70), (&param_71), (&param_72));
-    let _e757 = (*request).seed;
-    param_73 = _e757;
-    let _e758 = (*ordinal_2);
-    param_74 = _e758;
-    param_75 = 20u;
-    let _e759 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_73), (&param_74), (&param_75));
-    let _e762 = c.velocityBiasJitter;
-    let _e766 = velocity;
-    velocity = (_e766 + (_e746.xyz + (vec3<f32>(_e751, _e755, _e759) * _e762.xyz)));
-    let _e769 = c.lifetimeMean;
-    let _e771 = (*request).seed;
-    param_76 = _e771;
-    let _e772 = (*ordinal_2);
-    param_77 = _e772;
-    param_78 = 21u;
-    let _e773 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_76), (&param_77), (&param_78));
-    let _e775 = c.lifetimeJitter;
-    lifetime_1 = max(0.001f, (_e769 + (_e773 * _e775)));
-    let _e779 = deadParticle_u0028_();
-    p_8 = _e779;
-    let _e780 = base_1;
-    let _e781 = scatter;
-    p_8.pos = (_e780 + _e781);
-    let _e784 = velocity;
-    p_8.vel = _e784;
-    let _e786 = lifetime_1;
-    p_8.lifetimeInv = (1f / _e786);
-    let _e790 = (*request).classHandle;
-    p_8.classHandle = _e790;
-    let _e793 = c.paletteCount;
-    if (_e793 > 1i) {
-        let _e796 = (*request).seed;
-        let _e797 = (*ordinal_2);
-        param_79 = ((_e796 ^ _e797) ^ 2654435769u);
-        let _e800 = spawnHash_u0028_u1_u003b((&param_79));
-        let _e802 = c.paletteCount;
-        local_8 = (_e800 % bitcast<u32>(_e802));
+    let _e794 = c.velocityBias;
+    let _e797 = (*request).seed;
+    param_73 = _e797;
+    let _e798 = (*ordinal_2);
+    param_74 = _e798;
+    param_75 = 18u;
+    let _e799 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_73), (&param_74), (&param_75));
+    let _e801 = (*request).seed;
+    param_76 = _e801;
+    let _e802 = (*ordinal_2);
+    param_77 = _e802;
+    param_78 = 19u;
+    let _e803 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_76), (&param_77), (&param_78));
+    let _e805 = (*request).seed;
+    param_79 = _e805;
+    let _e806 = (*ordinal_2);
+    param_80 = _e806;
+    param_81 = 20u;
+    let _e807 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_79), (&param_80), (&param_81));
+    let _e810 = c.velocityBiasJitter;
+    let _e814 = velocity;
+    velocity = (_e814 + (_e794.xyz + (vec3<f32>(_e799, _e803, _e807) * _e810.xyz)));
+    let _e817 = c.lifetimeMean;
+    let _e819 = (*request).seed;
+    param_82 = _e819;
+    let _e820 = (*ordinal_2);
+    param_83 = _e820;
+    param_84 = 21u;
+    let _e821 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_82), (&param_83), (&param_84));
+    let _e823 = c.lifetimeJitter;
+    lifetime_1 = max(0.001f, (_e817 + (_e821 * _e823)));
+    let _e827 = deadParticle_u0028_();
+    p_8 = _e827;
+    let _e828 = base_1;
+    let _e829 = scatter;
+    p_8.pos = (_e828 + _e829);
+    let _e832 = velocity;
+    p_8.vel = _e832;
+    let _e834 = lifetime_1;
+    p_8.lifetimeInv = (1f / _e834);
+    let _e838 = (*request).classHandle;
+    p_8.classHandle = _e838;
+    let _e841 = c.paletteCount;
+    if (_e841 > 1i) {
+        let _e844 = (*request).seed;
+        let _e845 = (*ordinal_2);
+        param_85 = ((_e844 ^ _e845) ^ 2654435769u);
+        let _e848 = spawnHash_u0028_u1_u003b((&param_85));
+        let _e850 = c.paletteCount;
+        local_8 = (_e848 % bitcast<u32>(_e850));
     } else {
         local_8 = 0u;
     }
-    let _e805 = local_8;
-    p_8.paletteIndex = _e805;
-    let _e808 = (*request).seed;
-    param_80 = _e808;
-    let _e809 = (*ordinal_2);
-    param_81 = _e809;
-    param_82 = 22u;
-    let _e810 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_80), (&param_81), (&param_82));
-    let _e812 = c.sizeJitter;
-    p_8.sizeJitterPick = (_e810 * _e812);
-    let _e816 = (*request).profileHandle;
-    p_8.pad1_ = _e816;
-    let _e819 = (*request).stageIndex;
-    p_8.pad2_ = _e819;
-    let _e822 = (*request).seed;
-    let _e823 = (*ordinal_2);
-    p_8.pad3_ = (_e822 ^ _e823);
-    let _e827 = (*request).stageFlags;
-    p_8.pad4_ = _e827;
-    let _e830 = (*request).colorTint;
-    p_8.pad5_ = pack4x8unorm(clamp(_e830, vec4<f32>(0f, 0f, 0f, 0f), vec4<f32>(1f, 1f, 1f, 1f)));
-    let _e834 = p_8;
-    return _e834;
+    let _e853 = local_8;
+    p_8.paletteIndex = _e853;
+    let _e856 = (*request).seed;
+    param_86 = _e856;
+    let _e857 = (*ordinal_2);
+    param_87 = _e857;
+    param_88 = 22u;
+    let _e858 = spawnSigned_u0028_u1_u003b_u1_u003b_u1_u003b((&param_86), (&param_87), (&param_88));
+    let _e860 = c.sizeJitter;
+    p_8.sizeJitterPick = (_e858 * _e860);
+    let _e864 = (*request).profileHandle;
+    p_8.pad1_ = _e864;
+    let _e867 = (*request).stageIndex;
+    p_8.pad2_ = _e867;
+    let _e870 = (*request).seed;
+    let _e871 = (*ordinal_2);
+    p_8.pad3_ = (_e870 ^ _e871);
+    let _e875 = (*request).stageFlags;
+    p_8.pad4_ = _e875;
+    let _e878 = (*request).colorTint;
+    p_8.pad5_ = pack4x8unorm(clamp(_e878, vec4<f32>(0f, 0f, 0f, 0f), vec4<f32>(1f, 1f, 1f, 1f)));
+    let _e882 = p_8;
+    return _e882;
 }
 
 fn main_1() {
@@ -1485,44 +1534,44 @@ fn main_1() {
     var ordinal_3: u32;
     var request_1: ParticleSpawnRequest;
     var child: Particle;
-    var param_83: ParticleSpawnRequest;
-    var param_84: u32;
+    var param_89: ParticleSpawnRequest;
+    var param_90: u32;
     var requestIndex: u32;
     var ordinal_4: u32;
     var request_2: ParticleSpawnRequest;
-    var param_85: ParticleSpawnRequest;
-    var param_86: u32;
+    var param_91: ParticleSpawnRequest;
+    var param_92: u32;
     var idx: u32;
     var p_9: Particle;
     var c_1: ParticleClassGPU;
     var gScale: f32;
-    var param_87: ParticleParm;
+    var param_93: ParticleParm;
     var local_10: f32;
-    var param_88: ParticleParm;
-    var param_89: f32;
-    var param_90: f32;
+    var param_94: ParticleParm;
+    var param_95: f32;
+    var param_96: f32;
     var dragV: f32;
-    var param_91: ParticleParm;
+    var param_97: ParticleParm;
     var local_11: f32;
-    var param_92: ParticleParm;
-    var param_93: f32;
-    var param_94: f32;
+    var param_98: ParticleParm;
+    var param_99: f32;
+    var param_100: f32;
     var previousAge_2: f32;
     var died_2: bool;
     var collided_2: bool;
-    var param_95: Particle;
-    var param_96: Particle;
-    var param_97: Particle;
-    var param_98: f32;
-    var param_99: f32;
-    var param_100: bool;
-    var param_101: bool;
-    var phi_1902_: bool;
-    var phi_1909_: bool;
-    var phi_1921_: bool;
-    var phi_2258_: bool;
-    var phi_2267_: bool;
-    var phi_2676_: bool;
+    var param_101: Particle;
+    var param_102: Particle;
+    var param_103: Particle;
+    var param_104: f32;
+    var param_105: f32;
+    var param_106: bool;
+    var param_107: bool;
+    var phi_1956_: bool;
+    var phi_1963_: bool;
+    var phi_1975_: bool;
+    var phi_2312_: bool;
+    var phi_2321_: bool;
+    var phi_2730_: bool;
 
     if override_type_6_ {
         let _e154 = gl_GlobalInvocationID_1[0u];
@@ -1555,26 +1604,26 @@ fn main_1() {
         event_1.seed = _e176.seed;
         let _e192 = event_1.profileHandle;
         let _e193 = (_e192 == 0u);
-        phi_1902_ = _e193;
+        phi_1956_ = _e193;
         if !(_e193) {
             let _e196 = event_1.profileHandle;
-            phi_1902_ = (_e196 > 64u);
+            phi_1956_ = (_e196 > 64u);
         }
-        let _e199 = phi_1902_;
-        phi_1909_ = _e199;
+        let _e199 = phi_1956_;
+        phi_1963_ = _e199;
         if !(_e199) {
             let _e202 = event_1.stageIndex;
-            phi_1909_ = (_e202 >= 8u);
+            phi_1963_ = (_e202 >= 8u);
         }
-        let _e205 = phi_1909_;
-        phi_1921_ = _e205;
+        let _e205 = phi_1963_;
+        phi_1975_ = _e205;
         if !(_e205) {
             let _e208 = event_1.stageIndex;
             let _e210 = event_1.profileHandle;
             let _e215 = unnamed_2.atmosphereProfiles[(_e210 - 1u)].stageCount;
-            phi_1921_ = (_e208 >= _e215);
+            phi_1975_ = (_e208 >= _e215);
         }
-        let _e218 = phi_1921_;
+        let _e218 = phi_1975_;
         if _e218 {
             return;
         }
@@ -1658,10 +1707,10 @@ fn main_1() {
             request_1.stageFlags = _e331;
             request_1.reserved = 0u;
             let _e334 = request_1;
-            param_83 = _e334;
+            param_89 = _e334;
             let _e335 = ordinal_3;
-            param_84 = _e335;
-            let _e336 = buildSpawnParticle_u0028_struct_u002d_ParticleSpawnRequest_u002d_vf4_u002d_vf4_u002d_vf4_u002d_vf4_u002d_u1_u002d_u1_u002d_u1_u002d_u1_u002d_u1_u002d_u1_u002d_u1_u002d_u11_u003b_u1_u003b((&param_83), (&param_84));
+            param_90 = _e335;
+            let _e336 = buildSpawnParticle_u0028_struct_u002d_ParticleSpawnRequest_u002d_vf4_u002d_vf4_u002d_vf4_u002d_vf4_u002d_u1_u002d_u1_u002d_u1_u002d_u1_u002d_u1_u002d_u1_u002d_u1_u002d_u11_u003b_u1_u003b((&param_89), (&param_90));
             child = _e336;
             let _e338 = stage_3.flags;
             if ((_e338 & 2u) != 0u) {
@@ -1715,10 +1764,10 @@ fn main_1() {
             let _e423 = ordinal_4;
             let _e426 = unnamed.poolSize;
             let _e428 = request_2;
-            param_85 = _e428;
+            param_91 = _e428;
             let _e429 = ordinal_4;
-            param_86 = _e429;
-            let _e430 = buildSpawnParticle_u0028_struct_u002d_ParticleSpawnRequest_u002d_vf4_u002d_vf4_u002d_vf4_u002d_vf4_u002d_u1_u002d_u1_u002d_u1_u002d_u1_u002d_u1_u002d_u1_u002d_u1_u002d_u11_u003b_u1_u003b((&param_85), (&param_86));
+            param_92 = _e429;
+            let _e430 = buildSpawnParticle_u0028_struct_u002d_ParticleSpawnRequest_u002d_vf4_u002d_vf4_u002d_vf4_u002d_vf4_u002d_u1_u002d_u1_u002d_u1_u002d_u1_u002d_u1_u002d_u1_u002d_u1_u002d_u11_u003b_u1_u003b((&param_91), (&param_92));
             unnamed_6.readParticles[((_e422 + _e423) % _e426)].pos = _e430.pos;
             unnamed_6.readParticles[((_e422 + _e423) % _e426)].age = _e430.age;
             unnamed_6.readParticles[((_e422 + _e423) % _e426)].vel = _e430.vel;
@@ -1757,19 +1806,19 @@ fn main_1() {
     p_9.pad5_ = _e466.pad5_;
     let _e492 = p_9.classHandle;
     let _e493 = (_e492 == 0u);
-    phi_2258_ = _e493;
+    phi_2312_ = _e493;
     if !(_e493) {
         let _e496 = p_9.age;
-        phi_2258_ = (_e496 >= 1f);
+        phi_2312_ = (_e496 >= 1f);
     }
-    let _e499 = phi_2258_;
-    phi_2267_ = _e499;
+    let _e499 = phi_2312_;
+    phi_2321_ = _e499;
     if !(_e499) {
         let _e502 = p_9.classHandle;
         let _e504 = unnamed.numClasses;
-        phi_2267_ = (_e502 > _e504);
+        phi_2321_ = (_e502 > _e504);
     }
-    let _e507 = phi_2267_;
+    let _e507 = phi_2321_;
     if _e507 {
         let _e508 = idx;
         let _e509 = deadParticle_u0028_();
@@ -1917,37 +1966,37 @@ fn main_1() {
     c_1.gravityParm.samples[6i] = _e541.gravityParm.samples[6];
     c_1.gravityParm.samples[7i] = _e541.gravityParm.samples[7];
     let _e817 = c_1.gravityParm;
-    param_87 = _e817;
-    let _e818 = parmIsUnset_u0028_struct_u002d_ParticleParm_u002d_i1_u002d_i1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u005b_8_u005d_1_u003b((&param_87));
+    param_93 = _e817;
+    let _e818 = parmIsUnset_u0028_struct_u002d_ParticleParm_u002d_i1_u002d_i1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u005b_8_u005d_1_u003b((&param_93));
     if _e818 {
         let _e820 = c_1.gravityScale;
         local_10 = _e820;
     } else {
         let _e822 = c_1.gravityParm;
-        param_88 = _e822;
+        param_94 = _e822;
         let _e824 = p_9.age;
-        param_89 = _e824;
+        param_95 = _e824;
         let _e826 = p_9.sizeJitterPick;
-        param_90 = _e826;
-        let _e827 = parmEval_u0028_struct_u002d_ParticleParm_u002d_i1_u002d_i1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u005b_8_u005d_1_u003b_f1_u003b_f1_u003b((&param_88), (&param_89), (&param_90));
+        param_96 = _e826;
+        let _e827 = parmEval_u0028_struct_u002d_ParticleParm_u002d_i1_u002d_i1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u005b_8_u005d_1_u003b_f1_u003b_f1_u003b((&param_94), (&param_95), (&param_96));
         local_10 = _e827;
     }
     let _e828 = local_10;
     gScale = _e828;
     let _e830 = c_1.dragParm;
-    param_91 = _e830;
-    let _e831 = parmIsUnset_u0028_struct_u002d_ParticleParm_u002d_i1_u002d_i1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u005b_8_u005d_1_u003b((&param_91));
+    param_97 = _e830;
+    let _e831 = parmIsUnset_u0028_struct_u002d_ParticleParm_u002d_i1_u002d_i1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u005b_8_u005d_1_u003b((&param_97));
     if _e831 {
         let _e833 = c_1.drag;
         local_11 = _e833;
     } else {
         let _e835 = c_1.dragParm;
-        param_92 = _e835;
+        param_98 = _e835;
         let _e837 = p_9.age;
-        param_93 = _e837;
+        param_99 = _e837;
         let _e839 = p_9.sizeJitterPick;
-        param_94 = _e839;
-        let _e840 = parmEval_u0028_struct_u002d_ParticleParm_u002d_i1_u002d_i1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u005b_8_u005d_1_u003b_f1_u003b_f1_u003b((&param_92), (&param_93), (&param_94));
+        param_100 = _e839;
+        let _e840 = parmEval_u0028_struct_u002d_ParticleParm_u002d_i1_u002d_i1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u002d_f1_u005b_8_u005d_1_u003b_f1_u003b_f1_u003b((&param_98), (&param_99), (&param_100));
         local_11 = _e840;
     }
     let _e841 = local_11;
@@ -1973,29 +2022,29 @@ fn main_1() {
     let _e884 = p_9.age;
     died_2 = (_e884 >= 1f);
     let _e886 = p_9;
-    param_95 = _e886;
-    let _e887 = particleHasCollisionChild_u0028_struct_u002d_Particle_u002d_vf3_u002d_f1_u002d_vf3_u002d_f1_u002d_u1_u002d_u1_u002d_f1_u002d_u1_u002d_u1_u002d_u1_u002d_u1_u002d_u11_u003b((&param_95));
-    phi_2676_ = _e887;
+    param_101 = _e886;
+    let _e887 = particleHasCollisionChild_u0028_struct_u002d_Particle_u002d_vf3_u002d_f1_u002d_vf3_u002d_f1_u002d_u1_u002d_u1_u002d_f1_u002d_u1_u002d_u1_u002d_u1_u002d_u1_u002d_u11_u003b((&param_101));
+    phi_2730_ = _e887;
     if _e887 {
         let _e888 = p_9;
-        param_96 = _e888;
-        let _e889 = particleCollided_u0028_struct_u002d_Particle_u002d_vf3_u002d_f1_u002d_vf3_u002d_f1_u002d_u1_u002d_u1_u002d_f1_u002d_u1_u002d_u1_u002d_u1_u002d_u1_u002d_u11_u003b((&param_96));
-        phi_2676_ = _e889;
+        param_102 = _e888;
+        let _e889 = particleCollided_u0028_struct_u002d_Particle_u002d_vf3_u002d_f1_u002d_vf3_u002d_f1_u002d_u1_u002d_u1_u002d_f1_u002d_u1_u002d_u1_u002d_u1_u002d_u1_u002d_u11_u003b((&param_102));
+        phi_2730_ = _e889;
     }
-    let _e891 = phi_2676_;
+    let _e891 = phi_2730_;
     collided_2 = _e891;
     let _e892 = died_2;
     let _e893 = collided_2;
     let _e895 = p_9;
-    param_97 = _e895;
+    param_103 = _e895;
     let _e896 = previousAge_2;
-    param_98 = _e896;
+    param_104 = _e896;
     let _e898 = p_9.age;
-    param_99 = _e898;
+    param_105 = _e898;
     let _e899 = collided_2;
-    param_100 = _e899;
-    param_101 = (_e892 || _e893);
-    appendChildEvents_u0028_struct_u002d_Particle_u002d_vf3_u002d_f1_u002d_vf3_u002d_f1_u002d_u1_u002d_u1_u002d_f1_u002d_u1_u002d_u1_u002d_u1_u002d_u1_u002d_u11_u003b_f1_u003b_f1_u003b_b1_u003b_b1_u003b((&param_97), (&param_98), (&param_99), (&param_100), (&param_101));
+    param_106 = _e899;
+    param_107 = (_e892 || _e893);
+    appendChildEvents_u0028_struct_u002d_Particle_u002d_vf3_u002d_f1_u002d_vf3_u002d_f1_u002d_u1_u002d_u1_u002d_f1_u002d_u1_u002d_u1_u002d_u1_u002d_u1_u002d_u11_u003b_f1_u003b_f1_u003b_b1_u003b_b1_u003b((&param_103), (&param_104), (&param_105), (&param_106), (&param_107));
     let _e900 = died_2;
     let _e901 = collided_2;
     if (_e900 || _e901) {
