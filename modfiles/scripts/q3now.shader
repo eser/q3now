@@ -78,13 +78,16 @@ rocketExplosionRing
 // Alternatives inspired by JJ Abrams / cinematic lens flare references.
 // All use sort nearest + additive alpha blend for proper compositing.
 
-// Warm soft glow — gaussian falloff, core of map/missile flares
+// Neutral optical kernel for WiredFX flare primitives. The material name is
+// retained for the legacy map-flare path, while the texture is a clean radial
+// falloff rather than the old BFG-authored ring artwork.
 lfWarmGlow
 {
 	sort nearest
 	nopicmip
+	nomipmaps
 	{
-		map sprites/bfglfglare.tga
+		clampmap gfx/ui/glow_radial.png
 		blendfunc gl_src_alpha gl_one
 		alphagen vertex
 		rgbgen vertex

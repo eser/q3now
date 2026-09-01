@@ -30,8 +30,12 @@ LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 typedef struct {
 	vec3_t		origin;
 	float		radius;
+	float		range;
 	qboolean	visible;
 	float		intensity;
+	float		fxIntensity;
+	vec3_t		fxColor;
+	qboolean	cinematicEnabled;
 	// optional direction-independent halo, set by a light entity's
 	// "halo" key (or back-compat "corona" key, content) or implied for the cg_halo demo.
 	qboolean	hasHalo;
@@ -414,11 +418,16 @@ void CG_InitLensFlares( void ) {
 	float		light;
 	qboolean	inEntity;
 	qboolean	isLight;
+	qboolean	explicitFxSource;
 	char		key[MAX_TOKEN_CHARS];
 	char		value[MAX_TOKEN_CHARS];
 	qboolean	hasHalo;
 	vec3_t		haloRgb;
 	float		haloScale;
+	float		flareRange;
+	float		flareIntensity;
+	vec3_t		flareColor;
+	qboolean	cinematicEnabled;
 
 	memset( &lf, 0, sizeof( lf ) );
 
@@ -438,6 +447,7 @@ void CG_InitLensFlares( void ) {
 	// The entity string is available via trap_GetEntityToken
 	inEntity = qfalse;
 	isLight = qfalse;
+	explicitFxSource = qfalse;
 	VectorClear( origin );
 	light = 0;
 
@@ -449,8 +459,13 @@ void CG_InitLensFlares( void ) {
 		if ( key[0] == '{' ) {
 			inEntity = qtrue;
 			isLight = qfalse;
+			explicitFxSource = qfalse;
 			VectorClear( origin );
 			light = 300;	// default light radius
+			flareRange = FLARE_DISTANCE;
+			flareIntensity = 1.0f;
+			VectorSet( flareColor, 1.0f, 1.0f, 1.0f );
+			cinematicEnabled = qtrue;
 			hasHalo = qfalse;
 			VectorClear( haloRgb );
 			haloScale = 0.0f;
@@ -459,18 +474,20 @@ void CG_InitLensFlares( void ) {
 
 		if ( key[0] == '}' ) {
 			if ( inEntity && isLight && lf.numEntities < MAX_LENS_FLARE_ENTITIES
-				 && light >= FLARE_MIN_LIGHT_RADIUS ) {
+				 && ( explicitFxSource || light >= FLARE_MIN_LIGHT_RADIUS ) ) {
 				// check height above ground — skip floor-level fill lights
 				trace_t groundTrace;
 				vec3_t down;
-				VectorCopy( origin, down );
-				down[2] -= 4096;
-				CG_Trace( &groundTrace, origin, NULL, NULL, down, -1, CONTENTS_SOLID );
-				if ( groundTrace.fraction < 1.0f ) {
-					float heightAbove = origin[2] - groundTrace.endpos[2];
-					if ( heightAbove < FLARE_MIN_HEIGHT_ABOVE ) {
-						inEntity = qfalse;
-						continue;	// too close to floor — skip this light
+				if ( !explicitFxSource ) {
+					VectorCopy( origin, down );
+					down[2] -= 4096;
+					CG_Trace( &groundTrace, origin, NULL, NULL, down, -1, CONTENTS_SOLID );
+					if ( groundTrace.fraction < 1.0f ) {
+						float heightAbove = origin[2] - groundTrace.endpos[2];
+						if ( heightAbove < FLARE_MIN_HEIGHT_ABOVE ) {
+							inEntity = qfalse;
+							continue;	// too close to floor — skip this light
+						}
 					}
 				}
 
@@ -478,8 +495,12 @@ void CG_InitLensFlares( void ) {
 					lensFlareEntity_t *e = &lf.entities[lf.numEntities];
 					VectorCopy( origin, e->origin );
 					e->radius = light;
+					e->range = Com_Clamp( 64.0f, 8192.0f, flareRange );
 					e->visible = qfalse;
 					e->intensity = 0;
+					e->fxIntensity = Com_Clamp( 0.0f, 4.0f, flareIntensity );
+					VectorCopy( flareColor, e->fxColor );
+					e->cinematicEnabled = cinematicEnabled;
 					e->hasHalo = hasHalo;
 					VectorCopy( haloRgb, e->haloRgb );
 					e->haloScale = haloScale;
@@ -500,13 +521,23 @@ void CG_InitLensFlares( void ) {
 		}
 
 		if ( !Q_stricmp( key, "classname" ) ) {
-			if ( !Q_stricmp( value, "light" ) ) {
+			if ( !Q_stricmp( value, "light" ) || !Q_stricmp( value, "fx_lensflare" ) ) {
 				isLight = qtrue;
+				explicitFxSource = !Q_stricmp( value, "fx_lensflare" );
 			}
 		} else if ( !Q_stricmp( key, "origin" ) ) {
 			sscanf( value, "%f %f %f", &origin[0], &origin[1], &origin[2] );
 		} else if ( !Q_stricmp( key, "light" ) ) {
 			light = atof( value );
+		} else if ( !Q_stricmp( key, "lensflare_range" ) || !Q_stricmp( key, "flare_range" ) ) {
+			flareRange = atof( value );
+		} else if ( !Q_stricmp( key, "lensflare_intensity" ) || !Q_stricmp( key, "flare_intensity" ) ) {
+			flareIntensity = atof( value );
+		} else if ( !Q_stricmp( key, "_color" ) ) {
+			if ( sscanf( value, "%f %f %f", &flareColor[0], &flareColor[1], &flareColor[2] ) != 3 )
+				VectorSet( flareColor, 1.0f, 1.0f, 1.0f );
+		} else if ( !Q_stricmp( key, "lensflare" ) ) {
+			cinematicEnabled = atoi( value ) != 0 || !Q_stricmp( value, "cinematic" );
 		} else if ( !Q_stricmp( key, "halo" ) || !Q_stricmp( key, "corona" ) ) {
 			// "halo" is canonical; "corona" stays as a back-compat content-key alias
 			// (existing maps). "r g b scale" (0..1 colour); blank/short → white, scale 1.
@@ -519,7 +550,7 @@ void CG_InitLensFlares( void ) {
 	}
 
 	if ( lf.numEntities > 0 ) {
-		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "Lens flares: %i light entities found\n", lf.numEntities );
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "Lens flares: %i map sources found\n", lf.numEntities );
 	}
 }
 
@@ -544,7 +575,7 @@ static void CG_UpdateMapFlareVisibility( int idx ) {
 	VectorSubtract( e->origin, cg.refdef.vieworg, dir );
 	dist = VectorLength( dir );
 
-	if ( dist > FLARE_DISTANCE || dist < 1 ) {
+	if ( dist > e->range || dist < 1 ) {
 		e->visible = qfalse;
 		vis = 0.0f;
 	} else if ( trap_R_GetLensVisibility( idx, &vis ) ) {
@@ -590,7 +621,9 @@ static void CG_AddMapFlares( void ) {
 	int			i, checked;
 	float		dist;
 	vec3_t		dir;
+#if !CINEMATIC_LENS_FLARE_FX
 	refEntity_t	ent;
+#endif
 	float		dot, scale;
 	vec3_t		screenDir;
 
@@ -609,7 +642,7 @@ static void CG_AddMapFlares( void ) {
 
 		VectorSubtract( e->origin, cg.refdef.vieworg, dir );
 		dist = VectorLength( dir );
-		if ( dist > FLARE_DISTANCE || dist < 1 ) {
+		if ( dist > e->range || dist < 1 ) {
 			continue;
 		}
 		memset( &ld, 0, sizeof( ld ) );
@@ -660,7 +693,7 @@ static void CG_AddMapFlares( void ) {
 
 		VectorSubtract( e->origin, cg.refdef.vieworg, dir );
 		dist = VectorLength( dir );
-		if ( dist > FLARE_DISTANCE || dist < 1 ) {
+		if ( dist > e->range || dist < 1 ) {
 			continue;
 		}
 
@@ -672,11 +705,22 @@ static void CG_AddMapFlares( void ) {
 		}
 
 		// scale by distance and angle
-		scale = e->intensity * dot * ( 1.0f - dist / FLARE_DISTANCE );
+		scale = e->intensity * dot * ( 1.0f - dist / e->range );
 		if ( scale < 0.01f ) {
 			continue;
 		}
 
+#if CINEMATIC_LENS_FLARE_FX
+		if ( e->cinematicEnabled ) {
+			wiredFxEvent_t event;
+			CG_WiredFx_InitEvent( &event, WIRED_FX_PROFILE_CINEMATIC_LENS_FLARE,
+				e->origin, dir );
+			Vector4Set( event.color, e->fxColor[0], e->fxColor[1], e->fxColor[2], 1.0f );
+			event.intensity = Com_Clamp( 0.0f, 4.0f, scale * e->fxIntensity );
+			event.sizeScale = 0.82f + 0.36f * scale;
+			trap_WiredFx_EmitEvent( &event );
+		}
+#else
 		memset( &ent, 0, sizeof( ent ) );
 		ent.reType = RT_SPRITE;
 		VectorCopy( e->origin, ent.origin );
@@ -691,6 +735,7 @@ static void CG_AddMapFlares( void ) {
 					CG_EmitFlareLayer( &ent, &lf.mapLayers[li], scale, NULL );
 			}
 		}
+#endif
 
 	}
 
@@ -713,7 +758,7 @@ static void CG_AddMapFlares( void ) {
 
 			VectorSubtract( e->origin, cg.refdef.vieworg, dir );
 			dist = VectorLength( dir );
-			if ( dist > FLARE_DISTANCE || dist < 1 )
+			if ( dist > e->range || dist < 1 )
 				continue;
 
 			haloId = LENS_BAND_HALO + ( i % LENS_BAND_ENTSPAN );
