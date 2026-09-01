@@ -6,8 +6,9 @@
 /*
 beam.frag — primitive beam fragment shader
 
-Output = sampled texel × per-vertex color (with fade alpha already
-premultiplied host-side). Same shared-sampler-array texturing scheme
+Output = sampled texel × per-vertex color × texture/descriptor coverage.
+Coverage is premultiplied in this shader because the beam pipeline uses
+ONE/ONE additive blending. Same shared-sampler-array texturing scheme
 ribbon uses; binding index differs (beam: 1, ribbon: 2) because beam's
 descriptor set has no points SSBO. Slot 0 is reserved for tr.whiteImage,
 so unregistered or out-of-range handles render "untextured" (white
@@ -103,11 +104,11 @@ void main() {
 	vec4 texel = decodeColorTexel(
 		texture( sampler2D( shaderImages[slot], shaderImageSampler ), fragUV ), domain );
 
-	// per-vertex colour decoded to linear. Alpha stays
-	// raw. fragColor is beam.vert's linear interpolation of the
-	// (display-domain) hdr.startColor..endColor endpoints — decoded
-	// here. Texel decoded per its colour domain. Texel × colour modulate
-	// + additive HDR blend stay linear-correct.
-	outColor = vec4( texel.rgb * sRGBToLinear( fragColor.rgb ),
-	                 texel.a * fragColor.a );
+	// The beam pipeline is additive ONE/ONE, so source alpha is not applied by
+	// fixed-function blending. Premultiply here: this makes texture alpha carry
+	// optical falloff and restores descriptor alpha/fade semantics. Existing
+	// opaque beam assets (texel.a == fragColor.a == 1) remain byte-equivalent.
+	float coverage = texel.a * fragColor.a;
+	outColor = vec4( texel.rgb * sRGBToLinear( fragColor.rgb ) * coverage,
+	                 coverage );
 }

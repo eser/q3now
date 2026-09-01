@@ -152,7 +152,14 @@ static uint32_t CL_WiredFx_ResolveResource( wiredFxResourceType_t type,
 		s_fx.unknownParticleResources++; return 0u;
 	case WIRED_FX_RESOURCE_MODEL: return re.RegisterModel ? (uint32_t)re.RegisterModel( name ) : 0u;
 	case WIRED_FX_RESOURCE_SOUND: return (uint32_t)S_RegisterSound( name, qfalse );
-	case WIRED_FX_RESOURCE_FLARE: return re.RegisterShader ? (uint32_t)re.RegisterShader( name ) : 0u;
+	case WIRED_FX_RESOURCE_FLARE:
+		/* A flare may be presented either as an RT_SPRITE or, when the
+		 * author requests an anamorphic aspect, through the shared beam
+		 * primitive. Primitive registration returns the same public shader
+		 * handle while also publishing Vulkan's compact stage catalog. */
+		if ( re.RegisterPrimitiveShader )
+			return (uint32_t)re.RegisterPrimitiveShader( name );
+		return re.RegisterShader ? (uint32_t)re.RegisterShader( name ) : 0u;
 	case WIRED_FX_RESOURCE_RIBBON: return re.RegisterPrimitiveShader ? (uint32_t)re.RegisterPrimitiveShader( name ) : 0u;
 	case WIRED_FX_RESOURCE_CURVE:
 	case WIRED_FX_RESOURCE_RENDER_PARM:
@@ -217,7 +224,10 @@ static void CL_WiredFx_Color( float out[4], const wiredFxAction_t *action,
 	int i; for ( i = 0; i < 4; ++i ) out[i] = action->color[i] * event->color[i];
 }
 
-typedef struct { float now; } clWiredFxDispatchContext_t;
+typedef struct {
+	float now;
+	const refdef_t *refdef;
+} clWiredFxDispatchContext_t;
 
 static void CL_WiredFx_CopyEventAxis( vec3_t out[3], const wiredFxEvent_t *event ) {
 	int i;
@@ -578,7 +588,8 @@ static wiredFxDispatchResult_t CL_WiredFx_Dispatch( const wiredFxProfile_t *prof
 	}
 	case WIRED_FX_ACTION_MODEL: {
 		refEntity_t entity; int i;
-		if ( !re.AddRefEntityToScene ) return WIRED_FX_DISPATCH_UNSUPPORTED;
+		if ( action->type == WIRED_FX_ACTION_GODRAY && !re.AddRefEntityToScene )
+			return WIRED_FX_DISPATCH_UNSUPPORTED;
 		memset( &entity, 0, sizeof( entity ) ); entity.reType = RT_MODEL;
 		entity.hModel = (qhandle_t)action->payload.model.model; entity.customShader = (qhandle_t)action->payload.model.material;
 		VectorCopy( origin, entity.origin ); for ( i = 0; i < 3; ++i ) VectorCopy( actionAxis[i], entity.axis[i] );
@@ -669,12 +680,94 @@ static wiredFxDispatchResult_t CL_WiredFx_Dispatch( const wiredFxProfile_t *prof
 		return WIRED_FX_DISPATCH_EXECUTED;
 	}
 	case WIRED_FX_ACTION_FLARE: case WIRED_FX_ACTION_GODRAY: {
-		spriteDesc_t desc;
-		if ( !re.AddSpriteToScene ) return WIRED_FX_DISPATCH_UNSUPPORTED;
-		memset( &desc, 0, sizeof( desc ) ); VectorCopy( origin, desc.origin ); Vector4Copy( color, desc.rgba );
-		desc.shader = action->type == WIRED_FX_ACTION_FLARE ? (qhandle_t)action->payload.flare.flare : (qhandle_t)action->payload.godray.material;
-		desc.radius = event->sizeScale * ( action->type == WIRED_FX_ACTION_GODRAY ? (float)action->payload.godray.size : 1.0f );
-		desc.flags = PRIM_FLAG_ADDITIVE; re.AddSpriteToScene( &desc ); return WIRED_FX_DISPATCH_EXECUTED;
+		refEntity_t entity;
+		vec3_t spriteOrigin;
+		float intensity = Com_Clamp( 0.0f, 4.0f, event->intensity );
+		float layerIntensity = intensity;
+		float radius;
+		float depth = 0.0f;
+		float aspect = action->type == WIRED_FX_ACTION_FLARE && action->payload.flare.aspect > 0.0f
+			? action->payload.flare.aspect : 1.0f;
+		qhandle_t shader;
+		if ( !re.AddRefEntityToScene ) return WIRED_FX_DISPATCH_UNSUPPORTED;
+		if ( action->type == WIRED_FX_ACTION_FLARE ) {
+			const float intensityPower = action->payload.flare.intensityPower > 0.0f
+				? action->payload.flare.intensityPower : 1.0f;
+			layerIntensity = powf( intensity, intensityPower );
+		}
+		VectorCopy( origin, spriteOrigin );
+		if ( action->type == WIRED_FX_ACTION_FLARE && action->payload.flare.autosprite &&
+				 context->refdef ) {
+			vec3_t toSource, opticalCentre, sourceDelta;
+			VectorSubtract( origin, context->refdef->vieworg, toSource );
+			depth = DotProduct( toSource, context->refdef->viewaxis[0] );
+			if ( depth <= 0.0f ) return WIRED_FX_DISPATCH_EXECUTED;
+			VectorMA( context->refdef->vieworg, depth,
+				context->refdef->viewaxis[0], opticalCentre );
+			VectorSubtract( origin, opticalCentre, sourceDelta );
+			VectorMA( opticalCentre, action->payload.flare.position[0],
+				sourceDelta, spriteOrigin );
+		}
+		if ( action->type == WIRED_FX_ACTION_GODRAY ) {
+			int channel;
+			for ( channel = 0; channel < 4; ++channel )
+				color[channel] = color[channel] * action->payload.godray.color[channel]
+					* action->payload.godray.colorScale * intensity;
+			shader = (qhandle_t)action->payload.godray.material;
+			radius = event->sizeScale * (float)action->payload.godray.size;
+		} else {
+			int channel;
+			for ( channel = 0; channel < 4; ++channel )
+				color[channel] *= layerIntensity;
+			shader = (qhandle_t)action->payload.flare.flare;
+			radius = event->sizeScale * ( action->payload.flare.size > 0.0f
+				? action->payload.flare.size : 1.0f );
+			if ( action->payload.flare.screenSpace && context->refdef && depth > 0.0f ) {
+				/* size is a radius in 720p reference pixels. Project that fixed
+				 * angular extent to world units at this source depth. */
+				radius *= depth * tanf( DEG2RAD( context->refdef->fov_y * 0.5f ) ) / 360.0f;
+			}
+		}
+		if ( action->type == WIRED_FX_ACTION_FLARE && context->refdef &&
+			 action->payload.flare.autosprite ) {
+			VectorMA( spriteOrigin, radius * action->payload.flare.position[1],
+				context->refdef->viewaxis[1], spriteOrigin );
+			VectorMA( spriteOrigin, radius * action->payload.flare.position[2],
+				context->refdef->viewaxis[2], spriteOrigin );
+		}
+		/* One material-aware quad path owns every flare layer.  A beam with
+		 * aspect 1 is the circular radial sprite; wider aspects are anamorphic
+		 * streaks.  Keeping both on the same primitive preserves texture stages,
+		 * additive coverage and no-depth semantics across RAL backends. */
+		if ( action->type == WIRED_FX_ACTION_FLARE && context->refdef ) {
+			beamDesc_t beam;
+			vec3_t screenAxis;
+			const float rotation = DEG2RAD( action->payload.flare.screenRotation );
+			const float halfWidth = radius * aspect;
+			if ( !re.AddBeamToScene ) return WIRED_FX_DISPATCH_UNSUPPORTED;
+			memset( &beam, 0, sizeof( beam ) );
+			VectorScale( context->refdef->viewaxis[1], cosf( rotation ), screenAxis );
+			VectorMA( screenAxis, sinf( rotation ), context->refdef->viewaxis[2], screenAxis );
+			VectorMA( spriteOrigin, halfWidth, screenAxis, beam.start );
+			VectorMA( spriteOrigin, -halfWidth, screenAxis, beam.end );
+			beam.startWidth = beam.endWidth = radius;
+			Vector4Copy( color, beam.startColor );
+			Vector4Copy( color, beam.endColor );
+			beam.shader = shader;
+			beam.axialCopies = 1;
+			beam.startEntityNum = beam.endEntityNum = -1;
+			beam.flags = PRIM_FLAG_ADDITIVE | PRIM_FLAG_NO_DEPTH_TEST;
+			re.AddBeamToScene( &beam );
+			return WIRED_FX_DISPATCH_EXECUTED;
+		}
+		memset( &entity, 0, sizeof( entity ) );
+		entity.reType = RT_SPRITE;
+		entity.customShader = shader;
+		entity.radius = radius;
+		VectorCopy( spriteOrigin, entity.origin );
+		for ( int channel = 0; channel < 4; ++channel )
+			entity.shader.rgba[channel] = (byte)( Com_Clamp( 0, 1, color[channel] ) * 255.0f );
+		re.AddRefEntityToScene( &entity, qfalse ); return WIRED_FX_DISPATCH_EXECUTED;
 	}
 	case WIRED_FX_ACTION_RIBBON:
 	case WIRED_FX_ACTION_BEAM: {
@@ -806,6 +899,7 @@ void CL_WiredFx_ServiceScene( refdef_t *refdef ) {
 	if ( !refdef ) return;
 	now = (float)refdef->time * 0.001f;
 	context.now = now;
+	context.refdef = refdef;
 	if ( now >= s_fx.windEnd ) {
 		s_fx.presentation.flags &= ~WIRED_FX_FRAME_HAS_WIND;
 		VectorClear( s_fx.presentation.windDirection );

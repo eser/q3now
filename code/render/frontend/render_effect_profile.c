@@ -152,7 +152,19 @@ static wiredFxValidationError_t WiredFx_ValidatePayload( const wiredFxAction_t *
 	case WIRED_FX_ACTION_FLARE:
 		if ( !WiredFx_ResourcePresent( action, action->payload.flare.flare ) )
 			return WIRED_FX_INVALID_ACTION_RESOURCE;
-		if ( !WiredFx_FiniteArray( action->payload.flare.position, 3u ) )
+		if ( !WiredFx_FiniteArray( action->payload.flare.position, 3u ) ||
+			 action->payload.flare.screenSpace > 1u ||
+			 !WiredFx_Finite( action->payload.flare.size ) ||
+			 action->payload.flare.size < 0.0f ||
+			 !WiredFx_Finite( action->payload.flare.aspect ) ||
+			 action->payload.flare.aspect < 0.0f || action->payload.flare.aspect > 256.0f ||
+			 !WiredFx_Finite( action->payload.flare.screenRotation ) ||
+			 action->payload.flare.screenRotation < -360.0f ||
+			 action->payload.flare.screenRotation > 360.0f ||
+			 !WiredFx_Finite( action->payload.flare.intensityPower ) ||
+			 ( action->payload.flare.intensityPower != 0.0f &&
+			   ( action->payload.flare.intensityPower < 0.125f ||
+			     action->payload.flare.intensityPower > 8.0f ) ) )
 			return WIRED_FX_INVALID_ACTION_RANGE;
 		break;
 	case WIRED_FX_ACTION_RADIAL_BLUR:

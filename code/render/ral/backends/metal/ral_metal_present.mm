@@ -1675,11 +1675,19 @@ static qboolean BuildEntityVertices( const ralMetalPresent_t *present,
 				baseExtrude[component] /= extrudeLength;
 			age = fmaxf( (float)view.timeMs * 0.001f - beamSlot->spawnTime, 0.0f );
 			fade = EffectBeamFade( beamSlot, (float)view.timeMs * 0.001f );
+			const qboolean additive = ( beam->flags & PRIM_FLAG_ADDITIVE ) != 0u
+				? qtrue : qfalse;
+			const float startAlpha = beam->startColor[3] * fade;
+			const float endAlpha = beam->endColor[3] * fade;
 			for ( uint32_t channel = 0u; channel < 4u; ++channel ) {
-				const float startValue = beam->startColor[channel]
-					* ( channel == 3u ? fade : 1.0f );
-				const float endValue = beam->endColor[channel]
-					* ( channel == 3u ? fade : 1.0f );
+				/* The additive entity pipeline blends ONE/ONE. Texture alpha is
+				 * already folded into the material stage, but vertex alpha is not;
+				 * premultiply additive beam RGB here so authored opacity and lifetime
+				 * fade have the same energy response as the native beam shaders. */
+				const float startValue = channel == 3u ? startAlpha
+					: beam->startColor[channel] * ( additive ? startAlpha : 1.0f );
+				const float endValue = channel == 3u ? endAlpha
+					: beam->endColor[channel] * ( additive ? endAlpha : 1.0f );
 				startColor.rgba[channel] = (byte)fminf( 255.0f,
 					fmaxf( 0.0f, startValue * 255.0f ) );
 				endColor.rgba[channel] = (byte)fminf( 255.0f,
@@ -1721,7 +1729,7 @@ static qboolean BuildEntityVertices( const ralMetalPresent_t *present,
 			batch->useVertexColor = qtrue; batch->visible = qtrue;
 			EntityBatchMaterial( frontend, beam->shader, batch );
 			batch->cullMode = RENDER_CULL_NONE; batch->depthWrite = qfalse;
-			if ( beam->flags & PRIM_FLAG_ADDITIVE )
+			if ( additive )
 				batch->alphaMode = RENDER_ALPHA_ADDITIVE;
 		}
 	}

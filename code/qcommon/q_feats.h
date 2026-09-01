@@ -22,6 +22,9 @@
 #define FEAT_IPV6                         1   // IPv6 support
 #define FEAT_JSON_STATS                   0   // 7B  post-match JSON export
 #define FEAT_LENS_FLARES                  1   // 9A  map + missile lens flares (JUHOX)
+#ifndef CINEMATIC_LENS_FLARE_FX
+#define CINEMATIC_LENS_FLARE_FX           1   // WiredFX-authored occlusion-aware map flare/ghost composition
+#endif
 #define FEAT_MATCH_SUMMARY                1   // 8B  intermission stats overlay
 #define FEAT_MONSTER_AI                   1   // non-client monster behavior tick (decision layer over nav)
 #define FEAT_SPAWN_PROTECTION             1   // 2B  attacker gets no points for spawnkills

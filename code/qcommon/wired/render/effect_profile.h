@@ -51,6 +51,7 @@ profile can cross the native/WASM seam once at registration time.
 #define WIRED_FX_PROFILE_ROCKET_LAYERED_DETONATION 26u
 #define WIRED_FX_PROFILE_ROCKET_LAYERED_UNDERWATER 27u
 #define WIRED_FX_PROFILE_GRENADE_LAYERED_EXPLOSION 28u
+#define WIRED_FX_PROFILE_CINEMATIC_LENS_FLARE 29u
 
 typedef enum {
 	WIRED_FX_ACTION_LIGHT = 0,
@@ -208,8 +209,24 @@ typedef struct {
 
 typedef struct {
 	uint32_t flare;
+	/* With autosprite enabled, x is the optical-axis position: 1 = source,
+	 * 0 = optical centre at source depth, negative values mirror across it.
+	 * y/z offset the layer in camera-right/camera-up units of its own size;
+	 * this permits authored prism separation without backend-specific shaders. */
 	float position[3];
 	uint32_t autosprite;
+	/* Interpret size as radius pixels at a 720-line reference height, then
+	 * project it to the source depth. This keeps optical artifacts camera-bound. */
+	uint32_t screenSpace;
+	float size;
+	/* Width / height ratio. Non-square flares use a camera-facing quad so
+	 * anamorphic streaks do not depend on backend-specific tcMod support. */
+	float aspect;
+	/* Clockwise screen-plane rotation in degrees for non-square layers. */
+	float screenRotation;
+	/* Per-layer response to the semantic source intensity. Zero/one is linear;
+	 * values below one retain veiling glare, values above one gate hot cores. */
+	float intensityPower;
 } wiredFxFlareAction_t;
 
 typedef struct {

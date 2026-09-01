@@ -91,7 +91,7 @@ int main( void ) {
 		"weapon-water-splash.lua", "grenade-bounce.lua", "rocket-flight.lua",
 		"shotgun-smoke.lua", "shotgun-smoke-wide.lua",
 		"rocket-layered-explosion.lua", "rocket-layered-detonation.lua",
-		"rocket-layered-underwater.lua"
+		"rocket-layered-underwater.lua", "cinematic-lens-flare.lua"
 	};
 	uint32_t profileIndex;
 	char profilePath[512];
@@ -390,14 +390,14 @@ int main( void ) {
 	assert( luaL_loadfile( L, WIRED_SOURCE_DIR "/modfiles/scripts/effects/manifest.lua" ) == 0 );
 	assert( lua_pcall( L, 0, 1, 0 ) == 0 );
 	assert( lua_istable( L, -1 ) );
-	assert( lua_objlen( L, -1 ) == 28u );
-	lua_rawgeti( L, -1, 28 );
+	assert( lua_objlen( L, -1 ) == 29u );
+	lua_rawgeti( L, -1, 29 );
 	assert( lua_istable( L, -1 ) );
 	lua_getfield( L, -1, "handle" );
-	assert( (uint32_t)lua_tointeger( L, -1 ) == WIRED_FX_PROFILE_GRENADE_LAYERED_EXPLOSION );
+	assert( (uint32_t)lua_tointeger( L, -1 ) == WIRED_FX_PROFILE_CINEMATIC_LENS_FLARE );
 	lua_pop( L, 1 );
 	lua_getfield( L, -1, "path" );
-	assert( !strcmp( lua_tostring( L, -1 ), "scripts/effects/rocket-layered-explosion.lua" ) );
+	assert( !strcmp( lua_tostring( L, -1 ), "scripts/effects/cinematic-lens-flare.lua" ) );
 	lua_pop( L, 2 );
 	lua_pop( L, 1 );
 #endif

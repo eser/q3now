@@ -33,4 +33,5 @@ return {
     -- Intentional recipe alias: grenade keeps its own stable semantic handle
     -- and feature gate while sharing the accepted explosion composition.
     { handle = 28, path = "scripts/effects/rocket-layered-explosion.lua" },
+    { handle = 29, path = "scripts/effects/cinematic-lens-flare.lua" },
 }

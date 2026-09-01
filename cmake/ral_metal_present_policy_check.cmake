@@ -51,6 +51,8 @@ foreach(needle IN ITEMS
 	"RenderSubmission_EntityCommands" "RenderSubmission_ModelSnapshot"
 	"BuildEntityVertices" "loweredEntityIndexCount" "modelEntityCount"
 	"UpdatePersistentEffectBeams" "effectBeamSlots" "loweredEffectBeamCount"
+	"const float startAlpha = beam->startColor[3] * fade"
+	"beam->startColor[channel] * ( additive ? startAlpha : 1.0f )"
 	"surfaceDecal" "batch->surfaceDecal ? 1u"
 	"surface decals second, and translucent effects last"
 	"if ( snapshot.beamCount ) return qfalse;"

@@ -348,7 +348,12 @@ static qboolean WiredFxAuthoring_Payload( lua_State *L, int table, wiredFxAction
 	case WIRED_FX_ACTION_FLARE:
 		return FX_RES( "flare", WIRED_FX_RESOURCE_FLARE, &a->payload.flare.flare ) &&
 			FX_VEC( "position", a->payload.flare.position, 3u, NULL ) &&
-			FX_U32( "autosprite", 0, &a->payload.flare.autosprite );
+			FX_U32( "autosprite", 0, &a->payload.flare.autosprite ) &&
+			FX_U32( "screenSpace", 0, &a->payload.flare.screenSpace ) &&
+			FX_NUM( "size", 1, &a->payload.flare.size ) &&
+			FX_NUM( "aspect", 1, &a->payload.flare.aspect ) &&
+			FX_NUM( "screenRotation", 0, &a->payload.flare.screenRotation ) &&
+			FX_NUM( "intensityPower", 1, &a->payload.flare.intensityPower );
 	case WIRED_FX_ACTION_RADIAL_BLUR: return FX_NUM( "maxScale", 0, &a->payload.radialBlur.maxScale );
 	case WIRED_FX_ACTION_RIBBON:
 	case WIRED_FX_ACTION_BEAM:
