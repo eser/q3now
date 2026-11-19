@@ -294,7 +294,7 @@ SENTRY_HANDLER_BIN := $(BUILD_DIR)/src/libs/sentry-native/sentry-crash$(EXEEXT)
 		create-launcher create-packs package-content-tool build-fonts \
         _wails-build \
         copy-libs copy-build copy-packs copy-all \
-        bundle-codesign bundle-dmg bundle-tar bundle-zip bundle-docker \
+        bundle-codesign bundle-dmg bundle-tar bundle-zip bundle-docker test-ral-sky-fixture-goldens \
         run-launcher run-game run-headless release \
         check smoke test-wiredui-menu-functional test-wiredui-external-actions \
         test-wiredui-external-actions-self test-wiredui-bot-actions \
@@ -320,7 +320,7 @@ SENTRY_HANDLER_BIN := $(BUILD_DIR)/src/libs/sentry-native/sentry-crash$(EXEEXT)
 		test-ral-readback-runtime test-ral-auto-exposure-runtime \
 		test-ral-brightness-scalar-sweep test-ral-metal-runtime \
 		test-ral-opengl-runtime test-ral-opengl-vulkan-visual-parity \
-		test-ral-metal-vulkan-visual-parity test-renderer-switch-ui test-loading-ui test-player-settings-ui test-wiredui-scoreboard-authority test-wiredui-layout-authority test-wiredui-source-catalog test-wiredui-perspective-hud test-wiredui-inspector-hot-reload test-wiredui-inspector-hot-reload-runtime test-wiredui-lua-harness test-wiredui-screenshot-matrix test-wiredui-layout-performance test-wiredui-2d-batches test-ral-metal-vulkan-performance \
+		test-ral-metal-vulkan-visual-parity test-renderer-switch-ui test-loading-ui test-player-settings-ui test-wiredui-scoreboard-authority test-wiredui-layout-authority test-wiredui-source-catalog test-wiredui-perspective-hud test-wiredui-inspector-hot-reload test-wiredui-inspector-hot-reload-runtime test-wiredui-lua-harness test-wiredui-screenshot-matrix test-wiredui-layout-performance test-wiredui-2d-batches test-fps-performance test-ral-metal-vulkan-performance \
 		test-vm test-quic-game test-fs-dedup test-sw3z-lifecycle bench diff-api lint help
 
 # Default target: a CONSISTENT DEPLOYABLE WORLD, not just compiled objects.
@@ -352,7 +352,7 @@ build-webgpu-browser: configure
 
 test-webgpu-browser-module: build-webgpu-browser
 	ctest --test-dir $(BUILD_DIR) --output-on-failure \
-		-R 'ral_webgpu_browser_(host|dispatch|module).*_contract|ral_webgpu_browser_wasm_module_contract|wired_web_(client|platform).*_contract'
+		-R 'ral_webgpu_browser_(host|dispatch|module).*_contract|ral_webgpu_lens_contract|ral_webgpu_browser_wasm_module_contract|wired_web_(client|platform).*_contract'
 
 # Production browser client: keep pax01 read-only/external, build pax21 and the
 # Emscripten game modules from this checkout, then publish one integrity-bound
@@ -1275,11 +1275,18 @@ test-sw3z-lifecycle:
 # Audits every physical BSP in pax01. Imported id .shader files are accepted
 # verbatim through the static alias catalog; modfiles shaders must be canonical.
 test-shader-resource-audit: $(SW3Z_BIN) $(PAK_OUT)
+	node tests/shader-resource-audit-implicit-test.mjs
 	WIRED_BASE_CONTENT="$${WIRED_BASE_CONTENT:-$(HOME)/wired/$(APP_NAME)/base/pax01.sw3z}" \
 	WIRED_SW3Z="$(CURDIR)/$(SW3Z_BIN)" \
 	bash tests/shader-resource-audit-check.sh
 
-.PHONY: test-shader-resource-audit
+# Shipping/complete-corpus gate.  Unlike the ordinary developer inventory it
+# rejects every map-reachable imported stage and implicit BSP image that the
+# selected pax01+pax21 corpus cannot resolve.
+test-shader-resource-audit-strict: export WIRED_STRICT_MAP_MATERIALS=1
+test-shader-resource-audit-strict: test-shader-resource-audit
+
+.PHONY: test-shader-resource-audit test-shader-resource-audit-strict
 
 # ── smoke ────────────────────────────────────────────────────────────────────
 # Headless gameplay smoke test. Requires Q3DIR with base game pack.
@@ -1371,6 +1378,16 @@ endif
 
 .PHONY: test-advanced-fog-runtime
 
+.PHONY: test-ral-backend-conformance
+# Existing 1280x720 native fixture; includes cube/array face isolation readback.
+test-ral-backend-conformance: configure
+ifeq ($(UNAME_S),Darwin)
+	cmake --build $(BUILD_DIR) --target ral_backend_conformance_test
+	ctest --test-dir $(BUILD_DIR) --output-on-failure --no-tests=error -R '^ral_backend_conformance_contract$$'
+else
+	@echo "SKIP: paired Vulkan/native Metal conformance requires macOS"
+endif
+
 # Native Metal product proof: use the assembled/codesigned application, select
 # the Metal renderer explicitly, and boot both parent-acceptance arenas in
 # separate 1280x720 processes. The gate requires a native-free world/asset/UI
@@ -1426,6 +1443,22 @@ ifeq ($(UNAME_S),Darwin)
 	  "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)"
 else
 	@echo "SKIP: native Metal/Vulkan visual parity requires macOS"
+	@exit 77
+endif
+
+# TASK-239 AC#10: arena7 sky fixtures (clear noon / sunset / night / storm /
+# authored legacy / hybrid) on native Metal + Vulkan, cross-backend parity and
+# golden gate.  Goldens are (re)written only with SKY_FIXTURE_UPDATE=1 after
+# human visual approval.
+test-ral-sky-fixture-goldens: bundle-codesign png2raw
+ifeq ($(UNAME_S),Darwin)
+	@Q3DIR="$(Q3DIR)" \
+	bash tests/ral-sky-fixture-goldens.sh \
+	  "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)"
+	@python3 tests/ral-sky-fixture-goldens-analyze.py --png2raw "$(abspath $(PNG2RAW_BIN))" \
+	  $(if $(SKY_FIXTURE_UPDATE),--update-goldens,)
+else
+	@echo "SKIP: arena7 sky fixture goldens require macOS native backends"
 	@exit 77
 endif
 
@@ -1542,6 +1575,29 @@ ifeq ($(UNAME_S),Darwin)
 	  "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)"
 else
 	@echo "SKIP: current TASK-89 product measurement uses the macOS Vulkan lane"
+	@exit 77
+endif
+
+# Canonical TASK-86 real-gameplay budget. Keep this behind a Make target so
+# renderer workstreams cannot accidentally bypass the product build/package
+# and official 1280x720 harness contract when collecting performance evidence.
+test-fps-performance: bundle-codesign
+ifeq ($(UNAME_S),Darwin)
+	@if [ "$(DEV)" = "1" ]; then \
+		echo "FAIL: test-fps-performance is Release-only; omit DEV=1"; exit 2; \
+	fi
+	@grep -q '^CMAKE_BUILD_TYPE:STRING=Release$$' "$(BUILD_DIR)/CMakeCache.txt" || { \
+		echo "FAIL: canonical build/ tree is not configured Release"; exit 2; \
+	}
+	@Q3DIR="$(Q3DIR)" \
+	WIRED_CONTENT_ROOT="$${WIRED_CONTENT_ROOT:-$(HOME)/wired/$(APP_NAME)}" \
+	bash tests/fps-perf-gate.sh \
+		--engine "$(Q3DIR)/Contents/MacOS/$(INSTALLED_ENGINE)" \
+		--headless "$(Q3DIR)/Contents/MacOS/$(INSTALLED_HEADLESS)" \
+		--map "$${FPS_PERF_MAP:-arena1}" --bots "$${FPS_PERF_BOTS:-6}" \
+		--tag "$${FPS_PERF_TAG:-head}"
+else
+	@echo "SKIP: canonical TASK-86 product performance gate currently requires macOS"
 	@exit 77
 endif
 

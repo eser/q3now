@@ -932,6 +932,31 @@ ENDFUNCTION()
 # TASK-96 explicit App/Level lifetime contract.  The test compiles the real
 # allocators with logger/error stubs so it remains a small host-only ownership
 # check instead of pulling an engine executable into CTest.
+ADD_EXECUTABLE(frame_interval_stats_test tests/frame_interval_stats_test.c)
+TARGET_INCLUDE_DIRECTORIES(frame_interval_stats_test PRIVATE code/qcommon)
+TARGET_COMPILE_OPTIONS(frame_interval_stats_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME frame_interval_stats_contract COMMAND frame_interval_stats_test)
+WIRED_CONFIGURE_HOST_TEST(frame_interval_stats_test frame_interval_stats_contract)
+SET_TESTS_PROPERTIES(frame_interval_stats_contract PROPERTIES
+	LABELS "host-only;owner.engine;performance;failure.contract" TIMEOUT 10)
+ADD_TEST(NAME frame_interval_evidence_contract
+	COMMAND python3 -B ${CMAKE_SOURCE_DIR}/tests/frame_interval_evidence_test.py)
+SET_TESTS_PROPERTIES(frame_interval_evidence_contract PROPERTIES
+	LABELS "host-only;owner.engine;performance;failure.contract" TIMEOUT 10)
+
+FIND_PACKAGE(Threads REQUIRED)
+ADD_EXECUTABLE(snd_doppler_test tests/snd_doppler_test.c)
+TARGET_INCLUDE_DIRECTORIES(snd_doppler_test PRIVATE code/client)
+TARGET_LINK_LIBRARIES(snd_doppler_test PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+IF(NOT WIN32)
+	TARGET_LINK_LIBRARIES(snd_doppler_test PRIVATE m)
+ENDIF()
+ADD_TEST(NAME snd_doppler_contract COMMAND snd_doppler_test)
+SET_TESTS_PROPERTIES(snd_doppler_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.audio;failure.contract"
+	TIMEOUT 10)
+WIRED_CONFIGURE_HOST_TEST(snd_doppler_test snd_doppler_contract)
+
 ADD_EXECUTABLE(app_memory_test
 	tests/app_memory_test.c
 	code/qcommon/app_memory.c
@@ -1411,6 +1436,35 @@ SET_TESTS_PROPERTIES(ral_display_visibility_contract PROPERTIES
 	LABELS "host-only;subsystem;owner.ral;owner.presentation;owner.lighting;failure.contract;backend.webgpu;feature.always"
 	TIMEOUT 30)
 WIRED_CONFIGURE_HOST_TEST(ral_display_visibility_test ral_display_visibility_contract)
+ADD_EXECUTABLE(ral_exposure_history_test tests/ral_exposure_history_test.c)
+ADD_EXECUTABLE(ral_beam_geometry_test tests/ral_beam_geometry_test.c)
+TARGET_COMPILE_OPTIONS(ral_beam_geometry_test PRIVATE -Wall -Wextra -Werror)
+IF(UNIX)
+	TARGET_LINK_LIBRARIES(ral_beam_geometry_test PRIVATE m)
+ENDIF()
+ADD_TEST(NAME ral_beam_geometry_contract COMMAND ral_beam_geometry_test)
+SET_TESTS_PROPERTIES(ral_beam_geometry_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;failure.contract" TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_beam_geometry_test ral_beam_geometry_contract)
+TARGET_COMPILE_OPTIONS(ral_exposure_history_test PRIVATE -Wall -Wextra -Werror)
+IF(UNIX)
+	TARGET_LINK_LIBRARIES(ral_exposure_history_test PRIVATE m)
+ENDIF()
+ADD_TEST(NAME ral_exposure_history_contract COMMAND ral_exposure_history_test)
+SET_TESTS_PROPERTIES(ral_exposure_history_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;failure.contract" TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_exposure_history_test ral_exposure_history_contract)
+ADD_TEST(NAME vk_exposure_clock_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/vk_exposure_clock_policy_check.cmake)
+SET_TESTS_PROPERTIES(vk_exposure_clock_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.lighting;backend.vulkan;failure.contract"
+	TIMEOUT 30)
+ADD_TEST(NAME ral_auto_exposure_analyzer_contract
+	COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/tests/ral_auto_exposure_analyzer_test.py)
+SET_TESTS_PROPERTIES(ral_auto_exposure_analyzer_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.lighting;failure.contract"
+	TIMEOUT 30)
 ADD_TEST(NAME ral_color_output_source_policy_contract
 	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
 		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_color_output_policy_check.cmake)
@@ -1542,6 +1596,16 @@ ADD_TEST(NAME ral_texture_export_source_policy_contract
 SET_TESTS_PROPERTIES(ral_texture_export_source_policy_contract PROPERTIES
 	LABELS "host-only;infrastructure;owner.ral;owner.texture;failure.contract;backend.webgpu"
 	TIMEOUT 30)
+SET(RENDERER_MATERIAL_PROJECT_COOK_SRCS
+	code/tools/material_cook/material_cook_fs.c
+	code/render/frontend/render_material_cache_vfs.c
+	code/render/frontend/render_material_project_cook.c
+	code/render/frontend/render_material_product.c
+	code/render/frontend/render_material_package.c
+	code/render/frontend/render_material_runtime_catalog.c
+	code/render/frontend/render_material_runtime_owner.c
+	code/render/ral/core/ral_material_cook_cache.c
+	code/render/ral/core/ral_material_package.c)
 ADD_EXECUTABLE(ral_material_test
 	tests/ral_material_test.c
 	code/render/ral/core/ral_texture_asset.c
@@ -1581,6 +1645,168 @@ SET_TESTS_PROPERTIES(render_material_script_source_contract PROPERTIES
 	LABELS "host-only;subsystem;owner.ral;owner.material;failure.contract;backend.webgpu;feature.always"
 	TIMEOUT 30)
 WIRED_CONFIGURE_HOST_TEST(render_material_script_source_test render_material_script_source_contract)
+ADD_EXECUTABLE(render_material_noise_test tests/render_material_noise_test.c
+	code/render/frontend/tr_noise.c)
+TARGET_INCLUDE_DIRECTORIES(render_material_noise_test PRIVATE code/render/frontend)
+TARGET_COMPILE_OPTIONS(render_material_noise_test PRIVATE -Wall -Wextra -Werror)
+IF(NOT WIN32)
+	TARGET_LINK_LIBRARIES(render_material_noise_test PRIVATE m)
+ENDIF()
+ADD_TEST(NAME render_material_noise_contract COMMAND render_material_noise_test)
+SET_TESTS_PROPERTIES(render_material_noise_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.material;failure.contract;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(render_material_noise_test render_material_noise_contract)
+ADD_EXECUTABLE(ral_material_cook_test
+	tests/ral_material_cook_test.c
+	code/render/ral/core/ral_texture_asset.c
+	code/render/ral/core/ral_texture_cache.c
+	code/render/ral/core/ral_material.c
+	code/render/ral/core/ral_legacy_material.c
+	code/render/ral/core/ral_material_source.c
+	code/render/ral/core/ral_material_cook.c
+	code/render/ral/core/ral_material_proxy.c
+	code/render/ral/core/ral_material_proxy_lower.c)
+TARGET_INCLUDE_DIRECTORIES(ral_material_cook_test PRIVATE
+	code/qcommon code/render/ral/core code/render/frontend)
+TARGET_COMPILE_OPTIONS(ral_material_cook_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_material_cook_contract COMMAND ral_material_cook_test)
+SET_TESTS_PROPERTIES(ral_material_cook_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.material;failure.contract;backend.webgpu;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_material_cook_test ral_material_cook_contract)
+ADD_EXECUTABLE(ral_material_cook_cache_test
+	tests/ral_material_cook_cache_test.c
+	code/render/ral/core/ral_texture_asset.c
+	code/render/ral/core/ral_texture_cache.c
+	code/render/ral/core/ral_material.c
+	code/render/ral/core/ral_legacy_material.c
+	code/render/ral/core/ral_material_source.c
+	code/render/ral/core/ral_material_cook.c
+	code/render/ral/core/ral_material_proxy.c
+	code/render/ral/core/ral_material_proxy_lower.c
+	code/render/ral/core/ral_material_cook_cache.c)
+TARGET_INCLUDE_DIRECTORIES(ral_material_cook_cache_test PRIVATE
+	code/qcommon code/render/ral/core code/render/frontend)
+TARGET_COMPILE_OPTIONS(ral_material_cook_cache_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_material_cook_cache_contract
+	COMMAND ral_material_cook_cache_test)
+SET_TESTS_PROPERTIES(ral_material_cook_cache_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.material;owner.streaming;failure.contract;backend.webgpu;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_material_cook_cache_test ral_material_cook_cache_contract)
+ADD_EXECUTABLE(render_material_product_test
+	tests/render_material_product_test.c
+	code/render/frontend/render_material_product.c
+	code/render/ral/core/ral_texture_asset.c
+	code/render/ral/core/ral_texture_cache.c
+	code/render/ral/core/ral_material.c
+	code/render/ral/core/ral_legacy_material.c
+	code/render/ral/core/ral_material_source.c
+	code/render/ral/core/ral_material_cook.c
+	code/render/ral/core/ral_material_proxy.c
+	code/render/ral/core/ral_material_proxy_lower.c
+	code/render/ral/core/ral_material_cook_cache.c)
+TARGET_INCLUDE_DIRECTORIES(render_material_product_test PRIVATE
+	code/qcommon code/render/ral/core code/render/frontend)
+TARGET_COMPILE_OPTIONS(render_material_product_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME render_material_product_contract COMMAND render_material_product_test)
+SET_TESTS_PROPERTIES(render_material_product_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.material;owner.streaming;failure.contract;backend.webgpu;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(render_material_product_test render_material_product_contract)
+ADD_TEST(NAME render_material_product_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/render_material_product_policy_check.cmake)
+SET_TESTS_PROPERTIES(render_material_product_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.material;owner.streaming;failure.contract;backend.webgpu"
+	TIMEOUT 30)
+ADD_TEST(NAME render_material_runtime_residency_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/render_material_runtime_residency_policy_check.cmake)
+SET_TESTS_PROPERTIES(render_material_runtime_residency_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.material;owner.streaming;failure.contract;backend.vulkan;backend.opengl;backend.metal;backend.webgpu"
+	TIMEOUT 30)
+ADD_EXECUTABLE(render_material_package_test
+	tests/render_material_package_test.c
+	code/render/frontend/render_material_product.c
+	code/render/frontend/render_material_package.c
+	code/render/frontend/render_material_runtime_catalog.c
+	code/render/ral/core/ral_texture_asset.c
+	code/render/ral/core/ral_texture_cache.c
+	code/render/ral/core/ral_material.c
+	code/render/ral/core/ral_legacy_material.c
+	code/render/ral/core/ral_material_source.c
+	code/render/ral/core/ral_material_cook.c
+	code/render/ral/core/ral_material_proxy.c
+	code/render/ral/core/ral_material_proxy_lower.c
+	code/render/ral/core/ral_material_cook_cache.c
+	code/render/ral/core/ral_material_package.c
+	code/render/ral/core/ral_material_runtime.c)
+TARGET_INCLUDE_DIRECTORIES(render_material_package_test PRIVATE
+	code/qcommon code/render/ral/core code/render/frontend)
+TARGET_COMPILE_OPTIONS(render_material_package_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME render_material_package_contract COMMAND render_material_package_test)
+SET_TESTS_PROPERTIES(render_material_package_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.material;owner.streaming;failure.contract;backend.webgpu;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(render_material_package_test render_material_package_contract)
+ADD_EXECUTABLE(render_material_cook_fs_test
+	tests/render_material_cook_fs_test.c
+	code/tools/material_cook/material_cook_fs.c
+	code/render/frontend/render_material_cache_vfs.c
+	code/render/frontend/render_material_product.c
+	code/render/frontend/render_material_package.c
+	code/render/frontend/render_material_runtime_catalog.c
+	code/render/frontend/render_material_runtime_owner.c
+	code/render/ral/core/ral_texture_asset.c
+	code/render/ral/core/ral_texture_cache.c
+	code/render/ral/core/ral_material.c
+	code/render/ral/core/ral_legacy_material.c
+	code/render/ral/core/ral_material_source.c
+	code/render/ral/core/ral_material_cook.c
+	code/render/ral/core/ral_material_proxy.c
+	code/render/ral/core/ral_material_proxy_lower.c
+	code/render/ral/core/ral_material_cook_cache.c
+	code/render/ral/core/ral_material_package.c
+	code/render/ral/core/ral_material_runtime.c)
+FIND_PACKAGE(Threads REQUIRED)
+TARGET_INCLUDE_DIRECTORIES(render_material_cook_fs_test PRIVATE
+	code/qcommon code/render/ral/core code/render/frontend
+	code/tools/material_cook)
+TARGET_LINK_LIBRARIES(render_material_cook_fs_test PRIVATE Threads::Threads)
+TARGET_COMPILE_OPTIONS(render_material_cook_fs_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME render_material_cook_filesystem_contract
+	COMMAND render_material_cook_fs_test)
+SET_TESTS_PROPERTIES(render_material_cook_filesystem_contract PROPERTIES
+	LABELS "host-only;tooling;owner.ral;owner.material;owner.streaming;failure.contract;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(render_material_cook_fs_test
+	render_material_cook_filesystem_contract)
+ADD_TEST(NAME render_material_cache_io_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/render_material_cache_io_policy_check.cmake)
+SET_TESTS_PROPERTIES(render_material_cache_io_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.material;owner.streaming;owner.vfs;failure.contract"
+	TIMEOUT 30)
+ADD_TEST(NAME render_material_package_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/render_material_package_policy_check.cmake)
+SET_TESTS_PROPERTIES(render_material_package_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.material;owner.streaming;failure.contract;backend.webgpu"
+	TIMEOUT 30)
+ADD_TEST(NAME render_material_project_cook_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/render_material_project_cook_policy_check.cmake)
+SET_TESTS_PROPERTIES(render_material_project_cook_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.material;failure.contract"
+	TIMEOUT 30)
+ADD_TEST(NAME ral_material_cook_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_material_cook_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_material_cook_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.material;failure.contract;backend.webgpu"
+	TIMEOUT 30)
 ADD_TEST(NAME ral_material_source_ir_policy_contract
 	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
 		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_material_source_ir_policy_check.cmake)
@@ -1598,6 +1824,11 @@ ADD_EXECUTABLE(ral_material_runtime_test
 	code/render/ral/core/ral_texture_asset.c
 	code/render/ral/core/ral_texture_cache.c
 	code/render/ral/core/ral_material.c
+	code/render/ral/core/ral_legacy_material.c
+	code/render/ral/core/ral_material_source.c
+	code/render/ral/core/ral_material_cook.c
+	code/render/ral/core/ral_material_proxy.c
+	code/render/ral/core/ral_material_proxy_lower.c
 	code/render/ral/core/ral_material_runtime.c)
 TARGET_INCLUDE_DIRECTORIES(ral_material_runtime_test PRIVATE
 	code/qcommon code/render/ral/core code/render/frontend)
@@ -1613,6 +1844,73 @@ ADD_TEST(NAME ral_material_runtime_source_policy_contract
 SET_TESTS_PROPERTIES(ral_material_runtime_source_policy_contract PROPERTIES
 	LABELS "host-only;infrastructure;owner.ral;owner.material;failure.contract;backend.webgpu"
 	TIMEOUT 30)
+# Exercise the production static mip filters/uploader without a native window.
+# Reconfigure on source changes so the regression cannot test a stale copy.
+SET(VK_MIP_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/tr_image.c")
+SET_PROPERTY(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${VK_MIP_SOURCE}")
+FILE(READ "${VK_MIP_SOURCE}" VK_MIP_TEXT)
+STRING(FIND "${VK_MIP_TEXT}" "static float    s_srgb_to_linear_lut" VK_MIP_BEGIN)
+STRING(FIND "${VK_MIP_TEXT}" "static qboolean RawImage_HasAlpha" VK_MIP_END)
+MATH(EXPR VK_MIP_LENGTH "${VK_MIP_END} - ${VK_MIP_BEGIN}")
+STRING(SUBSTRING "${VK_MIP_TEXT}" ${VK_MIP_BEGIN} ${VK_MIP_LENGTH} VK_MIP_FILTERS)
+STRING(FIND "${VK_MIP_TEXT}" "typedef struct {\n\tbyte *buffer;" VK_MIP_BEGIN)
+STRING(FIND "${VK_MIP_TEXT}" "static void upload_vk_image(" VK_MIP_END)
+MATH(EXPR VK_MIP_LENGTH "${VK_MIP_END} - ${VK_MIP_BEGIN}")
+STRING(SUBSTRING "${VK_MIP_TEXT}" ${VK_MIP_BEGIN} ${VK_MIP_LENGTH} VK_MIP_UPLOAD)
+STRING(FIND "${VK_MIP_TEXT}" "static colorDomain_t R_ImageColorDomain(" VK_DOMAIN_BEGIN)
+STRING(FIND "${VK_MIP_TEXT}" "image_t *R_CreateImage(" VK_DOMAIN_END)
+MATH(EXPR VK_DOMAIN_LENGTH "${VK_DOMAIN_END} - ${VK_DOMAIN_BEGIN}")
+STRING(SUBSTRING "${VK_MIP_TEXT}" ${VK_DOMAIN_BEGIN} ${VK_DOMAIN_LENGTH} VK_DOMAIN_SOURCE)
+FILE(WRITE "${CMAKE_CURRENT_BINARY_DIR}/vk_image_mip_impl.inc" "${VK_MIP_FILTERS}\n${VK_MIP_UPLOAD}\n${VK_DOMAIN_SOURCE}")
+ADD_EXECUTABLE(vk_image_mip_test tests/vk_image_mip_test.c)
+SET(VK_SELECTION_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/tr_init.c")
+SET_PROPERTY(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${VK_SELECTION_SOURCE}")
+FILE(READ "${VK_SELECTION_SOURCE}" VK_SELECTION_TEXT)
+STRING(FIND "${VK_SELECTION_TEXT}" "static image_t *FrontendMaterialBaseImage(" VK_SELECTION_BEGIN)
+STRING(FIND "${VK_SELECTION_TEXT}" "static qhandle_t FrontendRegisterSkyTexture(" VK_SELECTION_END)
+MATH(EXPR VK_SELECTION_LENGTH "${VK_SELECTION_END} - ${VK_SELECTION_BEGIN}")
+STRING(SUBSTRING "${VK_SELECTION_TEXT}" ${VK_SELECTION_BEGIN} ${VK_SELECTION_LENGTH} VK_SELECTION_IMPL)
+FILE(WRITE "${CMAKE_CURRENT_BINARY_DIR}/vk_material_image_selection_impl.inc" "${VK_SELECTION_IMPL}")
+ADD_EXECUTABLE(vk_material_image_selection_test tests/vk_material_image_selection_test.c)
+TARGET_INCLUDE_DIRECTORIES(vk_material_image_selection_test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+TARGET_COMPILE_OPTIONS(vk_material_image_selection_test PRIVATE -UNDEBUG)
+ADD_TEST(NAME vk_material_image_selection_contract COMMAND vk_material_image_selection_test)
+SET_TESTS_PROPERTIES(vk_material_image_selection_contract PROPERTIES
+  LABELS "host-only;subsystem;owner.ral;owner.material;failure.contract;backend.vulkan" TIMEOUT 30)
+STRING(FIND "${VK_SELECTION_TEXT}" "static qhandle_t FrontendResolveSkyStage(" VK_SKY_STAGE_BEGIN)
+STRING(FIND "${VK_SELECTION_TEXT}" "static qboolean FrontendPublishSkyStages(" VK_SKY_STAGE_END)
+MATH(EXPR VK_SKY_STAGE_LENGTH "${VK_SKY_STAGE_END} - ${VK_SKY_STAGE_BEGIN}")
+STRING(SUBSTRING "${VK_SELECTION_TEXT}" ${VK_SKY_STAGE_BEGIN} ${VK_SKY_STAGE_LENGTH} VK_SKY_STAGE_IMPL)
+FILE(WRITE "${CMAKE_CURRENT_BINARY_DIR}/vk_sky_stage_resolver_impl.inc" "${VK_SKY_STAGE_IMPL}")
+ADD_EXECUTABLE(vk_sky_stage_resolver_test tests/vk_sky_stage_resolver_test.c)
+TARGET_INCLUDE_DIRECTORIES(vk_sky_stage_resolver_test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+TARGET_COMPILE_OPTIONS(vk_sky_stage_resolver_test PRIVATE -UNDEBUG)
+ADD_TEST(NAME vk_sky_stage_resolver_contract COMMAND vk_sky_stage_resolver_test)
+SET_TESTS_PROPERTIES(vk_sky_stage_resolver_contract PROPERTIES
+  LABELS "host-only;subsystem;owner.ral;owner.material;failure.contract;backend.vulkan" TIMEOUT 30)
+STRING(FIND "${VK_SELECTION_TEXT}" "qboolean R_FrontendSkyCaptureTime(" VK_SKY_PACKET_BEGIN)
+STRING(FIND "${VK_SELECTION_TEXT}" "qboolean R_FrontendActiveSkySource(" VK_SKY_PACKET_END)
+MATH(EXPR VK_SKY_PACKET_LENGTH "${VK_SKY_PACKET_END} - ${VK_SKY_PACKET_BEGIN}")
+STRING(SUBSTRING "${VK_SELECTION_TEXT}" ${VK_SKY_PACKET_BEGIN} ${VK_SKY_PACKET_LENGTH} VK_SKY_PACKET_IMPL)
+FILE(WRITE "${CMAKE_CURRENT_BINARY_DIR}/vk_sky_material_packet_impl.inc" "${VK_SKY_PACKET_IMPL}")
+ADD_EXECUTABLE(vk_sky_material_packet_test tests/vk_sky_material_packet_test.c)
+TARGET_INCLUDE_DIRECTORIES(vk_sky_material_packet_test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" code/qcommon code/render/frontend)
+TARGET_COMPILE_OPTIONS(vk_sky_material_packet_test PRIVATE -UNDEBUG)
+IF(NOT WIN32)
+  TARGET_LINK_LIBRARIES(vk_sky_material_packet_test PRIVATE m)
+ENDIF()
+ADD_TEST(NAME vk_sky_material_packet_contract COMMAND vk_sky_material_packet_test)
+SET_TESTS_PROPERTIES(vk_sky_material_packet_contract PROPERTIES
+  LABELS "host-only;subsystem;owner.ral;owner.material;failure.contract;backend.vulkan" TIMEOUT 30)
+TARGET_INCLUDE_DIRECTORIES(vk_image_mip_test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+TARGET_COMPILE_OPTIONS(vk_image_mip_test PRIVATE -UNDEBUG)
+IF(NOT WIN32)
+  TARGET_LINK_LIBRARIES(vk_image_mip_test PRIVATE m)
+ENDIF()
+ADD_TEST(NAME vk_image_mip_contract COMMAND vk_image_mip_test)
+SET_TESTS_PROPERTIES(vk_image_mip_contract PROPERTIES
+  LABELS "host-only;subsystem;owner.ral;owner.material;failure.contract;backend.vulkan"
+  TIMEOUT 30)
 ADD_EXECUTABLE(ral_material_proxy_test
 	tests/ral_material_proxy_test.c
 	code/render/ral/core/ral_texture_asset.c
@@ -1627,6 +1925,24 @@ SET_TESTS_PROPERTIES(ral_material_proxy_contract PROPERTIES
 	LABELS "host-only;subsystem;owner.ral;owner.material;failure.contract;backend.webgpu;feature.always"
 	TIMEOUT 30)
 WIRED_CONFIGURE_HOST_TEST(ral_material_proxy_test ral_material_proxy_contract)
+ADD_EXECUTABLE(ral_material_proxy_lower_test
+	tests/ral_material_proxy_lower_test.c
+	code/render/ral/core/ral_texture_asset.c
+	code/render/ral/core/ral_texture_cache.c
+	code/render/ral/core/ral_material.c
+	code/render/ral/core/ral_material_source.c
+	code/render/ral/core/ral_material_proxy.c
+	code/render/ral/core/ral_material_proxy_lower.c)
+TARGET_INCLUDE_DIRECTORIES(ral_material_proxy_lower_test PRIVATE
+	code/qcommon code/render/ral/core code/render/frontend)
+TARGET_COMPILE_OPTIONS(ral_material_proxy_lower_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_material_proxy_lower_contract
+	COMMAND ral_material_proxy_lower_test)
+SET_TESTS_PROPERTIES(ral_material_proxy_lower_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.material;failure.contract;backend.webgpu;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_material_proxy_lower_test
+	ral_material_proxy_lower_contract)
 ADD_TEST(NAME ral_material_proxy_source_policy_contract
 	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
 		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_material_proxy_policy_check.cmake)
@@ -1638,6 +1954,10 @@ ADD_EXECUTABLE(ral_material_reload_test
 	code/render/ral/core/ral_texture_asset.c
 	code/render/ral/core/ral_texture_cache.c
 	code/render/ral/core/ral_material.c
+	code/render/ral/core/ral_legacy_material.c
+	code/render/ral/core/ral_material_source.c
+	code/render/ral/core/ral_material_cook.c
+	code/render/ral/core/ral_material_proxy_lower.c
 	code/render/ral/core/ral_material_runtime.c
 	code/render/ral/core/ral_material_proxy.c
 	code/render/ral/core/ral_material_reload.c)
@@ -1962,8 +2282,10 @@ ADD_LIBRARY(ral_opengl STATIC
 	code/render/ral/backends/opengl/ral_opengl_pipeline.c
 	code/render/ral/backends/opengl/ral_opengl_product.c
 	code/render/ral/backends/opengl/ral_opengl_world.c
+	code/render/frontend/render_material_runtime_catalog.c
 	code/render/ral/core/ral_allocation.c
 	code/render/ral/core/ral_atmosphere.c
+	code/render/ral/core/ral_sky_radiance.c
 	code/render/ral/core/ral_lighting.c
 	code/render/ral/core/ral_static_lighting.c
 	code/render/ral/core/ral_lighting_cook.c
@@ -1984,10 +2306,19 @@ ADD_LIBRARY(ral_opengl STATIC
 	code/render/ral/core/ral_capability.c
 	code/render/ral/core/ral_command_lifecycle.c
 	code/render/ral/core/ral_display_visibility.c
+	code/render/ral/core/ral_legacy_material.c
+	code/render/ral/core/ral_material.c
 	code/render/ral/core/ral_material_source.c
+	code/render/ral/core/ral_material_cook.c
+	code/render/ral/core/ral_material_proxy.c
+	code/render/ral/core/ral_material_proxy_lower.c
+	code/render/ral/core/ral_material_reload.c
+	code/render/ral/core/ral_material_runtime.c
 	code/render/ral/core/ral_memory_recovery.c
 	code/render/ral/core/ral_presentation_host.c
 	code/render/ral/core/ral_shader_abi.c
+	code/render/ral/core/ral_texture_asset.c
+	code/render/ral/core/ral_texture_cache.c
 	code/render/ral/core/ral_transfer.c)
 TARGET_INCLUDE_DIRECTORIES(ral_opengl PUBLIC
 	code/qcommon code/render/frontend code/render/ral/core
@@ -1998,8 +2329,141 @@ IF(UNIX)
 	TARGET_LINK_LIBRARIES(ral_opengl PUBLIC m)
 ENDIF()
 
+ADD_EXECUTABLE(render_material_project_cook_test
+	tests/render_material_project_cook_test.c
+	${RENDERER_MATERIAL_PROJECT_COOK_SRCS}
+	code/render/frontend/render_material_script.c)
+TARGET_INCLUDE_DIRECTORIES(render_material_project_cook_test PRIVATE
+	code/qcommon code/render/frontend code/render/ral/core
+	code/tools/material_cook)
+TARGET_LINK_LIBRARIES(render_material_project_cook_test PRIVATE ral_opengl)
+TARGET_COMPILE_OPTIONS(render_material_project_cook_test PRIVATE
+	-Wall -Wextra -Werror)
+ADD_TEST(NAME render_material_project_cook_contract
+	COMMAND render_material_project_cook_test)
+SET_TESTS_PROPERTIES(render_material_project_cook_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.material;owner.vfs;failure.contract;tooling"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(render_material_project_cook_test
+	render_material_project_cook_contract)
+
+SET(RAL_WEBGPU_SKY_SHADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/ral_webgpu_sky_shaders")
+ADD_EXECUTABLE(render_sky_atlas_test tests/render_sky_atlas_test.c)
+TARGET_INCLUDE_DIRECTORIES(render_sky_atlas_test PRIVATE code/qcommon code/render/frontend)
+TARGET_COMPILE_OPTIONS(render_sky_atlas_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME render_sky_atlas_contract COMMAND render_sky_atlas_test)
+SET_TESTS_PROPERTIES(render_sky_atlas_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.renderer;failure.contract" TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(render_sky_atlas_test render_sky_atlas_contract)
+
+ADD_EXECUTABLE(render_sky_material_packet_test tests/render_sky_material_packet_test.c)
+TARGET_INCLUDE_DIRECTORIES(render_sky_material_packet_test PRIVATE code/qcommon)
+TARGET_COMPILE_OPTIONS(render_sky_material_packet_test PRIVATE -Wall -Wextra -Werror)
+IF(UNIX)
+	TARGET_LINK_LIBRARIES(render_sky_material_packet_test PRIVATE m)
+ENDIF()
+ADD_TEST(NAME render_sky_material_packet_contract COMMAND render_sky_material_packet_test)
+SET_TESTS_PROPERTIES(render_sky_material_packet_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.renderer;failure.contract" TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(render_sky_material_packet_test render_sky_material_packet_contract)
+
+SET(RAL_WEBGPU_SKY_SOURCE_WGSL
+	"${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/shaders/portable/source_sky_comp_spv.wgsl")
+SET(RAL_WEBGPU_SKY_PROJECT_SH_WGSL
+	"${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/shaders/portable/project_sky_sh_comp_spv.wgsl")
+SET(RAL_WEBGPU_SKY_IRRADIANCE_WGSL
+	"${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/shaders/portable/convolve_irradiance_comp_spv.wgsl")
+SET(RAL_WEBGPU_SKY_PREFILTER_WGSL
+	"${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/shaders/portable/prefilter_radiance_comp_spv.wgsl")
+FOREACH(RAL_WEBGPU_SKY_SHADER IN ITEMS source project_sh irradiance prefilter)
+	STRING(TOUPPER "${RAL_WEBGPU_SKY_SHADER}" RAL_WEBGPU_SKY_SHADER_UPPER)
+	SET(RAL_WEBGPU_SKY_${RAL_WEBGPU_SKY_SHADER_UPPER}_HEADER
+		"${RAL_WEBGPU_SKY_SHADER_DIR}/ral_webgpu_sky_${RAL_WEBGPU_SKY_SHADER}.h")
+	ADD_CUSTOM_COMMAND(
+		OUTPUT ${RAL_WEBGPU_SKY_${RAL_WEBGPU_SKY_SHADER_UPPER}_HEADER}
+		COMMAND ${CMAKE_COMMAND} -E make_directory ${RAL_WEBGPU_SKY_SHADER_DIR}
+		COMMAND ${CMAKE_COMMAND}
+			-DINPUT=${RAL_WEBGPU_SKY_${RAL_WEBGPU_SKY_SHADER_UPPER}_WGSL}
+			-DOUTPUT=${RAL_WEBGPU_SKY_${RAL_WEBGPU_SKY_SHADER_UPPER}_HEADER}
+			-DSYMBOL=ral_webgpu_sky_${RAL_WEBGPU_SKY_SHADER}_wgsl
+			-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake
+		DEPENDS ${RAL_WEBGPU_SKY_${RAL_WEBGPU_SKY_SHADER_UPPER}_WGSL}
+			${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake VERBATIM)
+ENDFOREACH()
+ADD_CUSTOM_TARGET(ral_webgpu_sky_shaders DEPENDS
+	${RAL_WEBGPU_SKY_SOURCE_HEADER}
+	${RAL_WEBGPU_SKY_PROJECT_SH_HEADER}
+	${RAL_WEBGPU_SKY_IRRADIANCE_HEADER}
+	${RAL_WEBGPU_SKY_PREFILTER_HEADER})
+
+SET(RAL_WEBGPU_EXPOSURE_HEADERS)
+FOREACH(RAL_WEBGPU_EXPOSURE_SHADER IN ITEMS histogram reduce tonemap)
+    IF(RAL_WEBGPU_EXPOSURE_SHADER STREQUAL "histogram")
+        SET(RAL_WEBGPU_EXPOSURE_ARTIFACT hdr_histogram_comp_spv)
+    ELSEIF(RAL_WEBGPU_EXPOSURE_SHADER STREQUAL "reduce")
+        SET(RAL_WEBGPU_EXPOSURE_ARTIFACT exposure_comp_spv)
+    ELSE()
+        SET(RAL_WEBGPU_EXPOSURE_ARTIFACT tonemap_tonemap_frag_spv)
+    ENDIF()
+    SET(RAL_WEBGPU_EXPOSURE_INPUT "${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/shaders/portable/${RAL_WEBGPU_EXPOSURE_ARTIFACT}.wgsl")
+    SET(RAL_WEBGPU_EXPOSURE_HEADER "${RAL_WEBGPU_SKY_SHADER_DIR}/ral_webgpu_exposure_${RAL_WEBGPU_EXPOSURE_SHADER}.h")
+    ADD_CUSTOM_COMMAND(OUTPUT ${RAL_WEBGPU_EXPOSURE_HEADER}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${RAL_WEBGPU_SKY_SHADER_DIR}
+        COMMAND ${CMAKE_COMMAND} -DINPUT=${RAL_WEBGPU_EXPOSURE_INPUT}
+            -DOUTPUT=${RAL_WEBGPU_EXPOSURE_HEADER}
+            -DSYMBOL=ral_webgpu_exposure_${RAL_WEBGPU_EXPOSURE_SHADER}_wgsl
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake
+        DEPENDS ${RAL_WEBGPU_EXPOSURE_INPUT} ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake VERBATIM)
+    LIST(APPEND RAL_WEBGPU_EXPOSURE_HEADERS ${RAL_WEBGPU_EXPOSURE_HEADER})
+ENDFOREACH()
+ADD_CUSTOM_TARGET(ral_webgpu_exposure_shaders DEPENDS ${RAL_WEBGPU_EXPOSURE_HEADERS})
+ADD_DEPENDENCIES(ral_webgpu_sky_shaders ral_webgpu_exposure_shaders)
+
+SET(RAL_WEBGPU_ATMOSPHERE_HEADERS)
+FOREACH(ATMOSPHERE_SHADER IN ITEMS inject light cloud integrate tile)
+    IF(ATMOSPHERE_SHADER STREQUAL "tile")
+        SET(ATMOSPHERE_ARTIFACT forwardplus_tile_comp_spv)
+    ELSE()
+        SET(ATMOSPHERE_ARTIFACT atmosphere_froxel_${ATMOSPHERE_SHADER}_comp_spv)
+    ENDIF()
+    SET(ATMOSPHERE_INPUT "${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/shaders/portable/${ATMOSPHERE_ARTIFACT}.wgsl")
+    SET(ATMOSPHERE_HEADER "${RAL_WEBGPU_SKY_SHADER_DIR}/ral_webgpu_atmosphere_${ATMOSPHERE_SHADER}.h")
+    ADD_CUSTOM_COMMAND(OUTPUT ${ATMOSPHERE_HEADER}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${RAL_WEBGPU_SKY_SHADER_DIR}
+        COMMAND ${CMAKE_COMMAND} -DINPUT=${ATMOSPHERE_INPUT} -DOUTPUT=${ATMOSPHERE_HEADER}
+            -DSYMBOL=ral_webgpu_atmosphere_${ATMOSPHERE_SHADER}_wgsl
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake
+        DEPENDS ${ATMOSPHERE_INPUT} ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake VERBATIM)
+    LIST(APPEND RAL_WEBGPU_ATMOSPHERE_HEADERS ${ATMOSPHERE_HEADER})
+ENDFOREACH()
+ADD_CUSTOM_TARGET(ral_webgpu_atmosphere_shaders DEPENDS ${RAL_WEBGPU_ATMOSPHERE_HEADERS})
+ADD_DEPENDENCIES(ral_webgpu_sky_shaders ral_webgpu_atmosphere_shaders)
+
+SET(RAL_WEBGPU_SKY_MATERIAL_HEADERS)
+FOREACH(SKY_STAGE IN ITEMS vertex fragment)
+    IF(SKY_STAGE STREQUAL "vertex")
+        SET(SKY_SYMBOL ral_opengl_product_vert_spv)
+    ELSE()
+        SET(SKY_SYMBOL ral_sky_material_frag_spv)
+    ENDIF()
+    SET(SKY_INPUT "${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/shaders/portable/${SKY_SYMBOL}.wgsl")
+    SET(SKY_HEADER "${RAL_WEBGPU_SKY_SHADER_DIR}/ral_webgpu_sky_${SKY_STAGE}.h")
+    ADD_CUSTOM_COMMAND(OUTPUT ${SKY_HEADER}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${RAL_WEBGPU_SKY_SHADER_DIR}
+        COMMAND ${CMAKE_COMMAND} -DINPUT=${SKY_INPUT} -DOUTPUT=${SKY_HEADER}
+            -DSYMBOL=ral_webgpu_sky_${SKY_STAGE}_wgsl
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake
+        DEPENDS ${SKY_INPUT} ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake VERBATIM)
+    LIST(APPEND RAL_WEBGPU_SKY_MATERIAL_HEADERS ${SKY_HEADER})
+ENDFOREACH()
+ADD_CUSTOM_TARGET(ral_webgpu_sky_material_shaders DEPENDS ${RAL_WEBGPU_SKY_MATERIAL_HEADERS})
+ADD_DEPENDENCIES(ral_webgpu_sky_shaders ral_webgpu_sky_material_shaders)
+
 ADD_LIBRARY(ral_webgpu STATIC
+    code/render/ral/backends/webgpu/ral_webgpu_sky_material.c
+    code/render/ral/backends/webgpu/ral_webgpu_exposure.c
 	code/render/ral/backends/webgpu/ral_webgpu_atmosphere.c
+	code/render/ral/backends/webgpu/ral_webgpu_sky.c
 	code/render/ral/backends/webgpu/ral_webgpu_lighting.c
 	code/render/ral/backends/webgpu/ral_webgpu_weather.c
 	code/render/ral/backends/webgpu/ral_webgpu_browser_bridge.c
@@ -2011,8 +2475,10 @@ ADD_LIBRARY(ral_webgpu STATIC
 	code/render/ral/backends/webgpu/ral_webgpu_product.c
 	code/render/ral/backends/webgpu/ral_webgpu_resource.c
 	code/render/ral/backends/webgpu/ral_webgpu_runtime.c
+	code/render/frontend/render_material_runtime_catalog.c
 	code/render/ral/core/ral_allocation.c
 	code/render/ral/core/ral_atmosphere.c
+	code/render/ral/core/ral_sky_radiance.c
 	code/render/ral/core/ral_lighting.c
 	code/render/ral/core/ral_static_lighting.c
 	code/render/ral/core/ral_lighting_cook.c
@@ -2033,13 +2499,23 @@ ADD_LIBRARY(ral_webgpu STATIC
 	code/render/ral/core/ral_capability.c
 	code/render/ral/core/ral_command_lifecycle.c
 	code/render/ral/core/ral_display_visibility.c
+	code/render/ral/core/ral_legacy_material.c
+	code/render/ral/core/ral_material.c
 	code/render/ral/core/ral_material_source.c
+	code/render/ral/core/ral_material_cook.c
+	code/render/ral/core/ral_material_proxy.c
+	code/render/ral/core/ral_material_proxy_lower.c
+	code/render/ral/core/ral_material_reload.c
+	code/render/ral/core/ral_material_runtime.c
 	code/render/ral/core/ral_memory_recovery.c
 	code/render/ral/core/ral_shader_abi.c
+	code/render/ral/core/ral_texture_asset.c
+	code/render/ral/core/ral_texture_cache.c
 	code/render/ral/core/ral_transfer.c)
 TARGET_INCLUDE_DIRECTORIES(ral_webgpu PUBLIC
 	code/qcommon code/render/frontend code/render/ral/core
-	code/render/ral/backends/webgpu)
+	code/render/ral/backends/webgpu ${RAL_WEBGPU_SKY_SHADER_DIR})
+ADD_DEPENDENCIES(ral_webgpu ral_webgpu_sky_shaders)
 TARGET_COMPILE_OPTIONS(ral_webgpu PRIVATE -Wall -Wextra -Werror)
 SET_TARGET_PROPERTIES(ral_webgpu PROPERTIES POSITION_INDEPENDENT_CODE ON)
 IF(UNIX)
@@ -2192,6 +2668,16 @@ SET_TESTS_PROPERTIES(ral_atmosphere_contract PROPERTIES
 	LABELS "host-only;subsystem;owner.ral;owner.renderer;failure.contract;backend-neutral;backend.vulkan;backend.opengl;backend.metal;backend.webgpu"
 	TIMEOUT 30)
 WIRED_CONFIGURE_HOST_TEST(ral_atmosphere_test ral_atmosphere_contract)
+ADD_EXECUTABLE(ral_sky_radiance_test tests/ral_sky_radiance_test.c
+	code/render/ral/core/ral_sky_radiance.c code/render/ral/core/ral_atmosphere.c)
+TARGET_INCLUDE_DIRECTORIES(ral_sky_radiance_test PRIVATE
+	code/qcommon code/render/ral/core code/render/frontend)
+TARGET_COMPILE_OPTIONS(ral_sky_radiance_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_sky_radiance_contract COMMAND ral_sky_radiance_test)
+SET_TESTS_PROPERTIES(ral_sky_radiance_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.renderer;failure.contract;backend-neutral;backend.vulkan;backend.opengl;backend.metal;backend.webgpu"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_sky_radiance_test ral_sky_radiance_contract)
 ADD_EXECUTABLE(ral_atmosphere_frame_graph_test
 	tests/ral_atmosphere_frame_graph_test.c
 	code/render/ral/core/ral_atmosphere.c
@@ -2231,6 +2717,12 @@ SET_TESTS_PROPERTIES(ral_webgpu_product_source_policy_contract PROPERTIES
 ADD_EXECUTABLE(ral_webgpu_renderer_module_test
 	tests/ral_webgpu_renderer_module_test.c
 	code/tools/lighting_cook/lighting_cook_fs.c
+	code/render/frontend/render_material_cache_vfs.c
+	code/render/frontend/render_material_product.c
+	code/render/frontend/render_material_package.c
+	code/render/frontend/render_material_runtime_owner.c
+	code/render/ral/core/ral_material_cook_cache.c
+	code/render/ral/core/ral_material_package.c
 	code/render/ral/backends/webgpu/ral_webgpu_browser_emscripten.c
 	code/render/ral/backends/webgpu/ral_webgpu_renderer_module.c
 	code/render/frontend/render_lighting_project_cook.c
@@ -2261,6 +2753,7 @@ WIRED_CONFIGURE_HOST_TEST(ral_webgpu_renderer_module_test
 
 ADD_LIBRARY(${RENDERER_PREFIX}_opengl${RENDEXT} SHARED
 	code/tools/lighting_cook/lighting_cook_fs.c
+	${RENDERER_MATERIAL_PROJECT_COOK_SRCS}
 	code/render/ral/backends/opengl/ral_opengl_module.c
 	code/render/ral/backends/opengl/ral_opengl_image_decode.c
 	code/render/frontend/render_lighting_project_cook.c
@@ -2284,7 +2777,7 @@ ADD_LIBRARY(${RENDERER_PREFIX}_opengl${RENDEXT} SHARED
 	code/qcommon/puff.c)
 TARGET_INCLUDE_DIRECTORIES(${RENDERER_PREFIX}_opengl${RENDEXT} PRIVATE
 	code/qcommon code/render/frontend code/render/ral/core
-	code/render/ral/backends/opengl code/tools/lighting_cook)
+	code/render/ral/backends/opengl code/tools/lighting_cook code/tools/material_cook)
 TARGET_LINK_LIBRARIES(${RENDERER_PREFIX}_opengl${RENDEXT} PRIVATE ral_opengl)
 TARGET_COMPILE_DEFINITIONS(${RENDERER_PREFIX}_opengl${RENDEXT} PRIVATE USE_RENDERER_DLOPEN)
 TARGET_COMPILE_OPTIONS(${RENDERER_PREFIX}_opengl${RENDEXT} PRIVATE -Wall -Wextra -Werror)
@@ -2500,11 +2993,118 @@ IF(APPLE)
 	FIND_LIBRARY(WIRED_QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
 	FIND_LIBRARY(WIRED_COREGRAPHICS_FRAMEWORK CoreGraphics REQUIRED)
 	SET(RAL_METAL_PRODUCT_SHADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/metal-product-shaders")
+	SET(RAL_METAL_EXPOSURE_HEADERS)
+	FOREACH(EXPOSURE_SHADER IN ITEMS hdr_histogram exposure)
+		SET(EXPOSURE_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/shaders/portable/${EXPOSURE_SHADER}_comp_spv.msl")
+		SET(EXPOSURE_AIR "${RAL_METAL_PRODUCT_SHADER_DIR}/${EXPOSURE_SHADER}.air")
+		SET(EXPOSURE_LIBRARY "${RAL_METAL_PRODUCT_SHADER_DIR}/${EXPOSURE_SHADER}.metallib")
+		SET(EXPOSURE_HEADER "${RAL_METAL_PRODUCT_SHADER_DIR}/ral_metal_${EXPOSURE_SHADER}_metallib.h")
+		ADD_CUSTOM_COMMAND(OUTPUT ${EXPOSURE_HEADER}
+			BYPRODUCTS ${EXPOSURE_AIR} ${EXPOSURE_LIBRARY}
+			COMMAND ${CMAKE_COMMAND} -E make_directory ${RAL_METAL_PRODUCT_SHADER_DIR}
+			COMMAND xcrun -sdk macosx metal -x metal -c ${EXPOSURE_SOURCE} -o ${EXPOSURE_AIR}
+			COMMAND xcrun -sdk macosx metallib ${EXPOSURE_AIR} -o ${EXPOSURE_LIBRARY}
+			COMMAND ${CMAKE_COMMAND} -DINPUT=${EXPOSURE_LIBRARY} -DOUTPUT=${EXPOSURE_HEADER}
+				-DSYMBOL=ral_metal_${EXPOSURE_SHADER}_metallib
+				-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake
+			DEPENDS ${EXPOSURE_SOURCE} ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake VERBATIM)
+		LIST(APPEND RAL_METAL_EXPOSURE_HEADERS ${EXPOSURE_HEADER})
+	ENDFOREACH()
+	ADD_CUSTOM_TARGET(ral_metal_exposure_metallibs DEPENDS ${RAL_METAL_EXPOSURE_HEADERS})
+	SET(RAL_METAL_BLOOM_HEADERS)
+	FOREACH(BLOOM_SHADER IN ITEMS bloom downsample upsample bloom_composite)
+		SET(BLOOM_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/shaders/portable/${BLOOM_SHADER}_frag_spv.msl")
+		SET(BLOOM_BASE "${RAL_METAL_PRODUCT_SHADER_DIR}/${BLOOM_SHADER}")
+		SET(BLOOM_HEADER "${RAL_METAL_PRODUCT_SHADER_DIR}/ral_metal_${BLOOM_SHADER}_metallib.h")
+		ADD_CUSTOM_COMMAND(OUTPUT ${BLOOM_HEADER}
+			BYPRODUCTS "${BLOOM_BASE}.air" "${BLOOM_BASE}.metallib"
+			COMMAND ${CMAKE_COMMAND} -E make_directory ${RAL_METAL_PRODUCT_SHADER_DIR}
+			COMMAND xcrun -sdk macosx metal -x metal -c ${BLOOM_SOURCE} -o "${BLOOM_BASE}.air"
+			COMMAND xcrun -sdk macosx metallib "${BLOOM_BASE}.air" -o "${BLOOM_BASE}.metallib"
+			COMMAND ${CMAKE_COMMAND} -DINPUT=${BLOOM_BASE}.metallib -DOUTPUT=${BLOOM_HEADER}
+				-DSYMBOL=ral_metal_${BLOOM_SHADER}_metallib
+				-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake
+			DEPENDS ${BLOOM_SOURCE} ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake VERBATIM)
+		LIST(APPEND RAL_METAL_BLOOM_HEADERS ${BLOOM_HEADER})
+	ENDFOREACH()
+	ADD_CUSTOM_TARGET(ral_metal_bloom_metallibs DEPENDS ${RAL_METAL_BLOOM_HEADERS})
+	SET(RAL_METAL_ATMOSPHERE_HEADERS)
+	FOREACH(ATMOSPHERE_SHADER IN ITEMS atmosphere_froxel_inject atmosphere_froxel_light
+			atmosphere_froxel_cloud atmosphere_froxel_integrate forwardplus_tile)
+		SET(ATMOSPHERE_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/shaders/portable/${ATMOSPHERE_SHADER}_comp_spv.msl")
+		SET(ATMOSPHERE_BASE "${RAL_METAL_PRODUCT_SHADER_DIR}/${ATMOSPHERE_SHADER}")
+		SET(ATMOSPHERE_HEADER "${RAL_METAL_PRODUCT_SHADER_DIR}/ral_metal_${ATMOSPHERE_SHADER}_metallib.h")
+		ADD_CUSTOM_COMMAND(OUTPUT ${ATMOSPHERE_HEADER}
+			BYPRODUCTS "${ATMOSPHERE_BASE}.air" "${ATMOSPHERE_BASE}.metallib"
+			COMMAND ${CMAKE_COMMAND} -E make_directory ${RAL_METAL_PRODUCT_SHADER_DIR}
+			COMMAND xcrun -sdk macosx metal -x metal -c ${ATMOSPHERE_SOURCE} -o "${ATMOSPHERE_BASE}.air"
+			COMMAND xcrun -sdk macosx metallib "${ATMOSPHERE_BASE}.air" -o "${ATMOSPHERE_BASE}.metallib"
+			COMMAND ${CMAKE_COMMAND} -DINPUT=${ATMOSPHERE_BASE}.metallib -DOUTPUT=${ATMOSPHERE_HEADER}
+				-DSYMBOL=ral_metal_${ATMOSPHERE_SHADER}_metallib
+				-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake
+			DEPENDS ${ATMOSPHERE_SOURCE} ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake VERBATIM)
+		LIST(APPEND RAL_METAL_ATMOSPHERE_HEADERS ${ATMOSPHERE_HEADER})
+	ENDFOREACH()
+	ADD_CUSTOM_TARGET(ral_metal_atmosphere_metallibs DEPENDS ${RAL_METAL_ATMOSPHERE_HEADERS})
 	SET(RAL_METAL_UI_SHADER_SOURCE
 		"${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/metal/shaders/ui_solid.msl")
 	SET(RAL_METAL_UI_SHADER_AIR "${RAL_METAL_PRODUCT_SHADER_DIR}/ui_solid.air")
 	SET(RAL_METAL_UI_SHADER_LIBRARY "${RAL_METAL_PRODUCT_SHADER_DIR}/ui_solid.metallib")
 	SET(RAL_METAL_UI_SHADER_HEADER "${RAL_METAL_PRODUCT_SHADER_DIR}/ral_metal_ui_metallib.h")
+	SET(RAL_METAL_PARTICLE_COMPUTE_SOURCE
+		"${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/shaders/portable/particle_integrate_comp_spv.msl")
+	SET(RAL_METAL_PARTICLE_VERTEX_SOURCE
+		"${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/shaders/portable/particle_vert_spv.msl")
+	SET(RAL_METAL_PARTICLE_FRAGMENT_SOURCE
+		"${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/shaders/portable/particle_frag_spv.msl")
+	SET(RAL_METAL_PARTICLE_COMPUTE_AIR "${RAL_METAL_PRODUCT_SHADER_DIR}/particle_compute.air")
+	SET(RAL_METAL_PARTICLE_VERTEX_AIR "${RAL_METAL_PRODUCT_SHADER_DIR}/particle_vertex.air")
+	SET(RAL_METAL_PARTICLE_FRAGMENT_AIR "${RAL_METAL_PRODUCT_SHADER_DIR}/particle_fragment.air")
+	SET(RAL_METAL_PARTICLE_COMPUTE_LIBRARY "${RAL_METAL_PRODUCT_SHADER_DIR}/particle_compute.metallib")
+	SET(RAL_METAL_PARTICLE_VERTEX_LIBRARY "${RAL_METAL_PRODUCT_SHADER_DIR}/particle_vertex.metallib")
+	SET(RAL_METAL_PARTICLE_FRAGMENT_LIBRARY "${RAL_METAL_PRODUCT_SHADER_DIR}/particle_fragment.metallib")
+	SET(RAL_METAL_PARTICLE_COMPUTE_HEADER "${RAL_METAL_PRODUCT_SHADER_DIR}/ral_metal_particle_compute_metallib.h")
+	SET(RAL_METAL_PARTICLE_VERTEX_HEADER "${RAL_METAL_PRODUCT_SHADER_DIR}/ral_metal_particle_vertex_metallib.h")
+	SET(RAL_METAL_PARTICLE_FRAGMENT_HEADER "${RAL_METAL_PRODUCT_SHADER_DIR}/ral_metal_particle_fragment_metallib.h")
+	SET(RAL_METAL_SKY_SOURCE_SOURCE
+		"${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/shaders/portable/source_sky_comp_spv.msl")
+	SET(RAL_METAL_SKY_PROJECT_SH_SOURCE
+		"${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/shaders/portable/project_sky_sh_comp_spv.msl")
+	SET(RAL_METAL_SKY_IRRADIANCE_SOURCE
+		"${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/shaders/portable/convolve_irradiance_comp_spv.msl")
+	SET(RAL_METAL_SKY_PREFILTER_SOURCE
+		"${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/shaders/portable/prefilter_radiance_comp_spv.msl")
+	FOREACH(RAL_METAL_SKY_SHADER IN ITEMS source project_sh irradiance prefilter)
+		STRING(TOUPPER "${RAL_METAL_SKY_SHADER}" RAL_METAL_SKY_SHADER_UPPER)
+		SET(RAL_METAL_SKY_${RAL_METAL_SKY_SHADER_UPPER}_AIR
+			"${RAL_METAL_PRODUCT_SHADER_DIR}/sky_${RAL_METAL_SKY_SHADER}.air")
+		SET(RAL_METAL_SKY_${RAL_METAL_SKY_SHADER_UPPER}_LIBRARY
+			"${RAL_METAL_PRODUCT_SHADER_DIR}/sky_${RAL_METAL_SKY_SHADER}.metallib")
+		SET(RAL_METAL_SKY_${RAL_METAL_SKY_SHADER_UPPER}_HEADER
+			"${RAL_METAL_PRODUCT_SHADER_DIR}/ral_metal_sky_${RAL_METAL_SKY_SHADER}_metallib.h")
+		ADD_CUSTOM_COMMAND(
+			OUTPUT ${RAL_METAL_SKY_${RAL_METAL_SKY_SHADER_UPPER}_HEADER}
+			BYPRODUCTS ${RAL_METAL_SKY_${RAL_METAL_SKY_SHADER_UPPER}_AIR}
+				${RAL_METAL_SKY_${RAL_METAL_SKY_SHADER_UPPER}_LIBRARY}
+			COMMAND xcrun -sdk macosx metal -x metal -c
+				${RAL_METAL_SKY_${RAL_METAL_SKY_SHADER_UPPER}_SOURCE}
+				-o ${RAL_METAL_SKY_${RAL_METAL_SKY_SHADER_UPPER}_AIR}
+			COMMAND xcrun -sdk macosx metallib
+				${RAL_METAL_SKY_${RAL_METAL_SKY_SHADER_UPPER}_AIR}
+				-o ${RAL_METAL_SKY_${RAL_METAL_SKY_SHADER_UPPER}_LIBRARY}
+			COMMAND ${CMAKE_COMMAND}
+				-DINPUT=${RAL_METAL_SKY_${RAL_METAL_SKY_SHADER_UPPER}_LIBRARY}
+				-DOUTPUT=${RAL_METAL_SKY_${RAL_METAL_SKY_SHADER_UPPER}_HEADER}
+				-DSYMBOL=ral_metal_sky_${RAL_METAL_SKY_SHADER}_metallib
+				-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake
+			DEPENDS ${RAL_METAL_SKY_${RAL_METAL_SKY_SHADER_UPPER}_SOURCE}
+				${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake VERBATIM)
+	ENDFOREACH()
+	ADD_CUSTOM_TARGET(ral_metal_sky_metallibs DEPENDS
+		${RAL_METAL_SKY_SOURCE_HEADER}
+		${RAL_METAL_SKY_PROJECT_SH_HEADER}
+		${RAL_METAL_SKY_IRRADIANCE_HEADER}
+		${RAL_METAL_SKY_PREFILTER_HEADER})
 	ADD_CUSTOM_COMMAND(
 		OUTPUT ${RAL_METAL_UI_SHADER_HEADER}
 		BYPRODUCTS ${RAL_METAL_UI_SHADER_AIR} ${RAL_METAL_UI_SHADER_LIBRARY}
@@ -2517,17 +3117,66 @@ IF(APPLE)
 			-DOUTPUT=${RAL_METAL_UI_SHADER_HEADER} -DSYMBOL=ral_metal_ui_metallib
 			-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake
 		DEPENDS ${RAL_METAL_UI_SHADER_SOURCE}
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_material_noise.h
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_sky_cube.glsl
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_material_stage.glsl
 			${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake
 		VERBATIM)
 	ADD_CUSTOM_TARGET(ral_metal_product_metallib DEPENDS ${RAL_METAL_UI_SHADER_HEADER})
+	ADD_CUSTOM_COMMAND(
+		OUTPUT ${RAL_METAL_PARTICLE_COMPUTE_HEADER}
+		BYPRODUCTS ${RAL_METAL_PARTICLE_COMPUTE_AIR} ${RAL_METAL_PARTICLE_COMPUTE_LIBRARY}
+		COMMAND xcrun -sdk macosx metal -x metal -c ${RAL_METAL_PARTICLE_COMPUTE_SOURCE}
+			-o ${RAL_METAL_PARTICLE_COMPUTE_AIR}
+		COMMAND xcrun -sdk macosx metallib ${RAL_METAL_PARTICLE_COMPUTE_AIR}
+			-o ${RAL_METAL_PARTICLE_COMPUTE_LIBRARY}
+		COMMAND ${CMAKE_COMMAND} -DINPUT=${RAL_METAL_PARTICLE_COMPUTE_LIBRARY}
+			-DOUTPUT=${RAL_METAL_PARTICLE_COMPUTE_HEADER} -DSYMBOL=ral_metal_particle_compute_metallib
+			-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake
+		DEPENDS ${RAL_METAL_PARTICLE_COMPUTE_SOURCE}
+			${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake VERBATIM)
+	ADD_CUSTOM_COMMAND(
+		OUTPUT ${RAL_METAL_PARTICLE_VERTEX_HEADER}
+		BYPRODUCTS ${RAL_METAL_PARTICLE_VERTEX_AIR} ${RAL_METAL_PARTICLE_VERTEX_LIBRARY}
+		COMMAND xcrun -sdk macosx metal -x metal -c ${RAL_METAL_PARTICLE_VERTEX_SOURCE}
+			-o ${RAL_METAL_PARTICLE_VERTEX_AIR}
+		COMMAND xcrun -sdk macosx metallib ${RAL_METAL_PARTICLE_VERTEX_AIR}
+			-o ${RAL_METAL_PARTICLE_VERTEX_LIBRARY}
+		COMMAND ${CMAKE_COMMAND} -DINPUT=${RAL_METAL_PARTICLE_VERTEX_LIBRARY}
+			-DOUTPUT=${RAL_METAL_PARTICLE_VERTEX_HEADER} -DSYMBOL=ral_metal_particle_vertex_metallib
+			-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake
+		DEPENDS ${RAL_METAL_PARTICLE_VERTEX_SOURCE}
+			${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake VERBATIM)
+	ADD_CUSTOM_COMMAND(
+		OUTPUT ${RAL_METAL_PARTICLE_FRAGMENT_HEADER}
+		BYPRODUCTS ${RAL_METAL_PARTICLE_FRAGMENT_AIR} ${RAL_METAL_PARTICLE_FRAGMENT_LIBRARY}
+		COMMAND xcrun -sdk macosx metal -x metal -c ${RAL_METAL_PARTICLE_FRAGMENT_SOURCE}
+			-o ${RAL_METAL_PARTICLE_FRAGMENT_AIR}
+		COMMAND xcrun -sdk macosx metallib ${RAL_METAL_PARTICLE_FRAGMENT_AIR}
+			-o ${RAL_METAL_PARTICLE_FRAGMENT_LIBRARY}
+		COMMAND ${CMAKE_COMMAND} -DINPUT=${RAL_METAL_PARTICLE_FRAGMENT_LIBRARY}
+			-DOUTPUT=${RAL_METAL_PARTICLE_FRAGMENT_HEADER} -DSYMBOL=ral_metal_particle_fragment_metallib
+			-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake
+		DEPENDS ${RAL_METAL_PARTICLE_FRAGMENT_SOURCE}
+			${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake VERBATIM)
+	ADD_CUSTOM_TARGET(ral_metal_particle_metallibs DEPENDS
+		${RAL_METAL_PARTICLE_COMPUTE_HEADER}
+		${RAL_METAL_PARTICLE_VERTEX_HEADER}
+		${RAL_METAL_PARTICLE_FRAGMENT_HEADER})
 	ADD_LIBRARY(ral_metal STATIC
+		code/render/ral/core/ral_sampler.c
 		code/render/ral/backends/metal/ral_metal_core.mm
 		code/render/ral/backends/metal/ral_metal_lighting.mm
 		code/render/ral/backends/metal/ral_metal_bind_group.mm
 		code/render/ral/backends/metal/ral_metal_render.mm
 		code/render/ral/backends/metal/ral_metal_pipeline.mm
 		code/render/ral/backends/metal/ral_metal_draw.mm
+		code/render/ral/backends/metal/ral_metal_exposure.mm
+		code/render/ral/backends/metal/ral_metal_bloom.mm
+		code/render/ral/backends/metal/ral_metal_atmosphere.mm
 		code/render/ral/backends/metal/ral_metal_present.mm
+		code/render/frontend/render_material_runtime_catalog.c
+		code/render/frontend/render_submission.c
 		code/render/frontend/render_submission_effects.c
 		code/render/frontend/render_submission_lighting.c
 		code/render/frontend/render_submission_material.c
@@ -2536,6 +3185,7 @@ IF(APPLE)
 		code/render/frontend/render_submission_world.c
 		code/render/ral/core/ral_allocation.c
 		code/render/ral/core/ral_atmosphere.c
+		code/render/ral/core/ral_sky_radiance.c
 		code/render/ral/core/ral_lighting.c
 		code/render/ral/core/ral_static_lighting.c
 		code/render/ral/core/ral_lighting_cook.c
@@ -2559,9 +3209,12 @@ IF(APPLE)
 		code/render/ral/core/ral_color_output.c
 		code/render/ral/core/ral_display_visibility.c
 		code/render/ral/core/ral_frame_shell.c
+		code/render/ral/core/ral_legacy_material.c
 		code/render/ral/core/ral_material.c
 		code/render/ral/core/ral_material_source.c
+		code/render/ral/core/ral_material_cook.c
 		code/render/ral/core/ral_material_proxy.c
+		code/render/ral/core/ral_material_proxy_lower.c
 		code/render/ral/core/ral_material_reload.c
 		code/render/ral/core/ral_material_runtime.c
 		code/render/ral/core/ral_planar_water.c
@@ -2584,7 +3237,9 @@ IF(APPLE)
 	TARGET_INCLUDE_DIRECTORIES(ral_metal PUBLIC
 		code/qcommon code/render/ral/core code/render/ral/backends/metal code/render/frontend)
 	TARGET_INCLUDE_DIRECTORIES(ral_metal PRIVATE ${RAL_METAL_PRODUCT_SHADER_DIR})
-	ADD_DEPENDENCIES(ral_metal ral_metal_product_metallib)
+	ADD_DEPENDENCIES(ral_metal ral_metal_product_metallib
+		ral_metal_particle_metallibs ral_metal_sky_metallibs ral_metal_exposure_metallibs ral_metal_bloom_metallibs
+		ral_metal_atmosphere_metallibs)
 	TARGET_LINK_LIBRARIES(ral_metal PUBLIC
 		${WIRED_METAL_FRAMEWORK} ${WIRED_FOUNDATION_FRAMEWORK}
 		${WIRED_QUARTZCORE_FRAMEWORK} ${WIRED_COREGRAPHICS_FRAMEWORK})
@@ -2691,14 +3346,118 @@ IF(APPLE)
 		LABELS "host-only;subsystem;owner.ral;failure.contract;backend.metal" TIMEOUT 30)
 	WIRED_CONFIGURE_HOST_TEST(ral_metal_draw_test ral_metal_draw_contract)
 	ADD_EXECUTABLE(ral_metal_present_test tests/ral_metal_present_test.mm
-		code/render/frontend/render_submission.c)
+		code/render/frontend/render_submission.c
+		code/render/frontend/tr_noise.c)
 	TARGET_LINK_LIBRARIES(ral_metal_present_test PRIVATE ral_metal)
 	TARGET_COMPILE_OPTIONS(ral_metal_present_test PRIVATE -Wall -Wextra -Werror)
-	ADD_TEST(NAME ral_metal_present_contract COMMAND ral_metal_present_test)
+	ADD_TEST(NAME ral_metal_present_contract COMMAND ral_metal_present_test --present)
+	ADD_TEST(NAME ral_metal_beam_atmosphere_contract COMMAND ral_metal_present_test --beam-atmosphere)
+	SET_TESTS_PROPERTIES(ral_metal_beam_atmosphere_contract PROPERTIES
+		LABELS "native-gpu;owner.ral;backend.metal;atmosphere;failure.contract" TIMEOUT 60)
+	WIRED_CONFIGURE_HOST_TEST(ral_metal_present_test ral_metal_beam_atmosphere_contract)
 	SET_TESTS_PROPERTIES(ral_metal_present_contract PROPERTIES
 		LABELS "host-only;subsystem;owner.ral;failure.contract;backend.metal" TIMEOUT 30)
 	WIRED_CONFIGURE_HOST_TEST(ral_metal_present_test ral_metal_present_contract)
+	ADD_TEST(NAME ral_metal_sky_lighting_contract COMMAND ral_metal_present_test --sky-lighting)
+	ADD_TEST(NAME ral_metal_lens_lifetime_contract COMMAND ral_metal_present_test --lens-lifetime)
+	SET_TESTS_PROPERTIES(ral_metal_sky_lighting_contract ral_metal_lens_lifetime_contract PROPERTIES
+		LABELS "host-only;subsystem;owner.ral;failure.contract;backend.metal" TIMEOUT 30)
+	WIRED_CONFIGURE_HOST_TEST(ral_metal_present_test ral_metal_sky_lighting_contract)
+	WIRED_CONFIGURE_HOST_TEST(ral_metal_present_test ral_metal_lens_lifetime_contract)
 	ADD_EXECUTABLE(ral_metal_lighting_test tests/ral_metal_lighting_test.mm)
+	ADD_EXECUTABLE(ral_metal_exposure_test tests/ral_metal_exposure_test.mm)
+	ADD_EXECUTABLE(ral_metal_bloom_test tests/ral_metal_bloom_test.mm)
+	ADD_EXECUTABLE(ral_metal_atmosphere_test tests/ral_metal_atmosphere_test.mm)
+	TARGET_LINK_LIBRARIES(ral_metal_atmosphere_test PRIVATE ral_metal)
+	TARGET_COMPILE_FEATURES(ral_metal_atmosphere_test PRIVATE cxx_std_17)
+	TARGET_COMPILE_OPTIONS(ral_metal_atmosphere_test PRIVATE -Wall -Wextra -Werror)
+	ADD_TEST(NAME ral_metal_atmosphere_contract COMMAND ral_metal_atmosphere_test)
+	SET_TESTS_PROPERTIES(ral_metal_atmosphere_contract PROPERTIES
+		LABELS "native-gpu;owner.ral;backend.metal;atmosphere;failure.contract" TIMEOUT 30)
+	TARGET_LINK_LIBRARIES(ral_metal_bloom_test PRIVATE ral_metal)
+	TARGET_COMPILE_OPTIONS(ral_metal_bloom_test PRIVATE -Wall -Wextra -Werror)
+	ADD_TEST(NAME ral_metal_bloom_contract COMMAND ral_metal_bloom_test)
+	SET_TESTS_PROPERTIES(ral_metal_bloom_contract PROPERTIES
+		LABELS "host-only;subsystem;owner.ral;backend.metal" TIMEOUT 60)
+	TARGET_LINK_LIBRARIES(ral_metal_exposure_test PRIVATE ral_metal)
+	TARGET_COMPILE_OPTIONS(ral_metal_exposure_test PRIVATE -Wall -Wextra -Werror)
+	ADD_TEST(NAME ral_metal_exposure_contract COMMAND ral_metal_exposure_test)
+	SET_TESTS_PROPERTIES(ral_metal_exposure_contract PROPERTIES
+		LABELS "host-only;subsystem;owner.ral;owner.lighting;failure.contract;backend.metal" TIMEOUT 30)
+	WIRED_CONFIGURE_HOST_TEST(ral_metal_exposure_test ral_metal_exposure_contract)
+	ADD_EXECUTABLE(ral_metal_sky_source_test tests/ral_metal_sky_source_test.mm)
+	SET(RAL_SKY_CUBE_PROBE_LIBRARIES)
+	FOREACH(SKY_CUBE_PORTABLE IN ITEMS 0 1)
+		SET(SKY_CUBE_PROBE "${RAL_METAL_PRODUCT_SHADER_DIR}/sky_cube_probe_${SKY_CUBE_PORTABLE}")
+		ADD_CUSTOM_COMMAND(OUTPUT "${SKY_CUBE_PROBE}.metallib"
+			COMMAND ${CMAKE_COMMAND} -E make_directory ${RAL_METAL_PRODUCT_SHADER_DIR}
+			COMMAND xcrun -sdk macosx metal -x metal -DWIRED_SKY_CUBE_PORTABLE=${SKY_CUBE_PORTABLE}
+				-c ${CMAKE_CURRENT_SOURCE_DIR}/tests/ral_sky_cube_probe.metal -o "${SKY_CUBE_PROBE}.air"
+			COMMAND xcrun -sdk macosx metallib "${SKY_CUBE_PROBE}.air" -o "${SKY_CUBE_PROBE}.metallib"
+			DEPENDS tests/ral_sky_cube_probe.metal ${RAL_METAL_UI_SHADER_SOURCE}
+				code/render/frontend/render_material_noise.h
+				code/render/ral/core/ral_sky_cube.glsl
+				code/render/ral/core/ral_material_stage.glsl
+				code/render/ral/backends/vulkan/renderer/shaders/portable/ral_opengl_product_frag_spv.msl
+			VERBATIM)
+		LIST(APPEND RAL_SKY_CUBE_PROBE_LIBRARIES "${SKY_CUBE_PROBE}.metallib")
+	ENDFOREACH()
+	ADD_CUSTOM_TARGET(ral_sky_cube_probe_libraries DEPENDS ${RAL_SKY_CUBE_PROBE_LIBRARIES})
+	ADD_EXECUTABLE(ral_sky_cube_gpu_test tests/ral_sky_cube_gpu_test.mm)
+	ADD_DEPENDENCIES(ral_sky_cube_gpu_test ral_sky_cube_probe_libraries)
+	TARGET_LINK_LIBRARIES(ral_sky_cube_gpu_test PRIVATE "-framework Foundation" "-framework Metal")
+	TARGET_COMPILE_OPTIONS(ral_sky_cube_gpu_test PRIVATE -Wall -Wextra -Werror -fobjc-arc)
+	ADD_TEST(NAME ral_sky_cube_gpu_contract COMMAND ral_sky_cube_gpu_test ${RAL_SKY_CUBE_PROBE_LIBRARIES})
+	SET_TESTS_PROPERTIES(ral_sky_cube_gpu_contract PROPERTIES
+		LABELS "host-only;subsystem;owner.ral;owner.lighting;failure.contract;backend.metal" TIMEOUT 30)
+	WIRED_CONFIGURE_HOST_TEST(ral_sky_cube_gpu_test ral_sky_cube_gpu_contract)
+	TARGET_LINK_LIBRARIES(ral_metal_sky_source_test PRIVATE ral_metal)
+	TARGET_COMPILE_OPTIONS(ral_metal_sky_source_test PRIVATE -Wall -Wextra -Werror -fobjc-arc)
+	ADD_TEST(NAME ral_metal_sky_source_contract COMMAND ral_metal_sky_source_test
+		${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/shaders/portable/source_sky_comp_spv.msl)
+	SET_TESTS_PROPERTIES(ral_metal_sky_source_contract PROPERTIES
+		LABELS "host-only;subsystem;owner.ral;owner.lighting;failure.contract;backend.metal"
+		TIMEOUT 30)
+	WIRED_CONFIGURE_HOST_TEST(ral_metal_sky_source_test ral_metal_sky_source_contract)
+	ADD_EXECUTABLE(ral_lens_depth_gpu_test tests/ral_lens_depth_gpu_test.mm)
+	TARGET_LINK_LIBRARIES(ral_lens_depth_gpu_test PRIVATE ral_metal)
+	TARGET_INCLUDE_DIRECTORIES(ral_lens_depth_gpu_test PRIVATE code/qcommon)
+	TARGET_COMPILE_OPTIONS(ral_lens_depth_gpu_test PRIVATE -Wall -Wextra -Werror -fobjc-arc)
+	ADD_TEST(NAME ral_lens_depth_gpu_contract COMMAND ral_lens_depth_gpu_test
+		${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/shaders/portable/lens_occlusion_comp_spv.msl)
+	SET_TESTS_PROPERTIES(ral_lens_depth_gpu_contract PROPERTIES
+		LABELS "host-only;subsystem;owner.ral;failure.contract;backend.metal;feature.wired-fx"
+		TIMEOUT 30)
+	WIRED_CONFIGURE_HOST_TEST(ral_lens_depth_gpu_test ral_lens_depth_gpu_contract)
+	ADD_EXECUTABLE(ral_gtao_denoise_gpu_test tests/ral_gtao_denoise_gpu_test.mm)
+	TARGET_LINK_LIBRARIES(ral_gtao_denoise_gpu_test PRIVATE "-framework Foundation" "-framework Metal")
+	TARGET_COMPILE_FEATURES(ral_gtao_denoise_gpu_test PRIVATE cxx_std_17)
+	TARGET_COMPILE_OPTIONS(ral_gtao_denoise_gpu_test PRIVATE -Wall -Wextra -Werror -fobjc-arc)
+	ADD_TEST(NAME ral_gtao_denoise_gpu_contract COMMAND ral_gtao_denoise_gpu_test
+		${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/shaders/portable/gtao_denoise_comp_spv.msl)
+	SET_TESTS_PROPERTIES(ral_gtao_denoise_gpu_contract PROPERTIES
+		LABELS "host-only;subsystem;owner.ral;failure.contract;backend.metal;backend.vulkan"
+		TIMEOUT 30)
+	WIRED_CONFIGURE_HOST_TEST(ral_gtao_denoise_gpu_test ral_gtao_denoise_gpu_contract)
+	ADD_EXECUTABLE(ral_atmosphere_depth_gpu_test tests/ral_atmosphere_depth_gpu_test.mm)
+	ADD_EXECUTABLE(ral_opengl_atmosphere_gpu_test tests/ral_opengl_atmosphere_gpu_test.mm)
+	TARGET_LINK_LIBRARIES(ral_opengl_atmosphere_gpu_test PRIVATE "-framework Foundation" "-framework Metal")
+	TARGET_COMPILE_FEATURES(ral_opengl_atmosphere_gpu_test PRIVATE cxx_std_17)
+	TARGET_COMPILE_OPTIONS(ral_opengl_atmosphere_gpu_test PRIVATE -Wall -Wextra -Werror -fobjc-arc)
+	ADD_TEST(NAME ral_opengl_atmosphere_gpu_contract COMMAND ral_opengl_atmosphere_gpu_test
+		${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/shaders/portable/ral_opengl_product_frag_spv.msl)
+	SET_TESTS_PROPERTIES(ral_opengl_atmosphere_gpu_contract PROPERTIES
+		LABELS "owner.ral;backend.opengl;native-gpu;atmosphere;failure.contract" TIMEOUT 30)
+	WIRED_CONFIGURE_HOST_TEST(ral_opengl_atmosphere_gpu_test ral_opengl_atmosphere_gpu_contract)
+	TARGET_LINK_LIBRARIES(ral_atmosphere_depth_gpu_test PRIVATE "-framework Foundation" "-framework Metal")
+	TARGET_COMPILE_FEATURES(ral_atmosphere_depth_gpu_test PRIVATE cxx_std_17)
+	TARGET_COMPILE_OPTIONS(ral_atmosphere_depth_gpu_test PRIVATE -Wall -Wextra -Werror -fobjc-arc)
+	ADD_TEST(NAME ral_atmosphere_depth_gpu_contract COMMAND ral_atmosphere_depth_gpu_test
+		${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/shaders/portable/atmosphere_composite_comp_spv.msl)
+	SET_TESTS_PROPERTIES(ral_atmosphere_depth_gpu_contract PROPERTIES
+		LABELS "host-only;subsystem;owner.ral;failure.contract;backend.metal;backend.vulkan"
+		TIMEOUT 30)
+	WIRED_CONFIGURE_HOST_TEST(ral_atmosphere_depth_gpu_test ral_atmosphere_depth_gpu_contract)
 	TARGET_LINK_LIBRARIES(ral_metal_lighting_test PRIVATE ral_metal)
 	TARGET_INCLUDE_DIRECTORIES(ral_metal_lighting_test PRIVATE code/qcommon
 		code/render/frontend code/render/ral/core code/render/ral/backends/metal)
@@ -2887,6 +3646,14 @@ SET_TESTS_PROPERTIES(ral_vulkan_texture_copy_contract PROPERTIES
 	TIMEOUT 30)
 WIRED_CONFIGURE_HOST_TEST(ral_vulkan_texture_copy_test
 	ral_vulkan_texture_copy_contract)
+ADD_EXECUTABLE(ral_vulkan_render_layer_test tests/ral_vulkan_render_layer_test.c)
+TARGET_INCLUDE_DIRECTORIES(ral_vulkan_render_layer_test PRIVATE
+	code/qcommon code/render/ral/core code/render/ral/backends/vulkan code/render/frontend)
+TARGET_LINK_LIBRARIES(ral_vulkan_render_layer_test PRIVATE ral_vulkan)
+ADD_TEST(NAME ral_vulkan_render_layer_contract COMMAND ral_vulkan_render_layer_test)
+SET_TESTS_PROPERTIES(ral_vulkan_render_layer_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;failure.contract;backend.vulkan;feature.always" TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_vulkan_render_layer_test ral_vulkan_render_layer_contract)
 ADD_EXECUTABLE(ral_vulkan_buffer_copy_test
 	tests/ral_vulkan_buffer_copy_test.c)
 TARGET_INCLUDE_DIRECTORIES(ral_vulkan_buffer_copy_test PRIVATE
@@ -3103,6 +3870,11 @@ IF(WIRED_NODE_EXECUTABLE)
 	)
 	ADD_TEST(NAME ral_webgpu_browser_host_contract
 		COMMAND ${WIRED_NODE_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/ral_webgpu_browser_host_test.mjs)
+	ADD_TEST(NAME ral_webgpu_lens_contract
+		COMMAND ${WIRED_NODE_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/ral_webgpu_lens_test.mjs)
+	SET_TESTS_PROPERTIES(ral_webgpu_lens_contract PROPERTIES
+		LABELS "host-only;subsystem;owner.ral;owner.presentation;failure.contract;backend.webgpu"
+		TIMEOUT 30)
 	SET_TESTS_PROPERTIES(ral_webgpu_browser_host_contract PROPERTIES
 		LABELS "host-only;subsystem;owner.ral;owner.presentation;failure.contract;backend.webgpu"
 		TIMEOUT 30
@@ -3154,24 +3926,52 @@ SET_TESTS_PROPERTIES(ral_webgpu_browser_module_source_policy_contract PROPERTIES
 	TIMEOUT 30)
 FIND_PROGRAM(WIRED_EMCC_EXECUTABLE NAMES emcc)
 IF(WIRED_EMCC_EXECUTABLE)
+	ADD_EXECUTABLE(ral_webgpu_smoke_cook
+		tests/ral_webgpu_smoke_cook.c tests/ral_webgpu_smoke_fixture.c
+		${RENDERER_MATERIAL_PROJECT_COOK_SRCS}
+		code/render/frontend/render_material_script.c
+		code/render/ral/backends/webgpu/ral_webgpu_image_decode.c
+		code/render/frontend/tr_image_bmp.c code/render/frontend/tr_image_jpg.c
+		code/render/frontend/tr_image_png.c code/render/frontend/tr_image_tga.c
+		code/qcommon/puff.c)
+	TARGET_INCLUDE_DIRECTORIES(ral_webgpu_smoke_cook PRIVATE tests code/qcommon
+		code/render/frontend code/render/ral/core code/tools/material_cook)
+	TARGET_LINK_LIBRARIES(ral_webgpu_smoke_cook PRIVATE ral_opengl)
+	TARGET_COMPILE_OPTIONS(ral_webgpu_smoke_cook PRIVATE -Wall -Wextra -Werror)
+	SET(WIRED_WEBGPU_SMOKE_ROOT "${CMAKE_BINARY_DIR}/ral_webgpu_smoke_assets")
+	ADD_CUSTOM_TARGET(ral_webgpu_smoke_assets
+		COMMAND ${CMAKE_COMMAND} -E make_directory
+			${WIRED_WEBGPU_SMOKE_ROOT}/textures ${WIRED_WEBGPU_SMOKE_ROOT}/materials/cooked
+		COMMAND $<TARGET_FILE:ral_webgpu_smoke_cook> ${WIRED_WEBGPU_SMOKE_ROOT}
+		DEPENDS ral_webgpu_smoke_cook VERBATIM)
 	IF(CMAKE_BUILD_TYPE STREQUAL "Debug")
 		SET(WIRED_WEBGPU_BROWSER_EMCC_CONFIG -O0 -g3)
 	ELSE()
-		SET(WIRED_WEBGPU_BROWSER_EMCC_CONFIG -O3)
+		# Preserve function names in this test module so native GPU failures are
+		# diagnosable without changing the Release optimization/validation path.
+		SET(WIRED_WEBGPU_BROWSER_EMCC_CONFIG -O3 -DNDEBUG -g2)
 	ENDIF()
 	ADD_CUSTOM_TARGET(ral_webgpu_browser_wasm_module
 		COMMAND ${CMAKE_COMMAND} -E env EM_CACHE=${CMAKE_BINARY_DIR}/emscripten-cache
 			${WIRED_EMCC_EXECUTABLE} -std=c11 -Wall -Wextra -Werror -D_GNU_SOURCE -DWASM_MODULE
 			-DRAL_WEBGPU_BROWSER_SMOKE=1
+			-I${CMAKE_CURRENT_SOURCE_DIR}/tests
+			${CMAKE_CURRENT_SOURCE_DIR}/tests/ral_webgpu_smoke_fixture.c
+			${CMAKE_CURRENT_SOURCE_DIR}/tests/ral_webgpu_atmosphere_probe.c
+			--embed-file ${WIRED_WEBGPU_SMOKE_ROOT}@/wired-smoke
 			${WIRED_WEBGPU_BROWSER_EMCC_CONFIG}
 			-I${CMAKE_CURRENT_SOURCE_DIR}/code/qcommon
 			-I${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend
 			-I${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core
 			-I${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu
+			-I${RAL_WEBGPU_SKY_SHADER_DIR}
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_browser_emscripten.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_atmosphere.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_sky.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_lighting.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_weather.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_exposure.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_sky_material.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_browser_bridge.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_command.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_core.c
@@ -3184,6 +3984,11 @@ IF(WIRED_EMCC_EXECUTABLE)
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_resource.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_runtime.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_lighting_metadata.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_material_cache_vfs.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_material_product.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_material_package.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_material_runtime_catalog.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_material_runtime_owner.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_material_script.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_material_script_lighting.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_lighting_sidecar.c
@@ -3202,6 +4007,7 @@ IF(WIRED_EMCC_EXECUTABLE)
 			${CMAKE_CURRENT_SOURCE_DIR}/code/qcommon/wired/entity/metadata.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_allocation.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_atmosphere.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_sky_radiance.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_backend_conformance.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_capability.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_command_lifecycle.c
@@ -3219,14 +4025,35 @@ IF(WIRED_EMCC_EXECUTABLE)
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_irradiance_runtime.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_irradiance_product.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_lighting_composition.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_legacy_material.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_material.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_material_cook.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_material_cook_cache.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_material_package.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_material_proxy.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_material_proxy_lower.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_material_runtime.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_material_source.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_memory_recovery.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_shader_abi.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_static_lighting.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_texture_asset.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_texture_cache.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_transfer.c
+            # Match the production browser client's bounded stack budget;
+            # full renderer frame plans exceed Emscripten's tiny default.
+            -sSTACK_SIZE=5242880 -sSTACK_OVERFLOW_CHECK=2
 			--no-entry -sMODULARIZE=1 -sEXPORT_ES6=1
-			"-sEXPORTED_FUNCTIONS=['_RalWebGpu_BrowserModuleStart','_RalWebGpu_BrowserModulePoll','_RalWebGpu_BrowserModuleResize','_RalWebGpu_BrowserModuleSmokeBegin','_RalWebGpu_BrowserModuleSmokePoll','_RalWebGpu_BrowserModuleStop','_GetRefAPI','_WiredWebGpu_RendererPoll','_WiredWebGpu_RendererResize','_WiredWebGpu_GetFrameReceipt','_WiredWebGpu_RendererSmokeBegin','_WiredWebGpu_RendererSmokePoll']"
+			"-sEXPORTED_FUNCTIONS=['_RalWebGpu_BrowserModuleStart','_RalWebGpu_BrowserModulePoll','_RalWebGpu_BrowserModuleResize','_RalWebGpu_BrowserModuleSmokeBegin','_RalWebGpu_BrowserModuleSmokePoll','_RalWebGpu_BrowserModuleStop','_GetRefAPI','_WiredWebGpu_RendererPoll','_WiredWebGpu_RendererResize','_WiredWebGpu_GetFrameReceipt','_WiredWebGpu_RendererSmokeBegin','_WiredWebGpu_RendererSmokePoll','_WiredWebGpu_UiSmokeFrame','_WiredWebGpu_UiSmokePoll','_WiredWebGpu_ExposureSmokeFrame','_WiredWebGpu_ExposureSmokePoll','_WiredWebGpu_ExposureSmokeEnd','_WiredWebGpu_BeamCoverageSmokeFrame','_WiredWebGpu_BeamCoverageSmokePoll','_WiredWebGpu_SkyMaterialSmokeFrame','_WiredWebGpu_SkyMaterialSmokePoll','_WiredWebGpu_SkyMaterialSmokeSource','_WiredWebGpu_WeatherGroundSmokeFrame','_WiredWebGpu_WeatherGroundSmokePoll']"
 			"-sEXPORTED_RUNTIME_METHODS=['wasmMemory']"
 			-o ${CMAKE_BINARY_DIR}/ral_webgpu_browser_module.mjs
+		DEPENDS
+			ral_webgpu_smoke_assets
+			ral_webgpu_sky_shaders
+			${RAL_WEBGPU_SKY_SOURCE_HEADER}
+			${RAL_WEBGPU_SKY_PROJECT_SH_HEADER}
+			${RAL_WEBGPU_SKY_IRRADIANCE_HEADER}
+			${RAL_WEBGPU_SKY_RADIANCE_HEADER}
 		VERBATIM)
 ELSE()
 	ADD_CUSTOM_TARGET(ral_webgpu_browser_wasm_module
@@ -4695,6 +5522,13 @@ ADD_TEST(NAME cg_projectile_trail_source_policy_contract
 		-P ${CMAKE_SOURCE_DIR}/cmake/cg_projectile_trail_policy_check.cmake)
 SET_TESTS_PROPERTIES(cg_projectile_trail_source_policy_contract PROPERTIES
 	LABELS "host-only;infrastructure;owner.q3now-cgame;failure.contract;feature.always"
+	TIMEOUT 30)
+
+ADD_TEST(NAME wired_fx_no_fallback_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/wired_fx_no_fallback_policy_check.cmake)
+SET_TESTS_PROPERTIES(wired_fx_no_fallback_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.q3now-client;failure.contract;feature.wired-fx"
 	TIMEOUT 30)
 
 ADD_TEST(NAME cg_hitscan_impact_source_policy_contract
@@ -6407,6 +7241,29 @@ ENDIF()
 AUX_SOURCE_DIRECTORY(code/render/frontend RENDERER_COMMON_SRCS)
 LIST(REMOVE_ITEM RENDERER_COMMON_SRCS code/render/frontend/r_profile_telemetry.c)
 LIST(REMOVE_ITEM RENDERER_COMMON_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/r_profile_telemetry.c)
+# Lua material declarations are a native authoring/frontend input path.  They
+# compile into pointer-free RAL material source IR through the dedicated
+# render_material_lua_frontend target; renderer DLLs must not acquire a Lua ABI
+# dependency merely because their legacy source inventory uses a directory
+# glob.
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS code/render/frontend/render_material_lua.c)
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_material_lua.c)
+# Material cook/load orchestration is likewise a native/offline product path,
+# not a dependency of deprecated renderer DLLs selected by the broad glob.
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS code/render/frontend/render_material_product.c)
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_material_product.c)
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS code/render/frontend/render_material_package.c)
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_material_package.c)
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS code/render/frontend/render_material_runtime_owner.c)
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_material_runtime_owner.c)
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS code/render/frontend/render_material_runtime_catalog.c)
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_material_runtime_catalog.c)
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS code/render/frontend/render_material_vfs.c)
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_material_vfs.c)
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS code/render/frontend/render_material_cache_vfs.c)
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_material_cache_vfs.c)
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS code/render/frontend/render_material_project_cook.c)
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_material_project_cook.c)
 # r_image_probe.c is an offline-tool-only TU (consumed by extract-meta).
 # It calls FS_FOpenFileRead/FS_FCloseFile directly, which the renderer
 # DLLs can't satisfy (they go through refimport_t::FS_ReadFile). The
@@ -6431,9 +7288,11 @@ LIST(REMOVE_ITEM RENDERER_COMMON_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/code/render/fr
 # The shared frontend's lighting submission owns backend-neutral validation and
 # selection. Deprecated renderer DLLs remain compatibility consumers, but they
 # still need the small, handle-free RAL core implementations used by that
-# frontend code in order to link. Native backend authority stays under
-# code/render/ral/backends/*.
+# frontend code in order to link. This is link closure for shared frontend
+# translation units, not a legacy feature backport; native backend authority
+# stays under code/render/ral/backends/*.
 SET(RENDERER_LIGHTING_COMPAT_SRCS
+	code/render/ral/core/ral_atmosphere.c
 	code/render/ral/core/ral_lighting.c
 	code/render/ral/core/ral_static_lighting.c
 	code/render/ral/core/ral_lighting_artifact.c
@@ -6442,12 +7301,15 @@ SET(RENDERER_LIGHTING_COMPAT_SRCS
 )
 SET(RENDERER_MATERIAL_SOURCE_COMPAT_SRCS
 	code/render/ral/core/ral_material_source.c
+	code/render/ral/core/ral_texture_asset.c
+	code/render/ral/core/ral_texture_cache.c
 )
 AUX_SOURCE_DIRECTORY(code/renderer RENDERER_GL_SRCS)
 AUX_SOURCE_DIRECTORY(code/renderer2 RENDERER_GL2_SRCS)
 AUX_SOURCE_DIRECTORY(code/render/ral/backends/vulkan/renderer RENDERER_VK_SRCS)
 LIST(APPEND RENDERER_VK_SRCS
 	code/tools/lighting_cook/lighting_cook_fs.c
+	${RENDERER_MATERIAL_PROJECT_COOK_SRCS}
 	code/render/frontend/render_lighting_project_cook.c
 	code/render/frontend/render_lighting_project_source.c
 	code/render/frontend/render_material_script_lighting.c
@@ -6478,6 +7340,7 @@ SET(RAL_VK_SRCS
 	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_bind_group_arena.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_allocation.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_atmosphere.c
+	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_sky_radiance.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_lighting.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_static_lighting.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_lighting_cook.c
@@ -6502,7 +7365,9 @@ SET(RAL_VK_SRCS
 	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_legacy_material.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_material.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_material_source.c
+	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_material_cook.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_material_proxy.c
+	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_material_proxy_lower.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_material_reload.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_material_runtime.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_planar_water.c
@@ -6581,7 +7446,7 @@ ENDIF()
 
 IF(APPLE AND BUILD_TESTING)
 	ADD_EXECUTABLE(ral_backend_conformance_test
-		tests/ral_backend_conformance_test.mm)
+		tests/ral_backend_conformance_test.mm tests/vk_sky_capture_fixture.c)
 	TARGET_INCLUDE_DIRECTORIES(ral_backend_conformance_test PRIVATE
 		code/qcommon code/render/ral/core code/render/ral/backends/metal
 		code/render/ral/backends/vulkan code/render/ral/backends/vulkan/include
@@ -6702,6 +7567,54 @@ IF(WIRED_BUILD_SHADER_XLATE)
 	ENDIF()
 ENDIF()
 
+# Compare the production Metal evaluator with the same source lowered from
+# GLSL. This offscreen test needs the optional offline translation toolchain.
+IF(APPLE AND BUILD_TESTING AND TARGET shader_xlate)
+	FIND_PROGRAM(WIRED_STAGE_GLSLANG NAMES glslangValidator)
+	IF(WIRED_STAGE_GLSLANG)
+		SET(STAGE_PROBE_DIR "${CMAKE_CURRENT_BINARY_DIR}/material-stage-probe")
+		SET(STAGE_PROBE_BASE "${STAGE_PROBE_DIR}/ral_material_stage_probe")
+		ADD_CUSTOM_COMMAND(OUTPUT "${STAGE_PROBE_BASE}.metallib" "${STAGE_PROBE_BASE}_native.metallib"
+			COMMAND ${CMAKE_COMMAND} -E make_directory "${STAGE_PROBE_DIR}"
+			COMMAND ${WIRED_STAGE_GLSLANG} -V ${CMAKE_CURRENT_SOURCE_DIR}/tests/ral_material_stage_probe.comp
+				-o "${STAGE_PROBE_BASE}.spv"
+			COMMAND $<TARGET_FILE:shader_xlate> --targets msl,glsl460 "${STAGE_PROBE_BASE}.spv" "${STAGE_PROBE_DIR}"
+			COMMAND xcrun -sdk macosx metal -x metal -c "${STAGE_PROBE_BASE}.msl" -o "${STAGE_PROBE_BASE}.air"
+			COMMAND xcrun -sdk macosx metallib "${STAGE_PROBE_BASE}.air" -o "${STAGE_PROBE_BASE}.metallib"
+			COMMAND xcrun -sdk macosx metal -x metal -c ${CMAKE_CURRENT_SOURCE_DIR}/tests/ral_material_stage_probe.metal
+				-o "${STAGE_PROBE_BASE}_native.air"
+			COMMAND xcrun -sdk macosx metallib "${STAGE_PROBE_BASE}_native.air" -o "${STAGE_PROBE_BASE}_native.metallib"
+			DEPENDS shader_xlate tests/ral_material_stage_probe.comp tests/ral_material_stage_probe.metal
+				code/render/ral/core/ral_material_stage.glsl code/render/ral/core/ral_sky_cube.glsl
+				code/render/frontend/render_material_noise.h code/render/ral/backends/metal/shaders/ui_solid.msl
+			VERBATIM)
+		ADD_CUSTOM_TARGET(ral_material_stage_probe_libraries DEPENDS
+			"${STAGE_PROBE_BASE}.metallib" "${STAGE_PROBE_BASE}_native.metallib")
+		ADD_EXECUTABLE(ral_material_stage_gpu_test tests/ral_material_stage_gpu_test.mm)
+		ADD_DEPENDENCIES(ral_material_stage_gpu_test ral_material_stage_probe_libraries)
+		TARGET_INCLUDE_DIRECTORIES(ral_material_stage_gpu_test PRIVATE code/qcommon)
+		TARGET_LINK_LIBRARIES(ral_material_stage_gpu_test PRIVATE "-framework Foundation" "-framework Metal")
+		TARGET_COMPILE_OPTIONS(ral_material_stage_gpu_test PRIVATE -Wall -Wextra -Werror -fobjc-arc)
+		ADD_TEST(NAME ral_material_stage_gpu_contract COMMAND ral_material_stage_gpu_test
+			"${STAGE_PROBE_BASE}_native.metallib" "${STAGE_PROBE_BASE}.metallib")
+		SET_TESTS_PROPERTIES(ral_material_stage_gpu_contract PROPERTIES
+			LABELS "host-only;subsystem;owner.ral;owner.renderer;failure.contract;backend.metal" TIMEOUT 30)
+		WIRED_CONFIGURE_HOST_TEST(ral_material_stage_gpu_test ral_material_stage_gpu_contract)
+		ADD_EXECUTABLE(ral_sky_material_gpu_test tests/ral_sky_material_gpu_test.mm)
+		TARGET_INCLUDE_DIRECTORIES(ral_sky_material_gpu_test PRIVATE code/qcommon)
+		TARGET_LINK_LIBRARIES(ral_sky_material_gpu_test PRIVATE "-framework Foundation" "-framework Metal")
+		TARGET_COMPILE_OPTIONS(ral_sky_material_gpu_test PRIVATE -Wall -Wextra -Werror -fobjc-arc)
+		ADD_TEST(NAME ral_sky_material_gpu_contract COMMAND ral_sky_material_gpu_test
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/shaders/portable/ral_sky_material_frag_spv.msl
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/shaders/portable/ral_opengl_product_vert_spv.msl)
+		SET_TESTS_PROPERTIES(ral_sky_material_gpu_contract PROPERTIES
+			LABELS "host-only;subsystem;owner.ral;owner.renderer;failure.contract;backend.metal" TIMEOUT 60)
+		WIRED_CONFIGURE_HOST_TEST(ral_sky_material_gpu_test ral_sky_material_gpu_contract)
+	ELSE()
+		MESSAGE(STATUS "Material stage GPU portability test unavailable: glslangValidator not found")
+	ENDIF()
+ENDIF()
+
 # GL2: stringify is a host tool, not a library source — remove it from the list
 LIST(REMOVE_ITEM RENDERER_GL2_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/code/renderer2/stringify.c)
 
@@ -6770,7 +7683,7 @@ IF(USE_RENDERER_DLOPEN)
 	ADD_LIBRARY(${RENDERER_PREFIX}_vulkan${RENDEXT} SHARED ${RENDERER_VK_SRCS} ${RENDERER_COMMON_SRCS} ${AUX_SRCS})
 	TARGET_COMPILE_DEFINITIONS(${RENDERER_PREFIX}_vulkan${RENDEXT} PRIVATE USE_RENDERER_DLOPEN)
 	TARGET_INCLUDE_DIRECTORIES(${RENDERER_PREFIX}_vulkan${RENDEXT} PRIVATE
-		code/qcommon code/tools/lighting_cook)
+		code/qcommon code/tools/lighting_cook code/tools/material_cook)
 	SET_TARGET_PROPERTIES(${RENDERER_PREFIX}_vulkan${RENDEXT} PROPERTIES PREFIX "")
 	# Emit a linker map file alongside the DLL — includes every symbol (static
 	# functions, compiler-generated helpers, etc.) with its VMA. Built-in
@@ -6907,19 +7820,23 @@ IF(APPLE AND USE_RENDERER_DLOPEN)
 		FIND_LIBRARY(WIRED_QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
 		FIND_LIBRARY(WIRED_COREGRAPHICS_FRAMEWORK CoreGraphics REQUIRED)
 		ADD_LIBRARY(ral_metal STATIC
+			code/render/ral/core/ral_sampler.c
 			code/render/ral/backends/metal/ral_metal_core.mm
 			code/render/ral/backends/metal/ral_metal_lighting.mm
 			code/render/ral/backends/metal/ral_metal_bind_group.mm
 			code/render/ral/backends/metal/ral_metal_render.mm
 			code/render/ral/backends/metal/ral_metal_pipeline.mm
 			code/render/ral/backends/metal/ral_metal_draw.mm
+			code/render/ral/backends/metal/ral_metal_exposure.mm
 			code/render/ral/backends/metal/ral_metal_present.mm
+			code/render/frontend/render_material_runtime_catalog.c
 			code/render/frontend/render_submission_material.c
 			code/render/frontend/render_submission_model.c
 			code/render/frontend/render_submission_ui.c
 			code/render/frontend/render_submission_world.c
 			code/render/ral/core/ral_allocation.c
 			code/render/ral/core/ral_atmosphere.c
+			code/render/ral/core/ral_sky_radiance.c
 			code/render/ral/core/ral_lighting.c
 			code/render/ral/core/ral_static_lighting.c
 			code/render/ral/core/ral_lighting_cook.c
@@ -6945,7 +7862,9 @@ IF(APPLE AND USE_RENDERER_DLOPEN)
 			code/render/ral/core/ral_frame_shell.c
 			code/render/ral/core/ral_material.c
 			code/render/ral/core/ral_material_source.c
+			code/render/ral/core/ral_material_cook.c
 			code/render/ral/core/ral_material_proxy.c
+			code/render/ral/core/ral_material_proxy_lower.c
 			code/render/ral/core/ral_material_reload.c
 			code/render/ral/core/ral_material_runtime.c
 			code/render/ral/core/ral_planar_water.c
@@ -6990,6 +7909,7 @@ IF(APPLE AND USE_RENDERER_DLOPEN)
 	ENDIF()
 	ADD_LIBRARY(${RENDERER_PREFIX}_metal${RENDEXT} SHARED
 		code/tools/lighting_cook/lighting_cook_fs.c
+		${RENDERER_MATERIAL_PROJECT_COOK_SRCS}
 		code/render/ral/backends/metal/ral_metal_module.mm
 		code/render/frontend/render_lighting_project_cook.c
 		code/render/frontend/render_lighting_project_source.c
@@ -7013,7 +7933,7 @@ IF(APPLE AND USE_RENDERER_DLOPEN)
 		PROPERTIES LANGUAGE C)
 	TARGET_INCLUDE_DIRECTORIES(${RENDERER_PREFIX}_metal${RENDEXT} PRIVATE
 		code/qcommon code/render/ral/core code/render/ral/backends/metal
-		code/render/frontend code/sdl code/tools/lighting_cook)
+		code/render/frontend code/sdl code/tools/lighting_cook code/tools/material_cook)
 	TARGET_LINK_LIBRARIES(${RENDERER_PREFIX}_metal${RENDEXT} PRIVATE ral_metal)
 	TARGET_COMPILE_DEFINITIONS(${RENDERER_PREFIX}_metal${RENDEXT} PRIVATE
 		USE_RENDERER_DLOPEN)
@@ -7061,6 +7981,8 @@ IF(APPLE AND USE_RENDERER_DLOPEN)
 		code/render/frontend/render_material_script.c
 		code/render/frontend/render_material_script_lighting.c
 		code/render/ral/core/ral_material_source.c
+		code/render/ral/core/ral_texture_asset.c
+		code/render/ral/core/ral_texture_cache.c
 		code/render/frontend/render_lighting_sidecar.c
 		code/render/frontend/render_lighting_metadata.c
 		code/qcommon/wired/entity/metadata.c
@@ -7068,7 +7990,8 @@ IF(APPLE AND USE_RENDERER_DLOPEN)
 		code/render/ral/core/ral_static_lighting.c
 		code/render/ral/core/ral_lighting_artifact.c
 		code/render/ral/core/ral_irradiance_runtime.c
-		code/render/ral/core/ral_lighting_composition.c)
+		code/render/ral/core/ral_lighting_composition.c
+		code/render/ral/core/ral_atmosphere.c)
 		TARGET_INCLUDE_DIRECTORIES(render_submission_test PRIVATE
 			code/qcommon code/render/frontend code/render/ral/core)
 		TARGET_COMPILE_OPTIONS(render_submission_test PRIVATE -Wall -Wextra -Werror)
@@ -7093,6 +8016,7 @@ IF(APPLE AND USE_RENDERER_DLOPEN)
 			code/render/frontend/render_submission_world.c
 			code/qcommon/wired/entity/metadata.c
 			code/render/ral/core/ral_lighting.c
+			code/render/ral/core/ral_atmosphere.c
 			code/render/ral/core/ral_lighting_product.c
 			code/render/ral/core/ral_irradiance_product.c
 			code/render/ral/core/ral_lighting_bake.c
@@ -7104,7 +8028,9 @@ IF(APPLE AND USE_RENDERER_DLOPEN)
 			code/render/ral/core/ral_static_lighting.c
 			code/render/ral/core/ral_lighting_artifact.c
 			code/render/ral/core/ral_irradiance_runtime.c
-			code/render/ral/core/ral_lighting_composition.c)
+			code/render/ral/core/ral_lighting_composition.c
+			code/render/ral/core/ral_texture_asset.c
+			code/render/ral/core/ral_texture_cache.c)
 		TARGET_INCLUDE_DIRECTORIES(render_lighting_project_source_test PRIVATE
 			code/qcommon code/render/frontend code/render/ral/core
 			code/tools/lighting_cook)
@@ -7312,6 +8238,72 @@ IF(USE_LUA)
 	)
 	WIRED_CONFIGURE_HOST_TEST(wired_scene_test wired_scene)
 
+	# Wired-owned material declarations use Lua only at load/cook time. This
+	# frontend marshals a trusted table into the same pointer-free source IR as
+	# the external Q3 .shader importer; the RAL core and frame loop remain Lua-free.
+	ADD_LIBRARY(render_material_lua_frontend STATIC
+		code/render/frontend/render_material_lua.c)
+	TARGET_INCLUDE_DIRECTORIES(render_material_lua_frontend PUBLIC
+		code/qcommon code/render/frontend code/render/ral/core ${LUAJIT_DIR}/src)
+	TARGET_LINK_LIBRARIES(render_material_lua_frontend PUBLIC luajit)
+	TARGET_COMPILE_OPTIONS(render_material_lua_frontend PRIVATE -Wall -Wextra -Werror)
+	ADD_LIBRARY(render_material_vfs_frontend STATIC
+		code/render/frontend/render_material_vfs.c)
+	TARGET_INCLUDE_DIRECTORIES(render_material_vfs_frontend PUBLIC
+		code/qcommon code/render/frontend code/render/ral/core ${LUAJIT_DIR}/src)
+	TARGET_LINK_LIBRARIES(render_material_vfs_frontend PUBLIC
+		render_material_lua_frontend)
+	TARGET_COMPILE_OPTIONS(render_material_vfs_frontend PRIVATE -Wall -Wextra -Werror)
+	ADD_EXECUTABLE(render_material_lua_test
+		tests/render_material_lua_test.c
+		code/render/ral/core/ral_texture_asset.c
+		code/render/ral/core/ral_texture_cache.c
+		code/render/ral/core/ral_material.c
+		code/render/ral/core/ral_material_source.c
+		code/render/ral/core/ral_material_proxy.c
+		code/render/ral/core/ral_material_proxy_lower.c)
+	TARGET_INCLUDE_DIRECTORIES(render_material_lua_test PRIVATE
+		code/qcommon code/render/frontend code/render/ral/core ${LUAJIT_DIR}/src)
+	TARGET_LINK_LIBRARIES(render_material_lua_test PRIVATE
+		render_material_lua_frontend)
+	IF(NOT WIN32)
+		TARGET_LINK_LIBRARIES(render_material_lua_test PRIVATE m dl pthread)
+	ENDIF()
+	TARGET_COMPILE_OPTIONS(render_material_lua_test PRIVATE -Wall -Wextra -Werror)
+	ADD_TEST(NAME render_material_lua_contract COMMAND render_material_lua_test)
+	SET_TESTS_PROPERTIES(render_material_lua_contract PROPERTIES
+		LABELS "host-only;subsystem;owner.material;owner.ral;failure.contract;feature.lua"
+		TIMEOUT 30)
+	WIRED_CONFIGURE_HOST_TEST(render_material_lua_test render_material_lua_contract)
+	ADD_EXECUTABLE(render_material_vfs_test
+		tests/render_material_vfs_test.c
+		code/render/ral/core/ral_material_source.c)
+	TARGET_INCLUDE_DIRECTORIES(render_material_vfs_test PRIVATE
+		code/qcommon code/render/frontend code/render/ral/core ${LUAJIT_DIR}/src)
+	TARGET_LINK_LIBRARIES(render_material_vfs_test PRIVATE
+		render_material_vfs_frontend)
+	IF(NOT WIN32)
+		TARGET_LINK_LIBRARIES(render_material_vfs_test PRIVATE m dl pthread)
+	ENDIF()
+	TARGET_COMPILE_OPTIONS(render_material_vfs_test PRIVATE -Wall -Wextra -Werror)
+	ADD_TEST(NAME render_material_vfs_contract COMMAND render_material_vfs_test)
+	SET_TESTS_PROPERTIES(render_material_vfs_contract PROPERTIES
+		LABELS "host-only;subsystem;owner.material;owner.ral;owner.vfs;failure.contract;feature.lua"
+		TIMEOUT 30)
+	WIRED_CONFIGURE_HOST_TEST(render_material_vfs_test render_material_vfs_contract)
+	ADD_TEST(NAME render_material_vfs_source_policy_contract
+		COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+			-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/render_material_vfs_policy_check.cmake)
+	SET_TESTS_PROPERTIES(render_material_vfs_source_policy_contract PROPERTIES
+		LABELS "host-only;infrastructure;owner.material;owner.ral;owner.vfs;failure.contract;feature.lua"
+		TIMEOUT 30)
+	ADD_TEST(NAME render_material_lua_source_policy_contract
+		COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+			-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/render_material_lua_policy_check.cmake)
+	SET_TESTS_PROPERTIES(render_material_lua_source_policy_contract PROPERTIES
+		LABELS "host-only;infrastructure;owner.material;owner.ral;failure.contract;feature.lua"
+		TIMEOUT 30)
+
 	# WiredFX Lua authoring compiles one trusted System-VM table into the
 	# pointer-free profile ABI. Runtime scheduling and backend dispatch never
 	# retain lua_State or expose raw Lua across the native/WASM boundary.
@@ -7395,7 +8387,10 @@ IF(WIRED_EMCC_EXECUTABLE)
 		"(^|/)code/qcommon/wired/net/|(^|/)src/libs/picoquic/|(^|/)src/libs/picotls/|(^|/)src/libs/mpack/")
 	LIST(APPEND WIRED_WEB_FULL_CLIENT_SOURCES
 		code/qcommon/wired/net/wn_transport.c
-		code/qcommon/wired/net/wn_inmem.c)
+		code/qcommon/wired/net/wn_inmem.c
+		# App/Level-owned material runtime owner is removed from the shared
+		# renderer list and added per host; the browser client hosts it too.
+		code/render/frontend/render_material_runtime_owner.c)
 	LIST(FILTER WIRED_WEB_FULL_CLIENT_SOURCES EXCLUDE REGEX
 		"(^|/)code/qcommon/nav/nav_impl\\.cpp$")
 	# LuaJIT has no wasm32 VM backend. Keep raw lua_* ABI out of W0 and route
@@ -7438,6 +8433,7 @@ IF(WIRED_EMCC_EXECUTABLE)
 			-I${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend
 			-I${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core
 			-I${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu
+			-I${RAL_WEBGPU_SKY_SHADER_DIR}
 			-I${CMAKE_CURRENT_SOURCE_DIR}/code/web
 			-I${CMAKE_CURRENT_SOURCE_DIR}/code/client/wired/ui
 			-I${CMAKE_CURRENT_SOURCE_DIR}/code/client/wired/hud
@@ -7446,9 +8442,9 @@ IF(WIRED_EMCC_EXECUTABLE)
 			-I${CMAKE_CURRENT_SOURCE_DIR}/src/libs/lz4
 			-I${CMAKE_CURRENT_SOURCE_DIR}/src/libs/zlib-ng
 			-I${CMAKE_BINARY_DIR}/src/libs/zlib-ng
-			-I${CMAKE_CURRENT_SOURCE_DIR}/src/libs/libjpeg-turbo/src
-			-I${CMAKE_CURRENT_SOURCE_DIR}/src/libs/libjpeg-turbo
-			-I${CMAKE_BINARY_DIR}/src/libs/libjpeg-turbo
+			# JPEG comes from the Emscripten port (-sUSE_LIBJPEG=1); the native
+			# libjpeg-turbo headers must not shadow it or jpeg_CreateDecompress
+			# rejects the library version ("library is 90, caller expects 62").
 			-I${CMAKE_CURRENT_SOURCE_DIR}/src/libs/ogg/include
 			-I${CMAKE_CURRENT_SOURCE_DIR}/src/libs/opus/include
 			-I${CMAKE_CURRENT_SOURCE_DIR}/src/libs/opus/include/opus
@@ -7481,6 +8477,7 @@ IF(WIRED_EMCC_EXECUTABLE)
 			"-sEXPORTED_FUNCTIONS=['___stack_pointer','___errno_location','_stderr','___assert_fail','_acos','_atan2','_atan2f','_atof','_atoi','_cos','_cosf','_exit','_fiprintf','_qsort','_rand','_sin','_sinf','_snprintf','_srand','_sscanf','_strcat','_strchr','_strcmp','_strcpy','_strlen','_strncmp','_strncpy','_strrchr','_strstr','_strtof','_strtok','_strtol','_tan','_tolower','_toupper','_vsnprintf','_WiredWeb_ClientStart','_WiredWeb_ClientFrame','_WiredWeb_ClientShutdown','_WiredWeb_ClientStatus','_WiredWeb_ClientPresentationChanged','_WiredWeb_ContentProbe','_WiredWeb_ArenaReceiptProbe','_WiredWeb_AuthoredReceiptProbe','_WiredWeb_UiTextReceiptProbe','_WiredWeb_UiMenuReceiptProbe','_WiredWeb_UiHudReceiptProbe','_WiredWeb_UiHudExtentProbe','_WiredWeb_UiEnableServerFixture','_WiredWeb_UiServerReceiptProbe','_WiredWeb_UiServerRowCenterProbe','_WiredWeb_UiServerP99MicrosProbe','_WiredWeb_UiLayerReceiptProbe','_WiredWeb_UiActivateLayerFixture','_WiredWeb_UiRootCount','_WiredWeb_UiActivateRoot','_WiredWeb_UiRootReceiptProbe','_WiredWeb_InputKey','_WiredWeb_InputBrowserKey','_WiredWeb_InputChar','_WiredWeb_InputMouse','_WiredWeb_InputPointer','_WiredWeb_InputWheel','_RalWebGpu_BrowserModuleStart','_RalWebGpu_BrowserModulePoll','_RalWebGpu_BrowserModuleResize','_RalWebGpu_BrowserModuleStop','_GetRefAPI','_WiredWebGpu_RendererPoll','_WiredWebGpu_RendererResize','_WiredWebGpu_RendererFailureStage']"
 			"-sEXPORTED_RUNTIME_METHODS=['FS','wasmMemory']"
 			-o ${CMAKE_BINARY_DIR}/wired_web_client.mjs
+		DEPENDS ral_webgpu_sky_shaders
 		VERBATIM)
 ELSE()
 	ADD_CUSTOM_TARGET(wired_web_full_client_wasm_module
