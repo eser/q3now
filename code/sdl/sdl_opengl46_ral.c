@@ -121,7 +121,7 @@ static wiredSdlOpenGl46Status_t OpenNative( wiredSdlOpenGl46_t *adapter ) {
 	wiredSdlOpenGl46Receipt_t receipt;
 	ralOpenGlCoreCreateInfo_t coreInfo;
 	uint64_t adapterGeneration, ownerGeneration, surfaceGeneration;
-	int actualMajor = 0, actualMinor = 0, actualProfile = 0;
+	int actualMajor = 0, actualMinor = 0, actualProfile = 0, actualSrgb = 0;
 	SDL_WindowFlags flags = SDL_WINDOW_OPENGL | SDL_WINDOW_HIGH_PIXEL_DENSITY;
 	if ( !adapter || !NextGeneration( adapter, &adapterGeneration )
 			|| !NextGeneration( adapter, &ownerGeneration )
@@ -141,6 +141,7 @@ static wiredSdlOpenGl46Status_t OpenNative( wiredSdlOpenGl46_t *adapter ) {
 			|| !SDL_GL_SetAttribute( SDL_GL_CONTEXT_FLAGS,
 				SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG )
 			|| !SDL_GL_SetAttribute( SDL_GL_DOUBLEBUFFER, 1 )
+			|| !SDL_GL_SetAttribute( SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, 1 )
 			|| !SDL_GL_SetAttribute( SDL_GL_DEPTH_SIZE, 24 )
 			|| !SDL_GL_SetAttribute( SDL_GL_STENCIL_SIZE, 8 ) ) goto fail;
 	adapter->window = SDL_CreateWindow( "Wired OpenGL 4.6 RAL",
@@ -152,6 +153,8 @@ static wiredSdlOpenGl46Status_t OpenNative( wiredSdlOpenGl46_t *adapter ) {
 			|| !SDL_GL_GetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION, &actualMajor )
 			|| !SDL_GL_GetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, &actualMinor )
 			|| !SDL_GL_GetAttribute( SDL_GL_CONTEXT_PROFILE_MASK, &actualProfile )
+			|| !SDL_GL_GetAttribute( SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, &actualSrgb )
+			|| !actualSrgb
 			|| actualMajor != 4 || actualMinor < 6
 			|| !( actualProfile & SDL_GL_CONTEXT_PROFILE_CORE ) ) goto fail;
 	memset( &coreInfo, 0, sizeof( coreInfo ) );

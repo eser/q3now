@@ -73,9 +73,15 @@ int main( void ) {
 		&& exports->BeginRegistration && exports->BeginFrame && exports->EndFrame
 		&& exports->RegisterModel && exports->RegisterShader
 		&& exports->RenderScene && exports->DrawStretchPic
+		&& exports->WorldContentIdentity
+		&& exports->AddLensSourceToScene && exports->GetLensVisibility
 		&& exports->CookLightingProject
 		&& !exports->CookLightingProject( "/tmp" ) );
 	CHECK( getRefApi( REF_API_VERSION, &imports ) == NULL );
+	{
+		float visibility = -7.0f;
+		CHECK( !exports->GetLensVisibility( 7, &visibility ) && visibility == -7.0f );
+	}
 	memset( &receipt, 0x5a, sizeof( receipt ) );
 	before = receipt;
 	CHECK( !getFrameReceipt( &receipt )

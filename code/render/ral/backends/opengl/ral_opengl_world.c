@@ -2,7 +2,10 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "ral_opengl_world.h"
+#include "ral_beam_geometry.h"
 #include "ral_opengl_internal.h"
+#include "render_material_stage_gpu.h"
+#include "render_material_script.h"
 
 #include <limits.h>
 #include <math.h>
@@ -51,6 +54,7 @@ enum {
 	GL_SRC_ALPHA_VALUE = 0x0302,
 	GL_ONE_MINUS_SRC_ALPHA_VALUE = 0x0303,
 	GL_UNIFORM_BUFFER_VALUE = 0x8a11,
+	PRODUCT_MATERIAL_UNIFORM_BINDING = 2,
 	GL_SHADER_STORAGE_BUFFER_VALUE = 0x90d2,
 	GL_DYNAMIC_STORAGE_BIT_VALUE = 0x0100
 };
@@ -161,15 +165,31 @@ typedef struct {
 	float viewportAlpha[4];
 	float atmosphereEyeDensity[4];
 	float atmosphereColorVisibility[4];
-	float atmosphereHeightCloud[4];
+	/* base height, falloff, physical-sky blend weight, sky-surface flag */
+	float atmosphereHeightSky[4];
 	uint32_t atmosphereFroxelGrid[4];
 	float localSh[4][4];
 	uint32_t staticLighting[4];
 	float emissiveRadiance[4];
 } productDrawUniforms_t;
 
+typedef struct {
+	float startColor[4], endColor[4], scaleOffset[4];
+	uint32_t flags[4];
+} productBeamParams_t;
+
+typedef struct {
+	float materialBaseColor[4];
+	/* metallic, roughness, occlusion strength, previous-to-current blend;
+	 * metallic < 0 means that no cooked factor cohort is published. */
+	float materialFactors[4];
+	productBeamParams_t beam;
+} productMaterialUniforms_t;
+
 typedef char productDrawUniformsMustMatchStd140[
 	sizeof( productDrawUniforms_t ) == 256u ? 1 : -1];
+typedef char productMaterialUniformsMustMatchStd140[
+	sizeof( productMaterialUniforms_t ) == 96u ? 1 : -1];
 
 static qboolean LoadDispatch( const ralOpenGlCore_t *core,
 		worldDispatch_t *gl ) {
@@ -219,11 +239,22 @@ static qboolean ReceiptValid( const ralOpenGlWorldReceipt_t *receipt ) {
 		&& receipt->backendType == RAL_BACKEND_OPENGL
 		&& receipt->coreGeneration && receipt->generation
 		&& receipt->frontendFrameDigest && receipt->loweringDigest
+		&& receipt->effectBeamStageDrawCount >= receipt->effectBeamDrawCount
+		&& receipt->effectBeamStageDrawCount <= receipt->effectBeamDrawCount * RENDER_MATERIAL_MAX_STAGES
 		&& receipt->localIrradianceEntityCount
 			<= receipt->modelEntityCount + receipt->primitiveEntityCount
 		&& receipt->localIrradianceDrawCount <= receipt->entityDrawCount
 		&& receipt->legacyLightmapDrawCount + receipt->directionalStaticDrawCount
-			<= receipt->worldDrawCount
+			<= receipt->worldDrawCount + receipt->distantWorldDrawCount
+		&& receipt->distantWorldDrawCount <= RAL_SKY_DISTANT_MAX_VISIBLE_DRAWS
+		&& ( receipt->distantWorldDrawCount
+			? receipt->uploadedDistantWorldVertexCount > 0u
+				&& receipt->uploadedDistantWorldIndexCount > 0u
+				&& receipt->distantWorldCandidateCount
+					>= receipt->distantWorldDrawCount
+			: !receipt->uploadedDistantWorldVertexCount
+				&& !receipt->uploadedDistantWorldIndexCount
+				&& !receipt->distantWorldCandidateCount )
 		&& ( ( receipt->legacyLightmapDrawCount
 			|| receipt->directionalStaticDrawCount )
 			? receipt->surfaceLightingBindingDigest != 0u
@@ -242,6 +273,9 @@ static glName_t MaterialTexture( const renderSubmissionState_t *frontend,
 		const glName_t *textures, qhandle_t handle ) {
 	for ( uint32_t i = 0u; i < frontend->materialCount; ++i )
 		if ( frontend->materials[i].snapshot.handle == handle ) return textures[i];
+	for ( uint32_t i = 0u; i < frontend->stageTextureCount; ++i )
+		if ( frontend->stageTextures[i].snapshot.handle == handle )
+			return textures[frontend->materialCount + i];
 	return 0u;
 }
 
@@ -272,12 +306,18 @@ static void UploadProductDraw( const worldDispatch_t *gl,
 }
 
 static void ApplyRaster( const worldDispatch_t *gl, glName_t uniformBuffer,
-		productDrawUniforms_t *uniforms,
+		glName_t materialUniformBuffer,
+		productDrawUniforms_t *uniforms, const productBeamParams_t *beamParams,
 		renderAlphaMode_t alpha, float alphaCutoff, qboolean depthWrite,
-		qboolean hasLightmap, const renderEntityCommand_t *entityCommand,
+		qboolean hasLightmap, qboolean skySurface,
+		const renderEntityCommand_t *entityCommand,
 		const ralLightingSurfaceBindingReceipt_t *surfaceLighting,
 		const ralLightingRuntimePlan_t *lightingPlan,
-		const float emissiveRadiance[4] ) {
+		const float emissiveRadiance[4],
+		const renderMaterialFactorsSnapshot_t *materialFactors,
+		float environmentBlend ) {
+	productMaterialUniforms_t materialUniforms = { 0 };
+	if (beamParams) materialUniforms.beam = *beamParams;
 	gl->Disable( GL_CULL_FACE_VALUE );
 	if ( alpha == RENDER_ALPHA_BLEND ) {
 		gl->Enable( GL_BLEND_VALUE );
@@ -291,6 +331,7 @@ static void ApplyRaster( const worldDispatch_t *gl, glName_t uniformBuffer,
 	} else gl->Disable( GL_BLEND_VALUE );
 	gl->DepthMask( depthWrite ? 1u : 0u );
 	uniforms->projectionLightmap[3] = hasLightmap ? 1.0f : 0.0f;
+	uniforms->atmosphereHeightSky[3] = skySurface ? 1.0f : 0.0f;
 	memset( uniforms->staticLighting, 0, sizeof( uniforms->staticLighting ) );
 	if ( surfaceLighting ) {
 		if ( surfaceLighting->directionalStaticBound && lightingPlan ) {
@@ -320,6 +361,25 @@ static void ApplyRaster( const worldDispatch_t *gl, glName_t uniformBuffer,
 			sizeof( uniforms->emissiveRadiance ) );
 	else memset( uniforms->emissiveRadiance, 0,
 		sizeof( uniforms->emissiveRadiance ) );
+	materialUniforms.materialBaseColor[0] = materialUniforms.materialBaseColor[1] =
+		materialUniforms.materialBaseColor[2] =
+		materialUniforms.materialBaseColor[3] = 1.0f;
+	materialUniforms.materialFactors[0] = -1.0f;
+	materialUniforms.materialFactors[1] = 1.0f;
+	materialUniforms.materialFactors[2] = 1.0f;
+	materialUniforms.materialFactors[3] = 1.0f;
+	if ( materialFactors && materialFactors->ready == qtrue ) {
+		memcpy( materialUniforms.materialBaseColor,
+			materialFactors->factors.baseColor,
+			sizeof( materialUniforms.materialBaseColor ) );
+		materialUniforms.materialFactors[0] = materialFactors->factors.metallic;
+		materialUniforms.materialFactors[1] = materialFactors->factors.roughness;
+		materialUniforms.materialFactors[2] =
+			materialFactors->factors.occlusionStrength;
+		materialUniforms.materialFactors[3] = environmentBlend;
+	}
+	gl->NamedBufferSubData( materialUniformBuffer, 0,
+		(glSizePtr_t)sizeof( materialUniforms ), &materialUniforms );
 	UploadProductDraw( gl, uniformBuffer, uniforms );
 }
 
@@ -364,40 +424,206 @@ static qboolean ApplyWorldView( productDrawUniforms_t *uniforms,
 	return qtrue;
 }
 
+qboolean RalOpenGl_WorldProjectLens( const renderWorldSnapshot_t *view,
+		const float origin[3], uint32_t outputHeight, float projected[3], float *radiusScale ) {
+	productDrawUniforms_t uniforms;
+	float delta[3], forward, point[3], radius;
+	if ( !origin || !projected || !radiusScale || !outputHeight ) return qfalse;
+	memset( &uniforms, 0, sizeof( uniforms ) );
+	if ( !ApplyWorldView( &uniforms, view ) ) return qfalse;
+	for ( uint32_t i = 0; i < 3u; ++i ) delta[i] = origin[i] - view->viewOrigin[i];
+	forward = DotProduct( delta, view->viewAxis[0] );
+	/* World vertex shader: clip.z = forward - near; clip.w = forward.
+	 * GL's default [-1,1] NDC maps to [0,1] window depth after division. */
+	if ( !isfinite( forward ) || forward <= uniforms.projectionLightmap[2] * 0.5f ) return qfalse;
+	point[0] = 0.5f - 0.5f * DotProduct( delta, view->viewAxis[1] )
+		* uniforms.projectionLightmap[0] / forward;
+	point[1] = 0.5f + 0.5f * DotProduct( delta, view->viewAxis[2] )
+		* uniforms.projectionLightmap[1] / forward;
+	point[2] = 1.0f - 0.5f * uniforms.projectionLightmap[2] / forward;
+	radius = 0.5f * outputHeight * uniforms.projectionLightmap[1] / forward;
+	if ( !isfinite( point[0] ) || !isfinite( point[1] ) || !isfinite( point[2] )
+			|| !isfinite( radius ) ) return qfalse;
+	memcpy( projected, point, sizeof( point ) );
+	*radiusScale = radius;
+	return qtrue;
+}
+
 static qboolean ApplyAtmosphere( productDrawUniforms_t *uniforms,
 		const renderSubmissionState_t *frontend,
 		const ralOpenGlWorldLowerInfo_t *info ) {
 	renderAtmosphereSnapshot_t snapshot;
+	ralSkySurfaceReceipt_t skySurface;
 	const atmosphereEmitter_t *emitters;
-	float sunWeight, lightning;
+	float cloudTransmission, lightning;
 	if ( !uniforms || !frontend || !info
 			|| !RenderSubmission_AtmosphereSnapshot( frontend, &snapshot,
 				&emitters ) ) return qfalse;
 	(void)emitters;
 	memcpy( uniforms->atmosphereEyeDensity, uniforms->viewOriginDrawSpace,
 		3u * sizeof( float ) );
+	if ( info->atmosphere.skyEnvironment.schemaVersion != 0u ) {
+		if ( !Ral_SkySurfacePlan( &info->atmosphere.skyEnvironment,
+				info->physicalSkyTextureName ? qtrue : qfalse,
+				&skySurface ) ) return qfalse;
+		uniforms->atmosphereHeightSky[2] = skySurface.physicalBlend;
+	}
 	if ( !snapshot.active
 			|| snapshot.state.qualityTier < ATMOSPHERE_QUALITY_ANALYTIC )
 		return qtrue;
 	uniforms->atmosphereEyeDensity[3] = snapshot.state.mediaDensity;
 	uniforms->atmosphereColorVisibility[3] = snapshot.state.visibility;
-	sunWeight = snapshot.state.sunIntensity * ( 1.0f
-		- snapshot.state.cloudCover * snapshot.state.cloudShadow );
+	cloudTransmission = 1.0f - snapshot.state.cloudCover
+		* info->atmosphere.skyEnvironment.cloudSunOcclusion;
 	lightning = snapshot.state.lightning;
 	for ( uint32_t channel = 0u; channel < 3u; ++channel )
 		uniforms->atmosphereColorVisibility[channel] = fminf( 16.0f,
-			snapshot.state.ambientColor[channel]
-			+ 0.08f * sunWeight + lightning );
-	uniforms->atmosphereHeightCloud[0] = snapshot.state.bounds[2];
-	uniforms->atmosphereHeightCloud[1] = snapshot.state.mediaHeightFalloff;
-	uniforms->atmosphereHeightCloud[2] = snapshot.state.cloudCover;
-	uniforms->atmosphereHeightCloud[3] = snapshot.state.cloudShadow;
+			info->atmosphere.skyEnvironment.ambientSh[channel]
+			+ 0.08f * info->atmosphere.skyEnvironment.sunRadiance[channel]
+				* cloudTransmission + lightning );
+	uniforms->atmosphereHeightSky[0] = snapshot.state.bounds[2];
+	uniforms->atmosphereHeightSky[1] = snapshot.state.mediaHeightFalloff;
 	if ( info->atmosphere.selectedTier == RAL_ATMOSPHERE_TIER_FULL ) {
+		/* FULL uses the same logarithmic range as EncodeAtmosphere; visibility
+		 * zero means an unbounded authored visibility, not a 4-unit grid. */
+		uniforms->atmosphereColorVisibility[3] = wired_atmosphere_grid_far( snapshot.state.visibility );
 		uniforms->atmosphereFroxelGrid[0] = info->atmosphere.froxelWidth;
 		uniforms->atmosphereFroxelGrid[1] = info->atmosphere.froxelHeight;
 		uniforms->atmosphereFroxelGrid[2] = info->atmosphere.froxelDepth;
 		uniforms->atmosphereFroxelGrid[3] = 0u;
+	} else if ( info->aerialHaze > 0.0f && info->skyRadianceConsumer.ready ) {
+		/* Aerial-perspective haze for the analytic tier: sun direction (snorm8
+		 * xyz) and weight (unorm8, top byte) ride the froxel arena offset,
+		 * which only the FULL tier consumes; keeps the 256-byte draw ABI. */
+		const float *sun = info->atmosphere.skyEnvironment.sunDirection;
+		uint32_t packed = 0u;
+		for ( uint32_t axis = 0u; axis < 3u; ++axis ) {
+			float clamped = fminf( 1.0f, fmaxf( -1.0f, sun[axis] ) );
+			int32_t snorm = (int32_t)lroundf( clamped * 127.0f );
+			packed |= ( (uint32_t)snorm & 0xffu ) << ( 8u * axis );
+		}
+		packed |= (uint32_t)lroundf( fminf( 1.0f, info->aerialHaze ) * 255.0f ) << 24u;
+		uniforms->atmosphereFroxelGrid[3] = packed;
 	}
+	return qtrue;
+}
+
+static qboolean DrawSkyBatch( const worldDispatch_t *gl,
+		glName_t uniformBuffer, glName_t materialUniformBuffer,
+		productDrawUniforms_t *uniforms,
+		const renderSubmissionState_t *frontend, const glName_t *textures,
+		const ralOpenGlWorldLowerInfo_t *info, const renderWorldBatch_t *batch,
+		const renderMaterialSnapshot_t *material ) {
+	renderSkyMaterialGpuParams_t params = { 0 };
+	glName_t images[8];
+	qhandle_t handles[RENDER_MATERIAL_MAX_STAGES];
+	const glName_t owner = MaterialTexture( frontend, textures, batch->baseMaterial );
+	if ( !info->skyProgramName || !owner
+			|| !wired_sky_material_pack(material, batch->lightmapMaterial,
+				frontend->worldSnapshot.timeMs, &params, handles) ) return qfalse;
+	for ( uint32_t i = 0u; i < RENDER_MATERIAL_MAX_STAGES; ++i ) {
+		images[i] = MaterialTexture(frontend, textures, handles[i]);
+		if (!images[i]) return qfalse;
+	}
+	ApplyRaster( gl, uniformBuffer, materialUniformBuffer, uniforms, NULL,
+		RENDER_ALPHA_OPAQUE, 0.0f, qfalse, qfalse, qtrue,
+		NULL, NULL, NULL, NULL, NULL, 0.0f );
+	gl->NamedBufferSubData( materialUniformBuffer, 0, sizeof( params ), &params );
+	for ( uint32_t i = 0u; i < 8u; ++i ) gl->BindTextureUnit( i, images[i] );
+	gl->BindTextureUnit( 8u, owner );
+	gl->BindTextureUnit( 9u, info->physicalSkyTextureName );
+	gl->UseProgram( info->skyProgramName );
+	gl->DrawElements( GL_TRIANGLES_VALUE, (glSize_t)batch->indexCount,
+		GL_UNSIGNED_INT_VALUE, (const void *)(uintptr_t)(batch->firstIndex * sizeof(uint32_t)) );
+	// Restore the product's global inputs; later world/entity/FX draws own 0..4.
+	gl->UseProgram( info->programName );
+	gl->BindTextureUnit( 5u, info->physicalSkyTextureName );
+	gl->BindTextureUnit( 6u, info->currentSkyRadianceTextureName );
+	gl->BindTextureUnit( 7u, info->previousSkyRadianceTextureName );
+	gl->BindTextureUnit( 8u, info->currentSkyIrradianceTextureName );
+	gl->BindTextureUnit( 9u, info->previousSkyIrradianceTextureName );
+	return qtrue;
+}
+
+static qboolean DrawWorldBatch( const worldDispatch_t *gl,
+		glName_t uniformBuffer, glName_t materialUniformBuffer,
+		productDrawUniforms_t *uniforms,
+		const renderSubmissionState_t *frontend, const glName_t *textures,
+		const ralOpenGlWorldLowerInfo_t *info,
+		const renderWorldBatch_t *batch,
+		ralOpenGlWorldReceipt_t *receipt ) {
+	renderMaterialSnapshot_t materialSnapshot;
+	float emissiveRadiance[4];
+	ralLightingSurfaceBindingReceipt_t surfaceLighting;
+	ralLightingSurfaceBindingRequest_t bindingRequest;
+	const ralLightingRuntimePlan_t *lightingPlan = info->directionalLighting
+		? &info->directionalLighting->plan : NULL;
+	const ralLightingSurfaceBindingReceipt_t *binding = NULL;
+	if ( !gl || !uniforms || !frontend || !textures || !info || !batch
+			|| !receipt || !MaterialEmission( frontend, batch->baseMaterial,
+				emissiveRadiance ) ) return qfalse;
+	memset( &materialSnapshot, 0, sizeof( materialSnapshot ) );
+	(void)RenderSubmission_MaterialSnapshot( frontend,
+		batch->baseMaterial, &materialSnapshot );
+	if ( batch->sky ) return DrawSkyBatch( gl, uniformBuffer, materialUniformBuffer,
+		uniforms, frontend, textures, info, batch, &materialSnapshot );
+	/* The radiance cohort remains bound for surface IBL.  It cannot replace a
+	 * visible authored sky because it does not encode ordered Q3 stage programs. */
+	emissiveRadiance[3] = -1.0f;
+	gl->BindTextureUnit( 0u, MaterialTexture( frontend, textures,
+		batch->baseMaterial ) );
+	if ( batch->lightmapIndex >= 0 ) {
+		memset( &bindingRequest, 0, sizeof( bindingRequest ) );
+		bindingRequest.schemaVersion = RAL_LIGHTING_SURFACE_BINDING_SCHEMA_VERSION;
+		bindingRequest.frameGeneration = info->generation;
+		bindingRequest.surfaceId = (uint64_t)batch->sourceSurfaceIndex + 1u;
+		bindingRequest.lightmapIndex = batch->lightmapIndex;
+		bindingRequest.legacyLightmapAvailable = batch->lightmapMaterial > 0
+			? qtrue : qfalse;
+		if ( !Ral_LightingSurfaceBindingBuild( &bindingRequest, lightingPlan,
+				&surfaceLighting ) ) return qfalse;
+		binding = &surfaceLighting;
+	}
+	if ( binding && binding->directionalStaticBound ) {
+		gl->BindTextureUnit( 1u, 0u );
+		gl->BindTextureUnit( 2u, info->directionalLighting->textureNames[
+			binding->radiancePlane] );
+		gl->BindTextureUnit( 3u, info->directionalLighting->textureNames[
+			binding->directionPlane] );
+		gl->BindTextureUnit( 4u,
+			binding->visibilityPlane == RAL_LIGHTING_SURFACE_BINDING_NO_PLANE
+				? 0u : info->directionalLighting->textureNames[
+					binding->visibilityPlane] );
+	} else {
+		gl->BindTextureUnit( 1u, MaterialTexture( frontend, textures,
+			batch->lightmapMaterial ) );
+		gl->BindTextureUnit( 2u, 0u );
+		gl->BindTextureUnit( 3u, 0u );
+		gl->BindTextureUnit( 4u, 0u );
+	}
+	ApplyRaster( gl, uniformBuffer, materialUniformBuffer, uniforms, NULL,
+		batch->alphaMode, batch->alphaCutoff, batch->depthWrite,
+		binding && binding->legacyLightmapBound, batch->sky, NULL, binding,
+		lightingPlan, emissiveRadiance,
+		frontend->pbrEnabled && info->skyRadianceConsumer.ready
+			? &materialSnapshot.factors : NULL,
+		info->skyRadianceConsumer.previousToCurrentBlend );
+	if ( binding ) {
+		uint64_t identity = binding->surfaceId
+			^ ( (uint64_t)binding->diffuseAuthority << 56u )
+			^ ( (uint64_t)binding->arrayLayer << 24u );
+		if ( binding->legacyLightmapBound ) receipt->legacyLightmapDrawCount++;
+		else receipt->directionalStaticDrawCount++;
+		receipt->surfaceLightingBindingDigest ^= identity
+			+ UINT64_C( 0x9e3779b97f4a7c15 )
+			+ ( receipt->surfaceLightingBindingDigest << 6u )
+			+ ( receipt->surfaceLightingBindingDigest >> 2u );
+		if ( !receipt->surfaceLightingBindingDigest )
+			receipt->surfaceLightingBindingDigest = 1u;
+	}
+	gl->DrawElements( GL_TRIANGLES_VALUE, (glSize_t)batch->indexCount,
+		GL_UNSIGNED_INT_VALUE, (const void *)(uintptr_t)( batch->firstIndex
+			* sizeof( uint32_t ) ) );
 	return qtrue;
 }
 
@@ -453,7 +679,8 @@ static void EntityTransformNormal( const refEntity_t *entity,
 }
 
 static qboolean DrawModelEntity( const worldDispatch_t *gl,
-		glName_t uniformBuffer, productDrawUniforms_t *uniforms,
+		glName_t uniformBuffer, glName_t materialUniformBuffer,
+		productDrawUniforms_t *uniforms,
 		const renderSubmissionState_t *frontend, const glName_t *textures,
 		const renderEntityCommand_t *command, uint32_t *outIndices,
 		uint32_t *outDraws ) {
@@ -502,8 +729,10 @@ static qboolean DrawModelEntity( const worldDispatch_t *gl,
 		qhandle_t material = RenderSubmission_EntityBatchMaterial(
 			frontend, command, &model.batches[i] );
 		gl->BindTextureUnit( 0u, MaterialTexture( frontend, textures, material ) );
-		ApplyRaster( gl, uniformBuffer, uniforms, RENDER_ALPHA_OPAQUE,
-			0.5f, qtrue, qfalse, command, NULL, NULL, NULL );
+		ApplyRaster( gl, uniformBuffer, materialUniformBuffer, uniforms, NULL,
+			RENDER_ALPHA_OPAQUE,
+			0.5f, qtrue, qfalse, qfalse, command, NULL, NULL, NULL,
+			NULL, 1.0f );
 		gl->DrawElements( GL_TRIANGLES_VALUE, (glSize_t)model.batches[i].indexCount,
 			GL_UNSIGNED_INT_VALUE, (const void *)(uintptr_t)( model.batches[i].firstIndex
 				* sizeof( uint32_t ) ) );
@@ -516,7 +745,8 @@ cleanup:
 }
 
 static qboolean DrawPrimitiveEntity( const worldDispatch_t *gl,
-		glName_t uniformBuffer, productDrawUniforms_t *uniforms,
+		glName_t uniformBuffer, glName_t materialUniformBuffer,
+		productDrawUniforms_t *uniforms,
 		const renderSubmissionState_t *frontend, const glName_t *textures,
 		const renderEntityCommand_t *command, uint32_t *outIndices,
 		uint32_t *outDraws ) {
@@ -569,8 +799,10 @@ static qboolean DrawPrimitiveEntity( const worldDispatch_t *gl,
 	gl->BindVertexArray( geometry.vao );
 	gl->BindTextureUnit( 0u, MaterialTexture( frontend, textures,
 		entity->customShader ) );
-	ApplyRaster( gl, uniformBuffer, uniforms, RENDER_ALPHA_BLEND,
-		0.5f, qfalse, qfalse, command, NULL, NULL, NULL );
+	ApplyRaster( gl, uniformBuffer, materialUniformBuffer, uniforms, NULL,
+		RENDER_ALPHA_BLEND,
+		0.5f, qfalse, qfalse, qfalse, command, NULL, NULL, NULL,
+		NULL, 1.0f );
 	gl->DrawElements( GL_TRIANGLES_VALUE, (glSize_t)indexCount,
 		GL_UNSIGNED_INT_VALUE, NULL );
 	TransientDestroy( gl, &geometry );
@@ -579,7 +811,8 @@ static qboolean DrawPrimitiveEntity( const worldDispatch_t *gl,
 }
 
 static qboolean DrawUiPrimitive( const worldDispatch_t *gl,
-		glName_t uniformBuffer, productDrawUniforms_t *uniforms,
+		glName_t uniformBuffer, glName_t materialUniformBuffer,
+		productDrawUniforms_t *uniforms,
 		const renderSubmissionState_t *frontend, const glName_t *textures,
 		const renderUiPrimitive_t *ui ) {
 	effectVertex_t vertices[4];
@@ -604,11 +837,51 @@ static qboolean DrawUiPrimitive( const worldDispatch_t *gl,
 	if ( !TransientCreate( gl, vertices, 4u, indices, 6u, &geometry ) ) return qfalse;
 	gl->BindVertexArray( geometry.vao );
 	gl->BindTextureUnit( 0u, MaterialTexture( frontend, textures, ui->material ) );
-	ApplyRaster( gl, uniformBuffer, uniforms, RENDER_ALPHA_BLEND,
-		0.5f, qfalse, qfalse, NULL, NULL, NULL, NULL );
+	ApplyRaster( gl, uniformBuffer, materialUniformBuffer, uniforms, NULL,
+		RENDER_ALPHA_BLEND,
+		0.5f, qfalse, qfalse, qfalse, NULL, NULL, NULL, NULL,
+		NULL, 1.0f );
 	gl->DrawElements( GL_TRIANGLES_VALUE, 6, GL_UNSIGNED_INT_VALUE, NULL );
 	TransientDestroy( gl, &geometry );
 	return qtrue;
+}
+
+static void ResolveEffectBeamEndpoint( const renderSubmissionState_t *frontend,
+		const beamDesc_t *beam, qboolean start, float out[3] )
+{
+	const int entityNum = start ? beam->startEntityNum : beam->endEntityNum;
+	const float *position = start ? beam->start : beam->end;
+	const float *offset = start ? beam->startOffset : beam->endOffset;
+	if ( frontend && entityNum >= 0 && (uint32_t)entityNum < frontend->entityCount ) {
+		for ( uint32_t axis = 0u; axis < 3u; ++axis )
+			out[axis] = frontend->entities[entityNum].entity.origin[axis]
+				+ offset[axis];
+	} else memcpy( out, position, 3u * sizeof( float ) );
+}
+
+static float EffectBeamFade( const renderEffectBeamSlot_t *slot, float now )
+{
+	float fade = 1.0f;
+	const float age = slot ? fmaxf( now - slot->spawnTime, 0.0f ) : 0.0f;
+	if ( !slot || slot->transient || slot->beam.duration <= 0.0f ) return 1.0f;
+	if ( slot->beam.fadeIn > 0.0f ) fade = fminf( fade, age / slot->beam.fadeIn );
+	if ( slot->beam.fadeOut > 0.0f ) fade = fminf( fade,
+		fmaxf( slot->beam.duration - age, 0.0f ) / slot->beam.fadeOut );
+	return fminf( 1.0f, fmaxf( 0.0f, fade ) );
+}
+
+static void RotateEffectBeamAxis( const float vector[3], const float axis[3],
+		float angle, float out[3] )
+{
+	const float cosine = cosf( angle ), sine = sinf( angle );
+	const float dot = vector[0] * axis[0] + vector[1] * axis[1]
+		+ vector[2] * axis[2];
+	const float cross[3] = { axis[1] * vector[2] - axis[2] * vector[1],
+		axis[2] * vector[0] - axis[0] * vector[2],
+		axis[0] * vector[1] - axis[1] * vector[0] };
+	for ( uint32_t component = 0u; component < 3u; ++component )
+		out[component] = vector[component] * cosine + cross[component] * sine
+			+ axis[component] * dot * ( 1.0f - cosine );
 }
 
 qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
@@ -621,17 +894,27 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 	worldDispatch_t gl;
 	ralOpenGlWorldReceipt_t receipt = { 0 };
 	renderWorldSnapshot_t world = { 0 };
+	const renderDistantWorldSubmission_t *distant = info
+		? info->distantWorld : NULL;
 	const renderPolyCommand_t *polygons = NULL;
 	const polyVert_t *polyVertices = NULL;
 	const renderLightCommand_t *lights = NULL;
+	renderEffectPrimitiveSnapshot_t effectPrimitives;
+	const spriteDesc_t *effectSprites = NULL;
+	const emitterDesc_t *effectEmitters = NULL;
+	const decalDesc_t *effectDecals = NULL;
+	const renderEffectRibbonCommand_t *effectRibbons = NULL;
+	const ribbonPoint_t *effectRibbonPoints = NULL;
+	const beamDesc_t *effectBeams = NULL;
+	renderWorldSnapshot_t effectView = { 0 };
 	const renderEntityCommand_t *entities = NULL;
 	const renderUiPrimitive_t *ui = NULL;
 	uint32_t polygonCommandCount = 0u, polyVertexCount = 0u, lightCount = 0u;
 	uint32_t entityCount = 0u, uiCount = 0u;
-	glName_t buffers[4] = { 0u }, vaos[2] = { 0u };
-	glName_t uniformBuffer = 0u;
+	glName_t buffers[6] = { 0u }, vaos[3] = { 0u };
+	glName_t uniformBuffer = 0u, materialUniformBuffer = 0u;
 	productDrawUniforms_t uniforms = { 0 };
-	glName_t textures[RENDER_SUBMISSION_MAX_MATERIALS] = { 0u };
+	const glName_t *textures;
 	effectVertex_t *effectVertices = NULL;
 	uint32_t *effectIndices = NULL;
 	uint32_t effectVertexCount, effectIndexCount, effectVertexCursor = 0u;
@@ -640,11 +923,27 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 	if ( !core || !coreReceipt || !frontend || !submission || !plan || !info
 			|| !outReceipt || !info->generation || !info->programName
 			|| !info->outputWidth || !info->outputHeight
+			|| !info->materialTextureNames
+			|| info->materialTextureCount != frontend->materialCount + frontend->stageTextureCount
 			|| !RalOpenGl_CoreMatchesReceipt( core, coreReceipt )
 			|| !RalOpenGl_FrontendPlanReceiptExact( plan, plan )
 			|| !Ral_AtmospherePlanReceiptExact( &info->atmosphere,
 				&info->atmosphere )
 			|| !Ral_DisplayVisibilityPlanValid( &info->displayVisibility )
+			|| ( ( info->effectDecalPool
+				|| info->effectDecalPoolReceipt.schemaVersion )
+				&& ( !info->effectDecalPool
+					|| !RenderEffectDecalPool_ReceiptExact( info->effectDecalPool,
+						&info->effectDecalPoolReceipt )
+					|| info->effectDecalPoolReceipt.frameGeneration
+						!= info->generation ) )
+			|| ( ( info->effectBeamPool
+				|| info->effectBeamPoolReceipt.schemaVersion )
+				&& ( !info->effectBeamPool
+					|| !RenderEffectBeamPool_ReceiptExact( info->effectBeamPool,
+						&info->effectBeamPoolReceipt )
+					|| info->effectBeamPoolReceipt.frameGeneration
+						!= info->generation ) )
 			|| info->atmosphere.frameGeneration != info->generation
 			|| !info->atmosphereBufferName
 			|| ( info->weatherParticleCount && ( !info->weatherProgramName
@@ -660,14 +959,44 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 			|| plan->frontendFrameDigest != submission->frameDigest
 			|| !frontend->frameSealed || frontend->frameOpen
 			|| !LoadDispatch( core, &gl ) ) return qfalse;
+	if ( distant && ( !RenderSubmission_DistantWorldSubmissionExact(
+			distant, distant ) || distant->backendType != RAL_BACKEND_OPENGL
+			|| distant->frameGeneration != info->generation ) ) return qfalse;
+	textures = (const glName_t *)info->materialTextureNames;
 	if ( !RenderSubmission_EffectSnapshots( frontend, &polygons,
 				&polygonCommandCount, &polyVertices, &polyVertexCount,
 				&lights, &lightCount )
 			|| plan->loweredPolygonCount != submission->polygonCount
 			|| plan->loweredLightCount != lightCount ) return qfalse;
+	memset( &effectPrimitives, 0, sizeof( effectPrimitives ) );
+	if ( !RenderSubmission_EffectPrimitiveSnapshots( frontend,
+			&effectPrimitives, &effectSprites, &effectEmitters, &effectDecals,
+			&effectRibbons, &effectRibbonPoints, &effectBeams )
+			|| effectPrimitives.emitterCount
+			|| effectPrimitives.decalCount
+				!= ( info->effectDecalPool
+					? info->effectDecalPoolReceipt.submittedCount : 0u )
+			|| effectPrimitives.beamCount
+				!= ( info->effectBeamPool
+					? info->effectBeamPoolReceipt.submittedCount : 0u )
+			|| effectPrimitives.spriteCount != plan->loweredEffectSpriteCount
+			|| effectPrimitives.ribbonCount != plan->loweredEffectRibbonCount
+			|| ( effectPrimitives.spriteCount && !effectSprites )
+			|| ( effectPrimitives.ribbonCount && !effectRibbons )
+			|| ( effectPrimitives.ribbonPointCount && !effectRibbonPoints )
+			|| ( ( effectPrimitives.spriteCount || effectPrimitives.ribbonCount
+					|| ( info->effectBeamPool
+						&& info->effectBeamPool->activeCount ) )
+				&& !RenderSubmission_ViewSnapshot( frontend, &effectView ) ) )
+		return qfalse;
+	(void)effectEmitters; (void)effectDecals; (void)effectBeams;
 	if ( submission->worldLoaded && submission->sceneRendered ) {
-		if ( !RenderSubmission_WorldSnapshot( frontend, &world )
-				|| plan->loweredWorldVertexCount != world.vertexCount
+		if ( !RenderSubmission_WorldSnapshot( frontend, &world ) ) return qfalse;
+		/* Retained world storage is not a draw request during teleport/UI views.
+		 * Keep view parameters for entities, but perform no BSP uploads/draws. */
+		if ( world.rdflags & RDF_NOWORLDMODEL )
+			world.vertexCount = world.indexCount = world.batchCount = world.patchBatchCount = 0u;
+		if ( plan->loweredWorldVertexCount != world.vertexCount
 				|| plan->loweredWorldIndexCount != world.indexCount
 				|| plan->loweredWorldBatchCount != world.batchCount ) return qfalse;
 	} else if ( plan->loweredWorldVertexCount || plan->loweredWorldIndexCount
@@ -678,17 +1007,54 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 			|| ( entityCount && !entities ) || ( uiCount && !ui ) ) return qfalse;
 	if ( lightCount > ( UINT32_MAX - polyVertexCount ) / 4u ) return qfalse;
 	effectVertexCount = polyVertexCount + lightCount * 4u;
+	if ( effectPrimitives.spriteCount
+			> ( UINT32_MAX - effectVertexCount ) / 4u ) return qfalse;
+	effectVertexCount += effectPrimitives.spriteCount * 4u;
+	if ( info->effectDecalPool
+			&& info->effectDecalPool->activeCount
+				> ( UINT32_MAX - effectVertexCount ) / 4u ) return qfalse;
+	effectVertexCount += info->effectDecalPool
+		? info->effectDecalPool->activeCount * 4u : 0u;
+	if ( effectPrimitives.ribbonPointCount
+			> ( UINT32_MAX - effectVertexCount ) / 2u ) return qfalse;
+	effectVertexCount += effectPrimitives.ribbonPointCount * 2u;
+	for ( uint32_t i = 0u; info->effectBeamPool
+			&& i < RENDER_SUBMISSION_MAX_EFFECT_BEAMS; ++i ) {
+		const renderEffectBeamSlot_t *slot = &info->effectBeamPool->slots[i];
+		if ( !slot->active ) continue;
+		if ( (uint32_t)slot->beam.axialCopies
+				> ( UINT32_MAX - effectVertexCount ) / 4u ) return qfalse;
+		effectVertexCount += (uint32_t)slot->beam.axialCopies * 4u;
+	}
 	effectIndexCount = plan->loweredEffectIndexCount;
 	if ( effectVertexCount ) {
 		effectVertices = calloc( effectVertexCount, sizeof( *effectVertices ) );
 		effectIndices = calloc( effectIndexCount, sizeof( *effectIndices ) );
 		if ( !effectVertices || !effectIndices ) goto cleanup;
 	}
+	if ( distant ) {
+		gl.CreateBuffers( 2, buffers + 4 );
+		gl.NamedBufferStorage( buffers[4],
+			(glSizePtr_t)( distant->world.vertexCount
+				* sizeof( *distant->world.vertices ) ),
+			distant->world.vertices, 0u );
+		gl.NamedBufferStorage( buffers[5],
+			(glSizePtr_t)( distant->world.indexCount
+				* sizeof( *distant->world.indices ) ),
+			distant->world.indices, 0u );
+	}
 	gl.CreateBuffers( 1, &uniformBuffer );
 	if ( !uniformBuffer ) goto cleanup;
 	gl.NamedBufferStorage( uniformBuffer, (glSizePtr_t)sizeof( uniforms ), NULL,
 		GL_DYNAMIC_STORAGE_BIT_VALUE );
 	gl.BindBufferBase( GL_UNIFORM_BUFFER_VALUE, 0u, uniformBuffer );
+	gl.CreateBuffers( 1, &materialUniformBuffer );
+	if ( !materialUniformBuffer ) goto cleanup;
+	gl.NamedBufferStorage( materialUniformBuffer,
+		(glSizePtr_t)sizeof( renderSkyMaterialGpuParams_t ), NULL,
+		GL_DYNAMIC_STORAGE_BIT_VALUE );
+	gl.BindBufferBase( GL_UNIFORM_BUFFER_VALUE,
+		PRODUCT_MATERIAL_UNIFORM_BINDING, materialUniformBuffer );
 	gl.BindBufferBase( GL_SHADER_STORAGE_BUFFER_VALUE, 0u,
 		info->atmosphereBufferName );
 	uniforms.viewportAlpha[0] = (float)info->outputWidth;
@@ -744,24 +1110,179 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 		effectIndices[effectIndexCursor++] = base + 3u;
 		effectVertexCursor += 4u;
 	}
+	for ( uint32_t i = 0u; i < effectPrimitives.spriteCount; ++i ) {
+		static const uint32_t order[6] = { 0u, 1u, 2u, 0u, 2u, 3u };
+		static const float uv[4][2] = {
+			{ 0.0f, 0.0f }, { 1.0f, 0.0f },
+			{ 1.0f, 1.0f }, { 0.0f, 1.0f }
+		};
+		const spriteDesc_t *sprite = &effectSprites[i];
+		uint32_t base = effectVertexCursor;
+		for ( uint32_t corner = 0u; corner < 4u; ++corner ) {
+			const float leftSign = ( corner == 0u || corner == 3u ) ? 1.0f : -1.0f;
+			const float upSign = corner < 2u ? 1.0f : -1.0f;
+			for ( uint32_t axis = 0u; axis < 3u; ++axis )
+				effectVertices[base + corner].position[axis] = sprite->origin[axis]
+					+ effectView.viewAxis[1][axis] * sprite->radius * leftSign
+					+ effectView.viewAxis[2][axis] * sprite->radius * upSign;
+			memcpy( effectVertices[base + corner].texCoord, uv[corner],
+				sizeof( uv[corner] ) );
+			for ( uint32_t channel = 0u; channel < 4u; ++channel ) {
+				const float value = sprite->rgba[channel] * 255.0f;
+				effectVertices[base + corner].color[channel] = (unsigned char)(
+					value < 0.0f ? 0u : value > 255.0f ? 255u
+						: (unsigned int)value );
+			}
+		}
+		for ( uint32_t index = 0u; index < 6u; ++index )
+			effectIndices[effectIndexCursor++] = base + order[index];
+		effectVertexCursor += 4u;
+	}
+	for ( uint32_t slotIndex = 0u; info->effectDecalPool
+			&& slotIndex < RENDER_SUBMISSION_MAX_EFFECT_DECALS; ++slotIndex ) {
+		static const uint32_t order[6] = { 0u, 1u, 2u, 0u, 2u, 3u };
+		static const float uv[4][2] = {
+			{ 0.0f, 0.0f }, { 1.0f, 0.0f },
+			{ 1.0f, 1.0f }, { 0.0f, 1.0f }
+		};
+		const renderEffectDecalSlot_t *slot = &info->effectDecalPool->slots[slotIndex];
+		const decalDesc_t *decal;
+		float seed[3], tangent[3], bitangent[3], tangentLength;
+		float rotatedTangent[3], rotatedBitangent[3], corners[4][3];
+		uint32_t base;
+		if ( !slot->active ) continue;
+		decal = &slot->decal;
+		seed[0] = fabsf( decal->normal[2] ) < 0.9f ? 0.0f : 1.0f;
+		seed[1] = 0.0f;
+		seed[2] = fabsf( decal->normal[2] ) < 0.9f ? 1.0f : 0.0f;
+		tangent[0] = decal->normal[1] * seed[2] - decal->normal[2] * seed[1];
+		tangent[1] = decal->normal[2] * seed[0] - decal->normal[0] * seed[2];
+		tangent[2] = decal->normal[0] * seed[1] - decal->normal[1] * seed[0];
+		tangentLength = sqrtf( tangent[0] * tangent[0]
+			+ tangent[1] * tangent[1] + tangent[2] * tangent[2] );
+		if ( tangentLength < 0.00001f ) goto cleanup;
+		for ( uint32_t axis = 0u; axis < 3u; ++axis ) tangent[axis] /= tangentLength;
+		bitangent[0] = decal->normal[1] * tangent[2] - decal->normal[2] * tangent[1];
+		bitangent[1] = decal->normal[2] * tangent[0] - decal->normal[0] * tangent[2];
+		bitangent[2] = decal->normal[0] * tangent[1] - decal->normal[1] * tangent[0];
+		for ( uint32_t axis = 0u; axis < 3u; ++axis ) {
+			const float cosine = cosf( decal->orientation );
+			const float sine = sinf( decal->orientation );
+			const float center = decal->origin[axis] + decal->normal[axis] * 0.25f;
+			rotatedTangent[axis] = ( tangent[axis] * cosine
+				+ bitangent[axis] * sine ) * decal->radius;
+			rotatedBitangent[axis] = ( bitangent[axis] * cosine
+				- tangent[axis] * sine ) * decal->radius;
+			corners[0][axis] = center - rotatedTangent[axis] - rotatedBitangent[axis];
+			corners[1][axis] = center + rotatedTangent[axis] - rotatedBitangent[axis];
+			corners[2][axis] = center + rotatedTangent[axis] + rotatedBitangent[axis];
+			corners[3][axis] = center - rotatedTangent[axis] + rotatedBitangent[axis];
+		}
+		base = effectVertexCursor;
+		for ( uint32_t corner = 0u; corner < 4u; ++corner ) {
+			effectVertex_t *vertex = &effectVertices[effectVertexCursor++];
+			memcpy( vertex->position, corners[corner], sizeof( vertex->position ) );
+			memcpy( vertex->texCoord, uv[corner], sizeof( uv[corner] ) );
+			for ( uint32_t channel = 0u; channel < 4u; ++channel ) {
+				const float value = decal->rgba[channel] * 255.0f;
+				vertex->color[channel] = (unsigned char)fminf( 255.0f,
+					fmaxf( 0.0f, value ) );
+			}
+		}
+		for ( uint32_t index = 0u; index < 6u; ++index )
+			effectIndices[effectIndexCursor++] = base + order[index];
+	}
+	for ( uint32_t i = 0u; i < effectPrimitives.ribbonCount; ++i ) {
+		const renderEffectRibbonCommand_t *ribbon = &effectRibbons[i];
+		const uint32_t firstVertex = effectVertexCursor;
+		for ( uint32_t pointIndex = 0u; pointIndex < ribbon->pointCount;
+				++pointIndex ) {
+			const ribbonPoint_t *point = &effectRibbonPoints[
+				ribbon->firstPoint + pointIndex];
+			const ribbonPoint_t *previous = &effectRibbonPoints[
+				ribbon->firstPoint + ( pointIndex ? pointIndex - 1u : pointIndex )];
+			const ribbonPoint_t *next = &effectRibbonPoints[
+				ribbon->firstPoint + ( pointIndex + 1u < ribbon->pointCount
+					? pointIndex + 1u : pointIndex )];
+			float tangent[3], extrude[3], length;
+			for ( uint32_t axis = 0u; axis < 3u; ++axis )
+				tangent[axis] = next->pos[axis] - previous->pos[axis];
+			if ( ribbon->flags & PRIM_FLAG_CUSTOM_NORMAL ) {
+				memcpy( extrude, point->normal, sizeof( extrude ) );
+			} else {
+				const float *plane = ( ribbon->flags & PRIM_FLAG_VIEW_UP_PLANE )
+					? effectView.viewAxis[2] : effectView.viewAxis[0];
+				extrude[0] = tangent[1] * plane[2] - tangent[2] * plane[1];
+				extrude[1] = tangent[2] * plane[0] - tangent[0] * plane[2];
+				extrude[2] = tangent[0] * plane[1] - tangent[1] * plane[0];
+			}
+			length = sqrtf( extrude[0] * extrude[0] + extrude[1] * extrude[1]
+				+ extrude[2] * extrude[2] );
+			if ( length < 0.00001f ) goto cleanup;
+			for ( uint32_t side = 0u; side < 2u; ++side ) {
+				effectVertex_t *vertex = &effectVertices[effectVertexCursor++];
+				const float sign = side ? -1.0f : 1.0f;
+				for ( uint32_t axis = 0u; axis < 3u; ++axis )
+					vertex->position[axis] = point->pos[axis]
+						+ extrude[axis] / length * point->width * sign;
+				vertex->texCoord[0] = (float)pointIndex
+					/ (float)( ribbon->pointCount - 1u );
+				vertex->texCoord[1] = (float)side;
+				for ( uint32_t channel = 0u; channel < 4u; ++channel ) {
+					const float value = point->rgba[channel] * 255.0f;
+					vertex->color[channel] = (unsigned char)( value < 0.0f
+						? 0u : value > 255.0f ? 255u : (unsigned int)value );
+				}
+			}
+		}
+		for ( uint32_t segment = 0u; segment + 1u < ribbon->pointCount;
+				++segment ) {
+			const uint32_t base = firstVertex + segment * 2u;
+			const uint32_t order[6] = { base, base + 1u, base + 2u,
+				base + 2u, base + 1u, base + 3u };
+			memcpy( effectIndices + effectIndexCursor, order, sizeof( order ) );
+			effectIndexCursor += 6u;
+		}
+	}
+	for ( uint32_t slotIndex = 0u; info->effectBeamPool
+			&& slotIndex < RENDER_SUBMISSION_MAX_EFFECT_BEAMS;
+			slotIndex++ ) {
+		const renderEffectBeamSlot_t *slot = &info->effectBeamPool->slots[slotIndex];
+		const beamDesc_t *beam;
+		float start[3], end[3], axis[3], baseExtrude[3];
+		if ( !slot->active ) continue;
+		beam = &slot->beam;
+		ResolveEffectBeamEndpoint( frontend, beam, qtrue, start );
+		ResolveEffectBeamEndpoint( frontend, beam, qfalse, end );
+		if ( !wired_ral_beam_frame( start, end, effectView.viewOrigin,
+				axis, baseExtrude ) ) goto cleanup;
+		for ( uint32_t copy = 0u; copy < (uint32_t)beam->axialCopies; ++copy ) {
+			float extrude[3], corners[4][3];
+			const float angle = (float)M_PI * (float)copy
+				/ (float)beam->axialCopies;
+			const uint32_t base = effectVertexCursor;
+			RotateEffectBeamAxis( baseExtrude, axis, angle, extrude );
+			for ( uint32_t component = 0u; component < 3u; ++component ) {
+				corners[0][component] = start[component] - extrude[component] * beam->startWidth;
+				corners[1][component] = start[component] + extrude[component] * beam->startWidth;
+				corners[2][component] = end[component] - extrude[component] * beam->endWidth;
+				corners[3][component] = end[component] + extrude[component] * beam->endWidth;
+			}
+			for ( uint32_t corner = 0u; corner < 4u; ++corner ) {
+				effectVertex_t *vertex = &effectVertices[effectVertexCursor++];
+				memcpy( vertex->position, corners[corner], sizeof( vertex->position ) );
+				vertex->texCoord[0] = corner >= 2u ? 1.0f : 0.0f;
+				vertex->texCoord[1] = corner & 1u ? 1.0f : 0.0f;
+				memset(vertex->color, 255, sizeof(vertex->color));
+			}
+			const uint32_t order[6] = { base, base + 1u, base + 2u,
+				base + 2u, base + 1u, base + 3u };
+			memcpy( effectIndices + effectIndexCursor, order, sizeof( order ) );
+			effectIndexCursor += 6u;
+		}
+	}
 	if ( effectIndexCursor != effectIndexCount
 			|| effectVertexCursor != effectVertexCount ) goto cleanup;
-	for ( uint32_t i = 0u; i < frontend->materialCount; ++i ) {
-		const renderMaterialSnapshot_t *material = &frontend->materials[i].snapshot;
-		gl.CreateTextures( GL_TEXTURE_2D_VALUE, 1, &textures[i] );
-		gl.TextureStorage2D( textures[i], 1,
-			material->srgb ? GL_SRGB8_ALPHA8_VALUE : GL_RGBA8_VALUE,
-			(glSize_t)material->width, (glSize_t)material->height );
-		gl.TextureSubImage2D( textures[i], 0, 0, 0, (glSize_t)material->width,
-			(glSize_t)material->height, GL_RGBA_VALUE, GL_UNSIGNED_BYTE_VALUE,
-			material->rgba8 );
-		gl.TextureParameteri( textures[i], GL_TEXTURE_MIN_FILTER_VALUE, GL_LINEAR_VALUE );
-		gl.TextureParameteri( textures[i], GL_TEXTURE_MAG_FILTER_VALUE, GL_LINEAR_VALUE );
-		gl.TextureParameteri( textures[i], GL_TEXTURE_WRAP_S_VALUE,
-			material->clampToEdge ? GL_CLAMP_TO_EDGE_VALUE : GL_REPEAT_VALUE );
-		gl.TextureParameteri( textures[i], GL_TEXTURE_WRAP_T_VALUE,
-			material->clampToEdge ? GL_CLAMP_TO_EDGE_VALUE : GL_REPEAT_VALUE );
-	}
 	if ( world.vertexCount ) {
 		gl.CreateBuffers( 2, buffers );
 		gl.NamedBufferStorage( buffers[0], (glSizePtr_t)( world.vertexCount
@@ -776,6 +1297,11 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 		gl.NamedBufferStorage( buffers[3], (glSizePtr_t)( effectIndexCount
 			* sizeof( *effectIndices ) ), effectIndices, 0u );
 	}
+	if ( distant ) {
+		gl.CreateVertexArrays( 1, vaos + 2 );
+		ConfigureVertexArray( &gl, vaos[2], buffers[4], buffers[5],
+			(glSize_t)sizeof( *distant->world.vertices ) );
+	}
 	if ( world.vertexCount ) {
 		gl.CreateVertexArrays( 1, vaos );
 		ConfigureVertexArray( &gl, vaos[0], buffers[0], buffers[1],
@@ -787,77 +1313,63 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 			(glSize_t)sizeof( *effectVertices ) );
 	}
 	gl.UseProgram( info->programName );
+	gl.BindTextureUnit( 5u, info->physicalSkyTextureName );
+	gl.BindTextureUnit( 6u, info->currentSkyRadianceTextureName );
+	gl.BindTextureUnit( 7u, info->previousSkyRadianceTextureName );
+	gl.BindTextureUnit( 8u, info->currentSkyIrradianceTextureName );
+	gl.BindTextureUnit( 9u, info->previousSkyIrradianceTextureName );
 	gl.Viewport( 0, 0, (glSize_t)info->outputWidth,
 		(glSize_t)info->outputHeight );
 	gl.ClearColor( 0.015f, 0.02f, 0.03f, 1.0f );
+	/* Clear owns its write state; the preceding frame may end in UI/alpha. */
+	gl.DepthMask( 1u );
 	gl.Clear( GL_COLOR_BUFFER_BIT_VALUE | GL_DEPTH_BUFFER_BIT_VALUE );
 	gl.Enable( GL_DEPTH_TEST_VALUE );
 	gl.DepthFunc( GL_LEQUAL_VALUE );
 	if ( ( world.batchCount || effectVertexCount || entityCount )
 			&& ( !ApplyWorldView( &uniforms, &world )
 				|| !ApplyAtmosphere( &uniforms, frontend, info ) ) ) goto cleanup;
-	if ( world.batchCount ) gl.BindVertexArray( vaos[0] );
-	for ( uint32_t i = 0u; i < world.batchCount; ++i ) {
-		const renderWorldBatch_t *batch = &world.batches[i];
-		float emissiveRadiance[4];
-		ralLightingSurfaceBindingReceipt_t surfaceLighting;
-		ralLightingSurfaceBindingRequest_t bindingRequest;
-		const ralLightingRuntimePlan_t *lightingPlan = info->directionalLighting
-			? &info->directionalLighting->plan : NULL;
-		const ralLightingSurfaceBindingReceipt_t *binding = NULL;
-		if ( !MaterialEmission( frontend, batch->baseMaterial,
-			emissiveRadiance ) ) goto cleanup;
-		gl.BindTextureUnit( 0u, MaterialTexture( frontend, textures,
-			batch->baseMaterial ) );
-		if ( batch->lightmapIndex >= 0 ) {
-			memset( &bindingRequest, 0, sizeof( bindingRequest ) );
-			bindingRequest.schemaVersion = RAL_LIGHTING_SURFACE_BINDING_SCHEMA_VERSION;
-			bindingRequest.frameGeneration = info->generation;
-			bindingRequest.surfaceId = (uint64_t)batch->sourceSurfaceIndex + 1u;
-			bindingRequest.lightmapIndex = batch->lightmapIndex;
-			bindingRequest.legacyLightmapAvailable = batch->lightmapMaterial > 0
-				? qtrue : qfalse;
-			if ( !Ral_LightingSurfaceBindingBuild( &bindingRequest, lightingPlan,
-					&surfaceLighting ) ) goto cleanup;
-			binding = &surfaceLighting;
+	if ( distant ) {
+		/* Main authored/physical sky is the background authority.  Distant
+		 * geometry is composited over it, then its depth is discarded so the
+		 * gameplay world remains the foreground authority. */
+		if ( world.batchCount ) gl.BindVertexArray( vaos[0] );
+		for ( uint32_t i = 0u; i < world.batchCount; ++i ) {
+			const renderWorldBatch_t *batch = &world.batches[i];
+			if ( !batch->sky || batch->noDraw || !batch->visible ) continue;
+			if ( !DrawWorldBatch( &gl, uniformBuffer, materialUniformBuffer,
+					&uniforms, frontend, textures, info, batch,
+					&receipt ) ) goto cleanup;
 		}
-		if ( binding && binding->directionalStaticBound ) {
-			gl.BindTextureUnit( 1u, 0u );
-			gl.BindTextureUnit( 2u, info->directionalLighting->textureNames[
-				binding->radiancePlane] );
-			gl.BindTextureUnit( 3u, info->directionalLighting->textureNames[
-				binding->directionPlane] );
-			gl.BindTextureUnit( 4u,
-				binding->visibilityPlane == RAL_LIGHTING_SURFACE_BINDING_NO_PLANE
-					? 0u : info->directionalLighting->textureNames[
-						binding->visibilityPlane] );
-		} else {
-			gl.BindTextureUnit( 1u, MaterialTexture( frontend, textures,
-				batch->lightmapMaterial ) );
-			gl.BindTextureUnit( 2u, 0u );
-			gl.BindTextureUnit( 3u, 0u );
-			gl.BindTextureUnit( 4u, 0u );
+		if ( !ApplyWorldView( &uniforms, &distant->world )
+				|| !ApplyAtmosphere( &uniforms, frontend, info ) ) goto cleanup;
+		gl.BindVertexArray( vaos[2] );
+		for ( uint32_t i = 0u; i < distant->drawPlan.admittedCount; ++i ) {
+			const uint32_t source = distant->drawPlan.selections[i].sourceDrawIndex;
+			if ( !DrawWorldBatch( &gl, uniformBuffer, materialUniformBuffer,
+					&uniforms, frontend, textures, info,
+					&distant->world.batches[source], &receipt ) ) goto cleanup;
+			receipt.distantWorldDrawCount++;
 		}
-		ApplyRaster( &gl, uniformBuffer, &uniforms, batch->alphaMode,
-			batch->alphaCutoff, batch->depthWrite,
-			binding && binding->legacyLightmapBound, NULL, binding, lightingPlan,
-			emissiveRadiance );
-		if ( binding ) {
-			uint64_t identity = binding->surfaceId
-				^ ( (uint64_t)binding->diffuseAuthority << 56u )
-				^ ( (uint64_t)binding->arrayLayer << 24u );
-			if ( binding->legacyLightmapBound ) receipt.legacyLightmapDrawCount++;
-			else receipt.directionalStaticDrawCount++;
-			receipt.surfaceLightingBindingDigest ^= identity
-				+ UINT64_C( 0x9e3779b97f4a7c15 )
-				+ ( receipt.surfaceLightingBindingDigest << 6u )
-				+ ( receipt.surfaceLightingBindingDigest >> 2u );
-			if ( !receipt.surfaceLightingBindingDigest )
-				receipt.surfaceLightingBindingDigest = 1u;
+		/* The last distant material may disable depth writes. */
+		gl.DepthMask( 1u );
+		gl.Clear( GL_DEPTH_BUFFER_BIT_VALUE );
+		if ( !ApplyWorldView( &uniforms, &world )
+				|| !ApplyAtmosphere( &uniforms, frontend, info ) ) goto cleanup;
+		if ( world.batchCount ) gl.BindVertexArray( vaos[0] );
+		for ( uint32_t i = 0u; i < world.batchCount; ++i ) {
+			const renderWorldBatch_t *batch = &world.batches[i];
+			if ( batch->sky ) continue;
+			if ( !DrawWorldBatch( &gl, uniformBuffer, materialUniformBuffer,
+					&uniforms, frontend, textures, info, batch,
+					&receipt ) ) goto cleanup;
 		}
-		gl.DrawElements( GL_TRIANGLES_VALUE, (glSize_t)batch->indexCount,
-			GL_UNSIGNED_INT_VALUE, (const void *)(uintptr_t)( batch->firstIndex
-				* sizeof( uint32_t ) ) );
+	} else {
+		if ( world.batchCount ) gl.BindVertexArray( vaos[0] );
+		for ( uint32_t i = 0u; i < world.batchCount; ++i )
+			if ( !DrawWorldBatch( &gl, uniformBuffer, materialUniformBuffer,
+					&uniforms, frontend, textures, info, &world.batches[i],
+					&receipt ) ) goto cleanup;
 	}
 	if ( effectVertexCount ) {
 		uint32_t firstIndex = 0u;
@@ -867,8 +1379,10 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 				* polygons[i].polygonCount;
 			gl.BindTextureUnit( 0u, MaterialTexture( frontend, textures,
 				polygons[i].material ) );
-			ApplyRaster( &gl, uniformBuffer, &uniforms, RENDER_ALPHA_BLEND, 0.5f,
-				qfalse, qfalse, NULL, NULL, NULL, NULL );
+			ApplyRaster( &gl, uniformBuffer, materialUniformBuffer, &uniforms, NULL,
+				RENDER_ALPHA_BLEND, 0.5f,
+				qfalse, qfalse, qfalse, NULL, NULL, NULL, NULL,
+				NULL, 1.0f );
 			gl.DrawElements( GL_TRIANGLES_VALUE, (glSize_t)count,
 				GL_UNSIGNED_INT_VALUE, (const void *)(uintptr_t)( firstIndex
 					* sizeof( uint32_t ) ) );
@@ -876,23 +1390,131 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 		}
 		for ( uint32_t i = 0u; i < lightCount; ++i ) {
 			gl.BindTextureUnit( 0u, 0u );
-			ApplyRaster( &gl, uniformBuffer, &uniforms, RENDER_ALPHA_BLEND, 0.5f,
-				qfalse, qfalse, NULL, NULL, NULL, NULL );
+			ApplyRaster( &gl, uniformBuffer, materialUniformBuffer, &uniforms, NULL,
+				RENDER_ALPHA_BLEND, 0.5f,
+				qfalse, qfalse, qfalse, NULL, NULL, NULL, NULL,
+				NULL, 1.0f );
 			gl.DrawElements( GL_TRIANGLES_VALUE, 6, GL_UNSIGNED_INT_VALUE,
 				(const void *)(uintptr_t)( firstIndex * sizeof( uint32_t ) ) );
 			firstIndex += 6u;
 		}
+		for ( uint32_t i = 0u; i < effectPrimitives.spriteCount; ++i ) {
+			const spriteDesc_t *sprite = &effectSprites[i];
+			if ( sprite->flags & PRIM_FLAG_NO_DEPTH_TEST )
+				gl.Disable( GL_DEPTH_TEST_VALUE );
+			else
+				gl.Enable( GL_DEPTH_TEST_VALUE );
+			gl.BindTextureUnit( 0u, MaterialTexture( frontend, textures,
+				sprite->shader ) );
+			ApplyRaster( &gl, uniformBuffer, materialUniformBuffer, &uniforms, NULL,
+				( sprite->flags & PRIM_FLAG_ADDITIVE )
+					? RENDER_ALPHA_ALPHA_ADDITIVE : RENDER_ALPHA_BLEND,
+				0.5f, qfalse, qfalse, qfalse, NULL, NULL, NULL, NULL,
+				NULL, 1.0f );
+			gl.DrawElements( GL_TRIANGLES_VALUE, 6, GL_UNSIGNED_INT_VALUE,
+				(const void *)(uintptr_t)( firstIndex * sizeof( uint32_t ) ) );
+			firstIndex += 6u;
+		}
+		for ( uint32_t slotIndex = 0u; info->effectDecalPool
+				&& slotIndex < RENDER_SUBMISSION_MAX_EFFECT_DECALS; ++slotIndex ) {
+			const renderEffectDecalSlot_t *slot = &info->effectDecalPool->slots[slotIndex];
+			if ( !slot->active ) continue;
+			gl.Enable( GL_DEPTH_TEST_VALUE );
+			gl.BindTextureUnit( 0u, MaterialTexture( frontend, textures,
+				slot->decal.shader ) );
+			ApplyRaster( &gl, uniformBuffer, materialUniformBuffer, &uniforms, NULL,
+				RENDER_ALPHA_BLEND, 0.5f, qfalse, qfalse, qfalse,
+				NULL, NULL, NULL, NULL, NULL, 1.0f );
+			gl.DrawElements( GL_TRIANGLES_VALUE, 6, GL_UNSIGNED_INT_VALUE,
+				(const void *)(uintptr_t)( firstIndex * sizeof( uint32_t ) ) );
+			firstIndex += 6u;
+			receipt.effectDecalDrawCount++;
+		}
+		for ( uint32_t i = 0u; i < effectPrimitives.ribbonCount; ++i ) {
+			const renderEffectRibbonCommand_t *ribbon = &effectRibbons[i];
+			const uint32_t count = ( ribbon->pointCount - 1u ) * 6u;
+			if ( ribbon->flags & PRIM_FLAG_NO_DEPTH_TEST )
+				gl.Disable( GL_DEPTH_TEST_VALUE );
+			else
+				gl.Enable( GL_DEPTH_TEST_VALUE );
+			gl.BindTextureUnit( 0u, MaterialTexture( frontend, textures,
+				ribbon->material ) );
+			ApplyRaster( &gl, uniformBuffer, materialUniformBuffer, &uniforms, NULL,
+				( ribbon->flags & PRIM_FLAG_ADDITIVE )
+					? RENDER_ALPHA_ALPHA_ADDITIVE : RENDER_ALPHA_BLEND,
+				0.5f, qfalse, qfalse, qfalse, NULL, NULL, NULL, NULL,
+				NULL, 1.0f );
+			gl.DrawElements( GL_TRIANGLES_VALUE, (glSize_t)count,
+				GL_UNSIGNED_INT_VALUE,
+				(const void *)(uintptr_t)( firstIndex * sizeof( uint32_t ) ) );
+			firstIndex += count;
+		}
+		for ( uint32_t slotIndex = 0u; info->effectBeamPool &&
+				slotIndex < RENDER_SUBMISSION_MAX_EFFECT_BEAMS; ++slotIndex ) {
+			const renderEffectBeamSlot_t *slot = &info->effectBeamPool->slots[slotIndex];
+			if ( !slot->active ) continue;
+			const uint32_t count = (uint32_t)slot->beam.axialCopies * 6u;
+			if ( slot->beam.flags & PRIM_FLAG_NO_DEPTH_TEST ) gl.Disable( GL_DEPTH_TEST_VALUE );
+			else gl.Enable( GL_DEPTH_TEST_VALUE );
+			renderMaterialSnapshot_t material;
+			if (!RenderSubmission_MaterialSnapshot(frontend, slot->beam.shader, &material)) goto cleanup;
+			const float now = (float)effectView.timeMs * .001f;
+			const float clock = slot->transient ? now : fmaxf(now - slot->spawnTime, 0.0f);
+			const float fade = EffectBeamFade(slot, now);
+			const uint32_t stages = material.stageCount ? material.stageCount : 1u;
+			for (uint32_t s = 0u; s < stages; ++s) {
+				productBeamParams_t params = {0};
+				qhandle_t image = slot->beam.shader;
+				memcpy(params.startColor, slot->beam.startColor, sizeof(params.startColor));
+				memcpy(params.endColor, slot->beam.endColor, sizeof(params.endColor));
+				params.startColor[3] *= fade; params.endColor[3] *= fade;
+				params.flags[0] = 1u;
+				params.scaleOffset[0] = params.scaleOffset[1] = 1.0f;
+				for (uint32_t a = 0u; a < 2u; ++a)
+					params.scaleOffset[2u+a] = slot->beam.uvScroll[a] * clock;
+				if (material.stageCount) {
+					const renderMaterialStageSnapshot_t *stage = &material.stages[s];
+					if (stage->imageSource != 0u || stage->material <= 0) goto cleanup;
+					image = stage->material;
+					if (stage->animationFrameCount && stage->animationFrequency > 0.0f) {
+						double frame = fmax(floor((double)effectView.timeMs * .001 * stage->animationFrequency), 0.0);
+						frame = stage->animationLooping ? fmod(frame, stage->animationFrameCount)
+							: fmin(frame, stage->animationFrameCount - 1u);
+						image = stage->animationMaterials[(uint32_t)frame];
+					}
+					for (uint32_t a = 0u; a < 2u; ++a) {
+						params.scaleOffset[a] = stage->scaleScroll[a];
+						params.scaleOffset[2u+a] += stage->scaleScroll[2u+a] * clock;
+					}
+				}
+				const glName_t texture = MaterialTexture(frontend, textures, image);
+				if (!texture) goto cleanup;
+				gl.BindTextureUnit(0u, texture);
+				ApplyRaster(&gl, uniformBuffer, materialUniformBuffer, &uniforms, &params,
+					(material.stageCount || (slot->beam.flags & PRIM_FLAG_ADDITIVE))
+						? RENDER_ALPHA_ALPHA_ADDITIVE : RENDER_ALPHA_BLEND,
+					0.5f, qfalse, qfalse, qfalse, NULL, NULL, NULL, NULL, NULL, 1.0f);
+				gl.DrawElements(GL_TRIANGLES_VALUE, (glSize_t)count, GL_UNSIGNED_INT_VALUE,
+					(const void *)(uintptr_t)(firstIndex * sizeof(uint32_t)));
+				receipt.effectBeamStageDrawCount++;
+			}
+			firstIndex += count;
+			receipt.effectBeamDrawCount++;
+		}
+		gl.Enable( GL_DEPTH_TEST_VALUE );
 	}
 	for ( uint32_t i = 0u; i < entityCount; ++i ) {
 		uint32_t drawsBefore = receipt.entityDrawCount;
 		if ( entities[i].entity.reType == RT_MODEL
 				&& entities[i].entity.hModel > 0 ) {
-			if ( !DrawModelEntity( &gl, uniformBuffer, &uniforms, frontend, textures,
+			if ( !DrawModelEntity( &gl, uniformBuffer, materialUniformBuffer,
+				&uniforms, frontend, textures,
 				&entities[i],
 				&receipt.entityIndexCount, &receipt.entityDrawCount ) ) goto cleanup;
 			receipt.modelEntityCount++;
 		} else {
-			if ( !DrawPrimitiveEntity( &gl, uniformBuffer, &uniforms, frontend, textures,
+			if ( !DrawPrimitiveEntity( &gl, uniformBuffer, materialUniformBuffer,
+				&uniforms, frontend, textures,
 				&entities[i],
 				&receipt.entityIndexCount, &receipt.entityDrawCount ) ) goto cleanup;
 			receipt.primitiveEntityCount++;
@@ -923,6 +1545,18 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 		receipt.weatherInstanceCount = info->weatherParticleCount;
 		gl.UseProgram( info->programName );
 		gl.BindBufferBase( GL_UNIFORM_BUFFER_VALUE, 0u, uniformBuffer );
+		gl.BindBufferBase( GL_UNIFORM_BUFFER_VALUE,
+			PRODUCT_MATERIAL_UNIFORM_BINDING,
+			materialUniformBuffer );
+		gl.BindBufferBase( GL_SHADER_STORAGE_BUFFER_VALUE, 0u,
+			info->atmosphereBufferName );
+	}
+	if ( info->sceneComplete ) {
+		if ( !info->sceneComplete( info->sceneCompleteContext ) ) goto cleanup;
+		gl.UseProgram( info->programName );
+		gl.BindBufferBase( GL_UNIFORM_BUFFER_VALUE, 0u, uniformBuffer );
+		gl.BindBufferBase( GL_UNIFORM_BUFFER_VALUE,
+			PRODUCT_MATERIAL_UNIFORM_BINDING, materialUniformBuffer );
 		gl.BindBufferBase( GL_SHADER_STORAGE_BUFFER_VALUE, 0u,
 			info->atmosphereBufferName );
 	}
@@ -935,7 +1569,8 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 	for ( uint32_t i = 0u; i < uiCount; ++i ) {
 		renderMaterialSnapshot_t material;
 		if ( !RenderSubmission_MaterialSnapshot( frontend, ui[i].material, &material )
-				|| !DrawUiPrimitive( &gl, uniformBuffer, &uniforms, frontend, textures,
+				|| !DrawUiPrimitive( &gl, uniformBuffer, materialUniformBuffer,
+					&uniforms, frontend, textures,
 					&ui[i] ) ) goto cleanup;
 		receipt.uiPrimitiveCount++; receipt.texturedUiPrimitiveCount++;
 		if ( material.msdf ) receipt.msdfUiPrimitiveCount++;
@@ -958,6 +1593,10 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 		receipt.uiDrawCount = content.uiDrawCount;
 		receipt.weatherDrawCount = content.weatherDrawCount;
 		receipt.weatherInstanceCount = content.weatherInstanceCount;
+		receipt.effectBeamDrawCount = content.effectBeamDrawCount;
+		receipt.effectBeamStageDrawCount = content.effectBeamStageDrawCount;
+		receipt.effectDecalDrawCount = content.effectDecalDrawCount;
+		receipt.distantWorldDrawCount = content.distantWorldDrawCount;
 		receipt.legacyLightmapDrawCount = content.legacyLightmapDrawCount;
 		receipt.directionalStaticDrawCount = content.directionalStaticDrawCount;
 		receipt.surfaceLightingBindingDigest = content.surfaceLightingBindingDigest;
@@ -972,17 +1611,35 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 	receipt.uploadedWorldVertexCount = world.vertexCount;
 	receipt.uploadedWorldIndexCount = world.indexCount;
 	receipt.worldDrawCount = world.batchCount;
+	if ( distant ) {
+		receipt.uploadedDistantWorldVertexCount = distant->world.vertexCount;
+		receipt.uploadedDistantWorldIndexCount = distant->world.indexCount;
+		receipt.distantWorldCandidateCount = distant->drawPlan.candidateCount;
+	}
 	receipt.polygonCount = plan->loweredPolygonCount;
 	receipt.lightCount = plan->loweredLightCount;
 	receipt.effectIndexCount = effectIndexCount;
-	receipt.effectDrawCount = polygonCommandCount + lightCount;
+	receipt.effectSpriteDrawCount = effectPrimitives.spriteCount;
+	receipt.effectDecalDrawCount = info->effectDecalPool
+		? info->effectDecalPool->activeCount : 0u;
+	receipt.effectRibbonDrawCount = effectPrimitives.ribbonCount;
+	receipt.effectDrawCount = polygonCommandCount + lightCount
+		+ receipt.effectSpriteDrawCount + receipt.effectDecalDrawCount
+		+ receipt.effectRibbonDrawCount
+		+ receipt.effectBeamDrawCount;
 	receipt.nativeDrawCount = receipt.worldDrawCount + receipt.effectDrawCount
-		+ receipt.entityDrawCount + receipt.uiDrawCount + receipt.weatherDrawCount;
+		+ receipt.effectBeamStageDrawCount - receipt.effectBeamDrawCount
+		+ receipt.distantWorldDrawCount + receipt.entityDrawCount
+		+ receipt.uiDrawCount + receipt.weatherDrawCount;
 	receipt.ready = qtrue;
 	if ( receipt.uploadedMaterialCount != plan->loweredMaterialCount
 			|| receipt.worldDrawCount != plan->loweredWorldBatchCount
 			|| receipt.effectIndexCount != plan->loweredEffectIndexCount
 			|| receipt.effectDrawCount != plan->loweredEffectBatchCount
+			|| receipt.effectSpriteDrawCount != plan->loweredEffectSpriteCount
+			|| receipt.effectDecalDrawCount != plan->loweredEffectDecalCount
+			|| receipt.effectRibbonDrawCount != plan->loweredEffectRibbonCount
+			|| receipt.effectBeamDrawCount != plan->loweredEffectBeamCount
 			|| receipt.modelEntityCount != plan->loweredModelEntityCount
 			|| receipt.primitiveEntityCount != plan->loweredPrimitiveEntityCount
 			|| receipt.temporalEntityCount != plan->loweredTemporalEntityCount
@@ -996,11 +1653,11 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 			|| !ReceiptValid( &receipt ) ) goto cleanup;
 	ok = qtrue;
 cleanup:
+	if ( materialUniformBuffer ) gl.DeleteBuffers( 1, &materialUniformBuffer );
 	if ( uniformBuffer ) gl.DeleteBuffers( 1, &uniformBuffer );
-	if ( vaos[0] || vaos[1] ) gl.DeleteVertexArrays( 2, vaos );
-	if ( buffers[0] || buffers[1] || buffers[2] || buffers[3] )
-		gl.DeleteBuffers( 4, buffers );
-	if ( frontend ) gl.DeleteTextures( (glSize_t)frontend->materialCount, textures );
+	if ( vaos[0] || vaos[1] || vaos[2] ) gl.DeleteVertexArrays( 3, vaos );
+	if ( buffers[0] || buffers[1] || buffers[2] || buffers[3]
+			|| buffers[4] || buffers[5] ) gl.DeleteBuffers( 6, buffers );
 	free( effectIndices );
 	free( effectVertices );
 	if ( ok ) *outReceipt = receipt;

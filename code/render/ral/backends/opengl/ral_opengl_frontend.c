@@ -63,6 +63,10 @@ qboolean RalOpenGl_FrontendPlanBuild(
 		const ralOpenGlCoreReceipt_t *coreReceipt,
 		const renderSubmissionState_t *frontend,
 		const renderSubmissionReceipt_t *submission, uint64_t planGeneration,
+		const renderEffectDecalPool_t *effectDecalPool,
+		const renderEffectDecalPoolReceipt_t *effectDecalPoolReceipt,
+		const renderEffectBeamPool_t *effectBeamPool,
+		const renderEffectBeamPoolReceipt_t *effectBeamPoolReceipt,
 		ralOpenGlFrontendPlanReceipt_t *outReceipt ) {
 	ralOpenGlFrontendPlanReceipt_t candidate;
 	renderWorldSnapshot_t world;
@@ -71,6 +75,13 @@ qboolean RalOpenGl_FrontendPlanBuild(
 	const renderPolyCommand_t *polygons;
 	const polyVert_t *polyVertices;
 	const renderLightCommand_t *lights;
+	renderEffectPrimitiveSnapshot_t effectPrimitives;
+	const spriteDesc_t *effectSprites;
+	const emitterDesc_t *effectEmitters;
+	const decalDesc_t *effectDecals;
+	const renderEffectRibbonCommand_t *effectRibbons;
+	const ribbonPoint_t *effectRibbonPoints;
+	const beamDesc_t *effectBeams;
 	uint32_t polygonCommandCount = 0u, polyVertexCount = 0u, lightCount = 0u;
 	uint32_t entityCount = 0u, uiCount = 0u;
 	if ( !coreReceipt || !frontend || !submission || !outReceipt
@@ -93,7 +104,17 @@ qboolean RalOpenGl_FrontendPlanBuild(
 			|| frontend->localIrradianceEntityCount != submission->localIrradianceEntityCount
 			|| frontend->polygonCount != submission->polygonCount
 			|| frontend->lightCount != submission->lightCount
-			|| frontend->uiPrimitiveCount != submission->uiPrimitiveCount ) return qfalse;
+			|| frontend->uiPrimitiveCount != submission->uiPrimitiveCount
+			|| ( ( effectDecalPool || effectDecalPoolReceipt )
+				&& ( !effectDecalPool || !effectDecalPoolReceipt
+					|| effectDecalPoolReceipt->frameGeneration != planGeneration
+					|| !RenderEffectDecalPool_ReceiptExact( effectDecalPool,
+						effectDecalPoolReceipt ) ) )
+			|| ( ( effectBeamPool || effectBeamPoolReceipt )
+				&& ( !effectBeamPool || !effectBeamPoolReceipt
+					|| effectBeamPoolReceipt->frameGeneration != planGeneration
+					|| !RenderEffectBeamPool_ReceiptExact( effectBeamPool,
+						effectBeamPoolReceipt ) ) ) ) return qfalse;
 	memset( &candidate, 0, sizeof( candidate ) );
 	candidate.schemaVersion = RAL_OPENGL_FRONTEND_SCHEMA_VERSION;
 	candidate.backendType = RAL_BACKEND_OPENGL;
@@ -114,7 +135,7 @@ qboolean RalOpenGl_FrontendPlanBuild(
 	if ( submission->worldLoaded && submission->sceneRendered ) {
 		if ( !RenderSubmission_WorldSnapshot( frontend, &world ) ) {
 			candidate.unresolvedCount++;
-		} else {
+		} else if ( !( world.rdflags & RDF_NOWORLDMODEL ) ) {
 			candidate.loweredWorldVertexCount = world.vertexCount;
 			candidate.loweredWorldIndexCount = world.indexCount;
 			candidate.loweredWorldBatchCount = world.batchCount;
@@ -217,6 +238,92 @@ qboolean RalOpenGl_FrontendPlanBuild(
 			|| ( polygonCommandCount && !polygons )
 			|| ( polyVertexCount && !polyVertices )
 			|| ( lightCount && !lights ) ) candidate.unresolvedCount++;
+	memset( &effectPrimitives, 0, sizeof( effectPrimitives ) );
+	if ( !RenderSubmission_EffectPrimitiveSnapshots( frontend,
+			&effectPrimitives, &effectSprites, &effectEmitters, &effectDecals,
+			&effectRibbons, &effectRibbonPoints, &effectBeams )
+			|| ( effectPrimitives.spriteCount && !effectSprites )
+			|| ( effectPrimitives.ribbonCount && !effectRibbons )
+			|| ( effectPrimitives.ribbonPointCount && !effectRibbonPoints )
+			|| effectPrimitives.emitterCount
+			|| ( effectPrimitives.decalCount && !effectDecalPool )
+			|| ( effectDecalPoolReceipt
+				&& effectDecalPoolReceipt->submittedCount
+					!= effectPrimitives.decalCount )
+			|| ( effectPrimitives.beamCount && !effectBeamPool )
+			|| ( effectBeamPoolReceipt
+				&& effectBeamPoolReceipt->submittedCount
+					!= effectPrimitives.beamCount ) ) {
+		candidate.unresolvedCount++;
+	} else {
+		(void)effectEmitters; (void)effectDecals; (void)effectBeams;
+		for ( uint32_t i = 0u; i < effectPrimitives.spriteCount; ++i ) {
+			if ( !MaterialReady( frontend, effectSprites[i].shader, NULL )
+					|| !AddU32( &candidate.loweredEffectIndexCount, 6u )
+					|| !AddU32( &candidate.loweredEffectBatchCount, 1u ) ) {
+				candidate.unresolvedCount++; break;
+			}
+			candidate.loweredEffectSpriteCount++;
+		}
+		if ( effectDecalPool ) {
+			for ( uint32_t i = 0u; i < RENDER_SUBMISSION_MAX_EFFECT_DECALS; ++i ) {
+				const renderEffectDecalSlot_t *slot = &effectDecalPool->slots[i];
+				if ( !slot->active ) continue;
+				if ( !MaterialReady( frontend, slot->decal.shader, NULL )
+						|| !AddU32( &candidate.loweredEffectIndexCount, 6u )
+						|| !AddU32( &candidate.loweredEffectBatchCount, 1u ) ) {
+					candidate.unresolvedCount++; break;
+				}
+				candidate.loweredEffectDecalCount++;
+			}
+			if ( candidate.loweredEffectDecalCount != effectDecalPool->activeCount )
+				candidate.unresolvedCount++;
+		}
+		{
+			uint32_t expectedFirstPoint = 0u;
+			for ( uint32_t i = 0u; i < effectPrimitives.ribbonCount; ++i ) {
+				const renderEffectRibbonCommand_t *ribbon = &effectRibbons[i];
+				const uint64_t indexCount = ribbon->pointCount > 1u
+					? (uint64_t)( ribbon->pointCount - 1u ) * 6u : 0u;
+				if ( ribbon->firstPoint != expectedFirstPoint
+						|| ribbon->pointCount < 2u
+						|| expectedFirstPoint
+							> effectPrimitives.ribbonPointCount
+						|| ribbon->pointCount > effectPrimitives.ribbonPointCount
+							- expectedFirstPoint
+						|| indexCount > UINT32_MAX
+						|| !MaterialReady( frontend, ribbon->material, NULL )
+						|| !AddU32( &candidate.loweredEffectIndexCount,
+							(uint32_t)indexCount )
+						|| !AddU32( &candidate.loweredEffectBatchCount, 1u ) ) {
+					candidate.unresolvedCount++; break;
+				}
+				expectedFirstPoint += ribbon->pointCount;
+				candidate.loweredEffectRibbonCount++;
+			}
+			if ( expectedFirstPoint != effectPrimitives.ribbonPointCount )
+				candidate.unresolvedCount++;
+		}
+		if ( effectBeamPool ) {
+			for ( uint32_t i = 0u; i < RENDER_SUBMISSION_MAX_EFFECT_BEAMS; ++i ) {
+				const renderEffectBeamSlot_t *slot = &effectBeamPool->slots[i];
+				const uint32_t copies = slot->active
+					? (uint32_t)slot->beam.axialCopies : 0u;
+				if ( !slot->active ) continue;
+				if ( copies < 1u || copies > 8u
+						|| !MaterialReady( frontend, slot->beam.shader, NULL )
+						|| copies > UINT32_MAX / 6u
+						|| !AddU32( &candidate.loweredEffectIndexCount,
+							copies * 6u )
+						|| !AddU32( &candidate.loweredEffectBatchCount, 1u ) ) {
+					candidate.unresolvedCount++; break;
+				}
+				candidate.loweredEffectBeamCount++;
+			}
+			if ( candidate.loweredEffectBeamCount != effectBeamPool->activeCount )
+				candidate.unresolvedCount++;
+		}
+	}
 	{
 		qboolean lightsValid = lightCount == submission->lightCount
 			&& ( !lightCount || lights );
@@ -283,6 +390,16 @@ qboolean RalOpenGl_FrontendPlanBuild(
 	candidate.loweringDigest = HashU64( candidate.loweringDigest,
 		( (uint64_t)candidate.loweredPolygonCount << 32u )
 		| candidate.loweredLightCount );
+	candidate.loweringDigest = HashU64( candidate.loweringDigest,
+		( (uint64_t)candidate.loweredEffectSpriteCount << 32u )
+		| candidate.loweredEffectDecalCount );
+	candidate.loweringDigest = HashU64( candidate.loweringDigest,
+		( (uint64_t)candidate.loweredEffectRibbonCount << 32u )
+		| candidate.loweredEffectBeamCount );
+	candidate.loweringDigest = HashU64( candidate.loweringDigest,
+		effectDecalPool ? effectDecalPool->digest : 0u );
+	candidate.loweringDigest = HashU64( candidate.loweringDigest,
+		effectBeamPool ? effectBeamPool->digest : 0u );
 	candidate.loweringDigest = HashU64( candidate.loweringDigest,
 		candidate.loweredLocalIrradianceEntityCount );
 	candidate.ready = qtrue;

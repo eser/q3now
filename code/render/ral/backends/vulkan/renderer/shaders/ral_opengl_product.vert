@@ -1,4 +1,15 @@
 #version 450
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
+layout(set = 2, binding = 1, std140) uniform ProductMaterialFactors {
+	vec4 baseColor;
+	vec4 factors;
+	vec4 beamStartColor;
+	vec4 beamEndColor;
+	vec4 beamScaleOffset;
+	uvec4 beamFlags;
+} productMaterial;
 
 layout(push_constant) uniform ProductDraw {
 	vec4 viewOriginDrawSpace;
@@ -9,7 +20,7 @@ layout(push_constant) uniform ProductDraw {
 	vec4 viewportAlpha;
 	vec4 atmosphereEyeDensity;
 	vec4 atmosphereColorVisibility;
-	vec4 atmosphereHeightCloud;
+	vec4 atmosphereHeightSky;
 	uvec4 atmosphereFroxelGrid;
 	vec4 localSh[4];
 	uvec4 staticLighting;
@@ -43,6 +54,11 @@ void main() {
 	texCoord = in_tex_coord;
 	lightmapCoord = in_lightmap_coord;
 	color = in_color;
+	// Sky binds SkyMaterial at this slot; its bytes are not beam operands.
+	if (productDraw.atmosphereHeightSky.w < 0.5 && productMaterial.beamFlags.x != 0u) {
+		color = mix(productMaterial.beamStartColor, productMaterial.beamEndColor, in_tex_coord.x);
+		texCoord = in_tex_coord * productMaterial.beamScaleOffset.xy + productMaterial.beamScaleOffset.zw;
+	}
 	worldPosition = in_position;
 	worldNormal = normalize(in_normal);
 }

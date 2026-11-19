@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-#define RAL_OPENGL_FRONTEND_SCHEMA_VERSION 1u
+#define RAL_OPENGL_FRONTEND_SCHEMA_VERSION 4u
 
 typedef struct {
 	uint32_t schemaVersion;
@@ -44,6 +44,10 @@ typedef struct {
 	uint32_t loweredLightCount;
 	uint32_t loweredEffectIndexCount;
 	uint32_t loweredEffectBatchCount;
+	uint32_t loweredEffectSpriteCount;
+	uint32_t loweredEffectDecalCount;
+	uint32_t loweredEffectRibbonCount;
+	uint32_t loweredEffectBeamCount;
 	uint32_t unresolvedCount;
 	uint32_t fallbackCount;
 	uint32_t fatalCount;
@@ -54,6 +58,10 @@ qboolean RalOpenGl_FrontendPlanBuild(
 	const ralOpenGlCoreReceipt_t *coreReceipt,
 	const renderSubmissionState_t *frontend,
 	const renderSubmissionReceipt_t *submission, uint64_t planGeneration,
+	const renderEffectDecalPool_t *effectDecalPool,
+	const renderEffectDecalPoolReceipt_t *effectDecalPoolReceipt,
+	const renderEffectBeamPool_t *effectBeamPool,
+	const renderEffectBeamPoolReceipt_t *effectBeamPoolReceipt,
 	ralOpenGlFrontendPlanReceipt_t *outReceipt );
 qboolean RalOpenGl_FrontendPlanReceiptExact(
 	const ralOpenGlFrontendPlanReceipt_t *a,

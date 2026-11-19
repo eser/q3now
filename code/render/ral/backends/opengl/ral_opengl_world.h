@@ -8,19 +8,33 @@
 #include "ral_opengl_lighting.h"
 #include "ral_atmosphere.h"
 #include "ral_display_visibility.h"
+#include "ral_sky_radiance.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define RAL_OPENGL_WORLD_SCHEMA_VERSION 4u
+#define RAL_OPENGL_WORLD_SCHEMA_VERSION 12u
 
 typedef struct {
 	uint64_t generation;
 	uint32_t programName;
+	uint32_t skyProgramName;
 	uint32_t outputWidth;
 	uint32_t outputHeight;
+	/* Adapter-local scene-complete boundary; postprocess runs before every UI
+	 * primitive and must restore the product draw bindings it replaces. */
+	qboolean (*sceneComplete)( void *context );
+	void *sceneCompleteContext;
+	const uint32_t *materialTextureNames;
+	uint32_t materialTextureCount;
 	uint32_t atmosphereBufferName;
+	uint32_t physicalSkyTextureName;
+	uint32_t currentSkyIrradianceTextureName;
+	uint32_t previousSkyIrradianceTextureName;
+	uint32_t currentSkyRadianceTextureName;
+	uint32_t previousSkyRadianceTextureName;
+	ralSkyRadianceConsumerReceipt_t skyRadianceConsumer;
 	ralAtmospherePlanReceipt_t atmosphere;
 	uint32_t weatherProgramName;
 	uint32_t weatherUniformBufferName;
@@ -28,6 +42,12 @@ typedef struct {
 	uint32_t weatherParticleCount;
 	const ralOpenGlLightingReceipt_t *directionalLighting;
 	ralDisplayVisibilityPlan_t displayVisibility;
+	float aerialHaze; /* r_atmosphereAerialHaze weight, 0..1 */
+	const renderDistantWorldSubmission_t *distantWorld;
+	const renderEffectDecalPool_t *effectDecalPool;
+	renderEffectDecalPoolReceipt_t effectDecalPoolReceipt;
+	const renderEffectBeamPool_t *effectBeamPool;
+	renderEffectBeamPoolReceipt_t effectBeamPoolReceipt;
 } ralOpenGlWorldLowerInfo_t;
 
 typedef struct {
@@ -41,6 +61,10 @@ typedef struct {
 	uint32_t uploadedWorldVertexCount;
 	uint32_t uploadedWorldIndexCount;
 	uint32_t worldDrawCount;
+	uint32_t uploadedDistantWorldVertexCount;
+	uint32_t uploadedDistantWorldIndexCount;
+	uint32_t distantWorldCandidateCount;
+	uint32_t distantWorldDrawCount;
 	uint32_t legacyLightmapDrawCount;
 	uint32_t directionalStaticDrawCount;
 	uint64_t surfaceLightingBindingDigest;
@@ -48,6 +72,11 @@ typedef struct {
 	uint32_t lightCount;
 	uint32_t effectIndexCount;
 	uint32_t effectDrawCount;
+	uint32_t effectSpriteDrawCount;
+	uint32_t effectDecalDrawCount;
+	uint32_t effectRibbonDrawCount;
+	uint32_t effectBeamDrawCount;
+	uint32_t effectBeamStageDrawCount;
 	uint32_t modelEntityCount;
 	uint32_t primitiveEntityCount;
 	uint32_t temporalEntityCount;
@@ -77,6 +106,10 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 	ralOpenGlWorldReceipt_t *outReceipt );
 qboolean RalOpenGl_WorldReceiptExact( const ralOpenGlWorldReceipt_t *a,
 	const ralOpenGlWorldReceipt_t *b );
+/* Uses the very same world projection parameters; output is bottom-left UV
+ * and standard GL device depth, not a CPU visibility/occlusion decision. */
+qboolean RalOpenGl_WorldProjectLens( const renderWorldSnapshot_t *view,
+	const float origin[3], uint32_t outputHeight, float projected[3], float *radiusScale );
 
 #ifdef __cplusplus
 }

@@ -2,10 +2,15 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "ral_opengl_module.h"
+#include "render_pbr_control.h"
 #include "ral_opengl_lighting.h"
 #include "maps/map_format_registry.h"
 #include "render_image_decode.h"
+#include "render_sky_atlas.h"
 #include "render_lighting_project_cook.h"
+#include "render_material_project_cook.h"
+#include "render_world_material_usage.h"
+#include "render_material_runtime_owner.h"
 #include "render_lighting_sidecar.h"
 #include "render_material_script.h"
 #include "tr_public.h"
@@ -18,6 +23,11 @@
 #include <string.h>
 
 typedef struct {
+	ralOpenGlLighting_t *resource;
+	ralOpenGlLightingReceipt_t receipt;
+} wiredOpenGlWorldLighting_t;
+
+typedef struct {
 	refimport_t					  imports;
 	refexport_t					  exports;
 	ralOpenGlCore_t				 *core;
@@ -25,10 +35,10 @@ typedef struct {
 	ralOpenGlProduct_t			 *product;
 	renderSubmissionState_t		  frontend;
 	renderMaterialScriptCatalog_t materialScripts;
+	renderMaterialRuntimeOwner_t  materialRuntimeOwner;
 	renderLightingSidecarReceipt_t lightingSidecar;
 	renderIrradianceSidecarReceipt_t irradianceSidecar;
-	ralOpenGlLighting_t			 *directionalLighting;
-	ralOpenGlLightingReceipt_t	  directionalLightingReceipt;
+	wiredOpenGlWorldLighting_t      worldLighting[MAX_RENDER_WORLDS];
 	ralOpenGlModuleFrameReceipt_t published;
 	glconfig_t					  config;
 	const mapFile_t				 *loadedWorld;
@@ -43,6 +53,7 @@ typedef struct {
 	qhandle_t					  defaultMaterial;
 	qboolean					  loaded;
 	qboolean					  registered;
+	qboolean                       resetRegistrationAssets;
 	qboolean					  frameOpen;
 	qboolean					  glInitialized;
 	qboolean					  screenshotCommandsRegistered;
@@ -53,7 +64,17 @@ typedef struct {
 	int							  logChannel;
 	int							  receiptLogChannel;
 	cvar_t						 *brightness;
+	cvar_t *pbr;
+	cvar_t pbrDefault;
 	cvar_t						  brightnessFallback;
+	cvar_t *aerialHaze;
+	cvar_t aerialHazeFallback;
+	cvar_t *skyPhysicalBlend;
+	cvar_t skyPhysicalBlendFallback;
+	cvar_t *lens;
+	cvar_t lensFallback;
+	cvar_t *exposureControls[10];
+	cvar_t exposureDefaults[10];
 } wiredOpenGlModuleState_t;
 
 static wiredOpenGlModuleState_t s_module;
@@ -82,6 +103,8 @@ static qboolean ReceiptValid( const ralOpenGlModuleFrameReceipt_t *receipt )
 		   receipt->atmosphere.frameGeneration == receipt->frameGeneration &&
 		   !memcmp( &receipt->atmosphere, &receipt->product.atmosphere, sizeof( receipt->atmosphere ) ) &&
 		   receipt->product.plan.frontendFrameDigest == receipt->frontend.frameDigest &&
+		   receipt->product.lensSourceCount == receipt->frontend.lensSourceCount &&
+		   receipt->frontend.lensSourceDroppedCount == 0u &&
 		   receipt->product.unresolvedCount == 0u && receipt->product.fallbackCount == 0u &&
 		   receipt->product.fatalCount == 0u && receipt->ready == qtrue;
 }
@@ -166,6 +189,165 @@ static ralOpenGlProc_t ResolveGl( const char *name, void *userData )
 	return proc;
 }
 
+static qboolean PublishDecodedMaterialIdentity( qhandle_t handle,
+		renderAssetKind_t kind, const char *resolved, const byte *pixels,
+		uint32_t width, uint32_t height, qboolean noMipMaps ) {
+	char canonical[MAX_QPATH];
+	uint64_t sourceId = 0u, byteSize = 0u;
+	unsigned filesystemGeneration = 0u;
+	ralTextureCacheKey_t key;
+	renderTextureSnapshot_t snapshot;
+	if ( handle <= 0 || !resolved || !resolved[0] || !pixels || !width || !height
+			|| !RenderSubmission_TextureSnapshot( &s_module.frontend, handle,
+				&snapshot ) || snapshot.ready != qtrue
+			|| !snapshot.rgba8 || !snapshot.width || !snapshot.height
+			|| !s_module.imports.FS_ResolveResource
+			|| !s_module.imports.FS_ResolveResource( resolved, canonical,
+				sizeof( canonical ), &sourceId, &byteSize,
+				&filesystemGeneration ) || !sourceId || !byteSize
+			|| !filesystemGeneration ) return qfalse;
+	/* One interned material name owns one immutable decoded snapshot. Preserve
+	 * its first provenance when an extension alias resolves another image later. */
+	if ( snapshot.textureCacheKeyReady )
+		return Ral_TextureCacheKeyValid( &snapshot.textureCacheKey )
+			&& snapshot.textureCacheKey.asset.width == snapshot.width
+			&& snapshot.textureCacheKey.asset.height == snapshot.height;
+	if ( !Ral_MaterialRuntimeTextureKeyBuild( sourceId,
+			filesystemGeneration, snapshot.rgba8, snapshot.width, snapshot.height,
+			kind == RENDER_ASSET_MSDF ? qfalse : qtrue, noMipMaps,
+			RAL_TEXTURE_RESIDENCY_STREAMED, &key ) ) return qfalse;
+	return RenderSubmission_SetTextureCacheKey( &s_module.frontend,
+		handle, &key );
+}
+
+static qhandle_t RegisterScriptedTextureResource( renderAssetKind_t kind,
+		const renderMaterialScriptEntry_t *scripted, const char *imageName,
+		qboolean clampToEdge ) {
+	byte *pixels = NULL;
+	uint32_t width = 0u, height = 0u;
+	char resolved[MAX_QPATH];
+	qhandle_t handle;
+	if ( !scripted || !imageName || !imageName[0] || imageName[0] == '*'
+			|| !RenderImage_DecodeRgba8( imageName, &pixels, &width, &height,
+				resolved ) ) return 0;
+	handle = RenderSubmission_RegisterStageTexture( &s_module.frontend, kind,
+		imageName, clampToEdge, pixels, width, height );
+	if ( handle && !PublishDecodedMaterialIdentity( handle, kind, resolved,
+			pixels, width, height, scripted->noMipMaps ) ) handle = 0;
+	ri.Free( pixels );
+	return handle;
+}
+
+static qboolean RegisterSkyProgramResources( renderAssetKind_t kind,
+		const renderMaterialScriptEntry_t *scripted,
+		qhandle_t outerTextures[RAL_MATERIAL_SKY_FACE_COUNT],
+		qhandle_t innerTextures[RAL_MATERIAL_SKY_FACE_COUNT] ) {
+	static const char *suffixes[RAL_MATERIAL_SKY_FACE_COUNT] = {
+		"rt", "bk", "lf", "ft", "up", "dn"
+	};
+	const char *prefixes[2];
+	qhandle_t *textureSets[2] = { outerTextures, innerTextures };
+	if ( !scripted || !scripted->sky || !outerTextures || !innerTextures )
+		return qfalse;
+	memset( outerTextures, 0,
+		RAL_MATERIAL_SKY_FACE_COUNT * sizeof( outerTextures[0] ) );
+	memset( innerTextures, 0,
+		RAL_MATERIAL_SKY_FACE_COUNT * sizeof( innerTextures[0] ) );
+	prefixes[0] = scripted->skyBoxPrefix;
+	prefixes[1] = scripted->skyInnerBoxPrefix;
+	for ( uint32_t box = 0u; box < 2u; ++box ) {
+		if ( !prefixes[box][0] ) continue;
+		for ( uint32_t face = 0u; face < RAL_MATERIAL_SKY_FACE_COUNT; ++face ) {
+			char path[MAX_QPATH];
+			const int length = snprintf( path, sizeof( path ), "%s_%s",
+				prefixes[box], suffixes[face] );
+			if ( length <= 0 || length >= (int)sizeof( path ) ) return qfalse;
+			textureSets[box][face] = RegisterScriptedTextureResource( kind, scripted,
+				path, qtrue );
+			if ( textureSets[box][face] <= 0 ) return qfalse;
+		}
+	}
+	for ( uint32_t stageIndex = 0u; stageIndex < scripted->stageCount;
+			++stageIndex ) {
+		const renderMaterialScriptStage_t *stage = &scripted->stages[stageIndex];
+		if ( stage->imageSource != RENDER_MATERIAL_STAGE_IMAGE ) continue;
+		if ( stage->imageName[0]
+				&& !RegisterScriptedTextureResource( kind, scripted, stage->imageName,
+					stage->clampToEdge ) ) return qfalse;
+		for ( uint32_t frame = 0u; frame < stage->animationFrameCount; ++frame ) {
+			const char *frameName = scripted->animationFrameNames[
+				stage->animationFrameOffset + frame];
+			if ( !RegisterScriptedTextureResource( kind, scripted, frameName,
+					stage->clampToEdge ) ) return qfalse;
+		}
+	}
+	return qtrue;
+}
+
+typedef struct {
+	renderAssetKind_t kind;
+	const renderMaterialScriptEntry_t *scripted;
+	qhandle_t owner;
+} scriptedStageContext_t;
+
+static qhandle_t ResolveScriptedStage( void *context,
+		const renderMaterialScriptStage_t *stage, const char *imageName ) {
+	const scriptedStageContext_t *source = (const scriptedStageContext_t *)context;
+	/* Reuse the already decoded primary only for the same sampler usage. */
+	if ( !source->scripted->skyBoxPrefix[0]
+			&& stage->clampToEdge == source->scripted->clampToEdge
+			&& !strcasecmp( imageName, source->scripted->imageName ) )
+		return source->owner;
+	const qhandle_t handle = RegisterScriptedTextureResource( source->kind,
+		source->scripted, imageName, stage->clampToEdge );
+	if ( !handle && ri.Log ) ri.Log( SEV_WARN,
+		"material '%s': unresolved stage image '%s'\n",
+		source->scripted->name, imageName );
+	return handle;
+}
+
+static qboolean ApplyScriptedMaterial( renderAssetKind_t kind,
+		const renderMaterialScriptEntry_t *scripted, qhandle_t handle ) {
+	renderMaterialStageSnapshot_t stages[RENDER_MATERIAL_MAX_STAGES];
+	qhandle_t skyOuterTextures[RAL_MATERIAL_SKY_FACE_COUNT] = { 0 };
+	qhandle_t skyInnerTextures[RAL_MATERIAL_SKY_FACE_COUNT] = { 0 };
+	if ( !scripted || !scripted->name[0] ) return handle > 0;
+	if ( !handle
+			|| !RenderSubmission_SetMaterialRasterPolicy( &s_module.frontend,
+				handle, scripted->alphaMode, scripted->alphaCutoff,
+				scripted->depthWrite )
+			|| !RenderSubmission_SetMaterialSort( &s_module.frontend, handle,
+				scripted->sort )
+			|| !RenderSubmission_SetMaterialCullMode( &s_module.frontend, handle,
+				scripted->cullMode )
+			|| !RenderSubmission_SetMaterialSky( &s_module.frontend, handle,
+				scripted->sky )
+			|| !RenderSubmission_SetMaterialSkyBox( &s_module.frontend, handle,
+				scripted->skyBoxPrefix[0] ? qtrue : qfalse )
+			|| !RenderSubmission_SetMaterialSkyCloudHeight( &s_module.frontend,
+				handle, scripted->skyCloudHeight )
+			|| !RenderSubmission_SetMaterialNoDraw( &s_module.frontend, handle,
+				scripted->noDraw ) ) return qfalse;
+	if ( ( scripted->sky || scripted->hasTcTransform )
+			&& !RenderSubmission_SetMaterialSkyProjection( &s_module.frontend,
+				handle, scripted->skyScale, scripted->skyScroll ) ) return qfalse;
+	if ( scripted->stageCount ) {
+		scriptedStageContext_t context = { kind, scripted, handle };
+		if ( !RenderMaterialScript_BuildStages( scripted, ResolveScriptedStage,
+				&context, stages )
+				|| !RenderSubmission_SetMaterialStages( &s_module.frontend, handle,
+					stages, scripted->stageCount ) ) return qfalse;
+	}
+	return !scripted->sky
+		|| ( RegisterSkyProgramResources( kind, scripted,
+			skyOuterTextures, skyInnerTextures )
+			&& RenderSubmission_SetMaterialAuthoredSkySource(
+				&s_module.frontend, handle, &scripted->skySource )
+			&& RenderSubmission_SetMaterialAuthoredSkyTextures(
+				&s_module.frontend, handle, skyOuterTextures,
+				skyInnerTextures ) );
+}
+
 static qhandle_t RegisterImageSource( renderAssetKind_t kind, const char *name, const char *imageName, qboolean clamp )
 {
 	static const byte			white[4] = { 255u, 255u, 255u, 255u };
@@ -184,15 +366,27 @@ static qhandle_t RegisterImageSource( renderAssetKind_t kind, const char *name, 
 	 * fallback; every other unresolved authored name remains a hard failure. */
 	if ( name && ( name[0] == '*' || !strcmp( name, "noshader" ) ) )
 		return RenderSubmission_RegisterMaterialImage( &s_module.frontend, kind, name, qtrue, white, 1u, 1u );
+	if ( scripted.skyBoxPrefix[0] ) {
+		if ( !wired_sky_atlas_decode( &ri, scripted.skyBoxPrefix, &pixels,
+				&width, &height ) ) return 0;
+		handle = RenderSubmission_RegisterMaterialImage( &s_module.frontend,
+			kind, name, qtrue, pixels, width, height );
+		ri.Free( pixels );
+		if ( !handle || !ApplyScriptedMaterial( kind, &scripted, handle ) ) return 0;
+		if ( scripted.hasLighting && !RenderMaterialScript_ApplyLighting(
+				&s_module.materialScripts, name, &s_module.frontend, handle ) ) return 0;
+		return handle;
+	}
 	if ( imageName && RenderImage_DecodeRgba8( imageName, &pixels, &width, &height, resolved ) ) {
 		const char *identityName = scripted.name[0] ? name : resolved;
 		handle = RenderSubmission_RegisterMaterialImage( &s_module.frontend, kind,
 			identityName, clamp, pixels, width, height );
+		if ( handle && !PublishDecodedMaterialIdentity( handle, kind, resolved,
+				pixels, width, height,
+				scripted.name[0] ? scripted.noMipMaps : qfalse ) ) handle = 0;
 		ri.Free( pixels );
-		if ( handle && scripted.name[0] &&
-			 !RenderSubmission_SetMaterialRasterPolicy( &s_module.frontend, handle, scripted.alphaMode,
-													scripted.alphaCutoff, scripted.depthWrite ) )
-			return 0;
+		if ( handle && scripted.name[0]
+				&& !ApplyScriptedMaterial( kind, &scripted, handle ) ) return 0;
 		if ( handle && scripted.hasLighting &&
 			 !RenderMaterialScript_ApplyLighting( &s_module.materialScripts, name,
 				 &s_module.frontend, handle ) ) return 0;
@@ -215,15 +409,7 @@ static qhandle_t RegisterModel( const char *name )
 	char				  canonical[MAX_QPATH];
 	if ( !name || !name[0] )
 		return 0;
-	if ( name[0] == '*' && s_module.loadedWorld ) {
-		char *end	= NULL;
-		long  index = strtol( name + 1, &end, 10 );
-		if ( end != name + 1 && *end == '\0' && index > 0 && index < s_module.loadedWorld->numSubModels ) {
-			const dmodel_t *source = &s_module.loadedWorld->subModels[index];
-			return RenderSubmission_RegisterInlineModel( &s_module.frontend, name, (uint32_t)source->firstSurface,
-														 (uint32_t)source->numSurfaces );
-		}
-	}
+	if ( name[0] == '*' ) return RenderSubmission_RegisterBspModel( &s_module.frontend, name );
 	if ( s_module.imports.FS_ResolveResource
 			&& s_module.imports.FS_ResolveResource( name, canonical,
 				sizeof( canonical ), NULL, NULL, NULL ) ) name = canonical;
@@ -286,39 +472,28 @@ static qhandle_t RegisterPrimitive( const char *name )
 
 static qboolean PrepareWorldMaterials( const mapFile_t *bsp )
 {
+	byte used[RENDER_SUBMISSION_MAX_MATERIALS];
 	byte	*rgba = NULL;
 	uint32_t side = 0u;
 	uint64_t pixels;
-	if ( !bsp || bsp->numSurfaces < 0 || bsp->numShaders < 0 || bsp->numLightmapPages < 0 ||
-		 bsp->lightmapPageSize < 0 || ( bsp->numSurfaces && !bsp->surfaces ) || ( bsp->numShaders && !bsp->shaders ) ) {
+	if ( !RenderWorldMaterialUsage_Build( bsp, used, sizeof( used ) ) || bsp->numLightmapPages < 0 ||
+		 bsp->lightmapPageSize < 0 ) {
 		if ( s_module.imports.LogCh && s_module.logChannel >= 0 )
 			s_module.imports.LogCh( s_module.logChannel, SEV_WARN,
 									"Wired native OpenGL RAL: invalid world material catalog\n" );
 		return qfalse;
 	}
-	for ( int i = 0; i < bsp->numSurfaces; ++i ) {
-		const dsurface_t *surface = &bsp->surfaces[i];
-		const dshader_t	 *shader;
-		if ( surface->surfaceType == MST_BAD || surface->surfaceType == MST_FLARE )
-			continue;
-		if ( surface->shaderNum < 0 || surface->shaderNum >= bsp->numShaders ) {
-			if ( s_module.imports.LogCh && s_module.logChannel >= 0 )
-				s_module.imports.LogCh(
-					s_module.logChannel, SEV_WARN,
-					"Wired native OpenGL RAL: world surface shader index invalid surface=%d shader=%d\n", i,
-					surface->shaderNum );
-			return qfalse;
-		}
-		shader = &bsp->shaders[surface->shaderNum];
-		if ( shader->surfaceFlags & ( SURF_NODRAW | SURF_SKIP ) )
+	for ( int i = 0; i < bsp->numShaders; ++i ) {
+		const dshader_t *shader = &bsp->shaders[i];
+		if ( !used[i] )
 			continue;
 		if ( !RenderSubmission_MaterialHandle( &s_module.frontend, shader->shader ) &&
 			 !RegisterShader( shader->shader ) ) {
 			if ( s_module.imports.LogCh && s_module.logChannel >= 0 )
 				s_module.imports.LogCh(
 					s_module.logChannel, SEV_WARN,
-					"Wired native OpenGL RAL: world material registration failed surface=%d shader=%d name=%s\n", i,
-					surface->shaderNum, shader->shader );
+					"Wired native OpenGL RAL: world material registration failed shader=%d name=%s\n", i,
+					shader->shader );
 			return qfalse;
 		}
 	}
@@ -361,25 +536,30 @@ static qboolean PrepareWorldMaterials( const mapFile_t *bsp )
 	return qtrue;
 }
 
-static void DestroyDirectionalLighting( void ) {
-	if ( s_module.product )
+static void DestroyDirectionalLighting( int worldIndex ) {
+	wiredOpenGlWorldLighting_t *slot;
+	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS ) return;
+	slot = &s_module.worldLighting[worldIndex];
+	if ( s_module.product && s_module.activeWorldIndex == worldIndex )
 		(void)RalOpenGl_ProductSetDirectionalLighting( s_module.product, NULL );
-	if ( s_module.directionalLighting && s_module.core )
+	if ( slot->resource && s_module.core )
 		(void)RalOpenGl_LightingDestroy( s_module.core, &s_module.coreReceipt,
-			s_module.directionalLighting, &s_module.directionalLightingReceipt );
-	s_module.directionalLighting = NULL;
-	memset( &s_module.directionalLightingReceipt, 0,
-		sizeof( s_module.directionalLightingReceipt ) );
+			slot->resource, &slot->receipt );
+	memset( slot, 0, sizeof( *slot ) );
 }
 
-static qboolean UploadDirectionalLighting( void ) {
+static qboolean UploadDirectionalLighting( int worldIndex ) {
 	const renderDirectionalLightingRecord_t *record;
 	ralLightingRuntimePlan_t plan;
 	ralStaticLightingCapabilities_t capabilities = { qtrue, qtrue, qtrue, qtrue };
+	wiredOpenGlWorldLighting_t *slot;
 	uint64_t digest;
-	DestroyDirectionalLighting();
+	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS ) return qfalse;
+	slot = &s_module.worldLighting[worldIndex];
+	DestroyDirectionalLighting( worldIndex );
 	if ( s_module.lightingSidecar.status ==
-			RENDER_LIGHTING_SIDECAR_MISSING_COMPATIBILITY ) return qtrue;
+			RENDER_LIGHTING_SIDECAR_MISSING_COMPATIBILITY )
+		return RalOpenGl_ProductSetDirectionalLighting( s_module.product, NULL );
 	if ( !RenderSubmission_DirectionalLightingSnapshot( &s_module.frontend,
 			&record, &digest ) || !record || !digest
 			|| !Ral_LightingRuntimePlanBuild( RAL_BACKEND_OPENGL,
@@ -388,29 +568,69 @@ static qboolean UploadDirectionalLighting( void ) {
 				&plan ) ) return qfalse;
 	if ( !RalOpenGl_LightingUpload( s_module.core, &s_module.coreReceipt,
 		record->ownedArtifactBytes, record->artifactByteLength, &plan,
-		&s_module.directionalLighting, &s_module.directionalLightingReceipt ) )
+		&slot->resource, &slot->receipt ) )
 		return qfalse;
 	if ( !RalOpenGl_ProductSetDirectionalLighting( s_module.product,
-			&s_module.directionalLightingReceipt ) ) {
-		DestroyDirectionalLighting();
+			&slot->receipt ) ) {
+		DestroyDirectionalLighting( worldIndex );
 		return qfalse;
 	}
 	return qtrue;
 }
 
+static qboolean PublishMaterialRuntimeWorld( const mapFile_t *bsp,
+		int worldIndex ) {
+#if defined( NDEBUG )
+	renderMaterialPackageDiagnostic_t diagnostic;
+	uint64_t generation;
+	if ( s_module.materialRuntimeOwner.ready != qtrue
+			&& !RenderMaterialRuntimeOwner_Init(
+				&s_module.materialRuntimeOwner, &s_module.imports ) ) return qfalse;
+	if ( !RenderSubmission_WorldLifecycleGeneration( &s_module.frontend,
+			worldIndex, &generation ) ) return qfalse;
+	memset( &diagnostic, 0, sizeof( diagnostic ) );
+	if ( !RenderMaterialRuntimeOwner_PublishWorld(
+			&s_module.materialRuntimeOwner, bsp, worldIndex, generation,
+			RalOpenGl_ProductResolveMaterialRuntimeResource,
+			s_module.product, &diagnostic ) ) {
+		if ( s_module.imports.LogCh && s_module.logChannel >= 0 )
+			s_module.imports.LogCh( s_module.logChannel, SEV_WARN,
+				"Wired native OpenGL RAL: cooked material catalog rejected world=%d reason=%u item=%u runtime=%u key=%llu\n",
+				worldIndex, (unsigned)diagnostic.reason,
+				(unsigned)diagnostic.itemIndex,
+				(unsigned)diagnostic.runtime.reason,
+				(unsigned long long)diagnostic.runtime.cacheKeyHash );
+		return qfalse;
+	}
+	if ( !RalOpenGl_ProductSetMaterialRuntimeCatalog( s_module.product,
+			RenderMaterialRuntimeOwner_World(
+				&s_module.materialRuntimeOwner, worldIndex ),
+			&s_module.frontend ) ) return qfalse;
+#else
+	(void)bsp; (void)worldIndex;
+#endif
+	return qtrue;
+}
+
 static void LoadWorld( const mapFile_t *bsp, int worldIndex )
 {
+	RalOpenGl_ProductResetLensVisibility( s_module.product );
 	if ( !PrepareWorldMaterials( bsp ) )
 		LogFailure( "frontend-world-materials" );
 	else if ( !RenderSubmission_LoadWorld( &s_module.frontend, bsp, worldIndex ) )
 		LogFailure( "frontend-world-geometry" );
+	else if ( !RalOpenGl_ProductPrepareMaterialResources( s_module.product,
+			&s_module.frontend ) )
+		LogFailure( "native-material-residency" );
+	else if ( !PublishMaterialRuntimeWorld( bsp, worldIndex ) )
+		LogFailure( "material-runtime-catalog" );
 	else if ( !RenderLightingSidecar_LoadDirectional( &s_module.frontend,
 			&s_module.imports, bsp->name, &s_module.lightingSidecar ) )
 		LogFailure( "frontend-directional-lighting-sidecar" );
 	else if ( !RenderLightingSidecar_LoadIrradiance( &s_module.frontend,
 			&s_module.imports, bsp->name, &s_module.irradianceSidecar ) )
 		LogFailure( "frontend-irradiance-lighting-sidecar" );
-	else if ( !UploadDirectionalLighting() )
+	else if ( !UploadDirectionalLighting( worldIndex ) )
 		LogFailure( "native-directional-lighting-upload" );
 	else {
 		s_module.loadedWorlds[worldIndex] = bsp;
@@ -424,15 +644,38 @@ static qboolean SelectWorld( int worldIndex )
 	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS
 			|| !s_module.loadedWorlds[worldIndex]
 			|| !RenderSubmission_SelectWorld( &s_module.frontend, worldIndex ) ) return qfalse;
+	if ( !RalOpenGl_ProductSetDirectionalLighting( s_module.product,
+			s_module.worldLighting[worldIndex].resource
+				? &s_module.worldLighting[worldIndex].receipt : NULL ) ) return qfalse;
+	if ( s_module.activeWorldIndex != worldIndex )
+		RalOpenGl_ProductResetLensVisibility( s_module.product );
 	s_module.activeWorldIndex = worldIndex;
 	s_module.loadedWorld = s_module.loadedWorlds[worldIndex];
+#if defined( NDEBUG )
+	if ( !RalOpenGl_ProductSetMaterialRuntimeCatalog( s_module.product,
+			RenderMaterialRuntimeOwner_World(
+				&s_module.materialRuntimeOwner, worldIndex ),
+			&s_module.frontend ) ) return qfalse;
+#endif
 	return qtrue;
 }
 
 static qboolean UnloadWorld( int worldIndex )
 {
-	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS
-			|| !RenderSubmission_UnloadWorld( &s_module.frontend, worldIndex ) ) return qfalse;
+	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS ) return qfalse;
+	if ( s_module.activeWorldIndex == worldIndex )
+		RalOpenGl_ProductResetLensVisibility( s_module.product );
+	if ( s_module.activeWorldIndex == worldIndex
+			&& !RalOpenGl_ProductSetMaterialRuntimeCatalog(
+				s_module.product, NULL, &s_module.frontend ) ) return qfalse;
+	if ( s_module.activeWorldIndex == worldIndex
+			&& !RalOpenGl_ProductUnloadSkyRadianceResources(
+				s_module.product ) ) return qfalse;
+	DestroyDirectionalLighting( worldIndex );
+	if ( !RenderSubmission_UnloadWorld( &s_module.frontend, worldIndex ) ) return qfalse;
+	RalOpenGl_ProductUnloadHeightgrid( s_module.product, worldIndex );
+	RenderMaterialRuntimeOwner_UnloadWorld(
+		&s_module.materialRuntimeOwner, worldIndex );
 	s_module.loadedWorlds[worldIndex] = NULL;
 	if ( s_module.activeWorldIndex == worldIndex ) {
 		s_module.loadedWorld = NULL;
@@ -447,6 +690,12 @@ static int ResidentWorldCount( void )
 	return RenderSubmission_ResidentWorldCount( &s_module.frontend );
 }
 
+static qboolean WorldContentIdentity( int worldIndex, uint64_t *outIdentity )
+{
+	return RenderSubmission_WorldContentIdentity( &s_module.frontend,
+		worldIndex, outIdentity );
+}
+
 static qboolean CookLightingProject( const char *derivedRoot )
 {
 	renderLightingProjectCookRequest_t request;
@@ -458,6 +707,33 @@ static qboolean CookLightingProject( const char *derivedRoot )
 		RenderLightingProjectCook_Execute( &s_module.frontend,
 			s_module.loadedWorld, &s_module.imports, &request, &receipt ) &&
 		RenderLightingProjectCook_ReceiptValid( &receipt );
+}
+
+static qboolean CookMaterialProject( const char *derivedRoot )
+{
+	renderMaterialProjectCookReceipt_t receipt;
+	renderMaterialProjectCookDiagnostic_t diagnostic;
+	uint64_t generation;
+	qboolean cooked;
+	if ( !s_module.loadedWorld ) return qfalse;
+	generation = (uint32_t)s_module.loadedWorld->checksum;
+	if ( !generation ) generation = 1u;
+	cooked = RenderMaterialProjectCook_Execute( &s_module.materialScripts,
+		s_module.loadedWorld, &s_module.imports, derivedRoot, generation,
+		&receipt, &diagnostic );
+	if ( !cooked ) {
+		const char *shaderName = diagnostic.shaderIndex <
+			(uint32_t)s_module.loadedWorld->numShaders
+			? s_module.loadedWorld->shaders[diagnostic.shaderIndex].shader : "<none>";
+		s_module.imports.Log( SEV_ERROR,
+			"material project cook rejected: reason=%u shader=%u '%s' dependency=%u source=%u cook=%u\n",
+			(unsigned)diagnostic.reason, diagnostic.shaderIndex, shaderName,
+			diagnostic.dependencyIndex, (unsigned)diagnostic.source.reason,
+			(unsigned)diagnostic.cook.reason );
+		return qfalse;
+	}
+	return RenderMaterialProjectCook_LogTelemetry( &receipt,
+		&s_module.imports );
 }
 
 static qboolean InitializeOwners( void )
@@ -510,6 +786,9 @@ fail:
 
 static void BeginRegistration( glconfig_t *config )
 {
+	if ( !s_module.pbr )
+		s_module.pbr = wired_render_pbr_register( &ri, &s_module.pbrDefault );
+	if ( !s_module.pbr ) { LogFailure( "pbr-cvar" ); return; }
 	if ( !config || !s_module.loaded || s_module.frameOpen ) {
 		LogFailure( "begin-registration-state" );
 		return;
@@ -537,6 +816,100 @@ static void BeginRegistration( glconfig_t *config )
 				"Continuous display visibility scalar; default 1.4, 1.0 is authored identity, fractional values are preserved." );
 			if ( ri.Cvar_SetGroup ) ri.Cvar_SetGroup( s_module.brightness, CVG_RENDERER );
 		}
+	}
+	if ( !s_module.aerialHaze ) {
+		if ( !ri.Cvar_Get || !ri.Cvar_CheckRange ) {
+			memset( &s_module.aerialHazeFallback, 0, sizeof( s_module.aerialHazeFallback ) );
+			s_module.aerialHazeFallback.value = 1.0f;
+			s_module.aerialHazeFallback.integer = 1;
+			s_module.aerialHaze = &s_module.aerialHazeFallback;
+		} else {
+			s_module.aerialHaze = ri.Cvar_Get( "r_atmosphereAerialHaze", "1",
+				CVAR_ARCHIVE | CVAR_NODEFAULT );
+			if ( !s_module.aerialHaze ) {
+				LogFailure( "aerial-haze-cvar" );
+				return;
+			}
+			ri.Cvar_CheckRange( s_module.aerialHaze, "0", "1", CV_FLOAT );
+			if ( ri.Cvar_SetDescription ) ri.Cvar_SetDescription( s_module.aerialHaze,
+				"Aerial-perspective tint of analytic weather media by sky radiance (0 = flat media colour)." );
+			if ( ri.Cvar_SetGroup ) ri.Cvar_SetGroup( s_module.aerialHaze, CVG_RENDERER );
+		}
+	}
+	/* r_lens gates the lens occlusion oracle exactly like Vulkan (default off);
+	 * a host without cvars (contract tests) keeps the oracle enabled. */
+	if ( !s_module.lens ) {
+		if ( !ri.Cvar_Get || !ri.Cvar_CheckRange ) {
+			memset( &s_module.lensFallback, 0, sizeof( s_module.lensFallback ) );
+			s_module.lensFallback.value = 1.0f; s_module.lensFallback.integer = 1;
+			s_module.lens = &s_module.lensFallback;
+		} else {
+			s_module.lens = ri.Cvar_Get( "r_lens", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
+			if ( !s_module.lens ) { LogFailure( "lens-cvar" ); return; }
+			ri.Cvar_CheckRange( s_module.lens, "0", "1", CV_INTEGER );
+			if ( ri.Cvar_SetDescription ) ri.Cvar_SetDescription( s_module.lens, "Depth-sampled lens occlusion oracle for flares (replaces the per-flare dot-probe with a smooth N-tap visibility). Requires r_fbo 1 + r_flares 1." );
+			if ( ri.Cvar_SetGroup ) ri.Cvar_SetGroup( s_module.lens, CVG_RENDERER );
+		}
+	}
+	if ( !s_module.skyPhysicalBlend ) {
+		if ( !ri.Cvar_Get || !ri.Cvar_CheckRange ) {
+			memset( &s_module.skyPhysicalBlendFallback, 0, sizeof( s_module.skyPhysicalBlendFallback ) );
+			s_module.skyPhysicalBlendFallback.value = 0.6f;
+			s_module.skyPhysicalBlendFallback.integer = 0;
+			s_module.skyPhysicalBlend = &s_module.skyPhysicalBlendFallback;
+		} else {
+			s_module.skyPhysicalBlend = ri.Cvar_Get( "r_skyPhysicalBlend", "0.6",
+				CVAR_ARCHIVE | CVAR_NODEFAULT );
+			if ( !s_module.skyPhysicalBlend ) {
+				LogFailure( "sky-physical-blend-cvar" );
+				return;
+			}
+			ri.Cvar_CheckRange( s_module.skyPhysicalBlend, "0", "1", CV_FLOAT );
+			if ( ri.Cvar_SetDescription ) ri.Cvar_SetDescription( s_module.skyPhysicalBlend,
+				"0..1: how strongly the physical sky relights the authored sky in physical mode (1 = full relight, 0 = authored)." );
+			if ( ri.Cvar_SetGroup ) ri.Cvar_SetGroup( s_module.skyPhysicalBlend, CVG_RENDERER );
+		}
+	}
+	/* A failed registration may have populated only a prefix. Retry until
+	 * the last control is present before EndFrame can consume the array. */
+	if ( !s_module.exposureControls[9] ) {
+		static const struct { const char *name, *value, *min, *max; } controls[] = {
+			{ "r_hdrAutoExposure", "1", "0", "1" },
+			{ "r_hdrExposureKey", "0.0123", "0.01", "1" },
+			{ "r_hdrExposurePctLow", "0.5", "0", "1" },
+			{ "r_hdrExposurePctHigh", "0.2", "0", "1" },
+			{ "r_hdrAdaptionRateUp", "1.5", "0", "100" },
+			{ "r_hdrAdaptionRateDown", "0.5", "0", "100" },
+			{ "r_hdrExposureMin", "0.25", "0.01", "1" },
+			{ "r_hdrExposureMax", "8", "1", "64" },
+			{ "r_tonemap", "3", "0", "4" },
+			{ "r_tonemapExposure", "1", "0.1", "8" }
+		};
+		for ( unsigned i = 0; i < ARRAY_LEN(controls); ++i ) {
+			cvar_t *cvar;
+			if ( !ri.Cvar_Get || !ri.Cvar_CheckRange ) {
+				cvar = &s_module.exposureDefaults[i];
+				cvar->value = (float)atof( controls[i].value );
+				cvar->integer = (int)cvar->value;
+			} else {
+				cvar = ri.Cvar_Get( controls[i].name, controls[i].value,
+					CVAR_ARCHIVE | CVAR_NODEFAULT );
+				if ( !cvar ) { LogFailure( "exposure-cvar" ); return; }
+				ri.Cvar_CheckRange( cvar, controls[i].min, controls[i].max,
+					(i == 0 || i == 8) ? CV_INTEGER : CV_FLOAT );
+				if ( ri.Cvar_SetGroup ) ri.Cvar_SetGroup( cvar, CVG_NONE );
+				if ( ri.Cvar_SetDescription ) ri.Cvar_SetDescription( cvar,
+					"GPU HDR exposure and tone mapping, applied before UI." );
+			}
+			s_module.exposureControls[i] = cvar;
+		}
+	}
+	if ( s_module.resetRegistrationAssets ) {
+		if ( !RalOpenGl_ProductResetRegistrationAssets( s_module.product, &s_module.frontend ) ) {
+			LogFailure( "registration-assets-reset" ); return;
+		}
+		s_module.defaultMaterial = 0;
+		s_module.resetRegistrationAssets = qfalse;
 	}
 	if ( !s_module.frontend.initialized && !RenderSubmission_Init( &s_module.frontend, s_module.moduleGeneration ) ) {
 		LogFailure( "frontend-initialization" );
@@ -582,13 +955,14 @@ static void BeginFrame( stereoFrame_t stereo )
 	}
 	s_module.currentFrameGeneration = generation;
 	s_module.frameOpen				= qtrue;
+	s_module.frontend.pbrEnabled = s_module.pbr && s_module.pbr->integer != 0 ? qtrue : qfalse;
 }
 
 static void EndFrame( int *frontEndMsec, int *backEndMsec )
 {
 	ralOpenGlModuleFrameReceipt_t  receipt;
-	ralOpenGlFrontendPlanReceipt_t planProbe;
 	ralDisplayVisibilityPlan_t visibility;
+	ralExposureSettings_t exposure;
 	qboolean					   completeContent, worldChanged, logContent;
 	if ( frontEndMsec )
 		*frontEndMsec = 0;
@@ -609,21 +983,28 @@ static void EndFrame( int *frontEndMsec, int *backEndMsec )
 		LogFailure( "frontend-end-frame" );
 		return;
 	}
-	memset( &planProbe, 0, sizeof( planProbe ) );
-	if ( !RalOpenGl_FrontendPlanBuild( &s_module.coreReceipt, &s_module.frontend, &receipt.frontend,
-									   receipt.frameGeneration, &planProbe ) ) {
-		s_module.frameOpen				= qfalse;
-		s_module.currentFrameGeneration = 0u;
-		LogFailure( "frontend-plan" );
-		return;
-	}
 	if ( !s_module.brightness
 			|| !Ral_DisplayVisibilityPlanBuild( s_module.brightness->value, &visibility )
-			|| !RalOpenGl_ProductSetDisplayVisibility( s_module.product, &visibility ) ) {
+			|| !RalOpenGl_ProductSetDisplayVisibility( s_module.product, &visibility )
+			|| !s_module.aerialHaze
+			|| !RalOpenGl_ProductSetAerialHaze( s_module.product, s_module.aerialHaze->value )
+			|| !s_module.skyPhysicalBlend
+			|| !Ral_SkySurfaceSetPhysicalBlendScale( s_module.skyPhysicalBlend->value ) ) {
 		s_module.frameOpen = qfalse;
 		s_module.currentFrameGeneration = 0u;
 		LogFailure( "display-visibility" );
 		return;
+	}
+	exposure = (ralExposureSettings_t){
+		s_module.exposureControls[0]->integer, s_module.exposureControls[1]->value,
+		s_module.exposureControls[2]->value, s_module.exposureControls[3]->value,
+		s_module.exposureControls[4]->value, s_module.exposureControls[5]->value,
+		s_module.exposureControls[6]->value, s_module.exposureControls[7]->value };
+	if ( !RalOpenGl_ProductSetExposure( s_module.product, &exposure,
+			(uint32_t)s_module.exposureControls[8]->integer,
+			s_module.exposureControls[9]->value ) ) {
+		s_module.frameOpen = qfalse; s_module.currentFrameGeneration = 0u;
+		LogFailure( "exposure-state" ); return;
 	}
 	if ( !RalOpenGl_ProductRender( s_module.product, &s_module.frontend, &receipt.frontend, receipt.frameGeneration,
 								   &receipt.product ) ) {
@@ -697,8 +1078,16 @@ static void Shutdown( refShutdownCode_t code )
 	s_module.frameOpen				= qfalse;
 	s_module.currentFrameGeneration = 0u;
 	s_module.loadedWorld			= NULL;
-	DestroyDirectionalLighting();
+	for ( int i = 0; i < MAX_RENDER_WORLDS; ++i )
+		DestroyDirectionalLighting( i );
+	(void)RalOpenGl_ProductSetMaterialRuntimeCatalog(
+		s_module.product, NULL, &s_module.frontend );
+	RenderMaterialRuntimeOwner_Destroy( &s_module.materialRuntimeOwner );
 	if ( code == REF_LEVEL_ONLY ) {
+		/* Loading UI still borrows this registration until BeginRegistration. */
+		s_module.resetRegistrationAssets = qtrue;
+		if ( !RalOpenGl_ProductResetLevelResources( s_module.product ) )
+			LogFailure( "level-product-resource-reset" );
 		if ( !RenderSubmission_ResetEffectRegistries( &s_module.frontend ) )
 			LogFailure( "level-effect-registry-reset" );
 		return;
@@ -866,33 +1255,44 @@ static int NoLightForPoint( vec3_t point, vec3_t ambient, vec3_t directed, vec3_
 		memset( direction, 0, sizeof( vec3_t ) );
 	return 0;
 }
-static void AddEffectRibbon( const ribbonDesc_t *v )
-{
-	if ( !RenderSubmission_AddEffectRibbon( &s_module.frontend, v ) )
-		LogFailure( "effect-ribbon" );
-}
 static void NoRail( const railRibbonDesc_t *v )
 {
 	(void)v;
 }
-static void NoBeam( const beamDesc_t *v )
+static void SubmitEffectSprite( const spriteDesc_t *desc )
 {
-	(void)v;
+	if ( !RenderSubmission_AddEffectSprite( &s_module.frontend, desc ) )
+		LogFailure( "frontend-effect-sprite" );
 }
-static void AddEffectSprite( const spriteDesc_t *v )
+static void SubmitEffectRibbon( const ribbonDesc_t *desc )
 {
-	if ( !RenderSubmission_AddEffectSprite( &s_module.frontend, v ) )
-		LogFailure( "effect-sprite" );
+	if ( !RenderSubmission_AddEffectRibbon( &s_module.frontend, desc ) )
+		LogFailure( "frontend-effect-ribbon" );
 }
-static void AddEffectEmitter( const emitterDesc_t *v )
+static void SubmitEffectBeam( const beamDesc_t *desc )
 {
-	if ( !RenderSubmission_AddEffectEmitter( &s_module.frontend, v ) )
-		LogFailure( "effect-emitter" );
+	if ( !RenderSubmission_AddEffectBeam( &s_module.frontend, desc ) )
+		LogFailure( "frontend-effect-beam" );
 }
-static void AddEffectDecal( const decalDesc_t *v )
+static void SubmitEffectDecal( const decalDesc_t *desc )
 {
-	if ( !RenderSubmission_AddEffectDecal( &s_module.frontend, v ) )
-		LogFailure( "effect-decal" );
+	if ( !RenderSubmission_AddEffectDecal( &s_module.frontend, desc ) )
+		LogFailure( "frontend-effect-decal" );
+}
+static void SubmitLensSource( const lensSourceDesc_t *desc )
+{
+	if ( s_module.lens && !s_module.lens->integer ) return;
+	if ( !RenderSubmission_AddLensSource( &s_module.frontend, desc ) )
+		LogFailure( "frontend-lens-source" );
+}
+static qboolean GetLensVisibility( int id, float *visibility )
+{
+	/* Fail closed with r_lens 0 (Vulkan RE_GetLensVisibility contract). */
+	if ( s_module.lens && !s_module.lens->integer ) {
+		if ( visibility ) *visibility = 0.0f;
+		return qfalse;
+	}
+	return RalOpenGl_ProductLensVisibility( s_module.product, id, visibility );
 }
 static void RegisterParticleClass( particleClassHandle_t h, const particleClass_t *v )
 {
@@ -924,21 +1324,10 @@ static void AddAtmosphereMediaVolume( const atmosphereMediaVolume_t *v )
 	if ( !RenderSubmission_AddAtmosphereMediaVolume( &s_module.frontend, v ) )
 		LogFailure( "atmosphere-media-volume" );
 }
-static void NoHeightgrid( const float *v, int c )
+static void SetHeightgrid( const float *v, int c )
 {
-	(void)v;
-	(void)c;
-}
-static void NoLens( const lensSourceDesc_t *v )
-{
-	(void)v;
-}
-static qboolean NoLensVisibility( int id, float *v )
-{
-	(void)id;
-	if ( v )
-		*v = 0;
-	return qfalse;
+	if ( !RenderSubmission_SetAtmosphereHeightgrid( &s_module.frontend, v, c ) )
+		LogFailure( "atmosphere-heightgrid" );
 }
 static void NoClip( const float *v )
 {
@@ -994,13 +1383,9 @@ static int SubmitTag( orientation_t *t, qhandle_t m, int s, int e, float f, cons
 {
 	return RenderSubmission_LerpTag( &s_module.frontend, t, m, s, e, f, n );
 }
-static void NoBounds( qhandle_t m, vec3_t mins, vec3_t maxs )
+static void ModelBounds( qhandle_t m, vec3_t mins, vec3_t maxs )
 {
-	(void)m;
-	if ( mins )
-		memset( mins, 0, sizeof( vec3_t ) );
-	if ( maxs )
-		memset( maxs, 0, sizeof( vec3_t ) );
+	RenderSubmission_ModelBounds( &s_module.frontend, m, mins, maxs );
 }
 static void NoFont( const char *n, int s, fontInfo_t *f )
 {
@@ -1102,6 +1487,7 @@ static void FillExports( refexport_t *e )
 	e->SelectWorld                  = SelectWorld;
 	e->UnloadWorld                  = UnloadWorld;
 	e->ResidentWorldCount           = ResidentWorldCount;
+	e->WorldContentIdentity         = WorldContentIdentity;
 	e->SetWorldVisData				   = NoopBytes;
 	e->EndRegistration				   = EndRegistration;
 	e->ClearScene					   = ClearScene;
@@ -1111,17 +1497,20 @@ static void FillExports( refexport_t *e )
 	e->AddLightToScene				   = AddLight;
 	e->AddAdditiveLightToScene		   = AddLight;
 	e->AddLinearLightToScene		   = AddLinearLight;
-	e->AddRibbonToScene				   = AddEffectRibbon;
+	/* Advertise each effect family only after its product path consumes and
+	 * draws the canonical snapshot. General particle emitters remain
+	 * fail-closed until their complete native lowering lands. */
+	e->AddRibbonToScene				   = SubmitEffectRibbon;
 	e->AddRailRibbonToScene			   = NoRail;
-	e->AddBeamToScene				   = NoBeam;
-	e->AddSpriteToScene				   = AddEffectSprite;
-	e->EmitParticles				   = AddEffectEmitter;
-	e->AddDecalToScene				   = AddEffectDecal;
+	e->AddBeamToScene				   = SubmitEffectBeam;
+	e->AddSpriteToScene				   = SubmitEffectSprite;
+	e->EmitParticles				   = NULL;
+	e->AddDecalToScene				   = SubmitEffectDecal;
 	e->RegisterParticleClass		   = RegisterParticleClass;
 	e->SetAtmosphere				   = SetAtmosphere;
-	e->SetAtmosphereHeightgrid		   = NoHeightgrid;
-	e->AddLensSourceToScene			   = NoLens;
-	e->GetLensVisibility			   = NoLensVisibility;
+	e->SetAtmosphereHeightgrid		   = SetHeightgrid;
+	e->AddLensSourceToScene			   = SubmitLensSource;
+	e->GetLensVisibility			   = GetLensVisibility;
 	e->RenderScene					   = RenderScene;
 	e->SetColor						   = SetColor;
 	e->SetMSDFOutline				   = NoOutline;
@@ -1139,7 +1528,7 @@ static void FillExports( refexport_t *e )
 	e->EndFrame						   = EndFrame;
 	e->MarkFragments				   = NoFragments;
 	e->LerpTag						   = SubmitTag;
-	e->ModelBounds					   = NoBounds;
+	e->ModelBounds					   = ModelBounds;
 	e->RegisterFont					   = NoFont;
 	e->RemapShader					   = NoRemap;
 	e->GetEntityToken				   = NoToken;
@@ -1163,6 +1552,7 @@ static void FillExports( refexport_t *e )
 	e->AddAtmosphereSurfaceEvent	   = AddAtmosphereSurfaceEvent;
 	e->AddAtmosphereMediaVolume		   = AddAtmosphereMediaVolume;
 	e->CookLightingProject			   = CookLightingProject;
+	e->CookMaterialProject			   = CookMaterialProject;
 }
 
 Q_EXPORT refexport_t *QDECL GetRefAPI( int apiVersion, refimport_t *imports )

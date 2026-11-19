@@ -22,12 +22,12 @@ const exact = (bytes, digest) => {
 
 assert.equal(catalog.schemaVersion, 2);
 assert.deepEqual(catalog.requiredTargets, ['glsl460']);
-assert.equal(catalog.entries.length, 299);
-assert.equal(manifest.entries.length, 299);
+assert.equal(catalog.entries.length, 315);
+assert.equal(manifest.entries.length, 315);
 assert.equal(catalog.portableManifest.byteCount, Buffer.byteLength(manifestText));
 assert.ok(exact(Buffer.from(manifestText), catalog.portableManifest.digest));
-assert.equal(readdirSync(root).filter((name) => name.endsWith('.glsl460')).length, 299);
-for (let ordinal = 0; ordinal < 299; ++ordinal) {
+assert.equal(readdirSync(root).filter((name) => name.endsWith('.glsl460')).length, 315);
+for (let ordinal = 0; ordinal < 315; ++ordinal) {
 	const entry = catalog.entries[ordinal];
 	const portable = manifest.entries[ordinal];
 	const artifact = entry.artifacts[0];
@@ -41,16 +41,61 @@ for (let ordinal = 0; ordinal < 299; ++ordinal) {
 	assert.ok(source.startsWith('#version 460\n'));
 	assert.doesNotMatch(source, /layout\([^)]*set\s*=|push_constant|nonuniformEXT|GL_EXT_nonuniform_qualifier|#version 3/);
 }
-assert.deepEqual(catalog.entries.slice(-5).map((entry) => entry.symbol), [
-	'atmosphere_froxel_inject_comp_spv',
+assert.deepEqual(catalog.entries.slice(-20).map((entry) => entry.symbol), [
 	'atmosphere_froxel_light_comp_spv',
 	'atmosphere_froxel_integrate_comp_spv',
 	'atmosphere_composite_comp_spv',
 	'atmosphere_froxel_cloud_comp_spv',
+	'sky_transmittance_comp_spv',
+	'sky_multiscatter_comp_spv',
+	'sky_view_comp_spv',
+	'project_sky_sh_comp_spv',
+	'sky_surface_composite_comp_spv',
+	'ral_sky_material_frag_spv',
+	'ral_sky_capture_frag_spv',
+	'vert_tx1_ident1_ibl',
+	'vert_tx1_ident1_ibl_fog',
+	'vert_tx1_fixed_ibl',
+	'vert_tx1_fixed_ibl_fog',
+	'frag_tx1_ident1_ibl_bindless',
+	'frag_tx1_ident1_ibl_fog_bindless',
+	'frag_tx1_fixed_ibl_bindless',
+	'frag_tx1_fixed_ibl_fog_bindless',
+	'gtao_prefilter_comp_spv',
 ]);
 generateProductShaderCatalog({ portable: root, output: productCatalogPath, check: true });
+// Check the actual translated product shaders, not only host-side uploads.
+const beamVertex = readFileSync(join(root, 'ral_opengl_product_vert_spv.glsl460'), 'utf8');
+const beamFragment = readFileSync(join(root, 'ral_opengl_product_frag_spv.glsl460'), 'utf8');
+const materialBlock = /layout\(binding = 2, std140\) uniform ProductMaterialFactors\s*\{([^}]+)\}/;
+const materialFields = 'vec4 baseColor; vec4 factors; vec4 beamStartColor; vec4 beamEndColor; vec4 beamScaleOffset; uvec4 beamFlags;';
+for (const source of [beamVertex, beamFragment]) {
+	assert.match(source, materialBlock);
+	assert.equal(source.match(materialBlock)[1].trim().replace(/\s+/g, ' '), materialFields);
+	assert.match(source, /productMaterial\.beamFlags\.x != 0u/);
+}
+assert.match(beamVertex, /color = mix\(productMaterial\.beamStartColor, productMaterial\.beamEndColor, vec4\(in_tex_coord\.x\)\)/);
+assert.match(beamVertex, /texCoord = \(in_tex_coord \* productMaterial\.beamScaleOffset\.xy\) \+ productMaterial\.beamScaleOffset\.zw/);
+assert.match(beamFragment, /vec3 linearColor = mix\(pow\([\s\S]*?lessThanEqual\(color\.xyz,/);
+// Beam emission consumes transmittance only; straight coverage remains in
+// alpha for SRC_ALPHA/ONE, with no extra fog radiance or double alpha.
+assert.match(beamFragment, /outColor = vec4\(\(base\.xyz \* linearColor\) \* wired_atmosphere_sample\(\)\.w, base\.w \* color\.w\);\s*return;/);
+assert.match(beamFragment, /float viewDistance = dot\(worldPosition - productDraw\.atmosphereEyeDensity\.xyz, productDraw\.viewForward\.xyz\)/);
+const histogram = readFileSync(join(root, 'hdr_histogram_comp_spv.glsl460'), 'utf8');
+assert.match(histogram, /layout\(binding = 0\) uniform sampler2D colorImage;/);
+assert.match(histogram, /texelFetch\(colorImage, ivec2\(coord\), 0\)/);
+assert.doesNotMatch(histogram, /uniform texture2D|colorSampler/);
+const fullscreen = readFileSync(join(root, 'gamma_vert_spv.glsl460'), 'utf8');
+assert.match(fullscreen, /gl_VertexID/);
+assert.doesNotMatch(fullscreen, /gl_VertexIndex/);
+const tonemap = readFileSync(join(root, 'tonemap_tonemap_frag_spv.glsl460'), 'utf8');
+assert.doesNotMatch(tonemap, /constant_id/);
+assert.match(tonemap, /#ifndef WIRED_SPEC_17\n#define WIRED_SPEC_17 1\n#endif\nconst int tonemap_mode = WIRED_SPEC_17;/);
+assert.match(tonemap, /#ifndef WIRED_SPEC_18/);
+assert.match(tonemap, /base \*= eb.exposure_bias;/);
+assert.match(tonemap, /float shadowExponent;/);
 const first = catalog.entries[0].artifacts[0];
 const bad = Buffer.from(readFileSync(join(root, `${catalog.entries[0].symbol}.glsl460`)));
 bad[bad.length - 1] ^= 1;
 assert.equal(exact(bad, first.digest), false);
-console.log('RAL OpenGL GLSL 4.60 catalog: PASS (299 modules; product artifact selected)');
+console.log('RAL OpenGL GLSL 4.60 catalog: PASS (315 modules; product artifact selected)');
