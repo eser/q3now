@@ -6,7 +6,7 @@
 // cgame stages these flat PODs and hands them to the client through the
 // trap_WiredStore_* syscalls (code/cgame/cg_public.h); the client's store
 // (code/client/wired/store/) reads the same layout. To keep the engine free of
-// cgame headers (CLAUDE.md one-way dependency rule) the types live here, like
+// cgame headers (AGENTS.md one-way dependency rule) the types live here, like
 // ui_viewport_types.h: both sides include this header, neither includes the
 // other's. They cross the VM boundary, so a layout change is an ABI change.
 

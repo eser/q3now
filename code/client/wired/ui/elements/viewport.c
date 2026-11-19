@@ -15,7 +15,7 @@
 //               code is invalid and silently never reached the cgame body —
 //               that was the black-screen defect. The VM_Call lives in
 //               cl_cgame.c so this engine file stays free of cgame headers
-//               (CLAUDE.md one-way dependency).
+//               (AGENTS.md one-way dependency).
 // Lookup miss → SEV_WARN (rate-limited per id) + visible red rect placeholder
 //               so missing providers are obvious in dev builds without
 //               crashing the whole panel.

@@ -2768,7 +2768,7 @@ VM-routed provider (is_vm_routed) and calls here with the provider's vm_key
 (a wuiViewportKey_t). This is the one engine file allowed to reference the
 cgame export enum (the cgame syscall bridge, it already includes cg_public.h),
 so the CG_RENDER_VIEWPORT integer lives here — viewport.c stays free of cgame
-headers (CLAUDE.md one-way dependency). A raw fn-ptr deref of VM-space code
+headers (AGENTS.md one-way dependency). A raw fn-ptr deref of VM-space code
 was the defect; this routes correctly through VM_Call. The cgame handler pulls
 per-frame context itself via CG_GET_SCENE_FRAME_CONTEXT (no push args here).
 

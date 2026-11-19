@@ -5,7 +5,7 @@
 //
 // cgame fills wiredHudState_t and pushes it with trap_WiredUI_PushHudState
 // (code/cgame/cg_public.h); the client's WiredUI HUD reads the same struct.
-// To keep the engine free of cgame headers (CLAUDE.md one-way dependency rule)
+// To keep the engine free of cgame headers (AGENTS.md one-way dependency rule)
 // the types live here, like ui_viewport_types.h and ui_store_types.h: both
 // sides include this header, neither includes the other's. The struct crosses
 // the VM boundary, so a layout change is an ABI change (cgame + client rebuilt

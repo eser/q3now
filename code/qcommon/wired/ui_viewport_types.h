@@ -7,7 +7,7 @@
 // cl_wired_viewport.{c,h}) and the cgame VM's CG_REGISTER_VIEWPORT_PROVIDER
 // syscall (code/cgame/cg_public.h slot 222) both deref the same struct
 // layout when register fires. To keep the engine clean of cgame headers
-// (CLAUDE.md one-way dependency rule), the public type lives here in
+// (AGENTS.md one-way dependency rule), the public type lives here in
 // qcommon/wired/ — both sides include this header, neither side learns
 // the other's internal layout.
 

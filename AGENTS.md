@@ -63,6 +63,11 @@ files must carry the appropriate header. Full license texts live in `LICENSE`
 and `LICENSES/`; every third-party component is catalogued in
 `THIRD_PARTY_LICENSES.md`.
 
+## Commits and pull requests
+
+- Commits are authored by the repository owner alone. Commit messages, PR descriptions and tags carry no AI attribution or session metadata: no `Claude-Session:` trailer, no `Co-Authored-By: Claude`, no "Generated with …" line, no session URLs.
+- Keep history linear (no merge commits) and keep generated build output, local tool state and large binaries out of git (see `.gitignore`).
+
 ## Filesystem layout (per-user state)
 
 Engine state lives under `<home>/wired/<basegame>/` (e.g. `~/wired/base/`).
