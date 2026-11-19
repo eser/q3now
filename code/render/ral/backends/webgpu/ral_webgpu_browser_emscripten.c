@@ -216,8 +216,10 @@ static qboolean SmokeGraphics( browserSmokeGraphics_t *graphics ) {
 	graphics->state.raster.lineWidth = 1.0f;
 	graphics->state.colorBlends = &graphics->blend;
 	graphics->state.numColorBlends = 1u;
-	graphics->state.colorFormats[0] = RAL_FORMAT_B8G8R8A8_UNORM;
+	graphics->state.colorFormats[0] = RAL_FORMAT_B8G8R8A8_SRGB;
 	graphics->state.numColorFormats = 1u; graphics->state.sampleCount = 1u;
+    graphics->state.depthFormat = RAL_FORMAT_D32_SFLOAT;
+    graphics->state.depthStencil.depthCompareOp = RAL_COMPARE_ALWAYS;
 	graphics->variant.artifactTarget = RAL_SHADER_ARTIFACT_WGSL;
 	graphics->variant.generation = 3u;
 	return Ral_GraphicsPipelineSemanticDigest( &graphics->state,

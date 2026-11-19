@@ -75,11 +75,26 @@ qboolean RenderImage_DecodeRgba8( const char *name, byte **outPixels,
 			sizeof( canonical ), NULL, NULL, NULL ) ) name = canonical;
 	extension = Extension( name );
 	if ( extension[0] ) {
+		/* Mirror the Vulkan product's R_LoadImage: the authored extension is
+		 * tried first, then the same stem with every other format. Authored
+		 * .shader stages name .tga files whose shipped pack holds .png/.jpg. */
 		for ( uint32_t i = 0u; i < ARRAY_LEN( s_formats ); ++i ) {
 			if ( !strcasecmp( extension, s_formats[i].extension ) ) {
-				return DecodeCandidate( name, s_formats[i].loader, outPixels,
-					outWidth, outHeight, outResolved );
+				if ( DecodeCandidate( name, s_formats[i].loader, outPixels,
+						outWidth, outHeight, outResolved ) ) return qtrue;
+				break;
 			}
+		}
+		(void)snprintf( stem, sizeof( stem ), "%.*s",
+			(int)( extension - name - 1 ), name );
+		for ( uint32_t i = 0u; i < ARRAY_LEN( s_formats ); ++i ) {
+			int written;
+			if ( !strcasecmp( extension, s_formats[i].extension ) ) continue;
+			written = snprintf( candidate, sizeof( candidate ), "%s.%s", stem,
+				s_formats[i].extension );
+			if ( written <= 0 || (size_t)written >= sizeof( candidate ) ) continue;
+			if ( DecodeCandidate( candidate, s_formats[i].loader, outPixels,
+					outWidth, outHeight, outResolved ) ) return qtrue;
 		}
 		return qfalse;
 	}

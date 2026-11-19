@@ -13,6 +13,7 @@ SOURCE_SHA="${2:-${RAL_PARITY_SOURCE_SHA:-}}"
 Q3DIR="${Q3DIR:-$WIRED_INSTALL}"
 OUT="${RAL_PARITY_OUT:-$REPO_ROOT/build/ral-webgpu-vulkan-parity}"
 WATCHDOG="$SCRIPT_DIR/run-with-timeout.py"
+PNG2RAW="${PNG2RAW:-$REPO_ROOT/tools/png2raw/png2raw}"
 BASE_CONTENT="${WEB_BASE_CONTENT:-$HOME/wired/q3now-preview/base/pax01.sw3z}"
 
 [ -x "$ENGINE" ] || { echo "FAIL: engine not executable: $ENGINE"; exit 1; }
@@ -77,6 +78,43 @@ SHOT="$(wired_newest_shot "$MARKER" "$HOME_PATH/base/screenshots")" || {
   echo "FAIL: Vulkan produced no fresh screenshot"; tail -n 80 "$LOG"; exit 1;
 }
 cp "$SHOT" "$OUT/vulkan/arena17.png"
+# HiDPI hosts present the 1280x720 logical window at native pixel density
+# (SDL_WINDOW_HIGH_PIXEL_DENSITY), so the screenshot is 2560x1440. The browser
+# capture is the logical 1280x720 canvas; box-average an exact 2x native
+# capture down to the logical extent (the native file is retained) so both
+# sides carry the same extent for the coarse-metric comparison.
+python3 - "$OUT/vulkan/arena17.png" "$PNG2RAW" <<'PY'
+import struct, subprocess, sys, zlib
+path, png2raw = sys.argv[1:3]
+head = open(path, "rb").read(24)
+width, height = struct.unpack(">II", head[16:24])
+if (width, height) == (1280, 720):
+    sys.exit(0)
+if (width, height) != (2560, 1440):
+    sys.exit("FAIL: Vulkan capture is %dx%d, expected 1280x720 logical or 2560x1440 native" % (width, height))
+raw = subprocess.run([png2raw, "--size", "%dx%d" % (width, height), path], check=True, capture_output=True).stdout
+channels = len(raw) // (width * height)
+if channels not in (3, 4):
+    sys.exit("FAIL: unexpected png2raw channel count %d" % channels)
+native = path[:-4] + ".native.png"
+open(native, "wb").write(open(path, "rb").read())
+rows = []
+for y in range(720):
+    row = bytearray([0])
+    r0 = (2 * y) * width * channels
+    r1 = (2 * y + 1) * width * channels
+    for x in range(1280):
+        i0 = r0 + 2 * x * channels
+        i1 = r1 + 2 * x * channels
+        for c in range(3):
+            row.append((raw[i0 + c] + raw[i0 + channels + c] + raw[i1 + c] + raw[i1 + channels + c] + 2) // 4)
+    rows.append(bytes(row))
+def chunk(kind, payload):
+    return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", zlib.crc32(kind + payload) & 0xffffffff)
+data = zlib.compress(b"".join(rows), 9)
+open(path, "wb").write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1280, 720, 8, 2, 0, 0, 0)) + chunk(b"IDAT", data) + chunk(b"IEND", b""))
+print("Vulkan capture box-averaged from native 2560x1440 to logical 1280x720; native retained as", native)
+PY
 ENGINE_SHA="$(shasum -a 256 "$ENGINE" | awk '{print $1}')"
 RENDERER_SHA="$(shasum -a 256 "$(dirname "$ENGINE")/wired_vulkan_arm64.dylib" | awk '{print $1}')"
 CAPTURE_SHA="$(shasum -a 256 "$OUT/vulkan/arena17.png" | awk '{print $1}')"

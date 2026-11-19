@@ -91,13 +91,21 @@ const waitForAuthored = async (client) => {
 const waitForResize = async (client, width, height) => {
 	for (let frame = 0; frame < 600; ++frame) {
 		if (client.resize({ width, height })) {
-			for (let settle = 0; settle < 5; ++settle)
+			/* The host applies the resize on its next tick and the arena/authored
+			 * receipts re-settle over the following frames; wait for the settled
+			 * state (bounded) instead of a fixed frame count, which depends on how
+			 * many engine frames each animation frame carries. */
+			for (let settle = 0; settle < 180; ++settle) {
 				await new Promise(resolve => requestAnimationFrame(resolve));
-			const arena = client.aggregate.module._WiredWeb_ArenaReceiptProbe?.() ?? 0;
-			return client.state() === "running" && canvas.width === width
-				&& canvas.height === height
-				&& (arena & 15) === 15
-				&& (client.aggregate.module._WiredWeb_AuthoredReceiptProbe?.() ?? 0) === 31;
+				const arena = client.aggregate.module._WiredWeb_ArenaReceiptProbe?.() ?? 0;
+				if (client.state() === "running" && canvas.width === width
+						&& canvas.height === height
+						&& (arena & 15) === 15
+						&& (client.aggregate.module._WiredWeb_AuthoredReceiptProbe?.() ?? 0) === 31)
+					return true;
+				if (client.state() !== "running") return false;
+			}
+			return false;
 		}
 		await new Promise(resolve => requestAnimationFrame(resolve));
 	}
@@ -215,12 +223,15 @@ const exerciseServerBrowser = async (client) => {
 	trace.scrolled = await waitForServerReceipt(client, 0x17, 0x17);
 	if ((trace.scrolled & 0x17) !== 0x17) return { passed: false, ...trace };
 	/* The wheel receipt is synchronous, while Clay publishes rendered geometry
-	 * at frame end. Wait for that public presentation boundary before querying
-	 * the canonical row rectangle. */
-	for (let settle = 0; settle < 2; ++settle)
+	 * at frame end. Wait for that public presentation boundary - the canonical
+	 * row rectangle becoming available - rather than a fixed frame count, which
+	 * depends on how many engine frames each animation frame carries. */
+	let packedRowCenter = 0;
+	for (let settle = 0; settle < 30 && !packedRowCenter; ++settle) {
 		await new Promise(resolve => requestAnimationFrame(resolve));
+		packedRowCenter = client.aggregate.module._WiredWeb_UiServerRowCenterProbe?.() ?? 0;
+	}
 	const bounds = canvas.getBoundingClientRect();
-	const packedRowCenter = client.aggregate.module._WiredWeb_UiServerRowCenterProbe?.() ?? 0;
 	const rowX = packedRowCenter >>> 16, rowY = packedRowCenter & 0xffff;
 	trace.rowCenter = [rowX, rowY];
 	if (!rowX || !rowY || rowX >= canvas.width || rowY >= canvas.height)
@@ -375,6 +386,19 @@ try {
 		renderer: "WebGPU RAL", content: second.aggregate.module.wiredWebContentReceipt,
 		userAgent: navigator.userAgent };
 		passDetail.menuCaptureRecorded = await captureEvidence(second, passDetail, "menu");
+		/* The arena17 gameplay capture was posted mid-flow with only its own
+		 * receipts; the parity analyzer reads the full lifecycle detail from the
+		 * same metadata file, so republish it now that the pass detail exists. */
+		if (menuToggle.gameplayCaptureRecorded && new URLSearchParams(location.search).has("capture")) {
+			const arenaMetadata = await fetch(`/__wired_parity__/webgpu/arena17.meta.json`, {
+				method: "POST", headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ ...passDetail, ...(menuToggle.gameplayCapture ?? {}),
+					backend: "webgpu", map: "arena17", surface: "arena17",
+					userAgent: navigator.userAgent,
+					hostReceipt: second.aggregate.host.receipt(2) })
+			});
+			passDetail.arenaMetadataRepublished = arenaMetadata.ok;
+		}
 		publish("PASS", passDetail);
     } else {
       publish("FAIL", { phase: "reload", firstState, secondState,

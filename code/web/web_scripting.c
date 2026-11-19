@@ -39,6 +39,7 @@ qboolean WiredScript_TryExecFile( const char *filename ) { (void)filename; retur
 void WiredScript_ExecFile( const char *filename ) { (void)WiredScript_TryExecFile( filename ); }
 void WiredScript_RegisterBindings( WiredScript_BindingFn fn ) { (void)fn; }
 lua_State *WiredScript_GetState( void ) { return NULL; }
+qboolean WiredScript_FileAliasCatalogReady( void ) { return qtrue; }
 int WiredScript_CompileChunk( const char *text, const char *name ) {
 	(void)text; (void)name; return WIRED_CHUNK_NOREF;
 }
@@ -303,6 +304,12 @@ qboolean SV_Lua_GetCharacterAttack( const char *name, char *out, int size ) {
 qboolean SV_Lua_GetCharacterCanActivate( const char *name, char *out, int size ) {
 	return SV_Lua_GetCharacterDisplayName( name, out, size );
 }
+qboolean SV_Lua_GetCharacterPrimaryModel( const char *name, char *out, int size ) {
+	return SV_Lua_GetCharacterDisplayName( name, out, size );
+}
+/* No Lua alias catalog exists in the browser build: a mount has no aliases to
+ * rebuild, so the reload is a successful no-op rather than a mount failure. */
+qboolean WiredScript_ReloadFileAliases( void ) { return qtrue; }
 int SV_Lua_GetCharacterCount( void ) { return 0; }
 qboolean SV_Lua_GetCharacterAt( int index, char *out, int size ) {
 	(void)index; WiredWeb_Clear( out, size > 0 ? (size_t)size : 0u ); return qfalse;

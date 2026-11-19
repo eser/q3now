@@ -8,7 +8,7 @@
 #include <string.h>
 
 typedef struct {
-	float v[65][4];
+	float v[66][4];
 } weatherFrame_t;
 typedef struct {
 	float positionLife[4], velocityFamily[4];
@@ -22,6 +22,9 @@ struct ralWebGpuWeather_s {
 	ralWebGpuPipelineReceipt_t computeReceipt, renderReceipt;
 	ralWebGpuResource_t		  *frame, *pools[2], *vertices, *indices;
 	ralWebGpuResourceReceipt_t frameReceipt, poolReceipts[2], vertexReceipt, indexReceipt;
+	ralWebGpuResource_t *heightgrid;
+	ralWebGpuResourceReceipt_t heightgridReceipt;
+	uint64_t heightgridDigest;
 	uintptr_t				   computeBindGroups[2], renderBindGroups[2];
 	uint64_t				   generation;
 	float					   timeline;
@@ -38,9 +41,15 @@ uint32_t		RalWebGpu_WeatherLastFailureStage( void )
 }
 
 static const char s_computeWgsl[] =
-	"struct F{v:array<vec4<f32>,65>};struct P{p:vec4<f32>,v:vec4<f32>};"
+	"struct F{v:array<vec4<f32>,66>};struct P{p:vec4<f32>,v:vec4<f32>};"
 	"struct B{p:array<P>};@group(0) @binding(0)var<uniform>f:F;"
 	"@group(0) @binding(1)var<storage,read>a:B;@group(0) @binding(2)var<storage,read_write>b:B;"
+	"@group(0) @binding(3)var<storage,read>ground:array<f32>;"
+	"fn floorHeight(xy:vec2<f32>)->f32{let edge=u32(f.v[16].w);if(edge<2u){return f.v[8].z;}"
+	"let cell=clamp((xy-f.v[65].xy)*f.v[65].zw,vec2(0.),vec2(f32(edge-1u)));"
+	"let lo=vec2<u32>(floor(cell));let hi=min(lo+vec2(1u),vec2(edge-1u));let t=fract(cell);"
+	"return mix(mix(ground[lo.y*edge+lo.x],ground[lo.y*edge+hi.x],t.x),"
+	"mix(ground[hi.y*edge+lo.x],ground[hi.y*edge+hi.x],t.x),t.y);}"
 	"fn h(x:u32)->f32{var n=x*747796405u+2891336453u;n=((n>>((n>>28u)+4u))^n)*277803737u;"
 	"return f32((n>>22u)^n)/4294967295.0;}"
 	"fn effect(i:u32)->u32{let count=u32(f.v[16].z);for(var k=0u;k<8u;k++){if(k>=count){break;}"
@@ -58,20 +67,23 @@ static const char s_computeWgsl[] =
 	"let j=(vec3<f32>(h(seed+4u),h(seed+5u),h(seed+6u))*2.0-1.0)*f.v[q+3u].y;"
 	"p.v=vec4<f32>(d*f.v[q+3u].x+j+f.v[10].xyz*.1,f32(expected));}else{"
 	"let seed=u32(f.v[12].z)+i.x*13u;p.p=vec4<f32>(mix(lo,hi,vec3<f32>(h(seed),h(seed+1u),h(seed+2u))),1.0);"
+	"if(f.v[16].w>=2.0&&p.p.z<=floorHeight(p.p.xy)){p.p.w=0.0;b.p[i.x]=p;return;}"
 	"let w=array<f32,5>(f.v[11].x,f.v[11].y,f.v[11].z,f.v[11].w,f.v[12].y);let total=w[0]+w[1]+w[2]+w[3]+w[4];"
 	"let r=h(seed+3u)*total;var acc=0.0;var fam=0.0;for(var k=0u;k<5u;k++){acc+=w[k];if(r>acc){fam=f32(k+1u);}}"
 	"p.v=vec4<f32>(f.v[10].xyz+vec3<f32>((h(seed+4u)-.5)*30.0,(h(seed+5u)-.5)*30.0,-180.0-260.0*h(seed+6u)),fam);"
 	"if(fam==1.0){p.v=vec4<f32>(p.v.xy,-45.0,p.v.w);}if(fam==3.0){p.v=vec4<f32>(p.v.xy,-300.0,p.v.w);}if(fam==4.0){p.v=vec4<f32>(p.v.xy,-25.0,p.v.w);}}}"
 	"let dt=clamp(f.v[7].x,0.0,.1);if(local){let q=17u+e*6u;let vz=p.v.z-800.0*f.v[q+3u].z*dt;"
 	"p.v=vec4<f32>(p.v.xy,vz,p.v.w);p.v=vec4<f32>(p.v.xyz*max(0.0,1.0-f.v[q+3u].w*dt),p.v.w);p.p=vec4<f32>(p.p.xyz+p.v.xyz*dt,p.p.w-dt);}else{"
-	"p.v=vec4<f32>(p.v.xyz+f.v[10].xyz*f.v[10].w*dt,p.v.w);p.p=vec4<f32>(p.p.xyz+p.v.xyz*dt,p.p.w);if(distance(p.p.xyz,f.v[6].xyz)>f.v[12].x){p.p.w=0.0;}}b.p["
+	"p.v=vec4<f32>(p.v.xyz+f.v[10].xyz*f.v[10].w*dt,p.v.w);p.p=vec4<f32>(p.p.xyz+p.v.xyz*dt,p.p.w);"
+	"if(p.p.z<=floorHeight(p.p.xy)||distance(p.p.xyz,f.v[6].xyz)>f.v[12].x){p.p.w=0.0;}}b.p["
 	"i.x]=p;}";
 
 static const char s_vertexWgsl[] =
-	"struct F{v:array<vec4<f32>,65>};struct P{p:vec4<f32>,v:vec4<f32>};struct B{p:array<P>};"
+	"struct F{v:array<vec4<f32>,66>};struct P{p:vec4<f32>,v:vec4<f32>};struct B{p:array<P>};"
 	"struct O{@builtin(position)p:vec4<f32>,@location(0)c:vec4<f32>,@location(1)uv:vec2<f32>};"
 	"@group(0) @binding(0)var<uniform>f:F;@group(0) @binding(1)var<storage,read>b:B;"
 	"@vertex fn main(@builtin(vertex_index)vi:u32,@builtin(instance_index)ii:u32)->O{"
+	"if(b.p[ii].p.w<=0.0){var dead:O;dead.p=vec4(2.,2.,2.,1.);dead.c=vec4(0.);dead.uv=vec2(0.);return dead;}"
 	"let q=array<vec2<f32>,6>(vec2(-1.,-1.),vec2(1.,-1.),vec2(1.,1.),vec2(-1.,-1.),vec2(1.,1.),vec2(-1.,1.));"
 	"let x=b.p[ii];let fam=u32(x.v.w+.5);var size=3.0;var color=vec4<f32>(.75,.85,1.,.72);"
 	"if(fam>=16u){let e=fam-16u;let b=17u+e*6u;let life=max(.05,f.v[b+5u].x+f.v[b+5u].y);"
@@ -82,7 +94,7 @@ static const char s_vertexWgsl[] =
 	"let light=clamp(f.v[15].xyz+vec3(f.v[13].w*(1.0-f.v[15].w*f.v[16].x)+f.v[16].y),vec3(.05),vec3(4.));"
 	"var rgb=max(color.rgb*light,vec3(0.0))*f.v[4].w;let l=dot(rgb,vec3(.2126,.7152,.0722));"
 	"if(l>0.0&&l<f.v[6].w&&f.v[5].w!=1.0){let curved=pow(l/f.v[6].w,f.v[5].w)*f.v[6].w;rgb*=curved/l;}"
-	"o.c=vec4(rgb,color.a);o.uv=q[vi]*.5+.5;return o;}";
+	"o.c=vec4(rgb,select(0.0,color.a,x.p.w>0.0));o.uv=q[vi]*.5+.5;return o;}";
 static const char s_fragmentWgsl[] =
 	"@fragment fn main(@location(0)c:vec4<f32>,@location(1)uv:vec2<f32>)->@location(0)vec4<f32>{"
 	"let a=max(0.0,1.0-length(uv*2.0-1.0));return vec4(c.rgb,c.a*a);}";
@@ -115,7 +127,7 @@ static qboolean CreatePipelines( ralWebGpuWeather_t *w, const ralWebGpuRuntimeRe
 {
 	uint32_t						spirv[4] = { 0x07230203u };
 	ralShaderModuleAbi_t			cm, gm[2];
-	ralShaderBindingAbi_t			cb[3], gb[2];
+	ralShaderBindingAbi_t			cb[4], gb[2];
 	ralShaderAbiManifest_t			manifest;
 	ralShaderVariantAbi_t			variant;
 	ralWebGpuWgslModule_t			wgsl[2];
@@ -160,7 +172,10 @@ static qboolean CreatePipelines( ralWebGpuWeather_t *w, const ralWebGpuRuntimeRe
 	manifest.modules	   = &cm;
 	manifest.moduleCount   = 1;
 	manifest.bindings	   = cb;
-	manifest.bindingCount  = 3;
+	cb[3] = (ralShaderBindingAbi_t){ 0, 3, RAL_SHADER_BIND_STORAGE_BUFFER_READ,
+		1, RAL_STAGE_COMPUTE, sizeof(float) * RENDER_SUBMISSION_MAX_HEIGHTGRID_EDGE
+		* RENDER_SUBMISSION_MAX_HEIGHTGRID_EDGE, 0, 0, RAL_FORMAT_UNDEFINED, qfalse };
+	manifest.bindingCount  = 4;
 	memset( &compute, 0, sizeof( compute ) );
 	compute.bindGroupLayouts	= layouts;
 	compute.numBindGroupLayouts = 1;
@@ -235,9 +250,11 @@ static qboolean CreatePipelines( ralWebGpuWeather_t *w, const ralWebGpuRuntimeRe
 	graphics.raster.lineWidth	 = 1.0f;
 	graphics.colorBlends		 = &blend;
 	graphics.numColorBlends		 = 1;
-	graphics.colorFormats[0]	 = RAL_FORMAT_B8G8R8A8_UNORM;
+	graphics.colorFormats[0] = RAL_FORMAT_R16G16B16A16_SFLOAT;
 	graphics.numColorFormats	 = 1;
 	graphics.sampleCount		 = 1;
+    graphics.depthFormat = RAL_FORMAT_D32_SFLOAT;
+    graphics.depthStencil.depthCompareOp = RAL_COMPARE_ALWAYS;
 	graphics.bindGroupLayouts	 = layouts;
 	graphics.numBindGroupLayouts = 1;
 	memset( &variant, 0, sizeof( variant ) );
@@ -269,7 +286,7 @@ static qboolean CreateResources( ralWebGpuWeather_t *w, const ralWebGpuRuntimeRe
 {
 	ralWebGpuResourceLayer_t	  *r = RalWebGpu_RuntimeResources( w->runtime, rr );
 	ralWebGpuBufferDesc_t		   d;
-	ralWebGpuBrowserBindResource_t e[3];
+	ralWebGpuBrowserBindResource_t e[4];
 	ralWebGpuWriteReceipt_t		   wr;
 	uint32_t					   indices[6] = { 0, 1, 2, 3, 4, 5 };
 	float						   vertex	  = 0.0f;
@@ -286,6 +303,11 @@ static qboolean CreateResources( ralWebGpuWeather_t *w, const ralWebGpuRuntimeRe
 	for ( uint32_t i = 0; i < 2; i++ )
 		if ( !RalWebGpu_CreateBuffer( r, &d, &w->pools[i], &w->poolReceipts[i] ) )
 			return qfalse;
+	/* One bounded executor buffer. Queue writes are ordered between dispatches;
+	 * an unchanged world digest requires neither an upload nor a new binding. */
+	d.size = sizeof(float) * RENDER_SUBMISSION_MAX_HEIGHTGRID_EDGE * RENDER_SUBMISSION_MAX_HEIGHTGRID_EDGE;
+	if ( !RalWebGpu_CreateBuffer( r, &d, &w->heightgrid, &w->heightgridReceipt ) )
+		return qfalse;
 	d.size	= sizeof( vertex );
 	d.usage = RAL_WEBGPU_BUFFER_VERTEX | RAL_WEBGPU_BUFFER_COPY_DESTINATION;
 	if ( !RalWebGpu_CreateBuffer( r, &d, &w->vertices, &w->vertexReceipt ) ||
@@ -305,7 +327,9 @@ static qboolean CreateResources( ralWebGpuWeather_t *w, const ralWebGpuRuntimeRe
 		e[2] = (ralWebGpuBrowserBindResource_t){ 2, RAL_WEBGPU_BROWSER_BIND_RESOURCE_BUFFER,
 												 w->poolReceipts[1u - i].resourceIdentity, 0,
 												 w->poolReceipts[1u - i].byteSize };
-		if ( !RalWebGpu_BrowserBridgeCreateBindGroup( w->bridge, w->computeReceipt.bindGroupLayoutIdentities[0], e, 3,
+		e[3] = (ralWebGpuBrowserBindResource_t){ 3, RAL_WEBGPU_BROWSER_BIND_RESOURCE_BUFFER,
+			w->heightgridReceipt.resourceIdentity, 0, w->heightgridReceipt.byteSize };
+		if ( !RalWebGpu_BrowserBridgeCreateBindGroup( w->bridge, w->computeReceipt.bindGroupLayoutIdentities[0], e, 4,
 													  &w->computeBindGroups[i] ) )
 			return qfalse;
 		memset( e, 0, sizeof( e ) );
@@ -366,6 +390,8 @@ void RalWebGpu_WeatherDestroy( ralWebGpuWeather_t *w, const ralWebGpuRuntimeRece
 	}
 	r = rr ? RalWebGpu_RuntimeResources( w->runtime, rr ) : NULL;
 	if ( r ) {
+		if ( w->heightgrid )
+			RalWebGpu_DestroyResource( r, w->heightgrid, &w->heightgridReceipt );
 		if ( w->indices )
 			RalWebGpu_DestroyResource( r, w->indices, &w->indexReceipt );
 		if ( w->vertices )
@@ -399,6 +425,12 @@ qboolean RalWebGpu_WeatherPlan( const renderSubmissionState_t *frontend, const r
 	q.maxParticles	 = RAL_WEBGPU_WEATHER_PARTICLE_CAPACITY;
 	q.enabled		 = s.active && frontend->sceneRendered;
 	q.indoorExposure = s.state.indoorExposure;
+	{
+		renderAtmosphereHeightgrid_t grid;
+		q.heightgridRequested = (s.state.flags & ATMOSPHERE_FLAG_HEIGHTGRID) ? qtrue : qfalse;
+		q.heightgridAvailable = RenderSubmission_AtmosphereHeightgrid( frontend, &grid );
+		if ( q.enabled && q.heightgridRequested && !q.heightgridAvailable ) return qfalse;
+	}
 	if ( !RenderSubmission_AtmosphereEffectWorkloadSnapshot( frontend, q.maxParticles, &effects ) )
 		return qfalse;
 	q.semanticEmitterCount	= effects.admittedEmitterCount;
@@ -440,21 +472,24 @@ qboolean RalWebGpu_WeatherBegin( ralWebGpuWeather_t *w, const ralWebGpuRuntimeRe
 	ralWebGpuCommandReceipt_t				 rec, next, exe;
 	ralWebGpuSubmissionReceipt_t			 sub;
 	ralWebGpuComputeDispatch_t				 d;
-	uint32_t								 read = w->parity ? 1u : 0u, write = 1u - read;
+	uint32_t read, write;
 	if ( !w || !rr || !frontend || !plan || !visibility || !out || w->active
 		 || plan->zeroWork || !frameGeneration
 		 || !Ral_DisplayVisibilityPlanValid( visibility ) ||
 		 !Ral_AtmosphereWeatherReceiptExact( plan, plan ) || !RenderSubmission_AtmosphereSnapshot( frontend, &s, &e ) ||
 		 !RenderSubmission_ViewSnapshot( frontend, &v ) )
 		return qfalse;
+	read = w->parity ? 1u : 0u;
+	write = 1u - read;
 	(void)e;
 	memset( &f, 0, sizeof( f ) );
 	Matrix( &v, &f.v[0][0] );
 	memcpy( f.v[5], v.viewAxis[2], 3 * sizeof( float ) );
 	memcpy( f.v[4], v.viewAxis[1], 3 * sizeof( float ) );
 	memcpy( f.v[6], v.viewOrigin, 3 * sizeof( float ) );
-	f.v[4][3] = visibility->exposureScale;
-	f.v[5][3] = visibility->shadowExponent;
+    /* Weather contributes linear radiance to the shared HDR scene. */
+	f.v[4][3] = 1.0f;
+	f.v[5][3] = 1.0f;
 	f.v[6][3] = visibility->shadowPivot;
 	f.v[7][0] = w->timeline > 0 ? s.state.timelineSeconds - w->timeline : 1.0f / 60.0f;
 	f.v[7][1] = s.state.timelineSeconds;
@@ -468,13 +503,21 @@ qboolean RalWebGpu_WeatherBegin( ralWebGpuWeather_t *w, const ralWebGpuRuntimeRe
 	f.v[12][0] = s.state.distance > 0 ? s.state.distance : 1024.0f;
 	f.v[12][1] = s.state.precipitation[4];
 	f.v[12][2] = (float)s.state.seed;
-	memcpy( f.v[13], s.state.sunDirection, 3 * sizeof( float ) );
-	f.v[13][3] = s.state.sunIntensity;
-	memcpy( f.v[14], s.state.moonDirection, 3 * sizeof( float ) );
-	f.v[14][3] = s.state.moonIntensity;
-	memcpy( f.v[15], s.state.ambientColor, 3 * sizeof( float ) );
+	/* The weather pass is lit by the versioned sky authority.  Do not sample
+	 * the legacy import mirror after the shared sky receipt has been resolved. */
+	memcpy( f.v[13], s.state.skyEnvironment.sunDirection, 3 * sizeof( float ) );
+	f.v[13][3] = sqrtf(
+		s.state.skyEnvironment.sunRadiance[0] * s.state.skyEnvironment.sunRadiance[0]
+		+ s.state.skyEnvironment.sunRadiance[1] * s.state.skyEnvironment.sunRadiance[1]
+		+ s.state.skyEnvironment.sunRadiance[2] * s.state.skyEnvironment.sunRadiance[2] );
+	memcpy( f.v[14], s.state.skyEnvironment.moonDirection, 3 * sizeof( float ) );
+	f.v[14][3] = sqrtf(
+		s.state.skyEnvironment.moonRadiance[0] * s.state.skyEnvironment.moonRadiance[0]
+		+ s.state.skyEnvironment.moonRadiance[1] * s.state.skyEnvironment.moonRadiance[1]
+		+ s.state.skyEnvironment.moonRadiance[2] * s.state.skyEnvironment.moonRadiance[2] );
+	memcpy( f.v[15], s.state.skyEnvironment.ambientSh, 3 * sizeof( float ) );
 	f.v[15][3] = s.state.cloudCover;
-	f.v[16][0] = s.state.cloudShadow;
+	f.v[16][0] = s.state.skyEnvironment.cloudSunOcclusion;
 	f.v[16][1] = s.state.lightning;
 	f.v[16][2] = (float)plan->semanticEmitterCount;
 	if ( !RenderSubmission_AtmosphereEffectGpuPayload( frontend, plan->semanticParticleCount,
@@ -484,6 +527,18 @@ qboolean RalWebGpu_WeatherBegin( ralWebGpuWeather_t *w, const ralWebGpuRuntimeRe
 		return qfalse;
 	memcpy( &f.v[17][0], gpuEffects, sizeof( gpuEffects ) );
 	r = RalWebGpu_RuntimeResources( w->runtime, rr );
+	if ( plan->heightgridActive ) {
+		renderAtmosphereHeightgrid_t grid;
+		if ( !r || !RenderSubmission_AtmosphereHeightgrid( frontend, &grid ) ) return qfalse;
+		if ( w->heightgridDigest != grid.digest ) {
+			if ( !RalWebGpu_WriteBuffer( r, w->heightgrid, &w->heightgridReceipt, 0,
+				grid.samples, grid.edge * grid.edge * sizeof(float), &wr ) ) return qfalse;
+			w->heightgridDigest = grid.digest;
+		}
+		f.v[16][3] = (float)grid.edge;
+		memcpy( f.v[65], grid.worldMins, 2 * sizeof(float) );
+		memcpy( f.v[65] + 2, grid.inverseStep, 2 * sizeof(float) );
+	}
 	if ( !r || !RalWebGpu_WriteBuffer( r, w->frame, &w->frameReceipt, 0, &f, sizeof( f ), &wr ) ||
 		 !RalWebGpu_CommandBegin( w->command, RAL_WEBGPU_PASS_COMPUTE, 0, &rec ) )
 		return qfalse;
@@ -565,5 +620,6 @@ void RalWebGpu_WeatherReset( ralWebGpuWeather_t *w )
 	if ( w && !w->active ) {
 		w->parity	= qfalse;
 		w->timeline = 0.0f;
+		w->heightgridDigest = 0;
 	}
 }

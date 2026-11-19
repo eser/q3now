@@ -34,6 +34,14 @@ foreach(NEEDLE IN ITEMS
 		message(FATAL_ERROR "WebGPU resource layer is missing async authority: ${NEEDLE}")
 	endif()
 endforeach()
+foreach(NEEDLE IN ITEMS "ralWebGpuTextureUsage_t"
+	"RAL_WEBGPU_TEXTURE_SAMPLED" "RAL_WEBGPU_TEXTURE_STORAGE"
+	"desc->usage")
+	string(FIND "${HEADER}${SOURCE}" "${NEEDLE}" POSITION)
+	if(POSITION EQUAL -1)
+		message(FATAL_ERROR "WebGPU texture usage authority misses: ${NEEDLE}")
+	endif()
+endforeach()
 file(GLOB_RECURSE PORTABLE_SOURCES
 	"${ROOT}/code/render/frontend/*.[ch]"
 	"${ROOT}/code/render/ral/core/*.[ch]")

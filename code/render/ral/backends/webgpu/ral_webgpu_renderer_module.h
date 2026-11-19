@@ -6,6 +6,7 @@
 
 #include "ral_webgpu_product.h"
 #include "ral_webgpu_atmosphere.h"
+#include "ral_webgpu_sky.h"
 #include "ral_webgpu_weather.h"
 #include "ral_atmosphere.h"
 #include "ral_display_visibility.h"
@@ -15,7 +16,7 @@
 extern "C" {
 #endif
 
-#define RAL_WEBGPU_RENDERER_MODULE_SCHEMA_VERSION 7u
+#define RAL_WEBGPU_RENDERER_MODULE_SCHEMA_VERSION 10u
 
 typedef struct {
 	uint32_t schemaVersion;
@@ -26,6 +27,9 @@ typedef struct {
 	ralWebGpuProductFrameReceipt_t product;
 	ralDisplayVisibilityPlan_t displayVisibility;
 	ralAtmospherePlanReceipt_t atmosphere;
+	ralWebGpuSkyReceipt_t skyExecution;
+	ralWebGpuSkyRadianceReceipt_t skyRadianceExecution;
+	ralSkyGpuTelemetryReceipt_t skyGpuTelemetry;
 	ralWebGpuAtmosphereReceipt_t atmosphereExecution;
 	ralAtmosphereWeatherReceipt_t weather;
 	ralWebGpuWeatherReceipt_t weatherExecution;
@@ -39,7 +43,10 @@ Q_EXPORT qboolean WiredWebGpu_GetFrameReceipt(
 Q_EXPORT qboolean RalWebGpu_RendererModuleFrameReceiptExact(
 	const ralWebGpuRendererModuleFrameReceipt_t *a,
 	const ralWebGpuRendererModuleFrameReceipt_t *b );
-Q_EXPORT int WiredWebGpu_RendererSmokeBegin( void );
+/* 0: scene suite, 1: cold UI, 2: resident world before its first scene. */
+Q_EXPORT int WiredWebGpu_RendererSmokeBegin( int uiOnly );
+Q_EXPORT int WiredWebGpu_UiSmokeFrame( int transition );
+Q_EXPORT int WiredWebGpu_UiSmokePoll( void );
 Q_EXPORT int WiredWebGpu_RendererSmokePoll( void );
 Q_EXPORT int WiredWebGpu_RendererResize( uint32_t width, uint32_t height );
 Q_EXPORT int WiredWebGpu_RendererFailureStage( void );

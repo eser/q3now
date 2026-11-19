@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-#define RAL_WEBGPU_FRONTEND_SCHEMA_VERSION 1u
+#define RAL_WEBGPU_FRONTEND_SCHEMA_VERSION 4u
 
 typedef struct {
 	uint32_t schemaVersion;
@@ -37,6 +37,12 @@ typedef struct {
 	uint32_t polygonCount;
 	uint32_t polygonBatchCount;
 	uint32_t lightCount;
+	uint32_t effectSpriteCount;
+	uint32_t effectDecalCount;
+	uint32_t effectRibbonCount;
+	uint32_t effectBeamCount;
+	uint32_t effectIndexCount;
+	uint32_t effectBatchCount;
 	uint32_t uiPrimitiveCount;
 	uint32_t texturedUiPrimitiveCount;
 	uint32_t msdfUiPrimitiveCount;
@@ -51,6 +57,10 @@ qboolean RalWebGpu_FrontendPlanBuild( ralWebGpuRuntime_t *runtime,
 	const ralWebGpuRuntimeReceipt_t *runtimeReceipt,
 	const renderSubmissionState_t *frontend,
 	const renderSubmissionReceipt_t *submission, uint64_t planGeneration,
+	const renderEffectDecalPool_t *effectDecalPool,
+	const renderEffectDecalPoolReceipt_t *effectDecalPoolReceipt,
+	const renderEffectBeamPool_t *effectBeamPool,
+	const renderEffectBeamPoolReceipt_t *effectBeamPoolReceipt,
 		ralWebGpuFrontendPlanReceipt_t *outReceipt );
 uint32_t RalWebGpu_FrontendPlanLastFailureStage( void );
 qboolean RalWebGpu_FrontendPlanReceiptExact(

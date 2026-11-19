@@ -43,14 +43,25 @@ typedef struct {
 typedef struct {
 	uint32_t width;
 	uint32_t height;
-	uint32_t depth;
+	uint32_t depth; /* 2D array layers; this adapter descriptor is not a 3D volume. */
+	uint32_t mipLevelCount;
 	ralFormat_t format;
 	uint32_t bytesPerTexel;
+	uint32_t usage;
 } ralWebGpuTextureDesc_t;
+
+typedef enum {
+	RAL_WEBGPU_TEXTURE_COPY_SOURCE = 1u << 0,
+	RAL_WEBGPU_TEXTURE_COPY_DESTINATION = 1u << 1,
+	RAL_WEBGPU_TEXTURE_SAMPLED = 1u << 2,
+	RAL_WEBGPU_TEXTURE_STORAGE = 1u << 3,
+	RAL_WEBGPU_TEXTURE_RENDER_ATTACHMENT = 1u << 4
+} ralWebGpuTextureUsage_t;
 
 typedef struct {
 	qboolean linearMinification;
 	qboolean linearMagnification;
+	qboolean linearMipmapping;
 	qboolean clampToEdge;
 } ralWebGpuSamplerDesc_t;
 
@@ -98,7 +109,8 @@ typedef qboolean ( *ralWebGpuWriteBufferFn )( void *userData,
 	const void *bytes, uint64_t byteSize );
 typedef qboolean ( *ralWebGpuWriteTextureFn )( void *userData,
 	uintptr_t queueIdentity, uintptr_t textureIdentity, const void *bytes,
-	uint64_t byteSize, uint32_t bytesPerRow, uint32_t rowsPerImage );
+	uint64_t byteSize, uint32_t bytesPerRow, uint32_t rowsPerImage,
+	uint32_t mipLevel, uint32_t width, uint32_t height, uint32_t depth );
 typedef qboolean ( *ralWebGpuBeginRoundTripFn )( void *userData,
 	uintptr_t deviceIdentity, uintptr_t queueIdentity,
 	uintptr_t uploadBufferIdentity, uintptr_t readbackBufferIdentity,
@@ -154,6 +166,12 @@ qboolean RalWebGpu_WriteTexture( ralWebGpuResourceLayer_t *layer,
 	ralWebGpuResource_t *resource,
 	const ralWebGpuResourceReceipt_t *authority, const void *bytes,
 	uint64_t byteSize, uint32_t bytesPerRow, uint32_t rowsPerImage,
+	ralWebGpuWriteReceipt_t *outReceipt );
+qboolean RalWebGpu_WriteTextureMip( ralWebGpuResourceLayer_t *layer,
+	ralWebGpuResource_t *resource,
+	const ralWebGpuResourceReceipt_t *authority, const void *bytes,
+	uint64_t byteSize, uint32_t bytesPerRow, uint32_t rowsPerImage,
+	uint32_t mipLevel, uint32_t width, uint32_t height, uint32_t depth,
 	ralWebGpuWriteReceipt_t *outReceipt );
 qboolean RalWebGpu_WriteReceiptExact( const ralWebGpuWriteReceipt_t *a,
 	const ralWebGpuWriteReceipt_t *b );

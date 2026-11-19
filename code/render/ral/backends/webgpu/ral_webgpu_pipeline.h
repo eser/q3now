@@ -57,6 +57,7 @@ typedef struct {
 	const ralGraphicsPipelineCreateInfo_t *graphicsState;
 	const ralComputePipelineCreateInfo_t *computeState;
 	const ralShaderSpecValue_t *specValues;
+	const ralShaderSpecConstantAbi_t *specConstants;
 	uint32_t specValueCount;
 } ralWebGpuNativePipelineDesc_t;
 

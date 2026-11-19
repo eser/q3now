@@ -130,12 +130,15 @@ static qboolean WriteBuffer( void *user, uintptr_t queue, uintptr_t buffer,
 
 static qboolean WriteTexture( void *user, uintptr_t queue, uintptr_t texture,
 		const void *bytes, uint64_t byteSize, uint32_t bytesPerRow,
-		uint32_t rowsPerImage ) {
+		uint32_t rowsPerImage, uint32_t mipLevel, uint32_t width,
+		uint32_t height, uint32_t depth ) {
 	fakeHost_t *host = (fakeHost_t *)user;
 	if ( queue != (uintptr_t)0x4000u || !texture || !bytes || !byteSize
 			|| !bytesPerRow || ( bytesPerRow & 255u ) || !rowsPerImage
+			|| height != rowsPerImage || !width || !depth
 			|| byteSize % ( (uint64_t)bytesPerRow * rowsPerImage ) )
 		return qfalse;
+	(void)mipLevel;
 	host->writeTextureCount++; return qtrue;
 }
 
@@ -279,12 +282,37 @@ int main( void ) {
 	CHECK( !RalWebGpu_WriteBuffer( layer, buffer, &bufferReceipt, 4u,
 		bufferBytes, sizeof( bufferBytes ), &write ) );
 	memset( &textureDesc, 0, sizeof( textureDesc ) ); textureDesc.width = 64u;
-	textureDesc.height = 4u; textureDesc.depth = 1u;
+	textureDesc.height = 4u; textureDesc.depth = 1u; textureDesc.mipLevelCount = 1u;
 	textureDesc.format = RAL_FORMAT_R8G8B8A8_UNORM; textureDesc.bytesPerTexel = 4u;
+	textureDesc.usage = RAL_WEBGPU_TEXTURE_COPY_SOURCE
+		| RAL_WEBGPU_TEXTURE_COPY_DESTINATION | RAL_WEBGPU_TEXTURE_SAMPLED;
 	CHECK( RalWebGpu_CreateTexture( layer, &textureDesc, &texture, &textureReceipt ) );
 	CHECK( RalWebGpu_WriteTexture( layer, texture, &textureReceipt, textureBytes,
 		sizeof( textureBytes ), 256u, 4u, &write ) );
 	CHECK( write.kind == RAL_WEBGPU_WRITE_TEXTURE && host.writeBufferCount == 1u );
+	{
+		ralWebGpuTextureDesc_t hdr = textureDesc;
+		ralWebGpuResource_t *target = NULL;
+		ralWebGpuResourceReceipt_t targetReceipt, before;
+		hdr.format = RAL_FORMAT_R16G16B16A16_SFLOAT; hdr.bytesPerTexel = 8u;
+		hdr.usage = RAL_WEBGPU_TEXTURE_RENDER_ATTACHMENT | RAL_WEBGPU_TEXTURE_SAMPLED;
+		CHECK( RalWebGpu_CreateTexture( layer, &hdr, &target, &targetReceipt ) );
+		CHECK( targetReceipt.byteSize == (uint64_t)hdr.width * hdr.height * 8u );
+		CHECK( RalWebGpu_DestroyResource( layer, target, &targetReceipt ) );
+		before = targetReceipt; target = NULL;
+		hdr.usage |= 1u << 5;
+		CHECK( !RalWebGpu_CreateTexture( layer, &hdr, &target, &targetReceipt ) );
+		CHECK( target == NULL && !memcmp( &targetReceipt, &before, sizeof(before) ) );
+		hdr.usage = RAL_WEBGPU_TEXTURE_RENDER_ATTACHMENT; hdr.depth = 6u;
+		CHECK( RalWebGpu_CreateTexture( layer, &hdr, &target, &targetReceipt ) );
+		CHECK( targetReceipt.byteSize == (uint64_t)hdr.width * hdr.height * 8u * 6u );
+		CHECK( RalWebGpu_DestroyResource( layer, target, &targetReceipt ) );
+		target = NULL;
+		hdr.depth = 2049u;
+		CHECK( !RalWebGpu_CreateTexture( layer, &hdr, &target, &targetReceipt ) );
+		hdr.depth = 1u; hdr.format = RAL_FORMAT_E5B9G9R9_UFLOAT; hdr.bytesPerTexel = 4u;
+		CHECK( !RalWebGpu_CreateTexture( layer, &hdr, &target, &targetReceipt ) );
+	}
 	memset( &lightingRequest, 0, sizeof( lightingRequest ) );
 	lightingRequest.schemaVersion = RAL_LIGHTING_PRODUCT_SCHEMA_VERSION;
 	lightingRequest.artifactGeneration = 21u;

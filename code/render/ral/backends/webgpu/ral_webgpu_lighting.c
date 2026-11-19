@@ -83,7 +83,10 @@ qboolean RalWebGpu_LightingUpload( ralWebGpuResourceLayer_t *resources,
 		memset( &desc, 0, sizeof( desc ) );
 		desc.width = plane->texture.width; desc.height = plane->texture.height;
 		desc.depth = plane->texture.depthOrArrayLayers;
+		desc.mipLevelCount = 1u;
 		desc.format = plane->texture.format; desc.bytesPerTexel = bytesPerTexel;
+		desc.usage = RAL_WEBGPU_TEXTURE_COPY_DESTINATION
+			| RAL_WEBGPU_TEXTURE_SAMPLED;
 		if ( !RalWebGpu_CreateTexture( resources, &desc, &lighting->planes[i],
 				&lighting->receipt.resources[i] )
 				|| !RalWebGpu_WriteTexture( resources, lighting->planes[i],

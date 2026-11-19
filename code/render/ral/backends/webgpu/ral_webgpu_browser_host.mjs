@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
-export const RAL_WEBGPU_BROWSER_HOST_SCHEMA_VERSION = 1;
+import { createRalWebGpuLensOracle } from "./ral_webgpu_lens.mjs";
+
+export const RAL_WEBGPU_BROWSER_HOST_SCHEMA_VERSION = 2;
 
 export class RalWebGpuBrowserHostError extends Error {
   constructor(code, message) {
@@ -21,7 +23,7 @@ function finitePositive(value, name) {
   }
 }
 
-function normalizedLimits(limits = {}) {
+function normalizedLimits(limits = {}, features = null) {
   const keys = [
     "maxTextureDimension2D", "maxTextureDimension3D", "maxTextureArrayLayers",
     "maxBindGroups", "maxBindingsPerBindGroup", "maxSampledTexturesPerShaderStage",
@@ -29,6 +31,7 @@ function normalizedLimits(limits = {}) {
     "minUniformBufferOffsetAlignment", "minStorageBufferOffsetAlignment"
   ];
   return Object.freeze({ maxColorAttachments: Number(limits.maxColorAttachments ?? 4),
+    timestampQueries: features?.has?.("timestamp-query") === true,
     ...Object.fromEntries(keys.map((key) => [key, Number(limits[key] ?? 0)])) });
 }
 
@@ -50,6 +53,8 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
   let canvasContext = null;
   let canvasFormat = null;
   let configured = null;
+  let canvasDepthTexture = null;
+  let lensOracle = null;
   let pendingCanvasCapture = null;
   const canvasFrames = new Map();
   const encoderCanvasFrames = new Map();
@@ -134,8 +139,14 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
       adapterInfo = normalizedAdapterInfo(adapter.info);
       put("adapter", adapter, { destroyable: false });
       status = "requesting-device";
+      const deviceOptions = { ...(options.device ?? {}) };
+      if ( adapter.features?.has?.("timestamp-query") === true ) {
+        const requiredFeatures = new Set(deviceOptions.requiredFeatures ?? []);
+        requiredFeatures.add("timestamp-query");
+        deviceOptions.requiredFeatures = [...requiredFeatures];
+      }
       let device;
-      try { device = await adapter.requestDevice(options.device ?? {}); } catch { device = null; }
+      try { device = await adapter.requestDevice(deviceOptions); } catch { device = null; }
       if (!device) { status = "failed"; reason = DEVICE_UNAVAILABLE; return currentReceipt(); }
       device.addEventListener?.("uncapturederror", (event) => {
         const message = String(event?.error?.message ?? event?.message ?? "WebGPU validation error");
@@ -143,13 +154,14 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
         else if (!uncapturedError.includes(message))
           uncapturedError = `${uncapturedError}\n${message}`.slice(0, 2048);
       });
-      limits = normalizedLimits(device.limits);
+      limits = normalizedLimits(device.limits, device.features);
       put("device", device); put("queue", device.queue, { destroyable: false });
       canvasFormat = typeof gpu.getPreferredCanvasFormat === "function"
         ? gpu.getPreferredCanvasFormat() : "bgra8unorm";
       status = "ready"; reason = "";
       Promise.resolve(device.lost).then((info) => {
         if (status === "destroyed") return;
+        lensOracle?.destroy(); lensOracle = null;
         lostInfo = { reason: String(info?.reason ?? "unknown"), message: String(info?.message ?? "WebGPU device lost") };
         status = "lost"; reason = lostInfo.message;
       });
@@ -167,7 +179,8 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
       assertReady(expectedGeneration);
       if (!descriptor?.size) throw new RalWebGpuBrowserHostError("invalid-argument", "texture size is required");
       return put("texture", getDevice().createTexture({ ...descriptor }),
-        { metadata: { size: { ...descriptor.size } } });
+        { metadata: { size: { ...descriptor.size }, usage: descriptor.usage,
+          dimension: descriptor.dimension ?? "2d", mipLevelCount: descriptor.mipLevelCount ?? 1 } });
     },
     createSampler(expectedGeneration, descriptor = {}) {
       assertReady(expectedGeneration); return put("sampler", getDevice().createSampler({ ...descriptor }));
@@ -235,7 +248,11 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
           resource = { buffer: get(entry.handle, "buffer"), offset: entry.offset };
           if (entry.size) resource.size = entry.size;
         } else if (entry.kind === 2) {
-          resource = get(entry.handle, "texture").createView();
+          const texture = get(entry.handle, "texture");
+          resource = entry.offset || entry.size
+            ? texture.createView({ baseMipLevel: entry.offset,
+                mipLevelCount: entry.size || 1 })
+            : texture.createView();
         } else if (entry.kind === 3) {
           resource = get(entry.handle, "sampler");
         } else throw new RalWebGpuBrowserHostError("invalid-argument", "bind resource kind");
@@ -248,16 +265,32 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
     writeBuffer(expectedGeneration, bufferHandle, offset, data) {
       assertReady(expectedGeneration); getQueue().writeBuffer(get(bufferHandle, "buffer"), offset, data); return true;
     },
-    writeTexture(expectedGeneration, textureHandle, data, layout, size) {
+    writeTexture(expectedGeneration, textureHandle, data, layout, size, mipLevel = 0) {
       assertReady(expectedGeneration);
-      const entry = entries.get(textureHandle);
       const texture = get(textureHandle, "texture");
-      /* The browser ABI models exact whole-resource uploads and carries the
-       * padded row layout, not the logical texture width. Keep the authoritative
-       * extent with the host-owned texture instead of deriving width from the
-       * 256-byte-aligned bytesPerRow (which turns a padded 1x1 upload into 64x1). */
-      const copySize = entry?.metadata?.size ?? size;
-      getQueue().writeTexture({ texture }, data, layout, copySize); return true;
+      getQueue().writeTexture({ texture, mipLevel }, data, layout, size); return true;
+    },
+    // Explicit diagnostic readback only; never uploads over the source or runs
+    // in the production frame loop. Staging is owned across the async mapping.
+    async readBuffer(expectedGeneration, bufferHandle, byteSize) {
+      assertReady(expectedGeneration);
+      const source = get(bufferHandle, "buffer");
+      if (!Number.isSafeInteger(byteSize) || byteSize <= 0 || byteSize % 4
+          || byteSize > source.size || !(source.usage & 4))
+        throw new RalWebGpuBrowserHostError("invalid-argument", "readback bounds/usage");
+      const staging = getDevice().createBuffer({size:byteSize,usage:1|8}); // MAP_READ | COPY_DST
+      let mapped = false;
+      try {
+        const encoder = getDevice().createCommandEncoder();
+        encoder.copyBufferToBuffer(source,0,staging,0,byteSize);
+        getQueue().submit([encoder.finish()]);
+        await staging.mapAsync(1,0,byteSize); mapped = true;
+        assertReady(expectedGeneration);
+        return new Uint8Array(staging.getMappedRange(0,byteSize)).slice();
+      } finally {
+        if (mapped) staging.unmap();
+        staging.destroy();
+      }
     },
     async roundTrip(expectedGeneration, uploadHandle, readbackHandle, data) {
       assertReady(expectedGeneration);
@@ -276,7 +309,9 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
         throw new RalWebGpuBrowserHostError("canvas-unavailable", "WebGPU canvas is unavailable");
       }
       if (cssWidth === 0 || cssHeight === 0) {
-        canvasContext?.unconfigure?.(); configured = null;
+        lensOracle?.reset();
+        canvasContext?.unconfigure?.(); canvasDepthTexture?.destroy?.();
+        canvasDepthTexture = null; configured = null;
         return Object.freeze({ generation, suspended: true, cssWidth, cssHeight, pixelWidth: 0, pixelHeight: 0 });
       }
       finitePositive(cssWidth, "canvas width"); finitePositive(cssHeight, "canvas height"); finitePositive(dpr, "device pixel ratio");
@@ -288,11 +323,26 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
       if (!canvasContext) throw new RalWebGpuBrowserHostError("canvas-unavailable", "WebGPU canvas context is unavailable");
       canvas.width = pixelWidth; canvas.height = pixelHeight;
       if (canvas.style) { canvas.style.width = `${cssWidth}px`; canvas.style.height = `${cssHeight}px`; }
+      /* Display encoding is hardware sRGB like the native drawables: the
+       * canvas keeps its unorm storage (readback stays byte-exact) while every
+       * render pass targets an -srgb view, so the tonemapped scene and the
+       * UI both write linear light and the view encodes once. */
+      const viewFormat = /^(bgra8unorm|rgba8unorm)$/.test(format) ? `${format}-srgb` : format;
       canvasContext.configure({ device: getDevice(), format, alphaMode, colorSpace,
+        viewFormats: viewFormat === format ? [] : [viewFormat],
         usage: (globalThis.GPUTextureUsage?.RENDER_ATTACHMENT ?? 16)
           | (globalThis.GPUTextureUsage?.COPY_SRC ?? 1) });
+      canvasDepthTexture?.destroy?.();
+      lensOracle?.reset();
+      canvasDepthTexture = getDevice().createTexture({
+        label: "Wired WebGPU canvas depth",
+        size: { width: pixelWidth, height: pixelHeight, depthOrArrayLayers: 1 },
+        format: "depth32float",
+        usage: (globalThis.GPUTextureUsage?.RENDER_ATTACHMENT ?? 16)
+          | (globalThis.GPUTextureUsage?.TEXTURE_BINDING ?? 4)
+      });
       configured = Object.freeze({ generation, suspended: false, cssWidth, cssHeight, dpr,
-        pixelWidth, pixelHeight, format, alphaMode, colorSpace });
+        pixelWidth, pixelHeight, format, viewFormat, alphaMode, colorSpace });
       return configured;
     },
     acquireCanvasTexture(expectedGeneration) {
@@ -300,12 +350,17 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
       if (!configured || !canvasContext) throw new RalWebGpuBrowserHostError("not-configured", "WebGPU canvas is not configured");
       const texture = canvasContext.getCurrentTexture();
       const textureHandle = put("canvas-texture", texture, { destroyable: false });
-      const viewHandle = put("texture-view", texture.createView(), { destroyable: false });
+      const view = configured.viewFormat !== configured.format
+        ? texture.createView({ format: configured.viewFormat }) : texture.createView();
+      const viewHandle = put("texture-view", view, { destroyable: false });
       canvasFrames.set(textureHandle, viewHandle);
       return Object.freeze({ generation, textureHandle, viewHandle, ...configured });
     },
     unconfigureCanvas(expectedGeneration) {
-      assertReady(expectedGeneration); canvasContext?.unconfigure?.(); configured = null; return true;
+      assertReady(expectedGeneration); canvasContext?.unconfigure?.();
+      lensOracle?.reset();
+      canvasDepthTexture?.destroy?.(); canvasDepthTexture = null;
+      configured = null; return true;
     },
     presentCanvas(expectedGeneration, textureHandle) {
       assertReady(expectedGeneration);
@@ -357,6 +412,22 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
       if (pendingCanvasCapture) throw new RalWebGpuBrowserHostError("capture-pending", "WebGPU canvas capture is already pending");
       return new Promise((resolve, reject) => { pendingCanvasCapture = { resolve, reject }; });
     },
+    beginLensVisibility(expectedGeneration, frameGeneration, params, sources) {
+      assertReady(expectedGeneration);
+      if (!configured || configured.suspended || !canvasDepthTexture)
+        throw new RalWebGpuBrowserHostError("not-configured", "lens scene depth unavailable");
+      if (!lensOracle) lensOracle = createRalWebGpuLensOracle(getDevice());
+      const query = lensOracle.begin(canvasDepthTexture, frameGeneration, params, sources);
+      return query ? put("lens-query", query, { destroyable: false }) : 0;
+    },
+    pollLensVisibility(expectedGeneration, handle) {
+      assertReady(expectedGeneration);
+      const query = get(handle, "lens-query");
+      return Object.freeze({ ...query, values: query.values?.slice() ?? null });
+    },
+    resetLensVisibility(expectedGeneration) {
+      assertReady(expectedGeneration); lensOracle?.reset();
+    },
     createCommandEncoder(expectedGeneration, descriptor = {}) {
       assertReady(expectedGeneration);
       const device = getDevice();
@@ -368,23 +439,93 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
     },
     beginRenderPass(expectedGeneration, encoderHandle, viewHandle, descriptor = {}) {
       assertReady(expectedGeneration);
+      const encoder = get(encoderHandle, "encoder");
       const canvasTextureHandle = canvasFrames.has(viewHandle) ? viewHandle
         : [...canvasFrames].find(([, candidateView]) => candidateView === viewHandle)?.[0];
-      if (canvasTextureHandle) encoderCanvasFrames.set(encoderHandle, canvasTextureHandle);
-      const resolvedView = canvasFrames.has(viewHandle)
-        ? get(canvasFrames.get(viewHandle), "texture-view") : get(viewHandle, "texture-view");
-      const colorAttachment = { view: resolvedView, loadOp: "clear", storeOp: "store",
+      let resolvedView;
+      const mip = descriptor.targetMipLevel ?? 0, layer = descriptor.targetArrayLayer ?? 0;
+      if (!Number.isInteger(mip) || !Number.isInteger(layer) || mip < 0 || layer < 0)
+        throw new RalWebGpuBrowserHostError("invalid-argument", "invalid render subresource");
+      // Owned render textures use their resource identity, just like sampled
+      // textures. Keep the view cached on that resource; no extra handle or
+      // hidden allocation per frame, and no canvas substitution on failure.
+      const target = entries.get(viewHandle);
+      if (target?.kind === "texture") {
+        const texture = get(viewHandle, "texture");
+        const metadata = target.metadata;
+        if (!(metadata.usage & (globalThis.GPUTextureUsage?.RENDER_ATTACHMENT ?? 16))
+            || metadata.dimension !== "2d")
+          throw new RalWebGpuBrowserHostError("invalid-argument", "texture is not a 2D render attachment");
+        if (mip >= (metadata.mipLevelCount ?? 1) || layer >= (metadata.size.depthOrArrayLayers ?? 1))
+          throw new RalWebGpuBrowserHostError("invalid-argument", "render subresource out of bounds");
+        // The existing scene-depth authority is canvas-scoped. A postprocess
+        // target can omit depth; a scene target must match its exact extent.
+        if ((descriptor.depthEnabled ?? true) && (!configured
+            || Math.max(1, Math.floor(metadata.size.width / 2 ** mip)) !== configured.pixelWidth
+            || Math.max(1, Math.floor(metadata.size.height / 2 ** mip)) !== configured.pixelHeight))
+          throw new RalWebGpuBrowserHostError("invalid-argument", "render target and scene depth extents differ");
+        metadata.renderViews ??= new Map();
+        const key = mip * (metadata.size.depthOrArrayLayers ?? 1) + layer;
+        if (!metadata.renderViews.has(key)) metadata.renderViews.set(key, texture.createView({
+          dimension: "2d", baseMipLevel: mip, mipLevelCount: 1,
+          baseArrayLayer: layer, arrayLayerCount: 1 }));
+        resolvedView = metadata.renderViews.get(key);
+      } else {
+        if (mip || layer)
+          throw new RalWebGpuBrowserHostError("invalid-argument", "canvas view has no selectable subresource");
+        resolvedView = canvasFrames.has(viewHandle)
+          ? get(canvasFrames.get(viewHandle), "texture-view") : get(viewHandle, "texture-view");
+      }
+      const colorAttachment = { view: resolvedView,
+        loadOp: descriptor.colorLoadOp ?? "clear", storeOp: "store",
         clearValue: descriptor.clearValue ?? { r: 0, g: 0, b: 0, a: 1 }, ...(descriptor.colorAttachment ?? {}) };
-      const passHandle = put("render-pass", get(encoderHandle, "encoder").beginRenderPass({
-        colorAttachments: [colorAttachment], ...(descriptor.pass ?? {})
-      }), { destroyable: false });
+      const passDescriptor = { colorAttachments: [colorAttachment], ...(descriptor.pass ?? {}) };
+      if (descriptor.depthEnabled ?? true) {
+        if (!canvasDepthTexture) throw new RalWebGpuBrowserHostError("not-configured", "WebGPU canvas depth target is unavailable");
+        passDescriptor.depthStencilAttachment = {
+          view: canvasDepthTexture.createView(),
+          depthLoadOp: descriptor.depthLoadOp ?? "clear",
+          depthStoreOp: descriptor.depthStore === false ? "discard" : "store",
+          depthClearValue: descriptor.clearDepth ?? 1
+        };
+      }
+      const passHandle = put("render-pass",
+        encoder.beginRenderPass(passDescriptor),
+        { destroyable: false });
+      if (canvasTextureHandle) encoderCanvasFrames.set(encoderHandle, canvasTextureHandle);
       passEncoders.set(passHandle, encoderHandle);
-      encoderDrawCounts.set(encoderHandle, 0);
+      if (!encoderDrawCounts.has(encoderHandle)) encoderDrawCounts.set(encoderHandle, 0);
       return passHandle;
     },
     beginComputePass(expectedGeneration, encoderHandle, descriptor = {}) {
       assertReady(expectedGeneration);
-      return put("compute-pass", get(encoderHandle, "encoder").beginComputePass(descriptor),
+      const encoder = get(encoderHandle, "encoder");
+      let timing = null, passDescriptor = {};
+      if (descriptor.timestampWrites === true) {
+        if (!limits.timestampQueries) {
+          throw new RalWebGpuBrowserHostError("unsupported-feature",
+            "timestamp-query was requested but is unavailable");
+        }
+        const usage = globalThis.GPUBufferUsage ?? {
+          MAP_READ: 1, COPY_SRC: 4, COPY_DST: 8, QUERY_RESOLVE: 512
+        };
+        let querySet = null, resolve = null, readback = null;
+        try {
+          querySet = getDevice().createQuerySet({ type: "timestamp", count: 2 });
+          resolve = getDevice().createBuffer({ size: 16,
+            usage: usage.QUERY_RESOLVE | usage.COPY_SRC });
+          readback = getDevice().createBuffer({ size: 16,
+            usage: usage.COPY_DST | usage.MAP_READ });
+          timing = { querySet, resolve, readback };
+          passDescriptor = { timestampWrites: { querySet,
+            beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } };
+          entries.get(encoderHandle).metadata.timing = timing;
+        } catch (error) {
+          querySet?.destroy?.(); resolve?.destroy?.(); readback?.destroy?.();
+          throw error;
+        }
+      }
+      return put("compute-pass", encoder.beginComputePass(passDescriptor),
         { destroyable: false });
     },
     recordIndexedDraw(expectedGeneration, passHandle, draw) {
@@ -394,16 +535,21 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
       const vertex = get(draw.vertexBufferHandle, "buffer");
       const index = get(draw.indexBufferHandle, "buffer");
 	  const texture = draw.textureHandle ? get(draw.textureHandle, "texture") : null;
-      if (draw.secondaryTextureHandle) get(draw.secondaryTextureHandle, "texture");
+      const secondary = draw.secondaryTextureHandle ? get(draw.secondaryTextureHandle, "texture") : null;
 	  const sampler = draw.samplerHandle ? get(draw.samplerHandle, "sampler") : null;
       finitePositive(draw.indexCount, "index count");
       pass.setPipeline(pipeline); pass.setVertexBuffer(draw.vertexSlot ?? 0, vertex, draw.vertexOffset ?? 0);
       pass.setIndexBuffer(index, draw.indexFormat ?? "uint32", draw.indexOffset ?? 0);
-	  if (draw.kind === 4 && texture && sampler) {
-		const group = getDevice().createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [
+	  if (draw.textureBindGroupSlot && texture && sampler) {
+		const materialGroup = draw.textureBindGroupSlot - 1;
+		/* The implicit material group is texture @0 + sampler @1; a draw that
+		 * carries a secondary texture (world lightmap) declares it at @2. */
+		const entries = [
 		  { binding: 0, resource: texture.createView() }, { binding: 1, resource: sampler }
-		] });
-		pass.setBindGroup(0, group);
+		];
+		if (secondary) entries.push({ binding: 2, resource: secondary.createView() });
+		const group = getDevice().createBindGroup({ layout: pipeline.getBindGroupLayout(materialGroup), entries });
+		pass.setBindGroup(materialGroup, group);
 	  }
       for (const binding of draw.bindGroups ?? []) pass.setBindGroup(binding.index, get(binding.handle, "bind-group"), binding.offsets ?? []);
       pass.drawIndexed(draw.indexCount, draw.instanceCount ?? 1, draw.firstIndex ?? 0,
@@ -436,7 +582,9 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
     finishEncoder(expectedGeneration, encoderHandle, descriptor = {}) {
       assertReady(expectedGeneration);
       const encoder = get(encoderHandle, "encoder");
-      const validationScope = entries.get(encoderHandle)?.metadata?.validationScope === true;
+      const encoderMetadata = entries.get(encoderHandle)?.metadata;
+      const validationScope = encoderMetadata?.validationScope === true;
+      const timing = encoderMetadata?.timing ?? null;
       let canvasCapture = null;
       const textureHandle = encoderCanvasFrames.get(encoderHandle);
       if (pendingCanvasCapture && textureHandle && configured
@@ -452,27 +600,54 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
         canvasCapture = { textureHandle, readback, bytesPerRow, width, height,
           sourceFormat: configured.format };
       }
+      if (timing) {
+        encoder.resolveQuerySet(timing.querySet, 0, 2, timing.resolve, 0);
+        encoder.copyBufferToBuffer(timing.resolve, 0, timing.readback, 0, 16);
+      }
       const commandBuffer = encoder.finish(descriptor);
       encoderCanvasFrames.delete(encoderHandle); encoderDrawCounts.delete(encoderHandle);
       release(encoderHandle);
       return put("command-buffer", commandBuffer, { destroyable: false,
-        metadata: { canvasCapture, validationScope } });
+        metadata: { canvasCapture, validationScope, timing } });
     },
     submit(expectedGeneration, commandBufferHandle) {
       assertReady(expectedGeneration);
       const queue = getQueue(), commandBuffer = get(commandBufferHandle, "command-buffer");
       const commandMetadata = entries.get(commandBufferHandle)?.metadata;
       const canvasCapture = commandMetadata?.canvasCapture;
+      const timing = commandMetadata?.timing ?? null;
       queue.submit([commandBuffer]); release(commandBufferHandle);
       if (canvasCapture) canvasCaptureCandidates.push(canvasCapture);
-      const submission = { status: "pending", error: "" };
+      const submission = { status: "pending", error: "",
+        timingState: timing ? "pending" : "unavailable",
+        gpuDurationNanoseconds: 0 };
+      const destroyTiming = () => {
+        timing?.querySet?.destroy?.(); timing?.resolve?.destroy?.();
+        timing?.readback?.destroy?.();
+      };
       const validation = commandMetadata?.validationScope
         ? Promise.resolve(getDevice().popErrorScope()) : Promise.resolve(null);
-      Promise.all([validation, Promise.resolve(queue.onSubmittedWorkDone())]).then(([error]) => {
-        if (error) { submission.status = "failed"; submission.error = String(error.message ?? error); }
-        else submission.status = "ready";
-      }, (error) => {
-        submission.status = "failed"; submission.error = String(error?.message ?? error ?? uncapturedError);
+      Promise.all([validation, Promise.resolve(queue.onSubmittedWorkDone())]).then(async ([error]) => {
+        if (error) throw error;
+        if (timing) {
+          await timing.readback.mapAsync(globalThis.GPUMapMode?.READ ?? 1, 0, 16);
+          const values = new BigUint64Array(timing.readback.getMappedRange(0, 16));
+          const begin = values[0], end = values[1];
+          timing.readback.unmap();
+          if (end < begin || end - begin > BigInt(Number.MAX_SAFE_INTEGER)) {
+            throw new RalWebGpuBrowserHostError("invalid-timestamp",
+              "WebGPU timestamp query returned an invalid interval");
+          }
+          submission.gpuDurationNanoseconds = Number(end - begin);
+          // Browser timestamp quantization can collapse a short interval.
+          // Keep GPU completion independent of an unavailable timing sample.
+          submission.timingState = end === begin ? "unavailable" : "valid";
+        }
+        submission.status = "ready"; destroyTiming();
+      }).catch((error) => {
+        submission.status = "failed"; submission.timingState = timing ? "failed" : "unavailable";
+        submission.gpuDurationNanoseconds = 0;
+        submission.error = String(error?.message ?? error ?? uncapturedError); destroyTiming();
       });
       return put("submission", submission, { destroyable: false });
     },
@@ -484,8 +659,10 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
       if (expectedGeneration !== generation || generation === 0) get(0, null, expectedGeneration);
       pendingCanvasCapture?.reject(new RalWebGpuBrowserHostError("destroyed", "WebGPU host was destroyed during capture"));
       pendingCanvasCapture = null;
-      canvasContext?.unconfigure?.(); configured = null;
+      canvasContext?.unconfigure?.(); canvasDepthTexture?.destroy?.();
+      canvasDepthTexture = null; configured = null;
       canvasFrames.clear();
+      lensOracle?.destroy(); lensOracle = null;
       encoderCanvasFrames.clear();
       passEncoders.clear(); encoderDrawCounts.clear();
       for (const candidate of canvasCaptureCandidates) candidate.readback.destroy?.();

@@ -6,7 +6,8 @@
 
 #include <stdint.h>
 
-#define RAL_WEBGPU_BROWSER_ABI_SCHEMA_VERSION 3u
+#define RAL_WEBGPU_BROWSER_ABI_SCHEMA_VERSION 12u
+#define RAL_WEBGPU_BROWSER_LENS_SOURCE_LIMIT 352u
 #define RAL_WEBGPU_BROWSER_ABI_NAME_BYTES 128u
 #define RAL_WEBGPU_BROWSER_ABI_REASON_BYTES 192u
 
@@ -46,16 +47,20 @@ typedef enum {
 	RAL_WEBGPU_BROWSER_OP_RELEASE_COMMAND_OBJECT,
 	RAL_WEBGPU_BROWSER_OP_CREATE_BIND_GROUP,
 	RAL_WEBGPU_BROWSER_OP_RELEASE_BIND_GROUP,
-	RAL_WEBGPU_BROWSER_OP_RECORD_COMPUTE_DISPATCH
+	RAL_WEBGPU_BROWSER_OP_RECORD_COMPUTE_DISPATCH,
+	RAL_WEBGPU_BROWSER_OP_BEGIN_LENS_VISIBILITY,
+	RAL_WEBGPU_BROWSER_OP_POLL_LENS_VISIBILITY,
+	RAL_WEBGPU_BROWSER_OP_RELEASE_LENS_VISIBILITY,
+	RAL_WEBGPU_BROWSER_OP_RESET_LENS_VISIBILITY
 } ralWebGpuBrowserOpcode_t;
 
 #pragma pack(push, 1)
 
 typedef struct {
-	uint32_t schemaVersion;
-	uint32_t opcode;
-	uint32_t byteCount;
-	uint32_t reserved;
+uint32_t schemaVersion;
+uint32_t opcode;
+uint32_t byteCount;
+uint32_t reserved;
 } ralWebGpuBrowserAbiHeader_t;
 
 typedef struct {
@@ -64,9 +69,9 @@ typedef struct {
 } ralWebGpuBrowserGenerationRequest_t;
 
 typedef struct {
-	ralWebGpuBrowserAbiHeader_t header;
-	uint32_t accepted;
-	uint32_t reserved;
+ralWebGpuBrowserAbiHeader_t header;
+uint32_t accepted;
+uint32_t reserved;
 } ralWebGpuBrowserStatusResponse_t;
 
 typedef struct {
@@ -195,6 +200,8 @@ typedef struct {
 	uint32_t depth;
 	uint32_t bytesPerTexel;
 	uint32_t format;
+	uint32_t mipLevelCount;
+	uint32_t usage;
 	uint32_t reserved;
 } ralWebGpuBrowserCreateTextureRequest_t;
 
@@ -204,7 +211,7 @@ typedef struct {
 	uint32_t linearMinification;
 	uint32_t linearMagnification;
 	uint32_t clampToEdge;
-	uint32_t reserved;
+	uint32_t linearMipmapping;
 } ralWebGpuBrowserCreateSamplerRequest_t;
 
 typedef struct {
@@ -231,6 +238,10 @@ typedef struct {
 	uint64_t byteSize;
 	uint32_t bytesPerRow;
 	uint32_t rowsPerImage;
+	uint32_t mipLevel;
+	uint32_t width;
+	uint32_t height;
+	uint32_t depth;
 } ralWebGpuBrowserWriteTextureRequest_t;
 
 typedef struct {
@@ -258,6 +269,13 @@ typedef struct {
 	uint32_t reserved;
 	uint64_t byteSize;
 } ralWebGpuBrowserAsyncResponse_t;
+
+typedef struct {
+	ralWebGpuBrowserAbiHeader_t header;
+	uint32_t status;
+	uint32_t timingState;
+	uint64_t gpuDurationNanoseconds;
+} ralWebGpuBrowserSubmissionResponse_t;
 
 typedef struct {
 	ralWebGpuBrowserAbiHeader_t header;
@@ -404,6 +422,8 @@ typedef struct {
 	ralWebGpuBrowserVertexAttributeAbi_t vertexAttributes[16];
 	ralWebGpuBrowserBlendAbi_t colorBlends[8];
 	ralWebGpuBrowserSpecValueAbi_t specValues[32];
+	uint32_t specStageMasks[32];
+	uint32_t specValueTypes[32];
 } ralWebGpuBrowserPipelineRequest_t;
 
 typedef struct {
@@ -416,6 +436,14 @@ typedef struct {
 	uint64_t encoderIdentity;
 	uint64_t targetIdentity;
 	uint32_t passKind;
+	uint32_t colorLoadOp;
+	uint32_t depthEnabled;
+	uint32_t depthLoadOp;
+	uint32_t depthStore;
+	float clearDepth;
+	uint32_t timestampWrites;
+	uint32_t targetMipLevel;
+	uint32_t targetArrayLayer;
 	uint32_t reserved;
 } ralWebGpuBrowserBeginPassRequest_t;
 
@@ -436,6 +464,7 @@ typedef struct {
 	uint32_t instanceCount;
 	uint32_t firstInstance;
 	uint32_t bindGroupCount;
+	uint32_t textureBindGroupSlot;
 	uint64_t bindGroupIdentities[8];
 } ralWebGpuBrowserIndexedDrawRequest_t;
 
@@ -464,6 +493,27 @@ typedef struct {
 	uint64_t submissionGeneration;
 } ralWebGpuBrowserPollSubmissionRequest_t;
 
+#pragma pack(pop)
+
+/* Fixed-layout lens upload/readback. Scope and frame are explicit; no native
+ * pointer or mutable WASM memory survives dispatch into the browser host. */
+#pragma pack(push, 1)
+typedef struct {
+	ralWebGpuBrowserAbiHeader_t header;
+	uint64_t deviceIdentity, scopeGeneration, frameGeneration;
+	uint64_t paramsOffset, sourcesOffset;
+	uint32_t sourceCount, reserved;
+} ralWebGpuBrowserLensBeginRequest_t;
+typedef struct {
+	ralWebGpuBrowserAbiHeader_t header;
+	uint64_t deviceIdentity, scopeGeneration, frameGeneration;
+	uint64_t queryIdentity, outputOffset;
+	uint32_t capacity, reserved;
+} ralWebGpuBrowserLensPollRequest_t;
+typedef struct {
+	ralWebGpuBrowserAbiHeader_t header;
+	uint64_t deviceIdentity, identity;
+} ralWebGpuBrowserLensControlRequest_t;
 #pragma pack(pop)
 
 #endif

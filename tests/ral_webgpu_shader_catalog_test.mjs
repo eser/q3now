@@ -11,7 +11,7 @@ import { openWebGpuShaderCatalog } from '../code/render/ral/core/ral_webgpu_shad
 const root = fileURLToPath(new URL('..', import.meta.url));
 const source = join(root, 'code/render/ral/backends/vulkan/renderer/shaders/portable');
 const catalog = openWebGpuShaderCatalog(source);
-assert.equal(catalog.moduleCount, 299);
+assert.equal(catalog.moduleCount, 315);
 assert.match(catalog.toolchainIdentity, /naga\/30\.0\.0\+wired-portable-v1$/);
 const color = catalog.get('color_vert_spv');
 assert.equal(color.stage, 'RAL_STAGE_VERTEX');
@@ -20,6 +20,9 @@ const histogram = catalog.get('hdr_histogram_comp_spv');
 assert.equal(histogram.inlineData.byteSize, 8);
 assert.match(histogram.code, /@group\(0\) @binding\(3\)\s*\nvar<uniform>/);
 assert.doesNotMatch(histogram.code, /var<immediate>|\bVk/);
+const skySh = catalog.get('project_sky_sh_comp_spv');
+assert.equal(skySh.inlineData.byteSize, 4);
+assert.match(skySh.code, /array<vec4<f32>, 9>/);
 assert.throws(() => catalog.get('missing_spv'), /unknown WGSL module/);
 
 const tempRoot = mkdtempSync(join(tmpdir(), 'wired-webgpu-catalog-'));

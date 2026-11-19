@@ -12,7 +12,7 @@
 extern "C" {
 #endif
 
-#define RAL_WEBGPU_COMMAND_SCHEMA_VERSION 1u
+#define RAL_WEBGPU_COMMAND_SCHEMA_VERSION 4u
 
 typedef struct ralWebGpuCommand_s ralWebGpuCommand_t;
 
@@ -20,6 +20,33 @@ typedef enum {
 	RAL_WEBGPU_PASS_RENDER = 1,
 	RAL_WEBGPU_PASS_COMPUTE
 } ralWebGpuPassKind_t;
+
+typedef enum {
+	RAL_WEBGPU_LOAD_CLEAR = 1,
+	RAL_WEBGPU_LOAD_PRESERVE
+} ralWebGpuLoadOp_t;
+
+typedef struct {
+	ralWebGpuPassKind_t kind;
+	uintptr_t targetIdentity;
+	ralWebGpuLoadOp_t colorLoadOp;
+	qboolean depthEnabled;
+	ralWebGpuLoadOp_t depthLoadOp;
+	qboolean depthStore;
+	float clearDepth;
+	qboolean timestampWrites;
+	/* One color subresource, never a layered render pass. Zero selects the
+	 * existing base mip/layer. The resource owner validates the bounds. */
+	uint32_t targetMipLevel;
+	uint32_t targetArrayLayer;
+} ralWebGpuPassDesc_t;
+
+typedef enum {
+	RAL_WEBGPU_GPU_TIMING_UNAVAILABLE = 1,
+	RAL_WEBGPU_GPU_TIMING_PENDING,
+	RAL_WEBGPU_GPU_TIMING_VALID,
+	RAL_WEBGPU_GPU_TIMING_FAILED
+} ralWebGpuGpuTimingState_t;
 
 typedef enum {
 	RAL_WEBGPU_COMMAND_OBJECT_ENCODER = 1,
@@ -31,8 +58,8 @@ typedef enum {
 typedef qboolean ( *ralWebGpuBeginEncoderFn )( void *userData,
 	uintptr_t deviceIdentity, uintptr_t *outEncoderIdentity );
 typedef qboolean ( *ralWebGpuBeginPassFn )( void *userData,
-	uintptr_t encoderIdentity, ralWebGpuPassKind_t kind,
-	uintptr_t targetIdentity, uintptr_t *outPassIdentity );
+	uintptr_t encoderIdentity, const ralWebGpuPassDesc_t *desc,
+	uintptr_t *outPassIdentity );
 typedef qboolean ( *ralWebGpuEndPassFn )( void *userData,
 	uintptr_t passIdentity );
 typedef enum {
@@ -55,6 +82,8 @@ typedef struct {
 	uint32_t instanceCount;
 	uint32_t firstInstance;
 	uint64_t contentDigest;
+	/* Zero disables implicit material binding; otherwise group index + 1. */
+	uint32_t textureBindGroupSlot;
 	uintptr_t bindGroupIdentities[RAL_SHADER_ABI_MAX_BIND_GROUPS];
 	uint32_t bindGroupCount;
 } ralWebGpuIndexedDraw_t;
@@ -78,7 +107,9 @@ typedef qboolean ( *ralWebGpuSubmitCommandFn )( void *userData,
 	uint64_t submissionGeneration, uintptr_t *outSubmissionIdentity );
 typedef qboolean ( *ralWebGpuPollSubmissionFn )( void *userData,
 	uintptr_t submissionIdentity, uint64_t submissionGeneration,
-	ralWebGpuAsyncStatus_t *outStatus );
+	ralWebGpuAsyncStatus_t *outStatus,
+	ralWebGpuGpuTimingState_t *outTimingState,
+	uint64_t *outGpuDurationNanoseconds );
 typedef void ( *ralWebGpuReleaseCommandObjectFn )( void *userData,
 	ralWebGpuCommandObjectKind_t kind, uintptr_t identity );
 
@@ -106,6 +137,7 @@ typedef struct {
 	ralWebGpuPassKind_t passKind;
 	uintptr_t targetIdentity;
 	uint64_t operationDigest;
+	uint32_t passCount;
 	uint32_t drawCount;
 	uint32_t dispatchCount;
 	ralCommandReceipt_t command;
@@ -129,6 +161,20 @@ void RalWebGpu_CommandDestroy( ralWebGpuCommand_t *command );
 qboolean RalWebGpu_CommandBegin( ralWebGpuCommand_t *command,
 	ralWebGpuPassKind_t kind, uintptr_t targetIdentity,
 	ralWebGpuCommandReceipt_t *outRecording );
+qboolean RalWebGpu_CommandBeginWithDesc( ralWebGpuCommand_t *command,
+	const ralWebGpuPassDesc_t *desc,
+	ralWebGpuCommandReceipt_t *outRecording );
+qboolean RalWebGpu_CommandNextRenderPass( ralWebGpuCommand_t *command,
+	const ralWebGpuCommandReceipt_t *recording,
+	const ralWebGpuPassDesc_t *desc,
+	ralWebGpuCommandReceipt_t *outRecording );
+/* End the current pass and begin a render or compute pass on the same encoder.
+ * Attachment changes are explicit; this never submits or waits for the GPU.
+ * At most one timestamp interval may be requested per encoder. */
+qboolean RalWebGpu_CommandNextPass( ralWebGpuCommand_t *command,
+	const ralWebGpuCommandReceipt_t *recording,
+	const ralWebGpuPassDesc_t *desc,
+	ralWebGpuCommandReceipt_t *outRecording );
 qboolean RalWebGpu_CommandEnd( ralWebGpuCommand_t *command,
 	const ralWebGpuCommandReceipt_t *recording,
 	ralWebGpuCommandReceipt_t *outExecutable );
@@ -147,6 +193,8 @@ qboolean RalWebGpu_CommandSubmit( ralWebGpuCommand_t *command,
 	ralWebGpuSubmissionReceipt_t *outSubmission );
 ralWebGpuAsyncStatus_t RalWebGpu_CommandPoll( ralWebGpuCommand_t *command,
 	const ralWebGpuSubmissionReceipt_t *submission );
+qboolean RalWebGpu_CommandLastGpuTiming( const ralWebGpuCommand_t *command,
+	ralWebGpuGpuTimingState_t *outState, uint64_t *outDurationNanoseconds );
 qboolean RalWebGpu_CommandReceiptExact( const ralWebGpuCommandReceipt_t *a,
 	const ralWebGpuCommandReceipt_t *b );
 qboolean RalWebGpu_SubmissionReceiptExact(

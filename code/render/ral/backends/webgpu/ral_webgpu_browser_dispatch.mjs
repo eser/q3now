@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
-export const RAL_WEBGPU_BROWSER_ABI_SCHEMA_VERSION = 3;
+import { LENS_SOURCE_LIMIT } from "./ral_webgpu_lens.mjs";
+export const RAL_WEBGPU_BROWSER_ABI_SCHEMA_VERSION = 12;
 
 export const RalWebGpuBrowserOpcode = Object.freeze({
   BEGIN_ADAPTER: 1, POLL_ADAPTER: 2, BEGIN_DEVICE: 3, POLL_DEVICE: 4,
@@ -16,21 +17,23 @@ export const RalWebGpuBrowserOpcode = Object.freeze({
   BEGIN_PASS: 27, RECORD_INDEXED_DRAW: 28, END_PASS: 29,
   FINISH_ENCODER: 30, SUBMIT: 31, POLL_SUBMISSION: 32,
   RELEASE_COMMAND_OBJECT: 33, CREATE_BIND_GROUP: 34,
-  RELEASE_BIND_GROUP: 35, RECORD_COMPUTE_DISPATCH: 36
+  RELEASE_BIND_GROUP: 35, RECORD_COMPUTE_DISPATCH: 36,
+  BEGIN_LENS_VISIBILITY: 37, POLL_LENS_VISIBILITY: 38,
+  RELEASE_LENS_VISIBILITY: 39, RESET_LENS_VISIBILITY: 40
 });
 
 const SIZE = Object.freeze({
   1: 24, 2: 24, 3: 32, 4: 24, 5: 32, 6: 24, 7: 24,
-  8: 56, 9: 24, 10: 32, 11: 48, 12: 40, 13: 48, 14: 40,
-  15: 32, 16: 56, 17: 56, 18: 72, 19: 48, 20: 24, 21: 120,
-  22: 40, 23: 40, 24: 1352, 25: 32, 26: 24, 27: 40,
-  28: 172, 29: 24, 30: 24, 31: 40, 32: 32, 33: 32,
-  34: 48, 35: 24, 36: 120
+  8: 56, 9: 24, 10: 32, 11: 48, 12: 40, 13: 56, 14: 40,
+  15: 32, 16: 56, 17: 72, 18: 72, 19: 48, 20: 24, 21: 120,
+  22: 40, 23: 40, 24: 1608, 25: 32, 26: 24, 27: 72,
+  28: 176, 29: 24, 30: 24, 31: 40, 32: 32, 33: 32,
+  34: 48, 35: 24, 36: 120, 37: 64, 38: 64, 39: 32, 40: 32
 });
 const RESPONSE_SIZE = Object.freeze({ 2: 376, 4: 40, 7: 224, 10: 32,
   12: 32, 13: 32, 14: 32, 18: 32, 19: 32, 21: 32, 22: 32,
   23: 32, 24: 32, 26: 32, 27: 32, 30: 32, 31: 32, 32: 32,
-  34: 32 });
+  34: 32, 37: 32, 38: 32 });
 const encoder = new TextEncoder(), decoder = new TextDecoder("utf-8", { fatal: true });
 const u64 = (view, offset) => {
   const value = view.getBigUint64(offset, true);
@@ -72,9 +75,11 @@ export function createRalWebGpuBrowserDispatch({ host, memory, canvasIdentity = 
   }
   const bufferFlags = bufferUsage ?? { MAP_READ: 1, COPY_SRC: 4, COPY_DST: 8,
     INDEX: 16, VERTEX: 32, UNIFORM: 64, STORAGE: 128 };
-  const textureFlags = textureUsage ?? { COPY_SRC: 1, COPY_DST: 2, TEXTURE_BINDING: 4, RENDER_ATTACHMENT: 16 };
+  const textureFlags = textureUsage ?? { COPY_SRC: 1, COPY_DST: 2, TEXTURE_BINDING: 4, STORAGE_BINDING: 8, RENDER_ATTACHMENT: 16 };
   let init = null, nextOperation = 0x100000, lastError = "", lastFailure = "";
   const operations = new Map(), submissions = new Map(), frames = new Map();
+  const lensQueries = new Map();
+  let lensScope = 0;
   const buffer = () => typeof memory === "function" ? memory() : memory.buffer;
   const region = (offset, bytes) => {
     const data = buffer();
@@ -112,6 +117,12 @@ export function createRalWebGpuBrowserDispatch({ host, memory, canvasIdentity = 
     if (usage & 16) out |= bufferFlags.UNIFORM; if (usage & 32) out |= bufferFlags.STORAGE;
     if (usage & 64) out |= bufferFlags.MAP_READ; if (!out || (usage & ~127)) throw new RangeError("buffer usage"); return out;
   };
+  const textureUsageValue = (usage) => {
+    let out = 0; if (usage & 1) out |= textureFlags.COPY_SRC; if (usage & 2) out |= textureFlags.COPY_DST;
+    if (usage & 4) out |= textureFlags.TEXTURE_BINDING; if (usage & 8) out |= textureFlags.STORAGE_BINDING;
+    if (usage & 16) out |= textureFlags.RENDER_ATTACHMENT;
+    if (!out || (usage & ~31)) throw new RangeError("texture usage"); return out;
+  };
   const bindingEntry = (view, offset) => {
     const binding = view.getUint32(offset, true), kind = view.getUint32(offset + 4, true);
     const count = view.getUint32(offset + 8, true), visibility = view.getUint32(offset + 12, true);
@@ -132,9 +143,21 @@ export function createRalWebGpuBrowserDispatch({ host, memory, canvasIdentity = 
     const modules = view.getUint32(116, true), layouts = view.getUint32(120, true);
     if ((kind === 1 && modules !== 2) || (kind === 2 && modules !== 1) || layouts > 8) throw new RangeError("pipeline cardinality");
     const moduleHandles = Array.from({ length: modules }, (_, i) => u64(view, 32 + i * 8));
-    const constants = {}; const specCount = view.getUint32(292, true); if (specCount > 32) throw new RangeError("spec constants");
-    for (let i = 0; i < specCount; ++i) constants[view.getUint32(1096 + i * 8, true)] = view.getUint32(1100 + i * 8, true);
-    if (kind === 2) return { kind, descriptor: { layoutHandle, compute: { moduleHandle: moduleHandles[0], entryPoint: "main", constants } } };
+    const constants = {1:{},2:{},4:{}};
+    const specCount = view.getUint32(292, true); if (specCount > 32) throw new RangeError("spec constants");
+    const ids = new Set(), allowedStages = kind === 2 ? 4 : 3;
+    for (let i = 0; i < specCount; ++i) {
+      const id = view.getUint32(1096 + i * 8, true), at = 1100 + i * 8;
+      const type = view.getUint32(1480 + i * 4, true), bits = view.getUint32(at, true);
+      if (type > 3 || (type === 3 && bits > 1)) throw new RangeError("spec constant type");
+      const value = type === 2 ? view.getFloat32(at, true) : type === 1 ? view.getInt32(at, true) : bits;
+      if (!Number.isFinite(value)) throw new RangeError("nonfinite spec constant");
+      const stages = view.getUint32(1352 + i * 4, true);
+      if (!stages || (stages & ~allowedStages) || ids.has(id)) throw new RangeError("spec constant stages");
+      ids.add(id);
+      for (const stage of [1,2,4]) if (stages & stage) constants[stage][id] = value;
+    }
+    if (kind === 2) return { kind, descriptor: { layoutHandle, compute: { moduleHandle: moduleHandles[0], entryPoint: "main", constants: constants[4] } } };
     const bindingCount = view.getUint32(280, true), attributeCount = view.getUint32(284, true);
     const blendCount = view.getUint32(288, true), colorCount = view.getUint32(268, true);
     if (bindingCount > 16 || attributeCount > 16 || blendCount > 8 || colorCount > 8 || blendCount !== colorCount) throw new RangeError("graphics cardinality");
@@ -159,8 +182,8 @@ export function createRalWebGpuBrowserDispatch({ host, memory, canvasIdentity = 
         || view.getFloat32(160, true) !== 1) throw new RangeError("unsupported WebGPU raster state");
     bool(view.getUint32(140, true)); bool(view.getUint32(164, true));
     bool(view.getUint32(168, true)); bool(view.getUint32(176, true));
-    const descriptor = { layoutHandle, vertex: { moduleHandle: moduleHandles[0], entryPoint: "main", buffers, constants },
-      fragment: { moduleHandle: moduleHandles[1], entryPoint: "main", targets, constants },
+    const descriptor = { layoutHandle, vertex: { moduleHandle: moduleHandles[0], entryPoint: "main", buffers, constants: constants[1] },
+      fragment: { moduleHandle: moduleHandles[1], entryPoint: "main", targets, constants: constants[2] },
       primitive: { topology: oneOf(view.getUint32(124, true), TOPOLOGY, "topology"),
         cullMode: oneOf(view.getUint32(132, true), CULL, "cull mode"), frontFace: oneOf(view.getUint32(136, true), FRONT, "front face") },
       multisample: { count: view.getUint32(276, true) } };
@@ -171,6 +194,59 @@ export function createRalWebGpuBrowserDispatch({ host, memory, canvasIdentity = 
   };
 
   const handlers = {
+    37(view) {
+      validateDevice(view);
+      const scope = u64(view, 24), frame = u64(view, 32);
+      exact(scope, lensScope, "lens scope");
+      const count = view.getUint32(56, true);
+      if (!scope || !frame || !count || count > LENS_SOURCE_LIMIT ||
+          view.getUint32(60, true)) throw new RangeError("lens request domain");
+      const params = region(u64(view, 40), 96);
+      const packed = region(u64(view, 48), count * 32);
+      const copy = Float32Array.from({ length: 24 }, (_, i) => params.getFloat32(i * 4, true));
+      const sourceCopy = new Uint8Array(packed.buffer, packed.byteOffset, packed.byteLength).slice();
+      const query = host.beginLensVisibility(init.generation, frame, copy, sourceCopy);
+      if (query) lensQueries.set(query, { scope, frame });
+      return identity(37, query);
+    },
+    38(view) {
+      validateDevice(view);
+      const query = u64(view, 40), owner = lensQueries.get(query);
+      if (!owner) throw new RangeError("unknown lens query");
+      exact(u64(view, 24), lensScope, "lens scope");
+      exact(owner.scope, lensScope, "lens query scope");
+      exact(u64(view, 32), owner.frame, "lens frame");
+      if (view.getUint32(56, true) !== LENS_SOURCE_LIMIT ||
+          view.getUint32(60, true)) throw new RangeError("lens result capacity");
+      const target = region(u64(view, 48), LENS_SOURCE_LIMIT * 4);
+      const result = host.pollLensVisibility(init.generation, query);
+      exact(result.frame, owner.frame, "native lens frame");
+      const out = response(38, 32);
+      out.view.setUint32(16, result.status === "pending" ? 1 : result.status === "ready" ? 2 : 3, true);
+      put64(out.view, 24, owner.frame);
+      if (result.status === "ready") {
+        if (!(result.values instanceof Float32Array) || result.values.length !== LENS_SOURCE_LIMIT ||
+            result.values.some(value => !Number.isFinite(value) || value < 0 || value > 1))
+          throw new RangeError("invalid native lens result");
+        for (let i = 0; i < LENS_SOURCE_LIMIT; i++) target.setFloat32(i * 4, result.values[i], true);
+      }
+      return out;
+    },
+    39(view) {
+      validateDevice(view);
+      const query = u64(view, 24);
+      if (lensQueries.delete(query)) host.release(init.generation, query);
+      return status(39);
+    },
+    40(view) {
+      validateDevice(view);
+      const scope = u64(view, 24);
+      if (!scope) throw new RangeError("zero lens scope");
+      host.resetLensVisibility(init.generation);
+      for (const query of lensQueries.keys()) host.release(init.generation, query);
+      lensQueries.clear(); lensScope = scope;
+      return status(40);
+    },
     1(view) { const generation = u64(view, 16); if (init) throw new RangeError("adapter request already begun");
       init = { generation, status: 1, result: null }; Promise.resolve(host.initialize(generation, {})).then(
         (value) => { init.result = value;
@@ -184,13 +260,15 @@ export function createRalWebGpuBrowserDispatch({ host, memory, canvasIdentity = 
         out.view.setUint32(60, limits.maxSampledTexturesPerShaderStage ?? 0, true); out.view.setUint32(64, limits.maxBindGroups ?? 0, true);
         out.view.setUint32(68, limits.maxBindingsPerBindGroup ?? 0, true); put64(out.view, 72, limits.maxStorageBufferBindingSize ?? 0);
         put64(out.view, 80, limits.minUniformBufferOffsetAlignment ?? 0); put64(out.view, 88, limits.minStorageBufferOffsetAlignment ?? 0);
+        out.view.setUint32(112, limits.timestampQueries ? 1 : 0, true);
         writeString(out.view, 120, 128, "Browser WebGPU"); writeString(out.view, 248, 128, "WebGPU adapter"); }
       return out; },
     3(view) { exact(u64(view, 24), init?.generation + 1, "generation"); exact(u64(view, 16), init?.result?.adapterHandle, "adapter"); return status(3); },
     4(view) { exact(u64(view, 16), init?.generation + 1, "generation"); const out = response(4, 40); out.view.setUint32(16, init.status, true);
       if (init.result?.ready) { put64(out.view, 24, init.result.deviceHandle); put64(out.view, 32, init.result.queueHandle); } return out; },
     5(view) { const r = receipt(); exact(u64(view, 16), r.deviceHandle, "device"); exact(u64(view, 24), r.queueHandle, "queue"); return status(5); },
-    6(view) { exact(u64(view, 16), receipt().adapterHandle, "adapter"); host.destroy(init.generation); init = null; return status(6); },
+    6(view) { exact(u64(view, 16), receipt().adapterHandle, "adapter"); host.destroy(init.generation);
+      lensQueries.clear(); lensScope = 0; init = null; return status(6); },
     7(view) { exact(u64(view, 16), init?.generation, "generation"); const r = receipt(), out = response(7, 224); put64(out.view, 16, r.deviceHandle);
       out.view.setUint32(24, r.lost ? 1 : 0, true); out.view.setUint32(28, r.lost ? 1 : 0, true); writeString(out.view, 32, 192, r.lost?.message ?? ""); return out; },
     8(view) { exact(u64(view, 16), canvasIdentity, "canvas"); validateDevice(view, 24); if (view.getUint32(44, true) !== 0) throw new RangeError("unsupported canvas color space"); const configured = host.configureCanvas(init.generation,
@@ -203,18 +281,18 @@ export function createRalWebGpuBrowserDispatch({ host, memory, canvasIdentity = 
     11(view) { exact(u64(view, 16), canvasIdentity, "canvas"); const texture = u64(view, 24); exact(u64(view, 32), frames.get(texture), "frame");
       if (!submissions.has(u64(view, 40))) throw new RangeError("unknown submission generation"); host.presentCanvas(init.generation, texture); frames.delete(texture); return status(11); },
     12(view) { validateDevice(view); return identity(12, host.createBuffer(init.generation, { size: u64(view, 24), usage: bufferUsageValue(view.getUint32(32, true)) })); },
-    13(view) { validateDevice(view); const width = view.getUint32(24, true), height = view.getUint32(28, true), depth = view.getUint32(32, true), bytes = view.getUint32(36, true), formatId = view.getUint32(40, true);
-      if (!width || !height || !depth || FORMAT_BYTES[formatId] !== bytes || view.getUint32(44, true) !== 0) throw new RangeError("texture extent/format"); return identity(13, host.createTexture(init.generation,
-        { size: { width, height, depthOrArrayLayers: depth }, format: format(formatId), usage: textureFlags.COPY_SRC | textureFlags.COPY_DST | textureFlags.TEXTURE_BINDING })); },
+    13(view) { validateDevice(view); const width = view.getUint32(24, true), height = view.getUint32(28, true), depth = view.getUint32(32, true), bytes = view.getUint32(36, true), formatId = view.getUint32(40, true), mipLevelCount = view.getUint32(44, true), usage = view.getUint32(48, true);
+      if (!width || !height || !depth || !mipLevelCount || FORMAT_BYTES[formatId] !== bytes) throw new RangeError("texture extent/format"); return identity(13, host.createTexture(init.generation,
+        { size: { width, height, depthOrArrayLayers: depth }, mipLevelCount, format: format(formatId), usage: textureUsageValue(usage) })); },
     14(view) { validateDevice(view); return identity(14, host.createSampler(init.generation, { minFilter: bool(view.getUint32(24, true)) ? "linear" : "nearest",
-      magFilter: bool(view.getUint32(28, true)) ? "linear" : "nearest", addressModeU: bool(view.getUint32(32, true)) ? "clamp-to-edge" : "repeat",
+      magFilter: bool(view.getUint32(28, true)) ? "linear" : "nearest", mipmapFilter: bool(view.getUint32(36, true)) ? "linear" : "nearest", addressModeU: bool(view.getUint32(32, true)) ? "clamp-to-edge" : "repeat",
       addressModeV: bool(view.getUint32(32, true)) ? "clamp-to-edge" : "repeat" })); },
     15(view) { const kind = view.getUint32(16, true); if (kind < 1 || kind > 3) throw new RangeError("resource kind"); host.release(init.generation, u64(view, 24)); return status(15); },
     16(view) { validateQueue(view); host.writeBuffer(init.generation, u64(view, 24), u64(view, 32), bytesAt(u64(view, 40), u64(view, 48)).slice()); return status(16); },
-    17(view) { validateQueue(view); const size = u64(view, 40), rows = view.getUint32(52, true), bpr = view.getUint32(48, true);
+    17(view) { validateQueue(view); const size = u64(view, 40), rows = view.getUint32(52, true), bpr = view.getUint32(48, true), mipLevel = view.getUint32(56, true), width = view.getUint32(60, true), height = view.getUint32(64, true), depth = view.getUint32(68, true);
       if (!size || !rows || !bpr || bpr % 256 || size % (bpr * rows)) throw new RangeError("texture write layout");
       host.writeTexture(init.generation, u64(view, 24), bytesAt(u64(view, 32), size).slice(), { bytesPerRow: bpr, rowsPerImage: rows },
-        { width: bpr, height: rows, depthOrArrayLayers: size / (bpr * rows) }); return status(17); },
+        { width, height, depthOrArrayLayers: depth }, mipLevel); return status(17); },
     18(view) { validateDevice(view); validateQueue(view, 24); const generation = u64(view, 64), id = nextOperation++;
       const operation = { generation, status: 1, data: null }; operations.set(id, operation);
       Promise.resolve(host.roundTrip(init.generation, u64(view, 32), u64(view, 40), bytesAt(u64(view, 48), u64(view, 56)).slice())).then(
@@ -239,8 +317,28 @@ export function createRalWebGpuBrowserDispatch({ host, memory, canvasIdentity = 
     25(view) { const kind = view.getUint32(16, true); if (kind < 1 || kind > 4) throw new RangeError("pipeline object kind"); host.release(init.generation, u64(view, 24)); return status(25); },
     26(view) { validateDevice(view); return identity(26, host.createCommandEncoder(init.generation)); },
     27(view) { const encoderHandle = u64(view, 16), target = u64(view, 24), kind = view.getUint32(32, true);
-      if (kind === 1) return identity(27, host.beginRenderPass(init.generation, encoderHandle, target));
-      if (kind === 2) return identity(27, host.beginComputePass(init.generation, encoderHandle)); throw new RangeError("pass kind"); },
+      const targetMipLevel = view.getUint32(60, true), targetArrayLayer = view.getUint32(64, true);
+      if (view.getUint32(68, true)) throw new RangeError("pass reserved field");
+      if (kind === 1) {
+        const depthEnabled = bool(view.getUint32(40, true));
+        const depthLoad = view.getUint32(44, true), depthStore = bool(view.getUint32(48, true));
+        const clearDepth = view.getFloat32(52, true);
+        if (!depthEnabled && (depthLoad || depthStore || clearDepth !== 0))
+          throw new RangeError("depthless pass must not carry depth operations");
+        if (depthEnabled && !(clearDepth >= 0 && clearDepth <= 1))
+          throw new RangeError("depth clear range");
+        return identity(27, host.beginRenderPass(init.generation, encoderHandle, target, {
+          colorLoadOp: oneOf(view.getUint32(36, true), { 1: "clear", 2: "load" }, "color load op"),
+          depthEnabled, targetMipLevel, targetArrayLayer,
+          ...(depthEnabled ? { depthLoadOp: oneOf(depthLoad, { 1: "clear", 2: "load" }, "depth load op"),
+            depthStore, clearDepth } : {})
+        }));
+      }
+      if (kind === 2) {
+        if (target || targetMipLevel || targetArrayLayer) throw new RangeError("compute pass color target");
+        return identity(27, host.beginComputePass(init.generation,
+          encoderHandle, { timestampWrites: bool(view.getUint32(56, true)) }));
+      } throw new RangeError("pass kind"); },
     28(view) { const textured = bool(view.getUint32(84, true)), drawKind = view.getUint32(80, true);
       const contentDigest = view.getBigUint64(72, true);
       const bindGroupCount = view.getUint32(104, true);
@@ -250,17 +348,22 @@ export function createRalWebGpuBrowserDispatch({ host, memory, canvasIdentity = 
       kind: drawKind,
       firstIndex: view.getUint32(88, true), indexCount: view.getUint32(92, true), instanceCount: view.getUint32(96, true),
       firstInstance: view.getUint32(100, true), indexFormat: "uint32",
-      bindGroups: Array.from({ length: bindGroupCount }, (_, i) => ({ index: i, handle: u64(view, 108 + i * 8) })) }); return status(28); },
+      textureBindGroupSlot: view.getUint32(108, true),
+      bindGroups: Array.from({ length: bindGroupCount }, (_, i) => ({ index: i, handle: u64(view, 112 + i * 8) })) }); return status(28); },
     29(view) { const id = u64(view, 16); try { host.endRenderPass(init.generation, id); } catch { host.endComputePass(init.generation, id); } return status(29); },
     30(view) { return identity(30, host.finishEncoder(init.generation, u64(view, 16))); },
     31(view) { validateQueue(view); const generation = u64(view, 32), id = host.submit(init.generation, u64(view, 24)); submissions.set(generation, id); return identity(31, id); },
     32(view) { const id = u64(view, 16), generation = u64(view, 24); exact(submissions.get(generation), id, "submission");
       const state = host.pollSubmission(init.generation, id);
       if (state.status === "failed" && state.error) lastFailure = state.error;
-      const out = response(32, 32); out.view.setUint32(16, state.status === "pending" ? 1 : state.status === "ready" ? 2 : 3, true); return out; },
+      const out = response(32, 32);
+      out.view.setUint32(16, state.status === "pending" ? 1 : state.status === "ready" ? 2 : 3, true);
+      out.view.setUint32(20, state.timingState === "unavailable" ? 1
+        : state.timingState === "pending" ? 2 : state.timingState === "valid" ? 3 : 4, true);
+      put64(out.view, 24, state.gpuDurationNanoseconds ?? 0); return out; },
     33(view) { const kind = view.getUint32(16, true); if (kind < 1 || kind > 4) throw new RangeError("command object kind"); host.release(init.generation, u64(view, 24)); return status(33); },
     34(view) { validateDevice(view); const count = view.getUint32(40, true);
-      if (!count || count > 64) throw new RangeError("bind resource count");
+      if (count > 64) throw new RangeError("bind resource count");
       const offset = u64(view, 32), entries = Array.from({ length: count }, (_, i) => {
         const entry = region(offset + i * 32, 32), kind = entry.getUint32(4, true);
         if (kind < 1 || kind > 3) throw new RangeError("bind resource kind");

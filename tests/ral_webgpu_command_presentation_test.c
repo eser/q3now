@@ -18,7 +18,10 @@ typedef struct {
 	uintptr_t submissionIdentity;
 	qboolean failFinish;
 	qboolean failDraw;
-	uint32_t drawCount, dispatchCount;
+	qboolean failBeginPass, failEndPass;
+	qboolean timingRequested;
+	qboolean timingQuantized;
+	uint32_t drawCount, dispatchCount, passCount, preserveColorDepthClears;
 } fakeHost_t;
 
 static qboolean BeginAdapter( void *user, uint64_t generation ) {
@@ -69,12 +72,22 @@ static qboolean BeginEncoder( void *user, uintptr_t device, uintptr_t *out ) {
 	*out = NewIdentity( host, RAL_WEBGPU_COMMAND_OBJECT_ENCODER ); return qtrue;
 }
 static qboolean BeginPass( void *user, uintptr_t encoder,
-		ralWebGpuPassKind_t kind, uintptr_t target, uintptr_t *out ) {
+		const ralWebGpuPassDesc_t *desc, uintptr_t *out ) {
 	fakeHost_t *host = (fakeHost_t *)user;
-	if ( !encoder || kind < RAL_WEBGPU_PASS_RENDER
-			|| kind > RAL_WEBGPU_PASS_COMPUTE
-			|| ( kind == RAL_WEBGPU_PASS_RENDER && !target )
-			|| ( kind == RAL_WEBGPU_PASS_COMPUTE && target ) ) return qfalse;
+	if ( !encoder || !desc || desc->kind < RAL_WEBGPU_PASS_RENDER
+			|| host->failBeginPass
+			|| desc->kind > RAL_WEBGPU_PASS_COMPUTE
+			|| ( desc->kind == RAL_WEBGPU_PASS_RENDER && !desc->targetIdentity )
+			|| ( desc->kind == RAL_WEBGPU_PASS_COMPUTE && desc->targetIdentity ) )
+		return qfalse;
+	host->passCount++;
+	host->timingRequested = desc->timestampWrites;
+	if ( desc->kind == RAL_WEBGPU_PASS_RENDER
+			&& desc->colorLoadOp == RAL_WEBGPU_LOAD_PRESERVE
+			&& desc->depthEnabled
+			&& desc->depthLoadOp == RAL_WEBGPU_LOAD_CLEAR
+			&& desc->depthStore && desc->clearDepth == 1.0f )
+		host->preserveColorDepthClears++;
 	*out = NewIdentity( host, RAL_WEBGPU_COMMAND_OBJECT_PASS ); return qtrue;
 }
 static qboolean RecordDraw( void *user, uintptr_t pass,
@@ -90,7 +103,7 @@ static qboolean RecordDispatch( void *user, uintptr_t pass,
 	host->dispatchCount++; return qtrue;
 }
 static qboolean EndPass( void *user, uintptr_t pass ) {
-	(void)user; return pass ? qtrue : qfalse;
+	return pass && !((fakeHost_t *)user)->failEndPass;
 }
 static qboolean FinishEncoder( void *user, uintptr_t encoder, uintptr_t *out ) {
 	fakeHost_t *host = (fakeHost_t *)user;
@@ -107,8 +120,12 @@ static qboolean Submit( void *user, uintptr_t queue, uintptr_t buffer,
 	*out = host->submissionIdentity; return qtrue;
 }
 static qboolean PollSubmission( void *user, uintptr_t submission,
-		uint64_t generation, ralWebGpuAsyncStatus_t *out ) {
+		uint64_t generation, ralWebGpuAsyncStatus_t *out,
+		ralWebGpuGpuTimingState_t *timing, uint64_t *duration ) {
 	fakeHost_t *host = (fakeHost_t *)user;
+	*timing = host->timingRequested && !host->timingQuantized ? RAL_WEBGPU_GPU_TIMING_VALID
+		: RAL_WEBGPU_GPU_TIMING_UNAVAILABLE;
+	*duration = host->timingRequested && !host->timingQuantized ? 250000u : 0u;
 	if ( submission != host->submissionIdentity
 			|| generation != host->submissionGeneration ) return qfalse;
 	if ( host->pendingPolls ) {
@@ -204,6 +221,9 @@ int main( void ) {
 	ralWebGpuCommandReceipt_t recording, updatedRecording, unchangedRecording;
 	ralWebGpuCommandReceipt_t executable, staleCommand;
 	ralWebGpuIndexedDraw_t draw;
+	ralWebGpuPassDesc_t nextPass, timedPass;
+	ralWebGpuGpuTimingState_t timingState;
+	uint64_t durationNanoseconds;
 	ralWebGpuComputeDispatch_t dispatch;
 	ralWebGpuSubmissionReceipt_t submission;
 	ralMemoryFailureEvent_t lossEvent;
@@ -239,6 +259,19 @@ int main( void ) {
 	CHECK( RalWebGpu_CommandRecordIndexedDraw( command, &recording, &draw,
 		&updatedRecording ) );
 	CHECK( updatedRecording.drawCount == 1u && host.drawCount == 1u );
+	memset( &nextPass, 0, sizeof( nextPass ) );
+	nextPass.kind = RAL_WEBGPU_PASS_RENDER;
+	nextPass.targetIdentity = frame.textureIdentity;
+	nextPass.colorLoadOp = RAL_WEBGPU_LOAD_PRESERVE;
+	nextPass.depthEnabled = qtrue;
+	nextPass.depthLoadOp = RAL_WEBGPU_LOAD_CLEAR;
+	nextPass.depthStore = qtrue;
+	nextPass.clearDepth = 1.0f;
+	recording = updatedRecording;
+	CHECK( RalWebGpu_CommandNextRenderPass( command, &recording,
+		&nextPass, &updatedRecording ) );
+	CHECK( updatedRecording.passCount == 2u && host.passCount == 2u
+		&& host.preserveColorDepthClears == 1u );
 	CHECK( !RalWebGpu_CommandEnd( command, &recording, &executable ) );
 	recording = updatedRecording;
 	CHECK( RalWebGpu_CommandEnd( command, &recording, &executable ) );
@@ -253,8 +286,10 @@ int main( void ) {
 	CHECK( RalWebGpu_CommandPoll( command, &submission ) == RAL_WEBGPU_ASYNC_PENDING );
 	CHECK( RalWebGpu_CommandPoll( command, &submission ) == RAL_WEBGPU_ASYNC_READY );
 
-	CHECK( RalWebGpu_CommandBegin( command, RAL_WEBGPU_PASS_COMPUTE,
-		0u, &recording ) );
+	memset( &timedPass, 0, sizeof( timedPass ) );
+	timedPass.kind = RAL_WEBGPU_PASS_COMPUTE;
+	timedPass.timestampWrites = qtrue;
+	CHECK( RalWebGpu_CommandBeginWithDesc( command, &timedPass, &recording ) );
 	memset( &dispatch, 0, sizeof( dispatch ) );
 	dispatch.pipelineIdentity = 0xb001u;
 	dispatch.bindGroupIdentities[0] = 0xb002u;
@@ -268,6 +303,78 @@ int main( void ) {
 	CHECK( RalWebGpu_CommandEnd( command, &recording, &executable ) );
 	CHECK( RalWebGpu_CommandSubmit( command, &executable, &submission ) );
 	CHECK( RalWebGpu_CommandPoll( command, &submission ) == RAL_WEBGPU_ASYNC_READY );
+	CHECK( RalWebGpu_CommandLastGpuTiming( command, &timingState,
+		&durationNanoseconds ) );
+	CHECK( timingState == RAL_WEBGPU_GPU_TIMING_VALID
+		&& durationNanoseconds == 250000u );
+	host.timingQuantized = qtrue;
+	CHECK( RalWebGpu_CommandBeginWithDesc( command, &timedPass, &recording ) );
+	CHECK( RalWebGpu_CommandRecordComputeDispatch( command, &recording,
+		&dispatch, &updatedRecording ) );
+	CHECK( RalWebGpu_CommandEnd( command, &updatedRecording, &executable ) );
+	CHECK( RalWebGpu_CommandSubmit( command, &executable, &submission ) );
+	CHECK( RalWebGpu_CommandPoll( command, &submission ) == RAL_WEBGPU_ASYNC_READY );
+	CHECK( RalWebGpu_CommandLastGpuTiming( command, &timingState,
+		&durationNanoseconds ) );
+	CHECK( timingState == RAL_WEBGPU_GPU_TIMING_UNAVAILABLE
+		&& durationNanoseconds == 0u );
+	host.timingQuantized = qfalse;
+	{
+		/* Scene -> histogram -> reduce -> output/UI is one encoder/submission.
+		 * These counters prove command ordering, not exposure pixel values. */
+		uint32_t encoders = host.created[RAL_WEBGPU_COMMAND_OBJECT_ENCODER];
+		uint32_t submissions = host.created[RAL_WEBGPU_COMMAND_OBJECT_SUBMISSION];
+		CHECK( RalWebGpu_CommandBegin( command, RAL_WEBGPU_PASS_RENDER, 0x8801u, &recording ) );
+		memset( &nextPass, 0, sizeof(nextPass) );
+		nextPass.kind = RAL_WEBGPU_PASS_COMPUTE;
+		unchangedRecording = recording;
+		for ( unsigned bad = 0; bad < 3; ++bad ) {
+			staleCommand = recording;
+			if ( bad == 0 ) staleCommand.backendGeneration++;
+			if ( bad == 1 ) staleCommand.command.generation++;
+			if ( bad == 2 ) staleCommand.targetIdentity++;
+			updatedRecording = unchangedRecording;
+			CHECK( !RalWebGpu_CommandNextPass( command, &staleCommand, &nextPass, &updatedRecording ) );
+			CHECK( !memcmp( &updatedRecording, &unchangedRecording, sizeof(updatedRecording) ) );
+		}
+		CHECK( !RalWebGpu_CommandNextRenderPass( command, &recording, &nextPass, &updatedRecording ) );
+		CHECK( RalWebGpu_CommandNextPass( command, &recording, &nextPass, &updatedRecording ) );
+		CHECK( updatedRecording.passKind == RAL_WEBGPU_PASS_COMPUTE && !updatedRecording.targetIdentity );
+		recording = updatedRecording;
+		CHECK( !RalWebGpu_CommandRecordIndexedDraw( command, &recording, &draw, &updatedRecording ) );
+		CHECK( RalWebGpu_CommandRecordComputeDispatch( command, &recording, &dispatch, &updatedRecording ) );
+		CHECK( !RalWebGpu_CommandNextPass( command, &recording, &nextPass, &unchangedRecording ) );
+		recording = updatedRecording;
+		CHECK( RalWebGpu_CommandNextPass( command, &recording, &nextPass, &updatedRecording ) );
+		recording = updatedRecording;
+		CHECK( RalWebGpu_CommandRecordComputeDispatch( command, &recording, &dispatch, &updatedRecording ) );
+		recording = updatedRecording;
+		nextPass.kind = RAL_WEBGPU_PASS_RENDER;
+		nextPass.targetIdentity = 0x8802u;
+		nextPass.colorLoadOp = RAL_WEBGPU_LOAD_PRESERVE;
+		CHECK( RalWebGpu_CommandNextPass( command, &recording, &nextPass, &updatedRecording ) );
+		recording = updatedRecording;
+		CHECK( recording.passKind == RAL_WEBGPU_PASS_RENDER && recording.targetIdentity == 0x8802u );
+		CHECK( !RalWebGpu_CommandRecordComputeDispatch( command, &recording, &dispatch, &updatedRecording ) );
+		CHECK( RalWebGpu_CommandRecordIndexedDraw( command, &recording, &draw, &updatedRecording ) );
+		CHECK( updatedRecording.passCount == 4u && updatedRecording.dispatchCount == 2u && updatedRecording.drawCount == 1u );
+		CHECK( RalWebGpu_CommandEnd( command, &updatedRecording, &executable ) );
+		CHECK( RalWebGpu_CommandSubmit( command, &executable, &submission ) );
+		CHECK( RalWebGpu_CommandPoll( command, &submission ) == RAL_WEBGPU_ASYNC_READY );
+		CHECK( host.created[RAL_WEBGPU_COMMAND_OBJECT_ENCODER] == encoders + 1u );
+		CHECK( host.created[RAL_WEBGPU_COMMAND_OBJECT_SUBMISSION] == submissions + 1u );
+		for ( unsigned fail = 0; fail < 2; ++fail ) {
+			CHECK( RalWebGpu_CommandBegin( command, RAL_WEBGPU_PASS_RENDER, 0x8801u, &recording ) );
+			host.failEndPass = fail == 0; host.failBeginPass = fail == 1;
+			updatedRecording = unchangedRecording;
+			CHECK( !RalWebGpu_CommandNextPass( command, &recording, &nextPass, &updatedRecording ) );
+			CHECK( !memcmp( &updatedRecording, &unchangedRecording, sizeof(updatedRecording) ) );
+			CHECK( !RalWebGpu_CommandEnd( command, &recording, &executable ) );
+			host.failEndPass = host.failBeginPass = qfalse;
+			CHECK( host.created[RAL_WEBGPU_COMMAND_OBJECT_ENCODER] == host.released[RAL_WEBGPU_COMMAND_OBJECT_ENCODER] );
+			CHECK( host.created[RAL_WEBGPU_COMMAND_OBJECT_PASS] == host.released[RAL_WEBGPU_COMMAND_OBJECT_PASS] );
+		}
+	}
 	CHECK( RalWebGpu_PresentationConfigure( presentation, 640u, 360u,
 		2u * RAL_WEBGPU_DPR_ONE_Q16, RAL_FORMAT_B8G8R8A8_UNORM,
 		RAL_COLORSPACE_SRGB_NONLINEAR, qtrue, &resized ) );

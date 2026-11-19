@@ -22,10 +22,14 @@ struct ralWebGpuCommand_s {
 	uint64_t commandToken;
 	uint64_t commandGeneration;
 	uint64_t operationDigest;
+	uint32_t passCount;
 	uint32_t drawCount;
 	uint32_t dispatchCount;
 	ralWebGpuPassKind_t passKind;
 	uintptr_t targetIdentity;
+	qboolean timestampRequested;
+	ralWebGpuGpuTimingState_t lastTimingState;
+	uint64_t lastGpuDurationNanoseconds;
 	qboolean active;
 };
 
@@ -57,6 +61,7 @@ static qboolean CommandValid( const ralWebGpuCommandReceipt_t *receipt ) {
 		&& ( receipt->passKind == RAL_WEBGPU_PASS_RENDER
 			? receipt->targetIdentity != 0u : receipt->targetIdentity == 0u )
 		&& receipt->operationDigest
+		&& receipt->passCount
 		&& Ral_CommandReceiptValid( &receipt->command )
 		&& receipt->ready == qtrue;
 }
@@ -79,6 +84,7 @@ static void BuildCommandReceipt( const ralWebGpuCommand_t *command,
 	out->passKind = command->passKind;
 	out->targetIdentity = command->targetIdentity;
 	out->operationDigest = command->operationDigest;
+	out->passCount = command->passCount;
 	out->drawCount = command->drawCount;
 	out->dispatchCount = command->dispatchCount;
 	out->command = *shared; out->ready = qtrue;
@@ -112,22 +118,44 @@ void RalWebGpu_CommandDestroy( ralWebGpuCommand_t *command ) {
 	ReleaseNative( command ); memset( command, 0, sizeof( *command ) ); free( command );
 }
 
-qboolean RalWebGpu_CommandBegin( ralWebGpuCommand_t *command,
-		ralWebGpuPassKind_t kind, uintptr_t targetIdentity,
+static qboolean PassDescValid( const ralWebGpuPassDesc_t *desc ) {
+	if ( !desc || desc->kind < RAL_WEBGPU_PASS_RENDER
+			|| desc->kind > RAL_WEBGPU_PASS_COMPUTE ) return qfalse;
+	if ( desc->kind == RAL_WEBGPU_PASS_COMPUTE )
+		return !desc->targetIdentity && !desc->colorLoadOp
+			&& !desc->targetMipLevel && !desc->targetArrayLayer
+			&& desc->depthEnabled == qfalse && !desc->depthLoadOp
+			&& desc->depthStore == qfalse && desc->clearDepth == 0.0f
+			&& ( desc->timestampWrites == qfalse
+				|| desc->timestampWrites == qtrue );
+	return desc->targetIdentity
+		&& desc->colorLoadOp >= RAL_WEBGPU_LOAD_CLEAR
+		&& desc->colorLoadOp <= RAL_WEBGPU_LOAD_PRESERVE
+		&& ( desc->depthEnabled == qfalse || desc->depthEnabled == qtrue )
+		&& ( desc->depthStore == qfalse || desc->depthStore == qtrue )
+		&& ( desc->depthEnabled
+			? desc->depthLoadOp >= RAL_WEBGPU_LOAD_CLEAR
+				&& desc->depthLoadOp <= RAL_WEBGPU_LOAD_PRESERVE
+				&& desc->clearDepth >= 0.0f && desc->clearDepth <= 1.0f
+			: !desc->depthLoadOp && desc->depthStore == qfalse
+				&& desc->clearDepth == 0.0f )
+		&& desc->timestampWrites == qfalse;
+}
+
+qboolean RalWebGpu_CommandBeginWithDesc( ralWebGpuCommand_t *command,
+		const ralWebGpuPassDesc_t *desc,
 		ralWebGpuCommandReceipt_t *outRecording ) {
 	ralCommandLifecycle_t lifecycle;
 	ralCommandReceipt_t recording;
 	uintptr_t encoder = (uintptr_t)0, pass = (uintptr_t)0;
 	if ( !command || !outRecording || command->active || command->encoderIdentity
 			|| !RalWebGpu_CoreMatchesReceipt( command->core, &command->coreReceipt )
-			|| kind < RAL_WEBGPU_PASS_RENDER || kind > RAL_WEBGPU_PASS_COMPUTE
-			|| ( kind == RAL_WEBGPU_PASS_RENDER && !targetIdentity )
-			|| ( kind == RAL_WEBGPU_PASS_COMPUTE && targetIdentity )
+			|| !PassDescValid( desc )
 			|| command->commandToken == UINT64_MAX ) return qfalse;
 	if ( !command->host.beginEncoder( command->userData,
 			command->coreReceipt.deviceIdentity, &encoder ) || !encoder ) return qfalse;
-	if ( !command->host.beginPass( command->userData, encoder, kind,
-			targetIdentity, &pass ) || !pass ) {
+	if ( !command->host.beginPass( command->userData, encoder, desc,
+			&pass ) || !pass ) {
 		command->host.releaseObject( command->userData,
 			RAL_WEBGPU_COMMAND_OBJECT_ENCODER, encoder ); return qfalse;
 	}
@@ -144,17 +172,114 @@ qboolean RalWebGpu_CommandBegin( ralWebGpuCommand_t *command,
 	}
 	command->encoderIdentity = encoder; command->passIdentity = pass;
 	command->lifecycle = lifecycle; command->commandGeneration = lifecycle.generation;
-	command->passKind = kind; command->targetIdentity = targetIdentity;
+	command->passKind = desc->kind; command->targetIdentity = desc->targetIdentity;
+	command->timestampRequested = desc->timestampWrites;
+	command->lastTimingState = desc->timestampWrites
+		? RAL_WEBGPU_GPU_TIMING_PENDING : RAL_WEBGPU_GPU_TIMING_UNAVAILABLE;
+	command->lastGpuDurationNanoseconds = 0u;
 	command->operationDigest = UINT64_C(1469598103934665603);
-	command->operationDigest ^= (uint64_t)kind;
+	command->operationDigest ^= (uint64_t)desc->kind;
 	command->operationDigest *= UINT64_C(1099511628211);
-	command->operationDigest ^= (uint64_t)targetIdentity;
+	command->operationDigest ^= (uint64_t)desc->targetIdentity;
+	command->operationDigest *= UINT64_C(1099511628211);
+	command->operationDigest ^= (uint64_t)desc->targetMipLevel
+		| ((uint64_t)desc->targetArrayLayer << 32u);
+	command->operationDigest *= UINT64_C(1099511628211);
+	command->operationDigest ^= (uint64_t)desc->colorLoadOp
+		| ( (uint64_t)desc->depthEnabled << 8u )
+		| ( (uint64_t)desc->depthLoadOp << 16u )
+		| ( (uint64_t)desc->depthStore << 24u )
+		| ( (uint64_t)desc->timestampWrites << 25u );
 	command->operationDigest *= UINT64_C(1099511628211);
 	if ( !command->operationDigest ) command->operationDigest = 1u;
+	command->passCount = 1u;
 	command->drawCount = 0u;
 	command->dispatchCount = 0u;
 	command->active = qtrue;
 	BuildCommandReceipt( command, &recording, outRecording ); return qtrue;
+}
+
+qboolean RalWebGpu_CommandBegin( ralWebGpuCommand_t *command,
+		ralWebGpuPassKind_t kind, uintptr_t targetIdentity,
+		ralWebGpuCommandReceipt_t *outRecording ) {
+	ralWebGpuPassDesc_t desc;
+	memset( &desc, 0, sizeof( desc ) );
+	desc.kind = kind; desc.targetIdentity = targetIdentity;
+	if ( kind == RAL_WEBGPU_PASS_RENDER ) {
+		desc.colorLoadOp = RAL_WEBGPU_LOAD_CLEAR;
+		desc.depthEnabled = qtrue;
+		desc.depthLoadOp = RAL_WEBGPU_LOAD_CLEAR;
+		desc.depthStore = qtrue;
+		desc.clearDepth = 1.0f;
+	}
+	return RalWebGpu_CommandBeginWithDesc( command, &desc, outRecording );
+}
+
+qboolean RalWebGpu_CommandNextRenderPass( ralWebGpuCommand_t *command,
+		const ralWebGpuCommandReceipt_t *recording,
+		const ralWebGpuPassDesc_t *desc,
+		ralWebGpuCommandReceipt_t *outRecording ) {
+	if ( !command || !desc || command->passKind != RAL_WEBGPU_PASS_RENDER
+			|| desc->kind != RAL_WEBGPU_PASS_RENDER
+			|| desc->targetIdentity != command->targetIdentity ) return qfalse;
+	return RalWebGpu_CommandNextPass( command, recording, desc, outRecording );
+}
+
+qboolean RalWebGpu_CommandNextPass( ralWebGpuCommand_t *command,
+		const ralWebGpuCommandReceipt_t *recording,
+		const ralWebGpuPassDesc_t *desc,
+		ralWebGpuCommandReceipt_t *outRecording ) {
+	ralCommandReceipt_t live;
+	ralWebGpuCommandReceipt_t expected;
+	uint32_t clearDepthBits;
+	uintptr_t nextPass = (uintptr_t)0;
+	if ( !command || !recording || !outRecording || !command->active
+			|| !RalWebGpu_CoreMatchesReceipt( command->core, &command->coreReceipt )
+			|| recording->command.state != RAL_COMMAND_RECORDING
+			|| !PassDescValid( desc )
+			|| ( desc->timestampWrites && command->timestampRequested )
+			|| Ral_CommandLifecycleGetReceipt( &command->lifecycle, &live ) != ralSuccess
+			|| command->passCount == UINT32_MAX ) return qfalse;
+	BuildCommandReceipt( command, &live, &expected );
+	if ( !RalWebGpu_CommandReceiptExact( recording, &expected ) ) return qfalse;
+	if ( !command->host.endPass( command->userData, command->passIdentity ) ) {
+		ReleaseNative( command ); command->active = qfalse; return qfalse;
+	}
+	command->host.releaseObject( command->userData,
+		RAL_WEBGPU_COMMAND_OBJECT_PASS, command->passIdentity );
+	command->passIdentity = (uintptr_t)0;
+	if ( !command->host.beginPass( command->userData,
+			command->encoderIdentity, desc, &nextPass ) || !nextPass ) {
+		ReleaseNative( command ); command->active = qfalse; return qfalse;
+	}
+	command->passIdentity = nextPass;
+	command->passKind = desc->kind;
+	command->targetIdentity = desc->targetIdentity;
+	if ( desc->timestampWrites ) {
+		command->timestampRequested = qtrue;
+		command->lastTimingState = RAL_WEBGPU_GPU_TIMING_PENDING;
+	}
+	command->passCount++;
+	command->operationDigest ^= (uint64_t)desc->kind;
+	command->operationDigest *= UINT64_C(1099511628211);
+	command->operationDigest ^= (uint64_t)desc->targetIdentity;
+	command->operationDigest *= UINT64_C(1099511628211);
+	command->operationDigest ^= (uint64_t)desc->targetMipLevel
+		| ((uint64_t)desc->targetArrayLayer << 32u);
+	command->operationDigest *= UINT64_C(1099511628211);
+	memcpy( &clearDepthBits, &desc->clearDepth, sizeof(clearDepthBits) );
+	command->operationDigest ^= clearDepthBits;
+	command->operationDigest *= UINT64_C(1099511628211);
+	command->operationDigest ^= (uint64_t)desc->colorLoadOp
+		| ( (uint64_t)desc->depthEnabled << 8u )
+		| ( (uint64_t)desc->depthLoadOp << 16u )
+		| ( (uint64_t)desc->depthStore << 24u )
+		| ( (uint64_t)desc->timestampWrites << 25u )
+		| ( (uint64_t)command->passCount << 32u );
+	command->operationDigest *= UINT64_C(1099511628211);
+	if ( !command->operationDigest ) command->operationDigest = 1u;
+	BuildCommandReceipt( command, &recording->command, outRecording );
+	return qtrue;
 }
 
 qboolean RalWebGpu_CommandRecordComputeDispatch( ralWebGpuCommand_t *command,
@@ -215,7 +340,8 @@ qboolean RalWebGpu_CommandRecordIndexedDraw( ralWebGpuCommand_t *command,
 				&& ( !draw->textureIdentity || !draw->samplerIdentity ) )
 			|| ( !draw->textured
 				&& ( draw->textureIdentity || draw->secondaryTextureIdentity
-					|| draw->samplerIdentity ) )
+					|| draw->samplerIdentity || draw->textureBindGroupSlot ) )
+			|| draw->textureBindGroupSlot > RAL_SHADER_ABI_MAX_BIND_GROUPS
 			|| ( !draw->textured && draw->kind != RAL_WEBGPU_DRAW_EFFECT )
 			|| !draw->indexCount || !draw->instanceCount
 			|| draw->firstIndex > UINT32_MAX - draw->indexCount
@@ -236,6 +362,7 @@ qboolean RalWebGpu_CommandRecordIndexedDraw( ralWebGpuCommand_t *command,
 	digest *= UINT64_C(1099511628211); digest ^= draw->instanceCount;
 	digest *= UINT64_C(1099511628211); digest ^= draw->firstInstance;
 	digest *= UINT64_C(1099511628211); digest ^= draw->contentDigest;
+	digest *= UINT64_C(1099511628211); digest ^= draw->textureBindGroupSlot;
 	for ( uint32_t i = 0u; i < draw->bindGroupCount; ++i ) {
 		digest *= UINT64_C(1099511628211);
 		digest ^= draw->bindGroupIdentities[i];
@@ -260,6 +387,7 @@ qboolean RalWebGpu_CommandCancel( ralWebGpuCommand_t *command,
 	ReleaseNative( command ); command->active = qfalse;
 	memset( &command->lifecycle, 0, sizeof( command->lifecycle ) );
 	command->drawCount = 0u; command->operationDigest = 0u;
+	command->passCount = 0u;
 	command->dispatchCount = 0u;
 	return qtrue;
 }
@@ -329,6 +457,8 @@ qboolean RalWebGpu_CommandSubmit( ralWebGpuCommand_t *command,
 ralWebGpuAsyncStatus_t RalWebGpu_CommandPoll( ralWebGpuCommand_t *command,
 		const ralWebGpuSubmissionReceipt_t *submission ) {
 	ralWebGpuAsyncStatus_t status = RAL_WEBGPU_ASYNC_FAILED;
+	ralWebGpuGpuTimingState_t timingState = RAL_WEBGPU_GPU_TIMING_FAILED;
+	uint64_t durationNanoseconds = 0u;
 	if ( !command || !submission || !command->submissionIdentity
 			|| !RalWebGpu_SubmissionReceiptExact( submission, submission )
 			|| !Ral_SubmissionReceiptExact( &submission->submission,
@@ -339,15 +469,42 @@ ralWebGpuAsyncStatus_t RalWebGpu_CommandPoll( ralWebGpuCommand_t *command,
 	}
 	if ( !command->host.pollSubmission( command->userData,
 			command->submissionIdentity, submission->submission.generation,
-			&status ) ) status = RAL_WEBGPU_ASYNC_FAILED;
+			&status, &timingState, &durationNanoseconds ) )
+		status = RAL_WEBGPU_ASYNC_FAILED;
 	if ( status == RAL_WEBGPU_ASYNC_PENDING ) return status;
+	if ( status == RAL_WEBGPU_ASYNC_READY ) {
+		if ( command->timestampRequested ) {
+			if ( !( ( timingState == RAL_WEBGPU_GPU_TIMING_VALID
+					&& durationNanoseconds )
+					|| ( timingState == RAL_WEBGPU_GPU_TIMING_UNAVAILABLE
+						&& !durationNanoseconds ) ) )
+				status = RAL_WEBGPU_ASYNC_FAILED;
+		} else if ( timingState != RAL_WEBGPU_GPU_TIMING_UNAVAILABLE
+				|| durationNanoseconds ) status = RAL_WEBGPU_ASYNC_FAILED;
+	}
 	if ( status == RAL_WEBGPU_ASYNC_READY
 			&& Ral_CommandLifecycleRecycle( &command->lifecycle,
 				&submission->submission.commands[0] ) != ralSuccess )
 		status = RAL_WEBGPU_ASYNC_FAILED;
+	command->lastTimingState = status == RAL_WEBGPU_ASYNC_READY
+		? timingState : RAL_WEBGPU_GPU_TIMING_FAILED;
+	command->lastGpuDurationNanoseconds = status == RAL_WEBGPU_ASYNC_READY
+		? durationNanoseconds : 0u;
 	ReleaseNative( command ); memset( &command->liveSubmission, 0,
 		sizeof( command->liveSubmission ) ); command->active = qfalse;
 	return status;
+}
+
+qboolean RalWebGpu_CommandLastGpuTiming( const ralWebGpuCommand_t *command,
+		ralWebGpuGpuTimingState_t *outState,
+		uint64_t *outDurationNanoseconds ) {
+	if ( !command || !outState || !outDurationNanoseconds
+			|| command->lastTimingState < RAL_WEBGPU_GPU_TIMING_UNAVAILABLE
+			|| command->lastTimingState > RAL_WEBGPU_GPU_TIMING_FAILED )
+		return qfalse;
+	*outState = command->lastTimingState;
+	*outDurationNanoseconds = command->lastGpuDurationNanoseconds;
+	return qtrue;
 }
 
 qboolean RalWebGpu_CommandReceiptExact( const ralWebGpuCommandReceipt_t *a,
@@ -356,6 +513,7 @@ qboolean RalWebGpu_CommandReceiptExact( const ralWebGpuCommandReceipt_t *a,
 		&& a->backendGeneration == b->backendGeneration
 		&& a->passKind == b->passKind && a->targetIdentity == b->targetIdentity
 		&& a->operationDigest == b->operationDigest
+		&& a->passCount == b->passCount
 		&& a->drawCount == b->drawCount
 		&& a->dispatchCount == b->dispatchCount
 		&& Ral_CommandReceiptExact( &a->command, &b->command );

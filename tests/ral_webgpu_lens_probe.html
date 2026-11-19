@@ -1,0 +1,105 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Wired WebGPU lens native contract</title>
+<style>body{background:#111;color:#ddd;font:16px monospace}canvas{width:1280px;height:720px}</style>
+<pre id="result" data-status="RUNNING">RUNNING</pre>
+<canvas id="canvas" width="1280" height="720"></canvas>
+<script type="module">
+import {createRalWebGpuBrowserHost} from "../code/render/ral/backends/webgpu/ral_webgpu_browser_host.mjs";
+import {createRalWebGpuBrowserDispatch, RAL_WEBGPU_BROWSER_ABI_SCHEMA_VERSION as ABI,
+  RalWebGpuBrowserOpcode as OP} from "../code/render/ral/backends/webgpu/ral_webgpu_browser_dispatch.mjs";
+const result=document.querySelector("#result"), host=createRalWebGpuBrowserHost({
+  gpu:navigator.gpu,canvas:document.querySelector("#canvas"),devicePixelRatio:()=>1});
+const checks=[];
+const memory=new WebAssembly.Memory({initial:2});
+const bridge=createRalWebGpuBrowserDispatch({host,memory,canvasIdentity:1});
+const put64=(v,o,n)=>v.setBigUint64(o,BigInt(n),true);
+const call=(op,bytes,responseBytes,write)=>{
+  const request=new DataView(memory.buffer,4096,bytes);
+  new Uint8Array(memory.buffer,4096,bytes).fill(0);
+  request.setUint32(0,ABI,true);request.setUint32(4,op,true);request.setUint32(8,bytes,true);
+  write(request);
+  if(!bridge.dispatch(op,4096,bytes,8192,responseBytes)) throw Error("ABI dispatch rejected opcode "+op);
+  return new DataView(memory.buffer,8192,responseBytes);
+};
+const publish=(status,detail)=>{result.dataset.status=status;result.textContent=JSON.stringify({status,...detail},null,2)};
+try {
+  call(OP.BEGIN_ADAPTER,24,24,v=>put64(v,16,1));
+  let adapterStatus=1;
+  for(let i=0;i<300 && adapterStatus===1;i++) {
+    await new Promise(resolve=>setTimeout(resolve,10));
+    adapterStatus=call(OP.POLL_ADAPTER,24,376,v=>put64(v,16,1)).getUint32(16,true);
+  }
+  const ready=host.receipt(1);
+  if(!ready.ready) { publish("UNSUPPORTED",{reason:ready.reason}); }
+  else {
+    host.configureCanvas(1,{cssWidth:1280,cssHeight:720,dpr:1});
+    call(OP.RESET_LENS_VISIBILITY,32,24,v=>{put64(v,16,ready.deviceHandle);put64(v,24,10);});
+    const vertex=host.createBuffer(1,{size:32,usage:GPUBufferUsage.VERTEX|GPUBufferUsage.COPY_DST});
+    const index=host.createBuffer(1,{size:24,usage:GPUBufferUsage.INDEX|GPUBufferUsage.COPY_DST});
+    host.writeBuffer(1,vertex,0,new Float32Array([-1,-1,0,-1,0,1,-1,1]));
+    host.writeBuffer(1,index,0,new Uint32Array([0,1,2,0,2,3]));
+    const vs=host.createShaderModule(1,{code:"@vertex fn main(@location(0) p:vec2<f32>)->@builtin(position) vec4<f32>{return vec4<f32>(p,0,1);}"});
+    const fs=host.createShaderModule(1,{code:"@fragment fn main()->@location(0) vec4<f32>{return vec4<f32>(0,0,0,1);}"});
+    const layout=host.createPipelineLayout(1,[]);
+    const pipeline=host.createRenderPipelineFromHandles(1,{layoutHandle:layout,
+      vertex:{moduleHandle:vs,entryPoint:"main",buffers:[{arrayStride:8,attributes:[{shaderLocation:0,offset:0,format:"float32x2"}]}]},
+      fragment:{moduleHandle:fs,entryPoint:"main",targets:[{format:ready.canvasFormat}]},
+      primitive:{topology:"triangle-list"},depthStencil:{format:"depth32float",depthWriteEnabled:true,depthCompare:"always"}});
+    let frameNumber=0;
+    const cases=[
+      {name:"clear-far-visible",depth:1,origin:[100,0,0],optics:1,expected:1},
+      {name:"nine-tap-partial-occlusion",depth:1,partial:true,origin:[100,0,0],optics:1,expected:6/9},
+      {name:"foreground-occluded",depth:0,origin:[100,0,0],optics:1,expected:0},
+      {name:"sky-optics-factor",depth:1,origin:[100,0,0],optics:0.25,expected:0.25},
+      {name:"offscreen",depth:1,origin:[100,500,0],optics:1,expected:0},
+      {name:"behind-camera",depth:1,origin:[-100,0,0],optics:1,expected:0},
+      {name:"near-surface-bias",depth:0.96,origin:[100,0,0],optics:1,expected:1},
+      {name:"foreground-beyond-bias",depth:0.95,origin:[100,0,0],optics:1,expected:0}
+    ];
+    for(const test of cases) {
+      const frame=host.acquireCanvasTexture(1), encoder=host.createCommandEncoder(1);
+      const pass=host.beginRenderPass(1,encoder,frame.textureHandle,{clearDepth:test.depth});
+      if(test.partial) host.recordIndexedDraw(1,pass,{pipelineHandle:pipeline,vertexBufferHandle:vertex,
+        indexBufferHandle:index,indexFormat:"uint32",indexCount:6});
+      host.endRenderPass(1,pass);
+      const submission=host.submit(1,host.finishEncoder(1,encoder));
+      const params=new Float32Array([0,0,0,0,1,0,0,0,0,1,0,0,0,0,1,0,
+        1,1,4,65536/65532,1280,720,test.optics,0]);
+      const sources=new Uint8Array(32), view=new DataView(sources.buffer);
+      test.origin.forEach((value,i)=>view.setFloat32(i*4,value,true));
+      view.setFloat32(12,4,true);view.setUint32(16,7,true);
+      new Float32Array(memory.buffer,16384,24).set(params);
+      new Uint8Array(memory.buffer,16640,32).set(sources);
+      ++frameNumber;
+      const begin=call(OP.BEGIN_LENS_VISIBILITY,64,32,v=>{
+        put64(v,16,ready.deviceHandle);put64(v,24,10);put64(v,32,frameNumber);
+        put64(v,40,16384);put64(v,48,16640);v.setUint32(56,1,true);
+      });
+      const query=Number(begin.getBigUint64(24,true));
+      if(!query) throw Error("unexpected lens backpressure");
+      let oracle;
+      for(let i=0;i<300;i++) {
+        const poll=call(OP.POLL_LENS_VISIBILITY,64,32,v=>{
+          put64(v,16,ready.deviceHandle);put64(v,24,10);put64(v,32,frameNumber);
+          put64(v,40,query);put64(v,48,20480);v.setUint32(56,352,true);
+        });
+        const status=poll.getUint32(16,true);
+        oracle={status:status===1?"pending":status===2?"ready":"failed",
+          values:new Float32Array(memory.buffer,20480,352)};
+        if(oracle.status!=="pending") break;
+        await new Promise(resolve=>setTimeout(resolve,10));
+      }
+      if(oracle.status!=="ready" || Math.abs(oracle.values[7]-test.expected)>0.0001)
+        throw Error(test.name+": "+JSON.stringify({status:oracle.status,error:oracle.error,actual:oracle.values?.[7]}));
+      if(host.pollSubmission(1,submission).status!=="ready") throw Error("depth submission not ready");
+      checks.push({name:test.name,actual:oracle.values[7]});
+      call(OP.RELEASE_LENS_VISIBILITY,32,24,v=>{put64(v,16,ready.deviceHandle);put64(v,24,query);});
+      host.release(1,submission);host.presentCanvas(1,frame.textureHandle);
+    }
+    if(host.receipt(1).error) throw Error(host.receipt(1).error);
+    publish("PASS",{checks,transport:"ABI "+ABI+" linear-memory dispatch",adapter:ready.adapterInfo});
+  }
+} catch(error) {publish("FAIL",{checks,error:String(error?.stack??error)});}
+finally {host.destroy(1);}
+</script>

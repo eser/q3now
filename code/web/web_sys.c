@@ -236,7 +236,10 @@ char **Sys_ListFiles( const char *directory, const char *extension,
 	copy = Z_Malloc( (size_t)( count + 1 ) * sizeof( *copy ) );
 	for ( i = 0; i < count; ++i ) copy[i] = found[i];
 	copy[count] = NULL;
-	if ( count > 1 ) Com_SortList( copy, count );
+	/* Com_SortList takes the index of the last entry (see unix_shared.c);
+	 * passing the count sorted the NULL terminator into the list and dropped
+	 * the last real name, which lost pax21.sw3z in the browser VFS. */
+	if ( count > 1 ) Com_SortList( copy, count - 1 );
 	*numFiles = count;
 	return copy;
 }

@@ -279,6 +279,7 @@ qboolean RalWebGpu_PipelineCreate( ralWebGpuCore_t *core,
 	native.graphicsState = createInfo->graphicsState;
 	native.computeState = createInfo->computeState;
 	native.specValues = createInfo->variant->specValues;
+	native.specConstants = createInfo->manifest->specConstants;
 	native.specValueCount = createInfo->variant->specValueCount;
 	if ( !createInfo->host.createPipeline( createInfo->userData,
 			coreReceipt->deviceIdentity, &native, &receipt.pipelineIdentity )

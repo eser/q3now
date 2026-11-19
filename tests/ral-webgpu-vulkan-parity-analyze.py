@@ -136,7 +136,9 @@ def require_webgpu(meta: Mapping[str, object]) -> str:
             "webgpu: populated capture receipt missing")
     host = meta.get("hostReceipt")
     require(isinstance(host, Mapping), "webgpu: host receipt missing")
-    require(host.get("schemaVersion") == 1 and host.get("generation") == 2
+    # Host receipt schema 1 (original bring-up) and 2 (adapter limits/canvas
+    # format added) carry the same readiness/generation contract.
+    require(host.get("schemaVersion") in (1, 2) and host.get("generation") == 2
             and host.get("status") == "ready" and host.get("ready") is True,
             "webgpu: host readiness/generation mismatch")
     require(host.get("error") == "" and host.get("lost") is None,
@@ -145,8 +147,11 @@ def require_webgpu(meta: Mapping[str, object]) -> str:
                 ("adapterHandle", "deviceHandle", "queueHandle")),
             "webgpu: opaque host handles missing")
     adapter = host.get("adapterInfo")
+    # Privacy-hardened Chromium builds (e.g. Brave) blank every adapter-info
+    # string; the receipt shape and the opaque handles above still prove the
+    # adapter/device/queue, so require the fields to exist, not to be filled.
     require(isinstance(adapter, Mapping)
-            and any(bool(adapter.get(field)) for field in
+            and any(field in adapter for field in
                     ("vendor", "architecture", "device", "description")),
             "webgpu: adapter metadata missing")
     content = meta.get("content")

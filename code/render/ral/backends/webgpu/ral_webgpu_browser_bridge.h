@@ -37,6 +37,8 @@ typedef struct {
 	uint32_t binding;
 	ralWebGpuBrowserBindResourceKind_t kind;
 	uintptr_t resourceIdentity;
+	/* Buffers use byte offset/size. Textures use base mip/mip count; zeroes
+	 * request the resource's default full view. */
 	uint64_t offset;
 	uint64_t byteSize;
 } ralWebGpuBrowserBindResource_t;
@@ -65,6 +67,25 @@ qboolean RalWebGpu_BrowserBridgeCreateBindGroup(
 	uintptr_t *outIdentity );
 void RalWebGpu_BrowserBridgeDestroyBindGroup(
 	ralWebGpuBrowserBridge_t *bridge, uintptr_t identity );
+
+typedef struct {
+	float originRadius[4];
+	uint32_t identity[4];
+} ralWebGpuBrowserLensSource_t;
+/* params: origin/forward/left/up/projection/viewportOpticsCount, six vec4.
+ * projection.w is the exact finite-far depth scale used by the world pass.
+ * Success with query=0 means bounded backpressure, not a visible fallback. */
+qboolean RalWebGpu_BrowserBridgeBeginLensVisibility(
+	ralWebGpuBrowserBridge_t *bridge, uint64_t scope, uint64_t frame,
+	const float params[24], const ralWebGpuBrowserLensSource_t *sources,
+	uint32_t count, uintptr_t *outQuery );
+ralWebGpuAsyncStatus_t RalWebGpu_BrowserBridgePollLensVisibility(
+	ralWebGpuBrowserBridge_t *bridge, uint64_t scope, uint64_t frame,
+	uintptr_t query, float values[RAL_WEBGPU_BROWSER_LENS_SOURCE_LIMIT] );
+qboolean RalWebGpu_BrowserBridgeResetLensVisibility(
+	ralWebGpuBrowserBridge_t *bridge, uint64_t scope );
+void RalWebGpu_BrowserBridgeReleaseLensVisibility(
+	ralWebGpuBrowserBridge_t *bridge, uintptr_t query );
 
 #ifdef __cplusplus
 }

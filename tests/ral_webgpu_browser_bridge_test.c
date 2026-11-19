@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #define CHECK(x) do { if ( !(x) ) { fprintf( stderr, "FAIL %s:%d: %s\n", \
 	__FILE__, __LINE__, #x ); return 1; } } while ( 0 )
@@ -23,6 +24,10 @@ typedef struct {
 	uint64_t roundTripBytes;
 	ralWebGpuBrowserOpcode_t failOpcode;
 	qboolean unavailable, lost;
+	uint32_t lensStatus, lensMalformed, lensReleases;
+	uint64_t lensScope;
+	qboolean lensBusy;
+	uint32_t targetMipLevel, targetArrayLayer;
 } fakeBrowser_t;
 
 static void ResponseHeader( ralWebGpuBrowserAbiHeader_t *header,
@@ -43,6 +48,46 @@ static qboolean Dispatch( void *userData, ralWebGpuBrowserOpcode_t opcode,
 	if ( fake->failOpcode == opcode ) return qfalse;
 	memset( response, 0, responseBytes );
 	switch ( opcode ) {
+	case RAL_WEBGPU_BROWSER_OP_BEGIN_LENS_VISIBILITY: {
+		const ralWebGpuBrowserLensBeginRequest_t *in = request;
+		ralWebGpuBrowserIdentityResponse_t *out = response;
+		if ( requestBytes != sizeof(*in) || responseBytes != sizeof(*out)
+				|| in->deviceIdentity != 0x3000u || in->scopeGeneration != fake->lensScope
+				|| in->frameGeneration != 5u || in->sourceCount != 1u
+				|| !in->paramsOffset || !in->sourcesOffset ) return qfalse;
+		ResponseHeader(&out->header, opcode, sizeof(*out));
+		out->accepted = 1u; out->identity = fake->lensBusy ? 0u : 0x9000u;
+		return qtrue;
+	}
+	case RAL_WEBGPU_BROWSER_OP_POLL_LENS_VISIBILITY: {
+		const ralWebGpuBrowserLensPollRequest_t *in = request;
+		ralWebGpuBrowserAsyncResponse_t *out = response;
+		if ( requestBytes != sizeof(*in) || responseBytes != sizeof(*out)
+				|| in->deviceIdentity != 0x3000u || in->scopeGeneration != fake->lensScope
+				|| in->frameGeneration != 5u || in->queryIdentity != 0x9000u
+				|| in->capacity != RAL_WEBGPU_BROWSER_LENS_SOURCE_LIMIT ) return qfalse;
+		ResponseHeader(&out->header, opcode, sizeof(*out));
+		out->status = fake->lensStatus;
+		out->byteSize = fake->lensMalformed == 2u ? 6u : 5u;
+		if ( fake->lensStatus == RAL_WEBGPU_ASYNC_READY ) {
+			float *values = (float *)(uintptr_t)in->outputOffset;
+			uint32_t count = in->capacity - (fake->lensMalformed == 3u ? 1u : 0u);
+			for ( uint32_t i = 0u; i < count; ++i ) values[i] = 0.25f;
+			if ( fake->lensMalformed == 1u ) values[count - 1u] = NAN;
+		}
+		return qtrue;
+	}
+	case RAL_WEBGPU_BROWSER_OP_RESET_LENS_VISIBILITY:
+	case RAL_WEBGPU_BROWSER_OP_RELEASE_LENS_VISIBILITY: {
+		const ralWebGpuBrowserLensControlRequest_t *in = request;
+		ralWebGpuBrowserStatusResponse_t *out = response;
+		if ( requestBytes != sizeof(*in) || responseBytes != sizeof(*out)
+				|| in->deviceIdentity != 0x3000u || !in->identity ) return qfalse;
+		if ( opcode == RAL_WEBGPU_BROWSER_OP_RESET_LENS_VISIBILITY ) fake->lensScope = in->identity;
+		else fake->lensReleases++;
+		ResponseHeader(&out->header, opcode, sizeof(*out)); out->accepted = 1u;
+		return qtrue;
+	}
 	case RAL_WEBGPU_BROWSER_OP_BEGIN_ADAPTER:
 	case RAL_WEBGPU_BROWSER_OP_BEGIN_DEVICE: {
 		ralWebGpuBrowserStatusResponse_t *out = response;
@@ -200,6 +245,17 @@ static qboolean Dispatch( void *userData, ralWebGpuBrowserOpcode_t opcode,
 					|| in->kind != RAL_SHADER_PIPELINE_GRAPHICS
 					|| in->shaderModuleCount != 2u || in->vertexBindingCount != 1u
 					|| in->vertexAttributeCount != 1u ) return qfalse;
+			if (in->specValueCount != 4u || in->specStageMasks[0] != RAL_STAGE_VERTEX
+				|| in->specStageMasks[1] != (RAL_STAGE_VERTEX | RAL_STAGE_FRAGMENT)
+				|| in->specStageMasks[2] != RAL_STAGE_FRAGMENT
+				|| in->specValueTypes[0] != RAL_SHADER_SPEC_I32
+				|| in->specValueTypes[1] != RAL_SHADER_SPEC_U32
+				|| in->specValueTypes[2] != RAL_SHADER_SPEC_I32
+				|| in->specValueTypes[3] != RAL_SHADER_SPEC_F32
+				|| in->specStageMasks[3] != RAL_STAGE_FRAGMENT
+				|| in->specValues[3].constantId != 18u || in->specValues[3].value != 0x3fb33333u
+				|| in->specValues[2].constantId != 17u || in->specValues[2].value != 3u)
+				return qfalse;
 		}
 		ResponseHeader( &out->header, opcode, sizeof( *out ) ); out->accepted = 1u;
 		out->identity = ++fake->nextIdentity; fake->pipelineObjectsCreated++;
@@ -216,6 +272,12 @@ static qboolean Dispatch( void *userData, ralWebGpuBrowserOpcode_t opcode,
 	case RAL_WEBGPU_BROWSER_OP_FINISH_ENCODER:
 	case RAL_WEBGPU_BROWSER_OP_SUBMIT: {
 		ralWebGpuBrowserIdentityResponse_t *out = response;
+		if (opcode == RAL_WEBGPU_BROWSER_OP_BEGIN_PASS) {
+			const ralWebGpuBrowserBeginPassRequest_t *in = request;
+			if (requestBytes != sizeof(*in) || in->reserved) return qfalse;
+			fake->targetMipLevel = in->targetMipLevel;
+			fake->targetArrayLayer = in->targetArrayLayer;
+		}
 		if ( responseBytes != sizeof( *out ) ) return qfalse;
 		ResponseHeader( &out->header, opcode, sizeof( *out ) ); out->accepted = 1u;
 		out->identity = ++fake->nextIdentity;
@@ -223,10 +285,12 @@ static qboolean Dispatch( void *userData, ralWebGpuBrowserOpcode_t opcode,
 		return qtrue;
 	}
 	case RAL_WEBGPU_BROWSER_OP_POLL_SUBMISSION: {
-		ralWebGpuBrowserAsyncResponse_t *out = response;
+		ralWebGpuBrowserSubmissionResponse_t *out = response;
 		if ( responseBytes != sizeof( *out ) ) return qfalse;
 		ResponseHeader( &out->header, opcode, sizeof( *out ) );
-		out->status = RAL_WEBGPU_ASYNC_READY; return qtrue;
+		out->status = RAL_WEBGPU_ASYNC_READY;
+		out->timingState = RAL_WEBGPU_GPU_TIMING_UNAVAILABLE;
+		return qtrue;
 	}
 	case RAL_WEBGPU_BROWSER_OP_RELEASE_COMMAND_OBJECT: {
 		ralWebGpuBrowserStatusResponse_t *out = response;
@@ -281,7 +345,17 @@ static void ShaderModule( ralShaderModuleAbi_t *module, uint32_t stage,
 }
 
 static void GraphicsSetup( graphicsFixture_t *fixture ) {
+	static const ralShaderSpecConstantAbi_t specs[] = {
+		{9, RAL_STAGE_VERTEX, 0, RAL_SHADER_SPEC_I32},
+		{10, RAL_STAGE_VERTEX | RAL_STAGE_FRAGMENT, 0, RAL_SHADER_SPEC_U32},
+		{17, RAL_STAGE_FRAGMENT, 1, RAL_SHADER_SPEC_I32},
+		{18, RAL_STAGE_FRAGMENT, 0x3f800000u, RAL_SHADER_SPEC_F32}};
+	static const ralShaderSpecValue_t values[] = {{9,1},{10,2},{17,3},{18,0x3fb33333u}};
+	static const ralSpecConstant_t nativeValues[] = {{9,1},{10,2},{17,3},{18,0x3fb33333u}};
 	memset( fixture, 0, sizeof( *fixture ) );
+	fixture->manifest.specConstants = specs; fixture->manifest.specConstantCount = 4;
+	fixture->variant.specValues = values; fixture->variant.specValueCount = 4;
+	fixture->state.specConstants = nativeValues; fixture->state.numSpecConstants = 4;
 	fixture->spirv[0][0] = 0x07230203u; fixture->spirv[1][0] = 0x07230203u;
 	ShaderModule( &fixture->modules[0], RAL_STAGE_VERTEX, fixture->spirv[0],
 		VERTEX_WGSL, sizeof( VERTEX_WGSL ) - 1u, 11u );
@@ -318,6 +392,36 @@ static void GraphicsSetup( graphicsFixture_t *fixture ) {
 	fixture->variant.generation = 3u;
 	if ( Ral_GraphicsPipelineSemanticDigest( &fixture->state,
 			&fixture->variant.semanticStateDigest ) != ralSuccess ) abort();
+}
+
+static int LensBridgeTest(ralWebGpuBrowserBridge_t *bridge, fakeBrowser_t *fake) {
+	float params[24] = {0}, values[RAL_WEBGPU_BROWSER_LENS_SOURCE_LIMIT];
+	ralWebGpuBrowserLensSource_t source = {0};
+	uintptr_t query = 123u;
+	CHECK(RalWebGpu_BrowserBridgeResetLensVisibility(bridge, 10u));
+	CHECK(!RalWebGpu_BrowserBridgeBeginLensVisibility(bridge, 11u, 5u, params, &source, 1u, &query));
+	CHECK(query == 123u);
+	CHECK(RalWebGpu_BrowserBridgeBeginLensVisibility(bridge, 10u, 5u, params, &source, 1u, &query));
+	CHECK(query == 0x9000u);
+	for (uint32_t i=0; i<RAL_WEBGPU_BROWSER_LENS_SOURCE_LIMIT; ++i) values[i] = -7.0f;
+	fake->lensStatus = RAL_WEBGPU_ASYNC_PENDING;
+	CHECK(RalWebGpu_BrowserBridgePollLensVisibility(bridge,10u,5u,query,values) == RAL_WEBGPU_ASYNC_PENDING);
+	for (uint32_t i=0; i<RAL_WEBGPU_BROWSER_LENS_SOURCE_LIMIT; ++i) CHECK(values[i] == -7.0f);
+	fake->lensStatus = RAL_WEBGPU_ASYNC_READY;
+	for (fake->lensMalformed=1u; fake->lensMalformed<=3u; fake->lensMalformed++) {
+		CHECK(RalWebGpu_BrowserBridgePollLensVisibility(bridge,10u,5u,query,values) == RAL_WEBGPU_ASYNC_FAILED);
+		for (uint32_t i=0; i<RAL_WEBGPU_BROWSER_LENS_SOURCE_LIMIT; ++i) CHECK(values[i] == -7.0f);
+	}
+	fake->lensMalformed = 0u;
+	CHECK(RalWebGpu_BrowserBridgePollLensVisibility(bridge,10u,5u,query,values) == RAL_WEBGPU_ASYNC_READY);
+	for (uint32_t i=0; i<RAL_WEBGPU_BROWSER_LENS_SOURCE_LIMIT; ++i) CHECK(values[i] == 0.25f);
+	CHECK(RalWebGpu_BrowserBridgeResetLensVisibility(bridge,11u));
+	CHECK(RalWebGpu_BrowserBridgePollLensVisibility(bridge,10u,5u,query,values) == RAL_WEBGPU_ASYNC_FAILED);
+	RalWebGpu_BrowserBridgeReleaseLensVisibility(bridge,query); CHECK(fake->lensReleases == 1u);
+	fake->lensBusy = qtrue;
+	CHECK(RalWebGpu_BrowserBridgeBeginLensVisibility(bridge,11u,5u,params,&source,1u,&query));
+	CHECK(query == 0u); fake->lensBusy = qfalse;
+	return 0;
 }
 
 int main( void ) {
@@ -377,6 +481,7 @@ int main( void ) {
 	CHECK( RalWebGpu_RuntimeReceiptExact( &runtimeReceipt, &runtimeReceipt ) );
 	coreReceipt = runtimeReceipt.core;
 	CHECK( coreReceipt.deviceIdentity == 0x3000u && coreReceipt.queueIdentity == 0x4000u );
+	CHECK( LensBridgeTest(bridge, &fake) == 0 );
 	presentation = RalWebGpu_RuntimePresentation( runtime, &runtimeReceipt );
 	resources = RalWebGpu_RuntimeResources( runtime, &runtimeReceipt );
 	command = RalWebGpu_RuntimeCommand( runtime, &runtimeReceipt );
@@ -408,8 +513,10 @@ int main( void ) {
 	CHECK( RalWebGpu_WriteBuffer( resources, index, &indexReceipt, 0u,
 		indexBytes, sizeof( indexBytes ), &writeReceipt ) );
 	memset( &textureDesc, 0, sizeof( textureDesc ) ); textureDesc.width = 64u;
-	textureDesc.height = 1u; textureDesc.depth = 1u;
+	textureDesc.height = 1u; textureDesc.depth = 1u; textureDesc.mipLevelCount = 1u;
 	textureDesc.format = RAL_FORMAT_R8G8B8A8_UNORM; textureDesc.bytesPerTexel = 4u;
+	textureDesc.usage = RAL_WEBGPU_TEXTURE_COPY_SOURCE
+		| RAL_WEBGPU_TEXTURE_COPY_DESTINATION | RAL_WEBGPU_TEXTURE_SAMPLED;
 	CHECK( RalWebGpu_CreateTexture( resources, &textureDesc, &texture, &textureReceipt ) );
 	CHECK( RalWebGpu_WriteTexture( resources, texture, &textureReceipt, textureBytes,
 		sizeof( textureBytes ), 256u, 1u, &writeReceipt ) );
@@ -452,6 +559,26 @@ int main( void ) {
 		&& fake.resourcesCreated == fake.resourcesDestroyed
 		&& fake.pipelineObjectsCreated == fake.pipelineObjectsDestroyed
 		&& fake.commandObjectsReleased == 4u );
+	{
+		ralWebGpuResource_t *cube = NULL;
+		ralWebGpuResourceReceipt_t cubeReceipt;
+		ralWebGpuTextureDesc_t desc = {0};
+		desc.width = desc.height = 128; desc.depth = 6; desc.mipLevelCount = 3;
+		desc.format = RAL_FORMAT_R16G16B16A16_SFLOAT; desc.bytesPerTexel = 8;
+		desc.usage = RAL_WEBGPU_TEXTURE_RENDER_ATTACHMENT | RAL_WEBGPU_TEXTURE_SAMPLED;
+		CHECK(RalWebGpu_CreateTexture(resources, &desc, &cube, &cubeReceipt));
+		ralWebGpuPassDesc_t capture = {0};
+		capture.kind = RAL_WEBGPU_PASS_RENDER; capture.targetIdentity = cubeReceipt.resourceIdentity;
+		capture.colorLoadOp = RAL_WEBGPU_LOAD_CLEAR;
+		capture.targetMipLevel = 2; capture.targetArrayLayer = 5;
+		CHECK(RalWebGpu_CommandBeginWithDesc(command, &capture, &recording));
+		CHECK(fake.targetMipLevel == 2 && fake.targetArrayLayer == 5);
+		CHECK(RalWebGpu_CommandEnd(command, &recording, &executable));
+		CHECK(RalWebGpu_CommandSubmit(command, &executable, &submission));
+		CHECK(RalWebGpu_CommandPoll(command, &submission) == RAL_WEBGPU_ASYNC_READY);
+		CHECK(RalWebGpu_DestroyResource(resources, cube, &cubeReceipt));
+		CHECK(fake.resourcesCreated == fake.resourcesDestroyed);
+	}
 	CHECK( RalWebGpu_PresentationConfigure( presentation, 1280u, 720u,
 		RAL_WEBGPU_DPR_ONE_Q16, RAL_FORMAT_B8G8R8A8_UNORM,
 		RAL_COLORSPACE_SRGB_NONLINEAR, qtrue, &configured ) );

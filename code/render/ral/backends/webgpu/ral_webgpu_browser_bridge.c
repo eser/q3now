@@ -4,6 +4,7 @@
 #include "ral_webgpu_browser_bridge.h"
 
 #include <limits.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -15,7 +16,7 @@ _Static_assert( sizeof( ralWebGpuBrowserAdapterResponse_t ) == 376u,
 	"browser ABI adapter response layout drift" );
 _Static_assert( sizeof( ralWebGpuBrowserCanvasConfigureRequest_t ) == 56u,
 	"browser ABI canvas configure layout drift" );
-_Static_assert( sizeof( ralWebGpuBrowserIndexedDrawRequest_t ) == 172u,
+_Static_assert( sizeof( ralWebGpuBrowserIndexedDrawRequest_t ) == 176u,
 	"browser ABI indexed draw request layout drift" );
 _Static_assert( sizeof( ralWebGpuBrowserBindResourceAbi_t ) == 32u,
 	"browser ABI bind resource layout drift" );
@@ -25,6 +26,8 @@ _Static_assert( sizeof( ralWebGpuBrowserBindGroupRequest_t ) == 48u,
 	"browser ABI bind group request layout drift" );
 _Static_assert( sizeof( ralWebGpuBrowserComputeDispatchRequest_t ) == 120u,
 	"browser ABI compute dispatch request layout drift" );
+_Static_assert( sizeof( ralWebGpuBrowserCreateTextureRequest_t ) == 56u,
+	"browser ABI texture request layout drift" );
 
 struct ralWebGpuBrowserBridge_s {
 	uint64_t generation;
@@ -314,6 +317,8 @@ static qboolean CreateTexture( void *userData, uintptr_t device,
 	request.width = desc->width; request.height = desc->height;
 	request.depth = desc->depth; request.bytesPerTexel = desc->bytesPerTexel;
 	request.format = (uint32_t)desc->format;
+	request.mipLevelCount = desc->mipLevelCount;
+	request.usage = desc->usage;
 	return IdentityCall( bridge, RAL_WEBGPU_BROWSER_OP_CREATE_TEXTURE,
 		&request, sizeof( request ), outIdentity );
 }
@@ -329,6 +334,7 @@ static qboolean CreateSampler( void *userData, uintptr_t device,
 	request.linearMinification = desc->linearMinification;
 	request.linearMagnification = desc->linearMagnification;
 	request.clampToEdge = desc->clampToEdge;
+	request.linearMipmapping = desc->linearMipmapping;
 	return IdentityCall( bridge, RAL_WEBGPU_BROWSER_OP_CREATE_SAMPLER,
 		&request, sizeof( request ), outIdentity );
 }
@@ -365,7 +371,8 @@ static qboolean WriteBuffer( void *userData, uintptr_t queue,
 
 static qboolean WriteTexture( void *userData, uintptr_t queue,
 		uintptr_t texture, const void *bytes, uint64_t byteSize,
-		uint32_t bytesPerRow, uint32_t rowsPerImage ) {
+		uint32_t bytesPerRow, uint32_t rowsPerImage, uint32_t mipLevel,
+		uint32_t width, uint32_t height, uint32_t depth ) {
 	ralWebGpuBrowserBridge_t *bridge = userData;
 	ralWebGpuBrowserWriteTextureRequest_t request;
 	if ( !bridge || queue != bridge->queueIdentity || !texture || !bytes
@@ -376,6 +383,8 @@ static qboolean WriteTexture( void *userData, uintptr_t queue,
 	request.resourceIdentity = texture;
 	request.dataOffset = (uint64_t)(uintptr_t)bytes; request.byteSize = byteSize;
 	request.bytesPerRow = bytesPerRow; request.rowsPerImage = rowsPerImage;
+	request.mipLevel = mipLevel; request.width = width;
+	request.height = height; request.depth = depth;
 	return StatusCall( bridge, RAL_WEBGPU_BROWSER_OP_WRITE_TEXTURE,
 		&request, sizeof( request ) );
 }
@@ -511,8 +520,8 @@ qboolean RalWebGpu_BrowserBridgeCreateBindGroup(
 	ralWebGpuBrowserBindGroupRequest_t request;
 	ralWebGpuBrowserBindResourceAbi_t converted[RAL_SHADER_ABI_MAX_BINDINGS_PER_GROUP];
 	if ( !bridge || !bridge->deviceIdentity || !layoutIdentity || !outIdentity
-			|| !entryCount || entryCount > RAL_SHADER_ABI_MAX_BINDINGS_PER_GROUP
-			|| !entries ) return qfalse;
+			|| entryCount > RAL_SHADER_ABI_MAX_BINDINGS_PER_GROUP
+			|| (entryCount && !entries) ) return qfalse;
 	memset( converted, 0, sizeof( converted ) );
 	for ( uint32_t i = 0u; i < entryCount; ++i ) {
 		if ( entries[i].kind < RAL_WEBGPU_BROWSER_BIND_RESOURCE_BUFFER
@@ -563,7 +572,7 @@ static qboolean CreatePipeline( void *userData, uintptr_t device,
 			|| desc->shaderModuleCount > RAL_SHADER_ABI_MAX_MODULES
 			|| desc->bindGroupLayoutCount > RAL_SHADER_ABI_MAX_BIND_GROUPS
 			|| desc->specValueCount > RAL_SHADER_ABI_MAX_SPEC_CONSTANTS
-			|| ( desc->specValueCount && !desc->specValues )
+			|| ( desc->specValueCount && (!desc->specValues || !desc->specConstants) )
 			|| !desc->pipelineLayout ) return qfalse;
 	memset( &request, 0, sizeof( request ) );
 	Header( &request.header, RAL_WEBGPU_BROWSER_OP_CREATE_PIPELINE,
@@ -581,8 +590,12 @@ static qboolean CreatePipeline( void *userData, uintptr_t device,
 		request.bindGroupLayouts[i] = desc->bindGroupLayouts[i];
 	}
 	for ( uint32_t i = 0u; i < desc->specValueCount; ++i ) {
+		if (desc->specConstants[i].constantId != desc->specValues[i].constantId)
+			return qfalse;
 		request.specValues[i].constantId = desc->specValues[i].constantId;
 		request.specValues[i].value = desc->specValues[i].value;
+		request.specStageMasks[i] = desc->specConstants[i].stageFlags;
+		request.specValueTypes[i] = desc->specConstants[i].valueType;
 	}
 	if ( desc->kind == RAL_SHADER_PIPELINE_GRAPHICS ) {
 		const ralGraphicsPipelineCreateInfo_t *graphics = desc->graphicsState;
@@ -671,17 +684,23 @@ static qboolean BeginEncoder( void *userData, uintptr_t device,
 }
 
 static qboolean BeginPass( void *userData, uintptr_t encoder,
-		ralWebGpuPassKind_t kind, uintptr_t target, uintptr_t *outPass ) {
+		const ralWebGpuPassDesc_t *desc, uintptr_t *outPass ) {
 	ralWebGpuBrowserBridge_t *bridge = userData;
 	ralWebGpuBrowserBeginPassRequest_t request;
-	if ( !bridge || !encoder || kind < RAL_WEBGPU_PASS_RENDER
-			|| kind > RAL_WEBGPU_PASS_COMPUTE
-			|| ( kind == RAL_WEBGPU_PASS_RENDER && !target )
-			|| ( kind == RAL_WEBGPU_PASS_COMPUTE && target ) ) return qfalse;
+	if ( !bridge || !encoder || !desc ) return qfalse;
 	memset( &request, 0, sizeof( request ) );
 	Header( &request.header, RAL_WEBGPU_BROWSER_OP_BEGIN_PASS,
 		sizeof( request ) ); request.encoderIdentity = encoder;
-	request.targetIdentity = target; request.passKind = kind;
+	request.targetIdentity = desc->targetIdentity;
+	request.passKind = desc->kind;
+	request.colorLoadOp = desc->colorLoadOp;
+	request.depthEnabled = desc->depthEnabled;
+	request.depthLoadOp = desc->depthLoadOp;
+	request.depthStore = desc->depthStore;
+	request.clearDepth = desc->clearDepth;
+	request.timestampWrites = desc->timestampWrites;
+	request.targetMipLevel = desc->targetMipLevel;
+	request.targetArrayLayer = desc->targetArrayLayer;
 	return IdentityCall( bridge, RAL_WEBGPU_BROWSER_OP_BEGIN_PASS,
 		&request, sizeof( request ), outPass );
 }
@@ -707,6 +726,7 @@ static qboolean RecordIndexedDraw( void *userData, uintptr_t pass,
 	request.textured = draw->textured; request.firstIndex = draw->firstIndex;
 	request.indexCount = draw->indexCount; request.instanceCount = draw->instanceCount;
 	request.firstInstance = draw->firstInstance;
+	request.textureBindGroupSlot = draw->textureBindGroupSlot;
 	if ( draw->bindGroupCount > RAL_SHADER_ABI_MAX_BIND_GROUPS ) return qfalse;
 	request.bindGroupCount = draw->bindGroupCount;
 	for ( uint32_t i = 0u; i < draw->bindGroupCount; ++i ) {
@@ -783,11 +803,14 @@ static qboolean Submit( void *userData, uintptr_t queue,
 }
 
 static qboolean PollSubmission( void *userData, uintptr_t submission,
-		uint64_t submissionGeneration, ralWebGpuAsyncStatus_t *outStatus ) {
+		uint64_t submissionGeneration, ralWebGpuAsyncStatus_t *outStatus,
+		ralWebGpuGpuTimingState_t *outTimingState,
+		uint64_t *outGpuDurationNanoseconds ) {
 	ralWebGpuBrowserBridge_t *bridge = userData;
 	ralWebGpuBrowserPollSubmissionRequest_t request;
-	ralWebGpuBrowserAsyncResponse_t response;
-	if ( !bridge || !submission || !submissionGeneration || !outStatus )
+	ralWebGpuBrowserSubmissionResponse_t response;
+	if ( !bridge || !submission || !submissionGeneration || !outStatus
+			|| !outTimingState || !outGpuDurationNanoseconds )
 		return qfalse;
 	memset( &request, 0, sizeof( request ) ); memset( &response, 0, sizeof( response ) );
 	Header( &request.header, RAL_WEBGPU_BROWSER_OP_POLL_SUBMISSION,
@@ -797,8 +820,15 @@ static qboolean PollSubmission( void *userData, uintptr_t submission,
 			sizeof( request ), &response, sizeof( response ) )
 			|| response.status < RAL_WEBGPU_ASYNC_PENDING
 			|| response.status > RAL_WEBGPU_ASYNC_DEVICE_LOST
-			|| response.byteSize ) return qfalse;
-	*outStatus = (ralWebGpuAsyncStatus_t)response.status; return qtrue;
+			|| response.timingState < RAL_WEBGPU_GPU_TIMING_UNAVAILABLE
+			|| response.timingState > RAL_WEBGPU_GPU_TIMING_FAILED
+			|| ( response.timingState == RAL_WEBGPU_GPU_TIMING_VALID
+				? response.gpuDurationNanoseconds == 0u
+				: response.gpuDurationNanoseconds != 0u ) ) return qfalse;
+	*outStatus = (ralWebGpuAsyncStatus_t)response.status;
+	*outTimingState = (ralWebGpuGpuTimingState_t)response.timingState;
+	*outGpuDurationNanoseconds = response.gpuDurationNanoseconds;
+	return qtrue;
 }
 
 static void ReleaseCommandObject( void *userData,
@@ -894,6 +924,90 @@ qboolean RalWebGpu_BrowserBridgeApplyPipelineInfo(
 	info->host.destroyObject = DestroyPipelineObject; return qtrue;
 }
 
+
+_Static_assert( sizeof( ralWebGpuBrowserLensSource_t ) == 32u, "lens source ABI" );
+_Static_assert( sizeof( ralWebGpuBrowserLensBeginRequest_t ) == 64u, "lens begin ABI" );
+_Static_assert( sizeof( ralWebGpuBrowserLensPollRequest_t ) == 64u, "lens poll ABI" );
+
+qboolean RalWebGpu_BrowserBridgeBeginLensVisibility(
+        ralWebGpuBrowserBridge_t *bridge, uint64_t scope, uint64_t frame,
+        const float params[24], const ralWebGpuBrowserLensSource_t *sources,
+        uint32_t count, uintptr_t *outQuery ) {
+    ralWebGpuBrowserLensBeginRequest_t request = { 0 };
+    ralWebGpuBrowserIdentityResponse_t response = { 0 };
+    uintptr_t query = 0u;
+    if ( !bridge || !bridge->deviceIdentity || !scope || !frame || !params
+            || !sources || !count || count > RAL_WEBGPU_BROWSER_LENS_SOURCE_LIMIT
+            || !outQuery ) return qfalse;
+    Header( &request.header, RAL_WEBGPU_BROWSER_OP_BEGIN_LENS_VISIBILITY,
+        sizeof( request ) );
+    request.deviceIdentity = bridge->deviceIdentity;
+    request.scopeGeneration = scope; request.frameGeneration = frame;
+    request.paramsOffset = (uint64_t)(uintptr_t)params;
+    request.sourcesOffset = (uint64_t)(uintptr_t)sources;
+    request.sourceCount = count;
+    if ( !Call( bridge, RAL_WEBGPU_BROWSER_OP_BEGIN_LENS_VISIBILITY,
+            &request, sizeof( request ), &response, sizeof( response ) )
+            || response.accepted != 1u || response.reserved
+            || ( response.identity && !Identity( response.identity, &query ) ) )
+        return qfalse;
+    *outQuery = query; return qtrue;
+}
+
+ralWebGpuAsyncStatus_t RalWebGpu_BrowserBridgePollLensVisibility(
+        ralWebGpuBrowserBridge_t *bridge, uint64_t scope, uint64_t frame,
+        uintptr_t query, float values[RAL_WEBGPU_BROWSER_LENS_SOURCE_LIMIT] ) {
+    ralWebGpuBrowserLensPollRequest_t request = { 0 };
+    ralWebGpuBrowserAsyncResponse_t response = { 0 };
+    float candidate[RAL_WEBGPU_BROWSER_LENS_SOURCE_LIMIT];
+    if ( !bridge || !bridge->deviceIdentity || !scope || !frame || !query
+            || !values ) return RAL_WEBGPU_ASYNC_FAILED;
+    /* A malformed host must not publish partially written visibility. */
+    for ( uint32_t i = 0u; i < RAL_WEBGPU_BROWSER_LENS_SOURCE_LIMIT; ++i )
+        candidate[i] = NAN;
+    Header( &request.header, RAL_WEBGPU_BROWSER_OP_POLL_LENS_VISIBILITY,
+        sizeof( request ) );
+    request.deviceIdentity = bridge->deviceIdentity;
+    request.scopeGeneration = scope; request.frameGeneration = frame;
+    request.queryIdentity = query;
+    request.outputOffset = (uint64_t)(uintptr_t)candidate;
+    request.capacity = RAL_WEBGPU_BROWSER_LENS_SOURCE_LIMIT;
+    if ( !Call( bridge, RAL_WEBGPU_BROWSER_OP_POLL_LENS_VISIBILITY,
+            &request, sizeof( request ), &response, sizeof( response ) )
+            || response.reserved || response.byteSize != frame )
+        return RAL_WEBGPU_ASYNC_FAILED;
+    if ( response.status == RAL_WEBGPU_ASYNC_PENDING ) return RAL_WEBGPU_ASYNC_PENDING;
+    if ( response.status != RAL_WEBGPU_ASYNC_READY ) return RAL_WEBGPU_ASYNC_FAILED;
+    for ( uint32_t i = 0u; i < RAL_WEBGPU_BROWSER_LENS_SOURCE_LIMIT; ++i )
+        if ( !isfinite( candidate[i] ) || candidate[i] < 0.0f || candidate[i] > 1.0f )
+            return RAL_WEBGPU_ASYNC_FAILED;
+    memcpy( values, candidate, sizeof( candidate ) ); return RAL_WEBGPU_ASYNC_READY;
+}
+
+qboolean RalWebGpu_BrowserBridgeResetLensVisibility(
+        ralWebGpuBrowserBridge_t *bridge, uint64_t scope ) {
+    ralWebGpuBrowserLensControlRequest_t request = { 0 };
+    ralWebGpuBrowserStatusResponse_t response = { 0 };
+    if ( !bridge || !bridge->deviceIdentity || !scope ) return qfalse;
+    Header( &request.header, RAL_WEBGPU_BROWSER_OP_RESET_LENS_VISIBILITY,
+        sizeof( request ) );
+    request.deviceIdentity = bridge->deviceIdentity; request.identity = scope;
+    return Call( bridge, RAL_WEBGPU_BROWSER_OP_RESET_LENS_VISIBILITY,
+        &request, sizeof( request ), &response, sizeof( response ) )
+        && response.accepted == 1u && !response.reserved;
+}
+
+void RalWebGpu_BrowserBridgeReleaseLensVisibility(
+        ralWebGpuBrowserBridge_t *bridge, uintptr_t query ) {
+    ralWebGpuBrowserLensControlRequest_t request = { 0 };
+    ralWebGpuBrowserStatusResponse_t response = { 0 };
+    if ( !bridge || !bridge->deviceIdentity || !query ) return;
+    Header( &request.header, RAL_WEBGPU_BROWSER_OP_RELEASE_LENS_VISIBILITY,
+        sizeof( request ) );
+    request.deviceIdentity = bridge->deviceIdentity; request.identity = query;
+    (void)Call( bridge, RAL_WEBGPU_BROWSER_OP_RELEASE_LENS_VISIBILITY,
+        &request, sizeof( request ), &response, sizeof( response ) );
+}
 qboolean RalWebGpu_BrowserBridgePollLoss(
 		ralWebGpuBrowserBridge_t *bridge, ralWebGpuBrowserLoss_t *outLoss ) {
 	ralWebGpuBrowserGenerationRequest_t request;

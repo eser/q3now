@@ -76,8 +76,10 @@ static qboolean WriteBuffer( void *u, uintptr_t q, uintptr_t b, uint64_t o,
 	(void)u; (void)q; (void)b; (void)o; (void)p; (void)n; return qtrue;
 }
 static qboolean WriteTexture( void *u, uintptr_t q, uintptr_t t, const void *b,
-		uint64_t n, uint32_t r, uint32_t i ) {
-	(void)u; (void)q; (void)t; (void)b; (void)n; (void)r; (void)i; return qtrue;
+		uint64_t n, uint32_t r, uint32_t i, uint32_t mip, uint32_t w,
+		uint32_t h, uint32_t d ) {
+	(void)u; (void)q; (void)t; (void)b; (void)n; (void)r; (void)i;
+	(void)mip; (void)w; (void)h; (void)d; return qtrue;
 }
 static qboolean BeginRoundTrip( void *u, uintptr_t d, uintptr_t q, uintptr_t a,
 		uintptr_t b, const void *p, uint64_t n, uint64_t g, uintptr_t *out ) {
@@ -91,7 +93,7 @@ static qboolean PollRoundTrip( void *u, uintptr_t o, uint64_t g, void *b,
 static void ReleaseOperation( void *u, uintptr_t o ) { (void)u; (void)o; }
 
 static qboolean BeginEncoder( void *u, uintptr_t d, uintptr_t *o ) { (void)u; (void)d; (void)o; return qfalse; }
-static qboolean BeginPass( void *u, uintptr_t e, ralWebGpuPassKind_t k, uintptr_t t, uintptr_t *o ) { (void)u; (void)e; (void)k; (void)t; (void)o; return qfalse; }
+static qboolean BeginPass( void *u, uintptr_t e, const ralWebGpuPassDesc_t *d, uintptr_t *o ) { (void)u; (void)e; (void)d; (void)o; return qfalse; }
 static qboolean RecordDraw( void *u, uintptr_t p,
 		const ralWebGpuIndexedDraw_t *d ) { (void)u; (void)p; (void)d; return qfalse; }
 static qboolean RecordDispatch( void *u, uintptr_t p,
@@ -99,7 +101,10 @@ static qboolean RecordDispatch( void *u, uintptr_t p,
 static qboolean EndPass( void *u, uintptr_t p ) { (void)u; (void)p; return qfalse; }
 static qboolean FinishEncoder( void *u, uintptr_t e, uintptr_t *o ) { (void)u; (void)e; (void)o; return qfalse; }
 static qboolean Submit( void *u, uintptr_t q, uintptr_t b, uint64_t g, uintptr_t *o ) { (void)u; (void)q; (void)b; (void)g; (void)o; return qfalse; }
-static qboolean PollSubmission( void *u, uintptr_t s, uint64_t g, ralWebGpuAsyncStatus_t *o ) { (void)u; (void)s; (void)g; (void)o; return qfalse; }
+static qboolean PollSubmission( void *u, uintptr_t s, uint64_t g,
+		ralWebGpuAsyncStatus_t *o, ralWebGpuGpuTimingState_t *t, uint64_t *n ) {
+	(void)u; (void)s; (void)g; (void)o; (void)t; (void)n; return qfalse;
+}
 static void ReleaseCommand( void *u, ralWebGpuCommandObjectKind_t k, uintptr_t o ) { (void)u; (void)k; (void)o; }
 static qboolean Configure( void *u, uintptr_t c, uintptr_t d, uint32_t w, uint32_t h,
 		ralFormat_t f, ralColorSpace_t s, qboolean a ) { (void)u; (void)c; (void)d; (void)w; (void)h; (void)f; (void)s; (void)a; return qtrue; }
@@ -192,7 +197,7 @@ int main( void ) {
 	Artifact( &module.artifacts[2], RAL_SHADER_ARTIFACT_WGSL, wgsl, sizeof( wgsl ) - 1u );
 	memset( &binding, 0, sizeof( binding ) ); binding.bindingClass = RAL_SHADER_BIND_UNIFORM_BUFFER;
 	binding.arrayCount = 1u; binding.stageFlags = RAL_STAGE_COMPUTE; binding.minBufferBindingSize = 16u;
-	memset( &manifest, 0, sizeof( manifest ) ); manifest.schemaVersion = 1u; manifest.generation = 9u;
+	memset( &manifest, 0, sizeof( manifest ) ); manifest.schemaVersion = RAL_SHADER_ABI_SCHEMA_VERSION; manifest.generation = 9u;
 	manifest.pipelineKind = RAL_SHADER_PIPELINE_COMPUTE; manifest.modules = &module; manifest.moduleCount = 1u;
 	manifest.bindings = &binding; manifest.bindingCount = 1u; manifest.inlineData.byteSize = 16u;
 	manifest.inlineData.stageFlags = RAL_STAGE_COMPUTE;
