@@ -97,14 +97,19 @@ type ImportOpts struct {
 	// demo-only import. When non-empty, pax02 (baseq3) and pax04
 	// (missionpack) are processed alongside pax01 (id-quakepack).
 	Q3Path string
+	// MaterialCookDir is an optional immutable snapshot produced by the
+	// engine's projectCookMaterials command. When set it is included only in
+	// pax02; the launcher never parses or regenerates cooked receipts.
+	MaterialCookDir string
 }
 
 // paxJob describes one pipeline pass that produces a single .sw3z file.
 type paxJob struct {
-	name    string
-	output  string
-	sources []SourceGroup
-	entries map[string]ProcessorEntry
+	name       string
+	output     string
+	sources    []SourceGroup
+	entries    map[string]ProcessorEntry
+	processors []Processor
 }
 
 // RunImport executes the multi-pass import pipeline:
@@ -115,6 +120,11 @@ type paxJob struct {
 // WailsReporter) and CLI (with StdoutReporter). Cancellation aborts the
 // in-progress pax pass and returns ctx.Err().
 func RunImport(ctx context.Context, paths *config.Paths, opts ImportOpts, reporter Reporter) error {
+	if opts.MaterialCookDir != "" && opts.Q3Path == "" {
+		err := fmt.Errorf("material cook directory requires a full Q3 import via --q3path")
+		reporter.Error(err)
+		return err
+	}
 	// ── Step 1: Validate downloaded pack ─────────────────────────────────
 	reporter.Progress("scan", 0, 1, "Checking downloaded resources...")
 
@@ -138,11 +148,17 @@ func RunImport(ctx context.Context, paths *config.Paths, opts ImportOpts, report
 	if opts.Q3Path != "" {
 		baseQ3Dir := filepath.Join(opts.Q3Path, "baseq3")
 		if fileExists(baseQ3Dir) {
+			processors := []Processor{&Q3CopyProcessor{Entries: Q3CopyPax02Entries}}
+			if opts.MaterialCookDir != "" {
+				processors = append(processors,
+					&CookedMaterialIncludeProcessor{Root: opts.MaterialCookDir})
+			}
 			jobs = append(jobs, paxJob{
-				name:    "pax02",
-				output:  "pax02.sw3z",
-				sources: []SourceGroup{{Origin: "q3_base", Dir: baseQ3Dir}},
-				entries: Q3CopyPax02Entries,
+				name:       "pax02",
+				output:     "pax02.sw3z",
+				sources:    []SourceGroup{{Origin: "q3_base", Dir: baseQ3Dir}},
+				entries:    Q3CopyPax02Entries,
+				processors: processors,
 			})
 		}
 
@@ -170,8 +186,12 @@ func RunImport(ctx context.Context, paths *config.Paths, opts ImportOpts, report
 		reporter.Progress("process", i, len(jobs),
 			fmt.Sprintf("Processing %s (%d/%d)...", job.name, i+1, len(jobs)))
 
+		processors := job.processors
+		if len(processors) == 0 {
+			processors = []Processor{&Q3CopyProcessor{Entries: job.entries}}
+		}
 		pip := New(paths, job.sources,
-			WithProcessors(&Q3CopyProcessor{Entries: job.entries}),
+			WithProcessors(processors...),
 			WithOutputName(job.output),
 		)
 

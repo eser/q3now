@@ -11,14 +11,18 @@ import fs from "node:fs";
 import path from "node:path";
 
 const IMAGE_EXTENSIONS = new Set([".tga", ".jpg", ".jpeg", ".png", ".webp", ".dds"]);
+const MAP_DIAGNOSTIC_LIMIT = 64;
 
 function usage() {
-  console.error("usage: shader-resource-audit.mjs --imported-root DIR --owned-root DIR --content-root DIR [--content-root DIR ...] --map-root DIR [--map-root DIR ...] --aliases FILE [--fix]");
+  console.error("usage: shader-resource-audit.mjs --imported-root DIR --owned-root DIR --content-root DIR [--content-root DIR ...] --map-root DIR [--map-root DIR ...] --aliases FILE [--strict-map-materials] [--fix]");
   process.exit(2);
 }
 
 const args = process.argv.slice(2);
-const options = { importedRoot: "", ownedRoot: "", contentRoots: [], mapRoots: [], aliases: "", fix: false };
+const options = {
+  importedRoot: "", ownedRoot: "", contentRoots: [], mapRoots: [], aliases: "",
+  strictMapMaterials: false, fix: false
+};
 for (let i = 0; i < args.length; i++) {
   switch (args[i]) {
     case "--imported-root": options.importedRoot = args[++i] ?? ""; break;
@@ -26,6 +30,7 @@ for (let i = 0; i < args.length; i++) {
     case "--content-root": options.contentRoots.push(args[++i] ?? ""); break;
     case "--map-root": options.mapRoots.push(args[++i] ?? ""); break;
     case "--aliases": options.aliases = args[++i] ?? ""; break;
+    case "--strict-map-materials": options.strictMapMaterials = true; break;
     case "--fix": options.fix = true; break;
     default: usage();
   }
@@ -139,6 +144,7 @@ function md3References(root, declaredMaterials) {
 function bspInventory(roots) {
   const maps = [];
   const materials = new Set();
+  const materialSources = new Map();
   let q1Maps = 0;
   for (const root of roots) {
     const mapsRoot = path.join(root, "maps");
@@ -154,25 +160,47 @@ function bspInventory(roots) {
         maps.push({ name, format: q1Version === 29 ? "q1" : `${ident}:${version}`, materials: 0 });
         continue;
       }
+      if (data.length < 8 + 17 * 8) throw new Error(`truncated Q3 header in ${file}`);
       const offset = data.readInt32LE(16);
       const length = data.readInt32LE(20);
       if (offset < 0 || length < 0 || offset + length > data.length || length % 72 !== 0) {
         throw new Error(`invalid Q3 shader lump in ${file}`);
+      }
+      const faceOffset = data.readInt32LE(112), faceLength = data.readInt32LE(116);
+      if (faceOffset < 0 || faceLength < 0 || faceOffset + faceLength > data.length || faceLength % 104 !== 0)
+        throw new Error(`invalid Q3 surface lump in ${file}`);
+      const referenced = new Set();
+      for (let cursor = faceOffset; cursor < faceOffset + faceLength; cursor += 104) {
+        const shader = data.readInt32LE(cursor);
+        if (shader < 0 || shader >= length / 72)
+          throw new Error(`invalid Q3 surface shader index in ${file}`);
+        referenced.add(shader);
+      }
+      const fogOffset = data.readInt32LE(104), fogLength = data.readInt32LE(108);
+      if (fogOffset < 0 || fogLength < 0 || fogOffset + fogLength > data.length || fogLength % 72 !== 0)
+        throw new Error(`invalid Q3 fog lump in ${file}`);
+      const fogNames = new Set();
+      for (let cursor = fogOffset; cursor < fogOffset + fogLength; cursor += 72) {
+        const nul = data.indexOf(0, cursor);
+        fogNames.add(data.toString("utf8", cursor, nul >= cursor && nul < cursor + 64 ? nul : cursor + 64).toLowerCase());
       }
       const local = new Set();
       for (let cursor = offset; cursor < offset + length; cursor += 72) {
         const nul = data.indexOf(0, cursor);
         const end = nul >= cursor && nul < cursor + 64 ? nul : cursor + 64;
         const material = data.toString("utf8", cursor, end).toLowerCase();
-        if (material && material !== "noshader") {
+        if (material && material !== "noshader"
+            && (referenced.has((cursor - offset) / 72) || fogNames.has(material))) {
           local.add(material);
           materials.add(material);
+          if (!materialSources.has(material)) materialSources.set(material, new Set());
+          materialSources.get(material).add(name);
         }
       }
       maps.push({ name, format: "q3", materials: local.size });
     }
   }
-  return { maps, materials, q1Maps };
+  return { maps, materials, materialSources, q1Maps };
 }
 
 const content = new Map();
@@ -231,6 +259,19 @@ const imported = classify([...importedShaderRefs, ...importedModelRefs], true);
 // compatibility alias happens to cover their legacy spelling.
 const owned = classify(shaderReferences(options.ownedRoot), false);
 const bsp = bspInventory(options.mapRoots);
+// A Q3 BSP shader-lump entry without a matching .shader declaration is an
+// implicit image material.  The renderer/cooker must still resolve that
+// extensionless semantic name to a packaged image.  Keeping this inventory
+// separate prevents the shader-stage audit from reporting a false clean result
+// when a map references a missing raw image (the real project cook rejects the
+// same dependency).
+const implicitMapRefs = [...bsp.materialSources.entries()]
+  .filter(([material]) => !declaredMaterials.has(material))
+  .map(([material, sources]) => ({
+    file: "", sourceFile: [...sources].sort().join(", "), line: 0,
+    material, requested: material
+  }));
+const implicitMapMaterials = classify(implicitMapRefs, true);
 const brokenCatalogTargets = [...aliases.entries()]
   .filter(([, target]) => !content.has(target))
   .map(([requested, target]) => ({ requested, target }));
@@ -257,6 +298,31 @@ function uniqueMappings(records) {
     grouped.get(key).sources.add(record.sourceFile);
   }
   return [...grouped.values()].sort((a, b) => a.requested.localeCompare(b.requested));
+}
+
+function summarizedMappings(records) {
+  const grouped = new Map();
+  for (const record of records) {
+    const key = record.requested.toLowerCase();
+    if (!grouped.has(key)) grouped.set(key, {
+      material: record.requested,
+      maps: new Set(),
+      alternatives: new Set()
+    });
+    const item = grouped.get(key);
+    for (const source of record.sourceFile.split(/,\s*/).filter(Boolean))
+      item.maps.add(source);
+    for (const alternative of record.alternatives ?? [])
+      item.alternatives.add(alternative);
+    if (record.target) item.alternatives.add(record.target);
+  }
+  return [...grouped.values()]
+    .map((item) => ({
+      material: item.material,
+      maps: [...item.maps].sort(),
+      alternatives: [...item.alternatives].sort()
+    }))
+    .sort((a, b) => a.material.localeCompare(b.material));
 }
 
 if (options.fix) {
@@ -307,6 +373,20 @@ if (options.fix) {
 
 const importedMappings = uniqueMappings(imported.candidates);
 const ownedMappings = uniqueMappings(owned.candidates);
+const implicitResolved = summarizedMappings([
+  ...implicitMapMaterials.exact,
+  ...implicitMapMaterials.aliased,
+  ...implicitMapMaterials.candidates
+]);
+const implicitMissing = summarizedMappings(
+  implicitMapMaterials.unresolved.filter((item) => !item.alternatives.length)
+);
+const implicitAmbiguous = summarizedMappings(
+  implicitMapMaterials.unresolved.filter((item) => item.alternatives.length > 1)
+);
+const implicitBrokenAliases = summarizedMappings(implicitMapMaterials.brokenAliases);
+const implicitDiagnosticCount = implicitMissing.length + implicitAmbiguous.length +
+  implicitBrokenAliases.length;
 console.log(JSON.stringify({
   imported: {
     references: imported.exact.length + imported.aliased.length + imported.candidates.length + imported.unresolved.length + imported.brokenAliases.length,
@@ -327,6 +407,20 @@ console.log(JSON.stringify({
     q3: bsp.maps.length - bsp.q1Maps,
     q1: bsp.q1Maps,
     referencedMaterials: bsp.materials.size,
+    implicitImageMaterials: implicitMapRefs.length,
+    implicitResolved: implicitResolved.length,
+    implicitMissing: implicitMissing.length,
+    implicitAmbiguous: implicitAmbiguous.length,
+    implicitBrokenAliases: implicitBrokenAliases.length,
+    implicitDiagnosticsReported: Math.min(implicitDiagnosticCount, MAP_DIAGNOSTIC_LIMIT),
+    implicitDiagnosticsTruncated: implicitDiagnosticCount > MAP_DIAGNOSTIC_LIMIT,
+    implicitDiagnostics: {
+      missing: implicitMissing.slice(0, MAP_DIAGNOSTIC_LIMIT),
+      ambiguous: implicitAmbiguous.slice(0, Math.max(0,
+        MAP_DIAGNOSTIC_LIMIT - implicitMissing.length)),
+      brokenAliases: implicitBrokenAliases.slice(0, Math.max(0,
+        MAP_DIAGNOSTIC_LIMIT - implicitMissing.length - implicitAmbiguous.length))
+    },
     reachableImportedUnresolved: uniqueMappings(reachableImported.unresolved.map((item) => ({ ...item, target: "" }))).length,
     reachableOwnedUnresolved: uniqueMappings(reachableOwned.unresolved.map((item) => ({ ...item, target: "" }))).length,
     reachableBrokenAliases: reachableImported.brokenAliases.length + reachableOwned.brokenAliases.length
@@ -336,6 +430,7 @@ console.log(JSON.stringify({
     duplicateKeys: duplicateAliases.size,
     missingTargets: brokenCatalogTargets.length
   },
+  strictMapMaterials: options.strictMapMaterials,
   changed: options.fix
 }, null, 2));
 
@@ -345,4 +440,9 @@ console.log(JSON.stringify({
 // fails on an actionable canonical alternative, a broken alias, or owned
 // content. The runtime map-transition gate fail-closes on the definition the
 // renderer actually selects.
-if (duplicateAliases.size || brokenCatalogTargets.length || reachableOwned.unresolved.length || reachableImported.brokenAliases.length || reachableOwned.brokenAliases.length || (!options.fix && (importedMappings.length || ownedMappings.length))) process.exit(1);
+const strictMapFailure = options.strictMapMaterials && (
+  reachableImported.unresolved.length ||
+  implicitMapMaterials.unresolved.length ||
+  implicitMapMaterials.brokenAliases.length
+);
+if (duplicateAliases.size || brokenCatalogTargets.length || reachableOwned.unresolved.length || reachableImported.brokenAliases.length || reachableOwned.brokenAliases.length || strictMapFailure || (!options.fix && (importedMappings.length || ownedMappings.length))) process.exit(1);

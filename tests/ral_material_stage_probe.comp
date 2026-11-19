@@ -1,0 +1,37 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#define WIRED_MATERIAL_GLSL 1
+#include "../code/render/frontend/render_material_noise.h"
+#include "../code/render/ral/core/ral_material_stage.glsl"
+
+struct StageCase {
+    MaterialStageParams stage;
+    vec4 uvTime;
+    vec4 sourceColor;
+    vec4 destinationColor;
+    vec4 vertexColor;
+    vec4 entityColor;
+    vec4 position;
+    vec4 diffuse;
+};
+layout(local_size_x = 64) in;
+layout(std140, set = 0, binding = 0) uniform Inputs { StageCase cases[64]; } inputs;
+layout(std430, set = 0, binding = 1) writeonly buffer Outputs { vec4 values[]; } outputs;
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= 64u) return;
+    StageCase c = inputs.cases[i];
+    vec2 uv = wired_material_stage_uv(c.uvTime.xy, c.stage, c.uvTime.z, c.position.xyz);
+    outputs.values[i * 4u] = vec4(uv,
+        wired_material_wave(c.stage.generators.z, c.stage.rgbWave, c.uvTime.z),
+        wired_material_wave(c.stage.generators.w, c.stage.alphaWave, c.uvTime.z));
+    outputs.values[i * 4u + 1u] = wired_material_stage_generators(c.sourceColor,
+        c.stage, c.vertexColor, c.entityColor, c.diffuse.xyz, c.uvTime.w, c.uvTime.z);
+    outputs.values[i * 4u + 2u] = c.sourceColor * wired_material_blend_factor(
+        c.stage.meta.x, c.sourceColor, c.destinationColor) + c.destinationColor
+        * wired_material_blend_factor(c.stage.meta.y, c.sourceColor, c.destinationColor);
+    outputs.values[i * 4u + 3u] = vec4(wired_sky_cloud_uv(normalize(c.position.xyz),
+        c.diffuse.w), 0.0, 1.0);
+}

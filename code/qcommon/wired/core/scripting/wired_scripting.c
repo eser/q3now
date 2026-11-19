@@ -689,6 +689,10 @@ lua_State *WiredScript_GetState( void ) {
 	return s_ws ? s_ws->lua : NULL;
 }
 
+qboolean WiredScript_FileAliasCatalogReady( void ) {
+	return WiredScript_GetState() != NULL ? qtrue : qfalse;
+}
+
 /* ---- Chunk compile + cache (WiredUI compositor) -----------
  *
  * Pre-compile a Lua chunk via luaL_loadbuffer, then store it as a function

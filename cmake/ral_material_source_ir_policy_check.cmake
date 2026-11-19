@@ -17,6 +17,8 @@ endforeach()
 foreach(NEEDLE IN ITEMS "RAL_MATERIAL_SOURCE_IR_SCHEMA_VERSION"
 	"RAL_MATERIAL_PROVENANCE_Q3_SHADER" "RAL_MATERIAL_PROVENANCE_WIRED_LUA"
 	"RAL_MATERIAL_SOURCE_MAX_DEPENDENCIES" "ralMaterialSourceDependency_t"
+	"ralMaterialSourcePbrTexture_t" "pbrFactors" "pbrRenderPolicy"
+	"pbrTextureCount"
 	"ralMaterialSourceSpan_t" "ralMaterialSourceDiagnostic_t" "semanticHash"
 	"dependencyHash" "artifactHash")
 	string(FIND "${HEADER}" "${NEEDLE}" POS)
@@ -24,8 +26,10 @@ foreach(NEEDLE IN ITEMS "RAL_MATERIAL_SOURCE_IR_SCHEMA_VERSION"
 		message(FATAL_ERROR "material source IR contract lost: ${NEEDLE}")
 	endif()
 endforeach()
-foreach(NEEDLE IN ITEMS "CanonicalPathValid" "RAL_MATERIAL_SOURCE_DUPLICATE_DEPENDENCY"
-	"HashSemantic" "HashDependencies" "*outReceipt = candidate")
+foreach(NEEDLE IN ITEMS "CanonicalPathValid" "PbrTextureSemanticValid"
+	"RAL_MATERIAL_SOURCE_DUPLICATE_DEPENDENCY"
+	"RAL_MATERIAL_SOURCE_DUPLICATE_PBR_TEXTURE" "HashSemantic"
+	"HashDependencies" "*outReceipt = candidate")
 	string(FIND "${CORE}" "${NEEDLE}" POS)
 	if(POS EQUAL -1)
 		message(FATAL_ERROR "material source compile invariant lost: ${NEEDLE}")
@@ -42,6 +46,8 @@ endforeach()
 foreach(NEEDLE IN ITEMS "changed.dependencies[0].sourceId++"
 	"RAL_MATERIAL_SOURCE_INVALID_DEPENDENCY" "RAL_MATERIAL_SOURCE_DUPLICATE_DEPENDENCY"
 	"RAL_MATERIAL_SOURCE_NONFINITE_VALUE" "!memcmp( &receipt, &before"
+	"Pbr()" "RAL_MATERIAL_SOURCE_INVALID_PBR_TEXTURE"
+	"RAL_MATERIAL_SOURCE_DUPLICATE_PBR_TEXTURE"
 	"pthread_create" "CreateThread" "CheckConcurrentCompile"
 	"diagnostic.span.line == 12u")
 	string(FIND "${TEST}" "${NEEDLE}" POS)

@@ -69,6 +69,10 @@ void WiredScript_RegisterBindings( WiredScript_BindingFn fn );
 /* Return the active Lua state so subsystems can register
    additional bindings.  Returns NULL when Lua is not initialised. */
 lua_State *WiredScript_GetState( void );
+/* True when scoped VFS mounts may rebuild the file-alias catalog: the System
+ * VM exists natively; browser builds carry no Lua catalog and answer true so
+ * lifecycle mounts stay available with a no-op alias reload. */
+qboolean WiredScript_FileAliasCatalogReady( void );
 
 /* ---- Chunk compile + cache ------------------------------------------ *
  *

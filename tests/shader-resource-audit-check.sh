@@ -22,6 +22,11 @@ mkdir -p "$AUDIT_DIR/pax01" "$AUDIT_DIR/pax21"
 "$SW3Z" x "$BASE_ARCHIVE" "$AUDIT_DIR/pax01" >/dev/null
 "$SW3Z" x "$MOD_ARCHIVE" "$AUDIT_DIR/pax21" >/dev/null
 
+STRICT_ARGS=()
+if [[ "${WIRED_STRICT_MAP_MATERIALS:-0}" == "1" ]]; then
+	STRICT_ARGS+=(--strict-map-materials)
+fi
+
 node "$ROOT/tools/shader-resource-audit.mjs" \
 	--imported-root "$AUDIT_DIR/pax01" \
 	--owned-root "$ROOT/modfiles" \
@@ -29,4 +34,5 @@ node "$ROOT/tools/shader-resource-audit.mjs" \
 	--content-root "$AUDIT_DIR/pax21" \
 	--content-root "$ROOT/modfiles" \
 	--map-root "$AUDIT_DIR/pax01" \
-	--aliases "$ROOT/modfiles/fs-aliases.lua"
+	--aliases "$ROOT/modfiles/fs-aliases.lua" \
+	"${STRICT_ARGS[@]}"

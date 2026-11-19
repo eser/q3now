@@ -105,32 +105,33 @@ static void DeriveRetirements( const ralMaterialRuntimePlan_t *oldPlan,
 	}
 }
 
-qboolean Ral_MaterialReloadTry( ralMaterialReloadOwner_t *owner,
-		const ralMaterialReloadCandidate_t *candidate, uint64_t generation,
+static qboolean TryResolved( ralMaterialReloadOwner_t *owner,
+		const ralMaterialReceipt_t *material,
+		const ralTextureResourceReceipt_t *resources, uint32_t resourceCount,
+		uint64_t runtimeGeneration,
+		const ralMaterialProxyProgram_t *proxyProgram, uint64_t generation,
 		ralMaterialReloadReceipt_t *out ) {
-	ralMaterialReceipt_t material;
 	ralMaterialRuntimePlan_t plan;
 	ralMaterialProxyProgramReceipt_t proxy;
 	ralMaterialReloadReceipt_t receipt;
 	ralMaterialReloadOwner_t next;
-	if ( !out || !Ral_MaterialReloadOwnerValid( owner ) || !candidate
+	if ( !out || !Ral_MaterialReloadOwnerValid( owner )
 			|| generation <= owner->transactionGeneration || owner->retirementPending
-			|| !candidate->description || !candidate->runtimeGeneration
-			|| candidate->runtimeGeneration <= owner->livePlan.runtimeGeneration
-			|| candidate->description->materialGeneration
+			|| !Ral_MaterialReceiptValid( material ) || !runtimeGeneration
+			|| runtimeGeneration <= owner->livePlan.runtimeGeneration
+			|| material->material.materialGeneration
 				<= owner->livePlan.material.material.materialGeneration
-			|| candidate->resourceCount > RAL_MATERIAL_MAX_TEXTURES ) return qfalse;
-	if ( !Ral_MaterialCompile( candidate->description, &material )
-			|| !Ral_MaterialRuntimePlanBuild( &material, candidate->resources,
-				candidate->resourceCount, candidate->runtimeGeneration, &plan ) ) return qfalse;
+			|| resourceCount > RAL_MATERIAL_MAX_TEXTURES
+			|| !Ral_MaterialRuntimePlanBuild( material, resources,
+				resourceCount, runtimeGeneration, &plan ) ) return qfalse;
 	memset( &proxy, 0, sizeof( proxy ) );
-	if ( candidate->proxyProgram
-			&& !Ral_MaterialProxyProgramBuild( &material, candidate->proxyProgram, &proxy ) )
+	if ( proxyProgram
+			&& !Ral_MaterialProxyProgramBuild( material, proxyProgram, &proxy ) )
 		return qfalse;
 	memset( &receipt, 0, sizeof( receipt ) );
 	receipt.schemaVersion = RAL_MATERIAL_RELOAD_RECEIPT_SCHEMA_VERSION;
 	receipt.transactionGeneration = generation; receipt.activePlan = plan;
-	receipt.hasProxy = candidate->proxyProgram ? qtrue : qfalse; receipt.proxy = proxy;
+	receipt.hasProxy = proxyProgram ? qtrue : qfalse; receipt.proxy = proxy;
 	if ( owner->usingFallback == qfalse ) DeriveRetirements( &owner->livePlan, &plan, &receipt );
 	receipt.ready = qtrue;
 	if ( !Ral_MaterialReloadReceiptValid( &receipt ) ) return qfalse;
@@ -141,6 +142,27 @@ qboolean Ral_MaterialReloadTry( ralMaterialReloadOwner_t *owner,
 	if ( next.retirementPending ) next.pendingRetirement = receipt;
 	if ( !Ral_MaterialReloadOwnerValid( &next ) ) return qfalse;
 	*owner = next; *out = receipt; return qtrue;
+}
+
+qboolean Ral_MaterialReloadTry( ralMaterialReloadOwner_t *owner,
+		const ralMaterialReloadCandidate_t *candidate, uint64_t generation,
+		ralMaterialReloadReceipt_t *out ) {
+	ralMaterialReceipt_t material;
+	if ( !candidate || !candidate->description
+			|| !Ral_MaterialCompile( candidate->description, &material ) ) return qfalse;
+	return TryResolved( owner, &material, candidate->resources,
+		candidate->resourceCount, candidate->runtimeGeneration,
+		candidate->proxyProgram, generation, out );
+}
+
+qboolean Ral_MaterialReloadTryCooked( ralMaterialReloadOwner_t *owner,
+		const ralMaterialReloadCookedCandidate_t *candidate,
+		uint64_t generation, ralMaterialReloadReceipt_t *out ) {
+	if ( !candidate || !Ral_MaterialCookReceiptValid( candidate->cook ) )
+		return qfalse;
+	return TryResolved( owner, &candidate->cook->material, candidate->resources,
+		candidate->resourceCount, candidate->runtimeGeneration,
+		candidate->proxyProgram, generation, out );
 }
 
 qboolean Ral_MaterialReloadAcknowledge( ralMaterialReloadOwner_t *owner,

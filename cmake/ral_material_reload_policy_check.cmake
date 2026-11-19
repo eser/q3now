@@ -15,21 +15,24 @@ foreach(TEXT IN ITEMS "${HEADER}" "${CORE}")
 	endforeach()
 endforeach()
 foreach(NEEDLE IN ITEMS "ralMaterialReloadOwner_t" "ralMaterialReloadCandidate_t"
-	"ralMaterialReloadReceipt_t" "Ral_MaterialReloadAcknowledge")
+	"ralMaterialReloadCookedCandidate_t" "ralMaterialReloadReceipt_t"
+	"Ral_MaterialReloadTryCooked" "Ral_MaterialReloadAcknowledge")
 	string(FIND "${HEADER}" "${NEEDLE}" POS)
 	if(POS EQUAL -1)
 		message(FATAL_ERROR "material reload contract lost: ${NEEDLE}")
 	endif()
 endforeach()
 foreach(NEEDLE IN ITEMS "DeriveRetirements" "retirementPending" "usingFallback"
-	"generation <= owner->transactionGeneration" "Ral_MaterialReloadReceiptExact")
+	"generation <= owner->transactionGeneration" "Ral_MaterialCookReceiptValid"
+	"Ral_MaterialReloadReceiptExact")
 	string(FIND "${CORE}" "${NEEDLE}" POS)
 	if(POS EQUAL -1)
 		message(FATAL_ERROR "material reload invariant lost: ${NEEDLE}")
 	endif()
 endforeach()
 foreach(NEEDLE IN ITEMS "RAL_BACKEND_VULKAN" "RAL_BACKEND_WEBGPU" "owner.usingFallback"
-	"wrong.retirements[0].resourceGeneration++" "receipt.retirementCount==2u")
+	"wrong.retirements[0].resourceGeneration++" "receipt.retirementCount==2u"
+	"Ral_MaterialReloadTryCooked" "bad.artifactHash++")
 	string(FIND "${TEST}" "${NEEDLE}" POS)
 	if(POS EQUAL -1)
 		message(FATAL_ERROR "material reload hostile fixture lost: ${NEEDLE}")

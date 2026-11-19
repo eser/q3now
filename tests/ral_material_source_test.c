@@ -60,6 +60,28 @@ static ralMaterialSourceIr_t Base( void ) {
 	return source;
 }
 
+static ralMaterialSourceIr_t Pbr( void ) {
+	ralMaterialSourceIr_t source = Base();
+	source.provenance = RAL_MATERIAL_PROVENANCE_WIRED_LUA;
+	source.stageCount = 0u;
+	source.pbrFactors.baseColor[0] = 0.8f;
+	source.pbrFactors.baseColor[1] = 0.7f;
+	source.pbrFactors.baseColor[2] = 0.6f;
+	source.pbrFactors.baseColor[3] = 1.0f;
+	source.pbrFactors.metallic = 0.25f;
+	source.pbrFactors.roughness = 0.45f;
+	source.pbrFactors.normalScale = 1.0f;
+	source.pbrFactors.occlusionStrength = 0.9f;
+	source.pbrRenderPolicy.depthTest = qtrue;
+	source.pbrRenderPolicy.depthWrite = qtrue;
+	source.pbrTextureCount = 1u;
+	source.pbrTextures[0].span = source.declaration;
+	source.pbrTextures[0].dependencyIndex = 0u;
+	source.pbrTextures[0].role = RAL_MATERIAL_TEXTURE_BASE_COLOR;
+	source.pbrTextures[0].channels = RAL_MATERIAL_CHANNEL_RGBA;
+	return source;
+}
+
 typedef struct compileThreadContext_s {
 	const ralMaterialSourceReceipt_t *expected;
 	int failure;
@@ -132,8 +154,51 @@ static int CheckConcurrentCompile( const ralMaterialSourceReceipt_t *expected ) 
 	return 0;
 }
 
+static int CheckSkySource( void ) {
+	ralMaterialSourceIr_t source = Base(), bad;
+	ralMaterialSourceReceipt_t receipt, before, changed;
+	ralMaterialSourceDiagnostic_t diagnostic;
+	source.sky = qtrue;
+	source.skySource.outerBox = qtrue; /* All six faces may share one texture. */
+	source.skySource.hasSun = qtrue;
+	source.skySource.sunColor[0] = 1.0f;
+	source.skySource.sunIntensity = 100.0f;
+	source.skySource.sunElevationDegrees = 25.0f;
+	CHECK( Ral_MaterialSourceCompile( &source, &receipt, NULL ) );
+	before = receipt;
+	source.skySource.sunColor[1] = 0.5f;
+	CHECK( Ral_MaterialSourceCompile( &source, &changed, NULL ) );
+	CHECK( changed.semanticHash != receipt.semanticHash );
+	source.dependencies[0].sourceId++;
+	CHECK( Ral_MaterialSourceCompile( &source, &receipt, NULL ) );
+	CHECK( receipt.semanticHash == changed.semanticHash
+		&& receipt.dependencyHash != changed.dependencyHash );
+	receipt = before;
+	bad = source; bad.skySource.outerDependencies[5] = bad.dependencyCount;
+	CHECK( !Ral_MaterialSourceCompile( &bad, &receipt, &diagnostic ) );
+	CHECK( diagnostic.reason == RAL_MATERIAL_SOURCE_INVALID_SKY
+		&& !memcmp( &before, &receipt, sizeof( before ) ) );
+	bad = source; bad.sky = qfalse;
+	CHECK( !Ral_MaterialSourceCompile( &bad, &receipt, NULL ) );
+	bad = source; bad.skySource.sunIntensity = NAN;
+	CHECK( !Ral_MaterialSourceCompile( &bad, &receipt, NULL ) );
+	bad = source; bad.skySource.sunColor[0] = -1.0f;
+	CHECK( !Ral_MaterialSourceCompile( &bad, &receipt, NULL ) );
+	bad = source; bad.skySource.sunExtended = qfalse; bad.skySource.sunSamples = 16u;
+	CHECK( !Ral_MaterialSourceCompile( &bad, &receipt, NULL ) );
+	bad = source; bad.skySource.innerBox = qfalse; bad.skySource.innerDependencies[0] = 1u;
+	CHECK( !Ral_MaterialSourceCompile( &bad, &receipt, NULL ) );
+	bad = source; bad.skySource.hasSun = qfalse;
+	CHECK( !Ral_MaterialSourceCompile( &bad, &receipt, NULL ) );
+	CHECK( !memcmp( &before, &receipt, sizeof( before ) ) );
+	before.source.skySource.sunElevationDegrees += 1.0f;
+	CHECK( !Ral_MaterialSourceReceiptValid( &before ) );
+	return 0;
+}
+
 int main( void ) {
 	ralMaterialSourceIr_t source = Base(), changed, bad;
+	ralMaterialSourceIr_t pbr;
 	ralMaterialSourceReceipt_t receipt, exact, before, changedReceipt;
 	ralMaterialSourceDiagnostic_t diagnostic;
 	memset( &receipt, 0xA5, sizeof( receipt ) );
@@ -182,6 +247,27 @@ int main( void ) {
 	CHECK( diagnostic.span.line == 14u && diagnostic.span.column == 9u );
 
 	CHECK( CheckConcurrentCompile( &exact ) == 0 );
+	CHECK( CheckSkySource() == 0 );
+
+	pbr = Pbr();
+	CHECK( Ral_MaterialSourceCompile( &pbr, &receipt, &diagnostic ) );
+	CHECK( Ral_MaterialSourceReceiptValid( &receipt ) );
+	changed = pbr;
+	changed.pbrFactors.roughness = 0.6f;
+	CHECK( Ral_MaterialSourceCompile( &changed, &changedReceipt, NULL ) );
+	CHECK( changedReceipt.semanticHash != receipt.semanticHash );
+	before = receipt;
+	bad = pbr;
+	bad.pbrTextures[0].channels = RAL_MATERIAL_CHANNEL_XY_NORMAL;
+	CHECK( !Ral_MaterialSourceCompile( &bad, &receipt, &diagnostic ) );
+	CHECK( diagnostic.reason == RAL_MATERIAL_SOURCE_INVALID_PBR_TEXTURE );
+	CHECK( !memcmp( &receipt, &before, sizeof( receipt ) ) );
+	bad = pbr;
+	bad.pbrTextureCount = 2u;
+	bad.pbrTextures[1] = bad.pbrTextures[0];
+	CHECK( !Ral_MaterialSourceCompile( &bad, &receipt, &diagnostic ) );
+	CHECK( diagnostic.reason == RAL_MATERIAL_SOURCE_DUPLICATE_PBR_TEXTURE );
+	CHECK( !memcmp( &receipt, &before, sizeof( receipt ) ) );
 
 	puts( "ral_material_source_test: ok" );
 	return 0;

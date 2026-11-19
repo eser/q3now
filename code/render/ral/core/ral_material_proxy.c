@@ -18,13 +18,11 @@ static uint64_t HashByte( uint64_t h, unsigned char v ) { return ( h ^ v ) * FNV
 static uint64_t HashU32( uint64_t h, uint32_t v ) { uint32_t i; for(i=0u;i<4u;i++)h=HashByte(h,(unsigned char)(v>>(i*8u)));return h; }
 static uint64_t HashU64( uint64_t h, uint64_t v ) { uint32_t i; for(i=0u;i<8u;i++)h=HashByte(h,(unsigned char)(v>>(i*8u)));return h; }
 
-static qboolean ProgramValid( const ralMaterialProxyProgram_t *p ) {
+static qboolean LegacyProgramValid( const ralMaterialProxyProgram_t *p ) {
 	uint32_t i;
 	qboolean hasWriter = qfalse;
 	ralMaterialProxyTarget_t target = RAL_MATERIAL_PROXY_BASE_COLOR_R;
-	if ( !p || p->schemaVersion != RAL_MATERIAL_PROXY_SCHEMA_VERSION
-			|| !p->materialArtifactHash
-			|| p->instructionCount > RAL_MATERIAL_PROXY_MAX_INSTRUCTIONS ) return qfalse;
+	if ( p->instructionCount > RAL_MATERIAL_PROXY_MAX_INSTRUCTIONS ) return qfalse;
 	for ( i=0u; i<p->instructionCount; i++ ) {
 		const ralMaterialProxyInstruction_t *v=&p->instructions[i];
 		qboolean writer;
@@ -48,15 +46,152 @@ static qboolean ProgramValid( const ralMaterialProxyProgram_t *p ) {
 	return qtrue;
 }
 
+static qboolean FieldNameValid( const char *name ) {
+	size_t length;
+	if ( !name || !name[0] ) return qfalse;
+	length = strnlen( name, RAL_MATERIAL_PROXY_FIELD_NAME );
+	return length > 0u && length < RAL_MATERIAL_PROXY_FIELD_NAME;
+}
+
+static qboolean ExpressionProgramValid( const ralMaterialProxyProgram_t *p ) {
+	uint32_t i, j;
+	if ( p->schemaVersion != RAL_MATERIAL_PROXY_SCHEMA_VERSION
+			|| p->instructionCount != 0u
+			|| p->expressionRegisterCount
+				< RAL_MATERIAL_PROXY_REGISTER_BASE_VALUES
+					+ RAL_MATERIAL_PROXY_BASE_VALUE_COUNT
+			|| p->expressionRegisterCount
+				> RAL_MATERIAL_PROXY_EXPRESSION_MAX_REGISTERS
+			|| p->expressionConstantCount
+				> RAL_MATERIAL_PROXY_EXPRESSION_MAX_CONSTANTS
+			|| !p->expressionInstructionCount
+			|| p->expressionInstructionCount
+				> RAL_MATERIAL_PROXY_EXPRESSION_MAX_INSTRUCTIONS
+			|| !p->expressionFieldCount
+			|| p->expressionFieldCount
+				> RAL_MATERIAL_PROXY_EXPRESSION_MAX_FIELDS
+			|| p->expressionTableCount
+				> RAL_MATERIAL_PROXY_EXPRESSION_MAX_TABLES ) return qfalse;
+	for ( i = 0u; i < p->expressionTableCount; ++i ) {
+		if ( p->expressionTables[i].sampleCount < 2u
+				|| p->expressionTables[i].sampleCount
+					> RAL_MATERIAL_PROXY_EXPRESSION_TABLE_SAMPLES
+				|| ( p->expressionTables[i].flags
+					& ~( RAL_MATERIAL_EXPRESSION_TABLE_WRAP
+						| RAL_MATERIAL_EXPRESSION_TABLE_SNAP ) ) ) return qfalse;
+	}
+	for ( i = 0u; i < p->expressionInstructionCount; ++i ) {
+		const ralMaterialExpressionInstruction_t *op =
+			&p->expressionInstructions[i];
+		if ( op->opcode >= RAL_MATERIAL_EXPRESSION_OPCODE_COUNT
+				|| op->destination >= p->expressionRegisterCount ) return qfalse;
+		switch ( op->opcode ) {
+		case RAL_MATERIAL_EXPRESSION_UNMASKED_MOVE_CONSTANT:
+			if ( op->a >= p->expressionConstantCount || op->b ) return qfalse;
+			break;
+		case RAL_MATERIAL_EXPRESSION_UNMASKED_MOVE:
+			if ( op->a >= p->expressionRegisterCount || op->b ) return qfalse;
+			break;
+		case RAL_MATERIAL_EXPRESSION_MOVE_CONSTANT:
+			if ( op->a >= p->expressionConstantCount || !( op->b & 15u )
+					|| ( op->b & ~15u ) ) return qfalse;
+			break;
+		case RAL_MATERIAL_EXPRESSION_MOVE:
+			if ( op->a >= p->expressionRegisterCount || !( op->b & 15u )
+					|| ( op->b & ~15u ) ) return qfalse;
+			break;
+		case RAL_MATERIAL_EXPRESSION_SWIZZLE:
+			if ( op->a >= p->expressionRegisterCount || ( op->b & ~255u ) )
+				return qfalse;
+			break;
+		case RAL_MATERIAL_EXPRESSION_TABLE:
+			if ( op->a >= p->expressionRegisterCount
+					|| op->b >= p->expressionTableCount ) return qfalse;
+			break;
+		default:
+			if ( op->a >= p->expressionRegisterCount
+					|| op->b >= p->expressionRegisterCount ) return qfalse;
+			break;
+		}
+	}
+	for ( i = 0u; i < p->expressionFieldCount; ++i ) {
+		const ralMaterialExpressionField_t *field = &p->expressionFields[i];
+		uint32_t inlineEnd, outputEnd;
+		if ( !FieldNameValid( field->name ) || field->reserved
+				|| field->registerIndex >= p->expressionRegisterCount
+				|| !field->componentCount || field->componentCount > 4u
+				|| ( field->inlineByteOffset & 3u ) ) return qfalse;
+		inlineEnd = field->inlineByteOffset + field->componentCount * 4u;
+		outputEnd = field->outputValueOffset + field->componentCount;
+		if ( inlineEnd > RAL_MATERIAL_PROXY_INLINE_MAX_BYTES
+				|| outputEnd > RAL_MATERIAL_PROXY_VALUE_COUNT )
+			return qfalse;
+		for ( j = 0u; j < i; ++j ) {
+			const ralMaterialExpressionField_t *previous =
+				&p->expressionFields[j];
+			uint32_t previousInlineEnd = previous->inlineByteOffset
+				+ previous->componentCount * 4u;
+			uint32_t previousOutputEnd = previous->outputValueOffset
+				+ previous->componentCount;
+			if ( !strcmp( field->name, previous->name )
+					|| ( field->inlineByteOffset < previousInlineEnd
+						&& previous->inlineByteOffset < inlineEnd )
+					|| ( field->outputValueOffset < previousOutputEnd
+						&& previous->outputValueOffset < outputEnd ) ) return qfalse;
+		}
+	}
+	return qtrue;
+}
+
+static qboolean ProgramValid( const ralMaterialProxyProgram_t *p ) {
+	if ( !p || !p->materialArtifactHash
+			|| ( p->schemaVersion != RAL_MATERIAL_PROXY_LEGACY_SCHEMA_VERSION
+				&& p->schemaVersion != RAL_MATERIAL_PROXY_SCHEMA_VERSION ) )
+		return qfalse;
+	if ( p->expressionInstructionCount || p->expressionFieldCount
+			|| p->expressionRegisterCount || p->expressionConstantCount
+			|| p->expressionTableCount ) return ExpressionProgramValid( p );
+	return LegacyProgramValid( p );
+}
+
 static uint64_t ProgramHash( const ralMaterialProxyProgram_t *p ) {
 	uint64_t h=FNV64_OFFSET;uint32_t i;
 	h=HashU32(h,RAL_MATERIAL_PROXY_RECEIPT_SCHEMA_VERSION);
+	h=HashU32(h,p->schemaVersion);
 	h=HashU64(h,p->materialArtifactHash);h=HashU32(h,p->instructionCount);
 	for(i=0u;i<p->instructionCount;i++){
 		const ralMaterialProxyInstruction_t*v=&p->instructions[i];
 		h=HashU32(h,(uint32_t)v->target);h=HashU32(h,(uint32_t)v->opcode);
 		h=HashU32(h,(uint32_t)v->input);h=HashU32(h,(uint32_t)v->aQ16);
 		h=HashU32(h,(uint32_t)v->bQ16);h=HashU32(h,(uint32_t)v->cQ16);
+	}
+	h=HashU32(h,p->expressionRegisterCount);
+	h=HashU32(h,p->expressionConstantCount);
+	for(i=0u;i<p->expressionConstantCount;i++){
+		uint32_t lane;for(lane=0u;lane<4u;lane++)h=HashU32(h,
+			(uint32_t)p->expressionConstants[i].lane[lane]);
+	}
+	h=HashU32(h,p->expressionInstructionCount);
+	for(i=0u;i<p->expressionInstructionCount;i++){
+		const ralMaterialExpressionInstruction_t *op=&p->expressionInstructions[i];
+		h=HashU32(h,op->opcode);h=HashU32(h,op->destination);
+		h=HashU32(h,op->a);h=HashU32(h,op->b);
+	}
+	h=HashU32(h,p->expressionFieldCount);
+	for(i=0u;i<p->expressionFieldCount;i++){
+		const ralMaterialExpressionField_t *field=&p->expressionFields[i];
+		uint32_t character;
+		for(character=0u;character<RAL_MATERIAL_PROXY_FIELD_NAME;character++)
+			h=HashByte(h,(unsigned char)field->name[character]);
+		h=HashU32(h,field->registerIndex);h=HashU32(h,field->inlineByteOffset);
+		h=HashU32(h,field->componentCount);h=HashU32(h,field->outputValueOffset);
+	}
+	h=HashU32(h,p->expressionTableCount);
+	for(i=0u;i<p->expressionTableCount;i++){
+		uint32_t sample;h=HashU32(h,p->expressionTables[i].sampleCount);
+		h=HashU32(h,p->expressionTables[i].flags);
+		for(sample=0u;sample<p->expressionTables[i].sampleCount;sample++)
+			h=HashU32(h,(uint32_t)p->expressionTables[i].samplesQ16[sample]);
 	}
 	return h?h:1u;
 }
@@ -104,6 +239,158 @@ static qboolean BaseValues( const ralMaterialReceipt_t*m,int32_t*v ) {
 		&&FloatQ16(m->material.renderPolicy.alphaCutoff,&v[11]);
 }
 
+static qboolean Sub( int32_t a, int32_t b, int32_t *out ) {
+	int64_t value = (int64_t)a - b;
+	if ( value < INT32_MIN || value > INT32_MAX ) return qfalse;
+	*out = (int32_t)value; return qtrue;
+}
+
+static qboolean Div( int32_t a, int32_t b, int32_t *out ) {
+	int64_t value;
+	if ( !b ) return qfalse;
+	value = ( (int64_t)a * RAL_MATERIAL_PROXY_Q16_ONE ) / b;
+	if ( value < INT32_MIN || value > INT32_MAX ) return qfalse;
+	*out = (int32_t)value; return qtrue;
+}
+
+static qboolean Mod( int32_t a, int32_t b, int32_t *out ) {
+	if ( !b || ( a == INT32_MIN && b == -1 ) ) return qfalse;
+	*out = a % b; return qtrue;
+}
+
+static qboolean ExpressionBinaryLane( uint16_t opcode, int32_t a, int32_t b,
+		int32_t *out ) {
+	switch ( opcode ) {
+	case RAL_MATERIAL_EXPRESSION_ADD: return Add( a, b, out );
+	case RAL_MATERIAL_EXPRESSION_SUBTRACT: return Sub( a, b, out );
+	case RAL_MATERIAL_EXPRESSION_MULTIPLY: return Mul( a, b, out );
+	case RAL_MATERIAL_EXPRESSION_DIVIDE: return Div( a, b, out );
+	case RAL_MATERIAL_EXPRESSION_MOD: return Mod( a, b, out );
+	case RAL_MATERIAL_EXPRESSION_GT: *out = a > b ? RAL_MATERIAL_PROXY_Q16_ONE : 0; return qtrue;
+	case RAL_MATERIAL_EXPRESSION_GE: *out = a >= b ? RAL_MATERIAL_PROXY_Q16_ONE : 0; return qtrue;
+	case RAL_MATERIAL_EXPRESSION_LT: *out = a < b ? RAL_MATERIAL_PROXY_Q16_ONE : 0; return qtrue;
+	case RAL_MATERIAL_EXPRESSION_LE: *out = a <= b ? RAL_MATERIAL_PROXY_Q16_ONE : 0; return qtrue;
+	case RAL_MATERIAL_EXPRESSION_EQ: *out = a == b ? RAL_MATERIAL_PROXY_Q16_ONE : 0; return qtrue;
+	case RAL_MATERIAL_EXPRESSION_NE: *out = a != b ? RAL_MATERIAL_PROXY_Q16_ONE : 0; return qtrue;
+	case RAL_MATERIAL_EXPRESSION_AND: *out = a && b ? RAL_MATERIAL_PROXY_Q16_ONE : 0; return qtrue;
+	case RAL_MATERIAL_EXPRESSION_OR: *out = a || b ? RAL_MATERIAL_PROXY_Q16_ONE : 0; return qtrue;
+	default: return qfalse;
+	}
+}
+
+static qboolean ExpressionTableLane( const ralMaterialExpressionTable_t *table,
+		int32_t coordinate, int32_t *out ) {
+	uint32_t interval, fraction, intervalCount;
+	int64_t scaled;
+	if ( table->flags & RAL_MATERIAL_EXPRESSION_TABLE_WRAP ) {
+		coordinate %= RAL_MATERIAL_PROXY_Q16_ONE;
+		if ( coordinate < 0 ) coordinate += RAL_MATERIAL_PROXY_Q16_ONE;
+	} else {
+		if ( coordinate <= 0 ) { *out = table->samplesQ16[0]; return qtrue; }
+		if ( coordinate >= RAL_MATERIAL_PROXY_Q16_ONE ) {
+			*out = table->samplesQ16[table->sampleCount - 1u]; return qtrue;
+		}
+	}
+	intervalCount = ( table->flags & RAL_MATERIAL_EXPRESSION_TABLE_WRAP )
+		? table->sampleCount : table->sampleCount - 1u;
+	scaled = (int64_t)coordinate * intervalCount;
+	interval = (uint32_t)( scaled / RAL_MATERIAL_PROXY_Q16_ONE );
+	if ( table->flags & RAL_MATERIAL_EXPRESSION_TABLE_SNAP ) {
+		if ( interval >= table->sampleCount ) interval = table->sampleCount - 1u;
+		*out = table->samplesQ16[interval]; return qtrue;
+	}
+	fraction = (uint32_t)( scaled % RAL_MATERIAL_PROXY_Q16_ONE );
+	return Lerp( table->samplesQ16[interval],
+		table->samplesQ16[( interval + 1u ) % table->sampleCount],
+		(int32_t)fraction, out );
+}
+
+static qboolean EvaluateExpression( const ralMaterialReceipt_t *material,
+		const ralMaterialProxyProgram_t *program,
+		const ralMaterialProxyInputs_t *inputs, int32_t *outValues ) {
+	ralMaterialExpressionValue_t registers[
+		RAL_MATERIAL_PROXY_EXPRESSION_MAX_REGISTERS];
+	int32_t baseValues[RAL_MATERIAL_PROXY_BASE_VALUE_COUNT];
+	uint32_t i, lane;
+	uint64_t timeQ16;
+	memset( registers, 0, sizeof( registers ) );
+	if ( !BaseValues( material, baseValues )
+			|| inputs->timeMilliseconds > UINT64_MAX / RAL_MATERIAL_PROXY_Q16_ONE )
+		return qfalse;
+	timeQ16 = inputs->timeMilliseconds * RAL_MATERIAL_PROXY_Q16_ONE / 1000u;
+	if ( timeQ16 > INT32_MAX ) return qfalse;
+	for ( lane = 0u; lane < 4u; ++lane ) {
+		registers[RAL_MATERIAL_PROXY_REGISTER_TIME].lane[lane] = (int32_t)timeQ16;
+		registers[RAL_MATERIAL_PROXY_REGISTER_SCALAR].lane[lane] = inputs->scalarQ16;
+	}
+	for ( i = 0u; i < RAL_MATERIAL_PROXY_BASE_VALUE_COUNT; ++i )
+		for ( lane = 0u; lane < 4u; ++lane )
+			registers[RAL_MATERIAL_PROXY_REGISTER_BASE_VALUES + i].lane[lane]
+				= baseValues[i];
+	for ( i = 0u; i < program->expressionInstructionCount; ++i ) {
+		const ralMaterialExpressionInstruction_t *op =
+			&program->expressionInstructions[i];
+		ralMaterialExpressionValue_t result = registers[op->destination];
+		const ralMaterialExpressionValue_t *a;
+		const ralMaterialExpressionValue_t *b;
+		switch ( op->opcode ) {
+		case RAL_MATERIAL_EXPRESSION_UNMASKED_MOVE_CONSTANT:
+			result = program->expressionConstants[op->a]; break;
+		case RAL_MATERIAL_EXPRESSION_UNMASKED_MOVE:
+			result = registers[op->a]; break;
+		case RAL_MATERIAL_EXPRESSION_MOVE_CONSTANT:
+			for ( lane = 0u; lane < 4u; ++lane ) if ( op->b & ( 1u << lane ) )
+				result.lane[lane] = program->expressionConstants[op->a].lane[lane];
+			break;
+		case RAL_MATERIAL_EXPRESSION_MOVE:
+			for ( lane = 0u; lane < 4u; ++lane ) if ( op->b & ( 1u << lane ) )
+				result.lane[lane] = registers[op->a].lane[lane];
+			break;
+		case RAL_MATERIAL_EXPRESSION_SWIZZLE:
+			a = &registers[op->a];
+			for ( lane = 0u; lane < 4u; ++lane )
+				result.lane[lane] = a->lane[( op->b >> ( lane * 2u ) ) & 3u];
+			break;
+		case RAL_MATERIAL_EXPRESSION_DOT3:
+		case RAL_MATERIAL_EXPRESSION_DOT4: {
+			int64_t sum = 0;
+			uint32_t componentCount = op->opcode == RAL_MATERIAL_EXPRESSION_DOT3
+				? 3u : 4u;
+			a = &registers[op->a]; b = &registers[op->b];
+			for ( lane = 0u; lane < componentCount; ++lane )
+				sum += ( (int64_t)a->lane[lane] * b->lane[lane] )
+					/ RAL_MATERIAL_PROXY_Q16_ONE;
+			if ( sum < INT32_MIN || sum > INT32_MAX ) return qfalse;
+			for ( lane = 0u; lane < 4u; ++lane ) result.lane[lane] = (int32_t)sum;
+			break;
+		}
+		case RAL_MATERIAL_EXPRESSION_TABLE:
+			a = &registers[op->a];
+			for ( lane = 0u; lane < 4u; ++lane ) if ( !ExpressionTableLane(
+					&program->expressionTables[op->b], a->lane[lane],
+					&result.lane[lane] ) ) return qfalse;
+			break;
+		default:
+			a = &registers[op->a]; b = &registers[op->b];
+			for ( lane = 0u; lane < 4u; ++lane ) if ( !ExpressionBinaryLane(
+					op->opcode, a->lane[lane], b->lane[lane],
+					&result.lane[lane] ) ) return qfalse;
+			break;
+		}
+		registers[op->destination] = result;
+	}
+	memset( outValues, 0,
+		RAL_MATERIAL_PROXY_VALUE_COUNT * sizeof( outValues[0] ) );
+	memcpy( outValues, baseValues, sizeof( baseValues ) );
+	for ( i = 0u; i < program->expressionFieldCount; ++i ) {
+		const ralMaterialExpressionField_t *field = &program->expressionFields[i];
+		for ( lane = 0u; lane < field->componentCount; ++lane )
+			outValues[field->outputValueOffset + lane]
+				= registers[field->registerIndex].lane[lane];
+	}
+	return qtrue;
+}
+
 qboolean Ral_MaterialProxyEvaluate( const ralMaterialReceipt_t *material,
 		const ralMaterialProxyProgramReceipt_t *program,
 		const ralMaterialProxyInputs_t *inputs, ralMaterialProxyDomain_t domain,
@@ -116,7 +403,11 @@ qboolean Ral_MaterialProxyEvaluate( const ralMaterialReceipt_t *material,
 			||inputs->scalarQ16>RAL_MATERIAL_PROXY_Q16_ONE
 			||!Ral_MaterialReceiptValid(material)||!Ral_MaterialProxyProgramReceiptValid(program)
 			||program->program.materialArtifactHash!=material->artifactHash)return qfalse;
-	memset(&v,0,sizeof(v));if(!BaseValues(material,v.valuesQ16))return qfalse;
+	memset(&v,0,sizeof(v));
+	if(program->program.expressionInstructionCount){
+		if(!EvaluateExpression(material,&program->program,inputs,v.valuesQ16))return qfalse;
+	}else{
+	if(!BaseValues(material,v.valuesQ16))return qfalse;
 	for(i=0u;i<program->program.instructionCount;i++){
 		const ralMaterialProxyInstruction_t*p=&program->program.instructions[i];
 		int32_t *value=&v.valuesQ16[p->target],temp;
@@ -137,6 +428,7 @@ qboolean Ral_MaterialProxyEvaluate( const ralMaterialReceipt_t *material,
 			break;}
 		default:return qfalse;
 		}
+	}
 	}
 	v.schemaVersion=RAL_MATERIAL_PROXY_EVALUATION_SCHEMA_VERSION;
 	v.evaluationGeneration=inputs->evaluationGeneration;v.materialArtifactHash=material->artifactHash;

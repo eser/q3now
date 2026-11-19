@@ -35,10 +35,11 @@ EULA: same gate as ` + "`q3now assets download`" + `.`,
 		}
 
 		q3path, _ := cmd.Flags().GetString("q3path")
+		materialCookDir, _ := cmd.Flags().GetString("material-cook-dir")
 
 		reporter := NewStdoutReporter("import")
 		return pipeline.RunImport(cmd.Context(), paths,
-			pipeline.ImportOpts{Q3Path: q3path}, reporter)
+			pipeline.ImportOpts{Q3Path: q3path, MaterialCookDir: materialCookDir}, reporter)
 	},
 }
 
@@ -46,6 +47,9 @@ func init() {
 	assetsImportCmd.Flags().String("q3path", "",
 		"Path to a full Quake III Arena install root (containing base/pak0.pk3). "+
 			"When set, pax02 and pax04 are produced alongside pax01. Optional.")
+	assetsImportCmd.Flags().String("material-cook-dir", "",
+		"Engine-produced materials/cooked directory to snapshot into pax02. "+
+			"Requires --q3path; receipts are validated by the Release runtime.")
 	assetsImportCmd.Flags().Bool("accept-eula", false,
 		"Record acceptance of the id Software demo EULA. Required on first run.")
 	assetsCmd.AddCommand(assetsImportCmd)

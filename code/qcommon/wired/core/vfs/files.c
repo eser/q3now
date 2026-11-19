@@ -5810,7 +5810,7 @@ fsMountResult_t FS_MountLayer( const char *path, const char *dir,
 			|| FS_CheckDirTraversal( dir ) || strchr( dir, '/' )
 			|| strchr( dir, '\\' ) || strchr( dir, ':' ) )
 		return FS_MOUNT_INVALID_ARGUMENT;
-	if ( !WiredScript_GetState() ) return FS_MOUNT_LIFECYCLE_UNAVAILABLE;
+	if ( !WiredScript_FileAliasCatalogReady() ) return FS_MOUNT_LIFECYCLE_UNAVAILABLE;
 	existingScope = FS_ScopeMounted( scopeId );
 	scopeState = existingScope ? FS_FindScopeState( scopeId ) : NULL;
 	/* One lifecycle scope may contain multiple physical roots (normally the
@@ -6074,7 +6074,7 @@ fsMountResult_t FS_SetScopePurePolicy( fsMountScopeId_t scopeId,
 			|| ( policy->approvedChecksumCount && !policy->approvedChecksums ) ) {
 		return FS_MOUNT_INVALID_ARGUMENT;
 	}
-	if ( !WiredScript_GetState() ) return FS_MOUNT_LIFECYCLE_UNAVAILABLE;
+	if ( !WiredScript_FileAliasCatalogReady() ) return FS_MOUNT_LIFECYCLE_UNAVAILABLE;
 	previous = FS_FindScopeState( scopeId );
 	if ( !previous ) return FS_MOUNT_SCOPE_NOT_FOUND;
 	/* A gamestate/receipt may be replayed for every map on one connection.
@@ -6106,7 +6106,7 @@ fsMountResult_t FS_UnmountScope( fsMountScopeId_t scopeId,
 	unsigned liveHandles;
 	if ( outLiveHandleCount ) *outLiveHandleCount = 0u;
 	if ( scopeId == FS_MOUNT_SCOPE_GLOBAL ) return FS_MOUNT_INVALID_ARGUMENT;
-	if ( !WiredScript_GetState() ) return FS_MOUNT_LIFECYCLE_UNAVAILABLE;
+	if ( !WiredScript_FileAliasCatalogReady() ) return FS_MOUNT_LIFECYCLE_UNAVAILABLE;
 	if ( !FS_ScopeMounted( scopeId ) ) return FS_MOUNT_SCOPE_NOT_FOUND;
 	liveHandles = FS_CountScopeHandles( scopeId );
 	if ( liveHandles ) {

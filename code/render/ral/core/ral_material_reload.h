@@ -4,6 +4,7 @@
 #ifndef WIRED_RAL_MATERIAL_RELOAD_H
 #define WIRED_RAL_MATERIAL_RELOAD_H
 
+#include "ral_material_cook.h"
 #include "ral_material_proxy.h"
 #include "ral_material_runtime.h"
 
@@ -40,6 +41,14 @@ typedef struct {
 } ralMaterialReloadCandidate_t;
 
 typedef struct {
+	const ralMaterialCookReceipt_t *cook;
+	const ralTextureResourceReceipt_t *resources;
+	uint32_t resourceCount;
+	uint64_t runtimeGeneration;
+	const ralMaterialProxyProgram_t *proxyProgram;
+} ralMaterialReloadCookedCandidate_t;
+
+typedef struct {
 	uint32_t schemaVersion;
 	uint64_t transactionGeneration;
 	ralMaterialRuntimePlan_t fallbackPlan;
@@ -57,6 +66,9 @@ qboolean Ral_MaterialReloadOwnerValid( const ralMaterialReloadOwner_t *owner );
 qboolean Ral_MaterialReloadTry( ralMaterialReloadOwner_t *owner,
 	const ralMaterialReloadCandidate_t *candidate, uint64_t transactionGeneration,
 	ralMaterialReloadReceipt_t *outReceipt );
+qboolean Ral_MaterialReloadTryCooked( ralMaterialReloadOwner_t *owner,
+	const ralMaterialReloadCookedCandidate_t *candidate,
+	uint64_t transactionGeneration, ralMaterialReloadReceipt_t *outReceipt );
 qboolean Ral_MaterialReloadAcknowledge( ralMaterialReloadOwner_t *owner,
 	const ralMaterialReloadReceipt_t *receipt );
 qboolean Ral_MaterialReloadReceiptValid( const ralMaterialReloadReceipt_t *receipt );
