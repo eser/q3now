@@ -7,6 +7,7 @@
 #include "qcommon.h"
 #include "wired/core/logging/log.h"
 #include "wired/stalltrace.h"
+#include "wired/frame_interval_stats.h"
 #include "wired/wired_build_stamp.h"
 #include "maps/meta.h"
 #include "crash.h"
@@ -3135,8 +3136,11 @@ void Com_Init( char *commandLine ) {
 		com_timescale = Cvar_Register( &d );
 	}
 	{
-		static const cvarDesc_t d = CVAR_BOOL( "fixedtime", "0", CVAR_CHEAT,
-			"Toggle the rendering of every frame the game will wait until each frame is completely rendered before sending the next frame." );
+		/* Milliseconds advanced per frame (0 = real time). An integer, not a
+		 * toggle: Com_Frame consumes the value as msec, and the capture
+		 * harnesses pin the clock with `set fixedtime 8`. */
+		static const cvarDesc_t d = CVAR_INT( "fixedtime", "0", CVAR_CHEAT,
+			"Advance the game clock by a fixed number of milliseconds per frame instead of real time (0 = off). Deterministic captures and demos.", 0, 1000 );
 		com_fixedtime = Cvar_Register( &d );
 	}
 	{
@@ -3452,10 +3456,13 @@ void Com_Frame( qboolean noDelay ) {
 	static uint64_t diagClientUsec;
 	static clProfile_t diagClientProfile;
 	static uint32_t diagFrameCount;
+	static uint64_t diagEpochFrames;
+	static uint32_t diagFocusedCount, diagMinimizedCount;
 	static uint32_t diagBucket;
 	static uint32_t diagWorkHistogram[10];
 	static uint64_t diagMaxWorkUsec;
 	static qboolean diagActive;
+	static wired_frame_interval_stats_t diagIntervals;
 
 #ifndef HEADLESS
 	static int biasUsec = 0;
@@ -3747,15 +3754,18 @@ void Com_Frame( qboolean noDelay ) {
 		uint64_t frameWorkUsec;
 		uint32_t workBin = 0u;
 		if ( !diagActive ) {
+			memset( &diagIntervals, 0, sizeof( diagIntervals ) );
 			diagWorkUsec = diagScrUsec = 0;
 			diagServerUsec = diagEventsUsec = diagClientUsec = 0;
 			memset( &diagClientProfile, 0, sizeof( diagClientProfile ) );
 			memset( diagWorkHistogram, 0, sizeof( diagWorkHistogram ) );
 			diagMaxWorkUsec = 0u;
 			diagFrameCount = 0;
+			diagEpochFrames = 0;
 			diagActive = qtrue;
 		}
 		frameWorkUsec = (uint64_t)( timeAfterNsec - timeBeforeServerNsec ) / 1000;
+		wired_frame_interval_record( &diagIntervals, (uint64_t)timeAfterNsec );
 		diagWorkUsec += frameWorkUsec;
 		while ( workBin < ARRAY_LEN( workUpperUsec )
 				&& frameWorkUsec >= workUpperUsec[workBin] ) workBin++;
@@ -3784,56 +3794,82 @@ void Com_Frame( qboolean noDelay ) {
 		DIAG_CLIENT_ACCUM( snapdg );
 		DIAG_CLIENT_ACCUM( chkpkt );
 #undef DIAG_CLIENT_ACCUM
+		if ( !diagFrameCount ) diagFocusedCount = diagMinimizedCount = 0u;
+#ifndef HEADLESS
+		diagFocusedCount += gw_active ? 1u : 0u;
+#endif
+		diagMinimizedCount += gw_minimized ? 1u : 0u;
 		diagFrameCount++;
-		if ( diagFrameCount == 200 ) {
-			diagBucket++;
-			Com_Log( SEV_INFO, LOG_CH(ch_system),
-				"frame trace (200f): bucket=%u count=%u valid=%u cpu_work_total=%lluus scr_end_total=%lluus\n",
-				diagBucket,
-				diagFrameCount, diagFrameCount,
-				(unsigned long long)diagWorkUsec,
-				(unsigned long long)diagScrUsec );
-			Com_Log( SEV_INFO, LOG_CH(ch_system),
-				"frame phase trace (200f): bucket=%u server_total=%lluus events_total=%lluus client_total=%lluus\n",
-				diagBucket,
-				(unsigned long long)diagServerUsec,
-				(unsigned long long)diagEventsUsec,
-				(unsigned long long)diagClientUsec );
-			Com_Log( SEV_INFO, LOG_CH(ch_system),
-				"frame work distribution (200f): bucket=%u lt1ms=%u lt2ms=%u lt4ms=%u lt8ms=%u lt12ms=%u lt16_667ms=%u lt24ms=%u lt33_334ms=%u lt50ms=%u ge50ms=%u max_us=%llu\n",
-				diagBucket,
-				diagWorkHistogram[0], diagWorkHistogram[1],
-				diagWorkHistogram[2], diagWorkHistogram[3],
-				diagWorkHistogram[4], diagWorkHistogram[5],
-				diagWorkHistogram[6], diagWorkHistogram[7],
-				diagWorkHistogram[8], diagWorkHistogram[9],
-				(unsigned long long)diagMaxWorkUsec );
-			Com_Log( SEV_INFO, LOG_CH(ch_system),
-				"client component trace (200f): bucket=%u store=%d send=%d resend=%d cgtime=%d cgr=%d whud=%d wui=%d cons=%d sound=%d scrextra=%d endframe=%d userinfo=%d misc=%d wnframe=%d relstr=%d snapdg=%d chkpkt=%d\n",
-				diagBucket,
-				diagClientProfile.store, diagClientProfile.send,
-				diagClientProfile.resend, diagClientProfile.cgtime,
-				diagClientProfile.cgr, diagClientProfile.whud,
-				diagClientProfile.wui, diagClientProfile.cons,
-				diagClientProfile.sound, diagClientProfile.scrextra,
-				diagClientProfile.endframe, diagClientProfile.userinfo,
-				diagClientProfile.misc, diagClientProfile.wnframe,
-				diagClientProfile.relstr, diagClientProfile.snapdg,
-				diagClientProfile.chkpkt );
-			diagWorkUsec = diagScrUsec = 0;
-			diagServerUsec = diagEventsUsec = diagClientUsec = 0;
-			memset( &diagClientProfile, 0, sizeof( diagClientProfile ) );
-			memset( diagWorkHistogram, 0, sizeof( diagWorkHistogram ) );
-			diagMaxWorkUsec = 0u;
-			diagFrameCount = 0;
-		}
-	} else if ( diagActive ) {
+		diagEpochFrames++;
+	}
+	/* A wall-clock capture rarely ends on a 200-frame boundary. Flush its
+	 * final partial bucket on disable instead of silently losing that tail.
+	 * The disabling frame is outside the measured epoch. No GPU wait is added. */
+	if ( diagFrameCount == 200 || ( diagActive && !com_perfTrace->integer && diagFrameCount ) ) {
+		diagBucket++;
+		/* One bounded row per existing bucket, never per-frame logging.
+		 * The first epoch bucket has 199 intervals from 200 endpoints. */
+		char intervalBins[WIRED_FRAME_INTERVAL_BINS * 12u];
+		size_t intervalOffset = 0;
+		for ( uint32_t i = 0; i < WIRED_FRAME_INTERVAL_BINS; ++i )
+			intervalOffset += (size_t)snprintf( intervalBins + intervalOffset,
+				sizeof( intervalBins ) - intervalOffset, "%s%u",
+				i ? "," : "", diagIntervals.bins[i] );
+		Com_Log( SEV_INFO, LOG_CH(ch_system),
+			"frame intervals v1: bucket=%u count=%u invalid=%u total_ns=%llu max_ns=%llu gt4ms=%u bins=%s\n",
+			diagBucket, diagIntervals.count, diagIntervals.invalid,
+			(unsigned long long)diagIntervals.totalNs,
+			(unsigned long long)diagIntervals.maxNs,
+			diagIntervals.overBudget, intervalBins );
+		wired_frame_interval_clear_window( &diagIntervals );
+		Com_Log( SEV_INFO, LOG_CH(ch_system),
+			"frame window context v1: bucket=%u count=%u focused=%u minimized=%u automated=%d\n",
+			diagBucket, diagFrameCount, diagFocusedCount, diagMinimizedCount,
+			com_automated->integer ? 1 : 0 );
+		Com_Log( SEV_INFO, LOG_CH(ch_system),
+			"frame trace (%uf): bucket=%u count=%u valid=%u cpu_work_total=%lluus scr_end_total=%lluus\n",
+			diagFrameCount, diagBucket,
+			diagFrameCount, diagFrameCount,
+			(unsigned long long)diagWorkUsec,
+			(unsigned long long)diagScrUsec );
+		Com_Log( SEV_INFO, LOG_CH(ch_system),
+			"frame phase trace (%uf): bucket=%u server_total=%lluus events_total=%lluus client_total=%lluus\n",
+			diagFrameCount, diagBucket,
+			(unsigned long long)diagServerUsec,
+			(unsigned long long)diagEventsUsec,
+			(unsigned long long)diagClientUsec );
+		Com_Log( SEV_INFO, LOG_CH(ch_system),
+			"frame work distribution (%uf): bucket=%u lt1ms=%u lt2ms=%u lt4ms=%u lt8ms=%u lt12ms=%u lt16_667ms=%u lt24ms=%u lt33_334ms=%u lt50ms=%u ge50ms=%u max_us=%llu\n",
+			diagFrameCount, diagBucket,
+			diagWorkHistogram[0], diagWorkHistogram[1],
+			diagWorkHistogram[2], diagWorkHistogram[3],
+			diagWorkHistogram[4], diagWorkHistogram[5],
+			diagWorkHistogram[6], diagWorkHistogram[7],
+			diagWorkHistogram[8], diagWorkHistogram[9],
+			(unsigned long long)diagMaxWorkUsec );
+		Com_Log( SEV_INFO, LOG_CH(ch_system),
+			"client component trace (%uf): bucket=%u store=%d send=%d resend=%d cgtime=%d cgr=%d whud=%d wui=%d cons=%d sound=%d scrextra=%d endframe=%d userinfo=%d misc=%d wnframe=%d relstr=%d snapdg=%d chkpkt=%d\n",
+			diagFrameCount, diagBucket,
+			diagClientProfile.store, diagClientProfile.send,
+			diagClientProfile.resend, diagClientProfile.cgtime,
+			diagClientProfile.cgr, diagClientProfile.whud,
+			diagClientProfile.wui, diagClientProfile.cons,
+			diagClientProfile.sound, diagClientProfile.scrextra,
+			diagClientProfile.endframe, diagClientProfile.userinfo,
+			diagClientProfile.misc, diagClientProfile.wnframe,
+			diagClientProfile.relstr, diagClientProfile.snapdg,
+			diagClientProfile.chkpkt );
 		diagWorkUsec = diagScrUsec = 0;
 		diagServerUsec = diagEventsUsec = diagClientUsec = 0;
 		memset( &diagClientProfile, 0, sizeof( diagClientProfile ) );
 		memset( diagWorkHistogram, 0, sizeof( diagWorkHistogram ) );
 		diagMaxWorkUsec = 0u;
 		diagFrameCount = 0;
+	}
+	if ( diagActive && !com_perfTrace->integer ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_system),
+			"frame trace end v1: bucket=%u frames=%llu\n",
+			diagBucket, (unsigned long long)diagEpochFrames );
 		diagActive = qfalse;
 	}
 

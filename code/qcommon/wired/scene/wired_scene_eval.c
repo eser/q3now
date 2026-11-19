@@ -355,6 +355,7 @@ static float WiredSceneEval_Resolve( wiredScenePlayback_t *pb, float wallSec ) {
 
 	/* reset the per-call derived cursor (signals stay latched) */
 	pb->curTargetIndex = -1;
+	pb->cameraCutRevision = 0;
 	pb->fovEventActive = 0;
 	/* director state defaults for a scene: third-person off, HUD hidden, not
 	   frozen — the events toggle these on; re-derived so a rewind un-does them. */
@@ -396,6 +397,7 @@ static float WiredSceneEval_Resolve( wiredScenePlayback_t *pb, float wallSec ) {
 			case WSCENE_EV_TARGET: {
 				int idx = WiredSceneEval_FindTarget( def, ev->sparam );
 				if ( idx >= 0 ) {
+					if ( idx != pb->curTargetIndex ) pb->cameraCutRevision++;
 					pb->curTargetIndex = idx;   /* unknown name leaves the previous */
 				}
 				break;
@@ -412,6 +414,10 @@ static float WiredSceneEval_Resolve( wiredScenePlayback_t *pb, float wallSec ) {
 				                               pb->fovEventStartMs * 0.001f, fireSec )
 				    : WiredSceneEval_AuthoredFov( def, fireSec );
 				pb->fovEventFrom    = seed;
+				/* Continuous zooms retain history; an instantaneous authored
+				 * projection change does not. No-op events leave it intact. */
+				if ( ev->fparam2 <= 0.0f && ev->fparam != seed )
+					pb->cameraCutRevision++;
 				pb->fovEventActive  = 1;
 				pb->fovEventTarget  = ev->fparam;
 				pb->fovEventLenSec  = ( ev->fparam2 > 0.0f ) ? ev->fparam2 : 0.0f;

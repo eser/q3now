@@ -1147,6 +1147,8 @@ extern	vmCvar_t	pm_step_debug;
 extern	vmCvar_t	g_rankings;
 extern	vmCvar_t	g_envGroundDusty;
 extern	vmCvar_t	g_envTemperature;
+extern	vmCvar_t	g_envSunElevation;
+extern	vmCvar_t	g_envSunAzimuth;
 extern	vmCvar_t	g_localTeamPref;
 extern  vmCvar_t	g_instagib;
 extern  vmCvar_t	g_excessive;
@@ -1556,6 +1558,11 @@ extern  vmCvar_t	g_ptl;
 #endif
 #if FEAT_ATMOSPHERIC
 extern  vmCvar_t	g_envWeather;
+extern  vmCvar_t	g_envSkyMode;
+extern  vmCvar_t	g_envDistantSkyMap;
+extern  vmCvar_t	g_envDistantSkyOrigin;
+extern  vmCvar_t	g_envDistantSkyScale;
+extern  vmCvar_t	g_envDistantSkyLodBias;
 #endif
 #if FEAT_GAME_MEETING
 extern  vmCvar_t	g_meeting;

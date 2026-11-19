@@ -620,20 +620,58 @@ static uint32_t CM_Checksum( const dheader_t *header ) {
 }
 #endif
 
-static void CM_ValidateTree_r( byte *visited, int node ) {
+static void CM_ValidateTree_r( byte *visited, int node, const char *context ) {
 	while ( node >= 0 ) {
+		if ( node >= cm.numNodes )
+			Com_Terminate( TERM_CLIENT_DROP,
+				"CM_ValidateMap(%s): node %d outside [0,%d)",
+				context, node, cm.numNodes );
 		if ( visited[node] )
-			Com_Terminate( TERM_CLIENT_DROP, "%s: cycle encountered", __func__ );
+			Com_Terminate( TERM_CLIENT_DROP,
+				"CM_ValidateMap(%s): cycle at node %d", context, node );
 		visited[node] = 1;
-		CM_ValidateTree_r( visited, cm.nodes[node].children[0] );
+		CM_ValidateTree_r( visited, cm.nodes[node].children[0], context );
 		node = cm.nodes[node].children[1];
 	}
+	if ( -1 - node >= cm.numLeafs )
+		Com_Terminate( TERM_CLIENT_DROP,
+			"CM_ValidateMap(%s): leaf %d outside [0,%d)",
+			context, -1 - node, cm.numLeafs );
 }
 
-static void CM_ValidateTree( void ) {
+void CM_ValidateMap( const char *context ) {
+	int i;
+	if ( !context ) context = "unknown";
+	if ( cm.numNodes <= 0 || !cm.nodes || cm.numLeafs <= 0 || !cm.leafs ||
+		cm.numBrushes < 0 || !cm.brushes || cm.numLeafBrushes < 0 || !cm.leafbrushes )
+		Com_Terminate( TERM_CLIENT_DROP,
+			"CM_ValidateMap(%s): incomplete collision world", context );
+	for ( i = 0; i < cm.numLeafs; ++i ) {
+		const cLeaf_t *leaf = &cm.leafs[i];
+		int j;
+		if ( leaf->firstLeafBrush < 0 || leaf->numLeafBrushes < 0 ||
+			leaf->firstLeafBrush > cm.numLeafBrushes - leaf->numLeafBrushes )
+			Com_Terminate( TERM_CLIENT_DROP,
+				"CM_ValidateMap(%s): leaf %d brush range %d+%d outside %d",
+				context, i, leaf->firstLeafBrush, leaf->numLeafBrushes,
+				cm.numLeafBrushes );
+		for ( j = 0; j < leaf->numLeafBrushes; ++j ) {
+			int brush = cm.leafbrushes[leaf->firstLeafBrush + j];
+			if ( brush < 0 || brush >= cm.numBrushes )
+				Com_Terminate( TERM_CLIENT_DROP,
+					"CM_ValidateMap(%s): leaf %d brush %d outside [0,%d)",
+					context, i, brush, cm.numBrushes );
+		}
+		if ( leaf->firstLeafSurface < 0 || leaf->numLeafSurfaces < 0 ||
+			leaf->firstLeafSurface > cm.numLeafSurfaces - leaf->numLeafSurfaces )
+			Com_Terminate( TERM_CLIENT_DROP,
+				"CM_ValidateMap(%s): leaf %d surface range %d+%d outside %d",
+				context, i, leaf->firstLeafSurface, leaf->numLeafSurfaces,
+				cm.numLeafSurfaces );
+	}
 	byte *visited = Hunk_AllocateTempMemory( cm.numNodes );
 	memset( visited, 0, cm.numNodes );
-	CM_ValidateTree_r( visited, 0 );
+	CM_ValidateTree_r( visited, 0, context );
 	Hunk_FreeTempMemory( visited );
 }
 
@@ -1043,7 +1081,7 @@ void CM_LoadMap( const char *name, qboolean clientload, int *checksum ) {
 	cm_bsp = NULL;
 
 	// check for cycles so we don't overflow stack
-	CM_ValidateTree();
+	CM_ValidateMap( "load" );
 
 	CM_InitBoxHull();
 

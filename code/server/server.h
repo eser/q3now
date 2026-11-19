@@ -50,6 +50,7 @@ typedef enum {
 typedef struct {
 	sv_spawn_phase_t phase;
 	qboolean         killBots;
+	qboolean         navLoadPending;
 	char             mapname[MAX_QPATH];
 } sv_spawn_state_t;
 

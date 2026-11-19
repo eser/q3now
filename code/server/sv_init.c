@@ -428,14 +428,13 @@ void SV_SpawnServer_Tick( void ) {
 	{
 		const char *mapname = svs.spawn.mapname;
 
-		SV_ShutdownGameLevel();
 #if FEAT_RECAST_NAVMESH
-		/* The bake worker traces against the current collision world. Join it
-		 * before Hunk_ClearLevel/CM_ClearMap invalidate that world; waiting until
-		 * Nav_LoadMap is too late and lets the previous map's worker race the
-		 * teardown while the next map begins loading. */
+		/* The bake worker traces static and game-owned collision. Join it before
+		 * shutting down the game VM as well as before clearing CM/the level hunk;
+		 * mover collision becomes invalid during SV_ShutdownGameLevel. */
 		Nav_UnloadMap();
 #endif
+		SV_ShutdownGameLevel();
 
 		Com_Log( SEV_INFO, LOG_CH(ch_server), "------ Server Initialization ------\n" );
 		Com_Log( SEV_INFO, LOG_CH(ch_server), "Server: %s\n", mapname );
@@ -560,7 +559,15 @@ void SV_SpawnServer_Tick( void ) {
 		Sys_SetStatus( "Loading map %s", mapname );
 		CM_LoadMap( va( "maps/%s.bsp", mapname ), qfalse, &checksum );
 #if FEAT_RECAST_NAVMESH
+		/* A headless server has no client-side CM/render registration phase, so
+		 * the bake can begin immediately. In an integrated game the worker's
+		 * water-edge probes read the shared collision world; defer them until the
+		 * focused cgame has completed CG_INIT + renderer registration. */
+#ifdef HEADLESS
 		Nav_LoadMap( mapname );
+#else
+		svs.spawn.navLoadPending = qtrue;
+#endif
 #endif
 
 		Cvar_Set( "mapname", mapname );
@@ -781,6 +788,7 @@ The actual work is driven one phase per Com_Frame tick by SV_SpawnServer_Tick.
 void SV_SpawnServer( const char *mapname, qboolean killBots ) {
 	Q_strncpyz( svs.spawn.mapname, mapname, sizeof( svs.spawn.mapname ) );
 	svs.spawn.killBots = killBots;
+	svs.spawn.navLoadPending = qfalse;
 	svs.spawn.phase = SPAWN_P1_TEARDOWN_SETUP;
 }
 
@@ -796,6 +804,37 @@ flight). Used by the Cbuf /waitForMap gate from cl_main.c.
 */
 qboolean SV_IsSpawnIdle( void ) {
 	return svs.spawn.phase == SPAWN_IDLE;
+}
+
+/*
+=================
+SV_ClientMapLoadComplete
+
+The integrated client calls this after CG_INIT and renderer registration have
+finished for the server's current map. Starting the asynchronous nav bake any
+earlier lets its collision traces overlap client-side map registration. The
+pending bit makes vid_restart and additional local cgame instances no-ops.
+=================
+*/
+void SV_ClientMapLoadComplete( const char *mapname ) {
+#if FEAT_RECAST_NAVMESH && !defined( HEADLESS )
+	if ( !com_sv_running || !com_sv_running->integer || !svs.spawn.navLoadPending ) {
+		return;
+	}
+	if ( !mapname || Q_stricmp( mapname, svs.spawn.mapname ) ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_server),
+			"deferred nav load ignored: client='%s' server='%s'\n",
+			mapname ? mapname : "", svs.spawn.mapname );
+		return;
+	}
+
+	/* Clear before entering Nav_LoadMap: an error longjmp must not leave a
+	 * duplicate-start token behind for the next cgame initialization. */
+	svs.spawn.navLoadPending = qfalse;
+	Nav_LoadMap( svs.spawn.mapname );
+#else
+	(void)mapname;
+#endif
 }
 
 
@@ -1137,13 +1176,15 @@ void SV_Shutdown( const char *finalmsg ) {
 	SV_RemoveOperatorCommands();
 	SV_ContentManifestCatalogReset();
 	SV_MasterShutdown();
+#if FEAT_RECAST_NAVMESH
+	/* Nav validation may still trace game-owned mover collision. The worker must
+	 * be joined before the game VM and its level resources are destroyed. */
+	Nav_Shutdown();
+#endif
 	SV_ShutdownGameProgs();
 	SV_Lua_Shutdown();
 	SV_RconLua_Shutdown();
 	UserVM_Shutdown();
-#if FEAT_RECAST_NAVMESH
-	Nav_Shutdown();
-#endif
 	AppMemory_Destroy( &svs.memory );
 
 	// Clear the active remap set; the tables themselves live in

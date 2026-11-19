@@ -9,8 +9,8 @@ Turns a loaded wiredScene_t (see wired_scene.h) into a per-frame view: given
 a clock time, produce {origin, angles, fov}. This is a PURE SAMPLER — it reads
 the immutable scene definition + a small runtime cursor and computes the view;
 it does not touch the renderer, the refdef, the view code, or the script VM.
-Nothing consumes its output yet; a later step feeds {origin, angles, fov} into
-the view.
+CG_SceneView consumes its pose; the game-side camera history consumes its
+authored discontinuity revision without adding renderer dependencies here.
 
 Two calls, mirroring the data-vs-eval split of wired_curve / wired_scene:
 
@@ -77,6 +77,11 @@ typedef struct {
 	   Eval (reset to -1 at the top of the pass), so rewinding the clock un-does
 	   a later TARGET switch. */
 	int   curTargetIndex;
+
+	/* Number of authored discontinuities at this sample: valid target changes
+	   and non-noop instantaneous FOV events. Re-derived, bounded by numEvents;
+	   identical stereo/pause samples agree and rewind restores the prefix. */
+	int   cameraCutRevision;
 
 	/* fov resolution — the fovEvent* group is RE-DERIVED each Eval (fovEventActive
 	   reset to 0 at the top of the pass, then rebuilt from the FOV events whose

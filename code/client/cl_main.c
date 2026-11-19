@@ -1497,10 +1497,13 @@ Must NOT be called from process-exit paths — use CL_ShutdownAll for those.
 =====================
 */
 void CL_ShutdownLevel( void ) {
+	int residentWorlds;
+	qboolean rendererWasStarted;
 	if ( !com_cl_running->integer ) {
 		// no local client subsystem — nothing to tear down
 		return;
 	}
+	rendererWasStarted = cls.rendererStarted;
 
 	// mute level sounds; audio mixer and device stay alive
 	S_DisableSounds();
@@ -1508,6 +1511,7 @@ void CL_ShutdownLevel( void ) {
 	// cgame VM is level-scoped; shut it down.
 	// Wired UI VM is persistent — do NOT call CL_ShutdownUI() here.
 	CL_ShutdownCGame( clientActiveApp );
+	residentWorlds = re.ResidentWorldCount ? re.ResidentWorldCount() : 0;
 
 	// The cgame just went away, so drop the LEVEL-lifetime viewport providers
 	// it registered (e.g. the world scene). Process-lifetime providers stay.
@@ -1515,24 +1519,22 @@ void CL_ShutdownLevel( void ) {
 	// own no heap here — so this is safe immediately after CG shutdown.
 	WiredUI_UnregisterLevelViewportProviders();
 
-	// Release level-scoped renderer resources.  REF_LEVEL_ONLY runs the
-	// map-scoped teardown path: level pipelines + per-map images + zone
-	// are released, but the renderer's persistent state (RAL backend +
-	// VkDevice + descriptor pool + base pipelines + backEndData) stays
-	// alive between async spawn phases. Font atlases + map textures are
-	// re-uploaded on the next CL_InitRenderer; CPU-side font glyph
-	// metadata (BSS) survives unchanged.
-	if ( re.Shutdown ) {
+	/* The targeted UnloadWorld above has already retired this app's world-owned
+	 * CPU/GPU resources. Global REF_LEVEL_ONLY teardown is legal only after the
+	 * final resident world leaves; otherwise it would destroy sibling worlds'
+	 * images, pipelines and descriptor state. */
+	if ( rendererWasStarted && residentWorlds == 0 && re.Shutdown ) {
 		re.Shutdown( REF_LEVEL_ONLY );
 	}
 	/* Retire only this app's map-owned CPU allocations.  App-owned connection,
 	 * VM/module and content-scope state remains valid. */
 	Level_Reset( &clientActiveApp->memory );
-	// Signal CL_StartHunkUsers → CL_InitRenderer → RE_BeginRegistration so the
-	// renderer is properly re-initialized (new backEndData, fresh shaders, new
-	// font atlas) for the incoming map.
-	cls.rendererStarted = qfalse;
-	cls.wiredUIStarted  = qfalse;
+	/* With siblings alive the shared renderer/UI remain initialized and the
+	 * replacement world is appended through LoadWorld. The final-world path
+	 * preserves the established BeginRegistration restart behavior. */
+	if ( rendererWasStarted && residentWorlds == 0 ) {
+		cls.rendererStarted = qfalse;
+	}
 
 	// sounds must be re-registered after each map load
 	cls.soundRegistered = qfalse;
@@ -4641,23 +4643,31 @@ static void *CL_RefMalloc( size_t size ) {
 
 static void *CL_RefWorldLevelAlloc( int worldIndex, size_t size,
 	size_t alignment ) {
-	if ( worldIndex < 0 || worldIndex >= MAX_LOCAL_CGAME_VMS ) {
+	int appIndex = worldIndex;
+	if ( worldIndex >= RENDER_DISTANT_WORLD_BASE )
+		appIndex -= RENDER_DISTANT_WORLD_BASE;
+	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS
+			|| appIndex < 0 || appIndex >= MAX_LOCAL_CGAME_VMS ) {
 		Com_Terminate( TERM_UNRECOVERABLE,
 			"CL_RefWorldLevelAlloc: invalid world owner %d", worldIndex );
 	}
-	if ( !AppMemory_IsInitialized( &clientApps[worldIndex].memory ) ) {
+	if ( !AppMemory_IsInitialized( &clientApps[appIndex].memory ) ) {
 		Com_Terminate( TERM_UNRECOVERABLE,
 			"CL_RefWorldLevelAlloc: world owner %d is not initialized", worldIndex );
 	}
-	return Level_Alloc( &clientApps[worldIndex].memory, size, alignment );
+	return Level_Alloc( &clientApps[appIndex].memory, size, alignment );
 }
 
 static size_t CL_RefWorldLevelUsed( int worldIndex ) {
-	if ( worldIndex < 0 || worldIndex >= MAX_LOCAL_CGAME_VMS ||
-		!AppMemory_IsInitialized( &clientApps[worldIndex].memory ) ) {
+	int appIndex = worldIndex;
+	if ( worldIndex >= RENDER_DISTANT_WORLD_BASE )
+		appIndex -= RENDER_DISTANT_WORLD_BASE;
+	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS
+			|| appIndex < 0 || appIndex >= MAX_LOCAL_CGAME_VMS ||
+		!AppMemory_IsInitialized( &clientApps[appIndex].memory ) ) {
 		return 0;
 	}
-	return Arena_Used( clientApps[worldIndex].memory.levelArena );
+	return Arena_Used( clientApps[appIndex].memory.levelArena );
 }
 
 
@@ -5549,6 +5559,35 @@ static void CL_ProjectCookLighting_f( void ) {
 		derivedRoot );
 }
 
+static void CL_ProjectCookMaterials_f( void ) {
+	char materialRoot[MAX_OSPATH];
+	const char *path;
+	if ( !re.CookMaterialProject ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_client),
+			"projectCookMaterials: loaded renderer has no project-cook adapter\n" );
+		return;
+	}
+	path = FS_BuildOSPath( Cvar_VariableString( "fs_homepath" ),
+		FS_GetCurrentGameDir(), "materials" );
+	Q_strncpyz( materialRoot, path, sizeof( materialRoot ) );
+	if ( !Sys_Mkdir( materialRoot ) ) {
+		Com_Log( SEV_ERROR, LOG_CH(ch_client),
+			"projectCookMaterials: cannot create derived root %s\n", materialRoot );
+		return;
+	}
+	path = FS_BuildOSPath( Cvar_VariableString( "fs_homepath" ),
+		FS_GetCurrentGameDir(), "materials/cooked" );
+	Q_strncpyz( materialRoot, path, sizeof( materialRoot ) );
+	if ( !Sys_Mkdir( materialRoot ) || !re.CookMaterialProject( materialRoot ) ) {
+		Com_Log( SEV_ERROR, LOG_CH(ch_client),
+			"projectCookMaterials: cook rejected; load a map with a valid material corpus\n" );
+		return;
+	}
+	Com_Log( SEV_INFO, LOG_CH(ch_client),
+		"projectCookMaterials: published content-addressed .wrmat/.wrmatpkg products under %s\n",
+		materialRoot );
+}
+
 
 /*
 ====================
@@ -5735,6 +5774,7 @@ void CL_Init( void ) {
 	Cmd_AddCommand( "ral_dump", CL_RalDump_f );          // dump renderer RAL backend probe / caps / memory budget
 	Cmd_AddCommand( "ral_pipeline_test", CL_RalPipelineTest_f ); // exact offscreen RAL pipeline exercise
 	Cmd_AddCommand( "projectCookLighting", CL_ProjectCookLighting_f ); // explicit editor/project lighting cook
+	Cmd_AddCommand( "projectCookMaterials", CL_ProjectCookMaterials_f ); // explicit map material corpus cook
 	Cmd_AddCommand( "waitForMap", CL_WaitForMap_f );     // yield Cbuf until map fully loaded
 	Cmd_AddCommand( "wiredFxStats", CL_WiredFx_Stats_f );
 	Cbuf_RegisterWaitForMapCheck( CL_WaitForMap_Ready );
@@ -5827,6 +5867,7 @@ void CL_Shutdown( const char *finalmsg, qboolean quit ) {
 	Cmd_RemoveCommand ("systeminfo");
 	Cmd_RemoveCommand ("modelist");
 	Cmd_RemoveCommand( "projectCookLighting" );
+	Cmd_RemoveCommand( "projectCookMaterials" );
 	Cmd_RemoveCommand( "wiredFxStats" );
 
 #ifndef NDEBUG

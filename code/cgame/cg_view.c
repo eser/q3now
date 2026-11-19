@@ -1062,6 +1062,7 @@ Generates and draws a game scene and status information at the given time.
 */
 void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demoPlayback ) {
 	int		inwater;
+	qboolean cinematicView;
 
 	// M1: if the engine bumped its glconfig generation (resolution change /
 	// vid_restart), re-fetch glconfig and recompute screen scale/bias before
@@ -1194,7 +1195,20 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 #endif
 
 	// build cg.refdef
+	cinematicView = CG_SceneActive();
 	inwater = CG_CalcViewValues();
+	{
+		const playerState_t *ps = &cg.predictedPlayerState;
+		wiredCameraSample_t camera = {
+			serverTime, ps->clientNum, ps->eFlags & EF_TELEPORT_BIT,
+			ps->persistant[PERS_SPAWN_COUNT], cg.renderingThirdPerson,
+			ps->pm_type == PM_INTERMISSION, cinematicView,
+			cinematicView ? cg.scenePlayback.startMs : 0,
+			cinematicView ? cg.scenePlayback.cameraCutRevision : 0
+		};
+		if ( wired_camera_history_step( &cg.cameraHistory, camera ) )
+			cg.refdef.rdflags |= RDF_CAMERA_CUT;
+	}
 	CG_UpdateThirdPersonCenterAim();
 
 	// Dev/visual-gate only: pin cg.time (entity-animation time) for byte-stable

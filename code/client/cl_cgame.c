@@ -534,6 +534,124 @@ rescan:
 
 /*
 ====================
+CL_DistantWorldIndex
+
+The renderer reserves a second range paired one-to-one with clientApps[].
+====================
+*/
+static int CL_DistantWorldIndex( const clientApp_t *app ) {
+	return RENDER_DISTANT_WORLD_BASE + (int)( app - clientApps );
+}
+
+static void CL_UnloadDistantWorld( clientApp_t *app ) {
+	if ( !app || !app->distantWorldBsp ) return;
+	if ( re.UnloadWorld )
+		(void)re.UnloadWorld( CL_DistantWorldIndex( app ) );
+	Map_Free( app->distantWorldBsp );
+	app->distantWorldBsp = NULL;
+	app->distantWorldMap[0] = '\0';
+	VectorClear( app->distantWorldOrigin );
+	app->distantWorldScale = 0.0f;
+	app->distantWorldLodBias = 0.0f;
+}
+
+static qboolean CL_DistantWorldPath( const char *authored,
+		char outPath[MAX_QPATH] ) {
+	const size_t authoredLength = authored ? strlen( authored ) : 0u;
+	const size_t prefixLength = authored && !Q_stricmpn( authored, "maps/", 5 )
+		? 0u : 5u;
+	const size_t extensionLength = authored && *COM_GetExtension( authored )
+		? 0u : 4u;
+	if ( !authored || !authored[0] || !outPath || authored[0] == '/'
+			|| authored[0] == '\\' || strstr( authored, ".." )
+			|| strchr( authored, '\\' )
+			|| authoredLength + prefixLength + extensionLength >= MAX_QPATH )
+		return qfalse;
+	if ( !Q_stricmpn( authored, "maps/", 5 ) )
+		Q_strncpyz( outPath, authored, MAX_QPATH );
+	else
+		Com_sprintf( outPath, MAX_QPATH, "maps/%s", authored );
+	COM_DefaultExtension( outPath, MAX_QPATH, ".bsp" );
+	return strlen( outPath ) < MAX_QPATH ? qtrue : qfalse;
+}
+
+static void CL_LoadDistantWorld( clientApp_t *app ) {
+	const char *serverInfo;
+	char authored[MAX_QPATH], mapPath[MAX_QPATH], originText[96];
+	char scaleText[32], lodBiasText[32];
+	vec3_t origin;
+	float scale, lodBias;
+	mapFile_t *bsp;
+	uint64_t identity;
+	int worldIndex;
+
+	if ( !app ) return;
+	serverInfo = app->cl.gameState.stringData
+		+ app->cl.gameState.stringOffsets[CS_SERVERINFO];
+	Q_strncpyz( authored, Info_ValueForKey( serverInfo,
+		"g_envDistantSkyMap" ), sizeof( authored ) );
+	if ( !authored[0] ) {
+		CL_UnloadDistantWorld( app );
+		return;
+	}
+	if ( !re.WorldContentIdentity ) {
+		CL_UnloadDistantWorld( app );
+		Com_Log( SEV_WARN, LOG_CH(ch_client),
+			"distant-sky: renderer has no exact world-identity capability; using authored sky only\n" );
+		return;
+	}
+	Q_strncpyz( originText, Info_ValueForKey( serverInfo,
+		"g_envDistantSkyOrigin" ), sizeof( originText ) );
+	Q_strncpyz( scaleText, Info_ValueForKey( serverInfo,
+		"g_envDistantSkyScale" ), sizeof( scaleText ) );
+	Q_strncpyz( lodBiasText, Info_ValueForKey( serverInfo,
+		"g_envDistantSkyLodBias" ), sizeof( lodBiasText ) );
+	if ( !CL_DistantWorldPath( authored, mapPath )
+			|| sscanf( originText, "%f %f %f", &origin[0], &origin[1],
+				&origin[2] ) != 3 ) {
+		Com_Terminate( TERM_CLIENT_DROP,
+			"distant-sky: invalid map or origin authoring" );
+	}
+	scale = atof( scaleText );
+	lodBias = atof( lodBiasText );
+	if ( !isfinite( origin[0] ) || !isfinite( origin[1] )
+			|| !isfinite( origin[2] ) || !isfinite( scale ) || scale <= 0.0f
+			|| !isfinite( lodBias ) ) {
+		Com_Terminate( TERM_CLIENT_DROP,
+			"distant-sky: non-finite or non-positive transform authoring" );
+	}
+	worldIndex = CL_DistantWorldIndex( app );
+	bsp = app->distantWorldBsp;
+	if ( !bsp || Q_stricmp( app->distantWorldMap, mapPath ) ) {
+		CL_UnloadDistantWorld( app );
+		if ( !Map_Load( mapPath, &bsp, MAP_LOAD_FLAG_RENDER_ONLY ) || !bsp )
+			Com_Terminate( TERM_CLIENT_DROP,
+				"distant-sky: couldn't load render-only world %s", mapPath );
+		app->distantWorldBsp = bsp;
+		Q_strncpyz( app->distantWorldMap, mapPath,
+			sizeof( app->distantWorldMap ) );
+	}
+	re.LoadWorld( bsp, worldIndex );
+	if ( !re.WorldContentIdentity( worldIndex, &identity ) || !identity
+			|| identity == UINT64_MAX ) {
+		CL_UnloadDistantWorld( app );
+		Com_Terminate( TERM_CLIENT_DROP,
+			"distant-sky: renderer rejected exact identity for %s", mapPath );
+	}
+	VectorCopy( origin, app->distantWorldOrigin );
+	app->distantWorldScale = scale;
+	app->distantWorldLodBias = lodBias;
+	if ( re.SelectWorld
+			&& !re.SelectWorld( (int)( app - clientApps ) ) )
+		Com_Terminate( TERM_CLIENT_DROP,
+			"distant-sky: couldn't restore gameplay world selection" );
+	Com_Log( SEV_INFO, LOG_CH(ch_client),
+		"distant-sky: resident world=%s slot=%d identity=%llu scale=%.3f lodBias=%.3f\n",
+		mapPath, worldIndex, (unsigned long long)identity, scale, lodBias );
+}
+
+/*
+====================
 CL_CM_LoadMap
 
 Just adds default parameters that cgame doesn't need to know about
@@ -545,6 +663,7 @@ static void CL_CM_LoadMap( const char *mapname ) {
 	mapFile_t	*bsp;
 
 	CM_LoadMap( mapname, qtrue, &checksum );
+	CM_ValidateMap( "client-map-load" );
 
 	if ( app->cgameBsp ) {
 		Map_Free( app->cgameBsp );
@@ -581,6 +700,7 @@ void CL_ShutdownCGame( clientApp_t *app ) {
 	app->cl.cgameAimAngles[YAW] = 0;
 
 	if ( !app->cgvm ) {
+		CL_UnloadDistantWorld( app );
 		if ( app->cgameBsp ) {
 			if ( re.UnloadWorld ) {
 				(void)re.UnloadWorld( (int)( app - clientApps ) );
@@ -607,6 +727,7 @@ void CL_ShutdownCGame( clientApp_t *app ) {
 	// keeps the focused-only gate (registered only when this app was focused).
 	VM_Free( shuttingDown );
 	app->cgvm = NULL;
+	CL_UnloadDistantWorld( app );
 
 	if ( app->cgameBsp ) {
 		/* The renderer may retain the parsed BSP through its per-app world slot.
@@ -1642,6 +1763,7 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		// Load into the executing app's world slot (its clientApps[] index), so a
 		// second app's map does not overwrite the focused app's world.
 		re.LoadWorld( app->cgameBsp, (int)( app - clientApps ) );
+		CL_LoadDistantWorld( app );
 		CL_LoadingYield( "loading BSP" );
 		return 0;
 	}
@@ -1822,7 +1944,7 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 			CL_RSND( &cl_desc_CG_R_GETLENSVISIBILITY, 2 );
 			return re.GetLensVisibility( (int)t[0].i, t[1].p );
 		}
-		return 0;   // qfalse → cgame falls back to its CG_Trace occlusion
+		return 0;   // qfalse = unsupported/not ready; cgame must fail closed
 	case CG_R_ADDHALOTOSCENE:
 #if FEAT_HALO
 		// Unpack the flat haloDesc_t into the renderer's pre-existing scalar
@@ -1852,8 +1974,27 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 	}
 	case CG_R_SETATMOSPHERE:
 		if ( re.SetAtmosphere ) {
+			clientApp_t *app = CL_AppForActiveCgame();
+			atmosphericDesc_t resolved;
+			uint64_t identity;
 			CL_RSND( &cl_desc_CG_R_SETATMOSPHERE, 1 );
-			re.SetAtmosphere( t[0].p );
+			resolved = *(const atmosphericDesc_t *)t[0].p;
+			if ( app->distantWorldBsp ) {
+				if ( !re.WorldContentIdentity
+						|| !re.WorldContentIdentity(
+							CL_DistantWorldIndex( app ), &identity ) )
+					Com_Terminate( TERM_CLIENT_DROP,
+						"distant-sky: resident identity became unavailable" );
+				resolved.skyEnvironment.flags |= ATMOSPHERE_SKY_DISTANT_SCENE;
+				resolved.skyEnvironment.distantSceneIdentity = identity;
+				VectorCopy( app->distantWorldOrigin,
+					resolved.skyEnvironment.distantSceneOrigin );
+				resolved.skyEnvironment.distantSceneScale =
+					app->distantWorldScale;
+				resolved.skyEnvironment.distantSceneLodBias =
+					app->distantWorldLodBias;
+			}
+			re.SetAtmosphere( &resolved );
 		}
 		return 0;
 	case CG_R_SETATMOSPHEREHEIGHTGRID:
@@ -2514,6 +2655,14 @@ void CL_InitCGame( clientApp_t *app ) {
 	// have the renderer touch all its images, so they are present
 	// on the card even if the driver does deferred loading
 	re.EndRegistration();
+
+	/* The integrated server owns Nav, but its background bake traces the same
+	 * collision world used while CG_INIT registers this map. Signal readiness
+	 * only after both cgame and renderer registration are complete; the server
+	 * consumes its one-shot pending token and remote clients are a no-op. */
+	if ( isFocused ) {
+		SV_ClientMapLoadComplete( mapname );
+	}
 
 	if ( isFocused ) {
 		// Final yield — all assets are loaded and finalized

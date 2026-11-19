@@ -7,6 +7,7 @@
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qcommon.h"
 #include "snd_public.h"
+#include "snd_doppler.h"
 #include "../qcommon/q_feats.h"
 
 #define	PAINTBUFFER_SIZE		4096					// this is in samples
@@ -78,8 +79,6 @@ typedef struct {
 
 
 #define START_SAMPLE_IMMEDIATE	0x7fffffff
-
-#define MAX_DOPPLER_SCALE 50.0f //arbitrary
 
 typedef struct loopSound_s {
 	vec3_t		origin;

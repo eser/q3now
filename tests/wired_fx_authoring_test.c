@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+/* This contract intentionally uses assert for both evaluation and validation.
+ * Keep those expressions active in Release test binaries as well. */
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
+
 #include "../code/qcommon/wired/core/scripting/wired_fx_authoring.h"
 #include "../code/render/frontend/render_effect_profile.h"
 

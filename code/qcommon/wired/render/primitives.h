@@ -440,7 +440,50 @@ typedef struct {
 
 // ── unified atmosphere ────────────────────────────────────────────────
 
-#define WIRED_ATMOSPHERE_SCHEMA_VERSION 1u
+#define WIRED_ATMOSPHERE_SCHEMA_VERSION 2u
+#define WIRED_SKY_ENVIRONMENT_SCHEMA_VERSION 1u
+
+typedef enum {
+	ATMOSPHERE_SKY_NONE = 0,
+	ATMOSPHERE_SKY_AUTHORED,
+	ATMOSPHERE_SKY_PHYSICAL,
+	ATMOSPHERE_SKY_HYBRID
+} atmosphereSkyEnvironmentMode_t;
+
+#define ATMOSPHERE_SKY_AUTHORED_AVAILABLE 0x00000001u
+#define ATMOSPHERE_SKY_DISTANT_SCENE      0x00000002u
+/* The game authored the sun direction (g_envSunElevation / g_envSunAzimuth);
+ * the frontend keeps it instead of adopting the sky material's q3map_sun
+ * direction.  Sun colour/intensity still come from the authored material. */
+#define ATMOSPHERE_SKY_SUN_OVERRIDE       0x00000004u
+
+/* Versioned, pointer-free sky/environment authoring authority.  Product and
+ * native resource ownership remain in RAL; identities and revisions are
+ * content values safe to marshal across the game VM boundary. */
+typedef struct {
+	uint32_t schemaVersion;
+	uint32_t mode;  /* atmosphereSkyEnvironmentMode_t */
+	uint32_t flags; /* ATMOSPHERE_SKY_* */
+	uint32_t reserved0;
+	uint64_t sourceRevision;
+	uint64_t authoredSkyIdentity;
+	uint64_t distantSceneIdentity;
+	vec3_t sunDirection;
+	vec3_t sunRadiance;
+	float sunAngularRadius;
+	vec3_t moonDirection;
+	vec3_t moonRadiance;
+	float moonAngularRadius;
+	float ambientSh[27]; /* RGB L0..L2 coefficients */
+	float cloudSunOcclusion;
+	float skyLuminance;
+	float exposure;
+	float opticsVisibility;
+	vec3_t distantSceneOrigin;
+	float distantSceneScale;
+	float distantSceneLodBias;
+	uint32_t reserved[7];
+} atmosphereSkyEnvironment_t;
 
 typedef enum {
 	ATMOSPHERE_QUALITY_OFF = 0,
@@ -666,6 +709,7 @@ typedef struct {
 	float	 lightning;			 // [0,1]
 	float	 mediaDensity;		 // >= 0
 	float	 mediaHeightFalloff; // >= 0
+	atmosphereSkyEnvironment_t skyEnvironment;
 	uint32_t reserved[8];
 } atmosphericDesc_t;
 

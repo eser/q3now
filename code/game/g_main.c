@@ -68,6 +68,8 @@ vmCvar_t	g_obeliskRespawnDelay;
 #endif
 vmCvar_t	g_envGroundDusty;
 vmCvar_t	g_envTemperature;
+vmCvar_t	g_envSunElevation;
+vmCvar_t	g_envSunAzimuth;
 
 vmCvar_t	g_spawnWeapons;
 vmCvar_t	g_grapple;
@@ -115,6 +117,11 @@ vmCvar_t	g_projectileBounce;
 #endif
 #if FEAT_ATMOSPHERIC
 vmCvar_t	g_envWeather;
+vmCvar_t	g_envSkyMode;
+vmCvar_t	g_envDistantSkyMap;
+vmCvar_t	g_envDistantSkyOrigin;
+vmCvar_t	g_envDistantSkyScale;
+vmCvar_t	g_envDistantSkyLodBias;
 #endif
 #if FEAT_GAME_MEETING
 vmCvar_t	g_meeting;
@@ -224,6 +231,10 @@ static cvarTable_t		gameCvarTable[] = {
 
 	{ &g_envGroundDusty, "g_envGroundDusty", "0", CVAR_SERVERINFO, 0, qtrue, qfalse },
 	{ &g_envTemperature, "g_envTemperature", "20", CVAR_SERVERINFO, 0, qtrue, qfalse },
+	/* Physical-sky sun override in degrees (empty = the cgame's fixed noon
+	 * vector). Elevation above the horizon, azimuth CCW from +X like q3map_sun. */
+	{ &g_envSunElevation, "g_envSunElevation", "", CVAR_SERVERINFO, 0, qtrue, qfalse },
+	{ &g_envSunAzimuth, "g_envSunAzimuth", "", CVAR_SERVERINFO, 0, qtrue, qfalse },
 	{ &g_smoothClients, "g_smoothClients", "1", 0, 0, qfalse},
 	{ &pmove_fixed, "pmove_fixed", "0", CVAR_SYSTEMINFO, 0, qfalse},
 	{ &pmove_msec, "pmove_msec", "8", CVAR_SYSTEMINFO, 0, qfalse},
@@ -277,6 +288,11 @@ static cvarTable_t		gameCvarTable[] = {
 #endif
 #if FEAT_ATMOSPHERIC
     { &g_envWeather,              "g_envWeather",              "", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qtrue },
+    { &g_envSkyMode,              "g_envSkyMode",              "authored", CVAR_SERVERINFO, 0, qtrue },
+    { &g_envDistantSkyMap,        "g_envDistantSkyMap",        "", CVAR_SERVERINFO, 0, qtrue },
+    { &g_envDistantSkyOrigin,     "g_envDistantSkyOrigin",     "0 0 0", CVAR_SERVERINFO, 0, qtrue },
+    { &g_envDistantSkyScale,      "g_envDistantSkyScale",      "16", CVAR_SERVERINFO, 0, qtrue },
+    { &g_envDistantSkyLodBias,    "g_envDistantSkyLodBias",    "0", CVAR_SERVERINFO, 0, qtrue },
 #endif
 #if FEAT_GAME_MEETING
     { &g_meeting,                 "g_meeting",                 "0", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qtrue },

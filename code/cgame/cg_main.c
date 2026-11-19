@@ -214,6 +214,8 @@ vmCvar_t cg_currentSelectedPlayerName;
 #endif
 vmCvar_t cg_envGroundDusty;
 vmCvar_t cg_envTemperature;
+vmCvar_t cg_envSunElevation;
+vmCvar_t cg_envSunAzimuth;
 #if FEAT_OVERLOAD
 vmCvar_t cg_obeliskRespawnDelay;
 #endif
@@ -353,6 +355,8 @@ static cvarTable_t cvarTable[] = {
 #endif
 	{ &cg_envGroundDusty, "g_envGroundDusty", "0", CVAR_SERVERINFO },
 	{ &cg_envTemperature, "g_envTemperature", "20", CVAR_SERVERINFO },
+	{ &cg_envSunElevation, "g_envSunElevation", "", CVAR_SERVERINFO },
+	{ &cg_envSunAzimuth, "g_envSunAzimuth", "", CVAR_SERVERINFO },
 #if FEAT_OVERLOAD
 	{ &cg_obeliskRespawnDelay, "g_obeliskRespawnDelay", "10", CVAR_SERVERINFO },
 #endif

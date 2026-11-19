@@ -213,6 +213,7 @@ void CG_ParseServerinfo( void ) {
 	Com_sprintf( cgs.mapname, sizeof( cgs.mapname ), "maps/%s.bsp", mapname );
 #if FEAT_ATMOSPHERIC
 	Q_strncpyz( cgs.weather, Info_ValueForKey( info, "g_envWeather" ), sizeof(cgs.weather) );
+	Q_strncpyz( cgs.skyMode, Info_ValueForKey( info, "g_envSkyMode" ), sizeof(cgs.skyMode) );
 	CG_AtmosphericInit();
 #endif
 }

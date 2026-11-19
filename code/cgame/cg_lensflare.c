@@ -428,6 +428,7 @@ void CG_InitLensFlares( void ) {
 	float		flareIntensity;
 	vec3_t		flareColor;
 	qboolean	cinematicEnabled;
+	qboolean	cinematicSpecified;
 
 	memset( &lf, 0, sizeof( lf ) );
 
@@ -465,7 +466,12 @@ void CG_InitLensFlares( void ) {
 			flareRange = FLARE_DISTANCE;
 			flareIntensity = 1.0f;
 			VectorSet( flareColor, 1.0f, 1.0f, 1.0f );
+			/* Qualified Q3 map lights remain flare sources by default.  The source
+			 * selection lives in cgame/content, while the resulting cinematic recipe
+			 * is lowered through backend-neutral WiredFX/RAL primitives.  Authors can
+			 * explicitly suppress an unsuitable fill light with "lensflare" "0". */
 			cinematicEnabled = qtrue;
+			cinematicSpecified = qfalse;
 			hasHalo = qfalse;
 			VectorClear( haloRgb );
 			haloScale = 0.0f;
@@ -524,6 +530,8 @@ void CG_InitLensFlares( void ) {
 			if ( !Q_stricmp( value, "light" ) || !Q_stricmp( value, "fx_lensflare" ) ) {
 				isLight = qtrue;
 				explicitFxSource = !Q_stricmp( value, "fx_lensflare" );
+				if ( explicitFxSource && !cinematicSpecified )
+					cinematicEnabled = qtrue;
 			}
 		} else if ( !Q_stricmp( key, "origin" ) ) {
 			sscanf( value, "%f %f %f", &origin[0], &origin[1], &origin[2] );
@@ -537,6 +545,7 @@ void CG_InitLensFlares( void ) {
 			if ( sscanf( value, "%f %f %f", &flareColor[0], &flareColor[1], &flareColor[2] ) != 3 )
 				VectorSet( flareColor, 1.0f, 1.0f, 1.0f );
 		} else if ( !Q_stricmp( key, "lensflare" ) ) {
+			cinematicSpecified = qtrue;
 			cinematicEnabled = atoi( value ) != 0 || !Q_stricmp( value, "cinematic" );
 		} else if ( !Q_stricmp( key, "halo" ) || !Q_stricmp( key, "corona" ) ) {
 			// "halo" is canonical; "corona" stays as a back-compat content-key alias
@@ -558,11 +567,10 @@ void CG_InitLensFlares( void ) {
 ==================
 CG_UpdateMapFlareVisibility
 
-Refresh one map-flare's visibility + drive its intensity ramp. Extracted verbatim
-from the former in-loop body so both the oracle-live (all-flares) and oracle-off
-(round-robin) iteration shapes share identical per-flare logic. The per-id oracle vs
-CG_Trace choice is preserved: a not-yet-warmed id (GetLensVisibility qfalse) still
-falls back to CG_Trace for THAT flare — no first-frame flicker.
+Refresh one map-flare's visibility + drive its intensity ramp. GPU visibility is
+the only supported authority. A false GetLensVisibility result means the selected
+backend has no completed oracle result for this id; it must fail closed instead of
+silently selecting the retired CPU trace implementation.
 ==================
 */
 static void CG_UpdateMapFlareVisibility( int idx ) {
@@ -570,7 +578,6 @@ static void CG_UpdateMapFlareVisibility( int idx ) {
 	vec3_t  dir;
 	float   dist;
 	float   vis;
-	trace_t tr;
 
 	VectorSubtract( e->origin, cg.refdef.vieworg, dir );
 	dist = VectorLength( dir );
@@ -582,10 +589,9 @@ static void CG_UpdateMapFlareVisibility( int idx ) {
 		// GPU oracle: smooth area visibility (0 = occluded, 1 = clear).
 		e->visible = ( vis > 0.0f );
 	} else {
-		// Fallback (no oracle for this id): the original CPU trace, binary occlusion.
-		CG_Trace( &tr, cg.refdef.vieworg, NULL, NULL, e->origin, -1, CONTENTS_SOLID );
-		e->visible = ( tr.fraction >= 0.99f );
-		vis = e->visible ? 1.0f : 0.0f;
+		// Unsupported or not-yet-completed: no legacy/approximate visibility path.
+		e->visible = qfalse;
+		vis = 0.0f;
 	}
 
 	if ( e->visible ) {
@@ -613,17 +619,14 @@ static void CG_UpdateMapFlareVisibility( int idx ) {
 CG_AddMapFlares
 
 Renders map light lens flares. Called each frame from CG_DrawActiveFrame.
-Uses distance culling + (oracle-live) per-frame all-flare visibility, or
-(oracle-off) round-robin interleaved CG_Trace checks.
+Uses distance culling plus the backend GPU visibility oracle. Unsupported and
+not-yet-completed oracle results fail closed.
 ==================
 */
 static void CG_AddMapFlares( void ) {
-	int			i, checked;
+	int			i;
 	float		dist;
 	vec3_t		dir;
-#if !CINEMATIC_LENS_FLARE_FX
-	refEntity_t	ent;
-#endif
 	float		dot, scale;
 	vec3_t		screenDir;
 
@@ -652,36 +655,10 @@ static void CG_AddMapFlares( void ) {
 		trap_R_AddLensSourceToScene( &ld );
 	}
 
-	// Visibility update. The GPU oracle depth-tests EVERY registered source each
-	// frame (the dispatch is ⌈count/64⌉ workgroups, unthrottled — the CPU 48-cap
-	// never gated it). So when the oracle is live, the per-flare read is just an
-	// SSBO fetch of an already-fresh result: iterate ALL flares each frame for
-	// zero-staleness visibility (no FLARES_PER_FRAME cap, no round-robin). When the
-	// oracle is OFF (r_lens 0 / GL backend / pipeline absent), the CG_Trace fallback
-	// is a per-flare BSP raycast — KEEP the FLARES_PER_FRAME round-robin to bound
-	// that CPU cost (byte-identical to pre-oracle). Liveness is probed via the
-	// per-id GetLensVisibility return (qtrue iff the oracle is live for this backend)
-	// — robust to GL where r_lens may be 1 but no pipeline exists (→ qfalse → capped).
-	{
-		float    probeVis;
-		qboolean oracleLive = ( lf.numEntities > 0 ) && trap_R_GetLensVisibility( 0, &probeVis );
-
-		if ( oracleLive ) {
-			// Oracle live: refresh ALL flares this frame, no throttle.
-			for ( i = 0; i < lf.numEntities; i++ )
-				CG_UpdateMapFlareVisibility( i );
-		} else {
-			// Oracle off: the original FLARES_PER_FRAME=48 round-robin + CG_Trace,
-			// exactly as pre-P5c-3 (bounds the per-flare trace cost).
-			checked = 0;
-			while ( checked < FLARES_PER_FRAME && checked < lf.numEntities ) {
-				CG_UpdateMapFlareVisibility( lf.checkIndex );
-				lf.checkIndex = ( lf.checkIndex + 1 ) % lf.numEntities;
-				checked++;
-			}
-		}
-
-	}
+	// Every registered id is read every frame. Missing results fail closed in
+	// CG_UpdateMapFlareVisibility; there is no CPU trace or visual fallback.
+	for ( i = 0; i < lf.numEntities; i++ )
+		CG_UpdateMapFlareVisibility( i );
 
 	// render all flares with intensity > 0
 	for ( i = 0; i < lf.numEntities; i++ ) {
@@ -710,8 +687,10 @@ static void CG_AddMapFlares( void ) {
 			continue;
 		}
 
-#if CINEMATIC_LENS_FLARE_FX
-		if ( e->cinematicEnabled ) {
+		if ( !e->cinematicEnabled ) {
+			continue;
+		}
+		{
 			wiredFxEvent_t event;
 			CG_WiredFx_InitEvent( &event, WIRED_FX_PROFILE_CINEMATIC_LENS_FLARE,
 				e->origin, dir );
@@ -720,22 +699,6 @@ static void CG_AddMapFlares( void ) {
 			event.sizeScale = 0.82f + 0.36f * scale;
 			trap_WiredFx_EmitEvent( &event );
 		}
-#else
-		memset( &ent, 0, sizeof( ent ) );
-		ent.reType = RT_SPRITE;
-		VectorCopy( e->origin, ent.origin );
-
-		// 4-layer JJ stack from the config table, gated on `scale` (the gate < 0
-		// sentinel = always; the L1 row uses it since the scale<0.01 pre-gate above
-		// already applied). Absolute colour, scale-driven radius/alpha — byte-identical.
-		{
-			int li;
-			for ( li = 0; li < 4; li++ ) {
-				if ( scale > lf.mapLayers[li].gate )
-					CG_EmitFlareLayer( &ent, &lf.mapLayers[li], scale, NULL );
-			}
-		}
-#endif
 
 	}
 
@@ -745,13 +708,12 @@ static void CG_AddMapFlares( void ) {
 	// halo at each in-range light: content lights ("halo"/"corona" key) use their
 	// colour/scale; otherwise the demo shows a neutral white halo. Occlusion comes
 	// from the shared lens oracle (register on the halo band, read back the
-	// visibility), with a CG_Trace fall-back when no GPU oracle is available.
+	// visibility). No GPU oracle means no halo; there is no CPU visibility fallback.
 	if ( cg_halo.integer ) {
 		for ( i = 0; i < lf.numEntities; i++ ) {
 			lensFlareEntity_t *e = &lf.entities[i];
 			lensSourceDesc_t  ld;
 			haloDesc_t        cd;
-			trace_t           tr;
 			float             vis;
 			qboolean          visible;
 			int               haloId;
@@ -773,9 +735,7 @@ static void CG_AddMapFlares( void ) {
 			if ( trap_R_GetLensVisibility( haloId, &vis ) ) {
 				visible = ( vis > 0.0f );
 			} else {
-				// No GPU oracle (GL / r_lens off): line-of-sight trace fallback.
-				CG_Trace( &tr, cg.refdef.vieworg, NULL, NULL, e->origin, -1, CONTENTS_SOLID );
-				visible = ( tr.fraction >= 0.99f );
+				continue;
 			}
 
 			memset( &cd, 0, sizeof( cd ) );
@@ -833,10 +793,8 @@ void CG_AddMissileFlare( centity_t *cent ) {
 	// they drew through walls. Register the missile with the shared occlusion oracle
 	// and fold its visibility into the flare intensity so a rocket behind geometry
 	// stops flaring through it. id is banded into the missile sub-range so it never
-	// aliases map-flare / powerup slots. When the oracle is unavailable (r_lens off /
-	// GL backend / not-yet-warmed) GetLensVisibility returns qfalse → draw as today
-	// (no occlusion = the pre-P5b behaviour, byte-identical). The ghost-chain +
-	// sub-flare composition below is UNCHANGED — only `scale` gets the occlusion fold.
+	// aliases map-flare / powerup slots. Unsupported or not-yet-completed visibility
+	// fails closed; the retired draw-through-walls path is not a fallback.
 	{
 		lensSourceDesc_t ld;
 		float            vis;
@@ -845,11 +803,9 @@ void CG_AddMissileFlare( centity_t *cent ) {
 		VectorCopy( cent->lerpOrigin, ld.origin );
 		ld.radius = 24.0f;   // probe disc radius (texels)
 		trap_R_AddLensSourceToScene( &ld );
-		if ( trap_R_GetLensVisibility( ld.id, &vis ) ) {
-			if ( vis <= 0.0f )
-				return;          // fully occluded → no flare this frame (the bug-fix)
-			scale *= vis;        // partial occlusion → proportional dim (smooth)
-		}
+		if ( !trap_R_GetLensVisibility( ld.id, &vis ) || vis <= 0.0f )
+			return;
+		scale *= vis;        // partial occlusion → proportional dim (smooth)
 	}
 
 	// screen-axis pivot: point on forward axis at missile depth
@@ -925,9 +881,9 @@ void CG_AddPowerupFlare( centity_t *cent, int powerupTag ) {
 	// they drew through walls. Register the pickup with the oracle (origin matches
 	// the +16Z draw position below) and fold its visibility into the pulse so a
 	// powerup behind geometry stops glowing through it. id banded into the powerup
-	// sub-range (no alias with map-flare / missile slots). qfalse (oracle off) →
-	// draw as today (pre-P5b, byte-identical). The pulse / palette / INVIS-skip /
-	// +16Z / 3-layer composition below are UNCHANGED — only `pulse` gets the fold.
+	// sub-range (no alias with map-flare / missile slots). The pulse / palette /
+	// INVIS-skip / +16Z / 3-layer composition below are unchanged; only `pulse`
+	// gets the fold. Unsupported or not-yet-completed visibility fails closed.
 	{
 		lensSourceDesc_t ld;
 		float            vis;
@@ -937,11 +893,9 @@ void CG_AddPowerupFlare( centity_t *cent, int powerupTag ) {
 		ld.origin[2] += 16;          // match the draw position
 		ld.radius = 24.0f;           // probe disc radius (texels)
 		trap_R_AddLensSourceToScene( &ld );
-		if ( trap_R_GetLensVisibility( ld.id, &vis ) ) {
-			if ( vis <= 0.0f )
-				return;              // fully occluded → no flare this frame (the bug-fix)
-			pulse *= vis;            // partial occlusion → proportional dim
-		}
+		if ( !trap_R_GetLensVisibility( ld.id, &vis ) || vis <= 0.0f )
+			return;
+		pulse *= vis;            // partial occlusion → proportional dim
 	}
 
 	memset( &ent, 0, sizeof( ent ) );

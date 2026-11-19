@@ -769,6 +769,24 @@ void SP_worldspawn( void ) {
 	G_SpawnString( "weather", "", &s );
 	trap_Cvar_Set( "g_envWeather", s );
 
+	/* Map-authored sky selection.  This is a semantic environment value, not
+	 * a renderer/backend switch: cgame publishes it through the versioned
+	 * AtmosphereFrameState sky authority. */
+	G_SpawnString( "skyMode", "authored", &s );
+	trap_Cvar_Set( "g_envSkyMode", s );
+
+	/* Optional Source-style distant sky scene.  These remain semantic authoring
+	 * values; the client resolves the map to a render-only world and publishes
+	 * the renderer-confirmed content identity through AtmosphereFrameState. */
+	G_SpawnString( "distantSky", "", &s );
+	trap_Cvar_Set( "g_envDistantSkyMap", s );
+	G_SpawnString( "distantSkyOrigin", "0 0 0", &s );
+	trap_Cvar_Set( "g_envDistantSkyOrigin", s );
+	G_SpawnString( "distantSkyScale", "16", &s );
+	trap_Cvar_Set( "g_envDistantSkyScale", s );
+	G_SpawnString( "distantSkyLodBias", "0", &s );
+	trap_Cvar_Set( "g_envDistantSkyLodBias", s );
+
 	G_SpawnString( "temperature", "20", &s );
 	trap_Cvar_Set( "g_envTemperature", s );
 

@@ -448,6 +448,14 @@ typedef struct clientApp_s {
 	qboolean	cgameStarted;
 	qboolean	startCgame;
 	mapFile_t	*cgameBsp;
+	/* Optional render-only secondary BSP paired with this app's renderer slot.
+	 * It has no collision, entities or gameplay selection and is retired before
+	 * the app's Level arena is reset. */
+	mapFile_t	*distantWorldBsp;
+	char		distantWorldMap[MAX_QPATH];
+	vec3_t		distantWorldOrigin;
+	float		distantWorldScale;
+	float		distantWorldLodBias;
 	int			captureWidth;
 	int			captureHeight;
 	cl_dlcomplete_state_t dlcomplete;	// async CL_DownloadsComplete machine

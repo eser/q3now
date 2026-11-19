@@ -1568,6 +1568,7 @@ void SV_Init( void );
 void SV_Shutdown( const char *finalmsg );
 void SV_SpawnServer_Tick( void ); /* advance one phase of the async spawn machine */
 qboolean SV_IsSpawnIdle( void );  /* qtrue when svs.spawn.phase == SPAWN_IDLE (no map transition in flight) */
+void SV_ClientMapLoadComplete( const char *mapname );
 void SV_Frame( int msec );
 void SV_TrackCvarChanges( void );
 void SV_PacketEvent( const netadr_t *from, msg_t *msg );

@@ -10,6 +10,7 @@
 #include "cg_public.h"
 #include "../qcommon/wired/render/particle_class.h"
 #include "cg_temporal_identity.h"
+#include "cg_camera_history.h"
 #include "../qcommon/wired/scene/wired_scene_eval.h" /* cinematic-scene POD + evaluator (runs cgame-side) */
 
 // Quake3e compat: refEntity_t renamed shaderRGBA[4] to shader (color4ub_t with .rgba[4])
@@ -555,6 +556,7 @@ typedef struct {
 
 	qboolean thisFrameTeleport;
 	qboolean nextFrameTeleport;
+	wiredCameraHistory_t cameraHistory;
 
 	int frametime; // cg.time - cg.oldTime
 
@@ -1232,7 +1234,8 @@ typedef struct {
 	char	   redTeam[MAX_QPATH];
 	char	   blueTeam[MAX_QPATH];
 #if FEAT_ATMOSPHERIC
-	char weather[16]; // server-controlled: "rain", "snow", or ""
+	char weather[16]; // server-controlled atmosphere preset
+	char skyMode[16]; // map-authored: authored, physical, or hybrid
 #endif
 
 	int		 voteTime;
@@ -1519,6 +1522,8 @@ extern vmCvar_t cg_currentSelectedPlayerName;
 #endif
 extern vmCvar_t cg_envGroundDusty;
 extern vmCvar_t cg_envTemperature;
+extern vmCvar_t cg_envSunElevation;
+extern vmCvar_t cg_envSunAzimuth;
 #if FEAT_OVERLOAD
 extern vmCvar_t cg_obeliskRespawnDelay;
 #endif

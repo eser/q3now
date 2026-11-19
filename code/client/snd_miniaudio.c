@@ -731,6 +731,8 @@ dopplerFactor 1 by default (doppler already active), so to keep s_doppler 0
 silent we must explicitly zero the factor. When enabled we leave the factor at
 the default 1 (miniaudio's standard OpenAL model, speed of sound 343.3) and rely
 on per-frame velocity feeding to drive the pitch shift.
+S_EngineSetVelocity bounds that input to the existing pitch budget so the
+spatializer cannot hand an infinite ratio to its audio-thread resampler.
 ===============
 */
 static void S_EngineSetDopplerEnabled( ma_sound *snd, qboolean enabled )
@@ -753,6 +755,10 @@ static void S_EngineSetVelocity( ma_sound *snd, const vec3_t velocity )
 {
 	float v[3];
 	Q3ToMiniaudio( velocity, v );
+	/* Wired uses one stationary listener; read its actual sound speed rather
+	 * than duplicating the library default. Position/falloff units do not change. */
+	wired_audio_bound_doppler_velocity( v,
+		ma_spatializer_listener_get_speed_of_sound( &s_maEngine.listeners[0] ) );
 	ma_sound_set_velocity( snd, v[0], v[1], v[2] );
 }
 

@@ -393,8 +393,10 @@ typedef struct {
 Per-frame presentation state produced by typed actions that affect the whole
 view rather than submitting scene primitives. It remains a pointer-free part
 of refdef_t, so every renderer backend receives the same bounded contract.
-Backends may degrade an unsupported presentation feature, but the client never
-passes a native object or backend-specific command through this seam.
+Unsupported presentation features fail closed and are reported as unsupported;
+neither the client nor a backend may substitute a different visual or input
+effect. The client never passes a native object or backend-specific command
+through this seam.
 */
 #define WIRED_FX_FRAME_SCHEMA_VERSION 1u
 #define WIRED_FX_FRAME_HAS_WIND          0x00000001u

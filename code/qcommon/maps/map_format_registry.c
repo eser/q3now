@@ -12,19 +12,13 @@ LOG_DECLARE_CHANNEL( ch_loading, "loading" );
 static mapFormat_t const *mapFormats[MAX_MAP_FORMATS];
 static int numMapFormats = 0;
 
-// Sized for the worst-case concurrent live BSPs: one held world BSP per client
-// app (app->cgameBsp, kept across frames until the next CL_CM_LoadMap /
-// CL_ShutdownLevel) plus one transient slot for an INCOMING map. During a map
-// change the OUTGOING map's held ref legitimately overlaps the incoming map's
-// preview/mapinfo/CM/nav transient loads, so the pool must hold (held + 1).
-// The client is architected for MAX_LOCAL_CGAME_VMS (= 4, vm_local.h) concurrent
-// apps (clientApps[], client.h), each owning its own cgameBsp, so the bound is
-// MAX_LOCAL_CGAME_VMS + 1 = 5. (Kept as a literal here: the maps layer must not
-// depend on the VM-internal vm_local.h. The previous value of 2 was the
-// single-app steady-state peak with ZERO margin — a third concurrent BSP, e.g. a
-// transient overlapping two distinct held maps mid-transition, exhausted it with
-// "no free BSP slots".)
-#define MAX_BSP_FILES 5
+// Sized for the worst-case concurrent live BSPs: one gameplay plus one optional
+// render-only distant-sky BSP per local client app, and one transient INCOMING
+// map.  During a transition the outgoing held references legitimately overlap
+// preview/mapinfo/CM/nav loads.  The client supports four local cgame apps, so
+// the exact upper bound is 4 * 2 + 1 = 9.  Kept literal because this neutral maps
+// layer must not depend on renderer/frontend or VM-internal headers.
+#define MAX_BSP_FILES 9
 static mapFile_t *bspLoadedFiles[MAX_BSP_FILES];
 
 // Persistent cache reference: keeps the current map's mapFile_t alive across

@@ -31,6 +31,7 @@
 #include <math.h>
 
 #include "../code/qcommon/wired/scene/wired_scene_eval.h"
+#include "../code/cgame/cg_camera_history.h"
 
 /* Angle indices — the header deliberately avoids q_shared.h, so the test names
    its own (same values as q_shared: PITCH=0, YAW=1, ROLL=2). */
@@ -724,6 +725,45 @@ static void test_actor_binding( void ) {
 	}
 }
 
+static void test_camera_cut_provenance( void ) {
+	wiredScene_t def;
+	wiredScenePlayback_t pb;
+	wiredCameraHistory_t history = {0};
+	wiredCameraSample_t sample = {0};
+	float origin[3], angles[3], fov;
+	const int times[] = { 0, 500, 1000, 1000, 1001, 1500, 1800, 2000,
+		2500, 3000, 3001, 3500, 4500, 4501, 500 };
+	const int revisions[] = { 0, 0, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 4, 4, 0 };
+	const int cuts[] = { 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1 };
+	build_scene( &def );
+	def.targets[1] = def.targets[0];
+	strcpy( def.targets[1].name, "other" );
+	def.numTargets = 2;
+	add_event( &def, WSCENE_EV_TARGET, 1000, 0, 0, "hero" );
+	add_event( &def, WSCENE_EV_TARGET, 1500, 0, 0, "hero" ); // no change
+	add_event( &def, WSCENE_EV_TARGET, 1800, 0, 0, "unknown" );
+	add_event( &def, WSCENE_EV_FOV, 2000, 40, 1, NULL ); // smooth zoom
+	add_event( &def, WSCENE_EV_FOV, 3000, 70, 0, NULL ); // instantaneous
+	add_event( &def, WSCENE_EV_FOV, 3500, 70, 0, NULL ); // no change
+	add_event( &def, WSCENE_EV_TARGET, 4000, 0, 0, "other" );
+	add_event( &def, WSCENE_EV_TARGET, 4100, 0, 0, "hero" ); // skipped A->B->A
+	WiredScenePlayback_Start( &pb, &def, 0 );
+	sample.cinematic = 1;
+	for ( unsigned i = 0; i < sizeof( times ) / sizeof( times[0] ); ++i ) {
+		WiredScene_Eval( &pb, times[i], origin, angles, &fov );
+		sample.timeMs = times[i];
+		sample.sceneCutRevision = pb.cameraCutRevision;
+		printf( "camera sample=%d revision=%d expected=%d\n",
+			times[i], pb.cameraCutRevision, revisions[i] );
+		check( pb.cameraCutRevision == revisions[i], "authored camera-cut prefix" );
+		check( wired_camera_history_step( &history, sample ) == cuts[i],
+			"scene event reaches camera history without cutting smooth motion" );
+	}
+	build_scene( &def );
+	WiredScenePlayback_Start( &pb, &def, 6000 );
+	check( pb.cameraCutRevision == 0, "new playback clears cut provenance" );
+}
+
 int main( void ) {
 	printf( "wired_scene evaluator test\n" );
 	printf( "===========================\n" );
@@ -744,6 +784,7 @@ int main( void ) {
 	test_player_space_transform();
 	test_director_state_events();
 	test_actor_binding();
+	test_camera_cut_provenance();
 
 	printf( "--------------------------------------------\n" );
 	printf( "%d/%d checks passed\n", g_checks - g_fail, g_checks );

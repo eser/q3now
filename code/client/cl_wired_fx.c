@@ -56,6 +56,9 @@ typedef struct {
 	float windEnd;
 	float radialBlurEnd;
 	uint64_t actionDispatches[WIRED_FX_ACTION_COUNT];
+	/* Log-schema compatibility counter. Strict dispatch never increments it:
+	 * an action is executed with its authored semantics, rejected as unsupported,
+	 * or dropped because its occurrence lacks required data. */
 	uint64_t degradedActions;
 	uint64_t presentationDrops;
 	uint64_t profileLoadFailures;
@@ -234,7 +237,7 @@ static void CL_WiredFx_CopyEventAxis( vec3_t out[3], const wiredFxEvent_t *event
 	for ( i = 0; i < 3; ++i ) VectorCopy( &event->axis[i * 3], out[i] );
 }
 
-static void CL_WiredFx_ActionTransform( vec3_t origin, vec3_t axis[3],
+static wiredFxDispatchResult_t CL_WiredFx_ActionTransform( vec3_t origin, vec3_t axis[3],
 		const wiredFxAction_t *action, const wiredFxEvent_t *event ) {
 	vec3_t direction;
 	int i;
@@ -249,12 +252,10 @@ static void CL_WiredFx_ActionTransform( vec3_t origin, vec3_t axis[3],
 		} else if ( event->flags & WIRED_FX_EVENT_HAS_END_ORIGIN ) {
 			VectorSubtract( event->endOrigin, event->origin, direction );
 		} else {
-			s_fx.degradedActions++;
-			break;
+			return WIRED_FX_DISPATCH_DROPPED;
 		}
 		if ( VectorNormalize( direction ) == 0.0f ) {
-			s_fx.degradedActions++;
-			break;
+			return WIRED_FX_DISPATCH_DROPPED;
 		}
 		VectorCopy( direction, axis[0] );
 		MakeNormalVectors( axis[0], axis[1], axis[2] );
@@ -264,16 +265,12 @@ static void CL_WiredFx_ActionTransform( vec3_t origin, vec3_t axis[3],
 		break;
 	case WIRED_FX_ROTATION_EXPLICIT_CURVES:
 	case WIRED_FX_ROTATION_EXPLICIT_CURVES_LOCAL:
-		/* Curve sampling is not part of schema 1. Preserve the authored static
-		 * angle and expose the deterministic reduction in telemetry. */
-		AnglesToAxis( action->rotationDegrees, axis );
-		s_fx.degradedActions++;
-		break;
+		/* A static angle is not the authored curve. Do not render a different
+		 * effect while curve sampling is unavailable. */
+		return WIRED_FX_DISPATCH_UNSUPPORTED;
 	case WIRED_FX_ROTATION_EXTERNAL:
-		/* External transforms require a future entity binding in the semantic
-		 * event. Schema 1 falls back to the captured start axis. */
-		s_fx.degradedActions++;
-		break;
+		/* External transforms require an explicit portable binding contract. */
+		return WIRED_FX_DISPATCH_UNSUPPORTED;
 	default:
 		break;
 	}
@@ -284,8 +281,7 @@ static void CL_WiredFx_ActionTransform( vec3_t origin, vec3_t axis[3],
 			VectorAdd( event->origin, event->endOrigin, origin );
 			VectorScale( origin, 0.5f, origin );
 		} else {
-			VectorCopy( event->origin, origin );
-			s_fx.degradedActions++;
+			return WIRED_FX_DISPATCH_DROPPED;
 		}
 		break;
 	case WIRED_FX_ORIGIN_TRACK:
@@ -294,8 +290,7 @@ static void CL_WiredFx_ActionTransform( vec3_t origin, vec3_t axis[3],
 		if ( event->flags & WIRED_FX_EVENT_HAS_END_ORIGIN ) {
 			VectorCopy( event->endOrigin, origin );
 		} else {
-			VectorCopy( event->origin, origin );
-			s_fx.degradedActions++;
+			return WIRED_FX_DISPATCH_DROPPED;
 		}
 		break;
 	default:
@@ -303,6 +298,7 @@ static void CL_WiredFx_ActionTransform( vec3_t origin, vec3_t axis[3],
 		break;
 	}
 	for ( i = 0; i < 3; ++i ) VectorMA( origin, action->offset[i], axis[i], origin );
+	return WIRED_FX_DISPATCH_EXECUTED;
 }
 
 static qboolean CL_WiredFx_OptionalResourceMissing( const wiredFxAction_t *action ) {
@@ -422,13 +418,14 @@ static wiredFxDispatchResult_t CL_WiredFx_Dispatch( const wiredFxProfile_t *prof
 	vec3_t actionAxis[3];
 	float color[4];
 	float fade = CL_WiredFx_Fade( profile, action, event, context->now );
+	wiredFxDispatchResult_t transformResult;
 	(void)actionIndex; (void)cycle;
 	CL_WiredFx_Color( color, action, event );
 	color[3] *= fade;
-	CL_WiredFx_ActionTransform( origin, actionAxis, action, event );
 	if ( action->type < WIRED_FX_ACTION_COUNT ) s_fx.actionDispatches[action->type]++;
+	transformResult = CL_WiredFx_ActionTransform( origin, actionAxis, action, event );
+	if ( transformResult != WIRED_FX_DISPATCH_EXECUTED ) return transformResult;
 	if ( CL_WiredFx_OptionalResourceMissing( action ) ) {
-		s_fx.degradedActions++;
 		return WIRED_FX_DISPATCH_DROPPED;
 	}
 	switch ( (wiredFxActionType_t)action->type ) {
@@ -621,30 +618,10 @@ static wiredFxDispatchResult_t CL_WiredFx_Dispatch( const wiredFxProfile_t *prof
 	case WIRED_FX_ACTION_SCREEN_SHAKE:
 		CL_WiredFx_StartShake( scheduledTime, action, event );
 		return WIRED_FX_DISPATCH_EXECUTED;
-	case WIRED_FX_ACTION_CONTROLLER_SHAKE: {
-		float magnitude = MAX( action->payload.controllerShake.highMagnitude,
-			action->payload.controllerShake.lowMagnitude );
-		float duration = MAX( action->payload.controllerShake.highDuration,
-			action->payload.controllerShake.lowDuration );
-		clWiredFxShake_t *shake;
-		/* No native haptic object crosses the RAL seam. Until the platform input
-		 * service exposes a portable motor contract, degrade deterministically to
-		 * camera feedback and make that fact visible in telemetry. */
-		/* Controller fallback remains bounded camera feedback. */
-		shake = CL_WiredFx_AllocateShake( scheduledTime );
-		if ( !shake ) return WIRED_FX_DISPATCH_DROPPED;
-		memset( shake, 0, sizeof( *shake ) );
-		shake->start = scheduledTime;
-		shake->end = scheduledTime + MAX( duration, 0.001f );
-		shake->magnitude = magnitude * event->intensity;
-		shake->fadeOut = duration;
-		shake->decayExponent = 1.0f;
-		shake->seed = event->seed ^ action->actionId;
-		VectorCopy( event->origin, shake->origin );
-		VectorSet( shake->maxOffset, 1.0f, 1.0f, 0.5f );
-		s_fx.degradedActions++;
-		return WIRED_FX_DISPATCH_EXECUTED;
-	}
+	case WIRED_FX_ACTION_CONTROLLER_SHAKE:
+		/* Haptics need a portable input-service contract. Camera shake is a
+		 * different authored action, so never substitute it here. */
+		return WIRED_FX_DISPATCH_UNSUPPORTED;
 	case WIRED_FX_ACTION_WIND: {
 		uint32_t mixed = event->seed ^ action->actionId * 0x9E3779B9u;
 		float fraction = (float)( mixed & 0xffffu ) / 65535.0f;
