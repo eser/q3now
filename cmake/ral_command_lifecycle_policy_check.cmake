@@ -109,12 +109,52 @@ require_text(RENDERER "vk.tess[i].ral_rendering_finished_fence = vk_create_fence
 require_text(RENDERER "vk.tess[i].rendering_finished_fence = Ral_GetFenceHandle(" "per-frame borrowed fence mirror")
 require_text(RENDERER "vk.ral_aux_fence = vk_create_fence( \"aux fence\" );" "optional upload fence owner")
 require_text(RENDERER "vk.aux_fence = Ral_GetFenceHandle( vk.ral_aux_fence );" "optional borrowed fence mirror")
-require_text(RENDERER "Ral_DestroyFence( vk.tess[i].ral_rendering_finished_fence );\n\t\t\tvk.tess[i].ral_rendering_finished_fence = NULL;\n\t\t}\n\t\tvk.tess[i].rendering_finished_fence = VK_NULL_HANDLE;" "frame fence owner-before-mirror teardown")
+# Per-frame present fence: created through the same owner helper, then torn
+# down in vk_destroy_sync_primitives by position, not adjacency: the frame
+# fence owner is destroyed before its borrowed mirror is cleared, and a pending
+# present fence is waited on before its owner is destroyed.
+require_text(RENDERER "vk.tess[i].ral_present_fence = vk_create_fence(" "per-frame present fence owner")
+string(FIND "${RENDERER}" "static void vk_destroy_sync_primitives( void  ) {" SYNC_TEARDOWN_BEGIN)
+if(SYNC_TEARDOWN_BEGIN EQUAL -1)
+	message(FATAL_ERROR "sync teardown function is missing")
+endif()
+string(SUBSTRING "${RENDERER}" ${SYNC_TEARDOWN_BEGIN} 6000 SYNC_TEARDOWN)
+string(FIND "${SYNC_TEARDOWN}" "\n}\n" SYNC_TEARDOWN_END)
+if(SYNC_TEARDOWN_END EQUAL -1)
+	message(FATAL_ERROR "sync teardown function span is malformed")
+endif()
+string(SUBSTRING "${SYNC_TEARDOWN}" 0 ${SYNC_TEARDOWN_END} SYNC_TEARDOWN)
+function(teardown_position OUT TOKEN)
+	string(FIND "${SYNC_TEARDOWN}" "${TOKEN}" POSITION)
+	if(POSITION EQUAL -1)
+		message(FATAL_ERROR "frame fence teardown lost: ${TOKEN}")
+	endif()
+	set(${OUT} ${POSITION} PARENT_SCOPE)
+endfunction()
+teardown_position(FRAME_OWNER_POS "Ral_DestroyFence( vk.tess[i].ral_rendering_finished_fence );")
+teardown_position(FRAME_MIRROR_POS "vk.tess[i].rendering_finished_fence = VK_NULL_HANDLE;")
+teardown_position(PRESENT_PENDING_POS "if ( vk.tess[i].present_fence_pending")
+teardown_position(PRESENT_WAIT_POS "const ralResult_t waitResult = Ral_WaitFenceExact(")
+teardown_position(PRESENT_WAIT_TARGET_POS "vk.tess[i].ral_present_fence, 10000000000ULL );")
+teardown_position(PRESENT_OWNER_POS "Ral_DestroyFence( vk.tess[i].ral_present_fence );")
+teardown_position(PRESENT_NULL_POS "vk.tess[i].ral_present_fence = NULL;")
+teardown_position(PRESENT_CLEAR_POS "vk.tess[i].present_fence_pending = qfalse;")
+if(NOT FRAME_OWNER_POS LESS FRAME_MIRROR_POS)
+	message(FATAL_ERROR "frame fence owner must be destroyed before its borrowed mirror is cleared")
+endif()
+if(NOT PRESENT_PENDING_POS LESS PRESENT_WAIT_POS
+		OR NOT PRESENT_WAIT_POS LESS PRESENT_WAIT_TARGET_POS
+		OR NOT PRESENT_WAIT_TARGET_POS LESS PRESENT_OWNER_POS
+		OR NOT PRESENT_OWNER_POS LESS PRESENT_NULL_POS
+		OR NOT PRESENT_NULL_POS LESS PRESENT_CLEAR_POS)
+	message(FATAL_ERROR "present fence teardown must wait for a pending present, destroy the owner, null it, then clear the pending flag")
+endif()
 require_text(RENDERER "if ( vk.ral_aux_fence ) { Ral_DestroyFence( vk.ral_aux_fence ); vk.ral_aux_fence = NULL; }\n\tvk.aux_fence = VK_NULL_HANDLE;" "optional fence owner-before-mirror teardown")
 string(REGEX MATCHALL "vk_create_fence[(]" FENCE_OWNER_CALLS "${RENDERER}")
 list(LENGTH FENCE_OWNER_CALLS FENCE_OWNER_CALL_COUNT)
-if(NOT FENCE_OWNER_CALL_COUNT EQUAL 3)
-	message(FATAL_ERROR "renderer fence owner inventory drifted: ${FENCE_OWNER_CALL_COUNT}/3")
+# helper definition + per-frame finished fence + per-frame present fence + aux fence
+if(NOT FENCE_OWNER_CALL_COUNT EQUAL 4)
+	message(FATAL_ERROR "renderer fence owner inventory drifted: ${FENCE_OWNER_CALL_COUNT}/4")
 endif()
 string(FIND "${RENDERER}" "static ralFence_t *vk_create_fence(" FENCE_HELPER_BEGIN)
 string(FIND "${RENDERER}" "static void vk_apply_hdr_metadata" FENCE_HELPER_END)
@@ -191,7 +231,10 @@ foreach(retired_command_op IN ITEMS qvkBeginCommandBuffer qvkEndCommandBuffer qv
 endforeach()
 require_text(RENDERER "vk_ral_begin_command_exact( vk.cmd->ral_cmd, \"vk_begin_frame\" );" "exact frame begin")
 require_text(RENDERER "vk_ral_end_command_exact( vk.cmd->ral_cmd, \"vk_end_frame\" );" "exact frame end")
-require_text(RENDERER "#endif\n\t\t\tif ( slotFenceCompleted )\n\t\t\t\tvk_ral_recycle_completed_command( vk.cmd->ral_cmd," "platform-common post-fence frame recycle")
+require_text(RENDERER "#endif\n\t\t\tif ( slotFenceCompleted ) {\n\t\t\t\tvk_ral_recycle_completed_command( vk.cmd->ral_cmd," "platform-common post-fence frame recycle")
+# Shared-fence split present: the present command buffer is covered by the slot
+# fence, so it recycles there only while no separate present fence is pending.
+require_text(RENDERER "if ( vk.cmd->split_pending_recycle && !vk.cmd->present_fence_pending ) {\n\t\t\t\t\tvk_ral_recycle_completed_command( vk.cmd->ral_cmd_present," "shared-fence split present recycle")
 require_text(RENDERER "vk_ral_recycle_completed_command( vk.ral_staging_cmd," "post-fence staging recycle")
 foreach(retired_external_surface IN ITEMS Ral_SetCommandBufferExternalLifecycle Ral_ResetExternalCommandState externalLifecycle)
 	string(FIND "${BRIDGE}${VULKAN}${INTERNAL_HEADER}${RENDERER}" "${retired_external_surface}" RETIRED_EXTERNAL_POS)

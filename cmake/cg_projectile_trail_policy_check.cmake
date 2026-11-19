@@ -76,9 +76,17 @@ require_text(ROCKET_PROFILE "particle=\"rocket_exhaust_core\"" "rocket exhaust r
 require_text(ROCKET_PROFILE "spawnRate=50" "rocket smoke cadence")
 require_text(ROCKET_PROFILE "spawnRate=25" "rocket ember cadence")
 require_text(GRENADE_PROFILE "particle=\"grenade_classic_trail\"" "classic grenade recipe")
+# One grenade detonation handle regardless of medium. GRENADE_FX_EXPLOSION (on by
+# default) reuses the accepted layered explosion; 0 keeps the classic recipe as a
+# compile-time rollback.
 require_text(WEAPONS
-	"CG_WiredFx_InitEvent( &event, WIRED_FX_PROFILE_GRENADE_EXPLOSION,"
-	"medium-independent pre-migration grenade detonation recipe")
+	"CG_WiredFx_InitEvent( &event,\n#if GRENADE_FX_EXPLOSION\n\t\tWIRED_FX_PROFILE_GRENADE_LAYERED_EXPLOSION,\n#else\n\t\tWIRED_FX_PROFILE_GRENADE_EXPLOSION,\n#endif\n\t\torigin, normal );"
+	"medium-independent grenade detonation recipe")
+file(READ "${ROOT}/code/qcommon/q_feats.h" FEATS)
+string(REGEX MATCH "#define GRENADE_FX_EXPLOSION[ \t]+1" GRENADE_FX_DEFAULT "${FEATS}")
+if(NOT GRENADE_FX_DEFAULT)
+	message(FATAL_ERROR "GRENADE_FX_EXPLOSION must default to the layered explosion")
+endif()
 forbid_text(WEAPONS
 	"underwater ? WIRED_FX_PROFILE_GRENADE_UNDERWATER"
 	"medium-specific grenade presentation substitution")

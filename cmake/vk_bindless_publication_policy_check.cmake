@@ -183,14 +183,14 @@ list(LENGTH vk_sampler_writes vk_sampler_count)
 if(NOT vk_sampler_count EQUAL 0)
 	message(FATAL_ERROR "vk.c bypasses the sampler publication wrapper")
 endif()
-# The reserved primitive slots (ribbon, rail ribbon, beam) publish through the
+# The reserved slots (screen map, scene depth) publish through the binding-aware
 # view writer; vk.c must not write raw textures into the bindless set.
 string(REGEX MATCHALL "Ral_BindGroupSetTextureAt[(]" vk_texture_writes "${VK}")
 list(LENGTH vk_texture_writes vk_texture_count)
 if(NOT vk_texture_count EQUAL 0)
 	message(FATAL_ERROR "vk.c reserved TextureAt inventory drifted: ${vk_texture_count}")
 endif()
-string(FIND "${VK}" "Ral_BindGroupSetTextureAt( ralSet, WIRED_BINDLESS_SCENEDEPTH_SLOT" depth_write_pos)
+string(FIND "${VK}" "Ral_BindGroupSetTextureViewAtBinding( ralSet,\n\t\t\tWIRED_BINDLESS_BIND_IMAGES, WIRED_BINDLESS_SCENEDEPTH_SLOT," depth_write_pos)
 string(FIND "${VK}" "vk_ral_bindless_record_reserved( WIRED_BINDLESS_SCENEDEPTH_SLOT" depth_record_pos)
 if(depth_write_pos EQUAL -1 OR depth_record_pos EQUAL -1 OR NOT depth_write_pos LESS depth_record_pos)
 	message(FATAL_ERROR "scene-depth write must precede its adjacent RESERVED receipt")
@@ -216,15 +216,16 @@ endif()
 foreach(needle IN ITEMS
 	"vk_ral_bindless_record_reserved( WIRED_BINDLESS_SCREENMAP_SLOT"
 	"vk_ral_bindless_record_reserved( WIRED_BINDLESS_SCENEDEPTH_SLOT"
-	"vk_ral_bindless_record_raw_image( tr.blackImage"
-	"vk_ral_bindless_record_raw_image( tr.whiteImage")
+	"vk_ral_bindless_publish_texture_view( tr.blackImage,\n\t\t\tWIRED_BINDLESS_BLACK_TEX_SENTINEL,"
+	"vk_ral_bindless_publish_texture_view( tr.whiteImage,\n\t\t\tWIRED_BINDLESS_WHITE_TEX_SENTINEL,")
 	require_text("${VK}" "${needle}" "reserved binding-0 publication join")
 endforeach()
 
 # Ordinary authoring is direct per-image group -> exact sampler -> exact RAL
 # binding-0 view publication, all in one function.
 string(FIND "${VK}" "void vk_update_descriptor_set( image_t *image, qboolean mipmap )" ordinary_begin)
-string(FIND "${VK}" "void vk_destroy_image_resources" ordinary_end)
+# The next definition (not its forward declaration) closes the function span.
+string(FIND "${VK}" "const char *entry) {\n\tdesc->sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;" ordinary_end)
 if(ordinary_begin EQUAL -1 OR ordinary_end EQUAL -1 OR NOT ordinary_begin LESS ordinary_end)
 	message(FATAL_ERROR "ordinary descriptor function boundary missing")
 endif()
@@ -240,10 +241,12 @@ if(combined_pos EQUAL -1 OR sampler_pos EQUAL -1 OR image_pos EQUAL -1 OR receip
 endif()
 foreach(needle IN ITEMS
 	"image->ralDescriptorView"
-	"Ral_GetTextureViewHandle( image->ralDescriptorView )"
-	"== (void *)image->view")
+	"Ral_GetTextureViewHandle( image->ralDescriptorView )")
 	require_text("${ORDINARY}" "${needle}" "ordinary exact native-view join")
 endforeach()
+# The identity comparison lives in the publication wrapper, not in the caller:
+# the LEGACY_EXACT gate below proves it rejects a view that is not the image's own
+# RAL descriptor view, so the ordinary path only has to hand over that view.
 foreach(retired IN ITEMS qvkUpdateDescriptorSets VkWriteDescriptorSet VkDescriptorImageInfo
 	vk_ral_bindless_record_legacy_exact)
 	string(FIND "${ORDINARY}" "${retired}" retired_pos)
@@ -251,11 +254,19 @@ foreach(retired IN ITEMS qvkUpdateDescriptorSets VkWriteDescriptorSet VkDescript
 		message(FATAL_ERROR "ordinary publication regained raw/legacy authority: ${retired}")
 	endif()
 endforeach()
+# image_t no longer mirrors a native VkImageView: the RAL view is the only
+# identity, so a revived `image->view` would reopen a second authority.
+foreach(native_view_source IN ITEMS TEXTURES VK)
+	string(REGEX MATCH "image->view[^A-Za-z0-9_]" native_view_use "${${native_view_source}}")
+	if(native_view_use)
+		message(FATAL_ERROR "retired native image view mirror returned in ${native_view_source}: ${native_view_use}")
+	endif()
+endforeach()
+# LEGACY_EXACT publishes only the image's own RAL descriptor view: the image must
+# carry a descriptor and the handed-over view must be that exact RAL object.
 foreach(needle IN ITEMS
 	"kind == VK_BINDLESS_PUBLICATION_LEGACY_EXACT"
-	"!image->descriptor || image->view == VK_NULL_HANDLE"
-	"image->ralDescriptorView != view"
-	"nativeView != (const void *)image->view")
+	"( !image->descriptor\n\t\t\t\t|| image->ralDescriptorView != view ) ) return qfalse;")
 	require_text("${TEXTURES}" "${needle}" "LEGACY_EXACT view identity gate")
 endforeach()
 

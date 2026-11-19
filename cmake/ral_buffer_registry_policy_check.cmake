@@ -83,9 +83,24 @@ foreach(needle IN ITEMS
 	"data->ral_index_buffer")
 	require_text("${product_all}" "${needle}" "direct renderer buffer identity")
 endforeach()
+# The overlay streams into one of two direct RAL buffers: the tess vertex
+# buffer, or, once the slot fence was handed over (fence-split present), the
+# per-slot present-lifetime shadow buffer. Both are RAL-owned; neither is adopted.
 require_text("${overlay}"
-	"ralBuffer_t *vb = vk.cmd->ral_vertex_buffer;"
+	"const qboolean presentLifetime = vk.cmd->slot_fence_handed"
+	"overlay present-lifetime route")
+require_text("${overlay}"
+	"ralBuffer_t *vb = presentLifetime ? overlayShadow->buffer : vk.cmd->ral_vertex_buffer;"
 	"overlay direct RAL-buffer owner")
+require_text("${overlay}"
+	"if ( off + sizeof( v ) > overlayShadow->byteSize )"
+	"overlay present-lifetime capacity gate")
+require_text("${overlay}"
+	"VK_RalBufferShadowWrite( overlayShadow, off, v, sizeof( v ) )"
+	"overlay present-lifetime shadow write")
+require_text("${overlay}"
+	"VK_RalBufferShadowPublish( overlayShadow, off, sizeof( v ),"
+	"overlay present-lifetime shadow publish")
 require_text("${overlay}"
 	"Ral_CmdBindVertexBuffer( vk.cmd->ral_cmd, 0, vb, off );"
 	"overlay direct RAL-buffer bind")
