@@ -237,10 +237,21 @@ static qboolean vk_ral_bindless_image_owner( image_t *image ) {
 }
 
 static void vk_ral_bindless_poison_active( void ) {
+	// Several residency promotions publish without checking the result, so a
+	// ledger invalidation would otherwise leave no trace at all. Report the first
+	// one per descriptor set; later failures against the same set add nothing.
+	static uintptr_t s_reportedSet;
 	if ( s_bindless_publication_initialized && s_ral_bindless_set
-			&& s_bindless_publication.setIdentity == (uintptr_t)s_ral_bindless_set )
+			&& s_bindless_publication.setIdentity == (uintptr_t)s_ral_bindless_set ) {
+		if ( s_reportedSet != (uintptr_t)s_ral_bindless_set ) {
+			s_reportedSet = (uintptr_t)s_ral_bindless_set;
+			R_LOG( rch_ral_texture, SEV_WARN,
+				"bindless publication ledger invalidated after a failed receipt; "
+				"published slots are refused until the set is rebuilt\n" );
+		}
 		(void)VK_BindlessPublicationPoisonSetAfterWrite(
 			&s_bindless_publication, s_ral_bindless_set );
+	}
 }
 
 static qboolean vk_ral_bindless_record_views( image_t *const *images,

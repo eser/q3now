@@ -17704,8 +17704,17 @@ static void vk_destroy_sync_primitives( void  ) {
 			vk.tess[i].ral_rendering_finished_fence = NULL;
 		}
 		if ( vk.tess[i].ral_present_fence ) {
-			if ( vk.tess[i].present_fence_pending )
-				(void)Ral_WaitFenceExact( vk.tess[i].ral_present_fence, 10000000000ULL );
+			// The device is idle here, so a pending present can only fail to
+			// signal on device loss; report it rather than swallowing it, then
+			// release the owner regardless.
+			if ( vk.tess[i].present_fence_pending ) {
+				const ralResult_t waitResult = Ral_WaitFenceExact(
+					vk.tess[i].ral_present_fence, 10000000000ULL );
+				if ( waitResult != ralSuccess )
+					R_LOG( rch_timing, SEV_WARN,
+						"present fence %u wait during sync teardown returned %s",
+						i, ral_result_string( waitResult ) );
+			}
 			Ral_DestroyFence( vk.tess[i].ral_present_fence );
 			vk.tess[i].ral_present_fence = NULL;
 		}
@@ -25167,9 +25176,17 @@ void vk_update_descriptor_set( image_t *image, qboolean mipmap ) {
 			// the RAL-owned bindless set's sampler-array binding (renderer set
 			// 7's binding 1 is retired). vk.samplers.handle[] is only the borrowed
 			// native mirror used by legacy combined-image-sampler descriptors.
-			image->bindlessSamplerSlot = smIdx;
-			(void)vk_ral_bindless_publish_sampler( (uint32_t)smIdx,
-				vk.samplers.ral_handle[smIdx], &vk.samplers.def[smIdx] );
+			// Hand the slot out only once the sampler is actually published: an
+			// image that kept a slot whose descriptor was never written would
+			// sample whatever a previous owner left there. -1 degrades to the
+			// default sampler at draw time, exactly like a pool overflow.
+			if ( vk_ral_bindless_publish_sampler( (uint32_t)smIdx,
+					vk.samplers.ral_handle[smIdx], &vk.samplers.def[smIdx] ) )
+				image->bindlessSamplerSlot = smIdx;
+			else
+				R_LOG( rch_ral, SEV_WARN,
+					"bindless sampler publication failed (slot %d): %s\n",
+					smIdx, image->imgName );
 		}
 		// Publish the exact descriptor view of the sole RAL texture when the
 		// caller pre-assigned a slot (DDS and other non-ordinary assets).
@@ -26214,6 +26231,7 @@ vk.cmd->ral_cmd.
 static void vk_replay_overlay_quads( struct ralPipeline_s *pipeline )
 {
 	int i;
+	int dropped = 0;
 	float invW, invH;
 
 	if ( backEnd.numOverlayQuads <= 0 || !pipeline )
@@ -26281,21 +26299,29 @@ static void vk_replay_overlay_quads( struct ralPipeline_s *pipeline )
 		if ( presentLifetime ) {
 			vkRalBufferShadowWriteReceipt_t overlayReceipt;
 			off = PAD( vk.cmd->overlay_vertex_offset, 32 );
-			if ( off + sizeof( v ) > overlayShadow->byteSize )
+			if ( off + sizeof( v ) > overlayShadow->byteSize ) {
+				dropped = backEnd.numOverlayQuads - i;
 				break;   // out of present-lifetime overlay space — drop the rest
+			}
 			if ( !VK_RalBufferShadowWrite( overlayShadow, off, v, sizeof( v ) )
 					|| !VK_RalBufferShadowPublish( overlayShadow, off, sizeof( v ),
-						&overlayReceipt ) )
+						&overlayReceipt ) ) {
+				dropped = backEnd.numOverlayQuads - i;
 				break;
+			}
 			vk.cmd->overlay_vertex_offset = off + sizeof( v );
 		} else {
 			off = PAD( vk.cmd->vertex_buffer_offset, 32 );
-			if ( off + sizeof( v ) > vk.geometry_buffer_size )
+			if ( off + sizeof( v ) > vk.geometry_buffer_size ) {
+				dropped = backEnd.numOverlayQuads - i;
 				break;   // out of dynamic vertex space this frame — drop the rest
+			}
 			memcpy( vk.cmd->vertex_buffer_ptr + off, v, sizeof( v ) );
 			vk.cmd->vertex_buffer_offset = off + sizeof( v );
-			if ( !vk_tess_publish_shadow_range( off, sizeof( v ) ) )
+			if ( !vk_tess_publish_shadow_range( off, sizeof( v ) ) ) {
+				dropped = backEnd.numOverlayQuads - i;
 				break;
+			}
 		}
 
 		// The overlay pipeline shares the post-process sampler layout at set 0.
@@ -26309,6 +26335,18 @@ static void vk_replay_overlay_quads( struct ralPipeline_s *pipeline )
 		Ral_CmdDraw( vk.cmd->ral_cmd, 6, 1, 0, 0 );
 	}
 
+	}
+
+	// Dropped quads are HUD content the player expected to see; say so, but
+	// cap the noise: a persistent shortage would otherwise log every frame.
+	if ( dropped > 0 ) {
+		static int s_overlayDropReports;
+		if ( s_overlayDropReports < 8 ) {
+			s_overlayDropReports++;
+			R_LOG( rch_ral, SEV_WARN,
+				"overlay dropped %d of %d quads (out of vertex space or failed publish)\n",
+				dropped, backEnd.numOverlayQuads );
+		}
 	}
 }
 
