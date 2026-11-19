@@ -71,3 +71,5 @@ tools/visual-diff/vdiff
 .claude/worktrees/
 # Per-user agent settings (machine-local; also covered by some global ignores)
 .claude/settings.local.json
+# clangd index cache
+.cache/
