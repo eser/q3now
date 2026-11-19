@@ -14,6 +14,24 @@
 
 id<MTLDevice> RalMetal_CoreNativeDevice( ralMetalCore_t *core );
 id<MTLCommandQueue> RalMetal_CoreNativeQueue( ralMetalCore_t *core );
+/* Borrowed adapter-private cache identity; invalidated by world unload. */
+id<MTLBuffer> RalMetal_PresentNativeWorldBuffer( const ralMetalPresent_t *present,
+	int worldIndex, qboolean indices );
+/* Borrowed current GPU weather pool; read only after queue completion. */
+id<MTLBuffer> RalMetal_PresentNativeWeatherBuffer( const ralMetalPresent_t *present );
+id<MTLBuffer> RalMetal_PresentNativeHeightgrid( const ralMetalPresent_t *present, int worldIndex );
+/* Borrowed world-scoped source cube; read only after queue completion. */
+id<MTLTexture> RalMetal_PresentNativeSkySource( const ralMetalPresent_t *present );
+/* Read-only adapter-private simulation ownership diagnostics. */
+typedef struct {
+	qboolean atmosphereValid, atmosphereParity, weatherParity;
+	float weatherTimeline;
+	qboolean particleParity, particlePlanReady;
+	float particleTimeline;
+	uint32_t particleNextSlot;
+} ralMetalSimulationHistory_t;
+qboolean RalMetal_PresentSimulationHistory( const ralMetalPresent_t *present,
+	ralMetalSimulationHistory_t *outHistory );
 qboolean RalMetal_CoreMatchesReceipt( ralMetalCore_t *core,
 	const ralMetalCoreReceipt_t *receipt );
 qboolean RalMetal_CoreBeginCommand( ralMetalCore_t *core, uint64_t generation,

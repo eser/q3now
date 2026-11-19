@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#define RAL_METAL_MODULE_SCHEMA_VERSION 3u
+#define RAL_METAL_MODULE_SCHEMA_VERSION 4u
 
 typedef struct {
 	uint32_t schemaVersion;

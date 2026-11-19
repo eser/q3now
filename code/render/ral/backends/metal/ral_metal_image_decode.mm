@@ -90,11 +90,29 @@ extern "C" qboolean RenderImage_DecodeRgba8( const char *name,
 			sizeof( canonical ), NULL, NULL, NULL ) ) name = canonical;
 	extension = Extension( name );
 	if ( extension[0] ) {
+		/* Mirror the Vulkan product's R_LoadImage (and the OpenGL/WebGPU
+		 * decoders): the authored extension is tried first, then the same
+		 * stem with every other format. Authored .shader stages name .tga
+		 * files whose shipped pack holds .png/.jpg; without this fallback the
+		 * material degraded to the white placeholder (storm breath/mist
+		 * sprites rendered as opaque squares on Metal only). */
 		for ( i = 0u; i < ARRAY_LEN( s_extensions ); ++i ) {
 			if ( !strcasecmp( extension, s_extensions[i].extension ) ) {
-				return DecodePath( name, s_extensions[i].loader,
-					outPixels, outWidth, outHeight, outResolved );
+				if ( DecodePath( name, s_extensions[i].loader,
+						outPixels, outWidth, outHeight, outResolved ) ) return qtrue;
+				break;
 			}
+		}
+		(void)snprintf( stem, sizeof( stem ), "%.*s",
+			(int)( extension - name - 1 ), name );
+		for ( i = 0u; i < ARRAY_LEN( s_extensions ); ++i ) {
+			int written;
+			if ( !strcasecmp( extension, s_extensions[i].extension ) ) continue;
+			written = snprintf( candidate, sizeof( candidate ), "%s.%s", stem,
+				s_extensions[i].extension );
+			if ( written < 0 || (size_t)written >= sizeof( candidate ) ) continue;
+			if ( DecodePath( candidate, s_extensions[i].loader,
+					outPixels, outWidth, outHeight, outResolved ) ) return qtrue;
 		}
 		return qfalse;
 	}

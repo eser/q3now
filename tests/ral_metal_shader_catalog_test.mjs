@@ -11,7 +11,7 @@ import { openMetalShaderCatalog } from '../code/render/ral/backends/metal/ral_me
 const root = fileURLToPath(new URL('..', import.meta.url));
 const source = join(root, 'code/render/ral/backends/vulkan/renderer/shaders/portable');
 const catalog = openMetalShaderCatalog(source);
-assert.equal(catalog.moduleCount, 299);
+assert.equal(catalog.moduleCount, 315);
 assert.match(catalog.toolchainIdentity, /^wired-shader-xlate\/2 spirv-cross\//);
 const color = catalog.get('color_vert_spv');
 assert.equal(color.stage, 'RAL_STAGE_VERTEX');
@@ -20,6 +20,21 @@ assert.match(color.code, /#include <metal_stdlib>/);
 const histogram = catalog.get('hdr_histogram_comp_spv');
 assert.equal(histogram.inlineData.byteSize, 8);
 assert.doesNotMatch(histogram.code, /\bVk|#\s*include\s*[<\"]vulkan\//i);
+const skySh = catalog.get('project_sky_sh_comp_spv');
+assert.equal(skySh.inlineData.byteSize, 4);
+assert.match(skySh.code, /device SkySH\*/);
+// Depth direction belongs to the common shader, never an MSL text patch.
+const particleSource = readFileSync(join(source, '../particle.frag'), 'utf8');
+assert.match(particleSource, /abs\( depthValid \) < 0\.5/);
+assert.match(particleSource, /depthValid > 0\.0 && sceneDepth <= 0\.0/);
+assert.match(particleSource, /depthValid < 0\.0 && sceneDepth >= 1\.0/);
+assert.match(particleSource, /\( gl_FragCoord\.z - sceneDepth \) \* sign\( depthValid \)/);
+assert.doesNotMatch(readFileSync(join(source, '../compile_xlate.mjs'), 'utf8'),
+	/item\.symbol === 'particle_frag_spv'/);
+const particle = catalog.get('particle_frag_spv');
+assert.match(particle.code, /abs\([^)]*depthValid\)/);
+assert.match(particle.code, /sign\([^)]*depthValid\)/);
+assert.match(particle.code, /sceneDepth >= 1\.0/);
 assert.throws(() => catalog.get('missing_spv'), /unknown MSL module/);
 
 const tempRoot = mkdtempSync(join(tmpdir(), 'wired-metal-catalog-'));

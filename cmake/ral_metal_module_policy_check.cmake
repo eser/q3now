@@ -25,10 +25,10 @@ file(READ "${P}" PUBLIC_ABI)
 file(READ "${I}" IMAGE_SOURCE)
 file(READ "${M}" MODEL_HEADER)
 file(READ "${MS}" MODEL_SOURCE)
-string(REGEX MATCH "#[ \t]*define[ \t]+REF_API_VERSION[ \t]+31([^0-9]|$)"
-	ref_api_31 "${PUBLIC_ABI}")
-if(NOT ref_api_31)
-	message(FATAL_ERROR "Metal renderer module no longer targets REF_API_VERSION 31")
+string(REGEX MATCH "#[ \t]*define[ \t]+REF_API_VERSION[ \t]+32([^0-9]|$)"
+	ref_api_32 "${PUBLIC_ABI}")
+if(NOT ref_api_32)
+	message(FATAL_ERROR "Metal renderer module no longer targets REF_API_VERSION 32")
 endif()
 
 foreach(forbidden IN ITEMS "CAMetalLayer" "MTLDevice" "SDL_Window" "SDL_MetalView"
@@ -46,7 +46,7 @@ foreach(needle IN ITEMS
 	"RalMetal_PresentAdoptBorrowedLayer" "Ral_FrameShellInit"
 	"Ral_FrameShellBegin" "RefreshPresentation"
 	"s_module.imports.PresentationHost.refresh"
-	"RalMetal_PresentAcquire" "RalMetal_PresentClearAndSubmit"
+	"RalMetal_PresentRenderAndSubmit" "RAL_METAL_SUBMIT_DRAWABLE_UNAVAILABLE"
 	"RenderSubmission_LoadWorld" "RenderSubmission_AddEntity"
 	"RenderSubmission_AddPoly" "RenderSubmission_RenderScene"
 	"RenderSubmission_AddUiQuad" "RenderSubmission_EndFrame"
@@ -58,7 +58,8 @@ foreach(needle IN ITEMS
 "zero-pass default shader" "placeholder cannot occlude valid geometry"
 	"s_module.imports.MetaRemap_Lookup" "REMAP_KIND_SHADER"
 	"PrepareWorldMaterials" "RenderSubmission_LightmapMaterialName"
-	"RenderSubmission_RegisterModelData" "RenderSubmission_RegisterInlineModel"
+	"RenderSubmission_RegisterModelData" "RenderSubmission_RegisterBspModel"
+	"RenderSubmission_ModelBounds" "RenderSubmission_SetAtmosphereHeightgrid"
 	"RenderSubmission_SetModelBatchMaterial" "RenderSubmission_ModelSnapshot"
 	"RENDER_ASSET_LIGHTMAP" "_atlas" ".png"
 	"Ral_FrameShellComplete"
@@ -74,7 +75,9 @@ endforeach()
 foreach(needle IN ITEMS "RENDER_SUBMISSION_MAX_MODELS"
 	"RENDER_SUBMISSION_MAX_MODEL_VERTICES" "RENDER_SUBMISSION_MAX_MODEL_BYTES"
 	"renderModelSnapshot_t" "renderEntityCommand_t" "RENDER_MODEL_MD3"
-	"RENDER_MODEL_IQM" "DecodeMd3" "DecodeIqm" "ModelRange")
+	"RENDER_MODEL_IQM" "DecodeMd3" "DecodeIqm" "ModelRange"
+	"RenderSubmission_RegisterInlineModel" "RenderSubmission_RegisterBspModel"
+	"RenderSubmission_ModelBounds" "RenderSubmission_ReleaseWorldModels")
 	string(FIND "${MODEL_HEADER}${MODEL_SOURCE}" "${needle}" pos)
 	if(pos EQUAL -1)
 		message(FATAL_ERROR "neutral model/entity payload lost bounded seam: ${needle}")

@@ -1,6 +1,12 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 #include <metal_stdlib>
+#include "../../../../frontend/render_material_noise.h"
 
 using namespace metal;
+#include "../../../core/ral_sky_cube.glsl"
+#include "../../../core/ral_material_stage.glsl"
 
 struct UiVertexIn {
     float2 position [[attribute(0)]];
@@ -67,6 +73,16 @@ struct FullscreenVertexOut {
 	float4 position [[position]];
 	float2 uv;
 };
+
+// Explicit catalog varying; Metal render-target coordinates have a top-left origin.
+struct BloomVertexOut {
+    float4 position [[position]];
+    float2 uv [[user(locn0)]];
+};
+vertex BloomVertexOut wired_bloom_vertex(uint id [[vertex_id]]) {
+    float2 uv = float2((id << 1u) & 2u, id & 2u);
+    return { float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 0.0, 1.0), uv };
+}
 
 static float3 wired_display_visibility_plan(float3 sceneColor, float3 plan);
 
@@ -145,10 +161,14 @@ static float3 wired_tonemap_lottes(float3 color,
 
 fragment float4 wired_tonemap_fragment(FullscreenVertexOut in [[stage_in]],
 		texture2d<float> scene [[texture(0)]], sampler sceneSampler [[sampler(0)]],
-		constant ToneMapParams &params [[buffer(0)]]) {
+		constant ToneMapParams &params [[buffer(0)]],
+		constant float &adaptedExposure [[buffer(1)]]) {
 	float3 color = wired_display_visibility_plan(
-		max(scene.sample(sceneSampler, in.uv).rgb, float3(0.0)),
-		params.displayVisibility.xyz) * params.exposure;
+		max(scene.sample(sceneSampler, in.uv).rgb, float3(0.0)) * adaptedExposure,
+		params.displayVisibility.xyz);
+	// Match the canonical disabled-tonemap variant: AE/brightness still apply,
+	// but the tonemap-specific exposure multiplier does not.
+	if (params.mode != 0u) color *= params.exposure;
 	if (params.mode == 1u) color = wired_tonemap_pbr_neutral(color);
 	else if (params.mode == 2u) color = wired_tonemap_agx(color);
 	else if (params.mode == 3u) color = wired_tonemap_lottes(color, params);
@@ -284,6 +304,7 @@ struct WorldVertexIn {
     float2 texCoord [[attribute(2)]];
     float2 lightmapCoord [[attribute(3)]];
     float4 normal [[attribute(4)]];
+    float4 materialPosition [[attribute(5)]];
 };
 
 struct WorldViewParams {
@@ -294,6 +315,67 @@ struct WorldViewParams {
     float4 projection;
 };
 
+struct LensSourceInput {
+    float4 originRadius;
+    uint4 meta;
+};
+
+struct LensOracleParams {
+    WorldViewParams view;
+    float4 viewportOpticsBias;
+};
+
+kernel void wired_lens_visibility_compute(
+        device const LensSourceInput *sources [[buffer(0)]],
+        device float *visibility [[buffer(1)]],
+        constant LensOracleParams &params [[buffer(2)]],
+        depth2d<float, access::read> sceneDepth [[texture(0)]],
+        uint index [[thread_position_in_grid]]) {
+    uint count = as_type<uint>(params.viewportOpticsBias.w);
+    if (index >= count) return;
+    LensSourceInput source = sources[index];
+    uint id = source.meta.x;
+    if (id >= 352u) return;
+    float3 delta = source.originRadius.xyz - params.view.viewOrigin.xyz;
+    float forward = dot(delta, params.view.forward.xyz);
+    if (forward <= params.view.projection.z) {
+        visibility[id] = 0.0;
+        return;
+    }
+    float2 ndc = float2(-dot(delta, params.view.left.xyz)
+            * params.view.projection.x,
+        dot(delta, params.view.up.xyz) * params.view.projection.y) / forward;
+    if (any(abs(ndc) > float2(1.05))) {
+        visibility[id] = 0.0;
+        return;
+    }
+    float2 viewport = params.viewportOpticsBias.xy;
+    float2 center = (ndc * float2(0.5, -0.5) + 0.5) * viewport;
+    /* Shared oracle policy (vk.c lens push: radiusPx 1.5, source radius
+     * ignored): a tight 1.5-texel disc. Projecting the authored light radius
+     * (up to 16 px here) let map flares peek around thin occluders on Metal
+     * while Vulkan reported them occluded. */
+    float radiusPixels = 1.5;
+    (void)source.originRadius.w;
+    const float2 taps[9] = {
+        float2(0.0), float2(1.0, 0.0), float2(-1.0, 0.0),
+        float2(0.0, 1.0), float2(0.0, -1.0),
+        float2(0.7071, 0.7071), float2(-0.7071, 0.7071),
+        float2(0.7071, -0.7071), float2(-0.7071, -0.7071)
+    };
+    float sourceDepth = (forward - params.view.projection.z) / forward;
+    float visible = 0.0;
+    uint2 maxPixel = uint2(max(viewport - 1.0, float2(0.0)));
+    for (uint tap = 0u; tap < 9u; ++tap) {
+        uint2 pixel = uint2(clamp(center + taps[tap] * radiusPixels,
+            float2(0.0), viewport - 1.0));
+        float sampledDepth = sceneDepth.read(min(pixel, maxPixel));
+        visible += sourceDepth <= sampledDepth + 0.0015 ? 1.0 : 0.0;
+    }
+    visibility[id] = visible * (1.0 / 9.0)
+        * clamp(params.viewportOpticsBias.z, 0.0, 1.0);
+}
+
 struct WorldVertexOut {
     float4 position [[position]];
     float3 worldPosition;
@@ -301,33 +383,13 @@ struct WorldVertexOut {
     float2 texCoord;
     float2 lightmapCoord;
     float3 normal;
-};
-
-vertex WorldVertexOut wired_world_vertex(WorldVertexIn in [[stage_in]],
-                                          constant WorldViewParams &view [[buffer(1)]]) {
-    WorldVertexOut out;
-    float3 delta = in.worldPosition.xyz - view.viewOrigin.xyz;
-    float forward = dot(delta, view.forward.xyz);
-    float left = dot(delta, view.left.xyz);
-    float up = dot(delta, view.up.xyz);
-    out.position = float4(-left * view.projection.x,
-                          up * view.projection.y,
-                          forward - view.projection.z,
-                          forward);
-    out.worldPosition = in.worldPosition.xyz;
-    out.color = in.color;
-    out.texCoord = in.texCoord;
-    out.lightmapCoord = in.lightmapCoord;
-    out.normal = normalize(in.normal.xyz);
-    return out;
-}
-
-struct MaterialStageParams {
-	uint4 meta;
-	float4 params;
-	float4 scaleScroll;
-	float4 turbulence;
-	float4 stretch;
+    float3 legacyGridColor;
+    float4 stageUv01;
+    float4 stageUv23;
+    float4 stageUv45;
+    float4 stageUv67;
+    float4 stageAlpha0123;
+    float4 stageAlpha4567;
 };
 
 struct WorldMaterialParams {
@@ -339,8 +401,12 @@ struct WorldMaterialParams {
     uint staticLightingMode;
     uint staticLightingLayer;
     uint staticLightingEncoding;
-    uint hasStaticVisibility;
+	uint hasStaticVisibility;
 	float4 emissiveRadiance;
+	float4 materialBaseColor;
+	/* metallic, roughness, occlusion strength, previous-to-current blend;
+	 * metallic < 0 means no cooked factor cohort is published. */
+	float4 materialFactors;
 	float4 skyScaleScroll;
 	float4 skySecondaryScaleScroll;
 	float skyTime;
@@ -348,7 +414,16 @@ struct WorldMaterialParams {
 	float skyCloudHeight;
 	float lightmapBoost;
 	uint4 stageProgram;
+	uint4 directLightMeta;
+	float4 directLightPositionRadius[4];
+	float4 directLightColorFalloff[4];
+	float4 directLightEndLinear[4];
 	MaterialStageParams stages[8];
+	/* Descriptor offset.xy, primitive scroll clock.z; no surface clock reuse. */
+	float4 beamUv;
+	float4 modelAxes[3];
+	float4 modelViewOrigin;
+	float4 entityColor;
 };
 
 struct WorldAtmosphereParams {
@@ -357,6 +432,9 @@ struct WorldAtmosphereParams {
     float4 heightCloud;
     uint4 froxelGrid;
 	float4 displayVisibility;
+	float4 skyControl;
+	/* sun direction xyz, aerial-perspective haze weight (r_atmosphereAerialHaze) */
+	float4 aerialHaze;
 };
 
 static float3 wired_display_visibility_plan(float3 sceneColor, float3 plan) {
@@ -369,93 +447,184 @@ static float3 wired_display_visibility_plan(float3 sceneColor, float3 plan) {
 	return exposed;
 }
 
-struct AtmosphereComputeParams {
-    uint4 dimsStage;
-    uint4 bases0;
-    uint4 bases1;
-    float4 boundsMin;
-    float4 boundsMax;
-    float4 climate;
-    float4 lighting;
-    float4 weather;
-};
-
-struct AtmosphereVolume {
-    float4 originRadius;
-    float4 extentShape;
-    float4 albedoAnisotropy;
-    float4 emissiveIntensity;
-    float4 media;
-};
-
-static float atmosphere_hash3(float3 value) {
-    return fract(sin(dot(value, float3(12.9898, 78.233, 37.719))) * 43758.5453);
+static float3 wired_sample_sky_radiance(texture2d_array<float> sky,
+		sampler skySampler, float3 direction, float lod) {
+	float3 location = wired_sky_cube_uv_layer(direction);
+	return sky.sample(skySampler, location.xy, uint(location.z), level(lod)).rgb;
 }
 
-kernel void wired_atmosphere_compute(
-        constant AtmosphereComputeParams &params [[buffer(0)]],
-        device float4 *arena [[buffer(1)]],
-        device const AtmosphereVolume *volumes [[buffer(2)]],
-        uint3 coord [[thread_position_in_grid]]) {
-    uint3 dims = params.dimsStage.xyz;
-    if (any(coord >= dims)) return;
-    uint index = (coord.z * dims.y + coord.y) * dims.x + coord.x;
-    float3 uvw = (float3(coord) + 0.5) / float3(dims);
-    uint stage = params.dimsStage.w;
-    if (stage == 0u) {
-        float extinction = max(params.climate.x, 0.0)
-            * exp(-max(params.climate.y, 0.0) * uvw.z);
-        extinction += params.weather.x * params.weather.y * 0.00008;
-        float3 scatter = float3(0.62, 0.70, 0.78) * extinction;
-        float3 world = mix(params.boundsMin.xyz, params.boundsMax.xyz, uvw);
-        for (uint n = 0u; n < params.bases1.w; ++n) {
-            AtmosphereVolume volume = volumes[n];
-            float3 delta = world - volume.originRadius.xyz;
-            float weight = 1.0 - smoothstep(volume.originRadius.w * 0.8,
-                volume.originRadius.w, length(delta));
-            if (volume.extentShape.w > 1.5) {
-                float normalized = max(max(abs(delta.x) / volume.extentShape.x,
-                    abs(delta.y) / volume.extentShape.y),
-                    abs(delta.z) / volume.extentShape.z);
-                weight = 1.0 - smoothstep(0.8, 1.0, normalized);
-            }
-            weight = max(weight, 0.0);
-            float localExtinction = max(volume.media.x, 0.0) * weight;
-            extinction += localExtinction;
-            scatter += volume.albedoAnisotropy.xyz * localExtinction
-                + volume.emissiveIntensity.xyz * volume.emissiveIntensity.w * weight;
-        }
-        arena[params.bases0.x + index] = float4(scatter, extinction);
-        return;
+/* Aerial-perspective haze, same semantics as the Vulkan product composite
+ * (sky_surface_composite.comp wiredAerialInscatter): the flat analytic media
+ * colour is tinted by the directional sky radiance normalised to the zenith
+ * mean luminance, then shaped by a Henyey-Greenstein sun lobe (g = 0.55).
+ * Weight 0 returns the flat colour bit-identically. */
+static float3 wired_aerial_inscatter(float3 mediaColor, float3 viewDir,
+		constant WorldAtmosphereParams &atmosphere,
+		texture2d<float> physicalSkyView, sampler physicalSkySampler,
+		texture2d_array<float> currentSkyRadiance, sampler skyRadianceSampler) {
+	float aerial = clamp(atmosphere.aerialHaze.w, 0.0, 1.0);
+	if (aerial <= 0.0) return mediaColor;
+	float3 skyIn;
+	if (atmosphere.skyControl.x > 0.0) {
+		float2 skyViewUv = float2(fract(atan2(viewDir.y, viewDir.x)
+			/ (2.0 * M_PI_F) + 0.5),
+			clamp(asin(clamp(viewDir.z, -1.0, 1.0)) / M_PI_F + 0.5, 0.0, 1.0));
+		skyIn = physicalSkyView.sample(physicalSkySampler, skyViewUv, level(0.0)).rgb;
+	} else {
+		skyIn = wired_sample_sky_radiance(currentSkyRadiance, skyRadianceSampler,
+			viewDir, 4.0);
+	}
+	/* Six face-centre taps of the coarsest prefiltered mip: backend-invariant
+	 * mean (cube and 2D-array sampling read the same texels there). */
+	const float3 luma = float3(0.2126, 0.7152, 0.0722);
+	float3 skySum = float3(0.0);
+	for (uint face = 0u; face < 6u; ++face) {
+		float3 axis = float3(0.0);
+		axis[face / 2u] = (face & 1u) != 0u ? -1.0 : 1.0;
+		skySum += wired_sample_sky_radiance(currentSkyRadiance, skyRadianceSampler,
+			axis, 7.0);
+	}
+	float skyMean = max(dot(skySum / 6.0, luma), 1e-4);
+	float3 directional = skyIn / skyMean;
+	float3 sunDir = normalize(atmosphere.aerialHaze.xyz + float3(1e-6));
+	float cosT = dot(viewDir, sunDir);
+	const float g = 0.55;
+	float hg = (1.0 - g * g) / max(pow(1.0 + g * g - 2.0 * g * cosT, 1.5), 1e-4);
+	float3 tinted = mediaColor * mix(float3(1.0),
+		clamp(directional, float3(0.35), float3(3.0)), aerial);
+	return tinted * mix(1.0, 0.75 + 0.25 * hg, aerial);
+}
+
+struct SkyPhysicalParams {
+    float4 sunDirectionAngularRadius;
+    float4 sunRadiance;
+    float4 moonDirectionAngularRadius;
+    float4 moonRadiance;
+    float4 atmosphereRadii;
+    float4 scatteringScale;
+    float4 groundExposure;
+};
+
+kernel void wired_sky_transmittance_compute(
+        constant SkyPhysicalParams &sky [[buffer(0)]],
+        texture2d<float, access::write> transmittanceLut [[texture(0)]],
+        uint2 coord [[thread_position_in_grid]]) {
+    uint2 extent = uint2(transmittanceLut.get_width(),
+        transmittanceLut.get_height());
+    if (any(coord >= extent)) return;
+    float2 uv = (float2(coord) + 0.5) / float2(extent);
+    float altitude = uv.y;
+    float mu = uv.x * 2.0 - 1.0;
+    float horizon = sqrt(max(1.0 - mu * mu, 0.0));
+    float airMass = mix(32.0, 1.0, clamp(mu * 0.5 + 0.5, 0.0, 1.0));
+    airMass *= mix(1.0, 0.035, altitude);
+    airMass *= mix(1.0, 1.8, horizon);
+    float3 rayleigh = float3(0.005802, 0.013558, 0.033100)
+        * max(sky.scatteringScale.x, 0.001);
+    float3 mie = float3(0.003996) * max(sky.scatteringScale.y, 0.001);
+    float3 absorption = float3(0.000650, 0.001881, 0.000085)
+        * max(sky.scatteringScale.z, 0.001);
+    float3 transmittance = exp(-(rayleigh + mie + absorption) * airMass);
+    transmittanceLut.write(float4(clamp(transmittance, 0.0, 1.0), airMass),
+        coord);
+}
+
+kernel void wired_sky_multiscatter_compute(
+        constant SkyPhysicalParams &sky [[buffer(0)]],
+        texture2d<float> transmittanceLut [[texture(0)]],
+        texture2d<float, access::write> multiscatterLut [[texture(1)]],
+        sampler linearClamp [[sampler(0)]],
+        uint2 coord [[thread_position_in_grid]]) {
+    uint2 extent = uint2(multiscatterLut.get_width(),
+        multiscatterLut.get_height());
+    if (any(coord >= extent)) return;
+    float2 uv = (float2(coord) + 0.5) / float2(extent);
+    float3 accumulated = 0.0;
+    for (uint i = 0u; i < 16u; ++i) {
+        float u = (float(i) + 0.5) / 16.0;
+        float2 sampleUv = float2(fract(u + uv.x), uv.y);
+        float3 transmittance = transmittanceLut.sample(linearClamp,
+            sampleUv, level(0.0)).xyz;
+        accumulated += (1.0 - transmittance) * transmittance;
     }
-    if (stage == 1u) {
-        float4 media = arena[params.bases0.x + index];
-        float cloudShadow = 1.0 - params.climate.w * params.climate.z;
-        float light = max(params.lighting.x + params.lighting.y * cloudShadow
-            + params.lighting.z, 0.0);
-        arena[params.bases0.y + index] = float4(media.xyz * light, media.w);
-        return;
-    }
-    if (stage == 2u) {
-        float4 lit = arena[params.bases0.y + index];
-        float layer = exp(-pow((uvw.z - 0.72) / 0.18, 2.0));
-        float erosion = mix(0.55, 1.0,
-            atmosphere_hash3(float3(uvw.xy * 32.0 + params.weather.z, uvw.z * 8.0)));
-        float cloud = params.climate.z * layer * erosion;
-        arena[params.bases0.z + index] = float4(lit.xyz
-            + cloud * (params.lighting.x + params.lighting.z), lit.w + cloud * 0.002);
-        return;
-    }
-    uint source = params.climate.z > 0.0 ? params.bases0.z : params.bases0.y;
-    float4 media = arena[source + index];
-    float distance = mix(4.0, max(params.weather.w, 4.01), uvw.z);
-    float transmittance = exp(-media.w * distance);
-    float4 current = float4(media.xyz * (1.0 - transmittance)
-        / max(media.w, 0.000001), transmittance);
-    if (params.lighting.w > 0.0)
-        current = mix(current, arena[params.bases1.x + index], params.lighting.w);
-    arena[params.bases0.w + index] = current;
-    arena[params.bases1.y + index] = current;
+    float3 energy = accumulated / 16.0;
+    energy *= max(sky.sunRadiance.xyz, float3(0.001));
+    energy *= 0.35 + 0.65 * clamp(sky.groundExposure.w, 0.0, 4.0);
+    multiscatterLut.write(float4(max(energy, 0.0), 1.0), coord);
+}
+
+static float wired_sky_rayleigh_phase(float cosTheta) {
+    return 3.0 * (1.0 + cosTheta * cosTheta) / 50.265482;
+}
+
+static float wired_sky_mie_phase(float cosTheta, float g) {
+    float g2 = g * g;
+    float denominator = max(1.0 + g2 - 2.0 * g * cosTheta, 0.001);
+    return (1.0 - g2) / (12.566371 * denominator * sqrt(denominator));
+}
+
+kernel void wired_sky_view_compute(
+        constant SkyPhysicalParams &sky [[buffer(0)]],
+        texture2d<float> transmittanceLut [[texture(0)]],
+        texture2d<float> multiscatterLut [[texture(1)]],
+        texture2d<float, access::write> skyViewLut [[texture(2)]],
+        sampler linearClamp [[sampler(0)]],
+        uint2 coord [[thread_position_in_grid]]) {
+    uint2 extent = uint2(skyViewLut.get_width(), skyViewLut.get_height());
+    if (any(coord >= extent)) return;
+    float2 uv = (float2(coord) + 0.5) / float2(extent);
+    float azimuth = (uv.x * 2.0 - 1.0) * M_PI_F;
+    float elevation = (uv.y - 0.5) * M_PI_F;
+    float3 viewDirection = normalize(float3(cos(elevation) * cos(azimuth),
+        cos(elevation) * sin(azimuth), sin(elevation)));
+    float3 sunDirection = normalize(sky.sunDirectionAngularRadius.xyz);
+    float cosTheta = clamp(dot(viewDirection, sunDirection), -1.0, 1.0);
+    float2 transmittanceUv = float2(viewDirection.z * 0.5 + 0.5,
+        clamp(sky.atmosphereRadii.z, 0.0, 1.0));
+    float3 transmittance = transmittanceLut.sample(linearClamp,
+        transmittanceUv, level(0.0)).xyz;
+    float3 multi = multiscatterLut.sample(linearClamp,
+        float2(cosTheta * 0.5 + 0.5, transmittanceUv.y), level(0.0)).xyz;
+    float3 betaRayleigh = float3(0.18, 0.34, 0.72)
+        * wired_sky_rayleigh_phase(cosTheta);
+    float3 betaMie = float3(0.42, 0.34, 0.24)
+        * wired_sky_mie_phase(cosTheta,
+            clamp(sky.scatteringScale.w, 0.0, 0.95));
+    float sunHeight = clamp(sunDirection.z * 0.5 + 0.5, 0.0, 1.0);
+    float twilight = 1.0 - smoothstep(0.42, 0.62, sunHeight);
+    float aboveHorizon = smoothstep(-0.08, 0.04, viewDirection.z);
+    float elevationMix = pow(clamp(viewDirection.z, 0.0, 1.0), 0.35);
+    float3 zenithTint = mix(float3(0.025, 0.035, 0.10),
+        float3(0.035, 0.16, 0.46), sunHeight);
+    float3 horizonTint = mix(float3(0.30, 0.52, 0.75),
+        float3(0.95, 0.24, 0.055), twilight);
+    float3 groundTint = max(sky.groundExposure.xyz, float3(0.015)) * 0.22;
+    float3 directionalSky = mix(horizonTint, zenithTint, elevationMix);
+    directionalSky = mix(groundTint, directionalSky, aboveHorizon);
+    float sunEnergy = dot(sky.sunRadiance.xyz,
+        float3(0.2126, 0.7152, 0.0722));
+    float3 radiance = directionalSky
+        * (0.22 + 0.48 * max(sunEnergy, 0.0));
+    radiance += sky.sunRadiance.xyz * (betaRayleigh + betaMie)
+        * (1.0 - transmittance) * 0.45;
+    radiance += multi * 0.12;
+    float angularRadius = max(sky.sunDirectionAngularRadius.w, 0.0001);
+    float resolvedRadius = max(angularRadius, 0.006);
+    float sunDisk = smoothstep(cos(resolvedRadius * 1.8), cos(resolvedRadius),
+        cosTheta);
+    float sunCorona = pow(max(cosTheta, 0.0), 256.0) * 0.55
+        + pow(max(cosTheta, 0.0), 24.0) * 0.06;
+    radiance += sky.sunRadiance.xyz * transmittance
+        * (sunDisk * 7.0 + sunCorona);
+    float3 moonDirection = normalize(sky.moonDirectionAngularRadius.xyz);
+    float moonTheta = clamp(dot(viewDirection, moonDirection), -1.0, 1.0);
+    float moonRadius = max(sky.moonDirectionAngularRadius.w, 0.009);
+    float moonDisk = smoothstep(cos(moonRadius * 1.6), cos(moonRadius),
+        moonTheta);
+    radiance += sky.moonRadiance.xyz * (moonDisk * 3.0
+        + pow(max(moonTheta, 0.0), 96.0) * 0.10);
+    radiance *= max(sky.groundExposure.w, 0.0);
+    skyViewLut.write(float4(max(radiance, 0.0), 1.0), coord);
 }
 
 struct WeatherFrame {
@@ -474,6 +643,7 @@ struct WeatherFrame {
     float4 ambientCloud;
     float4 cloudMedia;
     float4 effectMeta;
+    float4 heightgridOriginStep;
     float4 effectWorkloads[48];
 };
 
@@ -504,10 +674,23 @@ static uint weather_effect(constant WeatherFrame &frame, uint index) {
     return 0xffffffffu;
 }
 
+static float weather_ground(constant WeatherFrame &frame,
+        device const float *grid, float2 xy) {
+    uint edge = uint(frame.weather.w);
+    if (edge < 2u) return frame.boundsMin.z;
+    float2 cell = clamp((xy - frame.heightgridOriginStep.xy)
+        * frame.heightgridOriginStep.zw, float2(0.0), float2(float(edge - 1u)));
+    uint2 low = uint2(floor(cell)), high = min(low + 1u, uint2(edge - 1u));
+    float2 blend = fract(cell);
+    return mix(mix(grid[low.y * edge + low.x], grid[low.y * edge + high.x], blend.x),
+        mix(grid[high.y * edge + low.x], grid[high.y * edge + high.x], blend.x), blend.y);
+}
+
 kernel void wired_weather_compute(
         constant WeatherFrame &frame [[buffer(0)]],
         device const WeatherParticle *readPool [[buffer(1)]],
         device WeatherParticle *writePool [[buffer(2)]],
+        device const float *heightgrid [[buffer(3)]],
         uint index [[thread_position_in_grid]]) {
     uint poolSize = uint(frame.dtTimePoolRead.z);
     if (index >= poolSize) return;
@@ -560,6 +743,11 @@ kernel void wired_weather_compute(
                 frame.boundsMin.y, frame.boundsMax.y),
             min(frame.eyeWorld.z + rz * 800.0, frame.boundsMax.z));
         particle.posSeed.w = rx + ry + rz;
+        if (frame.weather.w >= 2.0 && particle.posSeed.z <= weather_ground(frame, heightgrid, particle.posSeed.xy)) {
+            particle.velFamily.w = 0.0;
+            writePool[index] = particle;
+            return;
+        }
         float total = frame.precipitation.x + frame.precipitation.y
             + frame.precipitation.z + frame.precipitation.w + frame.weather.y;
         float pick = weather_rand(index, 67u, seed) * max(total, 0.0001);
@@ -592,7 +780,7 @@ kernel void wired_weather_compute(
         float phase = sin(frame.dtTimePoolRead.y * 0.7 + float(index % 97u) * 0.37);
         particle.posSeed.xyz += frame.windGust.xyz * frame.windGust.w * phase * dt;
         float2 delta = particle.posSeed.xy - frame.eyeWorld.xy;
-        if (particle.posSeed.z < frame.boundsMin.z
+        if (particle.posSeed.z < weather_ground(frame, heightgrid, particle.posSeed.xy)
                 || dot(delta, delta) > frame.weather.x * frame.weather.x)
             particle.velFamily.w = 0.0;
     }
@@ -603,6 +791,7 @@ struct WeatherVertexOut {
     float4 position [[position]];
     float2 uv;
     float4 color;
+    float3 worldPosition;
     uint family [[flat]];
 };
 
@@ -617,7 +806,8 @@ vertex WeatherVertexOut wired_weather_vertex(
     uint family = uint(particle.velFamily.w + 0.5);
     if (family == 0u) {
         out.position = float4(0.0, 0.0, 0.0, 1.0);
-        out.uv = 0.0; out.color = 0.0; out.family = 0u; return out;
+        out.uv = 0.0; out.color = 0.0; out.family = 0u;
+        out.worldPosition = float3(0.0); return out;
     }
     float sx = side[vertexId % 6u], uy = up[vertexId % 6u];
     float3 world;
@@ -647,66 +837,215 @@ vertex WeatherVertexOut wired_weather_vertex(
             : (family == 5u ? float4(0.48, 0.42, 0.34, 0.45)
             : float4(1.0, 1.0, 1.0, 0.8));
     }
-    float light = dot(frame.ambientCloud.xyz, float3(0.3333))
-        + frame.sun.w * (1.0 - frame.ambientCloud.w * frame.cloudMedia.x)
-        + frame.moon.w * 0.2 + frame.cloudMedia.y;
-    if (light > 0.0) out.color.rgb *= clamp(light, 0.04, 4.0);
+    /* Vulkan atmospheric.vert: per-channel SH ambient + cloud-attenuated sun,
+     * moon and lightning, clamped 0.04..4. The scalar mean ambient used
+     * before tinted storm puffs cool where Vulkan keeps the warm ambient. */
+    float cloudTransmission = 1.0 - clamp(frame.ambientCloud.w * frame.cloudMedia.x, 0.0, 1.0);
+    float3 weatherLight = frame.ambientCloud.xyz
+        + float3(max(frame.sun.w, 0.0) * cloudTransmission)
+        + float3(max(frame.moon.w, 0.0) * 0.2)
+        + float3(max(frame.cloudMedia.y, 0.0));
+    if (dot(weatherLight, weatherLight) > 1e-8)
+        out.color.rgb *= clamp(weatherLight, float3(0.04), float3(4.0));
     out.position = frame.mvp * float4(world, 1.0);
     out.uv = float2(sx * 0.5 + 0.5, uy * -0.5 + 0.5);
+    out.worldPosition = world;
     out.family = family;
     return out;
 }
 
+static float3 wired_compose_authored_physical_sky(float3 authored,
+		float3 physical, float blend);
+
+/* Atmospheric media behind a weather quad: the froxel / analytic sample at
+ * the opaque scene depth of the pixel, not at the quad itself.  Vulkan blends
+ * its weather quads (no depth write) and fogs the result in the post-scene
+ * atmosphere composite, so the quad takes the media of whatever it covers. */
+static float4 wired_weather_media(float2 pixel, float sceneForward,
+        float3 worldPosition, float quadForward,
+        constant WorldAtmosphereParams &atmosphere,
+        device const float4 *atmosphereArena) {
+    float farDistance = max(atmosphere.colorVisibility.w, 4.01);
+    if (atmosphere.froxelGrid.z > 0u) {
+        uint x = min(uint(pixel.x) / 16u, atmosphere.froxelGrid.x - 1u);
+        uint y = min(uint(pixel.y) / 16u, atmosphere.froxelGrid.y - 1u);
+        float slice = clamp(log(max(sceneForward, 4.0) / 4.0)
+            / log(farDistance / 4.0), 0.0, 0.9999);
+        uint z = min(uint(slice * float(atmosphere.froxelGrid.z)),
+            atmosphere.froxelGrid.z - 1u);
+        return atmosphereArena[atmosphere.froxelGrid.w
+            + (z * atmosphere.froxelGrid.y + y) * atmosphere.froxelGrid.x + x];
+    }
+    float density = atmosphere.eyeDensity.w;
+    if (atmosphere.colorVisibility.w > 0.0)
+        density = max(density, 3.912023 / atmosphere.colorVisibility.w);
+    float transmission = 1.0;
+    if (density > 0.0) {
+        float3 eye = atmosphere.eyeDensity.xyz;
+        float3 background = eye + (worldPosition - eye)
+            * (min(sceneForward, farDistance) / max(quadForward, 0.001));
+        float distanceToEye = length(background - eye);
+        float heightWeight = exp(-atmosphere.heightCloud.y
+            * max(background.z - atmosphere.heightCloud.x, 0.0));
+        transmission = saturate(exp(-density * heightWeight * distanceToEye));
+    }
+    return float4(atmosphere.colorVisibility.rgb * (1.0 - transmission), transmission);
+}
+
 fragment float4 wired_weather_fragment(WeatherVertexOut in [[stage_in]],
-        texture2d<float> particleTexture [[texture(0)]],
-        sampler particleSampler [[sampler(0)]]) {
+        array<texture2d<float>, 8> particleTextures [[texture(0)]],
+        array<sampler, 8> particleSamplers [[sampler(0)]],
+        depth2d<float, access::read> sceneDepth [[texture(8)]],
+        texture2d<float> physicalSkyView [[texture(9)]],
+        sampler physicalSkySampler [[sampler(8)]],
+        constant WorldAtmosphereParams &atmosphere [[buffer(1)]],
+        device const float4 *atmosphereArena [[buffer(2)]],
+        constant float4 &fogParams [[buffer(3)]]) {
+    /* fogParams: x near plane, yz viewport.  Scene depth is (forward - near)
+     * / forward (see wired_lens_visibility_compute); a cleared texel (sky)
+     * takes no fade, like Vulkan's softParticleFade with nothing behind. */
+    float near = max(fogParams.x, 0.001);
+    uint2 pixel = uint2(clamp(in.position.xy, float2(0.0),
+        max(fogParams.yz - 1.0, float2(0.0))));
+    float depth = sceneDepth.read(pixel);
+    float quadForward = 1.0 / max(in.position.w, 0.000001);
+    float sceneForward = depth >= 0.99999 ? 1.0e9
+        : near / max(1.0 - depth, 1.0e-6);
+    /* atmospheric.frag: smoothstep(0, 0.001, fragDepth - sceneDepth) in
+     * reversed-Z units, i.e. near/forward; here 1 - depth plays that role. */
+    float fade = depth >= 0.99999 ? 1.0
+        : smoothstep(0.0, 0.001, depth - (1.0 - near / quadForward));
+    float4 media = wired_weather_media(in.position.xy, sceneForward,
+        in.worldPosition, quadForward, atmosphere, atmosphereArena);
+    /* Same operands as Vulkan's atmospheric.frag: linearised vertex colour
+     * times the class texel (both backends sample the class image through an
+     * sRGB view, so the texel is already linear), fogged by the media. */
+    float3 rgb = wired_srgb_to_linear(in.color.rgb);
+    float alpha = in.color.a * fade;
     if (in.family >= 16u) {
-        float4 texel = particleTexture.sample(particleSampler, in.uv);
-        return float4(in.color.rgb * texel.rgb, in.color.a * texel.a);
+        uint effect = in.family - 16u;
+        if (effect >= 8u) discard_fragment();
+        float4 texel = particleTextures[effect].sample(particleSamplers[effect], in.uv);
+        rgb *= texel.rgb;
+        alpha *= texel.a;
+    } else {
+        alpha *= 1.0 - smoothstep(0.0, 0.5, abs(in.uv.x - 0.5));
     }
-    float edge = 1.0 - smoothstep(0.0, 0.5, abs(in.uv.x - 0.5));
-    return float4(in.color.rgb, in.color.a * edge);
+    /* Vulkan's atmosphere_composite.comp re-composes every SKY pixel with
+     * the physical sky-view LUT (wiredComposeAuthoredPhysicalSky, blend =
+     * r_skyPhysicalBlend) after the weather quads were blended into the
+     * scene, which relights the puffs toward the physical sky energy.  The
+     * Metal sky pass composes before weather, so apply the same compose to
+     * the quad colour over sky pixels (cleared depth). */
+    if (depth >= 0.99999 && atmosphere.skyControl.x > 0.0) {
+        float3 viewDir = normalize(in.worldPosition - atmosphere.eyeDensity.xyz);
+        float2 skyViewUv = float2(fract(atan2(viewDir.y, viewDir.x)
+            / (2.0 * M_PI_F) + 0.5),
+            clamp(asin(clamp(viewDir.z, -1.0, 1.0)) / M_PI_F + 0.5, 0.0, 1.0));
+        float3 physical = physicalSkyView.sample(physicalSkySampler, skyViewUv,
+            level(0.0)).rgb;
+        rgb = wired_compose_authored_physical_sky(rgb, physical,
+            clamp(atmosphere.skyControl.x, 0.0, 1.0));
+    }
+    return float4(rgb * media.w + media.rgb, alpha);
 }
 
-static float4 wired_material_blend_factor(uint factor, float4 source,
-                                           float4 destination) {
-    if (factor == 0u) return float4(0.0);
-    if (factor == 1u) return float4(1.0);
-    if (factor == 2u) return source;
-    if (factor == 3u) return 1.0 - source;
-    if (factor == 4u) return destination;
-    if (factor == 5u) return 1.0 - destination;
-    if (factor == 6u) return float4(source.a);
-    if (factor == 7u) return float4(1.0 - source.a);
-    if (factor == 8u) return float4(destination.a);
-    if (factor == 9u) return float4(1.0 - destination.a);
-    return float4(min(source.a, 1.0 - destination.a));
+// Q3 evaluates surface tcGen/tcMod at vertices before perspective-correct
+// interpolation. Keep the bounded program out of the fragment invocation.
+// The scalar Q3 reciprocal-root approximation is part of its authored byte
+// result; substituting normalize() changes alpha at the quantization boundary.
+static float wired_material_scalar_rsqrt(float value) {
+    float estimate = as_type<float>(0x5f3759dfu - (as_type<uint>(value) >> 1u));
+    return estimate * (1.5 - (value * 0.5 * estimate * estimate));
 }
 
-static float2 wired_material_stage_uv(float2 authoredUv,
-                                       constant MaterialStageParams &stage,
-                                       float time) {
-    float2 uv = authoredUv * stage.scaleScroll.xy
-        + stage.scaleScroll.zw * time;
-    if (stage.params.w > 0.5) {
-        float wave = stage.stretch.x + stage.stretch.y
-            * sin((stage.stretch.z + time * stage.stretch.w) * 6.28318530718);
-        uv = (uv - 0.5) / max(abs(wave), 0.0001) + 0.5;
+static float wired_material_specular_alpha(float3 position, float3 normal, float3 eye) {
+    // Preserve legacy lightingSpecular's fixed light and fourth-power lobe.
+    // This is imported material behavior, not the physical/PBR light system.
+    float3 light = float3(-960.0, 1980.0, 96.0) - position;
+    light *= wired_material_scalar_rsqrt(dot(light, light));
+    float3 reflected = normal * (2.0 * dot(normal, light)) - light;
+    float3 viewer = eye - position;
+    float strength = max(0.0, dot(reflected, viewer)
+        * wired_material_scalar_rsqrt(dot(viewer, viewer)));
+    strength *= strength;
+    strength *= strength;
+    return floor(min(strength, 1.0) * 255.0) / 255.0;
+}
+
+vertex WorldVertexOut wired_world_vertex(WorldVertexIn in [[stage_in]],
+        constant WorldViewParams &view [[buffer(1)]],
+        constant WorldMaterialParams &material [[buffer(2)]]) {
+    WorldVertexOut out;
+    float3 delta = in.worldPosition.xyz - view.viewOrigin.xyz;
+    float forward = dot(delta, view.forward.xyz);
+    float left = dot(delta, view.left.xyz);
+    float up = dot(delta, view.up.xyz);
+    out.position = float4(-left * view.projection.x, up * view.projection.y,
+        forward - view.projection.z, forward);
+    out.worldPosition = in.worldPosition.xyz;
+    out.color = in.color;
+    out.texCoord = in.texCoord;
+    out.lightmapCoord = in.lightmapCoord;
+    out.normal = normalize(in.normal.xyz);
+    const bool modelSpace = material.modelViewOrigin.w > 0.5;
+    const float3 materialNormal = out.normal;
+    if (modelSpace) {
+        out.normal = normalize(material.modelAxes[0].xyz * materialNormal.x
+            + material.modelAxes[1].xyz * materialNormal.y
+            + material.modelAxes[2].xyz * materialNormal.z);
     }
-    if (abs(stage.params.y) > 0.0001) {
-        float angle = stage.params.y * time * 0.01745329252;
-        float sine = sin(angle), cosine = cos(angle);
-        float2 centered = uv - 0.5;
-        uv = float2(centered.x * cosine - centered.y * sine,
-            centered.x * sine + centered.y * cosine) + 0.5;
+    out.legacyGridColor = float3(1.0);
+    if ((material.hasLocalIrradiance & 4u) != 0u) {
+        // Q3 RB_CalcDiffuseColor: backfaces keep ambient, not ambient minus
+        // directed light. Its RGB bytes are interpolated before sRGB decode.
+        float3 directed = material.localSh[1].rgb * out.normal.x
+            + material.localSh[2].rgb * out.normal.y
+            + material.localSh[3].rgb * out.normal.z;
+        out.legacyGridColor = floor(clamp(material.localSh[0].rgb
+            + max(directed, float3(0.0)), 0.0, 1.0) * 255.0) / 255.0;
     }
-    if (stage.params.z > 0.5) {
-        float phase = stage.turbulence.z + time * stage.turbulence.w;
-        float offset = stage.turbulence.x + stage.turbulence.y
-            * sin((uv.x + uv.y + phase) * 6.28318530718);
-        uv += offset;
+    float2 uvs[8] = {};
+    float alphas[8] = {};
+    for (uint i = 0u; i < min(material.stageProgram.x, 8u); ++i) {
+        constant MaterialStageParams &stage = material.stages[i];
+        uint imageSource = stage.meta.z & 0xffu;
+        uint tcGen = stage.meta.z >> 8u;
+        float2 uv = (imageSource == 1u || tcGen == 1u)
+            ? in.lightmapCoord : in.texCoord;
+        if (tcGen == 2u) {
+            float3 viewer = normalize(modelSpace
+                ? material.modelViewOrigin.xyz - in.materialPosition.xyz
+                : view.viewOrigin.xyz - in.worldPosition.xyz);
+            float3 reflected = materialNormal * (2.0 * dot(materialNormal, viewer)) - viewer;
+            uv = float2(0.5 + reflected.y * 0.5, 0.5 - reflected.z * 0.5);
+        } else if (tcGen == 3u) {
+            uv = float2(dot(in.materialPosition.xyz, stage.tcGenVectorS.xyz),
+                dot(in.materialPosition.xyz, stage.tcGenVectorT.xyz));
+        }
+        uvs[i] = wired_material_stage_uv(uv, stage, material.skyTime,
+            in.materialPosition.xyz);
+        // Q3 AGEN_PORTAL uses tess vertex coordinates and the view origin,
+        // then truncates to a byte BEFORE perspective-correct interpolation.
+        // Each stage can author a different range; no per-fragment distance.
+        if (stage.generators.y == 8u) {
+            float distance = length(in.materialPosition.xyz - view.viewOrigin.xyz);
+            alphas[i] = floor(clamp(distance / max(stage.tcGenVectorS.w, 0.001),
+                0.0, 1.0) * 255.0) / 255.0;
+        } else if (stage.generators.y == 6u) {
+            // Tess normals are not renormalized here (including interpolated
+            // model normals); the local viewer follows R_RotateForEntity.
+            alphas[i] = wired_material_specular_alpha(in.materialPosition.xyz,
+                in.normal.xyz, modelSpace ? material.modelViewOrigin.xyz : view.viewOrigin.xyz);
+        }
     }
-    return uv;
+    out.stageUv01 = float4(uvs[0], uvs[1]);
+    out.stageUv23 = float4(uvs[2], uvs[3]);
+    out.stageUv45 = float4(uvs[4], uvs[5]);
+    out.stageUv67 = float4(uvs[6], uvs[7]);
+    out.stageAlpha0123 = float4(alphas[0], alphas[1], alphas[2], alphas[3]);
+    out.stageAlpha4567 = float4(alphas[4], alphas[5], alphas[6], alphas[7]);
+    return out;
 }
 
 /* Legacy BSP lightmaps are LDR irradiance, even though the scene target is
@@ -719,6 +1058,70 @@ static float3 wired_boost_legacy_lightmap(float3 rgb, float boost) {
     if (peak > 1.0)
         boosted /= peak;
     return boosted;
+}
+
+static float3 wired_compose_authored_physical_sky(float3 authored,
+		float3 physical, float blend) {
+	const float3 luma = float3(0.2126, 0.7152, 0.0722);
+	float authoredEnergy = dot(max(authored, float3(0.0)), luma);
+	float physicalEnergy = dot(max(physical, float3(0.0)), luma);
+	if (authoredEnergy <= 1e-5) return mix(authored, physical, blend);
+	float scale = clamp(physicalEnergy / max(authoredEnergy, 0.18), 0.65, 1.75);
+	float3 physicalTint = physicalEnergy > 1e-5
+		? physical / physicalEnergy : float3(1.0);
+	float3 relit = authored * scale
+		* mix(float3(1.0), clamp(physicalTint, float3(0.5), float3(2.0)), 0.12)
+		+ physical * 0.08;
+	return mix(authored, relit, blend);
+}
+
+// Shared surface/primitive medium sample. Beam radiance is already covered;
+// it consumes transmission only, without another alpha or lighting operation.
+static float4 wired_atmosphere_sample(WorldVertexOut in,
+        constant WorldAtmosphereParams &atmosphere,
+        device const float4 *atmosphereArena) {
+    if (atmosphere.froxelGrid.z > 0u) {
+        uint x = min(uint(in.position.x) / 16u, atmosphere.froxelGrid.x - 1u);
+        uint y = min(uint(in.position.y) / 16u, atmosphere.froxelGrid.y - 1u);
+        float farDistance = max(atmosphere.colorVisibility.w, 4.01);
+        // Reciprocal clip W is reciprocal forward depth, not ray length.
+        float viewDistance = 1.0 / max(in.position.w, 0.000001);
+        float slice = clamp(log(max(viewDistance, 4.0) / 4.0)
+            / log(farDistance / 4.0), 0.0, 0.9999);
+        uint z = min(uint(slice * float(atmosphere.froxelGrid.z)),
+            atmosphere.froxelGrid.z - 1u);
+        return atmosphereArena[atmosphere.froxelGrid.w
+            + (z * atmosphere.froxelGrid.y + y) * atmosphere.froxelGrid.x + x];
+    }
+    float density = atmosphere.eyeDensity.w;
+    if (atmosphere.colorVisibility.w > 0.0)
+        density = max(density, 3.912023 / atmosphere.colorVisibility.w);
+    float transmission = 1.0;
+    if (density > 0.0) {
+        float distanceToEye = length(in.worldPosition - atmosphere.eyeDensity.xyz);
+        float heightWeight = exp(-atmosphere.heightCloud.y
+            * max(in.worldPosition.z - atmosphere.heightCloud.x, 0.0));
+        transmission = saturate(exp(-density * heightWeight * distanceToEye));
+    }
+    return float4(atmosphere.colorVisibility.rgb * (1.0 - transmission), transmission);
+}
+
+/* Media sample for lit surfaces: analytic in-scattering picks up the
+ * aerial-perspective tint; the froxel path already integrates sky lighting. */
+static float4 wired_atmosphere_media(WorldVertexOut in,
+		constant WorldAtmosphereParams &atmosphere,
+		device const float4 *atmosphereArena,
+		texture2d<float> physicalSkyView, sampler physicalSkySampler,
+		texture2d_array<float> currentSkyRadiance, sampler skyRadianceSampler) {
+	float4 media = wired_atmosphere_sample(in, atmosphere, atmosphereArena);
+	if (atmosphere.froxelGrid.z == 0u && atmosphere.aerialHaze.w > 0.0
+			&& media.w < 1.0) {
+		float3 viewDir = normalize(in.worldPosition - atmosphere.eyeDensity.xyz);
+		media.rgb = wired_aerial_inscatter(atmosphere.colorVisibility.rgb, viewDir,
+			atmosphere, physicalSkyView, physicalSkySampler,
+			currentSkyRadiance, skyRadianceSampler) * (1.0 - media.w);
+	}
+	return media;
 }
 
 fragment float4 wired_world_fragment(WorldVertexOut in [[stage_in]],
@@ -736,6 +1139,11 @@ fragment float4 wired_world_fragment(WorldVertexOut in [[stage_in]],
 					 texture2d<float> stageImage5 [[texture(11)]],
 					 texture2d<float> stageImage6 [[texture(12)]],
 					 texture2d<float> stageImage7 [[texture(13)]],
+					 texture2d<float> physicalSkyView [[texture(14)]],
+					 texture2d_array<float> currentSkyRadiance [[texture(15)]],
+					 texture2d_array<float> previousSkyRadiance [[texture(16)]],
+					 texture2d_array<float> currentSkyIrradiance [[texture(17)]],
+					 texture2d_array<float> previousSkyIrradiance [[texture(18)]],
                                      sampler baseSampler [[sampler(0)]],
                                      sampler lightmapSampler [[sampler(1)]],
                                      sampler staticRadianceSampler [[sampler(2)]],
@@ -750,59 +1158,61 @@ fragment float4 wired_world_fragment(WorldVertexOut in [[stage_in]],
 					 sampler stageSampler5 [[sampler(11)]],
 					 sampler stageSampler6 [[sampler(12)]],
 					 sampler stageSampler7 [[sampler(13)]],
+					 sampler physicalSkySampler [[sampler(14)]],
+					 sampler skyRadianceSampler [[sampler(15)]],
                                      constant WorldMaterialParams &material [[buffer(0)]],
                                      constant WorldAtmosphereParams &atmosphere [[buffer(1)]],
-                                     device const float4 *atmosphereArena [[buffer(2)]]) {
+                                     device const float4 *atmosphereArena [[buffer(2)]],
+					 /* x near plane, yz viewport, w 1 = fog at the opaque scene depth
+					  * behind the fragment (translucent entity batches drawn after the
+					  * opaque scene), 0 = fog at the surface itself. */
+					 constant float4 &sceneFogParams [[buffer(3)]],
+					 depth2d<float, access::read> sceneDepth [[texture(19)]]) {
+    const bool sky = (material.hasLightmap & 4u) != 0u;
+    float2 cloudUv = in.texCoord;
     float2 projectedSkyUv = in.texCoord;
     float2 baseUv = in.texCoord * material.skyScaleScroll.xy
         + material.skyScaleScroll.zw;
-    if ((material.hasLightmap & 4u) != 0u) {
+    if (sky) {
         float3 direction = normalize(in.worldPosition - atmosphere.eyeDensity.xyz);
+		cloudUv = wired_sky_cloud_uv(direction, material.skyCloudHeight);
 		if ((material.hasLightmap & 16u) != 0u) {
-			float3 ad = abs(direction);
-			uint face;
-			float2 faceUv;
-			if (ad.x >= ad.y && ad.x >= ad.z) {
-				if (direction.x >= 0.0) {
-					face = 0u; faceUv = float2(-direction.y, -direction.z) / ad.x;
-				} else {
-					face = 2u; faceUv = float2(direction.y, -direction.z) / ad.x;
-				}
-			} else if (ad.y >= ad.z) {
-				if (direction.y >= 0.0) {
-					face = 1u; faceUv = float2(direction.x, -direction.z) / ad.y;
-				} else {
-					face = 3u; faceUv = float2(-direction.x, -direction.z) / ad.y;
-				}
-			} else if (direction.z >= 0.0) {
-				face = 4u; faceUv = float2(-direction.y, direction.x) / ad.z;
-			} else {
-				face = 5u; faceUv = float2(-direction.y, -direction.x) / ad.z;
-			}
-			faceUv = clamp(faceUv * 0.5 + 0.5, 0.001, 0.999);
-			projectedSkyUv = faceUv;
-			baseUv = (faceUv + float2(float(face % 3u), float(face / 3u)))
-				/ float2(3.0, 2.0);
+			baseUv = wired_sky_authored_atlas_uv_sized(direction,
+				float2(baseImage.get_width(), baseImage.get_height()));
+			projectedSkyUv = fract(baseUv * float2(3.0, 2.0));
 		} else {
 			/* Q3 cloud layers live on a sphere tangent to the world at the
 			 * viewer. Reproduce R_InitSkyTexCoords analytically so Metal and the
 			 * established renderer address the authored scrolling stages alike. */
-			const float radiusWorld = 4096.0;
-			const float cloudHeight = max(material.skyCloudHeight, 1.0);
-			const float rayDistance = -direction.z * radiusWorld
-				+ sqrt(direction.z * direction.z * radiusWorld * radiusWorld
-					+ 2.0 * radiusWorld * cloudHeight
-					+ cloudHeight * cloudHeight);
-			const float3 cloudDirection = normalize(direction * rayDistance
-				+ float3(0.0, 0.0, radiusWorld));
-			projectedSkyUv = acos(clamp(cloudDirection.xy, -1.0, 1.0));
+			projectedSkyUv = cloudUv;
 			baseUv = projectedSkyUv * material.skyScaleScroll.xy
 				+ material.skyScaleScroll.zw * material.skyTime;
 		}
     }
-    float4 base = baseImage.sample(baseSampler, baseUv);
+	// Bit 4 selects skybox projection; it must never select beam coverage.
+	const bool primitiveBeam = (material.hasLightmap & 32u) != 0u;
+	if (primitiveBeam) baseUv += material.beamUv.xy;
+    // Ordered stages replace the primary sample. Only an outer skybox keeps
+    // it beneath the stage program; do not fetch a discarded world/FX texel.
+    float4 base = float4(0.0);
+    if (material.stageProgram.x == 0u || (sky && (material.hasLightmap & 16u) != 0u))
+        base = sky && (material.hasLightmap & 16u) != 0u
+            ? baseImage.sample(baseSampler, baseUv, level(0.0))
+            : baseImage.sample(baseSampler, baseUv);
+	if (primitiveBeam && material.stageProgram.x == 0u) {
+		float coverage = base.a * in.color.a;
+		float transmission = wired_atmosphere_sample(in, atmosphere, atmosphereArena).w;
+		return float4(base.rgb * wired_srgb_to_linear(in.color.rgb) * coverage * transmission,
+			coverage);
+	}
 	bool stageHasLightmap = false;
-	if ((material.hasLightmap & 8u) != 0u) {
+	bool stageProgramApplied = false;
+	// The primary file-image stage owns material reflectance. Preserve its
+	// unlit sample before rgbGen, lightmap composition, emission or fog;
+	// those are radiance/lighting, not the metallic Fresnel colour.
+	float3 materialAlbedo = material.stageProgram.x == 0u ? base.rgb : float3(1.0);
+	bool hasMaterialAlbedo = false;
+	if ((material.hasLightmap & 8u) != 0u && material.stageProgram.x == 0u) {
 		float2 secondaryUv = projectedSkyUv * material.skySecondaryScaleScroll.xy
 			+ material.skySecondaryScaleScroll.zw * material.skyTime;
 		float4 secondary = skySecondaryImage.sample(skySecondarySampler, secondaryUv);
@@ -814,26 +1224,39 @@ fragment float4 wired_world_fragment(WorldVertexOut in [[stage_in]],
 			base = secondary;
 	}
 	if (material.stageProgram.x > 0u) {
-		float4 accumulated = float4(0.0);
+		stageProgramApplied = true;
+		// The outer cube is underneath the ordered cloud program, not a
+		// replacement for its first stage texture. Cloud-only skies start black.
+		float4 accumulated = sky && (material.hasLightmap & 16u) != 0u
+			? base : float4(0.0);
+		float3 stageLocalSh = max(material.localSh[0].rgb
+			+ material.localSh[1].rgb * in.normal.x
+			+ material.localSh[2].rgb * in.normal.y
+			+ material.localSh[3].rgb * in.normal.z, float3(0.0));
+		float3 stageDiffuse = (material.hasLocalIrradiance & 1u) != 0u
+			? stageLocalSh : ((material.hasLightmap & 2u) != 0u
+				? in.color.rgb : float3(1.0));
+		if ((material.hasLocalIrradiance & 4u) != 0u)
+			stageDiffuse = wired_srgb_to_linear(in.legacyGridColor);
 		for (uint stageIndex = 0u;
 				stageIndex < min(material.stageProgram.x, 8u); ++stageIndex) {
 			constant MaterialStageParams &stage =
 				material.stages[stageIndex];
 			uint imageSource = stage.meta.z & 0xffu;
-			uint tcGen = stage.meta.z >> 8u;
-			float2 authoredUv = (imageSource == 1u || tcGen == 1u)
-				? in.lightmapCoord : in.texCoord;
-			if (tcGen == 2u) {
-				float3 viewer = normalize(atmosphere.eyeDensity.xyz
-					- in.worldPosition);
-				float3 normal = normalize(in.normal);
-				float d = dot(normal, viewer);
-				float3 reflected = normal * (2.0 * d) - viewer;
-				authoredUv = float2(0.5 + reflected.y * 0.5,
-					0.5 - reflected.z * 0.5);
+			float4 stagePair = stageIndex < 2u ? in.stageUv01
+				: (stageIndex < 4u ? in.stageUv23
+					: (stageIndex < 6u ? in.stageUv45 : in.stageUv67));
+			float2 stageUv = (stageIndex & 1u) == 0u ? stagePair.xy : stagePair.zw;
+			if (sky && (stage.meta.z >> 8u) == 0u) {
+				stageUv = wired_material_stage_uv(cloudUv, stage,
+					material.skyTime, in.worldPosition);
 			}
-			float2 stageUv = wired_material_stage_uv(authoredUv, stage,
-				material.skyTime);
+			if (primitiveBeam) {
+				// Canonical beam.vert: scale the unmodified quad, then add
+				// both scroll contributions. Never fract the quad endpoints.
+				stageUv = in.texCoord * stage.scaleScroll.xy
+					+ stage.scaleScroll.zw * material.beamUv.z + material.beamUv.xy;
+			}
 			float4 source;
 			switch (stageIndex) {
 				case 0u: source = stageImage0.sample(stageSampler0, stageUv); break;
@@ -845,25 +1268,94 @@ fragment float4 wired_world_fragment(WorldVertexOut in [[stage_in]],
 				case 6u: source = stageImage6.sample(stageSampler6, stageUv); break;
 				default: source = stageImage7.sample(stageSampler7, stageUv); break;
 			}
+			if (imageSource == 0u && !hasMaterialAlbedo) {
+				materialAlbedo = source.rgb;
+				hasMaterialAlbedo = true;
+			}
 			if (imageSource == 1u) {
 				source.rgb = wired_boost_legacy_lightmap(
 					source.rgb, material.lightmapBoost);
 				stageHasLightmap = true;
 			}
-			if (stage.meta.w != 0u && source.a < stage.params.x)
+			/* beam.frag's shared primitive contract: each texture stage adds
+			 * linear radiance with descriptor/texture coverage applied once.
+			 * A surface rgbGen/alphaGen/blend program must not apply it again. */
+			if (primitiveBeam) {
+				float coverage = source.a * in.color.a;
+				accumulated += float4(source.rgb * wired_srgb_to_linear(in.color.rgb)
+					* coverage, coverage);
+				continue;
+			}
+			source = wired_material_stage_generators(source, stage, in.color, material.entityColor,
+				stageDiffuse, stageIndex < 4u ? in.stageAlpha0123[stageIndex]
+					: in.stageAlpha4567[stageIndex - 4u], material.skyTime);
+			if ((stage.meta.w == 1u && source.a == 0.0)
+					|| (stage.meta.w == 2u && source.a >= stage.params.x)
+					|| (stage.meta.w == 3u && source.a < stage.params.x)) {
+				// Reject this cloud layer, not the already accumulated sky.
+				if (sky) continue;
 				discard_fragment();
+			}
 			float4 sourceFactor = wired_material_blend_factor(
 				stage.meta.x, source, accumulated);
 			float4 destinationFactor = wired_material_blend_factor(
 				stage.meta.y, source, accumulated);
-			accumulated = source * sourceFactor
-				+ accumulated * destinationFactor;
+			/* A single authored stage is blended against the framebuffer by
+			 * the native pipeline. Pre-blending it against black here would
+			 * apply SRC_ALPHA twice and erase low-opacity smoke. */
+			bool nativeBlend = (material.alphaMode == 2u
+					&& stage.meta.x == 6u && stage.meta.y == 7u)
+				|| (material.alphaMode == 3u
+					&& stage.meta.x == 1u && stage.meta.y == 1u)
+				|| (material.alphaMode == 4u
+					&& stage.meta.x == 6u && stage.meta.y == 1u);
+			if (material.stageProgram.y != 0u) {
+				/* Shared publication classified an additive RGB chain. Native
+				 * ONE/ONE adds this already-covered sum to the framebuffer.
+				 * The attachment's separate alpha factors are ONE/ONE for both
+				 * native additive variants, so alpha is NOT squared here. */
+				accumulated += float4(source.rgb * sourceFactor.rgb, source.a);
+			} else {
+				accumulated = !sky && material.stageProgram.x == 1u && nativeBlend ? source
+					: source * sourceFactor + accumulated * destinationFactor;
+			}
 		}
 		base = accumulated;
+		if (sky) base.a = 1.0;
+	}
+	if (primitiveBeam) return float4(base.rgb
+		* wired_atmosphere_sample(in, atmosphere, atmosphereArena).w, base.a);
+	/* Visible sky and radiance capture share this composition. Capture uses
+	 * the target blend; display and environment consumers crossfade separately
+	 * so no intermediate display transition is baked into the IBL source. */
+	if ((material.hasLightmap & 4u) != 0u && atmosphere.skyControl.x > 0.0) {
+		float3 direction = normalize(in.worldPosition - atmosphere.eyeDensity.xyz);
+		float2 physicalUv = float2(atan2(direction.y, direction.x)
+			/ (2.0 * M_PI_F) + 0.5,
+			asin(clamp(direction.z, -1.0, 1.0)) / M_PI_F + 0.5);
+		float3 physical = physicalSkyView.sample(physicalSkySampler,
+			physicalUv, level(0.0)).rgb;
+		float3 composedSky = wired_compose_authored_physical_sky(base.rgb, physical,
+			clamp(atmosphere.skyControl.x, 0.0, 1.0));
+		/* Volumetric (froxel) media covers the sky at the far slice exactly like
+		 * Vulkan's atmosphere_composite (depth <= 0 -> farZ); analytic media
+		 * leaves the sky untouched like sky_surface_composite. */
+		if (atmosphere.froxelGrid.z > 0u) {
+			/* Sky is at infinity: read the far froxel slice, not the sky
+			 * polygon's own distance (Vulkan: depth <= 0 -> farZ). */
+			uint x = min(uint(in.position.x) / 16u, atmosphere.froxelGrid.x - 1u);
+			uint y = min(uint(in.position.y) / 16u, atmosphere.froxelGrid.y - 1u);
+			uint z = atmosphere.froxelGrid.z - 1u;
+			float4 media = atmosphereArena[atmosphere.froxelGrid.w
+				+ (z * atmosphere.froxelGrid.y + y) * atmosphere.froxelGrid.x + x];
+			composedSky = composedSky * media.w + media.rgb;
+		}
+		return float4(composedSky, 1.0);
 	}
     if (material.alphaMode == 1 && base.a < material.alphaCutoff) {
         discard_fragment();
     }
+	base *= material.materialBaseColor;
     float3 localSh = max(material.localSh[0].rgb
         + material.localSh[1].rgb * in.normal.x
         + material.localSh[2].rgb * in.normal.y
@@ -894,40 +1386,103 @@ fragment float4 wired_world_fragment(WorldVertexOut in [[stage_in]],
     } else {
         lighting = (material.hasLocalIrradiance & 1u) != 0u
             ? localSh : float3(1.0);
+        if ((material.hasLocalIrradiance & 4u) != 0u)
+            lighting = wired_srgb_to_linear(in.legacyGridColor);
     }
-    if ((material.hasLocalIrradiance & 2u) != 0u)
+    if ((material.hasLocalIrradiance & 6u) == 2u)
         lighting = max(lighting, float3(0.25));
     float3 vertexColor = (material.hasLightmap & 2u) != 0u
         ? in.color.rgb : float3(1.0);
+	if (stageProgramApplied) {
+		lighting = float3(1.0);
+		vertexColor = float3(1.0);
+	}
+	float3 directLighting = float3(0.0);
+	const float3 surfaceNormal = normalize(in.normal);
+	const float3 viewDirection = normalize(atmosphere.eyeDensity.xyz
+		- in.worldPosition);
+	for (uint lightIndex = 0u;
+			lightIndex < min(material.directLightMeta.x, 4u); ++lightIndex) {
+		const float4 positionRadius =
+			material.directLightPositionRadius[lightIndex];
+		const float4 colorFalloff = material.directLightColorFalloff[lightIndex];
+		const float4 endLinear = material.directLightEndLinear[lightIndex];
+		float3 lightPosition = positionRadius.xyz;
+		if (endLinear.w > 0.5) {
+			const float3 segment = endLinear.xyz - positionRadius.xyz;
+			const float denominator = dot(segment, segment);
+			if (denominator > 1e-6) {
+				const float along = clamp(dot(in.worldPosition
+					- positionRadius.xyz, segment) / denominator, 0.0, 1.0);
+				lightPosition += segment * along;
+			}
+		}
+		const float3 lightVector = lightPosition - in.worldPosition;
+		const float intensity = 1.0 - dot(lightVector, lightVector)
+			* colorFalloff.w;
+		if (intensity <= 0.0) continue;
+		const float3 lightDirection = normalize(lightVector);
+		const float diffuse = max(dot(surfaceNormal, lightDirection), 0.0);
+		const float specularResponse = max(dot(surfaceNormal,
+			normalize(lightDirection + viewDirection)), 0.0);
+		const float3 specular = pow(specularResponse, 10.0) * 0.2 * base.rgb;
+		directLighting += (base.rgb * diffuse + specular)
+			* colorFalloff.rgb * intensity;
+	}
     float3 lit = base.rgb * lighting * vertexColor
-		+ base.rgb * material.emissiveRadiance.rgb;
+		+ base.rgb * material.emissiveRadiance.rgb + directLighting;
+	if (material.materialFactors.x >= 0.0) {
+		const float metallic = clamp(material.materialFactors.x, 0.0, 1.0);
+		const float roughness = clamp(material.materialFactors.y, 0.0, 1.0);
+		const float occlusion = clamp(material.materialFactors.z, 0.0, 1.0);
+		const float environmentBlend = clamp(material.materialFactors.w, 0.0, 1.0);
+		const float3 normal = normalize(in.normal);
+		const float3 environmentView = normalize(atmosphere.eyeDensity.xyz
+			- in.worldPosition);
+		const float3 reflected = reflect(-environmentView, normal);
+		const float3 currentSpecular = wired_sample_sky_radiance(
+			currentSkyRadiance, skyRadianceSampler, reflected,
+			roughness * float(currentSkyRadiance.get_num_mip_levels() - 1));
+		const float3 previousSpecular = wired_sample_sky_radiance(
+			previousSkyRadiance, skyRadianceSampler, reflected,
+			roughness * float(previousSkyRadiance.get_num_mip_levels() - 1));
+		const float3 f0 = mix(float3(0.04),
+			materialAlbedo * material.materialBaseColor.rgb, metallic);
+		const float nDotV = max(dot(normal, environmentView), 0.0);
+		const float3 fresnel = f0 + (1.0 - f0) * pow(1.0 - nDotV, 5.0);
+		const float3 specularIbl = mix(previousSpecular, currentSpecular,
+			environmentBlend) * fresnel;
+		// Lightmap/vertex diffuse was composed above. Do not add the same
+		// diffuse bounce from sky irradiance; environment is specular-only.
+		lit += specularIbl * occlusion;
+	}
     if ((material.hasLightmap & 4u) != 0u) {
         return float4(lit, base.a);
     }
-    if (atmosphere.froxelGrid.z > 0u) {
-        uint x = min(uint(in.position.x) / 16u, atmosphere.froxelGrid.x - 1u);
-        uint y = min(uint(in.position.y) / 16u, atmosphere.froxelGrid.y - 1u);
-        float farDistance = max(atmosphere.colorVisibility.w, 4.01);
-        float viewDistance = length(in.worldPosition - atmosphere.eyeDensity.xyz);
-        float slice = clamp(log(max(viewDistance, 4.0) / 4.0)
-            / log(farDistance / 4.0), 0.0, 0.9999);
-        uint z = min(uint(slice * float(atmosphere.froxelGrid.z)),
-            atmosphere.froxelGrid.z - 1u);
-        float4 media = atmosphereArena[atmosphere.froxelGrid.w
-            + (z * atmosphere.froxelGrid.y + y) * atmosphere.froxelGrid.x + x];
-		return float4(lit * media.w + media.xyz, base.a * in.color.a);
-    }
-    float density = atmosphere.eyeDensity.w;
-    if (atmosphere.colorVisibility.w > 0.0) {
-        density = max(density, 3.912023 / atmosphere.colorVisibility.w);
-    }
-    if (density > 0.0) {
-        float distanceToEye = length(in.worldPosition - atmosphere.eyeDensity.xyz);
-        float heightWeight = exp(-atmosphere.heightCloud.y
-            * max(in.worldPosition.z - atmosphere.heightCloud.x, 0.0));
-        float transmittance = exp(-density * heightWeight * distanceToEye);
-        lit = mix(atmosphere.colorVisibility.rgb, lit, saturate(transmittance));
-    }
-	return float4(lit,
-		base.a * in.color.a);
+    // Additive emission contributes no opaque surface coverage. Attenuate its
+    // radiance, but never add the background's in-scattering a second time:
+    // black texels must remain zero (otherwise fire/glow quads become squares).
+    bool additiveMedia = material.alphaMode == 3u || material.alphaMode == 4u
+        || material.stageProgram.y != 0u;
+	/* Translucent entity batches (sprites, lens-flare quads: no depth write)
+	 * are drawn after the opaque scene and take the media at the opaque depth
+	 * BEHIND them, the way Vulkan's post-scene composite fogs the blended
+	 * pixel; everything else samples the media at its own surface. */
+	float4 media;
+	if (sceneFogParams.w > 0.0) {
+		float near = max(sceneFogParams.x, 0.001);
+		uint2 pixel = uint2(clamp(in.position.xy, float2(0.0),
+			max(sceneFogParams.yz - 1.0, float2(0.0))));
+		float depth = sceneDepth.read(pixel);
+		float quadForward = 1.0 / max(in.position.w, 0.000001);
+		float sceneForward = depth >= 0.99999 ? 1.0e9
+			: near / max(1.0 - depth, 1.0e-6);
+		media = wired_weather_media(in.position.xy, sceneForward,
+			in.worldPosition, quadForward, atmosphere, atmosphereArena);
+	} else {
+		media = wired_atmosphere_media(in, atmosphere, atmosphereArena,
+			physicalSkyView, physicalSkySampler, currentSkyRadiance, skyRadianceSampler);
+	}
+	return float4(lit * media.w + (additiveMedia ? float3(0.0) : media.xyz),
+		stageProgramApplied ? base.a : base.a * in.color.a);
 }

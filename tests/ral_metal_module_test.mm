@@ -3,6 +3,7 @@
 
 #include "ral_metal_module.h"
 #include "ral_atmosphere_conformance.h"
+#include "ral_particle_contract.h"
 #include "sdl_ral_presentation.h"
 #include "tr_public.h"
 
@@ -45,6 +46,7 @@ int main( void ) {
 	particleClass_t breathClass;
 	atmosphereEffectProfile_t breathProfile;
 	atmosphereEmitter_t breathEmitter;
+	emitterDesc_t genericEmitter;
 	atmosphereMediaVolume_t media;
 	ralMetalModuleFrameReceipt_t receipt, first, before, exact;
 	qhandle_t atmosphereParticleShader;
@@ -64,6 +66,7 @@ int main( void ) {
 	CHECK( getRefApi( REF_API_VERSION - 1, &imports ) == NULL );
 	exports = getRefApi( REF_API_VERSION, &imports );
 	CHECK( exports != NULL && exports->initFailed == qfalse
+		&& exports->WorldContentIdentity
 		&& exports->CookLightingProject
 		&& !exports->CookLightingProject( "/tmp" ) );
 	memset( &receipt, 0x5a, sizeof( receipt ) ); before = receipt;
@@ -86,8 +89,13 @@ int main( void ) {
 	CHECK( exports != NULL && exports->Shutdown && exports->BeginRegistration
 		&& exports->EndRegistration && exports->BeginFrame && exports->EndFrame
 		&& exports->SetAtmosphere && exports->RegisterParticleClass
+		&& exports->AddSpriteToScene && exports->EmitParticles
+		&& exports->AddDecalToScene && exports->AddRibbonToScene
+		&& exports->AddBeamToScene
+		&& exports->AddLensSourceToScene && exports->GetLensVisibility
 		&& exports->RegisterAtmosphereEffectProfile && exports->AddAtmosphereEmitter
 		&& exports->ClearScene && exports->RegisterShader && exports->GetConfig
+		&& exports->WorldContentIdentity
 		&& exports->GetMemoryBudget && exports->initFailed == qfalse );
 	memset( &receipt, 0x5a, sizeof( receipt ) ); before = receipt;
 	CHECK( !getFrameReceipt( &receipt )
@@ -98,7 +106,10 @@ int main( void ) {
 	CHECK( config.vidWidth > 0 && config.vidHeight > 0 );
 	CHECK( strstr( config.renderer_string, "native Metal RAL" ) != NULL );
 	CHECK( exports->GetConfig() != NULL );
-	atmosphereParticleShader = exports->RegisterShader( "gfx/2d/bigchars" );
+	/* The module contract must exercise a fully resident primitive material.
+	 * An unresolved scriptless shader is deliberately no-draw and cannot be
+	 * accepted by the native particle lowering path. */
+	atmosphereParticleShader = exports->RegisterPrimitiveShader( "*white" );
 	CHECK( exports->RegisterModel( "models/players/visor/lower.md3" ) > 0
 		&& exports->RegisterSkin( "models/players/visor/default.skin" ) > 0
 		&& atmosphereParticleShader > 0
@@ -145,6 +156,10 @@ int main( void ) {
 	CHECK( getFrameReceipt( &receipt ) );
 	CHECK( frameReceiptExact( &receipt, &receipt ) );
 	CHECK( receipt.presentation.presented == qtrue );
+	CHECK( receipt.presentation.frontendFrameGeneration
+		== receipt.frameGeneration );
+	CHECK( Ral_AtmospherePlanReceiptExact( &receipt.atmosphere,
+		&receipt.presentation.atmosphere ) );
 	CHECK( receipt.frontend.ready == qtrue );
 	CHECK( receipt.frontend.registeredAssetCount == 3u );
 	CHECK( receipt.frontend.registeredMaterialCount == 1u );
@@ -205,11 +220,20 @@ int main( void ) {
 	CHECK( receipt.atmosphere.requestedTier == RAL_ATMOSPHERE_TIER_FULL
 		&& receipt.atmosphere.selectedTier == RAL_ATMOSPHERE_TIER_FULL
 		&& receipt.atmosphere.fallbackReason == RAL_ATMOSPHERE_FALLBACK_NONE
+		&& receipt.atmosphere.skyEnvironment.schemaVersion
+			== RAL_SKY_ENVIRONMENT_RECEIPT_SCHEMA_VERSION
+		&& receipt.atmosphere.skyEnvironment.selectedMode
+			== RAL_SKY_ENVIRONMENT_AUTHORED
+		&& receipt.atmosphere.skyEnvironment.fallbackReason
+			== RAL_SKY_FALLBACK_NO_CAPTURE
+		&& receipt.atmosphere.skyEnvironment.zeroWork == qtrue
 		&& receipt.atmosphere.computeDispatchCount == 4u
 		&& receipt.atmosphere.froxelCount == 230400u
 		&& receipt.atmosphere.cloudsActive == qtrue
 		&& receipt.atmosphere.compositeCount == 1u
-		&& receipt.presentation.atmosphereDispatchCount == 4u
+		/* Native dispatches: four froxel/composite passes plus the shared GPU
+		 * light-tile classifier (ral_metal_present.mm). */
+		&& receipt.presentation.atmosphereDispatchCount == 5u
 		&& receipt.presentation.atmosphereFroxelCount == 230400u
 		&& receipt.presentation.atmosphereCompositeCount == 1u
 		&& receipt.presentation.atmosphereCloudsActive == qtrue );
@@ -223,6 +247,33 @@ int main( void ) {
 		&& receipt.presentation.weatherDispatchCount == 1u
 		&& receipt.presentation.weatherDrawCount == 1u );
 	CHECK( receipt.atmosphere.zeroWork == qfalse );
+	/* A production renderer may not acknowledge a WiredFX emitter and then
+	 * silently omit native compute/draw work. Exercise the module boundary,
+	 * not only the presentation helper used by its lower-level unit test. */
+	memset( &genericEmitter, 0, sizeof( genericEmitter ) );
+	genericEmitter.cls = 1;
+	genericEmitter.count = 8;
+	genericEmitter.axis[0] = 1.0f;
+	genericEmitter.end[0] = 8.0f;
+	genericEmitter.colorTint[0] = genericEmitter.colorTint[1]
+		= genericEmitter.colorTint[2] = genericEmitter.colorTint[3] = 1.0f;
+	exports->BeginFrame( STEREO_CENTER );
+	exports->ClearScene();
+	exports->EmitParticles( &genericEmitter );
+	exports->RenderScene( &atmosphereView, 0 );
+	exports->EndFrame( NULL, NULL );
+	CHECK( exports->initFailed == qfalse && getFrameReceipt( &receipt )
+		&& receipt.frontend.effectEmitterCount == 1u
+		&& receipt.presentation.effectEmitterDispatchCount == 1u
+		&& receipt.presentation.effectParticleDrawCount
+			== RAL_PARTICLE_POOL_CAPACITY );
+	/* Expire the synthetic pool before the lifecycle-only empty-frame sweep. */
+	atmosphereView.time = 2000;
+	exports->BeginFrame( STEREO_CENTER );
+	exports->ClearScene();
+	exports->RenderScene( &atmosphereView, 0 );
+	exports->EndFrame( NULL, NULL );
+	CHECK( exports->initFailed == qfalse && getFrameReceipt( &receipt ) );
 	for ( int fixtureIndex = RAL_ATMOSPHERE_FIXTURE_CLEAR;
 			fixtureIndex < RAL_ATMOSPHERE_FIXTURE_COUNT; ++fixtureIndex ) {
 		ralAtmosphereFixtureState_t authored;
@@ -256,12 +307,14 @@ int main( void ) {
 		if ( fixtureIndex == RAL_ATMOSPHERE_FIXTURE_CLEAR ||
 				fixtureIndex == RAL_ATMOSPHERE_FIXTURE_FOG )
 			CHECK( receipt.presentation.weather.zeroWork );
+		/* Native dispatch counts include the shared GPU light-tile classifier
+		 * (+1 over the RAL core's compute dispatch count). */
 		if ( fixtureIndex == RAL_ATMOSPHERE_FIXTURE_FOG )
-			CHECK( receipt.presentation.atmosphereDispatchCount == 3u &&
+			CHECK( receipt.presentation.atmosphereDispatchCount == 4u &&
 				receipt.presentation.atmosphereFroxelCount == 230400u &&
 				receipt.presentation.atmosphereCompositeCount == 1u );
 		if ( fixtureIndex == RAL_ATMOSPHERE_FIXTURE_STORM )
-			CHECK( receipt.presentation.atmosphereDispatchCount == 4u &&
+			CHECK( receipt.presentation.atmosphereDispatchCount == 5u &&
 				receipt.presentation.atmosphereCloudsActive &&
 				receipt.presentation.weather.activeParticleCount == 8192u );
 	}
@@ -282,6 +335,7 @@ int main( void ) {
 	MUTATE( drawable.acquireGeneration ); MUTATE( presentation.presentGeneration );
 	MUTATE( frontend.frameDigest );
 	MUTATE( atmosphere.fallbackReason );
+	MUTATE( presentation.atmosphere.fallbackReason );
 #undef MUTATE
 
 	exports->Shutdown( REF_LEVEL_ONLY );
@@ -291,12 +345,14 @@ int main( void ) {
 	exports->BeginFrame( STEREO_CENTER ); exports->EndFrame( NULL, NULL );
 	CHECK( exports->initFailed == qfalse && getFrameReceipt( &exact )
 		&& exact.frameGeneration > first.frameGeneration
-		&& exact.moduleGeneration == first.moduleGeneration );
+		&& exact.moduleGeneration == first.moduleGeneration
+		&& exact.frontend.registeredMaterialCount == receipt.frontend.registeredMaterialCount );
 	CHECK( WiredSdlRalPresentationHost_RequestResize( presentationHost,
 		800u, 450u ) );
 	memset( &config, 0, sizeof( config ) ); exports->BeginRegistration( &config );
 	exports->BeginFrame( STEREO_CENTER ); exports->EndFrame( NULL, NULL );
 	CHECK( getFrameReceipt( &receipt ) && receipt.frameGeneration > exact.frameGeneration
+		&& receipt.frontend.registeredMaterialCount == 0u
 		&& receipt.moduleGeneration == first.moduleGeneration
 		&& receipt.host.surfaceGeneration > first.host.surfaceGeneration
 		&& receipt.host.logicalWidth == 800u && receipt.host.logicalHeight == 450u
