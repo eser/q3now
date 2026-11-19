@@ -121,6 +121,8 @@ Other in-tree files are third-party code under **non-GPL** licenses; see
   — precomputed SMAA lookup textures (MIT, see §4.4).
 - `code/render/ral/backends/vulkan/include/vulkan/*.h` — Khronos Vulkan headers (Apache-2.0 —
   see §4.2).
+- `code/render/ral/backends/vulkan/renderer/renderdoc_app.h` — RenderDoc in-application
+  API header (MIT — see §4.10).
 
 ---
 
@@ -808,6 +810,16 @@ The Wired source tree references Clay only from the client target's include
 path; no renderer DLL, server, dedicated, or VM consumes it.
 
 ---
+
+### 4.10 RenderDoc in-application API header
+
+- **Upstream:** https://github.com/baldurk/renderdoc
+- **License:** MIT (see Appendix A)
+- **Path:** `code/render/ral/backends/vulkan/renderer/renderdoc_app.h`
+- **Copyright:** (c) 2015-2026 Baldur Karlsson
+
+Used by the Vulkan renderer to trigger frame captures when RenderDoc is
+attached. The file keeps its own MIT notice; Wired adds no copyright line.
 
 ## 5. Build & development tooling
 

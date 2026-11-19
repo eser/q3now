@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2015-2026 Baldur Karlsson
+
 /******************************************************************************
  * The MIT License (MIT)
  *

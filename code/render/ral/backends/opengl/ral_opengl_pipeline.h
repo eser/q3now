@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 #ifndef WIRED_RAL_OPENGL_PIPELINE_H
 #define WIRED_RAL_OPENGL_PIPELINE_H
 #include "ral_shader_abi.h"
