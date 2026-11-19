@@ -150,6 +150,14 @@ brew install cmake ninja pkg-config sdl3 molten-vk openssl@3 opus opusfile
 
 `openssl@3` is a hard configure requirement (`FIND_PACKAGE(OpenSSL REQUIRED)` — picoquic's TLS backend); it is easy to miss because CI's macOS runners preinstall it.
 
+**Metal needs the full Xcode, not just the command-line tools.** The native Metal renderer (`ral_metal`) compiles `.metal` shaders with `xcrun metal`, which ships as a separate Xcode component. Install it once:
+
+```
+xcodebuild -downloadComponent MetalToolchain
+```
+
+Without it the build stops at the first shader step with `error: cannot execute tool 'metal' due to missing Metal Toolchain`.
+
 `SDL3` is the only library CMake resolves from the system (`find_package(SDL3 REQUIRED)`); everything else heavy — zlib-ng, libjpeg-turbo, LuaJIT, picoquic/picotls, Recast/Detour — is a submodule built in-tree. MoltenVK is a *runtime* dependency of the Vulkan renderer: `code/sdl/sdl_glimp.c` points SDL at a MoltenVK dylib before `SDL_Init`, preferring the copy next to the binary (`make copy-libs` places it there via `otool -L` discovery) and falling back to the Homebrew one. There is no `libvulkan.dylib` loader in this setup and none is needed.
 
 **2 — Submodules**
@@ -183,6 +191,14 @@ test -x build/q3now-preview.arm64.app/Contents/MacOS/wired.arm64 && echo OK
 ```
 
 To collect *all* compile errors rather than stopping at the first, run `ninja -k 0` inside `build/`.
+
+**Troubleshooting: Xcode SDK headers fail under `-Werror`.** If `ral_metal` fails with errors from *Apple's* headers rather than ours — for example `NSURLHandle.h: method has no return type specified` or `Script.h: 'ScriptTokenType' is deprecated` — CMake has not been given an SDK sysroot. Check `grep CMAKE_OSX_SYSROOT build/CMakeCache.txt`: when the value is empty, the Xcode SDK reaches the compiler through a plain `-F` framework path, clang does not treat those headers as system headers, and `-Werror` turns their deprecation warnings into errors. This was seen with Xcode 27.2. Pass the sysroot explicitly (`CMAKE_EXTRA_FLAGS` is appended to the configure line):
+
+```
+make CMAKE_EXTRA_FLAGS="-DCMAKE_OSX_SYSROOT=$(xcode-select -p)/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
+```
+
+The value is cached in `build/CMakeCache.txt`, so later `make` invocations do not need the flag. Do not use `xcrun --show-sdk-path` for this when `xcode-select -p` points at Xcode but the command-line tools are also installed: it can return the `/Library/Developer/CommandLineTools` SDK instead. (Verified on an Apple Silicon Mac with Xcode 27.2, building in an existing `build/` directory, after installing the Metal Toolchain: `make run-game CMAKE_EXTRA_FLAGS=… MAP=arena1` completed all 2858 build steps and reached `CA_ACTIVE` on `arena1`.)
 
 **Per-user state.** Config, screenshots and the `qconsole.jsonl` structured log live under `~/wired/<PRODUCT_NAME><CHANNEL_SUFFIX>/` — by default `~/wired/q3now-preview/`. The names come from `PRODUCT_NAME` / `CHANNEL_SUFFIX` at the top of `CMakeLists.txt`.
 

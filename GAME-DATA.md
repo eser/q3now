@@ -188,6 +188,7 @@ Two related traps, both of which have cost real debugging time:
 make
 
 # 2. build and run the launcher; accept the EULA, let it download and import
+#    (one-time per machine: skip this when pax01.sw3z already exists, see step 3)
 make run-launcher
 
 # 3. verify the data landed
@@ -201,6 +202,24 @@ make run-game MAP=e1m1
 `make run-launcher` needs the Wails CLI:
 `go install github.com/wailsapp/wails/v2/cmd/wails@latest`, with `$(go env GOPATH)/bin`
 on `PATH`.
+
+### What `make run-game` does and does not need
+
+`make run-game` builds the engine and packs (`pax21.sw3z`), installs them into
+the app bundle (`/Applications/<app>.app` on macOS), then starts the engine
+directly. It does **not** download game data and does not need the launcher
+to have been run *in the same session*: it only needs `pax01.sw3z` to already
+be in `~/wired/q3now-preview/base/`. So:
+
+| Situation | What to run |
+|---|---|
+| New machine, no `pax01.sw3z` | `make run-launcher` once (after a successful build), then `make run-game` |
+| `pax01.sw3z` already present | `make run-game` alone |
+
+If `make run-game` stops before the game starts, it is a build failure, not a
+data problem. Read the first `FAILED:` line. On macOS the two known causes
+are a missing Metal Toolchain and an empty `CMAKE_OSX_SYSROOT`; both are
+described under *macos* in [BUILD.md](BUILD.md).
 
 ### Verifying a specific map is present
 

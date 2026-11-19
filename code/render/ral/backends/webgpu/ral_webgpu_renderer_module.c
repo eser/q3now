@@ -2969,10 +2969,6 @@ static int NoLight( vec3_t p, vec3_t a, vec3_t d, vec3_t n )
 		memset( n, 0, sizeof( vec3_t ) );
 	return 0;
 }
-static void NoRail( const railRibbonDesc_t *v )
-{
-	(void)v;
-}
 static void RegisterParticleClass( particleClassHandle_t h, const particleClass_t *v )
 {
 	if ( !RenderSubmission_RegisterParticleClass( &s_module.frontend, h, v ) )
@@ -3191,9 +3187,10 @@ static void FillExports( refexport_t *e )
 	e->AddAdditiveLightToScene		   = AddLight;
 	e->AddLinearLightToScene		   = AddLinearLight;
 	/* Submission without product lowering is not support: it would make
-	 * WiredFX report EXECUTED and then silently lose the primitive. */
+	 * WiredFX report EXECUTED and then silently lose the primitive. General
+	 * particle emitters and rail ribbons stay NULL until they are lowered. */
 	e->AddRibbonToScene				   = SubmitEffectRibbon;
-	e->AddRailRibbonToScene			   = NoRail;
+	e->AddRailRibbonToScene			   = NULL;
 	e->AddBeamToScene				   = SubmitEffectBeam;
 	e->AddSpriteToScene				   = SubmitEffectSprite;
 	e->EmitParticles				   = NULL;

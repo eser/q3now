@@ -1255,10 +1255,6 @@ static int NoLightForPoint( vec3_t point, vec3_t ambient, vec3_t directed, vec3_
 		memset( direction, 0, sizeof( vec3_t ) );
 	return 0;
 }
-static void NoRail( const railRibbonDesc_t *v )
-{
-	(void)v;
-}
 static void SubmitEffectSprite( const spriteDesc_t *desc )
 {
 	if ( !RenderSubmission_AddEffectSprite( &s_module.frontend, desc ) )
@@ -1498,10 +1494,11 @@ static void FillExports( refexport_t *e )
 	e->AddAdditiveLightToScene		   = AddLight;
 	e->AddLinearLightToScene		   = AddLinearLight;
 	/* Advertise each effect family only after its product path consumes and
-	 * draws the canonical snapshot. General particle emitters remain
-	 * fail-closed until their complete native lowering lands. */
+	 * draws the canonical snapshot. General particle emitters and rail
+	 * ribbons remain fail-closed (NULL) until their complete native lowering
+	 * lands; a non-NULL no-op would acknowledge work and silently drop it. */
 	e->AddRibbonToScene				   = SubmitEffectRibbon;
-	e->AddRailRibbonToScene			   = NoRail;
+	e->AddRailRibbonToScene			   = NULL;
 	e->AddBeamToScene				   = SubmitEffectBeam;
 	e->AddSpriteToScene				   = SubmitEffectSprite;
 	e->EmitParticles				   = NULL;
