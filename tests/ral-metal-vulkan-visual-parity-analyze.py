@@ -45,7 +45,10 @@ VULKAN_REQUIRED = (
 FORBIDDEN = re.compile(
     r"lifecycle failure|advancing cl_renderer|failed to initialize|"
     r"renderer fallback|Sys_Error|\bFATAL\b|\bVUID-|validation error|"
-    r"VM_Create.*failed|VM syscall error|died on signal",
+    r"VM_Create.*failed|VM syscall error|died on signal|"
+    r"\[ERROR\s*\]|disabling (?:particles|decals|ribbon/rail/beam)|"
+    r"(?:particles|decals) remain disabled|"
+    r"cooked material catalog rejected|rejected profile [0-9]+[^\n]*load/validation failure",
     re.IGNORECASE,
 )
 
@@ -92,6 +95,13 @@ def require_receipt(log: str, backend: str) -> None:
     match = FORBIDDEN.search(log)
     if match:
         raise EvidenceError(f"{backend}: forbidden runtime evidence: {match.group(0)}")
+    # Equal missing content is not parity. Ignore intentional BSP sentinels
+    # and nodraw volumes; scripted materials may resolve through stage images
+    # rather than their primary image, so their diagnostic is not sufficient.
+    for line in log.splitlines():
+        unresolved = re.search(r"unresolved material name=(\S+).*scripted=0.*noDraw=0\b", line)
+        if unresolved and unresolved.group(1).lower() != "noshader":
+            raise EvidenceError(f"{backend}: unresolved implicit world material: {unresolved.group(1)}")
     fields = receipt_fields(log, backend)
     required = METAL_REQUIRED if backend == "metal" else VULKAN_REQUIRED
     missing = [field for field in required if fields.get(field, 0) <= 0]
@@ -199,6 +209,9 @@ def analyze(root: Path, config: Mapping[str, object], decoder: Path) -> None:
         "width",
         "height",
         "render_scale",
+        "render_width",
+        "render_height",
+        "scene_format",
         "color_policy",
         "warmup_frames",
         "shader_time",
@@ -211,6 +224,59 @@ def analyze(root: Path, config: Mapping[str, object], decoder: Path) -> None:
             raise EvidenceError(f"capture metadata is not pinned for {field}: {sorted(values)}")
     if not re.fullmatch(r"[0-9a-f]{64}", str(metadata[0].get("binary_sha256", ""))):
         raise EvidenceError("capture metadata lacks a valid binary SHA-256")
+    for meta in metadata:
+        if (meta.get("scene_format") != "R16G16B16A16_SFLOAT"
+                or any(type(meta.get(k)) is not int or meta[k] <= 0
+                       for k in ("render_width", "render_height"))):
+            raise EvidenceError("capture metadata lacks verified HDR/render extent")
+
+    # Same-backend repeat determinism (N=1 self-identity): when repeat captures
+    # are present or required, each backend/scene must reproduce itself within a
+    # near-identity tolerance over the whole frame. This is independent of, and
+    # much tighter than, the cross-backend parity tolerances below.
+    repeat_cfg = config.get("repeat")
+    if repeat_cfg is not None:
+        if not isinstance(repeat_cfg, Mapping):
+            raise EvidenceError("invalid repeat configuration")
+        limits = (float(repeat_cfg["mae"]), float(repeat_cfg["p90"]), float(repeat_cfg["changed64"]))
+        required = bool(repeat_cfg.get("required", False))
+        pinned_repeat = ("binary_sha256", "width", "height", "render_scale", "render_width",
+                         "render_height", "scene_format", "camera", "frame_time", "shader_time")
+        for scene in scenes:
+            for backend in BACKENDS:
+                # Explicit names: Path.with_suffix would strip the ".repeat" tag.
+                png = root / backend / f"{scene}.repeat.png"
+                if not png.is_file():
+                    if required:
+                        raise EvidenceError(f"{backend}/{scene}: repeat capture missing")
+                    continue
+                log_path = root / backend / f"{scene}.repeat.log"
+                meta_path = root / backend / f"{scene}.repeat.meta.json"
+                for artifact in (png, log_path, meta_path):
+                    if not artifact.is_file() or artifact.stat().st_size == 0:
+                        raise EvidenceError(f"missing/empty repeat artifact: {artifact}")
+                    if artifact.stat().st_mtime_ns < marker_time:
+                        raise EvidenceError(f"stale repeat artifact: {artifact}")
+                if png_dimensions(png) != (width, height):
+                    raise EvidenceError(f"{backend}/{scene}: repeat screenshot extent differs")
+                require_receipt(log_path.read_text(encoding="utf-8", errors="replace"), backend)
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                first = next(m for m in metadata if m.get("backend") == backend and m.get("map") == scene)
+                for field in pinned_repeat:
+                    if json.dumps(meta.get(field), sort_keys=True) != json.dumps(first.get(field), sort_keys=True):
+                        raise EvidenceError(f"{backend}/{scene}: repeat metadata differs for {field}")
+                raw = decode_rgb(png, decoder)
+                if len(raw) != width * height * 3:
+                    raise EvidenceError(f"{backend}/{scene}: repeat decoded RGB byte count mismatch")
+                ensure_populated(raw, f"{backend}/{scene}.repeat")
+                metrics = roi_metrics(frames[(backend, str(scene))], raw, width, height, [0.0, 0.0, 1.0, 1.0])
+                print(
+                    f"{scene}/{backend}/repeat: mae={metrics[0]:.4f}/{limits[0]:.4f} "
+                    f"p90={metrics[1]:.4f}/{limits[1]:.4f} "
+                    f"changed64={metrics[2]:.4f}/{limits[2]:.4f}"
+                )
+                if any(value > limit for value, limit in zip(metrics, limits)):
+                    raise EvidenceError(f"{backend}/{scene}: same-backend repeat determinism exceeded")
 
     for scene, scene_cfg_raw in scenes.items():
         scene_cfg = scene_cfg_raw
@@ -250,6 +316,7 @@ def _fixture(root: Path, bad: str = "") -> Tuple[Mapping[str, object], Path]:
     config: Mapping[str, object] = {
         "width": 4,
         "height": 4,
+        "repeat": {"required": True, "mae": 0.002, "p90": 0.004, "changed64": 0.001},
         "scenes": {
             "arena1": {
                 "camera": [1, 2, 3, 4],
@@ -270,6 +337,9 @@ def _fixture(root: Path, bad: str = "") -> Tuple[Mapping[str, object], Path]:
         "width": 4,
         "height": 4,
         "render_scale": 1,
+        "render_width": 4,
+        "render_height": 4,
+        "scene_format": "R16G16B16A16_SFLOAT",
         "color_policy": "sdr-srgb",
         "warmup_frames": 180,
         "shader_time": 1.0,
@@ -283,6 +353,24 @@ def _fixture(root: Path, bad: str = "") -> Tuple[Mapping[str, object], Path]:
     ) + " unresolvedEntities=0\n"
     vulkan_receipt = "Wired Vulkan RAL: content receipt " + " ".join(f"{key}=1" for key in VULKAN_REQUIRED) + "\n"
     for backend, receipt in (("metal", metal_receipt), ("vulkan", vulkan_receipt)):
+        if bad == "cooked_catalog" and backend == "vulkan":
+            receipt += "RAL cooked material catalog rejected world=0 reason=5\n"
+        if bad == "fx_profile" and backend == "metal":
+            receipt += "rejected profile 1 'scripts/effects/rocket-explosion.lua': load/validation failure\n"
+        if backend == "vulkan":
+            fx_failures = {
+                "particle_disabled": "[WARN ] particle render RAL bind-group cohort unavailable; disabling particles\n",
+                "decal_disabled": "[WARN ] decal render RAL bind-group cohort unavailable; disabling decals\n",
+                "primitive_disabled": "[ERROR] primitive RAL bind-group cohort publication failed; disabling ribbon/rail/beam\n",
+                "runtime_error": "[ERROR] unexpected renderer resource failure\n",
+            }
+            receipt += fx_failures.get(bad, "")
+        if backend == "metal":
+            receipt += "unresolved material name=noshader image=noshader scripted=0 sky=0 noDraw=0\n"
+            receipt += "unresolved material name=textures/common/clip image= scripted=0 sky=0 noDraw=1\n"
+            receipt += "unresolved material name=test/staged image= scripted=1 sky=0 noDraw=0\n"
+            if bad == "implicit_material":
+                receipt += "unresolved material name=textures/test/missing image=textures/test/missing scripted=0 sky=0 noDraw=0\n"
         directory = root / backend
         directory.mkdir()
         png = directory / "arena1.png"
@@ -290,6 +378,12 @@ def _fixture(root: Path, bad: str = "") -> Tuple[Mapping[str, object], Path]:
         (directory / "arena1.log").write_text(receipt, encoding="utf-8")
         meta = dict(common, backend=("vulkan" if bad == "backend" and backend == "metal" else backend))
         (directory / "arena1.meta.json").write_text(json.dumps(meta), encoding="utf-8")
+        if bad != "repeat_missing":
+            _write_stub_png(directory / "arena1.repeat.png",
+                            b"bad_pixels" if bad == "repeat_pixels" and backend == "metal" else b"good")
+            (directory / "arena1.repeat.log").write_text(receipt, encoding="utf-8")
+            repeat_meta = dict(meta, camera=([9, 9, 9, 9] if bad == "repeat_meta" and backend == "metal" else meta["camera"]))
+            (directory / "arena1.repeat.meta.json").write_text(json.dumps(repeat_meta), encoding="utf-8")
     if bad == "stale":
         stale = root / "metal" / "arena1.png"
         marker_time = (root / "run.marker").stat().st_mtime - 10
@@ -306,7 +400,9 @@ def self_test() -> int:
             analyze(root / "pass", config, decoder)
         except EvidenceError as exc:
             failures.append(f"valid fixture rejected: {exc}")
-        for defect in ("cohort", "backend", "stale", "pixels"):
+        for defect in ("cohort", "backend", "stale", "pixels", "cooked_catalog", "fx_profile", "implicit_material",
+                       "particle_disabled", "decal_disabled", "primitive_disabled", "runtime_error",
+                       "repeat_missing", "repeat_pixels", "repeat_meta"):
             config, decoder = _fixture(root / defect, defect)
             try:
                 analyze(root / defect, config, decoder)

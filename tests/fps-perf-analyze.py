@@ -18,6 +18,9 @@ import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from lib.frame_interval_evidence import EvidenceError, INTERVALS, completed_frame_intervals, full_frame_intervals
+from lib.metal_acquire_evidence import acquire_scene_timing
+
 
 RE_ALL = re.compile(
     r"frame:(\d+)\s+all:\s*(\d+)\s+sv:\s*(\d+)\s+ev:\s*(\d+)"
@@ -25,8 +28,14 @@ RE_ALL = re.compile(
 )
 RE_END = re.compile(r"\bend:(\d+)")
 RE_GPU_HDR = re.compile(r"^gpu \((\d+)f avg, ms\):")
+RE_METAL_GPU_HDR = re.compile(
+    r"^metal perf v1: frames=(\d+) acquire_total_us=(\d+) submit_total_us=(\d+) "
+    r"gpu_samples=(\d+) gpu_total_ns=(\d+) gpu_unavailable=(\d+)$"
+)
 RE_GPU_LABEL = re.compile(r"^\s*([A-Za-z_]+)=([\d.]+)")
 RE_GPU_TOTAL = re.compile(r"^\s*total=([\d.]+)")
+RE_PACING_SPIKE = re.compile(r"^vkPacing v1: frames=(\d+) over4ms=(\d+) dominant=(\S+) max_us=(\S+)$")
+RE_GPU_SPIKE = re.compile(r"^gpuSpike v1: frames=(\d+) over4ms=(\d+) max_frame_ms=([\d.]+) dominant=(\S+) lane_max=(\S+)$")
 RE_VKT = re.compile(
     r"vk timing \((\d+)f avg\): fence=(\d+)ms/f\s+ft_fence=(\d+)ms/f"
     r"\s+acquire=(\d+)ms/f\s+submit=(\d+)ms/f\s+present=(\d+)ms/f"
@@ -42,6 +51,8 @@ RE_FRAME_PACING = re.compile(
     r"frame trace \((\d+)f\): bucket=(\d+) count=(\d+) valid=(\d+)"
     r" cpu_work_total=(\d+)us scr_end_total=(\d+)us"
 )
+FPS_SETTINGS = {"com_maxfps": 0, "com_maxfpsUnfocused": 1000, "com_maxfpsMinimized": 30}
+RE_FPS_SETTING = re.compile(r'^"(com_maxfps(?:Unfocused|Minimized)?)"\s+is:\s*"([+\-0-9.eE]+)(?:\^7)?"')
 RE_GAMEPLAY_MAP = re.compile(r"FIRST GAMEPLAY FRAME mapname=maps/([^\s.]+)\.bsp")
 RE_CAMERA = re.compile(r"^(-?\d+) (-?\d+) (-?\d+) (-?\d+) (-?\d+)$")
 RE_DLIGHT = re.compile(r"dlight srf:(\d+)\s+culled:(\d+)\s+verts:(\d+)\s+tris:(\d+)")
@@ -65,12 +76,14 @@ RE_RENDER_EXTENT = re.compile(
 )
 RE_PARTICLE_RUNTIME = re.compile(
     r"^particle emitters:(\d+) particles:(\d+) requests:(\d+) "
-    r"dropped:(\d+)/(\d+) computes:(\d+) draws:(\d+)$"
+    r"dropped:(\d+)/(\d+) computes:(\d+) draws:(\d+)"
+    r"(?: child-events:\d+ child-particles:\d+ child-dropped:\d+/\d+)?$"
 )
 RE_ATMOSPHERE_RUNTIME = re.compile(
     r"^atmosphere particles:(\d+) computes:(\d+) draws:(\d+) froxels:(\d+) "
     r"dispatches:(\d+) clouds:(\d+) heightgrid:(\d+) depth:(\d+) "
-    r"temporal:(\d+)/(\d+) surface-milli:(\d+)/(\d+)/(\d+)/(\d+)$"
+    r"temporal:(\d+)/(\d+) surface-milli:(\d+)/(\d+)/(\d+)/(\d+)"
+    r"(?: sky-work pending:\d+ inflight:\d+ admitted:\d+ completed:\d+ cancelled:\d+)?$"
 )
 
 VK_PERF_V2_KEYS = {
@@ -166,9 +179,13 @@ def analyze(path: Path, contract: Contract, *, emit: bool = True) -> dict:
     raw_vk_v2: list[dict] = []
     vk_v2_parse_errors = 0
     raw_frame_pacing: list[tuple[str, ...]] = []
+    intervals: dict[int, list[int]] = {}
+    interval_errors: list[str] = []
+    fps_settings: dict[str, list[tuple[str, float]]] = {name: [] for name in FPS_SETTINGS}
     vk_pacing_pair_errors = 0
     pending_vk_pacing = False
     raw_gpu: list[dict[str, float]] = []
+    raw_gpu_spikes: list[dict[str, object]] = []
     cur_gpu: dict[str, float] | None = None
     gpu_headers = 0
     partial_gpu = 0
@@ -215,6 +232,8 @@ def analyze(path: Path, contract: Contract, *, emit: bool = True) -> dict:
     atmosphere_temporal_reuse = 0
     atmosphere_temporal_reject = 0
     atmosphere_surface_milli = (0, 0, 0, 0)
+    epoch_rows: list[str] = []
+    epoch_end_seen = False
 
     with path.open(encoding="utf-8", errors="replace") as stream:
         for line_number, raw_line in enumerate(stream, 1):
@@ -235,6 +254,21 @@ def analyze(path: Path, contract: Contract, *, emit: bool = True) -> dict:
                 continue
             msg = record["msg"].rstrip("\r\n")
             category = record["cat"]
+            # Disable flushes the final partial CPU bucket after MEASURE_END.
+            # Collect only explicit frame evidence, never extend the GPU window
+            # or silently count post-roll rendering as steady gameplay.
+            if measurement_state != "before" and category == "system" and msg.startswith(
+                ("frame intervals ", "frame trace (", "frame trace end ")
+            ):
+                epoch_rows.append(msg)
+                epoch_end_seen |= msg.startswith("frame trace end ")
+            setting = RE_FPS_SETTING.match(msg) if category == "system" else None
+            if setting:
+                try:
+                    value = float(setting.group(2))
+                except ValueError:
+                    value = math.nan  # rejected below, without crashing the analyzer
+                fps_settings[setting.group(1)].append((measurement_state, value))
 
             gameplay = RE_GAMEPLAY_MAP.search(msg)
             if gameplay and category == "client":
@@ -372,6 +406,17 @@ def analyze(path: Path, contract: Contract, *, emit: bool = True) -> dict:
             if measurement_state != "active":
                 continue
 
+            if category == "system" and msg.startswith("frame intervals"):
+                interval = INTERVALS.fullmatch(msg)
+                if interval is None:
+                    interval_errors.append("malformed full-frame interval payload")
+                else:
+                    values = list(map(int, interval.groups()[:6]))
+                    bucket = values[0]
+                    if bucket in intervals:
+                        interval_errors.append("duplicate full-frame interval bucket")
+                    intervals[bucket] = values[1:] + list(map(int, interval.group(7).split(",")))
+
             match = RE_ALL.fullmatch(msg) if category == "system" else None
             if match:
                 if pending_frame is not None:
@@ -408,6 +453,17 @@ def analyze(path: Path, contract: Contract, *, emit: bool = True) -> dict:
             frame_pacing = RE_FRAME_PACING.fullmatch(msg) if category == "system" else None
             if frame_pacing:
                 raw_frame_pacing.append(frame_pacing.groups())
+            spike = RE_GPU_SPIKE.fullmatch(msg) if category == "renderer.timing" else None
+            if spike:
+                raw_gpu_spikes.append({
+                    "frames": int(spike.group(1)), "over4ms": int(spike.group(2)),
+                    "max_frame_ms": float(spike.group(3)),
+                    "dominant": {} if spike.group(4) == "-" else {
+                        k: int(v) for k, v in (item.split(":") for item in spike.group(4).split(","))},
+                    "lane_max_ms": {} if spike.group(5) == "-" else {
+                        k: float(v) for k, v in (item.split(":") for item in spike.group(5).split(","))},
+                })
+                continue
             header = RE_GPU_HDR.fullmatch(msg) if category == "renderer.timing" else None
             if header:
                 if cur_gpu is not None:
@@ -518,6 +574,12 @@ def analyze(path: Path, contract: Contract, *, emit: bool = True) -> dict:
     effective_values = (fps_mean, gpu_implied_fps, wall_fps)
     effective_fps = min(effective_values) if all(finite(value) for value in effective_values) else None
     failures: list[str] = []
+    for name, expected in FPS_SETTINGS.items():
+        observations = fps_settings[name]
+        if (not any(phase == "before" for phase, _ in observations)
+                or not any(phase == "after" for phase, _ in observations)
+                or any(value != expected for _, value in observations)):
+            failures.append(f"absent or mismatched runtime setting {name}")
     if begin_markers != 1 or end_markers != 1 or marker_errors:
         failures.append(
             f"measurement markers invalid (begin={begin_markers}, end={end_markers}, order_errors={len(marker_errors)})"
@@ -580,7 +642,7 @@ def analyze(path: Path, contract: Contract, *, emit: bool = True) -> dict:
     )
     particle_workload = (
         particle_emitters >= 1 and particle_emitted >= 1
-    ) or atmosphere_particles >= 1
+    ) or atmosphere_particles >= 1 or particle_causal
     if not particle_workload or max(particle_computes, atmosphere_computes) < 1 \
             or max(particle_draws, atmosphere_draws) < 1:
         failures.append(
@@ -621,6 +683,26 @@ def analyze(path: Path, contract: Contract, *, emit: bool = True) -> dict:
     )
     expected_frame_blocks = contract.hold_frames // 200
     expected_frame_coverage = expected_frame_blocks * 200
+    interval_summary = None
+    interval_coverage = expected_frame_coverage
+    try:
+        interval_summary = full_frame_intervals(
+            intervals, frame_pacing_buckets, expected_frame_coverage)
+        if epoch_end_seen:
+            interval_summary = completed_frame_intervals(epoch_rows)
+            interval_coverage = int(interval_summary["frames"])
+            if interval_coverage != contract.hold_frames:
+                raise EvidenceError("completed frame epoch differs from requested frame count")
+    except EvidenceError as exc:
+        interval_errors.append(str(exc))
+    failures.extend(interval_errors)
+    # Keep low-target historical diagnostics available, but never let their
+    # averaged throughput stand in for the ratified minimum-250 requirement.
+    if contract.target_fps >= 250:
+        if interval_summary and interval_summary["gt4ms_count"]:
+            failures.append(f"strict 4ms budget exceeded ({interval_summary['gt4ms_count']} intervals)")
+        if interval_coverage != contract.hold_frames:
+            failures.append("strict full-frame coverage incomplete: unmeasured tail frames")
     if (
         len(raw_frame_pacing) != expected_frame_blocks
         or frame_coverage != expected_frame_coverage
@@ -743,6 +825,7 @@ def analyze(path: Path, contract: Contract, *, emit: bool = True) -> dict:
         )
 
     summary = {
+        'gpu_spikes': raw_gpu_spikes,  # per-200-frame GPU single-frame spike attribution (gpuSpike v1 rows)
         "tag": contract.tag,
         "map": contract.map_name,
         "camera": list(camera_observed) if camera_observed else None,
@@ -760,6 +843,11 @@ def analyze(path: Path, contract: Contract, *, emit: bool = True) -> dict:
             f"{render_observed[2]}x{render_observed[3]}" if render_observed else None
         ),
         "target_fps": contract.target_fps,
+        "fps_settings": FPS_SETTINGS.copy(),
+        "frame_intervals": interval_summary,
+        "unmeasured_tail_frames": contract.hold_frames - interval_coverage,
+        "frame_epoch_ended": epoch_end_seen,
+        "acceptance_scope": "pinned-scene diagnostic; not TASK-86 long movement/combat corpus acceptance",
         "status": "FAIL" if failures else "PASS",
         "failure_reasons": failures,
         "marker_errors": marker_errors,
@@ -881,6 +969,8 @@ def analyze(path: Path, contract: Contract, *, emit: bool = True) -> dict:
             f"maxq={max((block['maxq'] for block in vk_v2_blocks), default=None)}"
         )
         print(f"  wall FPS                : {wall_fps:.1f}" if finite(wall_fps) else "  wall FPS                : unavailable")
+        if interval_summary:
+            print(f"  frame intervals         : count={interval_summary['count']} >4ms={interval_summary['gt4ms_count']} max={interval_summary['max_ns']}ns P99=[{interval_summary['p99_lower_ns']},{interval_summary['p99_upper_ns']}]ns tail-unmeasured={contract.hold_frames - interval_coverage}")
         print(f"  EFFECTIVE FPS           : {effective_fps:.1f}" if finite(effective_fps) else "  EFFECTIVE FPS           : unavailable")
         print(f"  verdict                 : {summary['status']}")
         print(f"=== END RESULT [{contract.tag}] ===\n")
@@ -891,7 +981,7 @@ def record(ts: str, msg: str, cat: str = "system") -> str:
     return json.dumps({"ts": ts, "sev": "INFO", "cat": cat, "msg": msg})
 
 
-def synthetic_fixture(samples: int = 650) -> list[str]:
+def synthetic_fixture(samples: int = 650, *, frame_ns: int = 10000000) -> list[str]:
     base = dt.datetime.fromisoformat("2026-08-11T12:00:00+03:00")
     fixture_platform = {"Windows": "windows", "Darwin": "macos", "Linux": "linux"}.get(platform.system(), "other")
     fixture_worker_mode = "sync" if fixture_platform == "windows" else "pthread"
@@ -924,11 +1014,12 @@ def synthetic_fixture(samples: int = 650) -> list[str]:
             record(base.isoformat(), "dlight-shadow-candidates: 1 peak: 1", "renderer.timing"),
             record(base.isoformat(), "dlightShadowProfile: 1 lights x 6 = 6 passes/frame, 2.0 us/frame CPU-submit (126 frames)", "renderer.timing"),
             record(base.isoformat(), "FPS_GATE_SCENE_END"),
-            record(base.isoformat(), "FPS_GATE_MEASURE_BEGIN"),
         ]
     )
+    lines.extend(record(base.isoformat(), f'"{name}" is:"{value}"') for name, value in FPS_SETTINGS.items())
+    lines.append(record(base.isoformat(), "FPS_GATE_MEASURE_BEGIN"))
     for index in range(samples):
-        ts = (base + dt.timedelta(seconds=(index + 1) / 100.0)).isoformat()
+        ts = (base + dt.timedelta(seconds=(index + 1) * frame_ns / 1e9)).isoformat()
         lines.append(record(ts, f"frame:{index} all:10 sv:0 ev:0 cl:0 gm:0 rf:0 bk:0"))
         lines.append(record(ts, "cl: front:100 end:10000 (us)"))
         if index in (199, 399, 599):
@@ -950,6 +1041,14 @@ def synthetic_fixture(samples: int = 650) -> list[str]:
             worker_reset_total = (100, 200, 400)[index // 200]
             cpu_work = (9000, 4000, 4200)[index // 200]
             scr_end = (8000, 3000, 3200)[index // 200]
+            interval_count = 199 if index == 199 else 200
+            bins = [0] * 33
+            bins[min(32, frame_ns // 250000)] = interval_count
+            lines.append(record(ts,
+                f"frame intervals v1: bucket={pacing_bucket} count={interval_count} invalid=0 "
+                f"total_ns={frame_ns * interval_count} max_ns={frame_ns} "
+                f"gt4ms={interval_count if frame_ns > 4000000 else 0} bins="
+                + ",".join(map(str, bins))))
             lines.extend(
                 [
                     record(ts, f"frame trace (200f): bucket={pacing_bucket} count=200 valid=200 cpu_work_total={cpu_work * 200}us scr_end_total={scr_end * 200}us"),
@@ -977,8 +1076,9 @@ def synthetic_fixture(samples: int = 650) -> list[str]:
                     ),
                 ]
             )
-    end = base + dt.timedelta(seconds=samples / 100.0)
+    end = base + dt.timedelta(seconds=samples * frame_ns / 1e9)
     lines.append(record(end.isoformat(), "FPS_GATE_MEASURE_END"))
+    lines.extend(record(end.isoformat(), f'"{name}" is:"{value}"') for name, value in FPS_SETTINGS.items())
     return lines
 
 
@@ -994,6 +1094,68 @@ def run_self_test() -> int:
 
     def without(pattern: str, source: list[str] = clean) -> list[str]:
         return [line for line in source if pattern not in line]
+
+    cases.append(("missing-runtime-fps", without("com_maxfpsUnfocused"), base_contract,
+                  False, "runtime setting com_maxfpsUnfocused"))
+    wrong_fps = [line.replace('is:\\"1000', 'is:\\"60') for line in clean]
+    cases.append(("capped-unfocused", wrong_fps, base_contract,
+                  False, "runtime setting com_maxfpsUnfocused"))
+    cases.append(("malformed-runtime-fps", [line.replace('is:\\"1000', 'is:\\"-') for line in clean],
+                  base_contract, False, "runtime setting com_maxfpsUnfocused"))
+    cases.append(("missing-end-fps", clean[:-3], base_contract,
+                  False, "runtime setting com_maxfps"))
+
+    cases.append(("missing-intervals", without("frame intervals"), base_contract, False,
+                  "full-frame interval coverage"))
+    duplicate_intervals = clean.copy()
+    interval_index = next(i for i, line in enumerate(clean) if "frame intervals" in line)
+    duplicate_intervals.insert(interval_index, clean[interval_index])
+    cases.append(("duplicate-intervals", duplicate_intervals, base_contract, False,
+                  "duplicate full-frame interval"))
+    cases.append(("malformed-intervals", [line.replace("invalid=0 total_ns", "invalid=no total_ns")
+                  for line in clean], base_contract, False, "malformed full-frame interval"))
+    cases.append(("wrong-interval-count", [line.replace("count=199 invalid=0", "count=200 invalid=0")
+                  for line in clean], base_contract, False, "invalid full-frame interval block"))
+
+    # High average throughput cannot hide a single 5ms hitch. These fixtures
+    # have 600 fully covered frames, unlike the historical 650-frame recipe.
+    fast = synthetic_fixture(600, frame_ns=3000000)
+    fast = [re.sub(r"cpu_work_total=\d+us scr_end_total=\d+us",
+                   "cpu_work_total=600000us scr_end_total=400000us", line)
+            .replace("world_done=4.00", "world_done=0.50")
+            .replace("world_done=5.00", "world_done=0.50")
+            .replace("total=5.00", "total=1.00")
+            .replace("total=6.00", "total=1.00") for line in fast]
+    strict_contract = replace(base_contract, target_fps=250, hold_frames=600)
+    cases.append(("strict-fast-complete", fast, strict_contract, True, None))
+    hitch = fast.copy()
+    at = next(i for i, line in enumerate(hitch) if "frame intervals" in line)
+    hitch_record = json.loads(hitch[at])
+    bins = [0] * 33; bins[12] = 198; bins[20] = 1
+    hitch_record["msg"] = ("frame intervals v1: bucket=1 count=199 invalid=0 "
+        "total_ns=599000000 max_ns=5000000 gt4ms=1 bins=" + ",".join(map(str, bins)))
+    hitch[at] = json.dumps(hitch_record)
+    cases.append(("strict-fast-with-hitch", hitch, strict_contract, False, "strict 4ms budget"))
+    cases.append(("strict-unmeasured-tail", fast, replace(strict_contract, hold_frames=650),
+                  False, "unmeasured tail frames"))
+    tail_bins = [0] * 33; tail_bins[12] = 37
+    tail = fast + [
+        record("2026-08-11T12:00:04+03:00", "frame intervals v1: bucket=4 count=37 invalid=0 total_ns=111000000 max_ns=3000000 gt4ms=0 bins=" + ','.join(map(str, tail_bins))),
+        record("2026-08-11T12:00:04+03:00", "frame trace (37f): bucket=4 count=37 valid=37 cpu_work_total=74000us scr_end_total=37000us"),
+        record("2026-08-11T12:00:04+03:00", "frame trace end v1: bucket=4 frames=637"),
+    ]
+    tail_contract = replace(strict_contract, hold_frames=637)
+    cases.append(("strict-completed-partial-tail", tail, tail_contract, True, None))
+    cases.append(("strict-wrong-epoch-end", [line.replace('frames=637', 'frames=638') for line in tail],
+                  tail_contract, False, "endpoint total mismatch"))
+    cases.append(("strict-missing-partial-tail", tail[:-3] + tail[-1:], tail_contract,
+                  False, "mismatched frame epoch end"))
+    cases.append(("strict-duplicate-epoch-end", tail + tail[-1:], tail_contract,
+                  False, "evidence after epoch end"))
+    tail_bins[12] -= 1; tail_bins[20] = 1
+    tail_hitch = tail.copy()
+    tail_hitch[-3] = record("2026-08-11T12:00:04+03:00", "frame intervals v1: bucket=4 count=37 invalid=0 total_ns=113000000 max_ns=5000000 gt4ms=1 bins=" + ','.join(map(str, tail_bins)))
+    cases.append(("strict-hitch-in-partial-tail", tail_hitch, tail_contract, False, "strict 4ms budget"))
 
     malformed = clean.copy()
     malformed.insert(malformed.index(next(line for line in malformed if "frame:0" in line)) + 1, "{broken-json")
@@ -1174,18 +1336,20 @@ def run_self_test() -> int:
             print(f"SELF-TEST FAIL: sparse legacy rows affected aggregate authority: {sparse_summary['failure_reasons']}")
         else:
             print("SELF-TEST PASS: sparse legacy rows do not affect aggregate authority")
-    return 1 if failed else 0
+    return int(failed or run_gameplay_self_test())
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--self-test", action="store_true")
+    parser.add_argument("--gameplay-seconds", type=int, default=0)
+    parser.add_argument("--backend", choices=("metal", "vulkan"), default="vulkan")
     parser.add_argument("--input", type=Path)
     parser.add_argument("--tag", default="head")
     parser.add_argument("--map", dest="map_name", default="arena1")
     parser.add_argument("--bots", type=int, default=6)
     parser.add_argument("--target-fps", type=float, default=250.0)
-    parser.add_argument("--hold-frames", type=int, default=650)
+    parser.add_argument("--hold-frames", type=int, default=600)
     parser.add_argument("--viewpos", default="1052 1432 90 135 0")
     parser.add_argument("--draw-floor", type=int, default=30)
     parser.add_argument("--render-width", type=int, default=1280)
@@ -1200,12 +1364,294 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def analyze_gameplay(path: Path, *, seconds: int, backend: str, map_name: str, bots: int) -> dict:
+    """One native-resolution moving/combat run, not an N3/multi-map verdict.
+
+    The strict gate uses completed frame-end intervals. GPU aggregates are
+    separately scoped diagnostics: neither their delayed delivery nor log wall
+    time replaces unmeasured application frames.
+    """
+    failures = []
+    records = []
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        try:
+            row = json.loads(line)
+            if not isinstance(row, dict) or not all(isinstance(row.get(k), str) for k in ("msg", "cat", "sev", "ts")):
+                raise ValueError("invalid record")
+            records.append(row)
+        except (ValueError, TypeError):
+            failures.append(f"malformed log record {number}")
+    messages = [r['msg'].strip() for r in records]
+    joined = '\n'.join(messages)
+    failures.extend(f"runtime {r['sev']}: {r['msg'].strip()}" for r in records if r['sev'] in ('ERROR', 'FATAL'))
+    if re.search(r"failed to initialize; advancing cl_renderer|died on signal|Wired crash", joined):
+        failures.append('renderer fallback or crash')
+    if re.search(r'You must be alive to use this command|unknown cmd |godmode OFF|UnnamedPlayer was telefragged', joined):
+        failures.append('gameplay setup command rejected or godmode lost')
+    marker_names = ('FPS_GAMEPLAY_SETTINGS_BEFORE', 'FPS_GAMEPLAY_BEGIN',
+                    'FPS_GAMEPLAY_END', 'FPS_GAMEPLAY_SETTINGS_AFTER')
+    markers = [[i for i, msg in enumerate(messages) if msg == name] for name in marker_names]
+    if any(len(hits) != 1 for hits in markers) or [hits[0] for hits in markers] != sorted(hits[0] for hits in markers):
+        return {'status': 'FAIL', 'failure_reasons': failures + ['invalid gameplay measurement markers']}
+    before, begin, end, after = [hits[0] for hits in markers]
+    if not any('godmode ON' in msg for msg in messages[:begin]):
+        failures.append('missing live player/godmode setup acknowledgement')
+    settings = dict(FPS_SETTINGS, fixedtime=0, timescale=1, r_pinFrameTime=0,
+        r_pinShaderTime=0, r_renderScale=0, r_hdr=1, r_hdrAutoExposure=0,
+        r_bloom=1, r_bloomPasses=2, r_bloomThresholdMode=0,
+        r_bloomThreshold=.32, r_bloomIntensity=.5, r_particles=1,
+        g_envWeather='rain', cl_renderer=backend)
+    for name, expected in settings.items():
+        pattern = re.compile(r'^"' + re.escape(name) + r'"\s+is:\s*"([^"^]*)(?:\^7)?"')
+        for label, subset in (('before', messages[before:begin]), ('after', messages[after:])):
+            values = [match.group(1) for msg in subset if (match := pattern.match(msg))]
+            try:
+                valid = bool(values) and all(value == expected if isinstance(expected, str)
+                    else math.isclose(float(value), expected, abs_tol=1e-6) for value in values)
+            except ValueError:
+                valid = False
+            if not valid:
+                failures.append(f'{label} runtime setting {name} missing or mismatched: {values}')
+    maps = [match.group(1) for msg in messages if (match := RE_GAMEPLAY_MAP.search(msg))]
+    if maps != [map_name]:
+        failures.append(f'gameplay map mismatch: {maps}')
+    entered = sum(r['cat'] == 'server' and r['msg'].startswith('broadcast: print "')
+                  and 'entered the game' in r['msg'] for r in records) - 1
+    if entered != bots:
+        failures.append(f'bot population mismatch: {entered}/{bots}')
+    extents = [tuple(map(int, match.groups())) for msg in messages if (match := RE_RENDER_EXTENT.match(msg))]
+    # GfxInfo prints only MODE when scene and output extents are equal.
+    # This is the actual native branch, not an inference from r_renderScale.
+    for msg in messages:
+        native = re.match(r'^MODE: -?\d+, (\d+) x (\d+) (?:windowed|fullscreen) hz:', msg)
+        if native:
+            width, height = map(int, native.groups())
+            extents.append((width, height, width, height))
+    if backend == 'metal':
+        # Independent native receipts: never infer drawable size from a cvar
+        # or accept Vulkan gfxinfo as evidence for a different backend.
+        ready = [tuple(map(int, values)) for values in re.findall(
+            r'Wired native Metal RAL: registration ready logical=(\d+)x(\d+) '
+            r'pixels=(\d+)x(\d+) swapInterval=(-?\d+) presentMode=(\d+) displaySync=(\d+)', joined)]
+        scenes = set(tuple(map(int, values)) for values in re.findall(
+            r'Wired native Metal RAL: scene format=\S+ extent=(\d+)x(\d+)', joined))
+        outputs = {(r[2], r[3]) for r in ready}
+        if not ready or any((r[0], r[1], *r[4:]) != (1280, 720, 0, 2, 0) for r in ready):
+            failures.append('missing or mismatched native Metal presentation policy')
+        if len(outputs) != 1 or len(scenes) != 1 or outputs != scenes:
+            failures.append('missing, changing or scaled native Metal scene/output receipt')
+        extents = [(w, h, dw, dh) for w, h in scenes for dw, dh in outputs]
+    if not extents or any(w != dw or h != dh or w < 1280 or h < 720 for w, h, dw, dh in extents):
+        failures.append(f'native render/output extent mismatch: {extents}')
+    format_pattern = (r'Wired native Metal RAL: scene format=(\S+)' if backend == 'metal'
+        else r'(?m)^\s*color(?: \(main FBO\))?\s*:\s*VK_FORMAT_(\S+)')
+    formats = set(re.findall(format_pattern, joined))
+    if formats != {'R16G16B16A16_SFLOAT'}:
+        failures.append(f'FP16 HDR scene evidence mismatch: {sorted(formats)}')
+    sampler = re.findall(rf'Wired {backend} material sampler: min=(\d+) mag=(\d+) mip=(\d+) aniso=([\d.]+) maxLod=([\d.]+)', joined)
+    if not sampler or any(tuple(map(float, values[:4])) != (1, 1, 1, 8) for values in sampler):
+        failures.append('missing or mismatched trilinear/aniso8 sampler')
+    window = messages[begin + 1:after]
+    intervals = None
+    try:
+        # END requests disable; the already measured partial bucket is flushed
+        # on that frame and precedes SETTINGS_AFTER. It is not post-roll work.
+        intervals = completed_frame_intervals(window, minimum_seconds=seconds)
+        if intervals['gt4ms_count']:
+            failures.append(f"strict 4ms budget exceeded ({intervals['gt4ms_count']} intervals)")
+    except EvidenceError as exc:
+        failures.append(str(exc))
+    phases = [int(msg.rsplit('_', 1)[1]) for msg in messages[begin:end] if re.fullmatch(r'FPS_GAMEPLAY_PHASE_[1-4]', msg)]
+    if phases != [1, 2, 3, 4]:
+        failures.append(f'missing or reordered movement/combat phases: {phases}')
+    poses = [tuple(map(int, match.groups())) for msg in messages[begin:end] if (match := RE_CAMERA.fullmatch(msg))]
+    if len(poses) != 8 or len({p[:3] for p in poses}) < 3 or len({p[3:] for p in poses}) < 3:
+        failures.append('insufficient observed translation/rotation across four phases')
+    particle_rows = [tuple(map(int, match.groups())) for msg in messages[begin:end] if (match := RE_PARTICLE_RUNTIME.fullmatch(msg))]
+    atmosphere_rows = [tuple(map(int, match.groups())) for msg in messages[begin:end] if (match := RE_ATMOSPHERE_RUNTIME.fullmatch(msg))]
+    metal_effects = [tuple(map(int, values)) for values in re.findall(
+        r'(?m)^metal effects submission v1: emitters=(\d+) admitted=(\d+) pool_instances=(\d+) '
+        r'weather_particles=(\d+) weather_computes=(\d+) weather_draws=(\d+)$', '\n'.join(messages[begin:end]))]
+    particle_work = (any(p[0] > 0 and p[1] > 0 and p[2] > 0 for p in metal_effects)
+        if backend == 'metal' else any(p[1] > 0 and p[5] > 0 and p[6] > 0 for p in particle_rows))
+    weather_work = (any(p[3] > 0 and p[4] > 0 and p[5] > 0 for p in metal_effects)
+        if backend == 'metal' else any(p[0] > 0 and p[1] > 0 and p[2] > 0 for p in atmosphere_rows))
+    if not particle_work:
+        failures.append('no live particle compute/draw evidence during combat')
+    if not weather_work:
+        failures.append('no live weather compute/draw evidence during movement')
+    metal_collision = [int(value) for value in re.findall(
+        r'(?m)^metal weather collision v1: heightgrid=([01])$', '\n'.join(messages[begin:end]))]
+    if backend == 'metal' and not any(metal_collision):
+        failures.append('no Metal weather heightgrid submission evidence during movement')
+    context_pattern = re.compile(r'^frame window context v1: bucket=(\d+) count=(\d+) focused=(\d+) minimized=(\d+) automated=([01])$')
+    context = [tuple(map(int, match.groups())) for msg in window if (match := context_pattern.fullmatch(msg))]
+    if not intervals or sum(c[1] for c in context) != intervals['frames'] or any(c[3] or c[2] > c[1] for c in context):
+        failures.append('missing/invalid window context or minimized measured frames')
+    acquire_scene = None
+    if backend == 'metal':
+        try:
+            acquire_scene = acquire_scene_timing(messages[begin:end])
+        except EvidenceError as exc:
+            failures.append(str(exc))
+    return {
+        'status': 'FAIL' if failures else 'PASS', 'failure_reasons': failures,
+        'acceptance_scope': 'single wall-clock movement/combat run; not N>=3 arena1/7/17 or visual parity acceptance',
+        'backend': backend, 'map': map_name, 'bots': entered, 'requested_seconds': seconds,
+        'frame_intervals': intervals, 'native_extent_observations': extents,
+        'settings': settings, 'poses': poses, 'particle_runtime': particle_rows,
+        'atmosphere_runtime': atmosphere_rows, 'window_context': context,
+        'metal_effect_submissions': metal_effects,
+        'metal_heightgrid_submissions': metal_collision,
+        'metal_acquire_scene': acquire_scene,
+        'effect_evidence_scope': 'validated submission counts; not GPU completion/readback or visible-pixel proof',
+        'gpu_aggregate_headers_in_window': sum(
+            (RE_METAL_GPU_HDR if backend == 'metal' else RE_GPU_HDR).fullmatch(msg) is not None
+            for msg in messages[begin:end]),
+        'gpu_spikes': [
+            {'frames': int(m.group(1)), 'over4ms': int(m.group(2)), 'max_frame_ms': float(m.group(3)),
+             'dominant': {} if m.group(4) == '-' else {k: int(v) for k, v in (item.split(':') for item in m.group(4).split(','))},
+             'lane_max_ms': {} if m.group(5) == '-' else {k: float(v) for k, v in (item.split(':') for item in m.group(5).split(','))}}
+            for m in (RE_GPU_SPIKE.fullmatch(msg) for msg in messages[begin:end]) if m],
+        'pacing_spikes': [
+            {'frames': int(m.group(1)), 'over4ms': int(m.group(2)),
+             'dominant': {k: int(v) for k, v in (item.split(':') for item in m.group(3).split(','))},
+             'max_us': {k: int(v) for k, v in (item.split(':') for item in m.group(4).split(','))}}
+            for m in (RE_PACING_SPIKE.fullmatch(msg) for msg in messages[begin:end]) if m],
+        'pacing_spike_scope': 'renderer frame-to-frame intervals >4ms attributed to the previous frame dominant main-thread wait (acquire/slot_wait/submit/present) or other; Vulkan, per 200 attempts (vkPacing v1)',
+        'gpu_spike_scope': 'per-200-frame GPU lane-sum spike attribution (gpuSpike v1): frames whose lane sum exceeds 4ms, worst single-frame total, dominant lane per spike frame and per-lane single-frame maxima; Vulkan product only, delayed readback, not matched to wall intervals',
+        'gpu_scope': 'delayed aggregate headers only; not full coverage or a matched per-frame latency attribution',
+        'excluded_phases': 'initialization/map load/bot warmup before BEGIN; stopping frame, screenshot and shutdown after END',
+    }
+
+
+def run_gameplay_self_test() -> bool:
+    settings = dict(FPS_SETTINGS, fixedtime=0, timescale=1, r_pinFrameTime=0,
+        r_pinShaderTime=0, r_renderScale=0, r_hdr=1, r_hdrAutoExposure=0,
+        r_bloom=1, r_bloomPasses=2, r_bloomThresholdMode=0, r_bloomThreshold=.32,
+        r_bloomIntensity=.5, r_particles=1, g_envWeather='rain', cl_renderer='vulkan')
+    reads = [f'"{key}" is:"{value}"' for key, value in settings.items()]
+    msgs = ['FIRST GAMEPLAY FRAME mapname=maps/arena1.bsp', 'godmode ON',
+        'RENDER: 2560 x 1440, MODE: -1, 2560 x 1440 windowed hz:',
+        'color (main FBO) : VK_FORMAT_R16G16B16A16_SFLOAT',
+        'Wired vulkan material sampler: min=1 mag=1 mip=1 aniso=8 maxLod=16',
+        *['broadcast: print "player has entered the game"'] * 3,
+        'FPS_GAMEPLAY_SETTINGS_BEFORE', *reads, 'FPS_GAMEPLAY_BEGIN']
+    for phase in range(1, 5):
+        msgs += [f'FPS_GAMEPLAY_PHASE_{phase}', f'{phase * 30} 0 100 {phase * 25} 0',
+            f'{phase * 30 + 10} 0 100 {phase * 25 + 10} 0',
+            'particle emitters:3 particles:8 requests:3 dropped:0/0 computes:1 draws:2',
+            'atmosphere particles:8192 computes:1 draws:1 froxels:0 dispatches:0 clouds:0 heightgrid:1 depth:1 temporal:0/0 surface-milli:0/0/0/0']
+    for bucket in range(1, 55):
+        count = 199 if bucket == 1 else 200
+        bins = [0] * 33; bins[12] = count
+        msgs += [f'frame intervals v1: bucket={bucket} count={count} invalid=0 total_ns={count * 3000000} max_ns=3000000 gt4ms=0 bins=' + ','.join(map(str, bins)),
+            f'frame trace (200f): bucket={bucket} count=200 valid=200 cpu_work_total=600000us scr_end_total=400000us',
+            f'frame window context v1: bucket={bucket} count=200 focused=0 minimized=0 automated=0']
+    msgs += ['FPS_GAMEPLAY_END', 'frame trace end v1: bucket=54 frames=10800',
+        'FPS_GAMEPLAY_SETTINGS_AFTER', *reads]
+    cases = [
+        ('complete', msgs, True),
+        ('native-gfxinfo', [s.replace('RENDER: 2560 x 1440, MODE:', 'MODE:').replace('color (main FBO)', 'color') for s in msgs], True),
+        ('dead-setup', msgs + ['You must be alive to use this command.'], False),
+        ('end-missing', [s for s in msgs if not s.startswith('frame trace end')], False),
+        ('bloom-disabled', [s.replace('"r_bloom" is:"1"', '"r_bloom" is:"0"') for s in msgs], False),
+        ('pinned-time', [s.replace('"fixedtime" is:"0"', '"fixedtime" is:"1"') for s in msgs], False),
+        ('wrong-map', [s.replace('maps/arena1.bsp', 'maps/arena17.bsp') for s in msgs], False),
+        ('missing-phase', [s for s in msgs if s != 'FPS_GAMEPLAY_PHASE_3'], False),
+        ('missing-motion', [s for s in msgs if not RE_CAMERA.fullmatch(s)], False),
+        ('missing-fx', [s for s in msgs if not s.startswith('particle emitters:')], False),
+        ('missing-weather', [s for s in msgs if not s.startswith('atmosphere particles:')], False),
+        ('minimized', [s.replace('minimized=0', 'minimized=200') for s in msgs], False),
+        ('internal720p', [s.replace('RENDER: 2560 x 1440', 'RENDER: 1280 x 720') for s in msgs], False),
+        ('wrong-sampler', [s.replace('mip=1 aniso=8', 'mip=0 aniso=8') for s in msgs], False),
+    ]
+    cases = [(name, source, expected, 'vulkan') for name, source, expected in cases]
+    metal = [s.replace('"cl_renderer" is:"vulkan"', '"cl_renderer" is:"metal"')
+        .replace('Wired vulkan material sampler:', 'Wired metal material sampler:')
+        .replace('RENDER: 2560 x 1440, MODE: -1, 2560 x 1440 windowed hz:',
+            'Wired native Metal RAL: registration ready logical=1280x720 pixels=2560x1440 swapInterval=0 presentMode=2 displaySync=0')
+        .replace('color (main FBO) : VK_FORMAT_R16G16B16A16_SFLOAT',
+            'Wired native Metal RAL: scene format=R16G16B16A16_SFLOAT extent=2560x1440')
+        for s in msgs if not s.startswith(('particle emitters:', 'atmosphere particles:'))]
+    effect = 'metal effects submission v1: emitters=3 admitted=8 pool_instances=32768 weather_particles=8192 weather_computes=1 weather_draws=1'
+    metal.insert(metal.index('FPS_GAMEPLAY_PHASE_2'), effect)
+    collision = 'metal weather collision v1: heightgrid=1'
+    metal.insert(metal.index('FPS_GAMEPLAY_PHASE_2'), collision)
+    metal_gpu = ('metal perf v1: frames=200 acquire_total_us=400000 submit_total_us=120000 '
+                 'gpu_samples=10 gpu_total_ns=15000000 gpu_unavailable=0')
+    metal.insert(metal.index('FPS_GAMEPLAY_PHASE_2'), metal_gpu)
+    # A delayed postroll header and a truncated payload are not in-window evidence.
+    metal.append(metal_gpu)
+    metal.insert(metal.index('FPS_GAMEPLAY_PHASE_2'), 'metal perf v1: frames=200')
+    paired = metal.copy()
+    acquire = ('metal acquire scene v1: frames=200 samples=10 unavailable=0 acquire_ns=30000000 '
+               'before_scene_ns=1000000 during_scene_ns=9000000 after_scene_ns=20000000')
+    split = 'metal gpu split v1: frames=200 samples=10 scene_ns=10000000 output_ns=5000000 overlap_ns=0 gap_ns=1000000'
+    paired[paired.index('FPS_GAMEPLAY_PHASE_2'):paired.index('FPS_GAMEPLAY_PHASE_2')] = [acquire, split]
+    cases += [
+        ('metal-acquire-paired', paired, True, 'metal'),
+        ('metal-acquire-invalid-sum', [s.replace('after_scene_ns=20000000', 'after_scene_ns=10000000') for s in paired], False, 'metal'),
+        ('metal-acquire-invalid-count', [s.replace('unavailable=0 acquire_ns', 'unavailable=1 acquire_ns') for s in paired], False, 'metal'),
+        ('metal-acquire-missing-pair', [s for s in paired if s != split], False, 'metal'),
+        ('metal-acquire-postroll', metal + [acquire, split], True, 'metal'),
+        ('metal-native', metal, True, 'metal'),
+        ('metal-missing-output', [s for s in metal if 'registration ready' not in s], False, 'metal'),
+        ('metal-scaled-scene', [s.replace('extent=2560x1440', 'extent=1280x720') for s in metal], False, 'metal'),
+        ('metal-sync', [s.replace('displaySync=0', 'displaySync=1') for s in metal], False, 'metal'),
+        ('metal-no-admission', [s.replace('admitted=8', 'admitted=0') for s in metal], False, 'metal'),
+        ('metal-no-draw', [s.replace('pool_instances=32768', 'pool_instances=0') for s in metal], False, 'metal'),
+        ('metal-no-weather', [s.replace('weather_draws=1', 'weather_draws=0') for s in metal], False, 'metal'),
+        ('metal-no-heightgrid', [s.replace('heightgrid=1', 'heightgrid=0') for s in metal], False, 'metal'),
+        ('metal-heightgrid-postroll', [s for s in metal if s != collision] + [collision], False, 'metal'),
+        ('metal-postroll-only', [s for s in metal if s != effect] + [effect], False, 'metal'),
+    ]
+    failed = False
+    with tempfile.TemporaryDirectory(prefix='wired-gameplay-analyzer-') as directory:
+        path = Path(directory) / 'qconsole.jsonl'
+        for name, source, expected, backend in cases:
+            path.write_text('\n'.join(json.dumps(dict(msg=msg, cat='server' if msg.startswith('broadcast:') else 'system',
+                sev='INFO', ts='2026-09-07T00:00:00+03:00')) for msg in source), encoding='utf-8')
+            result = analyze_gameplay(path, seconds=32, backend=backend, map_name='arena1', bots=2)
+            okay = (result['status'] == 'PASS') == expected
+            if name == 'metal-native':
+                okay &= result['gpu_aggregate_headers_in_window'] == 1
+                okay &= result['metal_acquire_scene'] is None
+            if name == 'metal-acquire-paired':
+                okay &= result['metal_acquire_scene']['samples'] == 10
+                okay &= result['metal_acquire_scene']['after_scene_mean_ms'] == 2
+            if name == 'metal-acquire-postroll':
+                okay &= result['metal_acquire_scene'] is None
+            failed |= not okay
+            print(f"GAMEPLAY SELF-TEST {'PASS' if okay else 'FAIL'}: {name}")
+            if not okay:
+                print(result['failure_reasons'])
+    return failed
+
+
 def main() -> int:
     args = parse_args()
     if args.self_test:
         return run_self_test()
     if args.input is None:
         raise SystemExit("--input is required")
+    if args.gameplay_seconds:
+        if not 32 <= args.gameplay_seconds <= 120:
+            raise SystemExit('--gameplay-seconds must be 32..120')
+        summary = analyze_gameplay(args.input, seconds=args.gameplay_seconds,
+            backend=args.backend, map_name=args.map_name, bots=args.bots)
+        for name, value in (('engine_sha256', args.engine_sha256), ('pax21_sha256', args.pax21_sha256)):
+            summary[name] = value
+            if not re.fullmatch(r'[0-9a-f]{64}', value):
+                summary['failure_reasons'].append(f'missing {name}')
+                summary['status'] = 'FAIL'
+        summary_path = args.input.parent / f'summary-{args.tag}.json'
+        summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+        print('SUMMARY FILE:', summary_path)
+        print('FRAME INTERVALS:', json.dumps(summary.get('frame_intervals')))
+        for failure in summary['failure_reasons']:
+            print('FAIL:', failure)
+        return int(summary['status'] != 'PASS')
     origin = tuple(int(float(value)) for value in args.viewpos.split())
     if len(origin) != 4:
         raise SystemExit("--viewpos must contain x y z yaw")

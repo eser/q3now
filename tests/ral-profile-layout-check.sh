@@ -200,7 +200,9 @@ if command -v otool >/dev/null 2>&1;then
 	done
 fi
 
-BOOT="$HOME_DIR/base/ral-profile-layout.cfg";printf '%s\n' 'log renderer.timing info' 'set activeAction "echo Q0_RAL_PROFILE_LAYOUT_REQUESTED; r_gpuSpeeds 1; wait 90; echo Q0_RAL_PROFILE_LAYOUT_BASE_READY; ral_dump live profile; echo Q0_RAL_PROFILE_LAYOUT_SMAA_ON_REQUESTED; r_smaa 1; wait 180; echo Q0_RAL_PROFILE_LAYOUT_SMAA_ON_READY; ral_dump live profile; echo Q0_RAL_PROFILE_LAYOUT_SMAA_OFF_REQUESTED; r_smaa 0; wait 180; ral_dump live profile; echo Q0_RAL_PROFILE_LAYOUT_COMPLETE; quit"' 'map arena7' >"$BOOT"
+# Cross two 200-sample reporting resets before the first topology change:
+# clearing interval averages must not emit another epoch-start record.
+BOOT="$HOME_DIR/base/ral-profile-layout.cfg";printf '%s\n' 'log renderer.timing info' 'set activeAction "echo Q0_RAL_PROFILE_LAYOUT_REQUESTED; r_gpuSpeeds 1; wait 450; echo Q0_RAL_PROFILE_LAYOUT_BASE_READY; ral_dump live profile; echo Q0_RAL_PROFILE_LAYOUT_SMAA_ON_REQUESTED; r_smaa 1; wait 180; echo Q0_RAL_PROFILE_LAYOUT_SMAA_ON_READY; ral_dump live profile; echo Q0_RAL_PROFILE_LAYOUT_SMAA_OFF_REQUESTED; r_smaa 0; wait 180; ral_dump live profile; echo Q0_RAL_PROFILE_LAYOUT_COMPLETE; quit"' 'map arena7' >"$BOOT"
 MANIFEST="$ROOT/manifest.jsonl";python3 - "$MANIFEST" "$WIRED" "$RENDERER" "$MOLTEN" "$PACK/base/pax21.sw3z" "$BASE" "$0" "$BOOT" <<'PYEOF'
 import hashlib,json,os,sys
 with open(sys.argv[1],"w") as out:

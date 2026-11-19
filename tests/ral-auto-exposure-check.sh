@@ -15,23 +15,32 @@ set vm_game 0
 set vm_cgame 0
 set sv_cheats 1
 set sv_pure 0
+set r_brightness 1
+set r_dither 0
+set r_hdrExposureKey 0.0123
+set r_hdrExposurePctLow 0.5
+set r_hdrExposurePctHigh 0.2
+set r_hdrExposureMin 0.25
+set r_hdrExposureMax 8.0
+set s_volume 0
+set s_musicVolume 0
 set aeSetup "cg_thirdPerson 0; cg_drawGun 0; com_maxfps 60; fixedtime 16; wait 180; noclip; setviewpos 1052 1432 50 135; vstr aeLegacySettle"
-set aeLegacySettle "r_hdrAdaptionRateUp 3.0; r_hdrAdaptionRateDown 1.0; wait 360; echo Q3_AE_LEGACY_FLICKER_BEGIN; wait 300; echo Q3_AE_LEGACY_FLICKER_END; vstr aeLegacyAB"
-set aeLegacyAB "r_pinShaderTime 2.0; wait 120; echo Q3_AE_LEGACY_AB_BEGIN; setviewpos 1052 1432 300 0; wait 300; echo Q3_AE_LEGACY_AB_END; vstr aeLegacyBA"
-set aeLegacyBA "echo Q3_AE_LEGACY_BA_BEGIN; setviewpos 1052 1432 50 135; wait 300; echo Q3_AE_LEGACY_BA_END; r_pinShaderTime 0; vstr aeMiddleSettle"
-set aeMiddleSettle "r_hdrAdaptionRateUp 2.0; r_hdrAdaptionRateDown 0.75; wait 360; echo Q3_AE_MIDDLE_FLICKER_BEGIN; wait 300; echo Q3_AE_MIDDLE_FLICKER_END; vstr aeMiddleAB"
-set aeMiddleAB "r_pinShaderTime 2.0; wait 120; echo Q3_AE_MIDDLE_AB_BEGIN; setviewpos 1052 1432 300 0; wait 300; echo Q3_AE_MIDDLE_AB_END; vstr aeMiddleBA"
-set aeMiddleBA "echo Q3_AE_MIDDLE_BA_BEGIN; setviewpos 1052 1432 50 135; wait 300; echo Q3_AE_MIDDLE_BA_END; r_pinShaderTime 0; vstr aeCurrentSettle"
-set aeCurrentSettle "r_hdrAdaptionRateUp 1.5; r_hdrAdaptionRateDown 0.5; wait 360; echo Q3_AE_CURRENT_FLICKER_BEGIN; wait 300; echo Q3_AE_CURRENT_FLICKER_END; vstr aeCurrentAB"
-set aeCurrentAB "r_pinShaderTime 2.0; wait 120; echo Q3_AE_CURRENT_AB_BEGIN; setviewpos 1052 1432 300 0; wait 300; echo Q3_AE_CURRENT_AB_END; vstr aeCurrentBA"
-set aeCurrentBA "echo Q3_AE_CURRENT_BA_BEGIN; setviewpos 1052 1432 50 135; wait 300; echo Q3_AE_CURRENT_BA_END; fixedtime 0; echo Q3_AE_COMPLETE; quit"
+set aeLegacySettle "r_hdrAdaptionRateUp 3.0; r_hdrAdaptionRateDown 1.0; exec ral-ae-settle.cfg; echo Q3_AE_LEGACY_FLICKER_BEGIN; exec ral-ae-flicker.cfg; echo Q3_AE_LEGACY_FLICKER_END; vstr aeLegacyAB"
+set aeLegacyAB "r_pinShaderTime 2.0; wait 120; echo Q3_AE_LEGACY_AB_BEGIN; setviewpos 1052 1432 50 0; wait 300; viewpos; echo Q3_AE_LEGACY_AB_END; screenshot ral-ae-bright png silent; wait 2; vstr aeLegacyBA"
+set aeLegacyBA "echo Q3_AE_LEGACY_BA_BEGIN; setviewpos 1052 1432 50 135; wait 300; viewpos; echo Q3_AE_LEGACY_BA_END; screenshot ral-ae-dark png silent; wait 2; r_pinShaderTime 0; vstr aeMiddleSettle"
+set aeMiddleSettle "r_hdrAdaptionRateUp 2.0; r_hdrAdaptionRateDown 0.75; exec ral-ae-settle.cfg; echo Q3_AE_MIDDLE_FLICKER_BEGIN; exec ral-ae-flicker.cfg; echo Q3_AE_MIDDLE_FLICKER_END; vstr aeMiddleAB"
+set aeMiddleAB "r_pinShaderTime 2.0; wait 120; echo Q3_AE_MIDDLE_AB_BEGIN; setviewpos 1052 1432 50 0; wait 300; viewpos; echo Q3_AE_MIDDLE_AB_END; vstr aeMiddleBA"
+set aeMiddleBA "echo Q3_AE_MIDDLE_BA_BEGIN; setviewpos 1052 1432 50 135; wait 300; viewpos; echo Q3_AE_MIDDLE_BA_END; r_pinShaderTime 0; vstr aeCurrentSettle"
+set aeCurrentSettle "r_hdrAdaptionRateUp 1.5; r_hdrAdaptionRateDown 0.5; exec ral-ae-settle.cfg; echo Q3_AE_CURRENT_FLICKER_BEGIN; exec ral-ae-flicker.cfg; echo Q3_AE_CURRENT_FLICKER_END; vstr aeCurrentAB"
+set aeCurrentAB "r_pinShaderTime 2.0; wait 120; echo Q3_AE_CURRENT_AB_BEGIN; setviewpos 1052 1432 50 0; wait 300; viewpos; echo Q3_AE_CURRENT_AB_END; vstr aeCurrentBA"
+set aeCurrentBA "echo Q3_AE_CURRENT_BA_BEGIN; setviewpos 1052 1432 50 135; wait 300; viewpos; echo Q3_AE_CURRENT_BA_END; fixedtime 0; echo Q3_AE_COMPLETE; quit"
 set activeAction "vstr aeSetup"
 map arena1
 '
 
 analyze() {
 	python3 - "$1" "$2" <<'PYEOF'
-import json,re,statistics,sys
+import json,math,re,statistics,sys
 
 log_path,manifest_path=sys.argv[1:]
 rows=[]
@@ -81,6 +90,21 @@ if any(b[1] != a[1]+1 for a,b in zip(series,series[1:])):
     raise SystemExit("FAIL exposure frame sequence is not contiguous")
 
 marker_at={msg:index for index,msg in markers}
+# The cheat teleport adds a short exit impulse. Compare settled viewpos
+# receipts, not the requested player origin, across the three rate trials.
+camera_re=re.compile(r"(-?[0-9]+) (-?[0-9]+) (-?[0-9]+) (-?[0-9]+) (-?[0-9]+)")
+camera_reference={}
+for rate in ("LEGACY","MIDDLE","CURRENT"):
+    for phase in ("AB","BA"):
+        begin=marker_at[f"Q3_AE_{rate}_{phase}_BEGIN"]
+        end=marker_at[f"Q3_AE_{rate}_{phase}_END"]
+        cameras=[tuple(map(int,match.groups())) for row in rows[begin+1:end]
+                 if row["cat"].lower()=="cgame" and row["sev"].upper()=="INFO"
+                 and (match:=camera_re.fullmatch(row["msg"].removesuffix("\n")))]
+        if len(cameras)!=1: raise SystemExit(f"FAIL exposure camera receipt {rate}/{phase}")
+        if rate=="LEGACY": camera_reference[phase]=cameras[0]
+        elif cameras[0]!=camera_reference[phase]:
+            raise SystemExit(f"FAIL exposure camera drift {rate}/{phase}")
 def values(rate,phase):
     begin=f"Q3_AE_{rate}_{phase}_BEGIN"; end=f"Q3_AE_{rate}_{phase}_END"
     if begin not in marker_at or end not in marker_at or marker_at[begin]>=marker_at[end]:
@@ -92,16 +116,72 @@ def values(rate,phase):
 def quantile(vals,p):
     ordered=sorted(vals); pos=(len(ordered)-1)*p; lo=int(pos); hi=min(lo+1,len(ordered)-1)
     return ordered[lo]+(ordered[hi]-ordered[lo])*(pos-lo)
-def metrics(vals):
+def baseline(rate,phase):
+    # A BEGIN marker precedes the camera change. Samples after it may already
+    # contain the transition (and delayed GPU readback), not its initial state.
+    begin=marker_at[f"Q3_AE_{rate}_{phase}_BEGIN"]
+    before=[value for index,_,value in series if index < begin][-16:]
+    if len(before)!=16: raise SystemExit(f"FAIL exposure short baseline {rate}/{phase}")
+    return statistics.median(before)
+
+def metrics(vals,start):
     median=statistics.median(vals)
     return {"n":len(vals),"median":median,"swing":quantile(vals,.95)-quantile(vals,.05),
             "relative":(quantile(vals,.95)-quantile(vals,.05))/median if median else 0.0,
-            "start":statistics.median(vals[:16]),"end":statistics.median(vals[-64:]),
+            "start":start,"end":statistics.median(vals[-64:]),
             "minimum":min(vals),"maximum":max(vals)}
 
 results={}
 for rate in ("LEGACY","MIDDLE","CURRENT"):
-    results[rate]={phase:metrics(values(rate,phase)) for phase in ("FLICKER","AB","BA")}
+    results[rate]={phase:metrics(values(rate,phase),baseline(rate,phase)) for phase in ("FLICKER","AB","BA")}
+
+# A stable exposure of 1 is not evidence of a bright view: an invalid BSP
+# camera can produce only black-bin samples. Require actual metered scene
+# content at every endpoint, independently of the exposure accumulator.
+histogram_re=re.compile(r"hdr histogram readback: total=([0-9]+) peakBin=[0-9]+\(count=[0-9]+\) bins\[0\]=([0-9]+) ")
+audit_re=re.compile(r"HISTAUDIT start=(0|64|128|192) bins=([0-9]+(?:,[0-9]+){63})")
+metered_targets={}
+def target_from_bins(bins):
+    # Independent double-precision integration of the fixed [-10,+2] EV
+    # histogram over its [50%,80%] cumulative band. Never fit to EXPSERIES.
+    total=sum(bins[1:]); lower=total*0.5; upper=total*0.8
+    cumulative=0; weighted=[]; weights=[]
+    for index,weight in enumerate(bins[1:],1):
+        contribution=max(0.0,min(cumulative+weight,upper)-max(cumulative,lower))
+        cumulative+=weight
+        weights.append(contribution)
+        weighted.append(contribution*(-10.0+index*12.0/255.0))
+    if not sum(weights): raise SystemExit("FAIL exposure empty metering band")
+    luminance=2.0**(math.fsum(weighted)/math.fsum(weights))
+    return min(8.0,max(0.25,0.0123/max(luminance,0.0001)))
+
+for rate in ("LEGACY","MIDDLE","CURRENT"):
+    for phase in ("FLICKER","AB","BA"):
+        begin=marker_at[f"Q3_AE_{rate}_{phase}_BEGIN"]
+        end=marker_at[f"Q3_AE_{rate}_{phase}_END"]
+        histograms=[histogram_re.match(msg) for msg in messages[begin+1:end]]
+        histograms=[match for match in histograms if match]
+        if not histograms: raise SystemExit(f"FAIL exposure histogram missing {rate}/{phase}")
+        total,black=map(int,histograms[-1].groups())
+        if total<=black: raise SystemExit(f"FAIL exposure unmetered scene {rate}/{phase}")
+        records=[]; bins=[]
+        for row in rows[begin+1:end]:
+            msg=row["msg"].removesuffix("\n")
+            if not msg.startswith("HISTAUDIT "): continue
+            match=audit_re.fullmatch(msg)
+            if not match or row["cat"].lower()!="renderer.ral" or row["sev"].upper()!="WARN":
+                raise SystemExit("FAIL exposure histogram audit metadata/schema")
+            offset=int(match.group(1))
+            if offset != len(bins): raise SystemExit("FAIL exposure histogram audit chunk order")
+            bins.extend(map(int,match.group(2).split(",")))
+            if any(value>0xffffffff for value in bins):
+                raise SystemExit("FAIL exposure histogram audit integer range")
+            if len(bins)==256:
+                records.append(bins); bins=[]
+        if bins or not records: raise SystemExit(f"FAIL exposure histogram audit incomplete {rate}/{phase}")
+        if sum(records[-1])!=total or records[-1][0]!=black:
+            raise SystemExit("FAIL exposure histogram audit summary mismatch")
+        metered_targets[(rate,phase)]=target_from_bins(records[-1])
 
 for rate,phases in results.items():
     for phase,metric in phases.items():
@@ -116,9 +196,18 @@ if legacy["FLICKER"]["relative"] < current["FLICKER"]["relative"] * 1.25:
 def progress(metric,target):
     step=target-metric["start"]
     return (metric["end"]-metric["start"])/step if abs(step)>1e-6 else 1.0
-target_b=legacy["AB"]["end"]; target_a=legacy["BA"]["end"]
-if not (0.90 <= target_b <= 1.02 and 1.65 <= target_a <= 1.75):
-    raise SystemExit(f"FAIL exposure pinned endpoint golden B={target_b:.5f} A={target_a:.5f}")
+target_b=metered_targets[("LEGACY","AB")]; target_a=metered_targets[("LEGACY","BA")]
+# The old fixed B golden described a camera inside solid geometry, not a
+# bright scene. Check against independently metered content, not a new fitted
+# screenshot value. 2% permits the finite 4.8-second legacy settling interval.
+for phase,target in (("AB",target_b),("BA",target_a)):
+    if abs(legacy[phase]["end"]-target)>target*0.02:
+        raise SystemExit(f"FAIL exposure independent endpoint {phase}: measured={legacy[phase]['end']:.5f} target={target:.5f}")
+    for rate in ("MIDDLE","CURRENT"):
+        if abs(metered_targets[(rate,phase)]-target)>target*0.02:
+            raise SystemExit(f"FAIL exposure pinned scene drift {rate}/{phase}")
+if target_a-target_b<0.25:
+    raise SystemExit("FAIL exposure insufficient bright/dark stimulus")
 if progress(current["AB"],target_b) < 0.85 or progress(current["BA"],target_a) < 0.95:
     raise SystemExit("FAIL exposure current transition convergence")
 for phase,target in (("AB",target_b),("BA",target_a)):
@@ -177,18 +266,27 @@ MANIFEST="$ROOT/manifest.jsonl"
 python3 - "$MANIFEST" "$WIRED" "$RENDERER" "$GAMECL" "$GAMESV" "$PAX21" "$BASE" "$0" "$BOOT" <<'PYEOF'
 import hashlib,json,os,sys
 with open(sys.argv[1],"w") as out:
-    out.write(json.dumps({"kind":"scenario","schema":1,"name":"ral-auto-exposure","map":"arena1","window":"1280x720","cameras":["1052 1432 50 135","1052 1432 300 0"]},sort_keys=True)+"\n")
+    out.write(json.dumps({"kind":"scenario","schema":2,"name":"ral-auto-exposure","map":"arena1","window":"1280x720","cameras":["1052 1432 50 135","1052 1432 50 0"],"shader_clock_ms":{"step":16,"settle_frames":360,"sample_frames":300}},sort_keys=True)+"\n")
     for role,path in zip(("gui","renderer","gamecl-native","gamesv-native","pax21","base","harness","bootstrap-cfg"),sys.argv[2:]):
         data=open(path,"rb").read(); out.write(json.dumps({"kind":"provenance","role":role,"path":os.path.abspath(path),"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()},sort_keys=True)+"\n")
+    # Replay the identical authored animation interval for each rate. Sampling
+    # three different wall-clock phases cannot isolate the adaptation setting.
+    # Separate bounded exec files remain well below the 64-KiB command buffer.
+    for name,first,count in (("settle",1,360),("flicker",361,300)):
+        path=os.path.join(os.path.dirname(sys.argv[-1]),f"ral-ae-{name}.cfg")
+        data="".join(f"r_pinShaderTime {frame*0.016:.3f}\nwait 1\n" for frame in range(first,first+count)).encode()
+        with open(path,"wb") as fixture: fixture.write(data)
+        out.write(json.dumps({"kind":"provenance","role":f"shader-clock-{name}","path":os.path.abspath(path),"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()},sort_keys=True)+"\n")
 PYEOF
 QCONSOLE="$HOME_DIR/qconsole.jsonl"
 STDOUT="$ROOT/stdout.log"
 python3 "$TIMEOUT_RUNNER" --timeout 180 --kill-after 15 --cwd "$WD" --stdout "$STDOUT" -- "$WIRED" \
 	+set fs_basepath "$HOME_DIR" +set fs_homepath "$HOME_DIR" +set fs_game base \
-	+set com_automated 1 +set com_noHardReboot 1 +set s_initsound 0 \
+	+set com_automated 1 +set com_noHardReboot 1 +set s_initsound 1 \
+	+set in_mouse 0 +set in_joystick 0 \
 	+set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 \
 	+set r_vkValidate 0 +set r_hdr 1 +set r_fbo 1 +set r_hdrAutoExposure 1 \
-	+set r_hdrHistogramDebug 2 +set r_brightness 1 +set r_dither 0 \
+	+set r_hdrHistogramDebug 2 \
 	+set r_bloom 1 +set r_ssao 0 +set r_smaa 0 +set r_forwardPlus 0 \
 	+set r_drawSunRays 0 +set r_shadows 0 +set r_depthFade 0 +set r_lens 0 \
 	+set r_gpuDecals 0 +set r_particles 0 +set r_atmosphericGPU 0 \

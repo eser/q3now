@@ -501,6 +501,9 @@ run_wired() {
             +set r_brightness 1 \
             +set vm_game 0 \
             +set vm_cgame 0 \
+            +set log_severity DEBUG \
+            +set con_severity DEBUG \
+            +set log_file_severity DEBUG \
             +set log_file_mode overwrite_synced \
             +set con_notifytime 0 \
             +set r_mode -1 \

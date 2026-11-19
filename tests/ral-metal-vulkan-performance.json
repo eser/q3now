@@ -1,6 +1,8 @@
 {
   "measurement_frames": 1200,
-  "repetitions": 1,
+  "repetitions": 3,
+  "minimum_wall_fps": 250,
+  "maximum_frame_interval_ns": 4000000,
   "native_to_moltenvk_ratio_limit": 1.15,
   "fixed_allowance_us": 0.0,
   "max_hitch_ratio_delta": 0.01,
