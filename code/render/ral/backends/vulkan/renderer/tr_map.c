@@ -586,13 +586,13 @@ static void R_LoadMergedLightmaps( const mapFile_t *bsp, byte *image, qboolean i
 
 	tr.numLightmaps = SetLightmapParams( tr.numLightmaps, glConfig.maxTextureSize );
 
-	tr.lightmaps = ri.Hunk_Alloc( tr.numLightmaps * sizeof(image_t *), h_low );
+	tr.lightmaps = R_WorldLevelAlloc( tr.numLightmaps * sizeof(image_t *) );
 
 	// sun-mask atlas paralleling lightmaps[]: one page per
 	// lightmap page at identical dimensions, so a merged-lightmap UV indexes
 	// the matching mask texel. Empty here; the load-time ray-cast pass fills
 	// .r. RGBA8 (R_CreateImage has no R8 path) — only .r is meaningful.
-	tr.sunMaskAtlas = ri.Hunk_Alloc( tr.numLightmaps * sizeof(image_t *), h_low );
+	tr.sunMaskAtlas = R_WorldLevelAlloc( tr.numLightmaps * sizeof(image_t *) );
 
 	for ( offs = 0, i = 0 ; i < tr.numLightmaps; i++ ) {
 		byte *atlasData = ri.Hunk_AllocateTempMemory(
@@ -990,7 +990,7 @@ static void R_LoadLightmaps( const mapFile_t *bsp, qboolean isQ1Lightmap ) {
 	// create all the lightmaps
 	tr.numLightmaps = numLightmaps;
 
-	tr.lightmaps = ri.Hunk_Alloc( tr.numLightmaps * sizeof(image_t *), h_low );
+	tr.lightmaps = R_WorldLevelAlloc( tr.numLightmaps * sizeof(image_t *) );
 
 	for ( i = 0 ; i < tr.numLightmaps ; i++ ) {
 		maxIntensity = R_ProcessLightmap( image, buf + i * LIGHTMAP_SIZE * LIGHTMAP_SIZE * 3, maxIntensity, isQ1Lightmap );
@@ -1036,7 +1036,7 @@ static void R_LoadQ1StyledLightmaps( const mapFile_t *bsp ) {
 			continue;
 		}
 
-		tr.lightmapsStyle[k-1] = ri.Hunk_Alloc( n * sizeof(image_t *), h_low );
+		tr.lightmapsStyle[k-1] = R_WorldLevelAlloc( n * sizeof(image_t *) );
 
 		for ( i = 0; i < n; i++ ) {
 			const byte *src = bsp->styledLightmapData[k] + (size_t)i * bsp->lightmapPageSize;
@@ -1132,7 +1132,7 @@ static void R_LoadVisibility( const mapFile_t *bsp ) {
 	const byte	*buf;
 
 	len = PAD( s_worldData.numClusters, 64 ) >> 3;
-	s_worldData.novis = ri.Hunk_Alloc( len, h_low );
+	s_worldData.novis = R_WorldLevelAlloc( len );
 	memset( s_worldData.novis, 0xff, len );
 
 	// The neutral map already split the 8-byte VIS_HEADER off the lump: the
@@ -1168,7 +1168,7 @@ static void R_LoadVisibility( const mapFile_t *bsp ) {
 	} else {
 		byte	*dest;
 
-		dest = ri.Hunk_Alloc( len, h_low );
+		dest = R_WorldLevelAlloc( len );
 		memcpy( dest, buf, len );
 		s_worldData.vis = dest;
 	}
@@ -1226,7 +1226,7 @@ static void GenerateNormals( srfSurfaceFace_t *face )
 	indices = ((int *)((byte *)face + face->ofsIndices));
 
 	// store as vec4_t so we can simply use memcpy() during tesselation
-	face->normals = ri.Hunk_Alloc( face->numPoints * sizeof( tess.normal[0] ), h_low );
+	face->normals = R_WorldLevelAlloc( face->numPoints * sizeof( tess.normal[0] ) );
 
 	for ( i = 0; i < face->numIndices; i += 3 ) {
 		i0 = indices[i+0];
@@ -1333,7 +1333,7 @@ static q1AnimChain_t *R_Q1_BuildAnimChain( shader_t *baseShader, int lightmapNum
 		return NULL;
 	}
 
-	q1AnimChain_t *chain = ri.Hunk_Alloc( sizeof( *chain ), h_low );
+	q1AnimChain_t *chain = R_WorldLevelAlloc( sizeof( *chain ) );
 	chain->numFrames = numFrames;
 	for ( int i = 0; i < numFrames; i++ ) {
 		chain->shaders[i] = frameShaders[i];
@@ -1376,7 +1376,7 @@ static srfSurfaceFace_t *ParseFaceCommon( const dsurface_t *ds, const drawVert_t
 	ofsIndexes = sfaceSize;
 	sfaceSize += sizeof( int ) * numIndexes;
 
-	cv = ri.Hunk_Alloc( sfaceSize, h_low );
+	cv = R_WorldLevelAlloc( sfaceSize );
 	cv->surfaceType = SF_FACE;
 	cv->numPoints   = numPoints;
 	cv->numIndices  = numIndexes;
@@ -1619,8 +1619,8 @@ static void ParseTriSurf( const dsurface_t *ds, const drawVert_t *verts, int num
 	// get shader
 	surf->shader = ShaderForShaderNum( ds->shaderNum, LIGHTMAP_BY_VERTEX );
 
-	tri = ri.Hunk_Alloc( sizeof( *tri ) + numVerts * sizeof( tri->verts[0] )
-		+ numIndexes * sizeof( tri->indexes[0] ), h_low );
+	tri = R_WorldLevelAlloc( sizeof( *tri ) + numVerts * sizeof( tri->verts[0] )
+		+ numIndexes * sizeof( tri->indexes[0] ) );
 	tri->surfaceType = SF_TRIANGLES;
 	tri->numVerts = numVerts;
 	tri->numIndexes = numIndexes;
@@ -1671,7 +1671,7 @@ static void ParseFlare( const dsurface_t *ds, msurface_t *surf ) {
 	// get shader (neutral surface ints already swapped)
 	surf->shader = ShaderForShaderNum( ds->shaderNum, LIGHTMAP_BY_VERTEX );
 
-	flare = ri.Hunk_Alloc( sizeof( *flare ), h_low );
+	flare = R_WorldLevelAlloc( sizeof( *flare ) );
 	flare->surfaceType = SF_FLARE;
 
 	surf->data = (surfaceType_t *)flare;
@@ -2377,13 +2377,13 @@ static void R_MovePatchSurfacesToHunk( void ) {
 			}
 		}
 
-		hunkgrid = ri.Hunk_Alloc( size, h_low );
+		hunkgrid = R_WorldLevelAlloc( size );
 		memcpy(hunkgrid, grid, size);
 
-		hunkgrid->widthLodError = ri.Hunk_Alloc( grid->width * 4, h_low );
+		hunkgrid->widthLodError = R_WorldLevelAlloc( grid->width * 4 );
 		memcpy( hunkgrid->widthLodError, grid->widthLodError, grid->width * 4 );
 
-		hunkgrid->heightLodError = ri.Hunk_Alloc( grid->height * 4, h_low );
+		hunkgrid->heightLodError = R_WorldLevelAlloc( grid->height * 4 );
 		memcpy( hunkgrid->heightLodError, grid->heightLodError, grid->height * 4 );
 
 		R_FreeSurfaceGridMesh( grid );
@@ -2426,7 +2426,7 @@ static void R_LoadSurfaces( const mapFile_t *bsp ) {
 	indexes = bsp->drawIndexes;
 	totalIndexes = bsp->numDrawIndexes;
 
-	out = ri.Hunk_Alloc( count * sizeof(*out), h_low );
+	out = R_WorldLevelAlloc( count * sizeof(*out) );
 
 	s_worldData.surfaces = out;
 	s_worldData.numsurfaces = count;
@@ -2524,7 +2524,7 @@ static void R_LoadSubmodels( const mapFile_t *bsp ) {
 	count = bsp->numSubModels;
 
 	s_worldData.numBModels = count;
-	s_worldData.bmodels = out = ri.Hunk_Alloc( count * sizeof(*out), h_low );
+	s_worldData.bmodels = out = R_WorldLevelAlloc( count * sizeof(*out) );
 
 	for ( i=0 ; i<count ; i++, in++, out++ ) {
 		model_t *model;
@@ -2604,7 +2604,7 @@ static void R_LoadNodesAndLeafs( const mapFile_t *bsp ) {
 	numNodes = bsp->numNodes;
 	numLeafs = bsp->numLeafs;
 
-	out = ri.Hunk_Alloc ( (numNodes + numLeafs) * sizeof(*out), h_low);
+	out = R_WorldLevelAlloc( (numNodes + numLeafs) * sizeof(*out) );
 
 	s_worldData.nodes = out;
 	s_worldData.numnodes = numNodes + numLeafs;
@@ -2718,7 +2718,7 @@ static void R_LoadShaders( const mapFile_t *bsp ) {
 	// repeated here (doing so would double-swap on a big-endian host).
 	in = bsp->shaders;
 	count = bsp->numShaders;
-	out = ri.Hunk_Alloc ( count*sizeof(*out), h_low );
+	out = R_WorldLevelAlloc( count * sizeof(*out) );
 
 	s_worldData.shaders = out;
 	s_worldData.numShaders = count;
@@ -2746,7 +2746,7 @@ static void R_LoadMarksurfaces( const mapFile_t *bsp )
 	// index→surface-pointer fixup + bounds check runs.
 	in = bsp->leafSurfaces;
 	count = bsp->numLeafSurfaces;
-	out = ri.Hunk_Alloc ( count*sizeof(*out), h_low);
+	out = R_WorldLevelAlloc( count * sizeof(*out) );
 
 	s_worldData.marksurfaces = out;
 	s_worldData.nummarksurfaces = count;
@@ -2779,7 +2779,7 @@ static	void R_LoadPlanes( const mapFile_t *bsp ) {
 	// derives type/signbits still runs.
 	in = bsp->planes;
 	count = bsp->numPlanes;
-	out = ri.Hunk_Alloc( count*2*sizeof(*out), h_low );
+	out = R_WorldLevelAlloc( count * 2 * sizeof(*out) );
 
 	s_worldData.planes = out;
 	s_worldData.numplanes = count;
@@ -2839,7 +2839,7 @@ static void R_LoadFogs( const mapFile_t *bsp ) {
 
 	// create fog structures for them
 	s_worldData.numfogs = count + 1;
-	s_worldData.fogs = ri.Hunk_Alloc( s_worldData.numfogs*sizeof(*out), h_low);
+	s_worldData.fogs = R_WorldLevelAlloc( s_worldData.numfogs * sizeof(*out) );
 	out = s_worldData.fogs + 1;
 
 	if ( !count ) {
@@ -3016,7 +3016,7 @@ static void R_LoadLightGrid( const mapFile_t *bsp ) {
 		w->lightGridBounds[i] = bounds[i];
 	}
 
-	w->lightGridData = ri.Hunk_Alloc( gridBytes, h_low );
+	w->lightGridData = R_WorldLevelAlloc( gridBytes );
 	memcpy( w->lightGridData, bsp->lightGridData, gridBytes );
 
 	// deal with overbright bits
@@ -3049,7 +3049,7 @@ static void R_LoadEntities( const mapFile_t *bsp ) {
 	// neutral map (plain ASCII, no byte-swap). Copy into the renderer's own hunk
 	// buffer + NUL exactly as the raw-lump path did.
 	entLen = bsp->entityStringLength;
-	w->entityString = ri.Hunk_Alloc( entLen + 1, h_low );
+	w->entityString = R_WorldLevelAlloc( entLen + 1 );
 	memcpy( w->entityString, bsp->entityString, entLen );
 	w->entityString[entLen] = 0;
 	w->entityParsePoint = w->entityString;
@@ -3273,7 +3273,7 @@ static void R_ExtractStaticLights( void ) {
 			if ( count <= 0 )
 				return;   // no static lights → nothing to allocate, dim stays 1.0
 			w->numStaticLights = count;
-			w->staticLights = ri.Hunk_Alloc( count * sizeof( staticLight_t ), h_low );
+			w->staticLights = R_WorldLevelAlloc( count * sizeof( staticLight_t ) );
 		}
 	}
 
@@ -3359,7 +3359,7 @@ static void R_BuildStaticLightClusters( world_t *w ) {
 	w->numClusterCells    = numCells;
 
 	// The flat GPU buffer: [count, idx0..idx31] per cell, zero-initialized (count=0).
-	w->clusterFlat = ri.Hunk_Alloc( (size_t)numCells * FP_CLUSTER_STRIDE * sizeof( uint32_t ), h_low );
+	w->clusterFlat = R_WorldLevelAlloc( (size_t)numCells * FP_CLUSTER_STRIDE * sizeof( uint32_t ) );
 	counts = ri.Hunk_AllocateTempMemory( (size_t)numCells * sizeof( uint32_t ) );
 	memset( counts, 0, (size_t)numCells * sizeof( uint32_t ) );
 
@@ -3445,11 +3445,61 @@ void R_SetWorldSlot( int worldIndex ) {
 		s_activeWorldIndex = worldIndex;
 		tr.world = &s_worldDataSlots[worldIndex];
 		R_ApplyWorldMapState( worldIndex );
+#ifdef USE_VBO
+		VBO_SelectWorld( worldIndex );
+		vk_cull_select_world( worldIndex );
+#endif
 	} else {
 		s_activeWorldIndex = -1;
 		tr.world = NULL;
 	}
 	tr.worldMapLoaded = R_ResidentWorldCount() > 0 ? qtrue : qfalse;
+}
+
+/*
+=================
+R_WorldLevelAlloc / R_WorldLevelUsed
+
+World-owned renderer data must follow the client app's level-arena lifetime,
+not the process-wide renderer hunk. During a load the pending owner wins;
+runtime BSP registrations belong to the currently selected resident world.
+Keep Hunk_Alloc's zero-filled contract so callers do not gain hidden init
+requirements during the ownership cutover.
+=================
+*/
+static int s_loadingWorldIndex = -1;
+
+static int R_WorldAllocationOwner( void ) {
+	if ( s_loadingWorldIndex >= 0 && s_loadingWorldIndex < MAX_RENDER_WORLDS )
+		return s_loadingWorldIndex;
+	if ( s_activeWorldIndex >= 0 && s_activeWorldIndex < MAX_RENDER_WORLDS )
+		return s_activeWorldIndex;
+	ri.Terminate( TERM_UNRECOVERABLE,
+		"R_WorldLevelAlloc: no loading or active world owner" );
+	return 0;
+}
+
+void *R_WorldLevelAlloc( size_t size ) {
+	void *memory;
+	if ( size == 0 ) return NULL;
+	if ( !ri.WorldLevelAlloc ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"R_WorldLevelAlloc: renderer import is unavailable" );
+		return NULL;
+	}
+	memory = ri.WorldLevelAlloc( R_WorldAllocationOwner(), size, 16 );
+	if ( !memory ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"R_WorldLevelAlloc: failed to allocate %zu bytes", size );
+		return NULL;
+	}
+	memset( memory, 0, size );
+	return memory;
+}
+
+size_t R_WorldLevelUsed( void ) {
+	if ( !ri.WorldLevelUsed ) return 0;
+	return ri.WorldLevelUsed( R_WorldAllocationOwner() );
 }
 
 qboolean R_WorldSlotResident( int worldIndex ) {
@@ -3467,6 +3517,10 @@ int R_ResidentWorldCount( void ) {
 qboolean R_UnloadWorldSlot( int worldIndex ) {
 	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS ) return qfalse;
 	if ( !R_WorldSlotResident( worldIndex ) ) return qtrue;
+#ifdef USE_VBO
+	vk_cull_unload_world( worldIndex );
+	VBO_UnloadWorld( worldIndex );
+#endif
 	if ( s_activeWorldIndex == worldIndex ) {
 		tr.world = NULL;
 		s_activeWorldIndex = -1;
@@ -3501,7 +3555,7 @@ void RE_LoadWorldMap( const mapFile_t *bsp, int worldIndex ) {
 		byte *b;
 		void *v;
 	} buffer;
-	byte		*startMarker;
+	size_t		startMarker;
 
 
 	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS )
@@ -3509,6 +3563,7 @@ void RE_LoadWorldMap( const mapFile_t *bsp, int worldIndex ) {
 	if ( R_WorldSlotResident( worldIndex ) ) {
 		ri.Terminate( TERM_CLIENT_DROP, "ERROR: attempted to redundantly load world map" );
 	}
+	s_loadingWorldIndex = worldIndex;
 
 	if ( !bsp ) {
 		ri.Terminate( TERM_CLIENT_DROP, "%s: bsp is NULL", __func__ );
@@ -3573,7 +3628,7 @@ void RE_LoadWorldMap( const mapFile_t *bsp, int worldIndex ) {
 	Q_strncpyz( s_worldData.baseName, COM_SkipPath( s_worldData.name ), sizeof( s_worldData.name ) );
 	COM_StripExtension(s_worldData.baseName, s_worldData.baseName, sizeof(s_worldData.baseName));
 
-	startMarker = ri.Hunk_Alloc(0, h_low);
+	startMarker = R_WorldLevelUsed();
 	c_gridVerts = 0;
 
 	header = (dheader_t *)buffer.b;
@@ -3620,17 +3675,17 @@ void RE_LoadWorldMap( const mapFile_t *bsp, int worldIndex ) {
 	R_LoadLightGrid( bsp );
 
 #ifdef USE_VBO
-	R_BuildWorldVBO( s_worldData.surfaces, s_worldData.numsurfaces );
+	R_BuildWorldVBO( s_worldData.surfaces, s_worldData.numsurfaces, worldIndex );
 #endif
 
 	// build the per-surface AABB SSBO for the GPU world cull now
 	// that the world surfaces are loaded (static geometry — built once, reused
 	// every frame). No-op if the backend/RAL cull pipeline isn't available.
-	vk_cull_build_world_aabbs( s_worldData.surfaces, s_worldData.numsurfaces );
+	vk_cull_build_world_aabbs( s_worldData.surfaces, s_worldData.numsurfaces, worldIndex );
 
 	tr.mapLoading = qfalse;
 
-	s_worldData.dataSize = (byte *)ri.Hunk_Alloc(0, h_low) - startMarker;
+	s_worldData.dataSize = R_WorldLevelUsed() - startMarker;
 
 	s_worldData.lightStyles = ( bsp->styledLightmapData[1] != NULL ) ? qtrue : qfalse;
 
@@ -3643,6 +3698,7 @@ void RE_LoadWorldMap( const mapFile_t *bsp, int worldIndex ) {
 	s_worldDataSlots[ worldIndex ] = s_worldData;
 	tr.world = &s_worldDataSlots[ worldIndex ];
 	s_activeWorldIndex = worldIndex;
+	s_loadingWorldIndex = -1;
 	R_TemporalWorldLoaded( worldIndex );
 
 	// A real sun exists only if a shader's sun/q3map_sun keyword moved tr.sunDirection
@@ -4075,7 +4131,7 @@ qhandle_t R_RegisterBSP( const char *name, model_t *mod ) {
 	}
 
 	allocSize = (int)(sizeof(bmodel_t) + sizeof(msurface_t) * numFaces);
-	bmodel    = ri.Hunk_Alloc( allocSize, h_low );
+	bmodel    = R_WorldLevelAlloc( allocSize );
 	surfs     = (msurface_t *)(bmodel + 1);
 
 	bmodel->firstSurface = surfs;

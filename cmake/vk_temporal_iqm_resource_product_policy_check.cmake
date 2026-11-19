@@ -222,13 +222,15 @@ foreach(needle IN ITEMS
 	"RB_RecordTemporalEntityReceipts( cmd );"
 	"temporalPrimaryCommand = vk_temporal_motion_begin_primary_command();"
 	"vk_temporal_iqm_prescan_primary_command("
-	"RB_BeginDrawingView();")
+	"RB_BeginDrawingView( cmd->clearDepth, cmd->resetSkyVisibility );")
 	require_text("${BACKEND}" "${needle}" "pre-pass primary scan seam")
 endforeach()
 string(FIND "${BACKEND}" "RB_RecordTemporalEntityReceipts( cmd );" receipt_pos)
 string(FIND "${BACKEND}" "temporalPrimaryCommand = vk_temporal_motion_begin_primary_command();" primary_pos)
 string(FIND "${BACKEND}" "vk_temporal_iqm_prescan_primary_command(" scan_pos)
-string(FIND "${BACKEND}" "RB_BeginDrawingView();" begin_view_pos)
+string(FIND "${BACKEND}"
+	"RB_BeginDrawingView( cmd->clearDepth, cmd->resetSkyVisibility );"
+	begin_view_pos)
 if(receipt_pos EQUAL -1 OR primary_pos EQUAL -1 OR scan_pos EQUAL -1
 		OR begin_view_pos EQUAL -1 OR NOT receipt_pos LESS primary_pos
 		OR NOT primary_pos LESS scan_pos OR NOT scan_pos LESS begin_view_pos)
@@ -304,7 +306,9 @@ if(bind_factory_pos EQUAL -1 OR bind_call_pos EQUAL -1 OR bind_publish_pos EQUAL
 endif()
 string(FIND "${BACKEND}" "vk_temporal_iqm_prescan_primary_command(" prescan_pos)
 string(FIND "${BACKEND}" "vk_temporal_iqm_bind_primary_command();" bind_pos)
-string(FIND "${BACKEND}" "RB_BeginDrawingView();" begin_view_pos)
+string(FIND "${BACKEND}"
+	"RB_BeginDrawingView( cmd->clearDepth, cmd->resetSkyVisibility );"
+	begin_view_pos)
 if(prescan_pos EQUAL -1 OR bind_pos EQUAL -1 OR begin_view_pos EQUAL -1
 		OR NOT prescan_pos LESS bind_pos OR NOT bind_pos LESS begin_view_pos)
 	message(FATAL_ERROR "IQM Bind must follow pre-scan and precede BeginDrawingView")

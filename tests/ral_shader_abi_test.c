@@ -169,6 +169,25 @@ int main( void ) {
 	CHECK( Ral_ShaderAbiBuildPipelineKey( &f.manifest, &f.variant, &key ) == ralSuccess );
 	CHECK( Ral_ShaderAbiMatchesGraphicsPipeline( &f.manifest, &f.variant, &f.pipeline, &changed ) );
 	CHECK( Ral_ShaderPipelineKeyExact( &key, &changed ) );
+	/* Same payload with a different numeric interpretation must not share a key. */
+	f.specs[0].valueType = RAL_SHADER_SPEC_I32;
+	CHECK(Ral_ShaderAbiBuildPipelineKey(&f.manifest,&f.variant,&changed)==ralSuccess);
+	CHECK(!Ral_ShaderPipelineKeyExact(&key,&changed));
+	f.specs[0].valueType = RAL_SHADER_SPEC_F32;
+	for (unsigned i=0;i<3;++i) {
+		const uint32_t invalid[] = {0x7f800000u,0xff800000u,0x7fc00001u};
+		f.specs[0].defaultValue = invalid[i];
+		CHECK(!Ral_ShaderAbiManifestValid(&f.manifest));
+		f.specs[0].defaultValue = 0x3f800000u; f.values[0].value = invalid[i];
+		CHECK(!Ral_ShaderVariantAbiValid(&f.manifest,&f.variant));
+	}
+	f.specs[0].valueType = RAL_SHADER_SPEC_BOOL; f.specs[0].defaultValue = 2;
+	CHECK(!Ral_ShaderAbiManifestValid(&f.manifest));
+	f.specs[0].defaultValue = 1; f.values[0].value = 2;
+	CHECK(!Ral_ShaderVariantAbiValid(&f.manifest,&f.variant));
+	f.specs[0].valueType = RAL_SHADER_SPEC_TYPE_COUNT;
+	CHECK(!Ral_ShaderAbiManifestValid(&f.manifest));
+	Setup(&f);
 
 	mutated = f; mutated.manifest = f.manifest; mutated.manifest.bindings = mutated.bindings;
 	memcpy( mutated.bindings, f.bindings, sizeof( f.bindings ) );

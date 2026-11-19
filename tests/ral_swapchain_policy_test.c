@@ -24,6 +24,7 @@ static uint32_t g_acquireIndex;
 static uint32_t g_createSerial;
 static uint32_t g_waitIdleCalls;
 static uint32_t g_presentCalls;
+static VkQueue g_lastPresentQueue;
 static uint32_t g_destroyTextureCalls;
 static uint32_t g_destroyViewCalls;
 static uint32_t g_destroySwapchainCalls;
@@ -178,7 +179,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL fakeAcquire(
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL fakePresent( VkQueue queue, const VkPresentInfoKHR *info ) {
-	(void)queue; CHECK( info->swapchainCount == 1 ); g_presentCalls++; return g_presentResult;
+	g_lastPresentQueue = queue;
+	CHECK( info->swapchainCount == 1 ); g_presentCalls++; return g_presentResult;
 }
 
 static void setupBackend( ralBackend_t *b ) {
@@ -188,6 +190,7 @@ static void setupBackend( ralBackend_t *b ) {
 	b->device = HANDLE( VkDevice, 2 );
 	b->surface = HANDLE( VkSurfaceKHR, 3 );
 	b->queues[RAL_QUEUE_GRAPHICS] = HANDLE( VkQueue, 4 );
+	b->presentQueue = HANDLE( VkQueue, 5 );
 	b->vk.GetPhysicalDeviceSurfaceCapabilitiesKHR = fakeGetCaps;
 	b->vk.GetPhysicalDeviceSurfaceFormatsKHR = fakeGetFormats;
 	b->vk.GetPhysicalDeviceSurfaceFormats2KHR = fakeGetFormats2;
@@ -230,6 +233,7 @@ static void setupBackend( ralBackend_t *b ) {
 	g_imageFillResult = VK_SUCCESS;
 	g_waitIdleResult = VK_SUCCESS;
 	g_presentResult = VK_SUCCESS;
+	g_lastPresentQueue = VK_NULL_HANDLE;
 	g_legacyFormatCalls = 0u;
 	g_extendedFormatCalls = 0u;
 }
@@ -358,6 +362,7 @@ int main( void ) {
 	swapchain->imageStates[8] = RAL_VK_SWAPCHAIN_IMAGE_PREPARED;
 	CHECK( Ral_Present( &backend, &present ) == ralSuccess );
 	CHECK( g_presentCalls == 1 );
+	CHECK( g_lastPresentQueue == backend.presentQueue );
 	CHECK( swapchain->imageStates[8] == RAL_VK_SWAPCHAIN_IMAGE_AVAILABLE );
 
 	// Surface loss is not an ordinary out-of-date result: the caller must

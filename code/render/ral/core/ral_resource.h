@@ -181,7 +181,16 @@ typedef struct {
 	qboolean          concurrentGraphicsTransfer;
 } ralTextureCreateInfo_t;
 
-#define RAL_TEXTURE_RESOURCE_RECEIPT_SCHEMA_VERSION 1u
+#define RAL_TEXTURE_RESOURCE_RECEIPT_SCHEMA_VERSION 2u
+
+typedef enum {
+	/* The native texture format performs the declared transfer function. */
+	RAL_TEXTURE_SAMPLE_ENCODING_NATIVE = 0,
+	/* The native resource is UNORM and the adapter performs sRGB decode in
+	 * shader code. This is an explicit adapter property, not a claim that the
+	 * underlying allocation has an sRGB format. */
+	RAL_TEXTURE_SAMPLE_ENCODING_MANUAL_SRGB
+} ralTextureSampleEncoding_t;
 
 // Backend-neutral identity for one materialized texture wrapper. Owned
 // textures bind the resource generation to their allocation generation;
@@ -200,6 +209,7 @@ typedef struct {
 	uint32_t          height;
 	uint32_t          mipLevels;
 	uint32_t          arrayLayers;
+	ralTextureSampleEncoding_t sampleEncoding;
 	qboolean          imported;
 	qboolean          ready;
 } ralTextureResourceReceipt_t;
@@ -258,7 +268,9 @@ void              Ral_DestroyTexture    ( ralTexture_t *tex );
 uint32_t          Ral_GetTextureMipLevelCount( const ralTexture_t *tex );
 qboolean          Ral_TextureGetResourceReceipt( const ralTexture_t *tex,
 	                                               ralTextureResourceReceipt_t *outReceipt );
-qboolean          Ral_TextureResourceReceiptExact(
+qboolean          Ral_TextureResourceReceiptValid(
+	                                               const ralTextureResourceReceipt_t *receipt );
+qboolean Ral_TextureResourceReceiptExact(
 	                                               const ralTextureResourceReceipt_t *a,
 	                                               const ralTextureResourceReceipt_t *b );
 ralTextureView_t *Ral_CreateTextureView ( ralBackend_t *b, const ralTextureViewCreateInfo_t *ci );

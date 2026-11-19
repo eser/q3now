@@ -11,7 +11,10 @@
 #include "../../../core/ral_types.h"   // ralFormat_t (renderer attachment-format helpers)
 #include "../../../core/ral_presentation_policy.h"
 #include "../../../core/ral_color_output.h"
+#include "../../../core/ral_exposure.h"
 #include "../../../core/ral_atmosphere.h"
+#include "../../../core/ral_sky_radiance.h"
+#include "../../../core/ral_particle_contract.h"
 
 // Vulkan validation layer toggle. Gates both the renderer's request bit
 // (vk_ral_textures.c: bci.enableValidation) and any in-file #ifdef in
@@ -40,10 +43,10 @@
 // probe is small (diffuse is low-frequency); the radiance probe is mipped, one
 // mip per prefiltered-roughness level. These size the per-face/per-mip view
 // arrays on the vk struct and the compute dispatch grids.
-#define VK_PROBE_SOURCE_SIZE     64   // analytic sky source cube face size
-#define VK_PROBE_IRRADIANCE_SIZE 32   // diffuse irradiance cube face size (1 mip)
-#define VK_PROBE_RADIANCE_SIZE   128  // prefiltered radiance cube face size (mip 0)
-#define VK_PROBE_RADIANCE_MIPS   6    // roughness levels: 128,64,32,16,8,4
+#define VK_PROBE_SOURCE_SIZE     WIRED_SKY_SOURCE_SIZE
+#define VK_PROBE_IRRADIANCE_SIZE WIRED_SKY_IRRADIANCE_SIZE
+#define VK_PROBE_RADIANCE_SIZE   WIRED_SKY_SPECULAR_SIZE
+#define VK_PROBE_RADIANCE_MIPS   WIRED_SKY_SPECULAR_MIP_COUNT
 
 #if FEAT_SHADOW_MAPPING
 // Per-inline-brush-model slice into the shared bmodel shadow-caster
@@ -199,6 +202,8 @@ qboolean vk_publish_menubg_shadow( uint32_t commandSlot );
 #define WIRED_ENGINE_RES_BIND_IRRADIANCE     2   // diffuse irradiance cube
 #define WIRED_ENGINE_RES_BIND_RADIANCE       3   // prefiltered radiance cube
 #define WIRED_ENGINE_RES_BIND_GTAO           4   // denoised screen-space GTAO visibility (R8); gen_frag modulates the IBL-specular term by it
+#define WIRED_ENGINE_RES_BIND_PREV_IRRADIANCE 5  // previous diffuse irradiance during sky crossfade
+#define WIRED_ENGINE_RES_BIND_PREV_RADIANCE   6  // previous prefiltered radiance during sky crossfade
 // Per-entity model/MVP matrices for the main opaque path live on their own
 // dedicated set (set 3 of vk.pipeline_layout), NOT here — the engine-resources
 // set is written once at FBO setup (stable views), whereas the entity matrices
@@ -292,8 +297,10 @@ typedef enum {
 	// (gen_frag/gen_vert USE_IBL). Created on-demand via vk_find_pipeline_ext
 	// like the SHADOW / PBR swaps — deliberately outside the
 	// TYPE_GENERIC_BEGIN..END range (no env pairing). Worldspawn lightmap-modulate
-	// only; mirrors the four core sun-shadow receiver types.
+	// only, retaining vertex, identity and fixed-colour lowering.
 	TYPE_MULTI_TEXTURE_MUL2_IBL,
+	TYPE_MULTI_TEXTURE_MUL2_IDENTITY_IBL,
+	TYPE_MULTI_TEXTURE_MUL2_FIXED_COLOR_IBL,
 	TYPE_BLEND2_MUL_IBL,
 	TYPE_MULTI_TEXTURE_MUL3_IBL,
 	TYPE_BLEND3_MUL_IBL,
@@ -447,10 +454,9 @@ typedef struct {
 	int line_width;
 	int fog_stage; // off, fog-in / fog-out
 	int abs_light;
-	// Base-pass IBL ambient gate (gen_frag's ibl_enabled spec constant, id 14).
-	// Set at the base-pass IBL pipeline-swap site for a pbrMap worldspawn surface
-	// under r_pbr; selects the USE_IBL gen pipeline variant. Ignored by every
-	// non-IBL shader (they do not declare id 14).
+	// Base-pass IBL route (gen_frag's ibl_enabled spec constant, id 14):
+	// 0=disabled, 1=ORM texture plus cooked factors, 2=cooked scalar factors only.
+	// Ignored by every non-IBL shader (they do not declare id 14).
 	int ibl_enabled;
 	int allow_discard;
 	int acff; // none, rgb, rgba, alpha
@@ -572,9 +578,13 @@ typedef struct vkUniform_s {
 	vec4_t advancedFogColorDensity;                   // offset 608, 16 B
 	vec4_t advancedFogTypeFarEnabled;                 // offset 624, 16 B
 	vec4_t emissionRadiance;                          // offset 640, 16 B
+	// Cooked material factors and the exact shared sky-product blend.  These are
+	// appended so every established UBO offset remains stable across pipelines.
+	vec4_t materialBaseColor;                         // offset 656, 16 B
+	vec4_t materialFactors;                           // offset 672: metallic, roughness, occlusion, sky blend
 } vkUniform_t;
-_Static_assert( sizeof( vkUniform_t ) == 656,
-	"ordinary draw UBO ABI must remain 656 bytes" );
+_Static_assert( sizeof( vkUniform_t ) == 688,
+	"ordinary draw UBO ABI must remain 688 bytes" );
 
 #define TESS_XYZ   (1)
 #define TESS_RGBA0 (2)
@@ -928,11 +938,14 @@ void VBO_BuildSurfaceMap( const struct msurface_s *surf, int surfCount, int numS
 // capture: front-end snapshot of frustum/reached/CPU-ref (R_AddWorldSurfaces).
 // dispatch: per-frame compute in the no-render-pass seam. shutdown: teardown.
 struct msurface_s;
-void vk_cull_build_world_aabbs( const struct msurface_s *surfaces, int numSurfaces );
+void vk_cull_build_world_aabbs( const struct msurface_s *surfaces, int numSurfaces, int worldIndex );
 void vk_cull_init( ralBackend_t *backend );
 void vk_cull_capture_world( const void *viewParms, const void *world, int viewCount );
 void vk_cull_dispatch( void );
 void vk_cull_shutdown( void );
+void vk_cull_select_world( int worldIndex );
+void vk_cull_unload_world( int worldIndex );
+void vk_cull_shutdown_worlds( void );
 // Forward+ tiled-lighting tile-classification compute (the dlight binning).
 void vk_forwardplus_init( ralBackend_t *backend );
 void vk_forwardplus_capture_dlights( void ); // snapshot the live dlights at RB_DrawSurfs (seam-order workaround)
@@ -986,6 +999,30 @@ typedef struct vk_tess_s {
 	// submit use the generation-bound RAL lifecycle; no external-lifecycle
 	// bypass or per-frame wrapper allocation remains.
 	struct ralCommandBuffer_s *ral_cmd;
+	// Split-present (r_vkSplitPresent): the offscreen scene is submitted from
+	// ral_cmd without waiting on the swapchain acquire; only the present blit
+	// recorded into ral_cmd_present waits on it, so MoltenVK's drawable wait no
+	// longer holds the whole frame's GPU work. ral_cmd is swapped to
+	// ral_cmd_present for the tail of the frame and restored after submit.
+	struct ralCommandBuffer_s *ral_cmd_present;
+	struct ralCommandBuffer_s *ral_cmd_scene;      // saved ral_cmd while split_active
+	struct ralSemaphore_s     *ral_scene_finished;  // scene submit -> present submit
+	qboolean split_active;                          // this frame used the split path
+	qboolean split_pending_recycle;                 // ral_cmd_present awaits slot-fence recycle
+	qboolean split_upload_waited;                   // upload semaphore consumed by the scene submit
+	// Fence split: the scene submit signals the slot fence (worker-waited at
+	// slot reuse); the present submit signals ral_present_fence, waited only
+	// right before this slot records its next present blit, so the drawable
+	// cadence no longer stalls slot reuse. GPU timestamp readback for the slot
+	// is deferred to that point when the present fence is still pending.
+	struct ralFence_s *ral_present_fence;
+	qboolean present_fence_pending;
+	qboolean gpu_ts_readback_deferred;
+	qboolean slot_fence_handed;                     // slot fence already given to the fence worker this frame
+	// Fence-split mode (r_vkSplitPresent 2): resources referenced by the
+	// present buffer live on the present fence, not on slot reuse.
+	uint32_t overlay_vertex_offset;                 // cursor into the per-slot overlay vertex buffer
+	qboolean drains_deferred;                       // begin-frame drains postponed to the present-fence retire
 
 	VkSemaphore image_acquired;
 	struct ralSemaphore_s *ral_image_acquired;  // adopted sibling for typed Ral_AcquireNextImage's signalSem arg
@@ -1221,11 +1258,11 @@ _Static_assert( sizeof( VkPrimitiveStageGPU ) == VK_PRIMITIVE_STAGE_BYTES,
 // particle_integrate.comp / particle.vert. PARTICLES_PER_POOL is the
 // fixed pool capacity. _Static_assert in vk_init_particle catches
 // any drift between this C layout and the std430 stride.
-#define PARTICLES_PER_POOL          16384u
-#define PARTICLE_BYTES                 64u  // sizeof(GPU Particle), std430
-#define PARTICLE_SPAWN_REQUEST_MAX   1024u
-#define PARTICLE_SPAWN_REQUEST_BYTES   96u
-#define PARTICLE_CLASS_GPU_BYTES      736u  // sizeof(ParticleClassGPU), std430
+#define PARTICLES_PER_POOL          RAL_PARTICLE_POOL_CAPACITY
+#define PARTICLE_BYTES              RAL_PARTICLE_GPU_BYTES
+#define PARTICLE_SPAWN_REQUEST_MAX  RAL_PARTICLE_SPAWN_REQUEST_MAX
+#define PARTICLE_SPAWN_REQUEST_BYTES RAL_PARTICLE_SPAWN_GPU_BYTES
+#define PARTICLE_CLASS_GPU_BYTES    RAL_PARTICLE_CLASS_GPU_BYTES
 #define PARTICLE_ATMOSPHERE_PROFILE_BYTES 592u
 #define PARTICLE_CHILD_EVENT_MAX      1024u
 #define PARTICLE_CHILD_EVENT_BYTES      64u
@@ -1262,134 +1299,13 @@ _Static_assert( sizeof( VkPrimitiveStageGPU ) == VK_PRIMITIVE_STAGE_BYTES,
 // field; the two are copied member-wise in RE_RegisterParticleClass rather
 // than memcpy'd, because the host type uses int/float and this one must be
 // explicit about which lanes the shader reads.
-typedef struct {
-	int32_t  calc;       // particleParmCalc_t
-	int32_t  hasCurve;   // 0 = samples[] unused; 1 = samples[] carries a shape
-	float    val0;
-	float    val1;
-	float    variance;
-	float    parmPad0;
-	float    parmPad1;
-	float    parmPad2;
-	// The curve RESOLVED at registration, not an index into a second buffer.
-	//
-	// Curves are shared on the HOST — CG_RegisterParticleCurve dedups by
-	// name, so editing one reaches every class built on it — but the GPU
-	// receives a flattened copy. That trade is deliberate: an index would
-	// need a second SSBO binding and an indirection per evaluation, on the
-	// hot path, to save 2 KB. Resolving at upload costs 32 B per parm and
-	// nothing per particle.
-	float    samples[8]; // PARTICLE_CURVE_SAMPLES
-} particleParmGPU_t;
-
-typedef struct {
-	uint32_t shader;
-	uint32_t renderFlags;
-	uint32_t emitMode;
-	uint32_t scatterShape;
-	float    scatterMagnitude;
-	uint32_t velocityShape;
-	float    axialSpeed;
-	float    cubeJitter;
-	float    coneHalfAngle;
-	float    lifetimeMean;
-	float    lifetimeJitter;
-	int32_t  paletteCount;
-	vec4_t   colorPalette[16];   // PARTICLE_CLASS_MAX_PALETTE
-	vec4_t   colorEndMult;
-	float    sizeStart;
-	float    sizeEnd;
-	float    gravityScale;
-	float    drag;
-	uint32_t shaderBlendIsAdditive;  // was pad0; 0=alpha, 1=additive
-	uint32_t pad1;
-	uint32_t pad2;
-	uint32_t pad3;
-	// Expressivity extension. Appended at the end so previously-set
-	// offsets (palette, colorEndMult, size/gravity/drag,
-	// shaderBlendIsAdditive) stay byte-identical. .w lanes on the two
-	// vec4s are unused — only .xyz carry data — but storing as vec4
-	// avoids std430 vec3-stride traps and keeps offsets 16-aligned.
-	vec4_t   velocityBias;           // 352..367; .xyz = constant added to vel post-shape
-	vec4_t   velocityBiasJitter;     // 368..383; .xyz = symmetric crandom() per-axis jitter
-	float    speedJitter;            // 384..387; axialSpeed scatter, picked at emit
-	float    sizeJitter;             // 388..391; sizeStart scatter, picked at emit
-	uint32_t colorDomain;            // 392..395; was pad4 — CD_SRGB(0) | CD_LINEAR(1)
-	                                 //           of the class's resolved stage-0 image; the vertex
-	                                 //           shader packs it into bit 31 of particleClassHandle.
-	uint32_t pad5;                   // 396..399; ends the original 400 B (= 25 * vec4) block
-	// Sprite-frame (flipbook) animation. Appended at the end so all prior
-	// offsets stay byte-identical. frameSlots[i] is the resolved sampler-
-	// array slot (64..95, the frame pool) for frame i; frameCount 0/1 →
-	// unused (single `shader` path). frameBlend 1 → vert forwards adjacent
-	// frame slots + a blend factor for sub-frame interpolation.
-	uint32_t frameSlots[16];         // 400..463; PARTICLE_CLASS_MAX_FRAMES (4 * vec4)
-	uint32_t frameCount;             // 464..467
-	uint32_t frameBlend;             // 468..471
-	uint32_t framePad0;              // 472..475
-	uint32_t framePad1;              // 476..479; ends the 480 B (= 30 * vec4) block
-	// Curve-valued parameters. Appended at the end like every extension
-	// before them, so all prior offsets stay byte-identical. Each mirrors a
-	// particleParm_t and is 32 B (2 * vec4) by construction — the host struct
-	// carries explicit padding for exactly this reason, so no per-field
-	// std430 alignment rules are needed here.
-	//
-	// A parm whose calc is PARM_CONSTANT with val0 == 0 was never authored;
-	// the shader falls back to the scalar field it overrides. That is what
-	// keeps every pre-curve class rendering bit-identically.
-	particleParmGPU_t sizeParm;      // 480..543
-	particleParmGPU_t alphaParm;     // 544..607
-	particleParmGPU_t dragParm;      // 608..671
-	particleParmGPU_t gravityParm;   // 672..735; total stride 736 B (= 46 * vec4)
-} particleClassGPU_t;
-
-// Host-side mirror of GLSL std430 Particle (per-particle pool slot).
-// Layout MUST exactly match the Particle struct in
-// particle_integrate.comp / particle.vert. Size is fixed at 64 B
-// (PARTICLE_BYTES); a sizeof check in vk_init_particle catches drift.
-//
-// In std430 a `vec3` followed by a `float` packs into a single 16 B
-// slot (offset 0..11 for vec3, 12..15 for float), so two such pairs
-// occupy 32 B. The next 16 B carries classHandle + paletteIndex +
-// sizeJitterPick + pad1, and the trailing 16 B is reserved (pad2..5)
-// to round the per-element stride up to 64 B (= 4 * vec4); std430
-// rounds the array element stride up to the largest member's
-// alignment (vec3 → 16 B), so sizes between 16-multiples would still
-// pad implicitly — making the extra fields explicit avoids surprise
-// at host-side memcpy time.
-typedef struct {
-	vec3_t   pos;            //  0..11
-	float    age;            // 12..15
-	vec3_t   vel;            // 16..27
-	float    lifetimeInv;    // 28..31
-	uint32_t classHandle;    // 32..35  (1..MAX_PARTICLE_CLASSES, 0 = dead)
-	uint32_t paletteIndex;   // 36..39  index into class colorPalette[]; rand() % paletteCount at emit
-	float    sizeJitterPick; // 40..43  per-particle sizeStart offset = crandom() * cls->sizeJitter
-	uint32_t pad1;           // 44..47
-	uint32_t pad2;           // 48..51
-	uint32_t pad3;           // 52..55
-	uint32_t pad4;           // 56..59
-	uint32_t pad5;           // 60..63  total stride 64 B
-} particleGPU_t;
-
-// One CPU-authored emitter request expanded by the compute shader. Request
-// count is bounded independently from particle count, so submission cost is
-// O(emitters/stages), never O(particles). The target slot range is reserved by
-// the host's monotonic ring cursor; deterministic hashes derive all variation.
-typedef struct {
-	vec4_t origin;           // xyz emission origin, w unused
-	vec4_t axis;             // xyz direction, w unused
-	vec4_t end;              // xyz path end, w unused
-	vec4_t colorTint;        // linear RGBA multiplier
-	uint32_t classHandle;
-	uint32_t count;
-	uint32_t firstSlot;
-	uint32_t seed;
-	uint32_t profileHandle;  // 0 for generic particles
-	uint32_t stageIndex;     // valid when profileHandle != 0
-	uint32_t stageFlags;     // ATMOSPHERE_STAGE_INHERIT_*
-	uint32_t reserved;
-} particleSpawnGPU_t;
+/* Vulkan and Metal deliberately share one backend-neutral GPU ABI.  Keep the
+ * historical Vulkan typedef names local to this renderer while making their
+ * layout and future extensions come from the RAL contract exactly once. */
+typedef ralParticleParmGpu_t particleParmGPU_t;
+typedef ralParticleClassGpu_t particleClassGPU_t;
+typedef ralParticleGpu_t particleGPU_t;
+typedef ralParticleSpawnGpu_t particleSpawnGPU_t;
 
 // Header occupies event-storage element zero. GPU atomics update the first
 // four lanes; the host rewrites the complete header before the current
@@ -1497,8 +1413,8 @@ typedef struct {
 	float    ambientCloud[4];// 320..335 ambient.rgb, cloud cover
 	float    cloudMedia[4];  // 336..351 cloud shadow, lightning, media density/falloff
 	float    effectMeta[4]; // precipitation count, semantic workload count
-	float    effectWorkloads[48][4]; // Vulkan weather keeps these zero; its
-	                                // generic effect graph owns semantic FX.
+	float    effectWorkloads[48][4]; // 8 semantic workloads x 6 vec4 (shared
+	                                // RenderSubmission_AtmosphereEffectGpuPayload)
 	// Render-only soft-particle depth-fade params. Final publication fills the
 	// last 16 bytes after the contiguous compute-owned region.
 	float    renderParams[4];
@@ -1594,26 +1510,7 @@ typedef struct {
 //                                           stride byte-stable.
 // Regions are contiguous and disjoint; do NOT memcpy the entire struct
 // from either site — that races / overwrites the other site's fields.
-typedef struct {
-	// ── render region (filled in RB_DrawParticles) ──────────────
-	float    mvp[16];        //   0..63
-	float    viewLeft[4];    //  64..79
-	float    viewUp[4];      //  80..95
-	float    eyeWorld[4];    //  96..111
-	// ── compute region (filled in RB_RunParticleCompute) ────────
-	float    dt;             // 112..115
-	uint32_t poolSize;       // 116..119
-	uint32_t numClasses;     // 120..123
-	uint32_t pingPongRead;   // 124..127
-	// ── render region cont.: soft-particle depth-fade params (filled in
-	//    RB_DrawParticles alongside mvp, repurposing the former pad lanes) ─
-	float    invResX;        // 128..131  1/renderWidth  (screen UV from gl_FragCoord)
-	float    invResY;        // 132..135  1/renderHeight
-	float    depthValid;     // 136..139  1.0 when vk.sceneDepth is fresh this frame, else 0.0
-	float    exposureBias;   // 140..143  auto-exposure bias the tonemap re-multiplies; the
-	                         //           additive flipbook divides by it for exposure-invariant
-	                         //           intensity (flare-hdr-retune F1 convention). Stride 144 B.
-} particleFrame_t;
+typedef ralParticleFrameGpu_t particleFrame_t;
 
 
 // Host-side mirror of tonemap.frag's set-2 ExposureBlock UBO (std140). The
@@ -1629,30 +1526,7 @@ typedef struct {
 // never moves. Field order/offsets mirror the ExposureBlock in tonemap.frag and
 // the storage-block mirror in exposure.comp. The final two fields carry the
 // backend-neutral low-luminance visibility curve; 16 scalars close at 64 bytes.
-typedef struct {
-	float exposure_bias;
-	float key;
-	float pctLow;
-	float pctHigh;
-	float rateUp;
-	float rateDown;
-	float minExp;
-	float maxExp;
-	int   autoEnabled;
-	float brightness;   // r_brightness — read by the reduce compute for the manual-trim multiply
-	// Sunray sun-screen params. Per-frame, written in vk_tonemap when the SUNRAYS
-	// tonemap variant is active. tonemap.frag reads these only under USE_SUNRAYS.
-	// std140: these 4 trailing floats land at offsets 40..55, closing the block at
-	// 56 bytes (14 scalars).
-	float sunScreenX;   // sun screen UV x (from the tr.sunDirection projection)
-	float sunScreenY;   // sun screen UV y (from the tr.sunDirection projection)
-	float sunrayIntensity;
-	float sunrayDecay;
-	float shadowExponent; // chroma-preserving toe exponent; 1.0 is exact identity
-	float shadowPivot;    // scene-linear luminance pivot; values above are unchanged
-	// (SSAO ssaoZNear/ssaoZFar removed: the legacy per-pixel tonemap SSAO path is
-	// fully retired — GTAO is the sole AO path.)
-} vk_exposure_block_t;
+typedef ralExposureBlock_t vk_exposure_block_t;
 
 // Host-side mirror of menubg.frag's set-2 MenuBgBlock UBO (std140). 8 floats = 32 B.
 typedef struct {
@@ -2121,7 +1995,9 @@ typedef struct {
 		struct image_s			*frameImages[32];    // FRAME_POOL_SIZE
 		uint32_t				frameNextSlot;       // bump allocator cursor [0..FRAME_POOL_SIZE]
 		VkSampler				sampler;
-		struct ralSampler_s *ral_sampler;          // borrowed from the renderer sampler pool
+		struct ralSampler_s *ral_sampler;          // owned here; primitive clamp groups borrow it
+		struct ralBuffer_s *ral_atmosphere_zero;   // zeroed ParticleAtmosphere block (binding 5)
+		struct ralBuffer_s *ral_media_zero;        // zeroed media SSBO (binding 6)
 		uint64_t              textureGeneration;    // registry generation, never zero while initialized
 		uint64_t              renderGroupTextureGeneration[NUM_COMMAND_BUFFERS][2];
 
@@ -2198,7 +2074,7 @@ typedef struct {
 		struct image_s			*images[64];         // MAX_DECAL_TEXTURES; NULL = unused slot, falls back to tr.whiteImage
 		uint32_t				numImages;           // current registry count
 		VkSampler				sampler;
-		struct ralSampler_s *ral_sampler;           // borrowed from renderer sampler pool
+		struct ralSampler_s *ral_sampler;           // owned here; survives material filter changes
 		uint64_t				textureGeneration;     // registry generation, never zero while initialized
 		uint64_t				renderGroupTextureGeneration[NUM_COMMAND_BUFFERS];
 
@@ -2226,9 +2102,17 @@ typedef struct {
 	struct {
 		// pipeline state
 		VkDescriptorSetLayout	compute_set_layout;  // 4 bindings: UBO + read SSBO + write SSBO + heightgrid sampler
-		VkDescriptorSetLayout	render_set_layout;   // 3 bindings: UBO + pool SSBO + scene depth
+		VkDescriptorSetLayout	render_set_layout;   // 4 bindings: UBO + pool SSBO + scene depth + 8 semantic-effect textures
 		struct ralBindGroupLayout_s *ral_bgl_compute;
 		struct ralBindGroupLayout_s *ral_bgl_render;
+		// Semantic emitter (breath/mist/debris) class textures: resolved from
+		// the frontend workload snapshot each frame; a change re-creates the
+		// current slot's render bind group (TASK-239, Vulkan parity with the
+		// textured Metal/OpenGL/WebGPU weather passes).
+		struct ralSampler_s *ral_effect_sampler;
+		image_t *effectImages[8];
+		uint32_t effectImageGeneration;
+		uint32_t effectImageSlotGeneration[NUM_COMMAND_BUFFERS];
 		VkPipelineLayout		compute_pipeline_layout;
 		VkPipelineLayout		render_pipeline_layout;
 		struct ralPipelineLayout_s *ral_compute_pipeline_layout;
@@ -2280,6 +2164,16 @@ typedef struct {
 		ralAtmosphereRuntimeState_t runtimeState;      // backend-neutral lifecycle authority
 		ralAtmosphereRuntimeReceipt_t runtimeReceipt;  // latest exact lifecycle telemetry
 		uint64_t				runtimeFrameGeneration;
+		ralSkyEnvironmentRuntimeState_t skyRuntimeState;
+		ralSkyEnvironmentRuntimeReceipt_t skyRuntimeReceipt;
+		uint64_t skyPlanFrameGeneration;
+		ralSkyRadianceState_t skyRadianceState;
+		ralSkyRadianceReceipt_t skyRadianceReceipt;
+		ralSkyRadianceConsumerReceipt_t skyRadianceConsumer;
+		ralSkyGpuTelemetryReceipt_t skyGpuTelemetry;
+		uint64_t skyRadianceFrameGeneration;
+		float skyRadianceTimelineSeconds;
+		uint64_t skyWorldLifecycleGeneration;
 
 		qboolean				available;           // false if init failed
 	} atm;
@@ -2338,6 +2232,10 @@ typedef struct {
 		// mirror of the current generation's arena-owned bind group.
 		struct ralBuffer_s    *ral_buffer[NUM_COMMAND_BUFFERS];
 		struct ralBindGroup_s *ral_descriptor[NUM_COMMAND_BUFFERS];
+		// Present-lifetime copy read by the gamma pass in fence-split mode; it is
+		// refreshed only after the slot's previous present blit retired.
+		void                  *present_ptr[NUM_COMMAND_BUFFERS];
+		struct ralBindGroup_s *present_descriptor[NUM_COMMAND_BUFFERS];
 	} exposure;
 
 	// Per-frame WiredUI SCENE backdrop UBO (menubg.frag set 2). Same host-coherent
@@ -2469,6 +2367,16 @@ typedef struct {
 	struct ralTextureView_s     *ral_gtao_denoised_view;   // storage+sampled view
 	struct ralTextureView_s     *ral_gtao_depth_view;      // sampling view over the depth copy
 	struct ralSampler_s         *ral_gtao_sampler;         // linear/clamp depth+AO sampler
+	// XeGTAO depth prefilter: view-space linear depth pyramid (R32F, 5 mips)
+	// written by gtao_prefilter.comp from the depth copy each frame; the main
+	// horizon pass samples it (point/clamp, per-tap mip) instead of the device depth.
+	struct ralTexture_s         *ral_gtao_depth_pyramid;          // R32F, RAL_GTAO_DEPTH_MIP_LEVELS mips
+	struct ralTextureView_s     *ral_gtao_depth_pyramid_view;     // sampled view over all mips
+	struct ralTextureView_s     *ral_gtao_depth_mip_views[5];     // per-mip storage views
+	struct ralSampler_s         *ral_gtao_point_sampler;          // nearest/clamp, mip nearest
+	struct ralBindGroupLayout_s *ral_gtao_prefilter_bgl;          // set 0: depth tex+sampler + 5 mip storage
+	struct ralBindGroup_s       *ral_gtao_prefilter_descriptor;
+	struct ralPipeline_s        *ral_gtao_prefilter_pipeline;
 	struct ralBindGroupLayout_s *ral_gtao_main_bgl;        // set 0: depth tex+sampler + AO storage
 	struct ralBindGroup_s       *ral_gtao_main_descriptor;
 	struct ralPipeline_s        *ral_gtao_main_pipeline;
@@ -2646,6 +2554,7 @@ typedef struct {
 	qboolean                     lensReadbackReady[NUM_COMMAND_BUFFERS];
 	void                        *lensSourcesPtr;        // CPU shadow; never a GPU mapping
 	int                          lensSourceCount;        // active slot high-water this frame
+	float                        lensOpticsVisibility;   // exact latest sky-environment optics factor
 	struct ralTextureView_s     *ral_lens_depth_view;   // sampling view over vk.sceneDepth.ral_image (NEAREST)
 	struct ralSampler_s         *ral_lens_sampler;      // NEAREST + clamp portable depth sampling
 	struct ralBindGroupLayout_s *ral_lens_bgl;          // depth tex(0) + sampler(1) + lens SSBO(2), COMPUTE
@@ -2719,6 +2628,8 @@ typedef struct {
 	struct ralBindGroupLayout_s *ral_probe_source_bgl;    // set 0: storage image (binding 0)
 	struct ralBindGroup_s       *ral_probe_source_descriptor;            // binds the 2D-array storage view
 	struct ralPipeline_s        *ral_probe_source_pipeline;
+	uint64_t                     probeSourceDescriptorRevision;
+	qboolean                     probeSourceHasAuthoredFaces;
 	qboolean                     probeSourceDispatched;   // false until the one-shot source fill is recorded
 
 	struct ralTexture_s         *ral_probe_irradiance;    // 32x32x6 RGBA16F cube, 1 mip (diffuse irradiance)
@@ -2726,6 +2637,9 @@ typedef struct {
 	// One 2D-ARRAY storage view over all 6 layers (mip 0) — the convolve writes the
 	// whole cube in one dispatch (image2DArray, layer = gl_GlobalInvocationID.z).
 	struct ralTextureView_s     *ral_probe_irradiance_array_view;
+	struct ralTexture_s         *ral_probe_irradiance_target;
+	struct ralTextureView_s     *ral_probe_irradiance_target_cube_view;
+	struct ralTextureView_s     *ral_probe_irradiance_target_array_view;
 
 	struct ralTexture_s         *ral_probe_radiance;      // 128x128x6 RGBA16F cube, N mips (prefiltered specular)
 	struct ralTextureView_s     *ral_probe_radiance_cube_view;           // VK_IMAGE_VIEW_TYPE_CUBE, all mips, sampled
@@ -2734,6 +2648,9 @@ typedef struct {
 	// a single-face 2D view) matches the prefilter shader's image2DArray output
 	// (a per-face 2D view trips VUID-vkCmdDispatch-viewType-07752).
 	struct ralTextureView_s     *ral_probe_radiance_mip_view[VK_PROBE_RADIANCE_MIPS];
+	struct ralTexture_s         *ral_probe_radiance_target;
+	struct ralTextureView_s     *ral_probe_radiance_target_cube_view;
+	struct ralTextureView_s     *ral_probe_radiance_target_mip_view[VK_PROBE_RADIANCE_MIPS];
 
 	// Convolve compute: source sampled cube (binding 0/1) + the per-dispatch storage
 	// array view (binding 2). One pipeline + bgl each for irradiance / radiance; the
@@ -2747,6 +2664,22 @@ typedef struct {
 	struct ralBindGroup_s       *ral_probe_radiance_bg[VK_PROBE_RADIANCE_MIPS];  // source + the mip's array view
 	struct ralPipeline_s        *ral_probe_radiance_pipeline;
 	qboolean                     probeRadianceDispatched;
+	struct ralBuffer_s          *ral_probe_sh_buffer;       // 9 vec4 L2 coefficients
+	struct ralBindGroupLayout_s *ral_probe_sh_bgl;          // source cube + sampler + SH SSBO
+	struct ralBindGroup_s       *ral_probe_sh_bg;
+	struct ralPipeline_s        *ral_probe_sh_pipeline;
+	struct ralBuffer_s          *ral_probe_sh_target_buffer;
+	uint32_t                     probeSubmittedSliceMask[NUM_COMMAND_BUFFERS];
+	uint64_t                     probeSubmittedRevision[NUM_COMMAND_BUFFERS];
+	qboolean                     probeSourceWriteStarted;
+	qboolean                     probeSourceReadable;
+	qboolean                     probeIrradianceWriteStarted;
+	qboolean                     probeIrradianceReadable;
+	qboolean                     probeIrradianceTargetReadable;
+	qboolean                     probeRadianceWriteStarted;
+	qboolean                     probeRadianceReadable;
+	qboolean                     probeRadianceTargetReadable;
+	qboolean                     probeCurrentProductValid;
 
 	// Debug-only readback (r_probeSourceDebug / r_probeRadianceDebug): host-coherent
 	// mirrors the one-shot dispatches copy the cubes into, so the CPU can confirm a

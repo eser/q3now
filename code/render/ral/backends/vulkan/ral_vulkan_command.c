@@ -1424,8 +1424,28 @@ static void ralVk_RenderTargetTransition( ralCommandBuffer_t *cb, ralTexture_t *
 		tex->portableStateKnown = qfalse;
 }
 
+static qboolean ralVk_ColorAttachmentView( const ralTexture_t *texture,
+		uint32_t layer, VkImageView *outView ) {
+	if ( !texture ) {
+		*outView = VK_NULL_HANDLE;
+		return layer == 0u;
+	}
+	if ( texture->layerViews && layer < texture->numLayerViews ) {
+		*outView = texture->layerViews[layer];
+		return *outView != VK_NULL_HANDLE;
+	}
+	// A cube/array default view is a sampling view, never a substitute for a
+	// missing single-face attachment view (including face zero).
+	if ( layer || texture->arrayLayers > 1u
+			|| texture->type == RAL_TEXTURE_CUBE ) return qfalse;
+	*outView = texture->defaultView;
+	return *outView != VK_NULL_HANDLE;
+}
+
 void Ral_BeginRendering( ralCommandBuffer_t *cb, const ralRenderingInfo_t *ri_ ) {
 	VkRenderingAttachmentInfo  colorAtt[ RAL_MAX_COLOR_ATTACHMENTS ];
+	VkImageView                colorViews[ RAL_MAX_COLOR_ATTACHMENTS ];
+	VkImageView                resolveViews[ RAL_MAX_COLOR_ATTACHMENTS ];
 	VkRenderingAttachmentInfo  depthAtt;
 	VkRenderingAttachmentInfo  stencilAtt;
 	qboolean                   haveStencil = qfalse;
@@ -1433,6 +1453,17 @@ void Ral_BeginRendering( ralCommandBuffer_t *cb, const ralRenderingInfo_t *ri_ )
 	uint32_t                   i;
 	if ( !cb || !ri_ ) return;
 	if ( ri_->numColorAttachments > RAL_MAX_COLOR_ATTACHMENTS ) return;
+	// Validate the complete attachment set before changing layouts, labels or
+	// recording any native command. MRT and MSAA resolve select independently.
+	for ( i = 0; i < ri_->numColorAttachments; i++ ) {
+		if ( !ralVk_ColorAttachmentView( ri_->colorAttachments[i],
+				ri_->colorAttachmentLayerIndices[i], &colorViews[i] )
+				|| !ralVk_ColorAttachmentView( ri_->resolveAttachments[i],
+					ri_->resolveAttachmentLayerIndices[i], &resolveViews[i] ) ) {
+			RAL_VK_LOG_ON( cb->backend, SEV_WARN, "Ral_BeginRendering: invalid color/resolve layer at attachment %u\n", i );
+			return;
+		}
+	}
 	if ( cb->renderingDebugLabelActive ) {
 		RAL_VK_LOG_ON( cb->backend, SEV_WARN, "Ral_BeginRendering: prior debug-label scope still active\n" );
 		Ral_EndDebugLabel( cb );
@@ -1451,7 +1482,7 @@ void Ral_BeginRendering( ralCommandBuffer_t *cb, const ralRenderingInfo_t *ri_ )
 	for ( i = 0; i < ri_->numColorAttachments; i++ ) {
 		RAL_ZERO( colorAtt[i] );
 		colorAtt[i].sType       = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-		colorAtt[i].imageView   = ri_->colorAttachments[i] ? ri_->colorAttachments[i]->defaultView : VK_NULL_HANDLE;
+		colorAtt[i].imageView   = colorViews[i];
 		colorAtt[i].imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		colorAtt[i].loadOp      = ralVk_TranslateLoadOp ( ri_->colorLoadOps [i] );
 		colorAtt[i].storeOp     = ralVk_TranslateStoreOp( ri_->colorStoreOps[i] );
@@ -1461,7 +1492,7 @@ void Ral_BeginRendering( ralCommandBuffer_t *cb, const ralRenderingInfo_t *ri_ )
 		colorAtt[i].clearValue.color.float32[3] = ri_->colorClears[i].color[3];
 		if ( ri_->resolveAttachments[i] ) {
 			colorAtt[i].resolveMode        = VK_RESOLVE_MODE_AVERAGE_BIT;
-			colorAtt[i].resolveImageView   = ri_->resolveAttachments[i]->defaultView;
+			colorAtt[i].resolveImageView   = resolveViews[i];
 			colorAtt[i].resolveImageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		}
 	}

@@ -316,7 +316,7 @@ require_text(CG_CHARACTERS "if ( !ci->iqmModel || !CG_ParseIQMAnimations( charNa
 require_order(CG_CHARACTERS "if ( !ci->iqmModel || !CG_ParseIQMAnimations( charName, ci ) )" "memcpy( ci->animations, mf.animations" "embedded animation before manifest fallback")
 require_text(HARNESS "IQM h5a_fixture: mapped 36/36 animations from embedded data" "embedded animation runtime receipt")
 require_text(COMMON "CVAR_FLOAT( \"timescale\", \"1\", CVAR_CHEAT | CVAR_SYSTEMINFO" "timescale registration")
-require_text(COMMON "CVAR_BOOL( \"fixedtime\", \"0\", CVAR_CHEAT" "fixedtime registration")
+require_text(COMMON "CVAR_INT( \"fixedtime\", \"0\", CVAR_CHEAT" "fixedtime registration")
 require_text(COMMON "if ( com_fixedtime->integer ) {\n\t\tmsec = com_fixedtime->integer;\n\t} else if ( com_timescale->value )" "fixedtime precedence")
 require_text(COMMON "if ( msec < 1 && com_timescale->value) {\n\t\tmsec = 1;" "minimum common tick")
 require_text(SERVER_INIT "CVAR_INT(    \"sv_fps\",               \"20\"" "default server cadence")

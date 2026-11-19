@@ -72,6 +72,21 @@ const uint FRAME_SLOT_NONE = 0xFFFFFFFFu;
 // lens consumers sample. Used for the soft-particle depth fade.
 layout(set = 0, binding = 4) uniform sampler2D sceneDepthTex;
 
+// Atmosphere media for backends that draw particles AFTER their fog. The Metal
+// effect pass runs over an already-fogged scene, so each fragment fogs itself
+// here at the opaque depth behind it, the way vk_atmosphere_full_execute fogs
+// Vulkan's particles in the post-scene composite. Vulkan binds zeroed blocks
+// (no froxel grid, zero density): particleMedia() then returns identity.
+layout(set = 0, binding = 5) uniform ParticleAtmosphere {
+	vec4  atmEyeDensity;      // eye.xyz, analytic density
+	vec4  atmColorVisibility; // media colour rgb, visibility distance
+	vec4  atmHeightCloud;     // height falloff base (x), scale (y)
+	uvec4 atmFroxelGrid;      // x,y,z grid dims (z == 0: analytic/off), w arena offset
+	vec4  atmControl;         // x near plane, y depth convention (+1 reversed, -1 forward)
+};
+layout(set = 0, binding = 6) readonly buffer ParticleMedia { vec4 atmMedia[]; };
+const uint PRIM_FLAG_ADDITIVE = 0x0002u;
+
 layout(location = 6) flat in uint particleRenderFlags;
 
 layout(location = 0) out vec4 outColor;
@@ -84,19 +99,56 @@ const uint PRIM_FLAG_PARTICLE_SURFACE_ANCHORED = 0x0080u;
 
 // Soft-particle depth fade: dissolve the alpha as the fragment nears the world
 // geometry behind it, so billboards melt into surfaces instead of hard-clipping.
-// Raw reversed-Z (near≈1, far/cleared≈0): a fragment IN FRONT of the scene has
-// fragDepth > sceneDepth, so depthDiff = fragDepth - sceneDepth is positive and
-// smoothstep ramps 0→1 as the particle pulls away from the surface. Returns 1.0
-// (no fade) when depth is not fresh this frame or there is no geometry behind.
+// RAL depthValid: 0 = unavailable, +1 = reversed-Z, -1 = forward-Z.
+// A fragment IN FRONT has a positive signed depth gap in either convention.
+// Keep this in the common source so every translated backend executes the
+// same visibility rule; cleared far depth must not dissolve free-space FX.
 float softParticleFade() {
-	if ( depthValid < 0.5 )
+	if ( abs( depthValid ) < 0.5 )
 		return 1.0;
 	vec2  screenUV   = gl_FragCoord.xy * vec2( invResX, invResY );
 	float sceneDepth = texture( sceneDepthTex, screenUV ).r;
-	if ( sceneDepth <= 0.0 )           // cleared far plane → nothing behind
+	if ( ( depthValid > 0.0 && sceneDepth <= 0.0 )
+			|| ( depthValid < 0.0 && sceneDepth >= 1.0 ) )
 		return 1.0;
-	float depthDiff = gl_FragCoord.z - sceneDepth;
+	float depthDiff = ( gl_FragCoord.z - sceneDepth ) * sign( depthValid );
 	return smoothstep( 0.0, PARTICLE_DEPTH_FADE_BAND, depthDiff );
+}
+
+// Media (in-scatter rgb, transmission a) at the opaque depth behind this
+// fragment; identity when the bound atmosphere block is zeroed (Vulkan).
+vec4 particleMedia() {
+	if ( atmFroxelGrid.z == 0u && atmEyeDensity.w <= 0.0 && atmColorVisibility.w <= 0.0 )
+		return vec4( 0.0, 0.0, 0.0, 1.0 );
+	float farDistance = max( atmColorVisibility.w, 4.01 );
+	float near = max( atmControl.x, 0.001 );
+	vec2  screenUV = gl_FragCoord.xy * vec2( invResX, invResY );
+	float sceneDepth = abs( depthValid ) < 0.5 ? gl_FragCoord.z
+		: texture( sceneDepthTex, screenUV ).r;
+	float sceneForward;
+	if ( atmControl.y < 0.0 )
+		sceneForward = sceneDepth >= 0.99999 ? farDistance * 64.0
+			: near / max( 1.0 - sceneDepth, 1e-6 );
+	else
+		sceneForward = sceneDepth <= 1e-6 ? farDistance * 64.0
+			: near / sceneDepth;
+	if ( atmFroxelGrid.z > 0u ) {
+		uvec2 cell = min( uvec2( gl_FragCoord.xy ) / 16u, atmFroxelGrid.xy - uvec2( 1u ) );
+		float slice = clamp( log( max( sceneForward, 4.0 ) / 4.0 )
+			/ log( farDistance / 4.0 ), 0.0, 0.9999 );
+		uint z = min( uint( slice * float( atmFroxelGrid.z ) ), atmFroxelGrid.z - 1u );
+		return atmMedia[ atmFroxelGrid.w + ( z * atmFroxelGrid.y + cell.y ) * atmFroxelGrid.x + cell.x ];
+	}
+	float density = atmEyeDensity.w;
+	if ( atmColorVisibility.w > 0.0 )
+		density = max( density, 3.912023 / atmColorVisibility.w );
+	if ( density <= 0.0 )
+		return vec4( 0.0, 0.0, 0.0, 1.0 );
+	float heightWeight = exp( -atmHeightCloud.y
+		* max( atmEyeDensity.z - atmHeightCloud.x, 0.0 ) );
+	float transmission = clamp( exp( -density * heightWeight
+		* min( sceneForward, farDistance ) ), 0.0, 1.0 );
+	return vec4( atmColorVisibility.rgb * ( 1.0 - transmission ), transmission );
 }
 
 // Precise piecewise sRGB <-> linear conversion.
@@ -193,6 +245,14 @@ void main() {
 	float rgbScale = ( frameSlot0 != FRAME_SLOT_NONE )
 	                 ? ( EXPLOSION_ADDITIVE_TARGET / max( exposureBias, 0.001 ) )
 	                 : 1.0;
-	outColor   = vec4( texel.rgb * sRGBToLinear( fragColor.rgb ) * rgbScale,
-	                   texel.a * fragColor.a * fade );
+	// Fog at the opaque depth behind the quad (identity on Vulkan, whose
+	// composite fogs the blended scene). Alpha blend: the quad takes the
+	// media of what it covers (rgb * T + S). Additive (SRC_ALPHA / ONE): only
+	// the transmission scales the addition; the background already carries
+	// the in-scatter.
+	vec4  media = particleMedia();
+	vec3  rgb   = texel.rgb * sRGBToLinear( fragColor.rgb ) * rgbScale;
+	rgb = ( ( particleRenderFlags & PRIM_FLAG_ADDITIVE ) != 0u )
+		? rgb * media.a : rgb * media.a + media.rgb;
+	outColor   = vec4( rgb, texel.a * fragColor.a * fade );
 }

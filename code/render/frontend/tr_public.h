@@ -19,7 +19,7 @@ typedef struct mapFile_s mapFile_t;
  * (wired.x64). The renderer DLL only sees the opaque pointer. */
 typedef struct arena_s arena_t;
 
-#define	REF_API_VERSION		31	/* explicit per-world level allocation owner */
+#define	REF_API_VERSION		32	/* exact renderer-world content identity query */
 
 #define REF_UI_TRANSFORM_SCHEMA_VERSION 1u
 typedef struct {
@@ -56,11 +56,13 @@ typedef struct {
 	uint32_t uiHeight;
 } refPresentationChange_t;
 
-// Number of concurrent world slots the renderer holds — one per local client
-// app. Must be >= the engine's MAX_LOCAL_CGAME_VMS (the app-instance count); the
-// world index passed to LoadWorld/RenderScene is bounds-checked against this.
-// Only slot 0 is populated when a single app is connected.
-#define MAX_RENDER_WORLDS	4
+// Each local client app owns one gameplay world and may own one render-only
+// distant-sky world.  The latter never becomes the app's selected gameplay
+// world; pairing the ranges keeps split-screen ownership exact instead of
+// borrowing another app's slot.
+#define MAX_RENDER_APP_WORLDS       4
+#define RENDER_DISTANT_WORLD_BASE   MAX_RENDER_APP_WORLDS
+#define MAX_RENDER_WORLDS           ( MAX_RENDER_APP_WORLDS * 2 )
 
 // Lightmap index constants for RegisterShaderLightMap and friends.
 // Must match the values in each renderer's tr_common.h.
@@ -152,6 +154,11 @@ typedef struct {
 	void	(*AddLinearLightToScene)( const vec3_t start, const vec3_t end, float intensity, float r, float g, float b );
 
 	// ── primitive submission (wired/render) — generic, effect-agnostic ──
+	// These callbacks are the canonical RAL-side WiredFX presentation contract.
+	// A non-NULL callback is a promise that the selected backend consumes the
+	// shared RenderSubmission snapshot and lowers it to native GPU work.  NULL
+	// means explicitly unsupported; callers must report that state and must not
+	// substitute a legacy, approximate, CPU-rendered, or backend-specific effect.
 	void	(*AddRibbonToScene)  ( const ribbonDesc_t  *desc );
 	void	(*AddBeamToScene)    ( const beamDesc_t    *desc );
 	void	(*AddSpriteToScene)  ( const spriteDesc_t  *desc );
@@ -164,9 +171,10 @@ typedef struct {
 
 	// Lens-source occlusion oracle (lens-glow unification). The game registers a
 	// light source each frame; the renderer's depth-sampling oracle reports its
-	// visibility (0 = occluded by geometry, 1 = clear). GetLensVisibility returns
-	// qfalse when no GPU oracle is available (GL backends, r_lens off) so the game
-	// falls back to its own occlusion test — zero feature loss.
+	// visibility (0 = occluded by geometry, 1 = clear). NULL callbacks or a
+	// qfalse query result mean explicitly unsupported/not-ready.  The consumer
+	// fails closed; it never replaces the GPU oracle with a CPU trace or a
+	// draw-through-wall compatibility path.
 	void	(*AddLensSourceToScene)( const lensSourceDesc_t *desc );
 	qboolean (*GetLensVisibility)( int id, float *outVis );
 
@@ -314,12 +322,16 @@ typedef struct {
 
 	/* Explicit authoring cook. Writes derived .wlight/.wprobe sidecars only. */
 	qboolean (*CookLightingProject)( const char *derivedRoot );
+	/* Explicit material authoring cook. Writes immutable .wrmat products and
+	 * publishes one map-scoped .wrmatpkg manifest after the full corpus passes. */
+	qboolean (*CookMaterialProject)( const char *derivedRoot );
 
 	/* Serialized per-app world selection. Selection changes no shared asset
 	 * handles; unload retires only the addressed app's map residency. */
 	qboolean (*SelectWorld)( int worldIndex );
 	qboolean (*UnloadWorld)( int worldIndex );
 	int (*ResidentWorldCount)( void );
+	qboolean (*WorldContentIdentity)( int worldIndex, uint64_t *outIdentity );
 
 } refexport_t;
 

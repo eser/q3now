@@ -10,8 +10,14 @@ command -v spirv-dis >/dev/null 2>&1 || exit 77
 # compile.mjs uses a fixed local scratch name while checking all committed
 # outputs. Run freshness validation from a private copy so read-only source
 # mounts and concurrent CI jobs never contend for shaders/spirv/data.spv.
-check_shader_dir="$tmp/check-shaders"
+# Preserve the production-relative shared GLSL/frontend include paths as well
+# as the private compiler scratch directory. Never compile against a flattened
+# shader-only copy that silently excludes new shared RAL implementations.
+check_shader_dir="$tmp/render/ral/backends/vulkan/renderer/shaders"
+mkdir -p "$(dirname "$check_shader_dir")" "$tmp/render/ral/core" "$tmp/render/frontend"
 cp -R "$shader_dir" "$check_shader_dir"
+cp "$root"/code/render/ral/core/*.glsl "$tmp/render/ral/core/"
+cp "$root/code/render/frontend/render_material_noise.h" "$tmp/render/frontend/"
 (cd "$check_shader_dir" && node compile.mjs --check)
 awk 'NR==1 { print; print "#extension GL_GOOGLE_include_directive : require"; next } { print }' \
 	"$shader_dir/gen_frag.tmpl" > "$tmp/gen_frag.glsl"

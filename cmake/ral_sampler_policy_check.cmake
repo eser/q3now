@@ -53,13 +53,34 @@ endforeach()
 
 string(REGEX MATCHALL "vk_create_ral_sampler[(]" CREATE_CALLS "${PRODUCT}")
 list(LENGTH CREATE_CALLS CREATE_COUNT)
-if(NOT CREATE_COUNT EQUAL 8)
-	message(FATAL_ERROR "renderer sampler create inventory drifted: expected definition + 7 raw-mirror owner sites, got ${CREATE_COUNT}")
+if(NOT CREATE_COUNT EQUAL 9)
+	message(FATAL_ERROR "renderer sampler create inventory drifted: expected definition + 8 raw-mirror owner sites (including fixed FX helper), got ${CREATE_COUNT}")
 endif()
 string(REGEX MATCHALL "Ral_DestroySampler[(]" DESTROY_CALLS "${PRODUCT}")
 list(LENGTH DESTROY_CALLS DESTROY_COUNT)
-if(NOT DESTROY_COUNT EQUAL 18)
-	message(FATAL_ERROR "renderer RAL sampler destroy inventory drifted: expected 18 owned/rollback sites, got ${DESTROY_COUNT}")
+if(NOT DESTROY_COUNT EQUAL 23)
+	message(FATAL_ERROR "renderer RAL sampler destroy inventory drifted: expected 23 owned/rollback sites including particle/decal owners, the GTAO point sampler and the atmospheric semantic-effect sampler, got ${DESTROY_COUNT}")
+endif()
+
+# Fixed FX samplers must not borrow from the r_textureMode-controlled pool.
+foreach(FAMILY IN ITEMS particle decal)
+	foreach(REQUIRED IN ITEMS
+		"vk.${FAMILY}.sampler = wired_create_fx_clamp_sampler("
+		"Ral_DestroySampler( vk.${FAMILY}.ral_sampler )"
+		"vk.${FAMILY}.sampler = VK_NULL_HANDLE;")
+		string(FIND "${PRODUCT}" "${REQUIRED}" POSITION)
+		if(POSITION EQUAL -1)
+			message(FATAL_ERROR "fixed FX sampler lifecycle lost: ${REQUIRED}")
+		endif()
+	endforeach()
+	string(REGEX MATCH "vk[.]${FAMILY}[.]sampler = vk_find_sampler" POOL_BORROW "${PRODUCT}")
+	if(POOL_BORROW)
+		message(FATAL_ERROR "${FAMILY} sampler must survive material pool reset")
+	endif()
+endforeach()
+string(FIND "${BINDLESS}" "clampSampler = vk.particle.ral_sampler;" CLAMP_OWNER)
+if(CLAMP_OWNER EQUAL -1)
+	message(FATAL_ERROR "primitive clamp groups must use the particle RAL owner")
 endif()
 
 foreach(REQUIRED IN ITEMS
@@ -72,6 +93,7 @@ foreach(REQUIRED IN ITEMS
 	"vk.sceneDepth.ral_sampler"
 	"vk.blueNoise.ral_sampler"
 	"vk_atmosphere_full.sampler"
+	"vk_sky_physical.sampler"
 	"candidateSampler = Ral_CreateSampler( backend, &samplerInfo );")
 	string(FIND "${PRODUCT}" "${REQUIRED}" POSITION)
 	if(POSITION EQUAL -1)

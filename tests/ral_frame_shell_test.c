@@ -36,6 +36,13 @@ int main( void ) {
 	CHECK( Ral_FrameShellShutdown( &shell, &presented, &exact ) );
 	CHECK( exact.state == RAL_FRAME_SHELL_SHUTDOWN && exact.ready == qfalse );
 	CHECK( !Ral_FrameShellBegin( &shell, &exact, 4u, &recording ) );
+	/* vid_restart may arrive after registration but before the first frame. */
+	CHECK( Ral_FrameShellInit( &shell, RAL_BACKEND_METAL, 5u, &ready ) );
+	CHECK( Ral_FrameShellShutdown( &shell, &ready, &exact ) );
+	CHECK( exact.state == RAL_FRAME_SHELL_SHUTDOWN && exact.frameGeneration == 0u );
+	CHECK( Ral_FrameShellReceiptExact( &exact, &exact ) );
+	CHECK( !Ral_FrameShellShutdown( &shell, &exact, &presented ) );
+	CHECK( !Ral_FrameShellBegin( &shell, &exact, 6u, &recording ) );
 	puts( "RAL frame shell: PASS" );
 	return 0;
 }

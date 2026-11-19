@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#define RENDER_SUBMISSION_SCHEMA_VERSION 24u
+#define RENDER_SUBMISSION_SCHEMA_VERSION 27u
 
 typedef enum {
 	RENDER_ASSET_MODEL = 1,
@@ -58,6 +58,8 @@ typedef struct {
 	uint32_t registeredMaterialCount;
 	uint32_t resolvedMaterialCount;
 	uint32_t materialBytes;
+	uint32_t stageTextureCount;
+	uint32_t stageTextureBytes;
 	uint32_t registeredModelCount;
 	uint32_t modelBytes;
 	uint32_t entityCount;
@@ -74,6 +76,8 @@ typedef struct {
 	uint32_t effectRibbonPointCount;
 	uint32_t effectBeamCount;
 	uint32_t effectPrimitiveDroppedCount;
+	uint32_t lensSourceCount;
+	uint32_t lensSourceDroppedCount;
 	uint32_t atmosphereEmitterCount;
 	uint32_t atmosphereProfileCount;
 	uint32_t particleClassCount;
@@ -94,10 +98,15 @@ typedef struct {
  * stay resident independently for every app slot. */
 typedef struct {
 	const mapFile_t          *map;
+	/* Monotonic load identity, distinct from content identity. Reloading the
+	 * same BSP is still a lifecycle boundary for temporal/GPU products. */
+	uint64_t                  lifecycleGeneration;
+	renderAtmosphereHeightgrid_t heightgrid;
 	byte                     *surfaceVisibility;
 	uint32_t                  surfaceVisibilityBytes;
 	renderWorldSnapshot_t     snapshot;
 	uint64_t                  digest;
+	uint64_t                  contentIdentity;
 	uint32_t                  surfaceCount;
 	uint32_t                  vertexCount;
 	uint32_t                  indexCount;
@@ -112,6 +121,9 @@ typedef struct {
 } renderSubmissionWorldSlot_t;
 
 typedef struct renderSubmissionState_s {
+	/* Application control, sampled once before scene submission. Standalone
+	 * RAL clients keep material PBR enabled; engine modules publish r_pbr. */
+	qboolean pbrEnabled;
 	uint64_t				   ownerGeneration;
 	uint64_t				   assetDigest;
 	uint64_t				   materialDigest;
@@ -132,6 +144,7 @@ typedef struct renderSubmissionState_s {
 	uint64_t				   irradianceVolumeDigest;
 	uint64_t				   directionalLightingDigest;
 	uint64_t				   currentFrameGeneration;
+	uint64_t				   sealedFrameGeneration;
 	uint32_t				   worldSurfaceCount;
 	uint32_t				   worldVertexCount;
 	uint32_t				   worldIndexCount;
@@ -140,6 +153,8 @@ typedef struct renderSubmissionState_s {
 	uint32_t				   resolvedMaterialCount;
 	uint32_t				   materialBytes;
 	uint32_t				   materialCount;
+	uint32_t				   stageTextureCount;
+	uint32_t				   stageTextureBytes;
 	uint32_t				   modelCount;
 	uint32_t				   modelBytes;
 	uint32_t				   entityCount;
@@ -157,6 +172,8 @@ typedef struct renderSubmissionState_s {
 	uint32_t                  effectRibbonPointCount;
 	uint32_t                  effectBeamCount;
 	uint32_t                  effectPrimitiveDroppedCount;
+	uint32_t                  lensSourceCount;
+	uint32_t                  lensSourceDroppedCount;
 	uint32_t				   emissiveProxyFrameLightCount;
 	uint32_t				   atmosphereEmitterCount;
 	uint32_t				   atmosphereProfileCount;
@@ -174,6 +191,7 @@ typedef struct renderSubmissionState_s {
 	refUiTransform_t		   uiTransform;
 	qboolean				   uiTransformActive;
 	renderMaterialRecord_t	   materials[RENDER_SUBMISSION_MAX_MATERIALS];
+	renderTextureRecord_t	   stageTextures[RENDER_SUBMISSION_MAX_STAGE_TEXTURES];
 	renderModelRecord_t		   models[RENDER_SUBMISSION_MAX_MODELS];
 	renderEntityCommand_t	   entities[RENDER_SUBMISSION_MAX_ENTITIES];
 	renderCharacterSkinSnapshot_t characterSkins[RENDER_SUBMISSION_MAX_CHARACTER_SKINS];
@@ -200,8 +218,11 @@ typedef struct renderSubmissionState_s {
 	renderEffectRibbonCommand_t *effectRibbons;
 	ribbonPoint_t             *effectRibbonPoints;
 	beamDesc_t                *effectBeams;
+	lensSourceDesc_t           lensSources[RENDER_SUBMISSION_MAX_LENS_SOURCES];
 	uint64_t                   effectPrimitiveDigest;
+	uint64_t                   lensSourceDigest;
 	renderSubmissionWorldSlot_t worlds[MAX_RENDER_WORLDS];
+	uint64_t                   nextWorldLifecycleGeneration;
 	int32_t                    activeWorldIndex;
 	/* Serialized active-slot aliases retained for existing frontend consumers.
 	 * SelectWorld changes only these aliases; ownership remains in worlds[]. */
@@ -236,10 +257,28 @@ typedef struct renderSubmissionState_s {
 
 qboolean  RenderSubmission_Init( renderSubmissionState_t *state, uint64_t ownerGeneration );
 void	  RenderSubmission_Reset( renderSubmissionState_t *state );
+/* Registration boundary only: caller must retire native borrowers first.
+ * Requires no open frame or resident world; keeps handles/generations monotonic
+ * and reusable frame storage intact. Never call during loading-UI teardown. */
+qboolean RenderSubmission_ResetRegistrationAssets( renderSubmissionState_t *state );
+qboolean  RenderSubmission_ReadableFrameGeneration(
+	const renderSubmissionState_t *state, uint64_t *outFrameGeneration );
 qhandle_t RenderSubmission_RegisterAsset( renderSubmissionState_t *state, renderAssetKind_t kind, const char *name );
 qhandle_t RenderSubmission_RegisterMaterialImage( renderSubmissionState_t *state, renderAssetKind_t kind,
-												  const char *name, qboolean clampToEdge, const byte *rgba8,
-												  uint32_t width, uint32_t height );
+											  const char *name, qboolean clampToEdge, const byte *rgba8,
+											  uint32_t width, uint32_t height );
+qhandle_t RenderSubmission_RegisterStageTexture( renderSubmissionState_t *state,
+	renderAssetKind_t kind, const char *name, qboolean clampToEdge,
+	const byte *rgba8, uint32_t width, uint32_t height );
+qboolean  RenderSubmission_SetTextureCacheKey( renderSubmissionState_t *state,
+	qhandle_t handle, const ralTextureCacheKey_t *textureCacheKey );
+qboolean  RenderSubmission_SetMaterialTextureCacheKey(
+	renderSubmissionState_t *state, qhandle_t handle,
+	const ralTextureCacheKey_t *textureCacheKey );
+qboolean  RenderSubmission_PublishMaterialFactors(
+	renderSubmissionState_t *state, uint64_t runtimeGeneration,
+	const renderMaterialFactorPublicationEntry_t *entries,
+	uint32_t entryCount );
 qboolean  RenderSubmission_SetMaterialRasterPolicy( renderSubmissionState_t *state, qhandle_t handle,
 										renderAlphaMode_t alphaMode, float alphaCutoff,
 										qboolean depthWrite );
@@ -249,6 +288,16 @@ qboolean  RenderSubmission_SetMaterialCullMode( renderSubmissionState_t *state,
 	qhandle_t handle, renderCullMode_t cullMode );
 qboolean  RenderSubmission_SetMaterialSky( renderSubmissionState_t *state,
 	qhandle_t handle, qboolean sky );
+qboolean  RenderSubmission_SetMaterialAuthoredSkySource(
+	renderSubmissionState_t *state, qhandle_t handle,
+	const ralMaterialSourceSky_t *source );
+qboolean  RenderSubmission_SetMaterialAuthoredSkyAverage(
+	renderSubmissionState_t *state, qhandle_t handle,
+	const float average[3] );
+qboolean  RenderSubmission_SetMaterialAuthoredSkyTextures(
+	renderSubmissionState_t *state, qhandle_t handle,
+	const qhandle_t outerTextures[RAL_MATERIAL_SKY_FACE_COUNT],
+	const qhandle_t innerTextures[RAL_MATERIAL_SKY_FACE_COUNT] );
 qboolean  RenderSubmission_SetMaterialSkyBox( renderSubmissionState_t *state,
 	qhandle_t handle, qboolean skyBox );
 qboolean  RenderSubmission_SetMaterialSkyCloudHeight( renderSubmissionState_t *state,
@@ -263,6 +312,8 @@ qboolean  RenderSubmission_SetMaterialSkySecondary( renderSubmissionState_t *sta
 qboolean  RenderSubmission_SetMaterialStages( renderSubmissionState_t *state,
 	qhandle_t handle, const renderMaterialStageSnapshot_t *stages,
 	uint32_t stageCount );
+/* Bounded dependency query on a validated immutable stage snapshot. */
+qboolean RenderSubmission_MaterialStagesUseTime( const renderMaterialSnapshot_t *material );
 qboolean  RenderSubmission_SetMaterialLighting( renderSubmissionState_t *state, qhandle_t handle,
 											 const renderMaterialLighting_t *lighting );
 qboolean  RenderSubmission_RecordAsset( renderSubmissionState_t *state, renderAssetKind_t kind, const char *name,
@@ -272,6 +323,11 @@ qboolean  RenderSubmission_SelectWorld( renderSubmissionState_t *state, int worl
 qboolean  RenderSubmission_UnloadWorld( renderSubmissionState_t *state, int worldIndex );
 qboolean  RenderSubmission_WorldResident( const renderSubmissionState_t *state, int worldIndex );
 int       RenderSubmission_ResidentWorldCount( const renderSubmissionState_t *state );
+/* Select the first drawable sky material referenced by the active world.
+ * The result is a value snapshot plus its semantic name; no backend handle or
+ * catalog pointer crosses this frontend boundary. */
+qboolean  RenderSubmission_ActiveSkyMaterial( const renderSubmissionState_t *state,
+	renderMaterialSnapshot_t *outMaterial, char outSemanticName[MAX_QPATH] );
 qboolean  RenderSubmission_BeginFrame( renderSubmissionState_t *state, uint64_t frameGeneration );
 void	  RenderSubmission_CancelFrame( renderSubmissionState_t *state );
 qboolean  RenderSubmission_ClearScene( renderSubmissionState_t *state );

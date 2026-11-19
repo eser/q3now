@@ -1158,9 +1158,9 @@ ralTexture_t *Ral_CreateTexture( ralBackend_t *b, const ralTextureCreateInfo_t *
 		ralVk_Free( b, tex->alloc ); b->vk.DestroyImage( b->device, tex->image, NULL ); free( tex ); return NULL;
 	}
 	// Dynamic rendering selects an array slice through the attachment view, not
-	// through VkRenderingInfo. Direct 2D-array attachment textures therefore own
+	// through VkRenderingInfo. Direct array/cube attachment textures therefore own
 	// one single-layer 2D view per slice, matching adopted-array semantics.
-	if ( ci->type == RAL_TEXTURE_2D_ARRAY && layers > 1u
+	if ( ( ci->type == RAL_TEXTURE_2D_ARRAY || ci->type == RAL_TEXTURE_CUBE ) && layers > 1u
 			&& ( ci->usage & ( RAL_TEXTURE_USAGE_COLOR_ATTACHMENT
 				| RAL_TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT ) ) ) {
 		uint32_t i;
@@ -1424,24 +1424,6 @@ uint32_t Ral_GetTextureMipLevelCount( const ralTexture_t *tex ) {
 	return tex ? tex->mipLevels : 0u;
 }
 
-static qboolean ralVk_TextureResourceReceiptValid(
-		const ralTextureResourceReceipt_t *receipt ) {
-	return receipt
-		&& receipt->schemaVersion == RAL_TEXTURE_RESOURCE_RECEIPT_SCHEMA_VERSION
-		&& receipt->backendType == RAL_BACKEND_VULKAN
-		&& receipt->textureIdentity != 0u
-		&& receipt->resourceGeneration > 0u
-		&& receipt->resourceGeneration < UINT64_MAX
-		&& receipt->type >= RAL_TEXTURE_1D
-		&& receipt->type <= RAL_TEXTURE_CUBE_ARRAY
-		&& receipt->format > RAL_FORMAT_UNDEFINED
-		&& receipt->format < RAL_FORMAT_COUNT
-		&& receipt->width > 0u && receipt->height > 0u
-		&& receipt->mipLevels > 0u && receipt->arrayLayers > 0u
-		&& ( receipt->imported == qfalse || receipt->imported == qtrue )
-		&& receipt->ready == qtrue;
-}
-
 qboolean Ral_TextureGetResourceReceipt( const ralTexture_t *tex,
 		ralTextureResourceReceipt_t *out ) {
 	ralTextureResourceReceipt_t candidate;
@@ -1461,17 +1443,9 @@ qboolean Ral_TextureGetResourceReceipt( const ralTexture_t *tex,
 	candidate.arrayLayers = tex->arrayLayers;
 	candidate.imported = tex->ownsImage ? qfalse : qtrue;
 	candidate.ready = qtrue;
-	if ( !ralVk_TextureResourceReceiptValid( &candidate ) ) return qfalse;
+	if ( !Ral_TextureResourceReceiptValid( &candidate ) ) return qfalse;
 	*out = candidate;
 	return qtrue;
-}
-
-qboolean Ral_TextureResourceReceiptExact(
-		const ralTextureResourceReceipt_t *a,
-		const ralTextureResourceReceipt_t *b ) {
-	return ralVk_TextureResourceReceiptValid( a )
-		&& ralVk_TextureResourceReceiptValid( b )
-		&& !memcmp( a, b, sizeof( *a ) );
 }
 
 void *Ral_GetTextureViewHandle( const ralTextureView_t *view ) {

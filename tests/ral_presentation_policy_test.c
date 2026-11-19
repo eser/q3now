@@ -27,7 +27,7 @@ int main( void ) {
 	CHECK( Ral_ResolvePresentationPolicy( &request, &policy ) );
 	CHECK( Ral_PresentationPolicyValid( &policy ) && policy.preferenceCount == 5u );
 	CHECK( policy.preferences[0].mode == RAL_PRESENT_IMMEDIATE
-		&& policy.preferences[0].desiredImageCount == 2u );
+		&& policy.preferences[0].desiredImageCount == 3u );
 	CHECK( policy.preferences[1].mode == RAL_PRESENT_MAILBOX
 		&& policy.preferences[1].desiredImageCount == 3u );
 	CHECK( policy.preferences[4].mode == RAL_PRESENT_FIFO

@@ -52,18 +52,19 @@ foreach(NATIVE "VkDescriptor" "VkPipeline" "WGPU" "MTL")
 endforeach()
 
 require_text(CATALOG "\"schemaVersion\":1,\"toolchainIdentity\":\"wired-shader-xlate/2" "pinned reflection corpus header")
-require_text(CATALOG "\"sourceCount\":299" "full reflection corpus count")
+require_text(CATALOG "\"sourceCount\":315" "full reflection corpus count")
 string(REGEX MATCHALL "\"ordinal\":[0-9]+" CATALOG_ROWS "${CATALOG}")
 list(LENGTH CATALOG_ROWS CATALOG_ROW_COUNT)
-if(NOT CATALOG_ROW_COUNT EQUAL 299)
+if(NOT CATALOG_ROW_COUNT EQUAL 315)
 	message(FATAL_ERROR "reflection catalog row count drift: ${CATALOG_ROW_COUNT}")
 endif()
 foreach(NEEDLE
-	"assert.equal(committed.sourceCount, 299)"
+	"assert.equal(committed.sourceCount, 315)"
 	"entry.spirv.digest, provenanceRow.artifactDigest"
 	"color_vert_spv"
 	"brdf_lut_comp_spv"
 	"hdr_histogram_comp_spv"
+	"project_sky_sh_comp_spv"
 )
 	require_text(CATALOG_HOST "${NEEDLE}" "full/representative reflection host gate")
 endforeach()

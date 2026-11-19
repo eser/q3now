@@ -7,8 +7,14 @@ trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 command -v glslangValidator >/dev/null 2>&1 || exit 77
 command -v spirv-val >/dev/null 2>&1 || exit 77
 command -v spirv-dis >/dev/null 2>&1 || exit 77
-cp -R "$shader_dir" "$tmp/check-shaders"
-(cd "$tmp/check-shaders" && node compile.mjs --check)
+# Keep the production-relative shared RAL/frontend includes in this private
+# copy; compile.mjs must still validate every committed shader output.
+check_shader_dir="$tmp/render/ral/backends/vulkan/renderer/shaders"
+mkdir -p "$(dirname "$check_shader_dir")" "$tmp/render/ral/core" "$tmp/render/frontend"
+cp -R "$shader_dir" "$check_shader_dir"
+cp "$root"/code/render/ral/core/*.glsl "$tmp/render/ral/core/"
+cp "$root/code/render/frontend/render_material_noise.h" "$tmp/render/frontend/"
+(cd "$check_shader_dir" && node compile.mjs --check)
 awk '/^#version / { print; print "#extension GL_GOOGLE_include_directive : require"; next } { print }' \
 	"$shader_dir/iqm_temporal_exact3.frag" > "$tmp/exact3.frag"
 glslangValidator -S vert -V -o "$tmp/v.spv" "$shader_dir/iqm_temporal_exact3.vert" >/dev/null

@@ -62,7 +62,7 @@ qboolean Ral_ResolvePresentationPolicy(
 		const ralPresentationPolicyRequest_t *request,
 		ralPresentationPolicy_t *outPolicy ) {
 	ralPresentationPolicy_t policy;
-	uint32_t directImages, queuedImages;
+	uint32_t queuedImages;
 	if ( !request || !outPolicy
 			|| request->schemaVersion != RAL_PRESENTATION_POLICY_SCHEMA_VERSION
 			|| !IntentValid( request->intent )
@@ -71,8 +71,15 @@ qboolean Ral_ResolvePresentationPolicy(
 			|| !BoolValid( request->allowTearingWhenLate )
 			|| !BoolValid( request->preferVrr ) ) return qfalse;
 
-	directImages = request->maxFramesInFlight < 2u
-		? 2u : request->maxFramesInFlight;
+	/* Every mode requests maxFramesInFlight + 1 images. IMMEDIATE used to ask
+	 * for maxFramesInFlight ("direct") images on the assumption that an
+	 * unsynchronized present returns its image immediately; on macOS neither
+	 * native Metal nor MoltenVK behaves that way: displaySyncEnabled=NO still
+	 * hands drawables back at the compositor's cadence, so with two images the
+	 * acquire blocks for the previous present and throughput collapses to the
+	 * display refresh (measured 119.9 FPS with acquire ~6 ms of an 8.33 ms
+	 * period at 120 Hz). The pre-policy renderer requested three images for
+	 * IMMEDIATE (MIN_SWAPCHAIN_IMAGES_IMM 3, build #117 baseline); keep that. */
 	queuedImages = request->maxFramesInFlight + 1u;
 	memset( &policy, 0, sizeof( policy ) );
 	policy.schemaVersion = RAL_PRESENTATION_POLICY_SCHEMA_VERSION;
@@ -84,7 +91,7 @@ qboolean Ral_ResolvePresentationPolicy(
 	switch ( request->intent ) {
 	case RAL_PRESENTATION_INTENT_UNLOCKED:
 		if ( request->allowTearingWhenLate )
-			AddPreference( &policy, RAL_PRESENT_IMMEDIATE, directImages, 0u );
+			AddPreference( &policy, RAL_PRESENT_IMMEDIATE, queuedImages, 0u );
 		AddPreference( &policy, RAL_PRESENT_MAILBOX, queuedImages, 0u );
 		AddPreference( &policy, RAL_PRESENT_FIFO_LATEST_READY, queuedImages, 0u );
 		if ( request->allowTearingWhenLate )

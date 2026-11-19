@@ -24,7 +24,8 @@ static qboolean ReceiptValid( const ralFrameShellReceipt_t *receipt ) {
 		&& receipt->shellIdentity != (uintptr_t)0
 		&& StateValid( receipt->state )
 		&& ( receipt->state == RAL_FRAME_SHELL_READY
-			? receipt->frameGeneration == 0u : receipt->frameGeneration != 0u
+			? receipt->frameGeneration == 0u
+			: ( receipt->state == RAL_FRAME_SHELL_SHUTDOWN || receipt->frameGeneration != 0u )
 				&& receipt->frameGeneration != UINT64_MAX )
 		&& ( receipt->state == RAL_FRAME_SHELL_SHUTDOWN
 			? receipt->ready == qfalse : receipt->ready == qtrue ) ) ? qtrue : qfalse;

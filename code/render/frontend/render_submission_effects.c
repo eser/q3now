@@ -30,6 +30,57 @@ static qboolean AtmosphereFloatArrayFinite( const float *values, size_t count )
 	return qtrue;
 }
 
+static void RebuildLensSourceDigest( renderSubmissionState_t *state )
+{
+	uint64_t digest = ATMOSPHERE_FNV_OFFSET;
+	if ( !state ) return;
+	for ( uint32_t i = 0u; i < state->lensSourceCount; ++i )
+		digest = AtmosphereHashBytes( digest, &state->lensSources[i],
+			sizeof( state->lensSources[i] ) );
+	state->lensSourceDigest = digest;
+}
+
+qboolean RenderSubmission_AddLensSource( renderSubmissionState_t *state,
+		const lensSourceDesc_t *source )
+{
+	if ( !state || !state->frameOpen || !source || source->id < 0
+			|| source->id >= LENS_MAX_CGSOURCES || !isfinite( source->radius )
+			|| source->radius < 0.0f
+			|| !AtmosphereFloatArrayFinite( source->origin, 3u )
+			|| !AtmosphereFloatArrayFinite( source->rgba, 4u ) ) return qfalse;
+	for ( uint32_t reserved = 0u; reserved < ARRAY_LEN( source->reserved ); ++reserved )
+		if ( source->reserved[reserved] != 0 ) return qfalse;
+	/* Stable ids are unique within a frame. A later publication refreshes the
+	 * same source instead of consuming another bounded slot. */
+	for ( uint32_t i = 0u; i < state->lensSourceCount; ++i ) {
+		if ( state->lensSources[i].id != source->id ) continue;
+		state->lensSources[i] = *source;
+		RebuildLensSourceDigest( state );
+		return qtrue;
+	}
+	if ( state->lensSourceCount >= RENDER_SUBMISSION_MAX_LENS_SOURCES ) {
+		state->lensSourceDroppedCount++;
+		return qfalse;
+	}
+	state->lensSources[state->lensSourceCount++] = *source;
+	RebuildLensSourceDigest( state );
+	return qtrue;
+}
+
+qboolean RenderSubmission_LensSourceSnapshot(
+		const renderSubmissionState_t *state,
+		renderLensSourceSnapshot_t *outSnapshot,
+		const lensSourceDesc_t **outSources )
+{
+	if ( !state || !state->initialized || !outSnapshot || !outSources
+			|| ( !state->frameOpen && !state->frameSealed ) ) return qfalse;
+	outSnapshot->digest = state->lensSourceDigest;
+	outSnapshot->count = state->lensSourceCount;
+	outSnapshot->droppedCount = state->lensSourceDroppedCount;
+	*outSources = state->lensSources;
+	return qtrue;
+}
+
 static qboolean AtmosphereUnitArray( const float *values, size_t count )
 {
 	if ( !AtmosphereFloatArrayFinite( values, count ) )
@@ -56,6 +107,77 @@ static qboolean AtmosphereEmitterReservedZero( const float *values, size_t count
 	return qtrue;
 }
 
+static void AtmosphereSkyDefaults( atmosphereSkyEnvironment_t *out )
+{
+	memset( out, 0, sizeof( *out ) );
+	out->schemaVersion = WIRED_SKY_ENVIRONMENT_SCHEMA_VERSION;
+	out->mode = ATMOSPHERE_SKY_AUTHORED;
+	out->flags = ATMOSPHERE_SKY_AUTHORED_AVAILABLE;
+	out->sourceRevision = 1u;
+	out->sunDirection[2] = 1.0f;
+	out->sunAngularRadius = 0.00465f;
+	out->moonDirection[2] = -1.0f;
+	out->moonAngularRadius = 0.00436f;
+	out->exposure = 1.0f;
+	out->opticsVisibility = 1.0f;
+	out->distantSceneScale = 1.0f;
+}
+
+static void AtmosphereSkyFromLegacy( const atmosphereFrameState_t *value,
+		atmosphereSkyEnvironment_t *out )
+{
+	AtmosphereSkyDefaults( out );
+	memcpy( out->sunDirection, value->sunDirection,
+		sizeof( out->sunDirection ) );
+	memcpy( out->moonDirection, value->moonDirection,
+		sizeof( out->moonDirection ) );
+	for ( uint32_t channel = 0u; channel < 3u; ++channel ) {
+		out->sunRadiance[channel] = value->sunIntensity;
+		out->moonRadiance[channel] = value->moonIntensity;
+		out->ambientSh[channel] = value->ambientColor[channel];
+	}
+	out->cloudSunOcclusion = value->cloudShadow;
+	out->skyLuminance = value->ambientColor[0];
+	if ( value->ambientColor[1] > out->skyLuminance ) out->skyLuminance = value->ambientColor[1];
+	if ( value->ambientColor[2] > out->skyLuminance ) out->skyLuminance = value->ambientColor[2];
+	out->opticsVisibility = 1.0f - value->cloudShadow;
+}
+
+static qboolean AtmosphereNonnegativeArray( const float *values, size_t count )
+{
+	if ( !AtmosphereFloatArrayFinite( values, count ) ) return qfalse;
+	for ( size_t i = 0u; i < count; ++i )
+		if ( values[i] < 0.0f ) return qfalse;
+	return qtrue;
+}
+
+static qboolean AtmosphereSkyValid( const atmosphereSkyEnvironment_t *value )
+{
+	static const uint32_t knownFlags = ATMOSPHERE_SKY_AUTHORED_AVAILABLE |
+		ATMOSPHERE_SKY_DISTANT_SCENE | ATMOSPHERE_SKY_SUN_OVERRIDE;
+	const float scalars[] = { value->sunAngularRadius, value->moonAngularRadius,
+		value->cloudSunOcclusion, value->skyLuminance, value->exposure,
+		value->opticsVisibility, value->distantSceneScale,
+		value->distantSceneLodBias };
+	if ( value->schemaVersion == 0u ) return qtrue;
+	return value->schemaVersion == WIRED_SKY_ENVIRONMENT_SCHEMA_VERSION &&
+		value->mode >= ATMOSPHERE_SKY_NONE && value->mode <= ATMOSPHERE_SKY_HYBRID &&
+		( value->flags & ~knownFlags ) == 0u && value->reserved0 == 0u &&
+		value->sourceRevision > 0u && AtmosphereFloatArrayFinite( scalars,
+			ARRAY_LEN( scalars ) ) && AtmosphereNonnegativeArray( value->sunRadiance, 3u ) &&
+		AtmosphereNonnegativeArray( value->moonRadiance, 3u ) &&
+		AtmosphereFloatArrayFinite( value->sunDirection, 3u ) &&
+		AtmosphereFloatArrayFinite( value->moonDirection, 3u ) &&
+		AtmosphereFloatArrayFinite( value->ambientSh, 27u ) &&
+		AtmosphereFloatArrayFinite( value->distantSceneOrigin, 3u ) &&
+		value->sunAngularRadius >= 0.0f && value->moonAngularRadius >= 0.0f &&
+		value->cloudSunOcclusion >= 0.0f && value->cloudSunOcclusion <= 1.0f &&
+		value->skyLuminance >= 0.0f && value->exposure >= 0.0f &&
+		value->opticsVisibility >= 0.0f && value->opticsVisibility <= 1.0f &&
+		value->distantSceneScale > 0.0f &&
+		AtmosphereReservedZero( value->reserved, ARRAY_LEN( value->reserved ) );
+}
+
 static void AtmosphereDefaults( atmosphereFrameState_t *out )
 {
 	memset( out, 0, sizeof( *out ) );
@@ -64,6 +186,7 @@ static void AtmosphereDefaults( atmosphereFrameState_t *out )
 	out->temperatureC	= 15.0f;
 	out->humidity		= 0.5f;
 	out->indoorExposure = 1.0f;
+	AtmosphereSkyDefaults( &out->skyEnvironment );
 }
 
 static qboolean AtmosphereBoundsValid( const atmosphereFrameState_t *value )
@@ -80,7 +203,8 @@ static qboolean AtmosphereBoundsValid( const atmosphereFrameState_t *value )
 	return qtrue;
 }
 
-static qboolean AtmosphereNormalize( const atmosphereFrameState_t *value, atmosphereFrameState_t *out )
+qboolean RenderSubmission_NormalizeAtmosphereState(
+		const atmosphereFrameState_t *value, atmosphereFrameState_t *out )
 {
 	static const uint32_t knownFlags = ATMOSPHERE_FLAG_ENABLED | ATMOSPHERE_FLAG_HEIGHTGRID |
 									   ATMOSPHERE_FLAG_INDOOR_EXPOSURE | ATMOSPHERE_FLAG_SURFACE_CLIMATE |
@@ -107,11 +231,13 @@ static qboolean AtmosphereNormalize( const atmosphereFrameState_t *value, atmosp
 			out->qualityTier					= ATMOSPHERE_QUALITY_WEATHER;
 			out->precipitation[value->type - 1] = 1.0f;
 		}
+		AtmosphereSkyFromLegacy( out, &out->skyEnvironment );
 		return qtrue;
 	}
 	if ( value->schemaVersion != WIRED_ATMOSPHERE_SCHEMA_VERSION || value->type < ATMOSPHERE_PRECIP_NONE ||
 		 value->type > ATMOSPHERE_PRECIP_DUST_ASH || value->qualityTier > ATMOSPHERE_QUALITY_FULL ||
 		 ( value->flags & ~knownFlags ) != 0u || value->gridSize < 0 || value->gridSize > 4096 ||
+		 !AtmosphereSkyValid( &value->skyEnvironment ) ||
 		 !AtmosphereReservedZero( value->reserved, 8u ) || !AtmosphereBoundsValid( value ) )
 		return qfalse;
 	{
@@ -137,6 +263,8 @@ static qboolean AtmosphereNormalize( const atmosphereFrameState_t *value, atmosp
 		 ( value->qualityTier == ATMOSPHERE_QUALITY_OFF && ( value->flags & ATMOSPHERE_FLAG_ENABLED ) != 0u ) )
 		return qfalse;
 	*out = *value;
+	if ( value->skyEnvironment.schemaVersion == 0u )
+		AtmosphereSkyFromLegacy( value, &out->skyEnvironment );
 	return qtrue;
 }
 
@@ -178,7 +306,7 @@ float RenderSubmission_AtmosphereEmitterIntensity( const atmosphereFrameState_t 
 	float				   precipitation = 0.0f;
 	float				   windSpeed;
 
-	if ( !AtmosphereNormalize( atmosphere, &state ) || !AtmosphereEmitterValid( emitter ) ||
+	if ( !RenderSubmission_NormalizeAtmosphereState( atmosphere, &state ) || !AtmosphereEmitterValid( emitter ) ||
 		 state.qualityTier == ATMOSPHERE_QUALITY_OFF || ( state.flags & ATMOSPHERE_FLAG_ENABLED ) == 0u )
 		return 0.0f;
 
@@ -226,7 +354,7 @@ qboolean RenderSubmission_AtmosphereSurfaceTargets( const atmosphereFrameState_t
 {
 	atmosphereFrameState_t state;
 	float				   rain, snow, freeze, thaw;
-	if ( !outTargets || !AtmosphereNormalize( atmosphere, &state ) )
+	if ( !outTargets || !RenderSubmission_NormalizeAtmosphereState( atmosphere, &state ) )
 		return qfalse;
 	memset( outTargets, 0, sizeof( *outTargets ) );
 	if ( state.qualityTier < ATMOSPHERE_QUALITY_WEATHER ||
@@ -882,11 +1010,68 @@ qboolean RenderSubmission_AtmosphereEffectGpuPayload(
 	return qtrue;
 }
 
+qboolean RenderSubmission_SetAtmosphereHeightgrid( renderSubmissionState_t *state,
+		const float *samples, int count ) {
+	renderAtmosphereHeightgrid_t candidate;
+	renderSubmissionWorldSlot_t *slot;
+	float *owned;
+	uint64_t digest;
+	if ( !state || !state->initialized || !samples || count <= 0
+			|| state->frameSealed || state->activeWorldIndex < 0
+			|| state->activeWorldIndex >= MAX_RENDER_WORLDS ) return qfalse;
+	slot = &state->worlds[state->activeWorldIndex];
+	if ( !slot->loaded || !(state->atmosphere.flags & ATMOSPHERE_FLAG_HEIGHTGRID)
+			|| state->atmosphere.gridSize < 2
+			|| state->atmosphere.gridSize > (int)RENDER_SUBMISSION_MAX_HEIGHTGRID_EDGE
+			|| count != state->atmosphere.gridSize * state->atmosphere.gridSize
+			|| !AtmosphereFloatArrayFinite( samples, (uint32_t)count ) ) return qfalse;
+	memset( &candidate, 0, sizeof( candidate ) );
+	candidate.edge = (uint32_t)state->atmosphere.gridSize;
+	candidate.worldIndex = state->activeWorldIndex;
+	candidate.worldGeneration = slot->lifecycleGeneration;
+	for ( unsigned axis = 0; axis < 2; ++axis ) {
+		float extent = state->atmosphere.worldMaxs[axis] - state->atmosphere.worldMins[axis];
+		if ( !isfinite( extent ) || extent <= 0.0f ) return qfalse;
+		candidate.worldMins[axis] = state->atmosphere.worldMins[axis];
+		candidate.worldMaxs[axis] = state->atmosphere.worldMaxs[axis];
+		/* BG_GenerateTracemap clamps its sample step to one world unit. */
+		candidate.inverseStep[axis] = 1.0f / fmaxf( extent / candidate.edge, 1.0f );
+	}
+	digest = AtmosphereHashBytes( ATMOSPHERE_FNV_OFFSET, &candidate, sizeof( candidate ) );
+	candidate.digest = AtmosphereHashBytes( digest, samples, (size_t)count * sizeof( float ) );
+	if ( slot->heightgrid.samples && slot->heightgrid.digest == candidate.digest
+			&& !memcmp( slot->heightgrid.samples, samples, (size_t)count * sizeof( float ) ) ) return qtrue;
+	owned = (float *)malloc( (size_t)count * sizeof( float ) );
+	if ( !owned ) return qfalse;
+	memcpy( owned, samples, (size_t)count * sizeof( float ) );
+	candidate.samples = owned;
+	free( (void *)slot->heightgrid.samples );
+	slot->heightgrid = candidate;
+	return qtrue;
+}
+
+qboolean RenderSubmission_AtmosphereHeightgrid( const renderSubmissionState_t *state,
+		renderAtmosphereHeightgrid_t *out ) {
+	const renderSubmissionWorldSlot_t *slot;
+	if ( !state || !state->initialized || !out || state->activeWorldIndex < 0
+			|| state->activeWorldIndex >= MAX_RENDER_WORLDS ) return qfalse;
+	slot = &state->worlds[state->activeWorldIndex];
+	if ( !slot->loaded || !slot->heightgrid.samples
+			|| slot->heightgrid.worldGeneration != slot->lifecycleGeneration
+			|| !(state->atmosphere.flags & ATMOSPHERE_FLAG_HEIGHTGRID)
+			|| slot->heightgrid.edge != (uint32_t)state->atmosphere.gridSize
+			|| memcmp( slot->heightgrid.worldMins, state->atmosphere.worldMins, sizeof( vec2_t ) )
+			|| memcmp( slot->heightgrid.worldMaxs, state->atmosphere.worldMaxs, sizeof( vec2_t ) ) ) return qfalse;
+	*out = slot->heightgrid;
+	return qtrue;
+}
+
 qboolean RenderSubmission_SetAtmosphere( renderSubmissionState_t *state, const atmosphereFrameState_t *atmosphere )
 {
 	atmosphereFrameState_t normalized;
 	uint64_t			   digest;
-	if ( !state || !state->initialized || !state->atmosphereReady || !AtmosphereNormalize( atmosphere, &normalized ) )
+	if ( !state || !state->initialized || !state->atmosphereReady ||
+			!RenderSubmission_NormalizeAtmosphereState( atmosphere, &normalized ) )
 		return qfalse;
 	digest = AtmosphereHashBytes( ATMOSPHERE_FNV_OFFSET, &normalized, sizeof( normalized ) );
 	if ( digest == state->atmosphereDigest && !memcmp( &normalized, &state->atmosphere, sizeof( normalized ) ) )
@@ -939,6 +1124,11 @@ uint64_t RenderSubmission_AtmosphereDigest( const renderSubmissionState_t *state
 	digest = AtmosphereHashBytes( digest, &state->atmosphereSurfaceEventCount,
 								  sizeof( state->atmosphereSurfaceEventCount ) );
 	digest = AtmosphereHashBytes( digest, &state->atmosphereMediaDigest, sizeof( state->atmosphereMediaDigest ) );
+	{
+		renderAtmosphereHeightgrid_t grid;
+		if ( RenderSubmission_AtmosphereHeightgrid( state, &grid ) )
+			digest = AtmosphereHashBytes( digest, &grid.digest, sizeof( grid.digest ) );
+	}
 	digest =
 		AtmosphereHashBytes( digest, &state->atmosphereMediaVolumeCount, sizeof( state->atmosphereMediaVolumeCount ) );
 	return AtmosphereHashBytes( digest, &state->surfaceClimateEvictionCount,
@@ -949,6 +1139,9 @@ qboolean RenderSubmission_AtmosphereSnapshot( const renderSubmissionState_t *sta
 											  renderAtmosphereSnapshot_t	*outSnapshot,
 											  const atmosphereEmitter_t	   **outEmitters )
 {
+	renderMaterialSnapshot_t authoredSkyStorage;
+	const renderMaterialSnapshot_t *authoredSky = NULL;
+	char authoredSkyName[MAX_QPATH];
 	if ( !state || !state->initialized || !state->atmosphereReady || !outSnapshot || !outEmitters )
 		return qfalse;
 	memset( outSnapshot, 0, sizeof( *outSnapshot ) );
@@ -958,8 +1151,151 @@ qboolean RenderSubmission_AtmosphereSnapshot( const renderSubmissionState_t *sta
 	outSnapshot->emitterCount = state->atmosphereEmitterCount;
 	outSnapshot->active =
 		( state->atmosphereEmitterCount > 0u || ( state->atmosphere.flags & ATMOSPHERE_FLAG_ENABLED ) != 0u ) ? qtrue
-																											  : qfalse;
+																									  : qfalse;
+	/* The game selects authored/physical policy, while the active map's sky
+	 * material supplies the actual q3map_sun direction/radiance and chromatic
+	 * environment identity.  Resolve it here so every RAL backend consumes the
+	 * same pointer-free atmosphere snapshot instead of inventing a backend-local
+	 * default sky. */
+	if ( RenderSubmission_ActiveSkyMaterial( state, &authoredSkyStorage,
+			authoredSkyName ) ) authoredSky = &authoredSkyStorage;
+	if ( authoredSky ) {
+		atmosphereSkyEnvironment_t *sky = &outSnapshot->state.skyEnvironment;
+		const ralMaterialSourceSky_t *source = &authoredSky->authoredSkySource;
+		float maxAverage = 0.0f;
+		sky->flags |= ATMOSPHERE_SKY_AUTHORED_AVAILABLE;
+		sky->authoredSkyIdentity = authoredSky->digest;
+		sky->sourceRevision ^= authoredSky->digest;
+		if ( sky->sourceRevision == 0u || sky->sourceRevision == UINT64_MAX )
+			sky->sourceRevision = authoredSky->digest ^ UINT64_C( 0x9e3779b97f4a7c15 );
+		for ( uint32_t channel = 0u; channel < 3u; ++channel ) {
+			sky->ambientSh[channel] = authoredSky->authoredSkyAverage[channel];
+			outSnapshot->state.ambientColor[channel] =
+				authoredSky->authoredSkyAverage[channel];
+			if ( authoredSky->authoredSkyAverage[channel] > maxAverage )
+				maxAverage = authoredSky->authoredSkyAverage[channel];
+		}
+		sky->skyLuminance = maxAverage;
+		if ( source->hasSun ) {
+			const float degreesToRadians = 0.01745329251994329577f;
+			float azimuth = source->sunAzimuthDegrees * degreesToRadians;
+			float elevation = source->sunElevationDegrees * degreesToRadians;
+			float colorLength = sqrtf( source->sunColor[0] * source->sunColor[0]
+				+ source->sunColor[1] * source->sunColor[1]
+				+ source->sunColor[2] * source->sunColor[2] );
+			float intensity = source->sunIntensity * 0.01f;
+			if ( !( sky->flags & ATMOSPHERE_SKY_SUN_OVERRIDE ) ) {
+				sky->sunDirection[0] = cosf( azimuth ) * cosf( elevation );
+				sky->sunDirection[1] = sinf( azimuth ) * cosf( elevation );
+				sky->sunDirection[2] = sinf( elevation );
+			}
+			memcpy( outSnapshot->state.sunDirection, sky->sunDirection,
+				sizeof( sky->sunDirection ) );
+			for ( uint32_t channel = 0u; channel < 3u; ++channel )
+				sky->sunRadiance[channel] = colorLength > 0.0f
+					? source->sunColor[channel] * intensity / colorLength : 0.0f;
+			outSnapshot->state.sunIntensity = intensity;
+		}
+	}
 	*outEmitters = state->atmosphereEmitters;
+	return qtrue;
+}
+
+uint64_t RenderSubmission_SkyEnvironmentDigest(
+		const renderAtmosphereSnapshot_t *snapshot )
+{
+	uint64_t digest;
+	float cloudSunTransmission;
+	if ( !snapshot || snapshot->state.skyEnvironment.schemaVersion !=
+			WIRED_SKY_ENVIRONMENT_SCHEMA_VERSION ||
+			!isfinite( snapshot->state.cloudCover ) ||
+			snapshot->state.cloudCover < 0.0f || snapshot->state.cloudCover > 1.0f )
+		return 0u;
+	digest = AtmosphereHashBytes( ATMOSPHERE_FNV_OFFSET,
+		&snapshot->state.skyEnvironment, sizeof( snapshot->state.skyEnvironment ) );
+	/* Coverage is atmosphere-local but changes the radiance source's sun lobe.
+	 * Key its effective transmission so weather changes cancel stale captures,
+	 * while coverage with zero authored shadow strength causes no recapture. */
+	cloudSunTransmission = 1.0f - snapshot->state.cloudCover
+		* snapshot->state.skyEnvironment.cloudSunOcclusion;
+	digest = AtmosphereHashBytes( digest, &cloudSunTransmission,
+		sizeof( cloudSunTransmission ) );
+	if ( digest == 0u || digest == UINT64_MAX ) digest ^= UINT64_C( 0x9e3779b97f4a7c15 );
+	return digest;
+}
+
+qboolean RenderSubmission_BuildSkyEnvironmentRuntimeRequest(
+		const renderAtmosphereSnapshot_t *snapshot,
+		const ralSkyEnvironmentRuntimeState_t *runtime,
+		ralBackendType_t backendType, uint64_t frameGeneration,
+		ralAtmosphereTier_t requestedTier, uint32_t eventMask,
+		uint32_t completedWorkMask, uint32_t maxWorkItems,
+		float timelineSeconds,
+		const ralSkyEnvironmentCapabilities_t *capabilities,
+		ralSkyEnvironmentRuntimeRequest_t *outRequest )
+{
+	ralSkyEnvironmentRuntimeRequest_t request;
+	const atmosphereSkyEnvironment_t *sky;
+	uint64_t sourceDigest;
+	if ( !snapshot || !runtime || !capabilities || !outRequest ||
+			runtime->schemaVersion != RAL_SKY_ENVIRONMENT_RUNTIME_SCHEMA_VERSION ||
+			runtime->backendType != backendType || !Ral_BackendTypeValid( backendType ) ||
+			frameGeneration == 0u ||
+			frameGeneration == UINT64_MAX || requestedTier > RAL_ATMOSPHERE_TIER_FULL ||
+			( eventMask & ~RAL_SKY_EVENT_ALL ) != 0u ||
+			( completedWorkMask & ~RAL_SKY_DIRTY_ALL ) != 0u ||
+			maxWorkItems > RAL_SKY_ENVIRONMENT_MAX_WORK_ITEMS ||
+			!isfinite( timelineSeconds ) || timelineSeconds < 0.0f ) return qfalse;
+	sky = &snapshot->state.skyEnvironment;
+	if ( sky->schemaVersion != WIRED_SKY_ENVIRONMENT_SCHEMA_VERSION ||
+			sky->mode > ATMOSPHERE_SKY_HYBRID ) return qfalse;
+	sourceDigest = RenderSubmission_SkyEnvironmentDigest( snapshot );
+	if ( sourceDigest == 0u ) return qfalse;
+	memset( &request, 0, sizeof( request ) );
+	request.schemaVersion = RAL_SKY_ENVIRONMENT_RUNTIME_SCHEMA_VERSION;
+	request.backendType = backendType;
+	request.frameGeneration = frameGeneration;
+	request.requestedTier = (uint32_t)requestedTier;
+	request.mode = (ralSkyEnvironmentMode_t)sky->mode;
+	request.sourceRevision = sourceDigest;
+	request.eventMask = eventMask;
+	if ( runtime->lastFrameGeneration != 0u &&
+			( runtime->sourceRevision != sourceDigest || runtime->mode != request.mode ) )
+		request.eventMask |= RAL_SKY_EVENT_SOURCE_CHANGE;
+	request.completedWorkMask = completedWorkMask;
+	request.maxWorkItems = maxWorkItems;
+	request.timelineSeconds = timelineSeconds;
+	request.deltaSeconds = runtime->lastFrameGeneration != 0u &&
+		!( request.eventMask & ( RAL_SKY_EVENT_MAP_TRANSITION |
+			RAL_SKY_EVENT_DEVICE_RECREATE | RAL_SKY_EVENT_SOURCE_CHANGE ) ) &&
+		timelineSeconds >= runtime->timelineSeconds
+		? timelineSeconds - runtime->timelineSeconds : 0.0f;
+	request.crossfadeSeconds = snapshot->state.transitionSeconds;
+	memcpy( request.sunDirection, sky->sunDirection,
+		sizeof( request.sunDirection ) );
+	memcpy( request.sunRadiance, sky->sunRadiance,
+		sizeof( request.sunRadiance ) );
+	memcpy( request.moonDirection, sky->moonDirection,
+		sizeof( request.moonDirection ) );
+	memcpy( request.moonRadiance, sky->moonRadiance,
+		sizeof( request.moonRadiance ) );
+	memcpy( request.ambientSh, sky->ambientSh,
+		sizeof( request.ambientSh ) );
+	request.cloudSunOcclusion = sky->cloudSunOcclusion;
+	request.skyLuminance = sky->skyLuminance;
+	request.exposure = sky->exposure;
+	request.opticsVisibility = sky->opticsVisibility;
+	request.authoredSkyAvailable =
+		( sky->flags & ATMOSPHERE_SKY_AUTHORED_AVAILABLE ) ? qtrue : qfalse;
+	request.distantSceneRequested =
+		( sky->flags & ATMOSPHERE_SKY_DISTANT_SCENE ) ? qtrue : qfalse;
+	request.distantSceneIdentity = sky->distantSceneIdentity;
+	memcpy( request.distantSceneOrigin, sky->distantSceneOrigin,
+		sizeof( request.distantSceneOrigin ) );
+	request.distantSceneScale = sky->distantSceneScale;
+	request.distantSceneLodBias = sky->distantSceneLodBias;
+	request.capabilities = *capabilities;
+	*outRequest = request;
 	return qtrue;
 }
 
@@ -1176,6 +1512,244 @@ qboolean RenderSubmission_AddEffectBeam( renderSubmissionState_t *state,
 	return qtrue;
 }
 
+void RenderEffectBeamPool_Reset( renderEffectBeamPool_t *pool )
+{
+	if ( !pool ) return;
+	memset( pool, 0, sizeof( *pool ) );
+	pool->schemaVersion = RENDER_EFFECT_BEAM_POOL_SCHEMA_VERSION;
+	pool->digest = UINT64_C( 1469598103934665603 );
+	pool->ready = qtrue;
+}
+
+static uint64_t EffectBeamPoolHash( uint64_t digest, const void *bytes,
+		size_t byteCount )
+{
+	const unsigned char *cursor = (const unsigned char *)bytes;
+	for ( size_t i = 0u; i < byteCount; ++i ) {
+		digest ^= cursor[i];
+		digest *= UINT64_C( 1099511628211 );
+	}
+	return digest;
+}
+
+static qboolean EffectBeamPoolValid( const renderEffectBeamPool_t *pool )
+{
+	uint32_t activeCount = 0u;
+	if ( !pool || pool->schemaVersion != RENDER_EFFECT_BEAM_POOL_SCHEMA_VERSION
+			|| !isfinite( pool->timelineSeconds ) || pool->timelineSeconds < 0.0f
+			|| !pool->digest || pool->ready != qtrue ) return qfalse;
+	for ( uint32_t i = 0u; i < RENDER_SUBMISSION_MAX_EFFECT_BEAMS; ++i ) {
+		const renderEffectBeamSlot_t *slot = &pool->slots[i];
+		if ( !slot->active ) continue;
+		activeCount++;
+		if ( !isfinite( slot->spawnTime ) || !isfinite( slot->expiresAt )
+				|| slot->spawnTime < 0.0f || slot->expiresAt < slot->spawnTime )
+			return qfalse;
+	}
+	return activeCount == pool->activeCount;
+}
+
+qboolean RenderEffectBeamPool_Advance(
+		const renderEffectBeamPool_t *current, uint64_t frameGeneration,
+		qboolean timelineAvailable, float timelineSeconds,
+		const beamDesc_t *submitted, uint32_t submittedCount,
+		renderEffectBeamPool_t *outCandidate,
+		renderEffectBeamPoolReceipt_t *outReceipt )
+{
+	renderEffectBeamPool_t candidate;
+	renderEffectBeamPoolReceipt_t receipt;
+	uint64_t digest = UINT64_C( 1469598103934665603 );
+	if ( !current || !outCandidate || !outReceipt || !frameGeneration
+			|| frameGeneration == UINT64_MAX || !EffectBeamPoolValid( current )
+			|| submittedCount > RENDER_SUBMISSION_MAX_EFFECT_BEAMS
+			|| ( submittedCount && !submitted )
+			|| ( timelineAvailable && ( !isfinite( timelineSeconds )
+				|| timelineSeconds < 0.0f ) )
+			|| ( !timelineAvailable && submittedCount ) ) return qfalse;
+	candidate = *current;
+	memset( &receipt, 0, sizeof( receipt ) );
+	receipt.schemaVersion = RENDER_EFFECT_BEAM_POOL_SCHEMA_VERSION;
+	receipt.frameGeneration = frameGeneration;
+	receipt.submittedCount = submittedCount;
+	receipt.timelineAvailable = timelineAvailable;
+	if ( timelineAvailable ) {
+		if ( candidate.timelineSeconds > timelineSeconds ) {
+			RenderEffectBeamPool_Reset( &candidate );
+		}
+		for ( uint32_t i = 0u; i < RENDER_SUBMISSION_MAX_EFFECT_BEAMS; ++i ) {
+			renderEffectBeamSlot_t *slot = &candidate.slots[i];
+			if ( slot->active && ( slot->transient
+					|| timelineSeconds >= slot->expiresAt ) ) {
+				slot->active = qfalse;
+				receipt.retiredCount++;
+			}
+		}
+		for ( uint32_t beamIndex = 0u; beamIndex < submittedCount; ++beamIndex ) {
+			uint32_t slotIndex;
+			for ( slotIndex = 0u; slotIndex < RENDER_SUBMISSION_MAX_EFFECT_BEAMS;
+					++slotIndex )
+				if ( !candidate.slots[slotIndex].active ) break;
+			if ( slotIndex == RENDER_SUBMISSION_MAX_EFFECT_BEAMS ) {
+				receipt.droppedCount++;
+				continue;
+			}
+			candidate.slots[slotIndex].beam = submitted[beamIndex];
+			candidate.slots[slotIndex].spawnTime = timelineSeconds;
+			candidate.slots[slotIndex].expiresAt = timelineSeconds
+				+ fmaxf( submitted[beamIndex].duration, 1.0f / 60.0f );
+			candidate.slots[slotIndex].transient =
+				submitted[beamIndex].duration <= 0.0f ? qtrue : qfalse;
+			candidate.slots[slotIndex].active = qtrue;
+			receipt.admittedCount++;
+		}
+		candidate.timelineSeconds = timelineSeconds;
+	}
+	candidate.activeCount = 0u;
+	for ( uint32_t i = 0u; i < RENDER_SUBMISSION_MAX_EFFECT_BEAMS; ++i ) {
+		const renderEffectBeamSlot_t *slot = &candidate.slots[i];
+		if ( !slot->active ) continue;
+		candidate.activeCount++;
+		digest = EffectBeamPoolHash( digest, &i, sizeof( i ) );
+		digest = EffectBeamPoolHash( digest, slot, sizeof( *slot ) );
+	}
+	if ( !digest ) digest = 1u;
+	candidate.digest = digest;
+	candidate.ready = qtrue;
+	receipt.activeCount = candidate.activeCount;
+	receipt.digest = candidate.digest;
+	receipt.ready = qtrue;
+	if ( !EffectBeamPoolValid( &candidate ) ) return qfalse;
+	*outCandidate = candidate;
+	*outReceipt = receipt;
+	return qtrue;
+}
+
+qboolean RenderEffectBeamPool_ReceiptExact(
+		const renderEffectBeamPool_t *pool,
+		const renderEffectBeamPoolReceipt_t *receipt )
+{
+	return EffectBeamPoolValid( pool ) && receipt
+		&& receipt->schemaVersion == RENDER_EFFECT_BEAM_POOL_SCHEMA_VERSION
+		&& receipt->frameGeneration && receipt->frameGeneration != UINT64_MAX
+		&& receipt->digest == pool->digest
+		&& receipt->activeCount == pool->activeCount
+		&& receipt->admittedCount + receipt->droppedCount
+			== receipt->submittedCount
+		&& receipt->ready == qtrue;
+}
+
+void RenderEffectDecalPool_Reset( renderEffectDecalPool_t *pool )
+{
+	if ( !pool ) return;
+	memset( pool, 0, sizeof( *pool ) );
+	pool->schemaVersion = RENDER_EFFECT_DECAL_POOL_SCHEMA_VERSION;
+	pool->digest = UINT64_C( 1469598103934665603 );
+	pool->ready = qtrue;
+}
+
+static qboolean EffectDecalPoolValid( const renderEffectDecalPool_t *pool )
+{
+	uint32_t activeCount = 0u;
+	if ( !pool || pool->schemaVersion != RENDER_EFFECT_DECAL_POOL_SCHEMA_VERSION
+			|| !isfinite( pool->timelineSeconds ) || pool->timelineSeconds < 0.0f
+			|| !pool->digest || pool->ready != qtrue ) return qfalse;
+	for ( uint32_t i = 0u; i < RENDER_SUBMISSION_MAX_EFFECT_DECALS; ++i ) {
+		const renderEffectDecalSlot_t *slot = &pool->slots[i];
+		if ( !slot->active ) continue;
+		activeCount++;
+		if ( !isfinite( slot->spawnTime ) || !isfinite( slot->expiresAt )
+				|| slot->spawnTime < 0.0f || slot->expiresAt < slot->spawnTime )
+			return qfalse;
+	}
+	return activeCount == pool->activeCount;
+}
+
+qboolean RenderEffectDecalPool_Advance(
+		const renderEffectDecalPool_t *current, uint64_t frameGeneration,
+		qboolean timelineAvailable, float timelineSeconds,
+		const decalDesc_t *submitted, uint32_t submittedCount,
+		renderEffectDecalPool_t *outCandidate,
+		renderEffectDecalPoolReceipt_t *outReceipt )
+{
+	renderEffectDecalPool_t candidate;
+	renderEffectDecalPoolReceipt_t receipt;
+	uint64_t digest = UINT64_C( 1469598103934665603 );
+	if ( !current || !outCandidate || !outReceipt || !frameGeneration
+			|| frameGeneration == UINT64_MAX || !EffectDecalPoolValid( current )
+			|| submittedCount > RENDER_SUBMISSION_MAX_EFFECT_DECALS
+			|| ( submittedCount && !submitted )
+			|| ( timelineAvailable && ( !isfinite( timelineSeconds )
+				|| timelineSeconds < 0.0f ) )
+			|| ( !timelineAvailable && submittedCount ) ) return qfalse;
+	candidate = *current;
+	memset( &receipt, 0, sizeof( receipt ) );
+	receipt.schemaVersion = RENDER_EFFECT_DECAL_POOL_SCHEMA_VERSION;
+	receipt.frameGeneration = frameGeneration;
+	receipt.submittedCount = submittedCount;
+	receipt.timelineAvailable = timelineAvailable;
+	if ( timelineAvailable ) {
+		if ( candidate.timelineSeconds > timelineSeconds )
+			RenderEffectDecalPool_Reset( &candidate );
+		for ( uint32_t i = 0u; i < RENDER_SUBMISSION_MAX_EFFECT_DECALS; ++i ) {
+			renderEffectDecalSlot_t *slot = &candidate.slots[i];
+			if ( slot->active && timelineSeconds >= slot->expiresAt ) {
+				slot->active = qfalse;
+				receipt.retiredCount++;
+			}
+		}
+		for ( uint32_t decalIndex = 0u; decalIndex < submittedCount;
+				++decalIndex ) {
+			uint32_t slotIndex;
+			for ( slotIndex = 0u; slotIndex < RENDER_SUBMISSION_MAX_EFFECT_DECALS;
+					++slotIndex )
+				if ( !candidate.slots[slotIndex].active ) break;
+			if ( slotIndex == RENDER_SUBMISSION_MAX_EFFECT_DECALS ) {
+				receipt.droppedCount++;
+				continue;
+			}
+			candidate.slots[slotIndex].decal = submitted[decalIndex];
+			candidate.slots[slotIndex].spawnTime = timelineSeconds;
+			candidate.slots[slotIndex].expiresAt = timelineSeconds
+				+ fmaxf( submitted[decalIndex].lifetime, 1.0f / 60.0f );
+			candidate.slots[slotIndex].active = qtrue;
+			receipt.admittedCount++;
+		}
+		candidate.timelineSeconds = timelineSeconds;
+	}
+	candidate.activeCount = 0u;
+	for ( uint32_t i = 0u; i < RENDER_SUBMISSION_MAX_EFFECT_DECALS; ++i ) {
+		const renderEffectDecalSlot_t *slot = &candidate.slots[i];
+		if ( !slot->active ) continue;
+		candidate.activeCount++;
+		digest = EffectBeamPoolHash( digest, &i, sizeof( i ) );
+		digest = EffectBeamPoolHash( digest, slot, sizeof( *slot ) );
+	}
+	if ( !digest ) digest = 1u;
+	candidate.digest = digest;
+	candidate.ready = qtrue;
+	receipt.activeCount = candidate.activeCount;
+	receipt.digest = candidate.digest;
+	receipt.ready = qtrue;
+	if ( !EffectDecalPoolValid( &candidate ) ) return qfalse;
+	*outCandidate = candidate;
+	*outReceipt = receipt;
+	return qtrue;
+}
+
+qboolean RenderEffectDecalPool_ReceiptExact(
+		const renderEffectDecalPool_t *pool,
+		const renderEffectDecalPoolReceipt_t *receipt )
+{
+	return EffectDecalPoolValid( pool ) && receipt
+		&& receipt->schemaVersion == RENDER_EFFECT_DECAL_POOL_SCHEMA_VERSION
+		&& receipt->frameGeneration && receipt->frameGeneration != UINT64_MAX
+		&& receipt->digest == pool->digest
+		&& receipt->activeCount == pool->activeCount
+		&& receipt->admittedCount + receipt->droppedCount
+			== receipt->submittedCount
+		&& receipt->ready == qtrue;
+}
+
 qboolean RenderSubmission_EffectPrimitiveSnapshots(
 		const renderSubmissionState_t *state,
 		renderEffectPrimitiveSnapshot_t *outSnapshot,
@@ -1206,6 +1780,276 @@ qboolean RenderSubmission_EffectPrimitiveSnapshots(
 	*outRibbonPoints = state->effectRibbonPoints;
 	*outBeams = state->effectBeams;
 	return qtrue;
+}
+
+static void EffectParticlePackParm( ralParticleParmGpu_t *out,
+		const particleParm_t *value )
+{
+	memset( out, 0, sizeof( *out ) );
+	out->calc = (int32_t)value->calc;
+	out->hasCurve = (int32_t)value->hasCurve;
+	out->val0 = value->val0;
+	out->val1 = value->val1;
+	out->variance = value->variance;
+	memcpy( out->samples, value->samples, sizeof( out->samples ) );
+}
+
+static qboolean EffectParticlePackClasses(
+		const renderSubmissionState_t *frontend,
+		ralParticleClassGpu_t classes[MAX_PARTICLE_CLASSES],
+		uint32_t *outClassCount, uint64_t *outDigest )
+{
+	uint32_t highestHandle = 0u, framePoolCursor = 0u;
+	uint64_t digest = ATMOSPHERE_FNV_OFFSET;
+	if ( !frontend || !classes || !outClassCount || !outDigest ) return qfalse;
+	memset( classes, 0, (size_t)MAX_PARTICLE_CLASSES * sizeof( *classes ) );
+	for ( uint32_t slot = 0u; slot < MAX_PARTICLE_CLASSES; ++slot ) {
+		particleClass_t value;
+		uint32_t materialIndex;
+		const renderMaterialSnapshot_t *material;
+		ralParticleClassGpu_t *out = &classes[slot];
+		if ( !RenderSubmission_GetParticleClass( frontend,
+				(particleClassHandle_t)( slot + 1u ), &value ) ) continue;
+		if ( !RenderSubmission_MaterialIndex( frontend, value.shader,
+				&materialIndex ) ) return qfalse;
+		/* Borrow only for this evaluation; retain no pointer or cached metadata.
+		 * Read the needed fields without copying the full stage packet. */
+		material = &frontend->materials[materialIndex].snapshot;
+		if ( material->ready != qtrue ) return qfalse;
+		memset( out, 0, sizeof( *out ) );
+		out->shader = (uint32_t)value.shader;
+		out->renderFlags = (uint32_t)value.renderFlags;
+		out->emitMode = (uint32_t)value.emitMode;
+		out->scatterShape = (uint32_t)value.scatterShape;
+		out->scatterMagnitude = value.scatterMagnitude;
+		out->velocityShape = (uint32_t)value.velocityShape;
+		out->axialSpeed = value.axialSpeed;
+		out->cubeJitter = value.cubeJitter;
+		out->coneHalfAngle = value.coneHalfAngle;
+		out->lifetimeMean = value.lifetimeMean;
+		out->lifetimeJitter = value.lifetimeJitter;
+		out->paletteCount = value.paletteCount;
+		memcpy( out->colorPalette, value.colorPalette,
+			sizeof( out->colorPalette ) );
+		memcpy( out->colorEndMult, value.colorEndMult,
+			sizeof( out->colorEndMult ) );
+		out->sizeStart = value.sizeStart;
+		out->sizeEnd = value.sizeEnd;
+		out->gravityScale = value.gravityScale;
+		out->drag = value.drag;
+		out->shaderBlendIsAdditive =
+			material->alphaMode == RENDER_ALPHA_ADDITIVE
+			|| material->alphaMode == RENDER_ALPHA_ALPHA_ADDITIVE
+			|| ( value.renderFlags & PRIM_FLAG_ADDITIVE ) ? 1u : 0u;
+		memcpy( out->velocityBias, value.velocityBias, 3u * sizeof( float ) );
+		memcpy( out->velocityBiasJitter, value.velocityBiasJitter,
+			3u * sizeof( float ) );
+		out->speedJitter = value.speedJitter;
+		out->sizeJitter = value.sizeJitter;
+		out->colorDomain = material->srgb ? 0u : 1u;
+		out->frameCount = value.frameCount > 1
+			? (uint32_t)value.frameCount : 0u;
+		out->frameBlend = value.frameBlend ? 1u : 0u;
+		if ( out->frameCount ) {
+			if ( framePoolCursor + out->frameCount > FRAME_POOL_SIZE )
+				return qfalse;
+			for ( uint32_t frame = 0u; frame < out->frameCount; ++frame ) {
+				uint32_t frameMaterialIndex;
+				if ( !RenderSubmission_MaterialIndex( frontend,
+						value.frameShaders[frame], &frameMaterialIndex )
+						|| frontend->materials[frameMaterialIndex].snapshot.ready
+							!= qtrue ) return qfalse;
+				out->frameSlots[frame] = MAX_PARTICLE_CLASSES
+					+ framePoolCursor++;
+			}
+		}
+		EffectParticlePackParm( &out->sizeParm, &value.sizeParm );
+		EffectParticlePackParm( &out->alphaParm, &value.alphaParm );
+		EffectParticlePackParm( &out->dragParm, &value.dragParm );
+		EffectParticlePackParm( &out->gravityParm, &value.gravityParm );
+		digest = AtmosphereHashBytes( digest, &slot, sizeof( slot ) );
+		digest = AtmosphereHashBytes( digest, out, sizeof( *out ) );
+		highestHandle = slot + 1u;
+	}
+	if ( !digest ) digest = 1u;
+	*outClassCount = highestHandle;
+	*outDigest = digest;
+	return qtrue;
+}
+
+void RenderEffectParticlePlan_Reset( renderEffectParticlePlanState_t *state )
+{
+	if ( !state ) return;
+	memset( state, 0, sizeof( *state ) );
+	state->schemaVersion = RENDER_EFFECT_PARTICLE_PLAN_SCHEMA_VERSION;
+	state->digest = ATMOSPHERE_FNV_OFFSET;
+	state->ready = qtrue;
+}
+
+static qboolean EffectParticlePlanStateValid(
+		const renderEffectParticlePlanState_t *state )
+{
+	return state
+		&& state->schemaVersion == RENDER_EFFECT_PARTICLE_PLAN_SCHEMA_VERSION
+		&& state->nextSlot < RAL_PARTICLE_POOL_CAPACITY
+		&& isfinite( state->timelineSeconds ) && state->timelineSeconds >= 0.0f
+		&& state->digest && state->ready == qtrue
+		&& ( state->timelineAvailable == qfalse
+			|| state->timelineAvailable == qtrue );
+}
+
+qboolean RenderEffectParticlePlan_Build(
+		const renderSubmissionState_t *frontend,
+		const renderEffectParticlePlanState_t *current,
+		uint64_t frameGeneration, qboolean timelineAvailable,
+		float timelineSeconds, ralParticleClassGpu_t *outClasses,
+		uint32_t classCapacity, ralParticleSpawnGpu_t *outSpawns,
+		uint32_t spawnCapacity, renderEffectParticlePlanState_t *outCandidate,
+		renderEffectParticlePlanReceipt_t *outReceipt )
+{
+	renderEffectPrimitiveSnapshot_t snapshot;
+	const spriteDesc_t *sprites;
+	const emitterDesc_t *emitters;
+	const decalDesc_t *decals;
+	const renderEffectRibbonCommand_t *ribbons;
+	const ribbonPoint_t *points;
+	const beamDesc_t *beams;
+	renderEffectParticlePlanState_t candidate;
+	renderEffectParticlePlanReceipt_t receipt;
+	ralParticleClassGpu_t classes[MAX_PARTICLE_CLASSES];
+	ralParticleSpawnGpu_t spawns[RAL_PARTICLE_SPAWN_REQUEST_MAX];
+	uint64_t digest, classDigest;
+	uint32_t classCount, spawnCount = 0u;
+	if ( !frontend || !EffectParticlePlanStateValid( current )
+			|| !frameGeneration || frameGeneration == UINT64_MAX
+			|| ( timelineAvailable != qfalse && timelineAvailable != qtrue )
+			|| ( timelineAvailable && ( !isfinite( timelineSeconds )
+				|| timelineSeconds < 0.0f ) )
+			|| classCapacity < MAX_PARTICLE_CLASSES
+			|| spawnCapacity < RAL_PARTICLE_SPAWN_REQUEST_MAX
+			|| !outClasses || !outSpawns || !outCandidate || !outReceipt
+			|| !RenderSubmission_EffectPrimitiveSnapshots( frontend, &snapshot,
+				&sprites, &emitters, &decals, &ribbons, &points, &beams ) )
+		return qfalse;
+	(void)sprites; (void)decals; (void)ribbons; (void)points; (void)beams;
+	if ( snapshot.emitterCount && !timelineAvailable ) return qfalse;
+	if ( !EffectParticlePackClasses( frontend, classes, &classCount,
+			&classDigest ) ) return qfalse;
+	memset( spawns, 0, sizeof( spawns ) );
+	candidate = *current;
+	if ( timelineAvailable && ( !candidate.timelineAvailable
+			|| candidate.timelineSeconds > timelineSeconds ) )
+		candidate.nextSlot = 0u;
+	memset( &receipt, 0, sizeof( receipt ) );
+	receipt.schemaVersion = RENDER_EFFECT_PARTICLE_PLAN_SCHEMA_VERSION;
+	receipt.frameGeneration = frameGeneration;
+	receipt.classDigest = classDigest;
+	receipt.submittedEmitterCount = snapshot.emitterCount;
+	receipt.timelineAvailable = timelineAvailable;
+	for ( uint32_t emitterIndex = 0u; emitterIndex < snapshot.emitterCount;
+			++emitterIndex ) {
+		const emitterDesc_t *emitter = &emitters[emitterIndex];
+		uint32_t requested = (uint32_t)emitter->count;
+		uint32_t remaining = RAL_PARTICLE_POOL_CAPACITY
+			- receipt.admittedParticleCount;
+		uint32_t admitted = requested < remaining ? requested : remaining;
+		receipt.requestedParticleCount += requested;
+		if ( !admitted || spawnCount >= RAL_PARTICLE_SPAWN_REQUEST_MAX ) {
+			receipt.droppedEmitterCount++;
+			receipt.droppedParticleCount += requested;
+			continue;
+		}
+		memcpy( spawns[spawnCount].origin, emitter->origin,
+			3u * sizeof( float ) );
+		memcpy( spawns[spawnCount].axis, emitter->axis,
+			3u * sizeof( float ) );
+		memcpy( spawns[spawnCount].end, emitter->end,
+			3u * sizeof( float ) );
+		memcpy( spawns[spawnCount].colorTint, emitter->colorTint,
+			4u * sizeof( float ) );
+		spawns[spawnCount].classHandle = (uint32_t)emitter->cls;
+		spawns[spawnCount].count = admitted;
+		spawns[spawnCount].firstSlot = candidate.nextSlot;
+		if ( ++candidate.nextSeed == 0u ) candidate.nextSeed = 1u;
+		spawns[spawnCount].seed = candidate.nextSeed;
+		candidate.nextSlot = ( candidate.nextSlot + admitted )
+			% RAL_PARTICLE_POOL_CAPACITY;
+		spawnCount++;
+		receipt.admittedEmitterCount++;
+		receipt.admittedParticleCount += admitted;
+		receipt.droppedParticleCount += requested - admitted;
+	}
+	if ( timelineAvailable ) {
+		candidate.timelineAvailable = qtrue;
+		candidate.timelineSeconds = timelineSeconds;
+	}
+	digest = classDigest;
+	digest = AtmosphereHashBytes( digest, &frameGeneration,
+		sizeof( frameGeneration ) );
+	digest = AtmosphereHashBytes( digest, &spawnCount, sizeof( spawnCount ) );
+	digest = AtmosphereHashBytes( digest, spawns,
+		(size_t)spawnCount * sizeof( *spawns ) );
+	if ( !digest ) digest = 1u;
+	candidate.digest = digest;
+	candidate.ready = qtrue;
+	receipt.digest = digest;
+	receipt.classCount = classCount;
+	receipt.spawnRequestCount = spawnCount;
+	receipt.nextSlot = candidate.nextSlot;
+	receipt.nextSeed = candidate.nextSeed;
+	receipt.ready = qtrue;
+	if ( !EffectParticlePlanStateValid( &candidate )
+			|| receipt.admittedEmitterCount + receipt.droppedEmitterCount
+				!= receipt.submittedEmitterCount
+			|| receipt.admittedParticleCount + receipt.droppedParticleCount
+				!= receipt.requestedParticleCount ) return qfalse;
+	memcpy( outClasses, classes, sizeof( classes ) );
+	memcpy( outSpawns, spawns, sizeof( spawns ) );
+	*outCandidate = candidate;
+	*outReceipt = receipt;
+	return qtrue;
+}
+
+qboolean RenderEffectParticlePlan_ReceiptExact(
+		const renderEffectParticlePlanState_t *candidate,
+		const ralParticleClassGpu_t *classes,
+		const ralParticleSpawnGpu_t *spawns,
+		const renderEffectParticlePlanReceipt_t *receipt )
+{
+	uint64_t digest;
+	if ( !EffectParticlePlanStateValid( candidate ) || !classes || !spawns
+			|| !receipt
+			|| receipt->schemaVersion
+				!= RENDER_EFFECT_PARTICLE_PLAN_SCHEMA_VERSION
+			|| !receipt->frameGeneration
+			|| receipt->frameGeneration == UINT64_MAX
+			|| receipt->classCount > MAX_PARTICLE_CLASSES
+			|| receipt->spawnRequestCount > RAL_PARTICLE_SPAWN_REQUEST_MAX
+			|| receipt->admittedEmitterCount + receipt->droppedEmitterCount
+				!= receipt->submittedEmitterCount
+			|| receipt->admittedParticleCount + receipt->droppedParticleCount
+				!= receipt->requestedParticleCount
+			|| receipt->nextSlot != candidate->nextSlot
+			|| receipt->nextSeed != candidate->nextSeed
+			|| receipt->timelineAvailable != candidate->timelineAvailable
+			|| receipt->ready != qtrue ) return qfalse;
+	digest = ATMOSPHERE_FNV_OFFSET;
+	for ( uint32_t slot = 0u; slot < receipt->classCount; ++slot ) {
+		if ( !classes[slot].shader ) continue;
+		digest = AtmosphereHashBytes( digest, &slot, sizeof( slot ) );
+		digest = AtmosphereHashBytes( digest, &classes[slot],
+			sizeof( classes[slot] ) );
+	}
+	if ( !digest ) digest = 1u;
+	if ( digest != receipt->classDigest ) return qfalse;
+	digest = AtmosphereHashBytes( digest, &receipt->frameGeneration,
+		sizeof( receipt->frameGeneration ) );
+	digest = AtmosphereHashBytes( digest, &receipt->spawnRequestCount,
+		sizeof( receipt->spawnRequestCount ) );
+	digest = AtmosphereHashBytes( digest, spawns,
+		(size_t)receipt->spawnRequestCount * sizeof( *spawns ) );
+	if ( !digest ) digest = 1u;
+	return digest == receipt->digest && digest == candidate->digest;
 }
 
 uint32_t RenderSubmission_AtmosphereLightCount( const renderSubmissionState_t *state )

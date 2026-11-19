@@ -1096,7 +1096,7 @@ void vk_ral_release_engine_resources_bindgroup( void )
 
 qboolean vk_ral_refresh_engine_resources_bindgroup( void )
 {
-	ralBindingValue_t values[5];
+	ralBindingValue_t values[7];
 	ralBindGroupCreateInfo_t createInfo;
 	ralTextureView_t *shadowViewCandidate = NULL, *shadowViewRetired;
 	ralBindGroup_t *groupCandidate = NULL, *groupRetired;
@@ -1162,6 +1162,24 @@ qboolean vk_ral_refresh_engine_resources_bindgroup( void )
 		ADD_ENGINE_COMBINED( WIRED_ENGINE_RES_BIND_RADIANCE,
 			vk.ral_probe_radiance_cube_view, vk.ral_ibl_sampler );
 	}
+	if ( vk.ral_probe_irradiance_cube_view ) {
+		const ralTextureView_t *previous =
+			vk.atm.skyRadianceReceipt.previousProductValid
+				&& vk.probeIrradianceTargetReadable
+				? vk.ral_probe_irradiance_target_cube_view
+				: vk.ral_probe_irradiance_cube_view;
+		ADD_ENGINE_COMBINED( WIRED_ENGINE_RES_BIND_PREV_IRRADIANCE,
+			previous, vk.ral_ibl_sampler );
+	}
+	if ( vk.ral_probe_radiance_cube_view ) {
+		const ralTextureView_t *previous =
+			vk.atm.skyRadianceReceipt.previousProductValid
+				&& vk.probeRadianceTargetReadable
+				? vk.ral_probe_radiance_target_cube_view
+				: vk.ral_probe_radiance_cube_view;
+		ADD_ENGINE_COMBINED( WIRED_ENGINE_RES_BIND_PREV_RADIANCE,
+			previous, vk.ral_ibl_sampler );
+	}
 
 	if ( vk.ral_gtao_denoised_view || vk.ral_gtao_sampler ) {
 		if ( !vk.ral_gtao_denoised_view || !vk.ral_gtao_sampler ) goto fail;
@@ -1178,10 +1196,12 @@ qboolean vk_ral_refresh_engine_resources_bindgroup( void )
 
 	for ( i = 0u; i < valueCount; ++i )
 		for ( j = 0u; j < i; ++j )
-			if ( values[i].textureView == values[j].textureView
-					|| Ral_GetTextureViewHandle( values[i].textureView )
-						== Ral_GetTextureViewHandle(
-							values[j].textureView ) ) goto fail;
+			if ( values[i].binding != WIRED_ENGINE_RES_BIND_PREV_IRRADIANCE
+					&& values[i].binding != WIRED_ENGINE_RES_BIND_PREV_RADIANCE
+					&& ( values[i].textureView == values[j].textureView
+						|| Ral_GetTextureViewHandle( values[i].textureView )
+							== Ral_GetTextureViewHandle(
+								values[j].textureView ) ) ) goto fail;
 	memset( &createInfo, 0, sizeof( createInfo ) );
 	createInfo.layout = vk.ral_bgl_engine_resources;
 	createInfo.values = values;
@@ -1329,9 +1349,10 @@ qboolean vk_ral_refresh_primitive_bindgroups( void )
 		  || !Ral_GetTextureViewHandle( image->ralResidencyView ) ) return qfalse;
 		views[i] = image->ralResidencyView;
 	}
-	clampSampler = vk_ral_lookup_sampler( vk.particle.sampler );
+	clampSampler = vk.particle.ral_sampler;
 	repeatSampler = vk.beam.ral_sampler_repeat;
 	if ( !clampSampler || !repeatSampler
+	  || Ral_GetSamplerHandle( clampSampler ) != (void *)vk.particle.sampler
 	  || Ral_GetSamplerHandle( repeatSampler ) != (void *)vk.beam.sampler_repeat )
 		return qfalse;
 	stageBuffer = vk.ral_primitive_stages_buffer;
@@ -2110,7 +2131,7 @@ void vk_ral_textures_shutdown( qboolean destroyWindow ) {
 	// only wrappers are freed; underlying VkImages remain renderer-owned.
 	// GPU culling is world-owned rather than attachment-owned, so it is released
 	// only on this full backend teardown path, not on live HDR/FBO rebuilds.
-	vk_cull_shutdown();
+	vk_cull_shutdown_worlds();
 	vk_ral_release_internal_texture_dependents();
 
 	// renderer-side RAL pipeline +

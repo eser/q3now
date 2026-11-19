@@ -627,7 +627,12 @@ ralResult_t Ral_Present( ralBackend_t *b, const ralPresentInfo_t *info ) {
 	pi.pWaitSemaphores    = ( info->numWaitSemaphores > 0 ) ? vkWaits : NULL;
 	pi.pResults           = NULL;
 
-	res = b->vk.QueuePresentKHR( b->queues[ RAL_QUEUE_GRAPHICS ], &pi );
+	/* Presentation may be display-paced even for an IMMEDIATE swapchain on
+	 * translation layers.  When the graphics family exposes a second queue,
+	 * RAL owns it solely for present so that display pacing cannot serialize
+	 * the following frame's graphics submit.  Single-queue devices retain the
+	 * exact established alias path. */
+	res = b->vk.QueuePresentKHR( b->presentQueue, &pi );
 	for ( i = 0; i < info->numSwapchains; i++ )
 		info->swapchains[i]->imageStates[info->imageIndices[i]] = RAL_VK_SWAPCHAIN_IMAGE_AVAILABLE;
 	free( vkWaits );

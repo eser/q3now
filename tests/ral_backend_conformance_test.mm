@@ -16,6 +16,8 @@
 #include <stdio.h>
 #include <string.h>
 
+extern "C" qboolean wired_test_vulkan_sky_capture(ralBackend_t *backend);
+
 #define CHECK(x) do { if (!(x)) { fprintf(stderr,"FAIL %s:%d: %s\n",__FILE__,__LINE__,#x); return 1; } } while (0)
 
 typedef struct {
@@ -162,6 +164,88 @@ done:
 	return ok;
 }
 
+static qboolean RunVulkanAttachmentLayers( ralBackend_t *backend, ralTextureType_t type ) {
+	ralTextureCreateInfo_t ti = {};
+	ralBufferCreateInfo_t bi = {};
+	ralTexture_t *texture = NULL;
+	ralBuffer_t *readback = NULL;
+	ralCommandBuffer_t *command = NULL;
+	ralFence_t *fence = NULL;
+	ralCommandReceipt_t recording, executable;
+	ralSubmissionReceipt_t submission;
+	qboolean ok = qfalse;
+	ti.type = type; ti.format = RAL_FORMAT_R8G8B8A8_UNORM;
+	ti.width = ti.height = 4; ti.depthOrArrayLayers = 6;
+	ti.mipLevels = ti.sampleCount = 1;
+	ti.memory = RAL_MEMORY_DEVICE_LOCAL;
+	ti.usage = (ralTextureUsage_t)(RAL_TEXTURE_USAGE_COLOR_ATTACHMENT | RAL_TEXTURE_USAGE_TRANSFER_SRC);
+	bi.size = 6u * 1024u;
+	bi.usage = (ralBufferUsage_t)(RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_MAP_READ);
+	bi.memory = RAL_MEMORY_HOST_COHERENT;
+	do {
+		texture = Ral_CreateTexture(backend, &ti);
+		readback = Ral_CreateBuffer(backend, &bi);
+		command = Ral_AcquireCommandBuffer(backend, RAL_QUEUE_GRAPHICS);
+		fence = Ral_CreateFence(backend);
+		if (!texture || !readback || !command || !fence) break;
+		if (Ral_BeginCommandBufferExact(command, &recording) != ralSuccess) break;
+		// Distinct colors in six faces, then overwrite only face 2. Every sibling
+		// must survive the second pass; a cube sampling view cannot satisfy this.
+		for (unsigned passIndex = 0; passIndex < 7; ++passIndex) {
+			unsigned face = passIndex < 6 ? passIndex : 2;
+			unsigned bits = passIndex < 6 ? face : 7;
+			ralRenderingInfo_t pass = {};
+			pass.numColorAttachments = 1;
+			pass.colorAttachments[0] = texture;
+			pass.colorAttachmentLayerIndices[0] = face;
+			pass.colorLoadOps[0] = RAL_LOAD_OP_CLEAR;
+			pass.colorStoreOps[0] = RAL_STORE_OP_STORE;
+			for (unsigned c = 0; c < 3; ++c) pass.colorClears[0].color[c] = (bits >> c) & 1u;
+			pass.colorClears[0].color[3] = 1.0f;
+			pass.renderArea.width = pass.renderArea.height = 4;
+			Ral_BeginRendering(command, &pass);
+			Ral_EndRendering(command);
+		}
+		Ral_CmdTransitionTexture(command, texture, RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			RAL_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+		bool copied = true;
+		for (unsigned face = 0; face < 6; ++face) {
+			ralBufferTextureCopy_t copy = {};
+			copy.bufferOffset = face * 1024u;
+			copy.bytesPerRow = 256; copy.rowsPerImage = 4;
+			copy.arrayLayer = face; copy.aspects = RAL_TEXTURE_ASPECT_COLOR;
+			copy.imageRect.width = copy.imageRect.height = 4;
+			if (!Ral_CmdCopyTextureToBuffer(command, texture, readback, &copy)) copied = false;
+		}
+		if (!copied || Ral_EndCommandBufferExact(command, &recording, &executable) != ralSuccess) break;
+		ralSubmitInfo_t submit = {};
+		submit.commandBuffers = &command; submit.numCommandBuffers = 1; submit.signalFence = fence;
+		if (Ral_SubmitExact(backend, RAL_QUEUE_GRAPHICS, &submit, &executable, &submission) != ralSuccess) break;
+		Ral_WaitFence(fence, RAL_TIMEOUT_INFINITE);
+		if (!Ral_FenceSignaled(fence)) break;
+		const uint8_t *pixels = (const uint8_t *)Ral_MapBuffer(readback);
+		if (!pixels) break;
+		ok = qtrue;
+		for (unsigned face = 0; face < 6; ++face)
+			for (unsigned y = 0; y < 4; ++y)
+				for (unsigned x = 0; x < 4; ++x)
+					for (unsigned c = 0; c < 4; ++c) {
+						unsigned bits = face == 2 ? 7 : face;
+						unsigned expected = c == 3 || ((bits >> c) & 1u) ? 255 : 0;
+						if (pixels[face * 1024 + y * 256 + x * 4 + c] != expected) ok = qfalse;
+					}
+		Ral_UnmapBuffer(readback);
+	} while (0);
+	(void)Ral_WaitQueueIdle(backend, RAL_QUEUE_GRAPHICS);
+	if (fence) Ral_DestroyFence(fence);
+	if (command) Ral_DestroyCommandBuffer(command);
+	if (readback) Ral_DestroyBuffer(readback);
+	if (texture) Ral_DestroyTexture(texture);
+	printf("Vulkan GPU %s six-layer clear/rewrite/readback: %s\n",
+		type == RAL_TEXTURE_CUBE ? "cube" : "array", ok ? "PASS" : "FAIL");
+	return ok;
+}
+
 static qboolean RunVulkanCopy( vulkanHost_t *host,
 		ralBackendConformanceReceipt_t *outReceipt ) {
 	const uint64_t byteCount = 4096u;
@@ -294,6 +378,9 @@ static qboolean RunVulkanCopy( vulkanHost_t *host,
 		facts.copiedByteDigest = digest;
 		if ( !Ral_BackendConformanceBuild( &facts, &receipt ) ) break;
 		if ( !RunVulkanLighting( backend ) ) break;
+		if ( !wired_test_vulkan_sky_capture( backend ) ) break;
+		if ( !RunVulkanAttachmentLayers( backend, RAL_TEXTURE_CUBE )
+				|| !RunVulkanAttachmentLayers( backend, RAL_TEXTURE_2D_ARRAY ) ) break;
 		*outReceipt = receipt;
 		ok = qtrue;
 	} while ( 0 );

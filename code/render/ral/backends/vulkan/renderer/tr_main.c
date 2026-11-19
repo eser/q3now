@@ -1842,7 +1842,7 @@ void R_ReleaseCompositeOrderStatics( void )
 R_SortDrawSurfs
 =================
 */
-static qboolean R_SortDrawSurfs( drawSurf_t *drawSurfs, int numDrawSurfs ) {
+static qboolean R_PrepareDrawSurfs( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	shader_t		*shader;
 	int				fogNum;
 	int				entityNum;
@@ -1851,8 +1851,7 @@ static qboolean R_SortDrawSurfs( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 
 	// it is possible for some views to not have any surfaces
 	if ( numDrawSurfs < 1 ) {
-		// we still need to add it for hyperspace cases
-		return R_AddDrawSurfCmd( drawSurfs, numDrawSurfs );
+		return qtrue;
 	}
 
 	// sort the drawsurfs by sort type, then orientation, then shader
@@ -1912,8 +1911,165 @@ static qboolean R_SortDrawSurfs( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	}
 #endif // USE_PMLIGHT
 
+	return qtrue;
+}
+
+static qboolean R_SortDrawSurfs( drawSurf_t *drawSurfs, int numDrawSurfs ) {
+	if ( !R_PrepareDrawSurfs( drawSurfs, numDrawSurfs ) ) return qfalse;
 	return R_AddDrawSurfCmd( drawSurfs, numDrawSurfs );
 }
+
+#ifdef USE_VULKAN
+/*
+====================
+R_QueueDistantWorldPasses
+
+Lower the shared, pointer-free distant-world receipt into the native renderer's
+ordinary world surface path.  The command stream owns the world selection and
+pass boundaries explicitly so no gameplay world selection leaks across the
+deferred backend execution:
+
+  main authored sky -> distant non-sky -> main foreground/effects/UI
+
+Every transition preserves color and clears depth.  Only the final foreground
+command finalizes temporal/entity/effect work, so splitting a view never repeats
+WiredFX, decals, particles, flares or postprocess consumers.
+====================
+*/
+static qboolean R_QueueDistantWorldPasses( drawSurf_t *mainDrawSurfs,
+		int mainCount, int mainWorldIndex,
+		const renderDistantWorldSubmission_t *distant ) {
+	trRefdef_t mainRefdef, distantRefdef;
+	viewParms_t mainView, distantView;
+	drawSurf_t *skyDrawSurfs, *distantDrawSurfs;
+	int skyFirst = -1, skyCount = 0, foregroundCount;
+	int originalEnd, distantStart, distantCount, distantWorldIndex;
+	qboolean seenSkyEnd = qfalse;
+
+	if ( !distant || !RenderSubmission_DistantWorldSubmissionExact(
+			distant, distant ) || distant->backendType != RAL_BACKEND_VULKAN
+			|| mainWorldIndex < 0 || mainWorldIndex >= MAX_RENDER_APP_WORLDS )
+		return qfalse;
+	for ( int index = 0; index < mainCount; ++index ) {
+		int entityNum, fogNum, dlighted;
+		shader_t *shader;
+		R_DecomposeSort( mainDrawSurfs[index].sort, &entityNum, &shader,
+			&fogNum, &dlighted );
+		if ( shader && shader->isSky ) {
+			if ( seenSkyEnd ) return qfalse;
+			if ( skyFirst < 0 ) skyFirst = index;
+			skyCount++;
+		} else if ( skyFirst >= 0 ) {
+			seenSkyEnd = qtrue;
+		}
+	}
+
+	originalEnd = tr.refdef.numDrawSurfs;
+	if ( originalEnd < 0 || originalEnd > MAX_DRAWSURFS
+			|| skyCount > MAX_DRAWSURFS - originalEnd
+			|| (int)distant->drawPlan.admittedCount
+				> MAX_DRAWSURFS - originalEnd - skyCount ) return qfalse;
+	/* All refusal paths must run before the first command is queued or the main
+	 * draw-surface range is compacted.  Reserve the worst-case three commands
+	 * up front; the render command list is single-threaded during frontend
+	 * submission, so successful preflight makes the later adds atomic. */
+	if ( !R_CommandBufferCanReserve( 3 * (int)sizeof( drawSurfsCommand_t ) ) )
+		return qfalse;
+
+	mainRefdef = tr.refdef;
+	mainView = tr.viewParms;
+	distantWorldIndex = RENDER_DISTANT_WORLD_BASE + mainWorldIndex;
+	R_SetWorldSlot( distantWorldIndex );
+	if ( !tr.world || !tr.world->bmodels ) {
+		R_SetWorldSlot( mainWorldIndex );
+		return qfalse;
+	}
+	distantStart = originalEnd + skyCount;
+	tr.refdef = mainRefdef;
+	tr.refdef.numDrawSurfs = distantStart;
+	tr.refdef.num_entities = 0;
+	tr.refdef.num_dlights = 0;
+	tr.refdef.numPolys = 0;
+	memcpy( tr.refdef.vieworg, distant->world.viewOrigin,
+		sizeof( tr.refdef.vieworg ) );
+	memcpy( tr.refdef.viewaxis, distant->world.viewAxis,
+		sizeof( tr.refdef.viewaxis ) );
+	distantView = mainView;
+	memcpy( distantView.or.origin, distant->world.viewOrigin,
+		sizeof( distantView.or.origin ) );
+	memcpy( distantView.or.axis, distant->world.viewAxis,
+		sizeof( distantView.or.axis ) );
+	memcpy( distantView.pvsOrigin, distant->world.viewOrigin,
+		sizeof( distantView.pvsOrigin ) );
+	distantView.temporalWorldIndex = -1;
+	distantView.temporalFrameId = 0u;
+	tr.viewParms = distantView;
+	R_RotateForViewer();
+	R_SetupProjection( &tr.viewParms, r_zproj->value, qtrue );
+	VectorCopy( tr.world->bmodels[0].bounds[0], tr.viewParms.visBounds[0] );
+	VectorCopy( tr.world->bmodels[0].bounds[1], tr.viewParms.visBounds[1] );
+	R_SetFarClip();
+	if ( tr.viewParms.zFar <= r_znear->value ) tr.viewParms.zFar = 2048.0f;
+	R_SetupProjectionZ( &tr.viewParms );
+	tr.currentEntity = &tr.worldEntity;
+	tr.currentEntityNum = REFENTITYNUM_WORLD;
+	tr.shiftedEntityNum = tr.currentEntityNum << QSORT_REFENTITYNUM_SHIFT;
+	for ( uint32_t selection = 0u;
+			selection < distant->drawPlan.admittedCount; ++selection ) {
+		const uint32_t batchIndex =
+			distant->drawPlan.selections[selection].sourceDrawIndex;
+		const renderWorldBatch_t *batch = &distant->world.batches[batchIndex];
+		msurface_t *surface;
+		if ( batch->sourceSurfaceIndex >= (uint32_t)tr.world->numsurfaces )
+			continue;
+		surface = &tr.world->surfaces[batch->sourceSurfaceIndex];
+		if ( !surface->data || !surface->shader || surface->shader->isSky )
+			continue;
+		R_AddDrawSurf( surface->data, surface->shader, surface->fogIndex, 0 );
+	}
+	distantCount = tr.refdef.numDrawSurfs - distantStart;
+	distantDrawSurfs = tr.refdef.drawSurfs + distantStart;
+	if ( distantCount ) R_RadixSort( distantDrawSurfs, distantCount );
+	distantRefdef = tr.refdef;
+	distantView = tr.viewParms;
+
+	/* Lowering is now complete and cannot refuse.  Restore the main frontend
+	 * state, move its sky range into the reserved tail, and queue the complete
+	 * pass transaction contiguously for screen-map duplication. */
+	R_SetWorldSlot( mainWorldIndex );
+	tr.refdef = mainRefdef;
+	skyDrawSurfs = tr.refdef.drawSurfs + originalEnd;
+	if ( skyCount ) {
+		const int afterSky = skyFirst + skyCount;
+		memcpy( skyDrawSurfs, mainDrawSurfs + skyFirst,
+			(size_t)skyCount * sizeof( *skyDrawSurfs ) );
+		memmove( mainDrawSurfs + skyFirst, mainDrawSurfs + afterSky,
+			(size_t)( mainCount - afterSky ) * sizeof( *mainDrawSurfs ) );
+	}
+	foregroundCount = mainCount - skyCount;
+	tr.refdef.numDrawSurfs = distantStart + distantCount;
+	tr.viewParms = mainView;
+	if ( skyCount ) {
+		(void)R_AddDrawSurfPassCmd( skyDrawSurfs, skyCount,
+			mainWorldIndex, qtrue, qtrue, qfalse );
+	}
+	if ( distantCount ) {
+		R_SetWorldSlot( distantWorldIndex );
+		tr.refdef = distantRefdef;
+		tr.viewParms = distantView;
+		(void)R_AddDrawSurfPassCmd( distantDrawSurfs, distantCount,
+			distantWorldIndex, qtrue, skyCount ? qfalse : qtrue, qfalse );
+		R_SetWorldSlot( mainWorldIndex );
+		tr.refdef = mainRefdef;
+		tr.refdef.numDrawSurfs = distantStart + distantCount;
+		tr.viewParms = mainView;
+	}
+	(void)R_AddDrawSurfPassCmd( mainDrawSurfs, foregroundCount,
+		mainWorldIndex, distantCount ? qtrue : ( skyCount ? qtrue : qfalse ),
+		distantCount || skyCount ? qfalse : qtrue, qtrue );
+	return qtrue;
+}
+#endif
 
 
 /*
@@ -2050,6 +2206,10 @@ void R_RenderView( const viewParms_t *parms ) {
 	int		numDrawSurfs;
 	uint64_t temporalFrameId;
 	qboolean queued;
+#ifdef USE_VULKAN
+	renderDistantWorldSubmission_t distantSubmission;
+	qboolean distantReady = qfalse;
+#endif
 
 	if ( parms->viewportWidth <= 0 || parms->viewportHeight <= 0 ) {
 		return;
@@ -2083,8 +2243,31 @@ void R_RenderView( const viewParms_t *parms ) {
 		numDrawSurfs = MAX_DRAWSURFS;
 	}
 
+#ifdef USE_VULKAN
+	memset( &distantSubmission, 0, sizeof( distantSubmission ) );
+	if ( parms->portalView == PV_NONE && parms->temporalWorldIndex >= 0 )
+		distantReady = R_FrontendDistantWorldSubmission( &distantSubmission );
+	if ( distantReady ) {
+		queued = R_PrepareDrawSurfs( tr.refdef.drawSurfs + firstDrawSurf,
+			numDrawSurfs - firstDrawSurf );
+		if ( queued && !R_QueueDistantWorldPasses(
+				tr.refdef.drawSurfs + firstDrawSurf,
+				numDrawSurfs - firstDrawSurf,
+				parms->temporalWorldIndex, &distantSubmission ) ) {
+			/* Distant lowering is optional presentation work.  Its refusal paths
+			 * are transactionally side-effect-free, so preserve the already
+			 * prepared main view rather than dropping the entire frame. */
+			queued = R_AddDrawSurfCmd( tr.refdef.drawSurfs + firstDrawSurf,
+				numDrawSurfs - firstDrawSurf );
+		}
+	} else {
+		queued = R_SortDrawSurfs( tr.refdef.drawSurfs + firstDrawSurf,
+			numDrawSurfs - firstDrawSurf );
+	}
+#else
 	queued = R_SortDrawSurfs( tr.refdef.drawSurfs + firstDrawSurf,
 		numDrawSurfs - firstDrawSurf );
+#endif
 	R_TemporalProjectionFinish( tr.viewParms.temporalWorldIndex,
 		temporalFrameId, queued );
 }

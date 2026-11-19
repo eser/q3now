@@ -128,10 +128,13 @@ foreach(source IN LISTS RENDERER_VK_C)
 	endif()
 endforeach()
 
-# Every RAL binding-0/binding-1 writer lives inside the publication wrappers.
+# Every RAL binding-0/binding-1 writer lives inside the publication wrappers:
+# vk_ral_bindless_publish_texture_view (publication) and
+# vk_ral_bindless_tombstone (eviction replaces the descriptor with the pinned
+# white view before the ledger forgets its owner).
 string(REGEX MATCHALL "Ral_BindGroupSetTextureViewAt[(]" texture_view_writes "${TEXTURES}")
 list(LENGTH texture_view_writes texture_view_count)
-if(NOT texture_view_count EQUAL 1)
+if(NOT texture_view_count EQUAL 2)
 	message(FATAL_ERROR "TextureViewAt writer inventory drifted: ${texture_view_count}")
 endif()
 string(REGEX MATCHALL "Ral_BindGroupSetTextureViewsAt[(]" texture_views_writes "${TEXTURES}")
@@ -139,10 +142,12 @@ list(LENGTH texture_views_writes texture_views_count)
 if(NOT texture_views_count EQUAL 1)
 	message(FATAL_ERROR "TextureViewsAt writer inventory drifted: ${texture_views_count}")
 endif()
+# The tombstone writes through the view writer above; only the publication
+# wrapper still writes a raw texture.
 string(REGEX MATCHALL "Ral_BindGroupSetTextureAt[(]" texture_writes "${TEXTURES}")
 list(LENGTH texture_writes texture_count)
-if(NOT texture_count EQUAL 2)
-	message(FATAL_ERROR "TextureAt wrapper/tombstone inventory drifted: ${texture_count}")
+if(NOT texture_count EQUAL 1)
+	message(FATAL_ERROR "TextureAt wrapper inventory drifted: ${texture_count}")
 endif()
 string(REGEX MATCHALL "Ral_BindGroupSetSamplerAt[(]" sampler_writes "${TEXTURES}")
 list(LENGTH sampler_writes sampler_count)
@@ -154,7 +159,7 @@ foreach(needle IN ITEMS
 	"if ( !Ral_BindGroupSetTextureViewsAt( s_ral_bindless_set, slots, views, count ) )"
 	"if ( !Ral_BindGroupSetTextureAt( s_ral_bindless_set, slot, texture ) )"
 	"if ( !Ral_BindGroupSetSamplerAt( s_ral_bindless_set, slot, sampler ) )"
-	"if ( !Ral_BindGroupSetTextureAt( s_ral_bindless_set, slot, NULL ) )")
+	"|| !Ral_BindGroupSetTextureViewAt( s_ral_bindless_set, slot,")
 	require_text("${TEXTURES}" "${needle}" "write-before-ledger failure gate")
 endforeach()
 foreach(needle IN ITEMS
@@ -178,9 +183,11 @@ list(LENGTH vk_sampler_writes vk_sampler_count)
 if(NOT vk_sampler_count EQUAL 0)
 	message(FATAL_ERROR "vk.c bypasses the sampler publication wrapper")
 endif()
+# The reserved primitive slots (ribbon, rail ribbon, beam) publish through the
+# view writer; vk.c must not write raw textures into the bindless set.
 string(REGEX MATCHALL "Ral_BindGroupSetTextureAt[(]" vk_texture_writes "${VK}")
 list(LENGTH vk_texture_writes vk_texture_count)
-if(NOT vk_texture_count EQUAL 1)
+if(NOT vk_texture_count EQUAL 0)
 	message(FATAL_ERROR "vk.c reserved TextureAt inventory drifted: ${vk_texture_count}")
 endif()
 string(FIND "${VK}" "Ral_BindGroupSetTextureAt( ralSet, WIRED_BINDLESS_SCENEDEPTH_SLOT" depth_write_pos)

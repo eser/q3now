@@ -174,6 +174,11 @@ typedef struct {
 	// Ral_BeginRendering/Ral_EndRendering wrap this dynamic-rendering scope in
 	// one balanced debug-label pair. NULL keeps the path byte-for-byte inert.
 	const char     *debugName;
+	// Mip-0 array layer / cube face, independently selected for each color and
+	// resolve attachment. Zero selects the ordinary 2D target or first layer.
+	// Invalid or unavailable layers reject the entire begin before recording.
+	uint32_t        colorAttachmentLayerIndices[RAL_MAX_COLOR_ATTACHMENTS];
+	uint32_t        resolveAttachmentLayerIndices[RAL_MAX_COLOR_ATTACHMENTS];
 } ralRenderingInfo_t;
 
 void Ral_BeginRendering( ralCommandBuffer_t *cb, const ralRenderingInfo_t *ri );

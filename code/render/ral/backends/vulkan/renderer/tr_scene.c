@@ -1211,14 +1211,14 @@ void RE_AddLensSourceToScene( const lensSourceDesc_t *desc ) {
 
 // Read back the oracle's last-frame visibility (0..1) for a registered source id.
 // Returns qfalse when no GPU oracle is available (no registry mapped, e.g. r_lens
-// off / no FBO) so the game falls back to its own occlusion test (zero feature
-// loss). The 1-frame delay is intentional and matches the flare/halo contract:
+// off / no FBO). Callers fail closed; there is no CPU trace or unconditional-draw
+// substitute. The 1-frame delay is intentional and matches the flare/halo contract:
 // the oracle samples this frame's record next frame; we read what it wrote last.
 qboolean RE_GetLensVisibility( int id, float *outVis ) {
 	int slot;
 
 	if ( !vk.lensSourcesPtr || !r_lens || !r_lens->integer || !vk.ral_lens_pipeline ) {
-		if ( outVis ) *outVis = 1.0f;   // no oracle → treat as fully visible
+		if ( outVis ) *outVis = 0.0f;
 		return qfalse;
 	}
 
@@ -1238,9 +1238,9 @@ qboolean RE_GetLensVisibility( int id, float *outVis ) {
 		(d).val0     = (srcParm).val0; \
 		(d).val1     = (srcParm).val1; \
 		(d).variance = (srcParm).variance; \
-		(d).parmPad0 = 0.0f; \
-		(d).parmPad1 = 0.0f; \
-		(d).parmPad2 = 0.0f; \
+		(d).pad[0] = 0.0f; \
+		(d).pad[1] = 0.0f; \
+		(d).pad[2] = 0.0f; \
 		/* Samples arrive already resolved: the curve table lives on the \
 		   authoring side, and what crosses the boundary is a flat copy. The \
 		   renderer therefore needs no knowledge of curve names or indices. */ \
@@ -1249,14 +1249,53 @@ qboolean RE_GetLensVisibility( int id, float *outVis ) {
 			(d).samples[cI] = (srcParm).samples[cI]; \
 	} while ( 0 )
 
+/* Resolve only authored inputs. R_GetShaderByHandle may return a default
+ * shader, which must never silently replace a WiredFX particle texture. */
+static shader_t *ParticleAuthoredShader( qhandle_t handle ) {
+	shader_t *shader = R_GetShaderByHandle( handle );
+	return shader && shader != tr.defaultShader && !shader->defaultShader
+		&& shader->stages[0] && shader->stages[0]->bundle[0].image[0]
+		? shader : NULL;
+}
+
 void RE_RegisterParticleClass( particleClassHandle_t handle, const particleClass_t *cls ) {
 	particleClassGPU_t local;
 	particleClassGPU_t *dst;
+	shader_t *classShader;
+	image_t *frameImages[PARTICLE_CLASS_MAX_FRAMES];
 	int i;
 
 	if ( !vk.particle.available ) return;
 	if ( cls == NULL ) return;
 	if ( handle < 1 || handle > MAX_PARTICLE_CLASSES ) return;
+
+	/* Validate every input before changing registry generations or pool slots. */
+	classShader = ParticleAuthoredShader( cls->shader );
+	if ( !classShader || cls->frameCount < 0
+			|| cls->frameCount > PARTICLE_CLASS_MAX_FRAMES ) {
+		ri.Terminate( TERM_CLIENT_DROP,
+			"WiredFX particle class %d: invalid authored shader %d or frame count %d",
+			handle, cls->shader, cls->frameCount );
+		return;
+	}
+	if ( cls->frameCount > 1 ) {
+		if ( vk.particle.frameNextSlot > FRAME_POOL_SIZE
+				|| (uint32_t)cls->frameCount > FRAME_POOL_SIZE - vk.particle.frameNextSlot ) {
+			ri.Terminate( TERM_CLIENT_DROP,
+				"WiredFX particle class %d: animation frame pool exhausted", handle );
+			return;
+		}
+		for ( i = 0; i < cls->frameCount; ++i ) {
+			shader_t *frameShader = ParticleAuthoredShader( cls->frameShaders[i] );
+			if ( !frameShader ) {
+				ri.Terminate( TERM_CLIENT_DROP,
+					"WiredFX particle class %d: invalid authored frame %d shader %d",
+					handle, i, cls->frameShaders[i] );
+				return;
+			}
+			frameImages[i] = frameShader->stages[0]->bundle[0].image[0];
+		}
+	}
 
 	// Build one complete element locally, then publish it into the RAL-owned
 	// class shadow as a single dirty slot.
@@ -1349,8 +1388,7 @@ void RE_RegisterParticleClass( particleClassHandle_t handle, const particleClass
 
 	// ── Resolve class shader → image, write to sampler array.
 	//
-	// Three-tier fallback mirrors the IQM precedent at
-	// tr_model_iqm.c:1495-1504. The resolved image_t is cached in
+	// The prevalidated authored image_t is cached in
 	// vk.particle.classImages[] so vk_init_descriptors's re-alloc
 	// path can re-walk the registry after a pool reset.
 	//
@@ -1360,19 +1398,9 @@ void RE_RegisterParticleClass( particleClassHandle_t handle, const particleClass
 	// PRIM_FLAG_ADDITIVE bit on cls->renderFlags is no longer
 	// load-bearing for blend selection. See primitives.h.
 	{
-		shader_t *resolvedShader = R_GetShaderByHandle( cls->shader );
-		image_t  *resolvedImage;
+		shader_t *resolvedShader = classShader;
+		image_t  *resolvedImage = classShader->stages[0]->bundle[0].image[0];
 		uint32_t  isAdditive = 0;
-
-		if ( resolvedShader && resolvedShader->stages[0]
-		  && resolvedShader->stages[0]->bundle[0].image[0] ) {
-			resolvedImage = resolvedShader->stages[0]->bundle[0].image[0];
-		} else if ( tr.defaultShader && tr.defaultShader->stages[0]
-		         && tr.defaultShader->stages[0]->bundle[0].image[0] ) {
-			resolvedImage = tr.defaultShader->stages[0]->bundle[0].image[0];
-		} else {
-			resolvedImage = tr.whiteImage;
-		}
 
 		// Derive blend mode from the resolved shader's stage 0 state
 		// bits. Two patterns are recognised as additive:
@@ -1404,52 +1432,15 @@ void RE_RegisterParticleClass( particleClassHandle_t handle, const particleClass
 		vk_particle_set_class_image( handle, resolvedImage );
 	}
 
-	// ── Sprite-frame (flipbook) resolve. Only when the class opts in
-	// (frameCount > 1). Each frameShaders[i] resolves to a dedicated
-	// frame-pool slot [64..95] via the same three-tier image fallback as
-	// the single shader; the resolved ABSOLUTE sampler-array slot
-	// (MAX_PARTICLE_CLASSES + bare pool slot = [64..95], per the vk.h
-	// frameSlots[] contract) is stored in dst->frameSlots[i] so the
-	// fragment's particleSamplers[frameSlot0] indexes the frame pool
-	// directly. A static class (frameCount <= 1) skips this entirely →
-	// byte-identical.
+	/* Capacity and all frame images were validated before publication. Empty
+	 * descriptor slots remain harmless sentinels, never authored substitutes. */
 	if ( cls->frameCount > 1 ) {
-		int n = cls->frameCount;
-		int i;
-		if ( n > PARTICLE_CLASS_MAX_FRAMES ) n = PARTICLE_CLASS_MAX_FRAMES;
-
-		// Fail gracefully if the frame pool cannot fit this class's
-		// frames: leave frameCount 0 (static fallback via `shader`),
-		// matching how a full class table is tolerated rather than
-		// corrupting the pool. Registration of the class itself stands.
-		if ( vk.particle.frameNextSlot + (uint32_t)n > FRAME_POOL_SIZE ) {
-			R_LOG( rch_cmd, SEV_WARN,
-				"RE_RegisterParticleClass: frame pool overflow (%u + %d > %u); "
-				"class %d falls back to static shader\n",
-				vk.particle.frameNextSlot, n, (unsigned)FRAME_POOL_SIZE, handle );
-			dst->frameCount = 0;
-		} else {
-			for ( i = 0; i < n; i++ ) {
-				shader_t *fsh = R_GetShaderByHandle( cls->frameShaders[i] );
-				image_t  *fimg;
-				uint32_t  slot;
-
-				if ( fsh && fsh->stages[0]
-				  && fsh->stages[0]->bundle[0].image[0] ) {
-					fimg = fsh->stages[0]->bundle[0].image[0];
-				} else if ( tr.defaultShader && tr.defaultShader->stages[0]
-				         && tr.defaultShader->stages[0]->bundle[0].image[0] ) {
-					fimg = tr.defaultShader->stages[0]->bundle[0].image[0];
-				} else {
-					fimg = tr.whiteImage;
-				}
-
-				slot = vk.particle.frameNextSlot++;
-				dst->frameSlots[i] = (uint32_t)MAX_PARTICLE_CLASSES + slot;   // absolute sampler-array slot [64..95], per vk.h:1233 contract
-				vk_particle_set_frame_image( (int)slot, fimg );              // helper takes the BARE pool slot; it adds +MAX_PARTICLE_CLASSES itself (vk.c:7064)
-			}
-			dst->frameCount = (uint32_t)n;
+		for ( i = 0; i < cls->frameCount; ++i ) {
+			uint32_t slot = vk.particle.frameNextSlot++;
+			dst->frameSlots[i] = (uint32_t)MAX_PARTICLE_CLASSES + slot;
+			vk_particle_set_frame_image( (int)slot, frameImages[i] );
 		}
+		dst->frameCount = (uint32_t)cls->frameCount;
 	}
 
 	if ( !vk_particle_shadow_write_class( (uint32_t)handle - 1u, dst ) ) {
@@ -1516,7 +1507,7 @@ void RE_RenderScene( const refdef_t *fd, int worldIndex ) {
 		return;
 	}
 	startTime = ri.Milliseconds();
-	if ( fd->rdflags & RDF_HYPERSPACE ) {
+	if ( fd->rdflags & ( RDF_CAMERA_CUT | RDF_HYPERSPACE ) ) {
 		R_TemporalMarkCameraCut( worldIndex );
 	}
 
@@ -1550,6 +1541,7 @@ void RE_RenderScene( const refdef_t *fd, int worldIndex ) {
 	VectorCopy( fd->viewaxis[2], tr.refdef.viewaxis[2] );
 
 	tr.refdef.time = fd->time;
+	tr.refdef.sceneTime = fd->time;
 	tr.refdef.rdflags = fd->rdflags;
 
 	/* c2-shadertime-pin — dev/C2-smoke override: when r_pinShaderTime is

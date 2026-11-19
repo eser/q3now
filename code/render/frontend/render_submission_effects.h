@@ -5,6 +5,8 @@
 #define WIRED_RENDER_FRONTEND_SUBMISSION_EFFECTS_H
 
 #include "tr_types.h"
+#include "../ral/core/ral_atmosphere.h"
+#include "../ral/core/ral_particle_contract.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -25,6 +27,11 @@ extern "C" {
 #define RENDER_SUBMISSION_MAX_EFFECT_RIBBONS               512u
 #define RENDER_SUBMISSION_MAX_EFFECT_RIBBON_POINTS        8192u
 #define RENDER_SUBMISSION_MAX_EFFECT_BEAMS                  128u
+#define RENDER_SUBMISSION_MAX_LENS_SOURCES LENS_MAX_CGSOURCES
+#define RENDER_SUBMISSION_MAX_HEIGHTGRID_EDGE 256u
+#define RENDER_EFFECT_BEAM_POOL_SCHEMA_VERSION 1u
+#define RENDER_EFFECT_DECAL_POOL_SCHEMA_VERSION 1u
+#define RENDER_EFFECT_PARTICLE_PLAN_SCHEMA_VERSION 1u
 
 typedef struct {
 	qhandle_t material;
@@ -64,6 +71,113 @@ typedef struct {
 	uint32_t droppedCount;
 } renderEffectPrimitiveSnapshot_t;
 
+/* Backend-neutral lifetime authority for submitted beam recipes.  The pool is
+ * fixed-capacity and copied as a candidate before native lowering, allowing a
+ * backend to commit it only after the frame has rendered successfully. */
+typedef struct {
+	beamDesc_t beam;
+	float spawnTime;
+	float expiresAt;
+	qboolean active;
+	qboolean transient;
+} renderEffectBeamSlot_t;
+
+typedef struct {
+	uint32_t schemaVersion;
+	float timelineSeconds;
+	uint64_t digest;
+	uint32_t activeCount;
+	renderEffectBeamSlot_t slots[RENDER_SUBMISSION_MAX_EFFECT_BEAMS];
+	qboolean ready;
+} renderEffectBeamPool_t;
+
+typedef struct {
+	uint32_t schemaVersion;
+	uint64_t frameGeneration;
+	uint64_t digest;
+	uint32_t submittedCount;
+	uint32_t admittedCount;
+	uint32_t retiredCount;
+	uint32_t activeCount;
+	uint32_t droppedCount;
+	qboolean timelineAvailable;
+	qboolean ready;
+} renderEffectBeamPoolReceipt_t;
+
+/* Backend-neutral lifetime authority for submitted surface decals.  As with
+ * beams, adapters lower a complete candidate and commit it only after the
+ * native frame succeeds, so a failed frame cannot partially mutate lifetime
+ * ownership. */
+typedef struct {
+	decalDesc_t decal;
+	float spawnTime;
+	float expiresAt;
+	qboolean active;
+} renderEffectDecalSlot_t;
+
+typedef struct {
+	uint32_t schemaVersion;
+	float timelineSeconds;
+	uint64_t digest;
+	uint32_t activeCount;
+	renderEffectDecalSlot_t slots[RENDER_SUBMISSION_MAX_EFFECT_DECALS];
+	qboolean ready;
+} renderEffectDecalPool_t;
+
+typedef struct {
+	uint32_t schemaVersion;
+	uint64_t frameGeneration;
+	uint64_t digest;
+	uint32_t submittedCount;
+	uint32_t admittedCount;
+	uint32_t retiredCount;
+	uint32_t activeCount;
+	uint32_t droppedCount;
+	qboolean timelineAvailable;
+	qboolean ready;
+} renderEffectDecalPoolReceipt_t;
+
+/* Backend-neutral particle admission and GPU ABI publication.  Adapters build
+ * a complete candidate and submit its exact class/spawn buffers. Scheduling
+ * state advances only after native submission is accepted, so the next queued
+ * frame uses the submitted pool/slots even if later readback publication fails.
+ * This is not a GPU-completion receipt; readiness/retirement still require the
+ * backend completion path, and device loss invalidates the resource owner. */
+typedef struct {
+	uint32_t schemaVersion;
+	uint32_t nextSlot;
+	uint32_t nextSeed;
+	float timelineSeconds;
+	uint64_t digest;
+	qboolean timelineAvailable;
+	qboolean ready;
+} renderEffectParticlePlanState_t;
+
+typedef struct {
+	uint32_t schemaVersion;
+	uint64_t frameGeneration;
+	uint64_t classDigest;
+	uint64_t digest;
+	uint32_t submittedEmitterCount;
+	uint32_t admittedEmitterCount;
+	uint32_t droppedEmitterCount;
+	uint32_t requestedParticleCount;
+	uint32_t admittedParticleCount;
+	uint32_t droppedParticleCount;
+	uint32_t classCount;
+	uint32_t spawnRequestCount;
+	uint32_t nextSlot;
+	uint32_t nextSeed;
+	qboolean timelineAvailable;
+	qboolean ready;
+} renderEffectParticlePlanReceipt_t;
+
+typedef struct {
+	uint64_t digest;
+	uint32_t count;
+	uint32_t droppedCount;
+} renderLensSourceSnapshot_t;
+
 typedef struct {
 	atmosphereFrameState_t state;
 	uint64_t			   generation;
@@ -71,6 +185,16 @@ typedef struct {
 	uint32_t			   emitterCount;
 	qboolean			   active;
 } renderAtmosphereSnapshot_t;
+
+/* Borrowed immutable CPU data, owned by one resident world slot. Backends
+ * copy once per digest/lifecycle, never retain the caller's VM pointer. */
+typedef struct {
+	const float *samples;
+	float worldMins[2], worldMaxs[2], inverseStep[2];
+	uint32_t edge;
+	uint64_t digest, worldGeneration;
+	int worldIndex;
+} renderAtmosphereHeightgrid_t;
 
 typedef struct {
 	float wetness;
@@ -147,6 +271,12 @@ qboolean RenderSubmission_AddEffectRibbon( renderSubmissionState_t *state,
 	const ribbonDesc_t *ribbon );
 qboolean RenderSubmission_AddEffectBeam( renderSubmissionState_t *state,
 	const beamDesc_t *beam );
+qboolean RenderSubmission_AddLensSource( renderSubmissionState_t *state,
+	const lensSourceDesc_t *source );
+qboolean RenderSubmission_LensSourceSnapshot(
+	const renderSubmissionState_t *state,
+	renderLensSourceSnapshot_t *outSnapshot,
+	const lensSourceDesc_t **outSources );
 qboolean RenderSubmission_EffectPrimitiveSnapshots(
 	const renderSubmissionState_t *state,
 	renderEffectPrimitiveSnapshot_t *outSnapshot,
@@ -156,11 +286,51 @@ qboolean RenderSubmission_EffectPrimitiveSnapshots(
 	const renderEffectRibbonCommand_t **outRibbons,
 	const ribbonPoint_t **outRibbonPoints,
 	const beamDesc_t **outBeams );
+void RenderEffectBeamPool_Reset( renderEffectBeamPool_t *pool );
+qboolean RenderEffectBeamPool_Advance(
+	const renderEffectBeamPool_t *current, uint64_t frameGeneration,
+	qboolean timelineAvailable, float timelineSeconds,
+	const beamDesc_t *submitted, uint32_t submittedCount,
+	renderEffectBeamPool_t *outCandidate,
+	renderEffectBeamPoolReceipt_t *outReceipt );
+qboolean RenderEffectBeamPool_ReceiptExact(
+	const renderEffectBeamPool_t *pool,
+	const renderEffectBeamPoolReceipt_t *receipt );
+void RenderEffectDecalPool_Reset( renderEffectDecalPool_t *pool );
+qboolean RenderEffectDecalPool_Advance(
+	const renderEffectDecalPool_t *current, uint64_t frameGeneration,
+	qboolean timelineAvailable, float timelineSeconds,
+	const decalDesc_t *submitted, uint32_t submittedCount,
+	renderEffectDecalPool_t *outCandidate,
+	renderEffectDecalPoolReceipt_t *outReceipt );
+qboolean RenderEffectDecalPool_ReceiptExact(
+	const renderEffectDecalPool_t *pool,
+	const renderEffectDecalPoolReceipt_t *receipt );
+void RenderEffectParticlePlan_Reset( renderEffectParticlePlanState_t *state );
+qboolean RenderEffectParticlePlan_Build(
+	const renderSubmissionState_t *frontend,
+	const renderEffectParticlePlanState_t *current,
+	uint64_t frameGeneration, qboolean timelineAvailable,
+	float timelineSeconds, ralParticleClassGpu_t *outClasses,
+	uint32_t classCapacity, ralParticleSpawnGpu_t *outSpawns,
+	uint32_t spawnCapacity, renderEffectParticlePlanState_t *outCandidate,
+	renderEffectParticlePlanReceipt_t *outReceipt );
+qboolean RenderEffectParticlePlan_ReceiptExact(
+	const renderEffectParticlePlanState_t *candidate,
+	const ralParticleClassGpu_t *classes,
+	const ralParticleSpawnGpu_t *spawns,
+	const renderEffectParticlePlanReceipt_t *receipt );
 uint32_t RenderSubmission_AtmosphereLightCount( const renderSubmissionState_t *state );
 uint32_t RenderSubmission_AtmosphereShadowedLightCount( const renderSubmissionState_t *state );
 
 qboolean RenderSubmission_InitAtmosphere( renderSubmissionState_t *state );
+qboolean RenderSubmission_NormalizeAtmosphereState(
+	const atmosphereFrameState_t *value, atmosphereFrameState_t *out );
 qboolean RenderSubmission_SetAtmosphere( renderSubmissionState_t *state, const atmosphereFrameState_t *atmosphere );
+qboolean RenderSubmission_SetAtmosphereHeightgrid( renderSubmissionState_t *state,
+	const float *samples, int count );
+qboolean RenderSubmission_AtmosphereHeightgrid( const renderSubmissionState_t *state,
+	renderAtmosphereHeightgrid_t *out );
 qboolean RenderSubmission_RegisterAtmosphereEffectProfile( renderSubmissionState_t *state, uint32_t handle,
 														   const atmosphereEffectProfile_t *profile );
 qboolean RenderSubmission_GetAtmosphereEffectProfile( const renderSubmissionState_t *state, uint32_t handle,
@@ -199,6 +369,19 @@ uint64_t RenderSubmission_AtmosphereDigest( const renderSubmissionState_t *state
 qboolean RenderSubmission_AtmosphereSnapshot( const renderSubmissionState_t *state,
 											  renderAtmosphereSnapshot_t	*outSnapshot,
 											  const atmosphereEmitter_t	   **outEmitters );
+uint64_t RenderSubmission_SkyEnvironmentDigest( const renderAtmosphereSnapshot_t *snapshot );
+qboolean RenderSubmission_BuildSkyEnvironmentRuntimeRequest(
+	const renderAtmosphereSnapshot_t *snapshot,
+	const ralSkyEnvironmentRuntimeState_t *runtime,
+	ralBackendType_t backendType,
+	uint64_t frameGeneration,
+	ralAtmosphereTier_t requestedTier,
+	uint32_t eventMask,
+	uint32_t completedWorkMask,
+	uint32_t maxWorkItems,
+	float timelineSeconds,
+	const ralSkyEnvironmentCapabilities_t *capabilities,
+	ralSkyEnvironmentRuntimeRequest_t *outRequest );
 
 #ifdef __cplusplus
 }

@@ -45,7 +45,7 @@ require_text(VK_INIT "Cvar_Get( \"r_brightness\", \"1.4\"" "Vulkan RAL brightnes
 require_text(GL_WORLD "emissiveRadiance" "OpenGL typed surface emission")
 require_text(METAL_WORLD "emissionRadianceQ16" "Metal typed surface emission")
 require_text(WEBGPU_PRODUCT "worldMaterialData" "WebGPU typed world-material upload")
-require_text(WEBGPU_MODULE "color.rgb * emission" "WebGPU WGSL HDR emission consumption")
+require_text(WEBGPU_MODULE "authored*emission" "WebGPU WGSL HDR emission consumption")
 
 if(HEADER MATCHES "Vk[A-Z]|MTL[A-Z]|WGPU[A-Z]|GLuint|GLenum")
 	message(FATAL_ERROR "ral lighting policy: native backend type leaked into public contract")

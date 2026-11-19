@@ -76,6 +76,139 @@ typedef struct vbo_s {
 
 static vbo_t world_vbo;
 
+typedef struct vboShaderWorldState_s {
+	qboolean isStaticShader;
+	int      svarsSize;
+	int      iboOffset;
+	int      vboOffset;
+	int      normalOffset;
+	int      numIndexes;
+	int      numVertexes;
+	int      curVertexes;
+	int      curIndexes;
+} vboShaderWorldState_t;
+
+typedef struct vboWorldSlot_s {
+	qboolean              resident;
+	vbo_t                 cpu;
+	struct ralBuffer_s   *gpu;
+	uint32_t             *cullSurfToItem;
+	uint32_t             *cullItemToSurf;
+	uint32_t             *cullItemSortKey;
+	int                   cullVboItemCount;
+	int                   shaderCount;
+	vboShaderWorldState_t shaders[MAX_SHADERS];
+} vboWorldSlot_t;
+
+static vboWorldSlot_t world_vbo_slots[MAX_RENDER_WORLDS];
+static int world_vbo_active_slot = -1;
+
+static void VBO_ResetShaderRuntime( void )
+{
+	for ( int i = 0; i < tr.numShaders; ++i ) {
+		shader_t *shader = tr.shaders[i];
+		if ( !shader ) continue;
+		shader->isStaticShader = qfalse;
+		shader->svarsSize = 0;
+		shader->iboOffset = -1;
+		shader->vboOffset = -1;
+		shader->normalOffset = -1;
+		shader->numIndexes = 0;
+		shader->numVertexes = 0;
+		shader->curVertexes = 0;
+		shader->curIndexes = 0;
+	}
+}
+
+static void VBO_CaptureWorld( int worldIndex )
+{
+	vboWorldSlot_t *slot;
+	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS ) return;
+	slot = &world_vbo_slots[worldIndex];
+	slot->resident = qtrue;
+	slot->cpu = world_vbo;
+	slot->gpu = vk.vbo.ral_vertex_buffer;
+	slot->cullSurfToItem = vk.cullSurfToItem;
+	slot->cullItemToSurf = vk.cullItemToSurf;
+	slot->cullItemSortKey = vk.cullItemSortKey;
+	slot->cullVboItemCount = vk.cullVboItemCount;
+	slot->shaderCount = tr.numShaders;
+	for ( int i = 0; i < slot->shaderCount; ++i ) {
+		shader_t *shader = tr.shaders[i];
+		vboShaderWorldState_t *state = &slot->shaders[i];
+		if ( !shader ) { memset( state, 0, sizeof( *state ) ); continue; }
+		state->isStaticShader = shader->isStaticShader;
+		state->svarsSize = shader->svarsSize;
+		state->iboOffset = shader->iboOffset;
+		state->vboOffset = shader->vboOffset;
+		state->normalOffset = shader->normalOffset;
+		state->numIndexes = shader->numIndexes;
+		state->numVertexes = shader->numVertexes;
+		state->curVertexes = shader->curVertexes;
+		state->curIndexes = shader->curIndexes;
+	}
+	world_vbo_active_slot = worldIndex;
+}
+
+void VBO_SelectWorld( int worldIndex )
+{
+	vboWorldSlot_t *slot;
+	VBO_ResetShaderRuntime();
+	memset( &world_vbo, 0, sizeof( world_vbo ) );
+	vk.vbo.ral_vertex_buffer = NULL;
+	vk.cullSurfToItem = NULL;
+	vk.cullItemToSurf = NULL;
+	vk.cullItemSortKey = NULL;
+	vk.cullVboItemCount = 0;
+	world_vbo_active_slot = -1;
+	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS ) return;
+	slot = &world_vbo_slots[worldIndex];
+	if ( !slot->resident ) return;
+	world_vbo = slot->cpu;
+	vk.vbo.ral_vertex_buffer = slot->gpu;
+	vk.cullSurfToItem = slot->cullSurfToItem;
+	vk.cullItemToSurf = slot->cullItemToSurf;
+	vk.cullItemSortKey = slot->cullItemSortKey;
+	vk.cullVboItemCount = slot->cullVboItemCount;
+	for ( int i = 0; i < slot->shaderCount && i < tr.numShaders; ++i ) {
+		shader_t *shader = tr.shaders[i];
+		const vboShaderWorldState_t *state = &slot->shaders[i];
+		if ( !shader ) continue;
+		shader->isStaticShader = state->isStaticShader;
+		shader->svarsSize = state->svarsSize;
+		shader->iboOffset = state->iboOffset;
+		shader->vboOffset = state->vboOffset;
+		shader->normalOffset = state->normalOffset;
+		shader->numIndexes = state->numIndexes;
+		shader->numVertexes = state->numVertexes;
+		shader->curVertexes = state->curVertexes;
+		shader->curIndexes = state->curIndexes;
+	}
+	world_vbo_active_slot = worldIndex;
+}
+
+void VBO_UnloadWorld( int worldIndex )
+{
+	vboWorldSlot_t *slot;
+	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS ) return;
+	slot = &world_vbo_slots[worldIndex];
+	if ( !slot->resident ) return;
+	if ( vk.active ) vk_wait_idle();
+	if ( slot->gpu ) Ral_DestroyBuffer( slot->gpu );
+	if ( world_vbo_active_slot == worldIndex ) VBO_SelectWorld( -1 );
+	memset( slot, 0, sizeof( *slot ) );
+}
+
+void VBO_ShutdownWorlds( void )
+{
+	for ( int i = 0; i < MAX_RENDER_WORLDS; ++i ) {
+		if ( world_vbo_slots[i].gpu )
+			Ral_DestroyBuffer( world_vbo_slots[i].gpu );
+		memset( &world_vbo_slots[i], 0, sizeof( world_vbo_slots[i] ) );
+	}
+	VBO_SelectWorld( -1 );
+}
+
 // ── world batch-list contract (pre-pass decomposition seam) ─────────
 //
 // The producer/consumer seam between the surface→batch decomposition stage
@@ -570,8 +703,8 @@ static int VBO_SurfItemIndex( const msurface_t *sf )
 
 
 // Bake the static surfaceIndex↔vboItemIndex map + per-vboItem
-// static sort-key data into vk.* host tables, map-load lifetime (ri.Hunk_Alloc,
-// h_low). Called at the tail of R_BuildWorldVBO where every static surface carries
+// static sort-key data into vk.* host tables, map-load lifetime. Called at the
+// tail of R_BuildWorldVBO where every static surface carries
 // its final vboItemIndex. PURE DATA: nobody consumes these yet; this
 // only builds + self-verifies (_DEBUG round-trip identity). The forward map is a
 // direct per-surface read (vboItemIndex is stored on the surface struct regardless
@@ -590,10 +723,10 @@ void VBO_BuildSurfaceMap( const msurface_t *surf, int surfCount, int numStaticSu
 		return;
 
 	// Forward: surfaceIndex (0-based into surfaces[]) → vboItemIndex (0 = not a VBO item).
-	vk.cullSurfToItem  = ri.Hunk_Alloc( surfCount * sizeof( uint32_t ), h_low );
+	vk.cullSurfToItem  = R_WorldLevelAlloc( surfCount * sizeof( uint32_t ) );
 	// Inverse + per-item static key: indexed by vboItemIndex (1-based; slot 0 unused).
-	vk.cullItemToSurf  = ri.Hunk_Alloc( ( numStaticSurfaces + 1 ) * sizeof( uint32_t ), h_low );
-	vk.cullItemSortKey = ri.Hunk_Alloc( ( numStaticSurfaces + 1 ) * sizeof( uint32_t ), h_low );
+	vk.cullItemToSurf  = R_WorldLevelAlloc( ( numStaticSurfaces + 1 ) * sizeof( uint32_t ) );
+	vk.cullItemSortKey = R_WorldLevelAlloc( ( numStaticSurfaces + 1 ) * sizeof( uint32_t ) );
 	vk.cullVboItemCount = numStaticSurfaces;
 
 	for ( i = 0; i < surfCount; i++ ) {
@@ -643,7 +776,7 @@ void VBO_BuildSurfaceMap( const msurface_t *surf, int surfCount, int numStaticSu
 }
 
 
-void R_BuildWorldVBO( msurface_t *surf, int surfCount )
+void R_BuildWorldVBO( msurface_t *surf, int surfCount, int worldIndex )
 {
 	vbo_t *vbo = &world_vbo;
 	msurface_t **surfList;
@@ -672,7 +805,10 @@ void R_BuildWorldVBO( msurface_t *surf, int surfCount )
 		return;
 	}
 
-	VBO_Cleanup();
+	/* Detach the previously selected world's CPU/GPU view without destroying
+	 * its slot. The new world gets a clean build state and is captured only
+	 * after the upload and surface-map publication both succeed. */
+	VBO_SelectWorld( -1 );
 
 	vbo_size = 0;
 
@@ -726,11 +862,11 @@ void R_BuildWorldVBO( msurface_t *surf, int surfCount )
 	ibo_size = PAD( ibo_size, 32 );
 
 	// 0 item is unused
-	vbo->items = ri.Hunk_Alloc( ( numStaticSurfaces + 1 ) * sizeof( vbo_item_t ), h_low );
+	vbo->items = R_WorldLevelAlloc( ( numStaticSurfaces + 1 ) * sizeof( vbo_item_t ) );
 	vbo->items_count = numStaticSurfaces;
 
 	// last item will be used for run length termination
-	vbo->items_queue = ri.Hunk_Alloc( ( numStaticSurfaces + 1 ) * sizeof( int ), h_low );
+	vbo->items_queue = R_WorldLevelAlloc( ( numStaticSurfaces + 1 ) * sizeof( int ) );
 	vbo->items_queue_count = 0;
 
 	//Com_Log( SEV_INFO, S_COLOR_CYAN "VBO size: %i\n", vbo_size );
@@ -743,12 +879,12 @@ void R_BuildWorldVBO( msurface_t *surf, int surfCount )
 	vbo->vbo_size = vbo_size;
 
 	// index buffer
-	vbo->ibo_buffer = ri.Hunk_Alloc( ibo_size, h_low );
+	vbo->ibo_buffer = R_WorldLevelAlloc( ibo_size );
 	vbo->ibo_offset = 0;
 	vbo->ibo_size = ibo_size;
 
 	// ibo runs buffer
-	vbo->ibo_items = ri.Hunk_Alloc( ( (numStaticIndexes / MIN_IBO_RUN) + 1 ) * sizeof( ibo_item_t ), h_low );
+	vbo->ibo_items = R_WorldLevelAlloc( ( (numStaticIndexes / MIN_IBO_RUN) + 1 ) * sizeof( ibo_item_t ) );
 	vbo->ibo_items_count = 0;
 
 	surfList = ri.Hunk_AllocateTempMemory( numStaticSurfaces * sizeof( msurface_t* ) );
@@ -835,7 +971,8 @@ void R_BuildWorldVBO( msurface_t *surf, int surfCount )
 	ri.Hunk_FreeTempMemory( surfList );
 
 //__fail:
-	vk_alloc_vbo( vbo->vbo_buffer, vbo->vbo_size );
+	if ( !vk_alloc_vbo( vbo->vbo_buffer, vbo->vbo_size ) )
+		ri.Terminate( TERM_CLIENT_DROP, "failed to allocate world VBO" );
 
 	//if ( err == GL_OUT_OF_MEMORY )
 	//	R_LOG( rch_vk, SEV_WARN, "%s: out of memory\n", __func__ );
@@ -874,19 +1011,14 @@ void R_BuildWorldVBO( msurface_t *surf, int surfCount )
 	// vboItemIndex and vbo->items[] holds the run extents. Pure data, map-load
 	// lifetime; consumed by a later stage, not by any current render path.
 	VBO_BuildSurfaceMap( surf, surfCount, numStaticSurfaces );
+	VBO_CaptureWorld( worldIndex );
 }
 
 
 void VBO_Cleanup( void )
 {
 	memset( &world_vbo, 0, sizeof( world_vbo ) );
-
-	for ( int i = 0; i < tr.numShaders; i++ )
-	{
-		tr.shaders[ i ]->isStaticShader = qfalse;
-		tr.shaders[ i ]->iboOffset = -1;
-		tr.shaders[ i ]->vboOffset = -1;
-	}
+	VBO_ResetShaderRuntime();
 }
 
 

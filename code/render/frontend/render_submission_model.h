@@ -57,6 +57,9 @@ typedef struct {
 	const float *positions;
 	const float *normals;
 	const float *texCoords;
+	/* Authored per-vertex RGBA bytes, independent of refEntity shader color.
+	 * NULL means the format has no color channel (opaque white). */
+	const color4ub_t *colors;
 	const uint32_t *indices;
 	const renderModelBatch_t *batches;
 	/* Frame-major MD3 tags: frame * tagCount + tag index. */
@@ -72,6 +75,10 @@ typedef struct {
 typedef struct {
 	renderModelSnapshot_t snapshot;
 	char name[MAX_QPATH];
+	vec3_t bounds[2];
+	/* Zero for independently registered meshes; BSP metadata dies with slot. */
+	uint64_t worldLifecycleGeneration;
+	int worldIndex;
 } renderModelRecord_t;
 
 typedef struct {
@@ -81,6 +88,10 @@ typedef struct {
 	ralLightingCompositionReceipt_t lightingComposition;
 	qboolean hasTemporal;
 	qboolean hasLocalIrradiance;
+	/* Q3 grid coefficients encode byte-domain ambient + directional light,
+	 * not linear SH: clamp the directional term per vertex, quantize to bytes,
+	 * interpolate, then decode sRGB. Never infer this from probe fallback tags. */
+	qboolean legacyLightGrid;
 } renderEntityCommand_t;
 
 typedef struct renderSubmissionState_s renderSubmissionState_t;
@@ -89,6 +100,11 @@ qhandle_t RenderSubmission_RegisterModelData( renderSubmissionState_t *state,
 	const char *name, const void *bytes, uint32_t byteCount );
 qhandle_t RenderSubmission_RegisterInlineModel( renderSubmissionState_t *state,
 	const char *name, uint32_t firstSurface, uint32_t surfaceCount );
+qhandle_t RenderSubmission_RegisterBspModel( renderSubmissionState_t *state,
+	const char *name );
+void RenderSubmission_ModelBounds( const renderSubmissionState_t *state,
+	qhandle_t handle, vec3_t mins, vec3_t maxs );
+void RenderSubmission_ReleaseWorldModels( renderSubmissionState_t *state, int worldIndex );
 qboolean RenderSubmission_SetModelBatchMaterial( renderSubmissionState_t *state,
 	qhandle_t model, uint32_t batchIndex, qhandle_t material );
 qboolean RenderSubmission_ModelSnapshot( const renderSubmissionState_t *state,
@@ -102,6 +118,8 @@ qhandle_t RenderSubmission_EntityBatchMaterial(
 	const renderSubmissionState_t *state, const renderEntityCommand_t *command,
 	const renderModelBatch_t *batch );
 qboolean RenderSubmission_AttachEntityIrradiance( renderSubmissionState_t *state,
+	uint32_t entityIndex, const ralIrradianceEntitySampleReceipt_t *receipt );
+qboolean wired_render_attach_legacy_grid_irradiance( renderSubmissionState_t *state,
 	uint32_t entityIndex, const ralIrradianceEntitySampleReceipt_t *receipt );
 
 #ifdef __cplusplus

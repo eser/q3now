@@ -50,7 +50,7 @@ FOREACH(NEEDLE IN ITEMS
 	"#define WIRED_ADVANCED_FOG_UBO_SIZE    32u"
 	"vec4_t advancedFogColorDensity;"
 	"vec4_t advancedFogTypeFarEnabled;"
-	"sizeof( vkUniform_t ) == 656"
+	"sizeof( vkUniform_t ) == 688"
 	"void vk_update_fog_uniform(")
 	REQUIRE_TEXT("${VKH}" "${NEEDLE}" "enhanced-fog host UBO ABI missing")
 ENDFOREACH()

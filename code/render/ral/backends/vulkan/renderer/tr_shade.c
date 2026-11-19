@@ -903,12 +903,23 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 		(void)pushUniform;
 		pushUniform = qfalse;
 		VectorClear( uniform.emissionRadiance );
+		Vector4Set( uniform.materialBaseColor, 1.0f, 1.0f, 1.0f, 1.0f );
+		Vector4Set( uniform.materialFactors, -1.0f, 1.0f, 1.0f, 1.0f );
 		// The typed material is stamped only onto retained world/BSP shaders.
 		// Consume it once for every 3D use of that material, including moving
 		// brush models, while keeping 2D/UI draws dark even when they reuse a
 		// world shader.
-		if ( stage == 0 && !backEnd.projection2D )
+		if ( stage == 0 && !backEnd.projection2D ) {
 			VectorCopy( tess.shader->emissionRadiance, uniform.emissionRadiance );
+			if ( tess.shader->materialFactorsReady ) {
+				Vector4Copy( tess.shader->materialBaseColor,
+					uniform.materialBaseColor );
+				Vector4Copy( tess.shader->materialFactors,
+					uniform.materialFactors );
+				uniform.materialFactors[3] =
+					vk.atm.skyRadianceConsumer.previousToCurrentBlend;
+			}
+		}
 		VK_PushUniform( &uniform );
 
 		GL_SelectTexture( 0 );
@@ -1110,7 +1121,10 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 		// hot base pass is byte-identical on every non-pbrMap / r_pbr-0 / entity
 		// surface. Entities are excluded (worldspawn-only — they keep the
 		// lightgrid path); the IBL needs the world normal, so TESS_NNN is OR'd in.
-		if ( r_pbr->integer && pStage->bundle[3].image[0] != NULL
+		if ( r_pbr->integer && vk.atm.skyRadianceConsumer.ready
+			 && vk.probeCurrentProductValid
+			 && ( pStage->bundle[3].image[0] != NULL
+				|| tess.shader->materialFactorsReady )
 		     && backEnd.currentEntity == &tr.worldEntity ) {
 			Vk_Pipeline_Def idef;
 			Vk_Shader_Type  ibase;
@@ -1118,18 +1132,22 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 			ibase = idef.shader_type;
 			switch ( ibase ) {
 				case TYPE_MULTI_TEXTURE_MUL2: idef.shader_type = TYPE_MULTI_TEXTURE_MUL2_IBL; break;
+				case TYPE_MULTI_TEXTURE_MUL2_IDENTITY: idef.shader_type = TYPE_MULTI_TEXTURE_MUL2_IDENTITY_IBL; break;
+				case TYPE_MULTI_TEXTURE_MUL2_FIXED_COLOR: idef.shader_type = TYPE_MULTI_TEXTURE_MUL2_FIXED_COLOR_IBL; break;
 				case TYPE_BLEND2_MUL:         idef.shader_type = TYPE_BLEND2_MUL_IBL;         break;
 				case TYPE_MULTI_TEXTURE_MUL3: idef.shader_type = TYPE_MULTI_TEXTURE_MUL3_IBL; break;
 				case TYPE_BLEND3_MUL:         idef.shader_type = TYPE_BLEND3_MUL_IBL;         break;
-				default: break;   // _ENV / identity / fixed / non-lightmap — no IBL variant for these
+				default: break;   // _ENV / non-lightmap — no IBL variant for these
 			}
 			if ( idef.shader_type != ibase ) {
-				idef.ibl_enabled = 1;
+				idef.ibl_enabled = pStage->bundle[3].image[0] != NULL ? 1 : 2;
 				pipeline = vk_find_pipeline_ext( 0, &idef, qtrue );
 				// pbrMap (ORM) at bindless role 8 — distinct from the light-pass
 				// pbrMap (role 3); the base pass and PMLIGHT pass reset bindless
 				// tracking independently, so no collision.
-				vk_bindless_track( 8 /* role: pbrMap */, pStage->bundle[3].image[0] );
+				if ( pStage->bundle[3].image[0] != NULL )
+					vk_bindless_track( 8 /* role: pbrMap */,
+						pStage->bundle[3].image[0] );
 				// The IBL gen pipeline binds the world normal at location 5; make
 				// sure the normal vertex stream is computed + bound for this draw.
 				tess_flags |= TESS_NNN;

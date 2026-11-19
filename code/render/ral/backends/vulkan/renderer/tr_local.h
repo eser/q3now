@@ -33,7 +33,10 @@
 #include "../../../../../qcommon/qfiles.h"
 #include "../../../../../qcommon/qcommon.h"
 #include "../../../../frontend/tr_public.h"
+#include "../../../../frontend/render_submission_world.h"
+#include "../../../../frontend/render_submission_effects.h"
 #include "../../../core/ral_lighting.h"
+#include "../../../core/ral_material_runtime.h"
 #include "tr_common.h"
 #include "tr_temporal_entity_cache.h"
 #include "../../../../frontend/tr_screenshot.h"
@@ -482,6 +485,11 @@ typedef struct shader_s {
 	// Backend projection of the backend-neutral wiredLighting authority. Values
 	// are linear radiance; only the first world base-pass stage consumes them.
 	vec3_t		emissionRadiance;
+	// Backend projection of the immutable cooked material-factor cohort.  Native
+	// handles stay adapter-owned; these values are refreshed from RenderSubmission.
+	vec4_t		materialBaseColor;
+	vec4_t		materialFactors;
+	qboolean	materialFactorsReady;
 
 	cullType_t	cullType;				// CT_FRONT_SIDED, CT_BACK_SIDED, or CT_TWO_SIDED
 	qboolean	polygonOffset;			// set for decals and other items that must be offset
@@ -556,7 +564,8 @@ typedef struct {
 
 	stereoFrame_t	stereoFrame;
 
-	int			time;				// time in milliseconds for shader effects and other time dependent rendering issues
+	int			time;				// shader animation time in milliseconds (may be pinned)
+	int			sceneTime;			// original refdef time for temporal history; unaffected by shader pinning
 	int			rdflags;			// RDF_NOWORLDMODEL, etc
 
 	// 1 bits will prevent the associated area from rendering at all
@@ -638,6 +647,12 @@ typedef struct image_s {
 	// Sole GPU texture identity for ordinary, packed/compressed, cube, array and
 	// 3D image_t assets. Native handles are backend-private borrowed mirrors only.
 	struct ralTexture_s *ral;
+	/* Exact portable identity of this file-backed resident texture.  The key is
+	 * stable across eviction/recreate; runtimeResource is refreshed from the
+	 * new RAL allocation generation after every re-residency operation. */
+	ralTextureCacheKey_t ralTextureCacheKey;
+	ralMaterialRuntimeResource_t ralMaterialRuntimeResource;
+	qboolean ralTextureCacheKeyReady;
 	// Portable sampling view used by the bindless residency path. It currently
 	// spans the full mip chain (behavior-preserving); future coarse-parent
 	// fallback changes only this view range, never the bindless descriptor ABI.
@@ -1335,6 +1350,11 @@ typedef struct {
 	int		c_atmosphereDepth;
 	int		c_atmosphereTemporalReuse;
 	int		c_atmosphereTemporalReject;
+	int		c_skyPendingWork;
+	int		c_skyInFlightWork;
+	int		c_skyAdmittedWork;
+	int		c_skyCompletedWork;
+	int		c_skyCancelledWork;
 
 	int		msec;			// total msec for backend run
 #ifdef USE_PMLIGHT
@@ -1702,6 +1722,9 @@ extern cvar_t	*r_parallaxMapping;
 #if FEAT_SSAO
 extern cvar_t	*r_ssao;
 extern cvar_t	*r_ssaoRadius;
+extern cvar_t	*r_atmosphereAerialHaze;
+extern cvar_t	*r_skyPhysicalBlend;
+extern cvar_t	*r_vkSplitPresent;
 extern cvar_t	*r_ssaoQuality;
 extern cvar_t	*r_ssaoIntensity;
 extern cvar_t	*r_showAO;
@@ -1968,6 +1991,8 @@ void		R_SetWorldSlot( int worldIndex );
 qboolean   R_WorldSlotResident( int worldIndex );
 qboolean   R_UnloadWorldSlot( int worldIndex );
 int        R_ResidentWorldCount( void );
+void       *R_WorldLevelAlloc( size_t size );
+size_t     R_WorldLevelUsed( void );
 void		RE_SetWorldVisData( const byte *vis );
 qhandle_t	RE_RegisterModel( const char *name );
 qhandle_t	RE_RegisterSkin( const char *name );
@@ -2587,6 +2612,10 @@ typedef struct drawSurfsCommand_s {
 	viewParms_t	viewParms;
 	drawSurf_t *drawSurfs;
 	int		numDrawSurfs;
+	int		worldIndex;
+	qboolean	clearDepth;
+	qboolean	resetSkyVisibility;
+	qboolean	finalizeView;
 } drawSurfsCommand_t;
 
 typedef struct
@@ -2699,6 +2728,13 @@ void RB_TakeScreenshotBMP( int x, int y, int width, int height, const char *file
 void RB_TakeScreenshotPNG( int x, int y, int width, int height, const char *fileName, int clipboard );
 
 qboolean R_AddDrawSurfCmd( drawSurf_t *drawSurfs, int numDrawSurfs );
+qboolean R_CommandBufferCanReserve( int bytes );
+qboolean R_AddDrawSurfPassCmd( drawSurf_t *drawSurfs, int numDrawSurfs,
+	int worldIndex, qboolean clearDepth, qboolean resetSkyVisibility,
+	qboolean finalizeView );
+
+qboolean R_FrontendDistantWorldSubmission(
+	renderDistantWorldSubmission_t *outSubmission );
 
 void RE_SetColor( const float *rgba );
 void RE_SetClipRegion( const float *region );
@@ -2727,6 +2763,23 @@ void RE_ThrottleBackend( void );
 qboolean RE_CanMinimize( void );
 const glconfig_t *RE_GetConfig( void );
 void RE_VertexLighting( qboolean allowed );
+qboolean R_FrontendWorldLifecycleGeneration( uint64_t *outGeneration );
+typedef struct {
+	uint64_t revision;
+	qboolean authoredOuterBox;
+	struct ralTextureView_s *outerFaces[RAL_MATERIAL_SKY_FACE_COUNT];
+} ralFrontendSkySource_t;
+qboolean R_FrontendActiveSkySource( ralFrontendSkySource_t *outSource );
+/* Semantic atmosphere emitters (breath/mist/debris): shared frontend workload
+ * snapshot/payload plus the authored class images for the weather pass. */
+qboolean R_FrontendAtmosphereEffectWorkloadSnapshot( uint32_t maxParticles,
+	renderAtmosphereEffectWorkloadSnapshot_t *outSnapshot );
+qboolean R_FrontendAtmosphereEffectGpuPayload( uint32_t maxParticles,
+	uint32_t firstParticle,
+	renderAtmosphereEffectGpuWorkload_t outWorkloads[RENDER_SUBMISSION_MAX_ATMOSPHERE_EFFECT_WORKLOADS],
+	renderAtmosphereEffectWorkloadSnapshot_t *outSnapshot );
+qboolean R_FrontendAtmosphereEffectImages( uint32_t maxParticles,
+	image_t *outImages[RENDER_SUBMISSION_MAX_ATMOSPHERE_EFFECT_WORKLOADS] );
 
 #ifndef USE_VULKAN
 #define GLE( ret, name, ... ) extern ret ( APIENTRY * q##name )( __VA_ARGS__ );
@@ -2737,7 +2790,10 @@ void RE_VertexLighting( qboolean allowed );
 
 #ifdef USE_VBO
 // VBO functions
-extern void R_BuildWorldVBO( msurface_t *surf, int surfCount );
+extern void R_BuildWorldVBO( msurface_t *surf, int surfCount, int worldIndex );
+extern void VBO_SelectWorld( int worldIndex );
+extern void VBO_UnloadWorld( int worldIndex );
+extern void VBO_ShutdownWorlds( void );
 
 extern void VBO_PushData( int itemIndex, shaderCommands_t *input );
 extern void VBO_UnBind( void );

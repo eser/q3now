@@ -709,7 +709,7 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 			uint32_t                                  nDevExts = 0, i;
 			VkDeviceQueueCreateInfo                   queueInfos[3];
 			uint32_t                                  nQueueInfos = 0;
-			const float                               priority = 1.0f;
+			const float                               priorities[2] = { 1.0f, 1.0f };
 			VkDeviceCreateInfo                        dci;
 			VkResult                                  r2;
 
@@ -743,6 +743,7 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 					RAL_VK_LOG( SEV_ERROR, "Ral_CreateBackend: no graphics+present queue family found\n" );
 					goto fail_after_instance;
 				}
+				b->graphicsQueueCount = qfp[b->graphicsFamily].queueCount >= 2u ? 2u : 1u;
 				for ( i = 0; i < nqf; i++ ) {
 					VkQueueFlags f = qfp[i].queueFlags;
 					if ( ( f & VK_QUEUE_COMPUTE_BIT ) && !( f & VK_QUEUE_GRAPHICS_BIT ) ) {
@@ -951,21 +952,21 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 			memset( queueInfos, 0, sizeof( queueInfos ) );
 			queueInfos[ nQueueInfos ].sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
 			queueInfos[ nQueueInfos ].queueFamilyIndex = b->graphicsFamily;
-			queueInfos[ nQueueInfos ].queueCount       = 1;
-			queueInfos[ nQueueInfos ].pQueuePriorities = &priority;
+			queueInfos[ nQueueInfos ].queueCount       = b->graphicsQueueCount;
+			queueInfos[ nQueueInfos ].pQueuePriorities = priorities;
 			nQueueInfos++;
 			if ( b->computeFamily != b->graphicsFamily ) {
 				queueInfos[ nQueueInfos ].sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
 				queueInfos[ nQueueInfos ].queueFamilyIndex = b->computeFamily;
 				queueInfos[ nQueueInfos ].queueCount       = 1;
-				queueInfos[ nQueueInfos ].pQueuePriorities = &priority;
+				queueInfos[ nQueueInfos ].pQueuePriorities = priorities;
 				nQueueInfos++;
 			}
 			if ( b->transferFamily != b->graphicsFamily && b->transferFamily != b->computeFamily ) {
 				queueInfos[ nQueueInfos ].sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
 				queueInfos[ nQueueInfos ].queueFamilyIndex = b->transferFamily;
 				queueInfos[ nQueueInfos ].queueCount       = 1;
-				queueInfos[ nQueueInfos ].pQueuePriorities = &priority;
+				queueInfos[ nQueueInfos ].pQueuePriorities = priorities;
 				nQueueInfos++;
 			}
 
@@ -1258,11 +1259,13 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 			if ( ( fl & VK_QUEUE_TRANSFER_BIT ) && !( fl & ( VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT ) ) && b->transferFamily == RAL_VK_INVALID_FAMILY )
 				b->transferFamily = i;  // dedicated DMA family
 		}
-		free( qf );
 		if ( b->graphicsFamily == RAL_VK_INVALID_FAMILY ) {
+			free( qf );
 			RAL_VK_LOG( SEV_WARN, "Ral_CreateBackend: device has no graphics queue family\n" );
 			goto fail;
 		}
+		b->graphicsQueueCount = qf[b->graphicsFamily].queueCount >= 2u ? 2u : 1u;
+		free( qf );
 		if ( b->computeFamily  == RAL_VK_INVALID_FAMILY ) b->computeFamily  = b->graphicsFamily;
 		if ( b->transferFamily == RAL_VK_INVALID_FAMILY ) b->transferFamily = b->graphicsFamily;
 	}
@@ -1273,7 +1276,7 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 		VkExtensionProperties  *devExtProps = NULL;
 		const char             *enabledDevExts[4];
 		uint32_t                nEnabledDevExts = 0;
-		float                   prio = 1.0f;
+		float                   priorities[2] = { 1.0f, 1.0f };
 		VkDeviceQueueCreateInfo qcis[3];
 		uint32_t                nQci = 0;
 		VkDeviceCreateInfo      dci;
@@ -1374,21 +1377,21 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 		memset( qcis, 0, sizeof( qcis ) );
 		qcis[ nQci ].sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
 		qcis[ nQci ].queueFamilyIndex = b->graphicsFamily;
-		qcis[ nQci ].queueCount       = 1;
-		qcis[ nQci ].pQueuePriorities = &prio;
+		qcis[ nQci ].queueCount       = b->graphicsQueueCount;
+		qcis[ nQci ].pQueuePriorities = priorities;
 		nQci++;
 		if ( b->computeFamily != b->graphicsFamily ) {
 			qcis[ nQci ].sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
 			qcis[ nQci ].queueFamilyIndex = b->computeFamily;
 			qcis[ nQci ].queueCount       = 1;
-			qcis[ nQci ].pQueuePriorities = &prio;
+			qcis[ nQci ].pQueuePriorities = priorities;
 			nQci++;
 		}
 		if ( b->transferFamily != b->graphicsFamily && b->transferFamily != b->computeFamily ) {
 			qcis[ nQci ].sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
 			qcis[ nQci ].queueFamilyIndex = b->transferFamily;
 			qcis[ nQci ].queueCount       = 1;
-			qcis[ nQci ].pQueuePriorities = &prio;
+			qcis[ nQci ].pQueuePriorities = priorities;
 			nQci++;
 		}
 
@@ -1414,7 +1417,12 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 
 initSharedLayers:
 	// queues (compute/transfer alias graphics if no dedicated family)
+	if ( b->graphicsQueueCount == 0u ) b->graphicsQueueCount = 1u;
 	b->vk.GetDeviceQueue( b->device, b->graphicsFamily, 0, &b->graphicsQueue );
+	b->presentQueue = b->graphicsQueue;
+	if ( b->ownsDevice && b->graphicsQueueCount >= 2u )
+		b->vk.GetDeviceQueue( b->device, b->graphicsFamily, 1, &b->presentQueue );
+	if ( b->presentQueue == VK_NULL_HANDLE ) b->presentQueue = b->graphicsQueue;
 	b->computeQueue  = b->graphicsQueue;
 	b->transferQueue = b->graphicsQueue;
 	if ( b->computeFamily  != b->graphicsFamily ) b->vk.GetDeviceQueue( b->device, b->computeFamily,  0, &b->computeQueue );
@@ -1423,6 +1431,9 @@ initSharedLayers:
 	b->queues[ RAL_QUEUE_GRAPHICS ] = b->graphicsQueue;  b->queueFamily[ RAL_QUEUE_GRAPHICS ] = b->graphicsFamily;
 	b->queues[ RAL_QUEUE_COMPUTE  ] = b->computeQueue;   b->queueFamily[ RAL_QUEUE_COMPUTE  ] = b->computeFamily;
 	b->queues[ RAL_QUEUE_TRANSFER ] = b->transferQueue;  b->queueFamily[ RAL_QUEUE_TRANSFER ] = b->transferFamily;
+	RAL_VK_LOG( SEV_INFO, "queue topology: graphics-family=%u requested=%u present=%s\n",
+		b->graphicsFamily, b->graphicsQueueCount,
+		b->presentQueue != b->graphicsQueue ? "dedicated" : "shared" );
 	Ral_SubmissionLifecycleInit( &b->submissionLifecycle[ RAL_QUEUE_GRAPHICS ], b, RAL_QUEUE_GRAPHICS );
 	Ral_SubmissionLifecycleInit( &b->submissionLifecycle[ RAL_QUEUE_COMPUTE ], b, RAL_QUEUE_COMPUTE );
 	Ral_SubmissionLifecycleInit( &b->submissionLifecycle[ RAL_QUEUE_TRANSFER ], b, RAL_QUEUE_TRANSFER );

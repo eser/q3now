@@ -45,6 +45,30 @@ static int MaterialScriptReadFile( const char *name, void **bytes ) {
 
 static void MaterialScriptFreeFile( void *bytes ) { (void)bytes; }
 
+static qboolean BuildTestTextureKey( uint64_t provenance, uint32_t width,
+		uint32_t height, ralTextureCacheKey_t *outKey ) {
+	ralTextureAssetRequest_t request;
+	ralTextureAssetReceipt_t receipt;
+	memset( &request, 0, sizeof( request ) );
+	request.schemaVersion = RAL_TEXTURE_ASSET_SCHEMA_VERSION;
+	request.assetGeneration = 3u;
+	request.provenanceHash = provenance;
+	request.dimension = RAL_TEXTURE_ASSET_2D;
+	request.width = width;
+	request.height = height;
+	request.depth = request.layers = request.sourceMipLevels = 1u;
+	request.colorEncoding = RAL_TEXTURE_ENCODING_SRGB;
+	request.channelSemantic = RAL_TEXTURE_CHANNEL_COLOR;
+	request.sourceEncoding = RAL_TEXTURE_SOURCE_UNCOMPRESSED;
+	request.mipPolicy = RAL_TEXTURE_MIPS_GENERATE;
+	request.residency = RAL_TEXTURE_RESIDENCY_STREAMED;
+	request.preferenceCount = 1u;
+	request.preferences[0] = RAL_TEXTURE_COMPRESSION_UNCOMPRESSED;
+	request.allowUncompressedFallback = qtrue;
+	return Ral_ResolveTextureAsset( &request, &receipt )
+		&& Ral_TextureCacheKeyBuild( &receipt, outKey );
+}
+
 static qboolean MaterialScriptResolveResource( const char *name,
 		char *canonicalPath, size_t canonicalCapacity, uint64_t *sourceId,
 		uint64_t *size, unsigned *generation ) {
@@ -225,17 +249,107 @@ static int TestLegacyLightGridIrradiance( void )
 	material = RenderSubmission_RegisterAsset( &state,
 		RENDER_ASSET_MATERIAL, shader.shader );
 	CHECK( material > 0 && RenderSubmission_LoadWorld( &state, &world, 0 ) );
+	{
+		vec3_t mins, maxs;
+		renderModelSnapshot_t metadata;
+		qhandle_t original, other, replacement;
+		uint32_t bytes = state.modelBytes;
+		subModel.mins[0] = -128.0f; subModel.mins[1] = -256.0f; subModel.mins[2] = -32.0f;
+		subModel.maxs[0] = 512.0f; subModel.maxs[1] = 1024.0f; subModel.maxs[2] = 64.0f;
+		original = RenderSubmission_RegisterBspModel( &state, "*0" );
+		CHECK( original > 0 && RenderSubmission_RegisterBspModel( &state, "*0" ) == original );
+		CHECK( state.modelBytes == bytes && !RenderSubmission_ModelSnapshot( &state, original, &metadata ) );
+		RenderSubmission_ModelBounds( &state, original, mins, maxs );
+		CHECK( !memcmp( mins, subModel.mins, sizeof( mins ) ) && !memcmp( maxs, subModel.maxs, sizeof( maxs ) ) );
+		CHECK( !RenderSubmission_RegisterBspModel( &state, "*-1" )
+			&& !RenderSubmission_RegisterBspModel( &state, "*1" )
+			&& !RenderSubmission_RegisterBspModel( &state, "*42949672960" ) );
+		CHECK( RenderSubmission_LoadWorld( &state, &world, 1 ) );
+		other = RenderSubmission_RegisterBspModel( &state, "*0" );
+		CHECK( other > original );
+		CHECK( RenderSubmission_UnloadWorld( &state, 0 ) );
+		RenderSubmission_ModelBounds( &state, original, mins, maxs );
+		CHECK( mins[0] == 0 && maxs[0] == 0 );
+		RenderSubmission_ModelBounds( &state, other, mins, maxs );
+		CHECK( mins[0] == -128.0f && maxs[1] == 1024.0f );
+		CHECK( RenderSubmission_LoadWorld( &state, &world, 0 ) );
+		replacement = RenderSubmission_RegisterBspModel( &state, "*0" );
+		CHECK( replacement > other && state.modelBytes == bytes );
+		CHECK( RenderSubmission_UnloadWorld( &state, 1 ) );
+		RenderSubmission_ModelBounds( &state, other, mins, maxs );
+		CHECK( mins[0] == 0 && maxs[0] == 0 );
+		/* Preserve the original lightgrid fixture's authored bounds. */
+		memset( subModel.mins, 0, sizeof( subModel.mins ) );
+		memset( subModel.maxs, 0, sizeof( subModel.maxs ) );
+		CHECK( RenderSubmission_LoadWorld( &state, &world, 0 ) );
+		RenderSubmission_ModelBounds( &state, replacement, mins, maxs );
+		CHECK( mins[0] == 0 && maxs[0] == 0 && state.modelCount == 0u );
+	}
+	{
+		atmosphereFrameState_t atmosphere = {0};
+		renderAtmosphereHeightgrid_t grid, previous;
+		float heights[4] = { -64, -32, 16, 48 };
+		atmosphere.type = ATMOSPHERE_PRECIP_RAIN;
+		atmosphere.gridSize = 2;
+		atmosphere.worldMaxs[0] = atmosphere.worldMaxs[1] = 64;
+		CHECK( RenderSubmission_SetAtmosphere( &state, &atmosphere ) );
+		CHECK( !RenderSubmission_AtmosphereHeightgrid( &state, &grid ) );
+		CHECK( RenderSubmission_SetAtmosphereHeightgrid( &state, heights, 4 ) );
+		CHECK( RenderSubmission_AtmosphereHeightgrid( &state, &grid )
+			&& grid.samples != heights && grid.edge == 2 && grid.inverseStep[0] == 1.0f / 32.0f );
+		previous = grid;
+		CHECK( RenderSubmission_SetAtmosphereHeightgrid( &state, heights, 4 )
+			&& RenderSubmission_AtmosphereHeightgrid( &state, &grid ) && grid.samples == previous.samples );
+		heights[0] = NAN;
+		CHECK( !RenderSubmission_SetAtmosphereHeightgrid( &state, heights, 4 )
+			&& !RenderSubmission_SetAtmosphereHeightgrid( &state, heights, 3 )
+			&& !RenderSubmission_SetAtmosphereHeightgrid( &state, NULL, 4 ) );
+		CHECK( RenderSubmission_AtmosphereHeightgrid( &state, &grid )
+			&& grid.digest == previous.digest && grid.samples[0] == -64 );
+		atmosphere.worldMaxs[0] = 128;
+		CHECK( RenderSubmission_SetAtmosphere( &state, &atmosphere )
+			&& !RenderSubmission_AtmosphereHeightgrid( &state, &grid ) );
+		atmosphere.worldMaxs[0] = 64;
+		atmosphere.gridSize = RENDER_SUBMISSION_MAX_HEIGHTGRID_EDGE + 1u;
+		CHECK( RenderSubmission_SetAtmosphere( &state, &atmosphere )
+			&& !RenderSubmission_SetAtmosphereHeightgrid( &state, heights, 4 ) );
+		atmosphere.gridSize = 2;
+		CHECK( RenderSubmission_SetAtmosphere( &state, &atmosphere )
+			&& RenderSubmission_AtmosphereHeightgrid( &state, &grid )
+			&& grid.digest == previous.digest );
+		heights[0] = 10;
+		CHECK( RenderSubmission_LoadWorld( &state, &world, 1 ) );
+		CHECK( !RenderSubmission_AtmosphereHeightgrid( &state, &grid ) );
+		CHECK( RenderSubmission_SetAtmosphereHeightgrid( &state, heights, 4 ) );
+		CHECK( RenderSubmission_SelectWorld( &state, 0 )
+			&& RenderSubmission_AtmosphereHeightgrid( &state, &grid ) && grid.samples[0] == -64 );
+		CHECK( RenderSubmission_UnloadWorld( &state, 0 )
+			&& RenderSubmission_AtmosphereHeightgrid( &state, &grid ) && grid.samples[0] == 10 );
+		CHECK( RenderSubmission_LoadWorld( &state, &world, 0 )
+			&& !RenderSubmission_AtmosphereHeightgrid( &state, &grid ) );
+		CHECK( RenderSubmission_UnloadWorld( &state, 1 ) );
+		memset( &atmosphere, 0, sizeof( atmosphere ) );
+		CHECK( RenderSubmission_SetAtmosphere( &state, &atmosphere ) );
+	}
 	CHECK( RenderSubmission_BeginFrame( &state, 56u ) );
 	CHECK( RenderSubmission_AddEntity( &state, &entity, NULL ) );
 	CHECK( RenderSubmission_AttachLegacyLightGridEntityIrradiance(
 		&state, 0u, 0.6f, 1.0f ) );
 	commands = RenderSubmission_EntityCommands( &state, &commandCount );
 	CHECK( commands && commandCount == 1u && commands[0].hasLocalIrradiance
+		&& commands[0].legacyLightGrid
 		&& state.localIrradianceEntityCount == 1u
 		&& commands[0].localIrradiance.blendedCoefficientsQ16[0][0] > 0
 		&& commands[0].localIrradiance.blendedCoefficientsQ16[3][2] > 0
 		&& commands[0].localIrradiance.blendedCoefficientsQ16[1][0] == 0
 		&& commands[0].localIrradiance.blendedCoefficientsQ16[2][1] == 0 );
+	const ralIrradianceEntitySampleReceipt_t sample = commands[0].localIrradiance;
+	CHECK( RenderSubmission_AddEntity( &state, &entity, NULL ) );
+	CHECK( RenderSubmission_AttachEntityIrradiance( &state, 1u, &sample ) );
+	CHECK( !state.entities[1].legacyLightGrid );
+	/* A failed duplicate cannot relabel an already attached linear sample. */
+	CHECK( !wired_render_attach_legacy_grid_irradiance( &state, 1u, &sample ) );
+	CHECK( !state.entities[1].legacyLightGrid );
 	RenderSubmission_CancelFrame( &state );
 	RenderSubmission_Reset( &state );
 	return 0;
@@ -493,11 +607,27 @@ static int TestIrradianceVolumeOwner( void )
 	{
 		mapFile_t worldA, worldB;
 		uint64_t worldAIrradianceDigest, worldADirectionalDigest;
+		uint64_t worldAGeneration, worldBGeneration, worldAReloadGeneration;
+		renderWorldSnapshot_t resident, untouched;
 		memset( &worldA, 0, sizeof( worldA ) );
 		memset( &worldB, 0, sizeof( worldB ) );
 		strcpy( worldA.name, "maps/world-a.bsp" );
 		strcpy( worldB.name, "maps/world-b.bsp" );
-		CHECK( RenderSubmission_LoadWorld( &state, &worldA, 0 ) );
+		CHECK( RenderSubmission_LoadWorld( &state, &worldA, 0 )
+			&& RenderSubmission_WorldLifecycleGeneration( &state, 0,
+				&worldAGeneration ) );
+		memset( &untouched, 0xa5, sizeof( untouched ) );
+		resident = untouched;
+		CHECK( !state.frameOpen && !state.frameSealed );
+		CHECK( !RenderSubmission_WorldSnapshot( &state, &resident )
+			&& !memcmp( &resident, &untouched, sizeof( resident ) ) );
+		CHECK( RenderSubmission_ResidentWorldSnapshot( &state, 0,
+			worldAGeneration, &resident ) && resident.ready );
+		resident = untouched;
+		CHECK( !RenderSubmission_ResidentWorldSnapshot( &state, 0, 0u, &resident )
+			&& !RenderSubmission_ResidentWorldSnapshot( &state, -1, worldAGeneration, &resident )
+			&& !RenderSubmission_ResidentWorldSnapshot( &state, MAX_RENDER_WORLDS, worldAGeneration, &resident )
+			&& !memcmp( &resident, &untouched, sizeof( resident ) ) );
 		placement.volumeId = 70u;
 		CHECK( RenderSubmission_RegisterIrradianceVolume( &state, &placement,
 			artifactBackup, artifactReceipt.byteLength ) );
@@ -506,8 +636,19 @@ static int TestIrradianceVolumeOwner( void )
 		worldAIrradianceDigest = state.irradianceVolumeDigest;
 		worldADirectionalDigest = state.directionalLightingDigest;
 		CHECK( RenderSubmission_LoadWorld( &state, &worldB, 1 )
+			&& RenderSubmission_WorldLifecycleGeneration( &state, 1,
+				&worldBGeneration )
+			&& worldBGeneration > worldAGeneration
 			&& state.irradianceVolumeCount == 0u
 			&& state.directionalLightingCount == 0u );
+		/* Resident A is readable while B is active, without selecting A or
+		 * manufacturing frame state. B's catalog cannot authorize A. */
+		CHECK( RenderSubmission_ResidentWorldSnapshot( &state, 0,
+			worldAGeneration, &resident ) && state.activeWorldIndex == 1 );
+		resident = untouched;
+		CHECK( !RenderSubmission_ResidentWorldSnapshot( &state, 0,
+			worldBGeneration, &resident )
+			&& !memcmp( &resident, &untouched, sizeof( resident ) ) );
 		placement.volumeId = 71u;
 		CHECK( RenderSubmission_RegisterIrradianceVolume( &state, &placement,
 			artifactBackup, artifactReceipt.byteLength ) );
@@ -523,7 +664,24 @@ static int TestIrradianceVolumeOwner( void )
 			&& state.irradianceVolumes[0].placement.volumeId == 71u );
 		CHECK( RenderSubmission_UnloadWorld( &state, 0 )
 			&& RenderSubmission_WorldResident( &state, 1 )
+			&& !RenderSubmission_WorldLifecycleGeneration( &state, 0,
+				&worldAReloadGeneration )
 			&& state.irradianceVolumes[0].placement.volumeId == 71u );
+		CHECK( RenderSubmission_LoadWorld( &state, &worldA, 0 )
+			&& RenderSubmission_WorldLifecycleGeneration( &state, 0,
+				&worldAReloadGeneration )
+			&& worldAReloadGeneration > worldBGeneration );
+		resident = untouched;
+		CHECK( !RenderSubmission_ResidentWorldSnapshot( &state, 0,
+			worldAGeneration, &resident )
+			&& !memcmp( &resident, &untouched, sizeof( resident ) ) );
+		CHECK( RenderSubmission_ResidentWorldSnapshot( &state, 0,
+			worldAReloadGeneration, &resident ) );
+		CHECK( RenderSubmission_UnloadWorld( &state, 0 ) );
+		resident = untouched;
+		CHECK( !RenderSubmission_ResidentWorldSnapshot( &state, 0,
+			worldAReloadGeneration, &resident )
+			&& !memcmp( &resident, &untouched, sizeof( resident ) ) );
 		CHECK( RenderSubmission_UnloadWorld( &state, 1 )
 			&& RenderSubmission_ResidentWorldCount( &state ) == 0 );
 	}
@@ -613,6 +771,37 @@ static int TestModelPayloads( void )
 	header->ofsEnd	= header->ofsSurfaces + offset;
 	CHECK( RenderSubmission_Init( &state, 51u ) );
 	qhandle_t model = RenderSubmission_RegisterModelData( &state, "models/test.md3", md3, header->ofsEnd );
+	vec3_t modelMins, modelMaxs;
+	RenderSubmission_ModelBounds( &state, model, modelMins, modelMaxs );
+	CHECK( modelMins[0] == 0 && modelMins[1] == 0 && modelMins[2] == 0
+		&& modelMaxs[0] == 1 && modelMaxs[1] == 1 && modelMaxs[2] == 0 );
+	/* Cache source bounds once, preserving the authored first pose rather than
+	 * unioning every animation frame or rescanning vertices at query time. */
+	int geometryEnd = header->ofsEnd;
+	md3Frame_t frames[2] = {0};
+	for ( int axis = 0; axis < 3; ++axis ) {
+		frames[0].bounds[0][axis] = -10.0f - axis;
+		frames[0].bounds[1][axis] = 20.0f + axis;
+		frames[1].bounds[0][axis] = -100.0f;
+		frames[1].bounds[1][axis] = 100.0f;
+	}
+	memcpy( md3 + geometryEnd, frames, sizeof( frames ) );
+	header->ofsFrames = geometryEnd;
+	header->ofsEnd += sizeof( frames );
+	qhandle_t authored = RenderSubmission_RegisterModelData( &state, "models/bounds.md3", md3, header->ofsEnd );
+	CHECK( authored > model );
+	memset( md3 + geometryEnd, 0, sizeof( frames ) );
+	RenderSubmission_ModelBounds( &state, authored, modelMins, modelMaxs );
+	CHECK( modelMins[0] == -10 && modelMins[2] == -12
+		&& modelMaxs[0] == 20 && modelMaxs[2] == 22 );
+	/* Bytes after the declared file end must never supply authored bounds. */
+	memcpy( md3 + geometryEnd, frames, sizeof( frames ) );
+	header->ofsEnd = geometryEnd;
+	qhandle_t trailing = RenderSubmission_RegisterModelData( &state, "models/trailing.md3", md3, sizeof( md3 ) );
+	CHECK( trailing > authored );
+	RenderSubmission_ModelBounds( &state, trailing, modelMins, modelMaxs );
+	CHECK( modelMins[0] == 0 && modelMaxs[0] == 1 && modelMaxs[2] == 0 );
+	header->ofsFrames = 0;
 	CHECK( model > 0 && RenderSubmission_ModelSnapshot( &state, model, &snapshot ) &&
 		   snapshot.format == RENDER_MODEL_MD3 && snapshot.frameCount == 2u && snapshot.vertexCount == 3u &&
 		   snapshot.indexCount == 3u && snapshot.batchCount == 1u && snapshot.tagCount == 1u &&
@@ -667,7 +856,7 @@ static int TestModelPayloads( void )
 	arrays[0].type			   = 0u;
 	arrays[0].format		   = 7u;
 	arrays[0].size			   = 3u;
-	arrays[0].offset		   = iqmHeader->ofsVertexArrays + 2u * sizeof( *arrays );
+	arrays[0].offset		   = iqmHeader->ofsVertexArrays + 3u * sizeof( *arrays );
 	float *positions		   = (float *)( iqm + arrays[0].offset );
 	positions[3]			   = 1.0f;
 	positions[7]			   = 1.0f;
@@ -686,11 +875,67 @@ static int TestModelPayloads( void )
 	iqmTriangle[2]			   = 2u;
 	iqmHeader->filesize		   = iqmHeader->ofsTriangles + 3u * sizeof( uint32_t );
 	qhandle_t iqmModel = RenderSubmission_RegisterModelData( &state, "models/test.iqm", iqm, iqmHeader->filesize );
+	RenderSubmission_ModelBounds( &state, iqmModel, modelMins, modelMaxs );
+	CHECK( modelMins[0] == 0 && modelMins[1] == 0 && modelMins[2] == 0
+		&& modelMaxs[0] == 1 && modelMaxs[1] == 1 && modelMaxs[2] == 0 );
 	CHECK( iqmModel > model && RenderSubmission_ModelSnapshot( &state, iqmModel, &snapshot ) &&
 		   snapshot.format == RENDER_MODEL_IQM && snapshot.frameCount == 1u && snapshot.vertexCount == 3u &&
 		   snapshot.indexCount == 3u && snapshot.batchCount == 1u &&
 		   !strcmp( snapshot.batches[0].materialName, "textures/iqm" ) );
+
+	CHECK( snapshot.colors == NULL ); // Missing IQM color means white, not entity tint.
+	const byte authoredColors[12] = {19,151,93,87, 255,0,128,51, 0,255,64,204};
+	arrays[2].type = 6u; arrays[2].format = 1u; arrays[2].size = 4u;
+	arrays[2].offset = iqmHeader->filesize;
+	memcpy(iqm + arrays[2].offset, authoredColors, sizeof(authoredColors));
+	iqmHeader->filesize += sizeof(authoredColors); iqmHeader->numVertexArrays = 3u;
+	const uint32_t beforeBytes = state.modelBytes;
+	qhandle_t colored = RenderSubmission_RegisterModelData(&state,"models/colored.iqm",iqm,iqmHeader->filesize);
+	CHECK(colored > iqmModel && RenderSubmission_ModelSnapshot(&state,colored,&snapshot));
+	CHECK(snapshot.colors && !memcmp(snapshot.colors,authoredColors,sizeof(authoredColors)));
+	CHECK(state.modelBytes - beforeBytes == 3u * (3u+3u+2u) * sizeof(float)
+		+ 3u * sizeof(uint32_t) + sizeof(renderModelBatch_t) + sizeof(authoredColors));
+	// Verify owned immutable input and color participation in the existing digest.
+	iqm[arrays[2].offset] ^= 127;
+	CHECK(!memcmp(snapshot.colors,authoredColors,sizeof(authoredColors)));
+	qhandle_t colorMaterial = RenderSubmission_RegisterAsset(&state,RENDER_ASSET_MATERIAL,"textures/color-test");
+	CHECK(RenderSubmission_SetModelBatchMaterial(&state,colored,0,colorMaterial));
+	CHECK(RenderSubmission_ModelSnapshot(&state,colored,&snapshot));
+	uint64_t colorDigest = snapshot.digest;
+	((color4ub_t *)snapshot.colors)[0].rgba[0] ^= 1; // Test-only mutation of owned bytes.
+	CHECK(RenderSubmission_SetModelBatchMaterial(&state,colored,0,colorMaterial));
+	CHECK(RenderSubmission_ModelSnapshot(&state,colored,&snapshot) && snapshot.digest != colorDigest);
+	((color4ub_t *)snapshot.colors)[0].rgba[0] ^= 1;
+	const uint32_t beforeCount = state.modelCount, ownedBytes = state.modelBytes;
+	arrays[2].offset = iqmHeader->filesize-1u;
+	CHECK(!RenderSubmission_RegisterModelData(&state,"models/color-truncated.iqm",iqm,iqmHeader->filesize));
+	arrays[2].offset = iqmHeader->filesize-sizeof(authoredColors); arrays[2].format = 7u;
+	CHECK(!RenderSubmission_RegisterModelData(&state,"models/color-format.iqm",iqm,iqmHeader->filesize));
+	arrays[2].format = 1u;
+	testIqmArray_t savedTexCoord = arrays[1]; arrays[1] = arrays[2];
+	CHECK(!RenderSubmission_RegisterModelData(&state,"models/color-duplicate.iqm",iqm,iqmHeader->filesize));
+	arrays[1] = savedTexCoord;
+	state.modelBytes = RENDER_SUBMISSION_MAX_MODEL_BYTES;
+	CHECK(!RenderSubmission_RegisterModelData(&state,"models/color-overbudget.iqm",iqm,iqmHeader->filesize));
+	state.modelBytes = ownedBytes;
+	CHECK(state.modelCount == beforeCount);
 	CHECK( RenderSubmission_RegisterModelData( &state, "models/bad.md3", md3, sizeof( md3Header_t ) - 1u ) == 0 );
+	/* Registration retirement and full shutdown own every decoded plane,
+	 * including optional IQM colors. Exercise repeated replacement for leak
+	 * tooling as well as stale-handle rejection. */
+	qhandle_t retired = colored;
+	for ( unsigned cycle = 0; cycle < 40; ++cycle ) {
+		CHECK( RenderSubmission_ResetRegistrationAssets( &state ) );
+		CHECK( !state.modelBytes && !state.modelCount
+			&& !RenderSubmission_ModelSnapshot( &state, retired, &snapshot ) );
+		RenderSubmission_ModelBounds( &state, retired, modelMins, modelMaxs );
+		CHECK( modelMins[0] == 0 && modelMaxs[0] == 0 );
+		qhandle_t next = RenderSubmission_RegisterModelData( &state,
+			"models/colored.iqm", iqm, iqmHeader->filesize );
+		CHECK( next > retired
+			&& RenderSubmission_ModelSnapshot( &state, next, &snapshot ) && snapshot.colors );
+		retired = next;
+	}
 	RenderSubmission_Reset( &state );
 	return 0;
 }
@@ -755,6 +1000,1018 @@ static int WriteIrradianceFixture( const char *path, int originX, int originY, i
 	return 0;
 }
 
+static int TestDistantWorldDrawPlanBridge( void )
+{
+	const int distantWorldIndex = RENDER_DISTANT_WORLD_BASE;
+	static renderSubmissionState_t state;
+	renderWorldVertex_t vertices[3];
+	uint32_t indices[9] = { 0u, 1u, 2u, 0u, 1u, 2u, 0u, 1u, 2u };
+	renderWorldBatch_t batches[3];
+	renderDistantWorldDrawMetric_t metrics[3];
+	ralSkyDistantDrawCandidate_t scratch[3];
+	ralSkyEnvironmentPlanRequest_t skyRequest;
+	ralSkyEnvironmentPlanReceipt_t skyReceipt;
+	ralSkyDistantDrawPlanReceipt_t receipt, before;
+	renderDistantWorldSubmission_t submission, submissionBefore;
+	mapFile_t map;
+	refdef_t view;
+	uint32_t metricCount = 0u;
+	uint64_t contentIdentity = 0u;
+	memset( &state, 0, sizeof( state ) );
+	memset( vertices, 0, sizeof( vertices ) );
+	memset( batches, 0, sizeof( batches ) );
+	memset( metrics, 0, sizeof( metrics ) );
+	memset( scratch, 0, sizeof( scratch ) );
+	memset( &skyRequest, 0, sizeof( skyRequest ) );
+	memset( &map, 0, sizeof( map ) );
+	memset( &view, 0, sizeof( view ) );
+	memset( &submission, 0, sizeof( submission ) );
+	state.initialized = state.frameOpen = qtrue;
+	state.currentFrameGeneration = 9u;
+	state.activeWorldIndex = 0;
+	CHECK( MAX_RENDER_WORLDS == MAX_RENDER_APP_WORLDS * 2
+		&& distantWorldIndex < MAX_RENDER_WORLDS );
+	state.worlds[distantWorldIndex].loaded = qtrue;
+	state.worlds[distantWorldIndex].map = &map;
+	state.worlds[distantWorldIndex].digest = 77u;
+	state.worlds[distantWorldIndex].contentIdentity = 77u;
+	state.worlds[distantWorldIndex].snapshot.ready = qtrue;
+	state.worlds[distantWorldIndex].snapshot.vertices = vertices;
+	state.worlds[distantWorldIndex].snapshot.indices = indices;
+	state.worlds[distantWorldIndex].snapshot.batches = batches;
+	state.worlds[distantWorldIndex].snapshot.vertexCount = 3u;
+	state.worlds[distantWorldIndex].snapshot.indexCount = 9u;
+	state.worlds[distantWorldIndex].snapshot.batchCount = 3u;
+	for ( uint32_t index = 0u; index < 3u; ++index ) {
+		batches[index].sourceSurfaceIndex = 10u + index;
+		batches[index].firstIndex = index * 3u;
+		batches[index].indexCount = 3u;
+		batches[index].shaderIndex = (int32_t)index;
+		batches[index].visible = qtrue;
+		batches[index].boundsCenter[0] = 10.0f + index * 5.0f;
+		batches[index].boundsRadius = 1.0f;
+	}
+	batches[1].sky = qtrue;
+	view.fov_x = view.fov_y = 90.0f;
+	view.viewaxis[0][0] = 1.0f;
+	view.viewaxis[1][1] = 1.0f;
+	view.viewaxis[2][2] = 1.0f;
+	skyRequest.schemaVersion = RAL_SKY_ENVIRONMENT_SCHEMA_VERSION;
+	skyRequest.backendType = RAL_BACKEND_VULKAN;
+	skyRequest.frameGeneration = 9u;
+	skyRequest.requestedTier = RAL_ATMOSPHERE_TIER_FULL;
+	skyRequest.mode = RAL_SKY_ENVIRONMENT_AUTHORED;
+	skyRequest.sourceRevision = 1u;
+	skyRequest.authoredSkyAvailable = qtrue;
+	skyRequest.distantSceneRequested = qtrue;
+	skyRequest.distantSceneIdentity = 77u;
+	skyRequest.distantSceneScale = 16.0f;
+	skyRequest.distantSceneLodBias = 1.0f;
+	skyRequest.capabilities.distantScene = qtrue;
+	CHECK( Ral_SkyEnvironmentPlan( &skyRequest, &skyReceipt ) );
+	CHECK( RenderSubmission_WorldContentIdentity( &state, distantWorldIndex,
+		&contentIdentity ) && contentIdentity == 77u &&
+		state.activeWorldIndex == 0 );
+	CHECK( RenderSubmission_DistantWorldBuildMetrics( &state, distantWorldIndex, &skyReceipt,
+		&view, 4u, metrics, 3u, &metricCount ) && metricCount == 3u &&
+		metrics[0].visible && !metrics[1].visible && metrics[2].visible &&
+		metrics[0].projectedCoverageQ16 > metrics[2].projectedCoverageQ16 &&
+		metrics[0].lodLevelCount == 4u );
+	CHECK( RenderSubmission_DistantWorldDrawPlan( &state, distantWorldIndex, &skyReceipt,
+		metrics, metricCount, 1u, scratch, 3u, &receipt ) &&
+		receipt.drawClass == RAL_SKY_DRAW_CLASS_DISTANT_SCENE &&
+		receipt.candidateCount == 3u && receipt.visibleCount == 2u &&
+		receipt.admittedCount == 1u && receipt.visibilityCulledCount == 1u &&
+		receipt.budgetDroppedCount == 1u && !receipt.collisionQueryCount &&
+		!receipt.entityDrawCount && receipt.selections[0].sourceDrawIndex == 0u );
+	CHECK( RenderSubmission_DistantWorldSubmissionBuild( &state, distantWorldIndex, &view,
+		&receipt, &submission ) &&
+		RenderSubmission_DistantWorldSubmissionExact( &submission, &submission ) &&
+		submission.world.batches == batches && submission.world.viewOrigin[0] == 0.0f &&
+		submission.drawPlan.admittedCount == 1u && state.activeWorldIndex == 0 );
+	submissionBefore = submission;
+	receipt.selections[0].drawIdentity++;
+	CHECK( !RenderSubmission_DistantWorldSubmissionBuild( &state, distantWorldIndex, &view,
+		&receipt, &submission ) && !memcmp( &submission, &submissionBefore,
+		sizeof( submission ) ) );
+	receipt = submissionBefore.drawPlan;
+	batches[2].boundsCenter[0] = -20.0f;
+	CHECK( RenderSubmission_DistantWorldBuildMetrics( &state, distantWorldIndex, &skyReceipt,
+		&view, 4u, metrics, 3u, &metricCount ) && metricCount == 3u &&
+		metrics[0].visible && !metrics[1].visible && !metrics[2].visible );
+	before = receipt;
+	CHECK( !RenderSubmission_DistantWorldDrawPlan( &state, 0, &skyReceipt,
+		metrics, 3u, 1u, scratch, 3u, &receipt ) &&
+		!memcmp( &receipt, &before, sizeof( receipt ) ) );
+	/* Native products consume the sealed frontend frame.  The high-level
+	 * bridge derives the paired render-only slot without selecting it and
+	 * publishes output only after metrics, admission and submission all agree. */
+	state.worldSnapshot.ready = qtrue;
+	state.worldSnapshot.fovX = state.worldSnapshot.fovY = 90.0f;
+	state.worldSnapshot.viewportWidth = 1280u;
+	state.worldSnapshot.viewportHeight = 720u;
+	state.worldSnapshot.viewAxis[0][0] = 1.0f;
+	state.worldSnapshot.viewAxis[1][1] = 1.0f;
+	state.worldSnapshot.viewAxis[2][2] = 1.0f;
+	state.sceneRendered = qtrue;
+	state.frameOpen = qfalse;
+	state.frameSealed = qtrue;
+	state.sealedFrameGeneration = 9u;
+	state.currentFrameGeneration = 0u;
+	CHECK( RenderSubmission_ReadableFrameGeneration( &state,
+		&contentIdentity ) && contentIdentity == 9u );
+	batches[2].boundsCenter[0] = 20.0f;
+	CHECK( RenderSubmission_DistantWorldSubmissionForActiveView( &state,
+		&skyReceipt, 4u, 1u, metrics, 3u, scratch, 3u, &submission )
+		&& RenderSubmission_DistantWorldSubmissionExact( &submission, &submission )
+		&& submission.world.viewportWidth == 1280u
+		&& submission.world.viewportHeight == 720u
+		&& state.activeWorldIndex == 0 );
+	submissionBefore = submission;
+	state.sealedFrameGeneration++;
+	CHECK( RenderSubmission_ReadableFrameGeneration( &state,
+		&contentIdentity ) && contentIdentity == 10u );
+	CHECK( !RenderSubmission_DistantWorldSubmissionForActiveView( &state,
+		&skyReceipt, 4u, 1u, metrics, 3u, scratch, 3u, &submission )
+		&& !memcmp( &submission, &submissionBefore, sizeof( submission ) ) );
+	state.sealedFrameGeneration--;
+	skyReceipt.distantSceneIdentity++;
+	CHECK( !RenderSubmission_DistantWorldSubmissionForActiveView( &state,
+		&skyReceipt, 4u, 1u, metrics, 3u, scratch, 3u, &submission )
+		&& !memcmp( &submission, &submissionBefore, sizeof( submission ) ) );
+	return 0;
+}
+
+static int TestMapAuthoredSkyAtmosphere( void )
+{
+	static renderSubmissionState_t state;
+	mapFile_t world = { 0 };
+	dsurface_t surface = { 0 };
+	drawVert_t vertices[3] = { 0 };
+	int indices[3] = { 0, 1, 2 };
+	dshader_t shader = { 0 };
+	atmosphereFrameState_t atmosphere = { 0 };
+	renderAtmosphereSnapshot_t snapshot;
+	const atmosphereEmitter_t *emitters;
+	ralMaterialSourceSky_t skySource = { 0 }, invalidSource;
+	renderMaterialSnapshot_t materialSnapshot;
+	renderMaterialSnapshot_t activeSkySnapshot;
+	char activeSkyName[MAX_QPATH];
+	const byte pixels[4] = { 128u, 64u, 32u, 255u };
+	const byte facePixels[4] = { 64u, 96u, 128u, 255u };
+	const float stageAverage[3] = { 0.20f, 0.30f, 0.40f };
+	float invalidAverage[3] = { 0.20f, NAN, 0.40f };
+	qhandle_t outerTextures[RAL_MATERIAL_SKY_FACE_COUNT] = { 0 };
+	qhandle_t innerTextures[RAL_MATERIAL_SKY_FACE_COUNT] = { 0 };
+	qhandle_t invalidTextures[RAL_MATERIAL_SKY_FACE_COUNT];
+	qhandle_t material;
+
+	strcpy( world.name, "maps/authored-sky-fixture.bsp" );
+	world.checksum = 0x51534b59;
+	world.numSurfaces = 1; world.surfaces = &surface;
+	world.numDrawVerts = 3; world.drawVerts = vertices;
+	world.numDrawIndexes = 3; world.drawIndexes = indices;
+	world.numShaders = 1; world.shaders = &shader;
+	strcpy( shader.shader, "textures/skies/tim_hell" );
+	shader.surfaceFlags = SURF_SKY;
+	surface.surfaceType = MST_PLANAR;
+	surface.numVerts = surface.numIndexes = 3;
+	surface.lightmapNum = -1;
+	vertices[1].xyz[0] = 1.0f;
+	vertices[2].xyz[1] = 1.0f;
+	CHECK( RenderSubmission_Init( &state, 0x51534b59u ) );
+	material = RenderSubmission_RegisterMaterialImage( &state,
+		RENDER_ASSET_MATERIAL, shader.shader, qfalse, pixels, 1u, 1u );
+	CHECK( material > 0 && RenderSubmission_SetMaterialSky( &state, material,
+		qtrue ) );
+	skySource.hasSun = qtrue;
+	skySource.sunColor[0] = 1.0f;
+	skySource.sunColor[1] = skySource.sunColor[2] = 0.77f;
+	skySource.sunIntensity = 80.0f;
+	skySource.sunAzimuthDegrees = 315.0f;
+	skySource.sunElevationDegrees = 70.0f;
+	skySource.outerBox = qtrue;
+	for ( uint32_t face = 0u; face < RAL_MATERIAL_SKY_FACE_COUNT; ++face ) {
+		char name[MAX_QPATH];
+		skySource.outerDependencies[face] = face;
+		snprintf( name, sizeof( name ), "textures/skies/fixture_%u", face );
+		outerTextures[face] = RenderSubmission_RegisterStageTexture( &state,
+			RENDER_ASSET_MATERIAL, name, qtrue, facePixels, 1u, 1u );
+		CHECK( outerTextures[face] > 0 );
+	}
+	CHECK( RenderSubmission_SetMaterialAuthoredSkySource( &state, material,
+		&skySource ) );
+	/* Stage-only skies must publish their real colour through the shared
+	 * frontend too, not only through Vulkan's former image-decoding path. */
+	{
+		const byte white[4] = { 255, 255, 255, 255 };
+		ralMaterialSourceSky_t stagedSource = skySource;
+		renderMaterialStageSnapshot_t stage = { 0 };
+		qhandle_t empty[RAL_MATERIAL_SKY_FACE_COUNT] = { 0 };
+		qhandle_t staged = RenderSubmission_RegisterMaterialImage( &state,
+			RENDER_ASSET_MATERIAL, "textures/skies/stage-only", qfalse, white, 1, 1 );
+		stagedSource.outerBox = qfalse;
+		memset( stagedSource.outerDependencies, 0, sizeof( stagedSource.outerDependencies ) );
+		stage.material = outerTextures[0];
+		stage.sourceBlend = PRIM_BLEND_ONE;
+		stage.destinationBlend = PRIM_BLEND_ZERO;
+		stage.scaleScroll[0] = stage.scaleScroll[1] = 1.0f;
+		for ( unsigned c = 0; c < 4; ++c ) stage.constantColor[c] = 1.0f;
+		CHECK( staged > 0 && RenderSubmission_SetMaterialSky( &state, staged, qtrue )
+			&& RenderSubmission_SetMaterialStages( &state, staged, &stage, 1u )
+			&& RenderSubmission_SetMaterialAuthoredSkySource( &state, staged, &stagedSource )
+			&& RenderSubmission_SetMaterialAuthoredSkyTextures( &state, staged, empty, empty )
+			&& RenderSubmission_MaterialSnapshot( &state, staged, &materialSnapshot ) );
+		for ( unsigned channel = 0; channel < 3; ++channel )
+			CHECK( fabsf( materialSnapshot.authoredSkyAverage[channel]
+				- (float)facePixels[channel] / 255.0f ) < 0.0001f );
+	}
+	CHECK( RenderSubmission_MaterialSnapshot( &state, material,
+		&materialSnapshot )
+		&& fabsf( materialSnapshot.authoredSkyAverage[0] - 0.04f ) < 0.0001f );
+	CHECK( RenderSubmission_SetMaterialAuthoredSkyAverage( &state, material,
+		stageAverage )
+		&& !RenderSubmission_SetMaterialAuthoredSkyAverage( &state, material,
+			invalidAverage )
+		&& RenderSubmission_MaterialSnapshot( &state, material,
+			&materialSnapshot )
+		&& fabsf( materialSnapshot.authoredSkyAverage[2] - 0.40f ) < 0.0001f );
+	CHECK( RenderSubmission_SetMaterialAuthoredSkyTextures( &state, material,
+		outerTextures, innerTextures ) );
+	memcpy( invalidTextures, outerTextures, sizeof( invalidTextures ) );
+	invalidTextures[2] = 0;
+	CHECK( !RenderSubmission_SetMaterialAuthoredSkyTextures( &state, material,
+		invalidTextures, innerTextures ) );
+	invalidSource = skySource;
+	invalidSource.sunIntensity = NAN;
+	CHECK( !RenderSubmission_SetMaterialAuthoredSkySource( &state, material,
+		&invalidSource ) );
+	CHECK( RenderSubmission_MaterialSnapshot( &state, material,
+		&materialSnapshot ) && materialSnapshot.authoredSkySourceReady
+		&& materialSnapshot.authoredSkyTexturesReady
+		&& !memcmp( materialSnapshot.authoredSkyOuterTextures, outerTextures,
+			sizeof( outerTextures ) )
+		&& fabsf( materialSnapshot.authoredSkyAverage[0]
+			- 64.0f / 255.0f ) < 0.0001f );
+	CHECK( RenderSubmission_LoadWorld( &state, &world, 0 ) );
+	CHECK( RenderSubmission_ActiveSkyMaterial( &state, &activeSkySnapshot,
+		activeSkyName ) && !strcmp( activeSkyName, shader.shader )
+		&& activeSkySnapshot.handle == material
+		&& activeSkySnapshot.digest == materialSnapshot.digest );
+	atmosphere.type = ATMOSPHERE_PRECIP_NONE;
+	CHECK( RenderSubmission_SetAtmosphere( &state, &atmosphere )
+		&& RenderSubmission_AtmosphereSnapshot( &state, &snapshot, &emitters )
+		&& emitters != NULL
+		&& snapshot.state.skyEnvironment.authoredSkyIdentity
+			== materialSnapshot.digest
+		&& snapshot.state.skyEnvironment.sourceRevision != 0u
+		&& snapshot.state.skyEnvironment.skyLuminance == 128.0f / 255.0f
+		&& fabsf( snapshot.state.skyEnvironment.sunDirection[0] - 0.2418448f )
+			< 0.0001f
+		&& fabsf( snapshot.state.skyEnvironment.sunDirection[1] + 0.2418448f )
+			< 0.0001f
+		&& fabsf( snapshot.state.skyEnvironment.sunDirection[2] - 0.9396926f )
+			< 0.0001f
+		&& snapshot.state.skyEnvironment.sunRadiance[0]
+			> snapshot.state.skyEnvironment.sunRadiance[1] );
+	RenderSubmission_Reset( &state );
+	return 0;
+}
+
+static int TestMaterialStageDepthCollapse( void ) {
+	ralMaterialStageDepth_t stages[RAL_MATERIAL_SOURCE_MAX_STAGES] = { 0 };
+	ralMaterialStageDepthPlan_t plan, before;
+	/* Exhaust the four function/write combinations for every program length.
+	 * Independent depth-buffer simulation checks every possible input relation. */
+	for ( unsigned count = 1u; count <= RAL_MATERIAL_SOURCE_MAX_STAGES; ++count ) {
+		const unsigned programs = 1u << ( count * 2u );
+		for ( unsigned program = 0u; program < programs; ++program ) {
+			for ( unsigned i = 0u; i < count; ++i ) {
+				stages[i].depthFunc = ( program >> ( 2u * i ) ) & 1u;
+				stages[i].depthWrite = (qboolean)(( program >> ( 2u * i + 1u ) ) & 1u);
+				stages[i].alphaTest = RAL_MATERIAL_ALPHA_TEST_NONE;
+			}
+			CHECK( Ral_MaterialStageDepthCollapse( stages, count, &plan ) );
+			if ( plan.singleDraw ) for ( unsigned fragment = 0u; fragment < 3u; ++fragment ) {
+				unsigned depth = 1u, mask = 0u;
+				for ( unsigned i = 0u; i < count; ++i ) {
+					const qboolean pass = stages[i].depthFunc == RAL_MATERIAL_DEPTH_EQUAL
+						? fragment == depth : fragment <= depth;
+					if ( pass ) { mask |= 1u << i; if ( stages[i].depthWrite ) depth = fragment; }
+				}
+				const qboolean pass = plan.depthFunc == RAL_MATERIAL_DEPTH_EQUAL
+					? fragment == 1u : fragment <= 1u;
+				CHECK( mask == ( pass ? ( 1u << count ) - 1u : 0u ) );
+				CHECK( depth == ( pass && plan.depthWrite ? fragment : 1u ) );
+			}
+		}
+	}
+	/* Common Q3 base-write -> equal-lightmap stays one depth operation. */
+	memset( stages, 0, sizeof( stages ) ); stages[0].depthWrite = qtrue;
+	stages[1].depthFunc = RAL_MATERIAL_DEPTH_EQUAL;
+	CHECK( Ral_MaterialStageDepthCollapse( stages, 2u, &plan )
+		&& plan.singleDraw && plan.depthWrite && plan.depthFunc == RAL_MATERIAL_DEPTH_LEQUAL );
+	stages[0].depthWrite = qfalse;
+	CHECK( Ral_MaterialStageDepthCollapse( stages, 2u, &plan ) && !plan.singleDraw );
+	stages[0].depthFunc = RAL_MATERIAL_DEPTH_EQUAL;
+	stages[1].depthFunc = RAL_MATERIAL_DEPTH_LEQUAL;
+	CHECK( Ral_MaterialStageDepthCollapse( stages, 2u, &plan ) && !plan.singleDraw );
+	for ( unsigned slot = 0u; slot < RAL_MATERIAL_SOURCE_MAX_STAGES; ++slot ) {
+		memset( stages, 0, sizeof( stages ) );
+		stages[slot].alphaTest = RAL_MATERIAL_ALPHA_TEST_KEEP_LESS;
+		CHECK( Ral_MaterialStageDepthCollapse( stages, RAL_MATERIAL_SOURCE_MAX_STAGES, &plan )
+			&& !plan.singleDraw );
+	}
+	memset( stages, 0, sizeof( stages ) ); stages[0].alphaTest = RAL_MATERIAL_ALPHA_TEST_KEEP_LESS;
+	CHECK( Ral_MaterialStageDepthCollapse( stages, 1u, &plan ) && plan.singleDraw );
+	before = plan;
+	CHECK( !Ral_MaterialStageDepthCollapse( NULL, 1u, &plan ) && !memcmp( &plan, &before, sizeof( plan ) ) );
+	CHECK( !Ral_MaterialStageDepthCollapse( stages, 0u, &plan ) && !memcmp( &plan, &before, sizeof( plan ) ) );
+	CHECK( !Ral_MaterialStageDepthCollapse( stages, RAL_MATERIAL_SOURCE_MAX_STAGES + 1u, &plan )
+		&& !memcmp( &plan, &before, sizeof( plan ) ) );
+	stages[7].depthFunc = UINT32_MAX;
+	CHECK( !Ral_MaterialStageDepthCollapse( stages, 8u, &plan ) && !memcmp( &plan, &before, sizeof( plan ) ) );
+	stages[7].depthFunc = 0u; stages[7].depthWrite = (qboolean)2;
+	CHECK( !Ral_MaterialStageDepthCollapse( stages, 8u, &plan ) && !memcmp( &plan, &before, sizeof( plan ) ) );
+	stages[7].depthWrite = qfalse; stages[7].alphaTest = UINT32_MAX;
+	CHECK( !Ral_MaterialStageDepthCollapse( stages, 8u, &plan ) && !memcmp( &plan, &before, sizeof( plan ) ) );
+	return 0;
+}
+
+static int TestMaterialStageBlendAdditive( void ) {
+	ralMaterialStageBlend_t stages[8] = { 0 };
+	qboolean additive;
+	/* Every factor pair in every slot: don't classify a chain from stage zero.
+	 * Also pins the public source-IR encoding used by the shared classifier. */
+	CHECK( RENDER_MATERIAL_BLEND_ONE == 1 && RENDER_MATERIAL_BLEND_SRC_ALPHA == 6
+		&& RENDER_MATERIAL_BLEND_SRC_ALPHA_SATURATE == 10 );
+	for ( unsigned slot = 0u; slot < 8u; ++slot )
+	for ( unsigned src = 0u; src <= 10u; ++src )
+	for ( unsigned dst = 0u; dst <= 10u; ++dst ) {
+		for ( unsigned i = 0u; i < 8u; ++i ) {
+			stages[i].sourceBlend = RENDER_MATERIAL_BLEND_SRC_ALPHA;
+			stages[i].destinationBlend = RENDER_MATERIAL_BLEND_ONE;
+		}
+		stages[slot].sourceBlend = src; stages[slot].destinationBlend = dst;
+		CHECK( Ral_MaterialStageBlendAdditive( stages, 8u, &additive ) );
+		CHECK( !!additive == ( dst == RENDER_MATERIAL_BLEND_ONE
+			&& ( src == RENDER_MATERIAL_BLEND_ONE || src == RENDER_MATERIAL_BLEND_SRC_ALPHA ) ) );
+	}
+	/* All 510 eligible factor programs, against three colored backgrounds and
+	 * nonuniform stage color/coverage. Independent ordered recurrence vs sum. */
+	for ( unsigned count = 1u; count <= 8u; ++count )
+	for ( unsigned bits = 0u; bits < (1u << count); ++bits ) {
+		for ( unsigned i = 0u; i < count; ++i ) {
+			stages[i].sourceBlend = bits & (1u << i)
+				? RENDER_MATERIAL_BLEND_ONE : RENDER_MATERIAL_BLEND_SRC_ALPHA;
+			stages[i].destinationBlend = RENDER_MATERIAL_BLEND_ONE;
+		}
+		CHECK( Ral_MaterialStageBlendAdditive( stages, count, &additive ) && additive );
+		for ( unsigned bg = 0u; bg < 3u; ++bg ) for ( unsigned c = 0u; c < 3u; ++c ) {
+			double background = (bg*3+c+1)/17.0, ordered = background, sum = 0.0;
+			for ( unsigned i = 0u; i < count; ++i ) {
+				double color = (i+c+1)/31.0, alpha = ((i+bg)%4)/3.0;
+				double contribution = bits & (1u << i) ? color : color*alpha;
+				ordered = contribution + ordered; sum += contribution;
+			}
+			CHECK( fabs( ordered - (background+sum) ) < 1e-12 );
+		}
+	}
+	for ( unsigned invalid = 0u; invalid < 6u; ++invalid ) {
+		qboolean sentinel = (qboolean)73;
+		stages[7].sourceBlend = invalid == 0u ? UINT32_MAX : 1u;
+		stages[7].destinationBlend = invalid == 1u ? UINT32_MAX : 1u;
+		CHECK( !Ral_MaterialStageBlendAdditive( invalid == 2u ? NULL : stages,
+			invalid == 3u ? 0u : (invalid == 4u ? 9u : 8u),
+			invalid == 5u ? NULL : &sentinel ) );
+		CHECK( sentinel == (qboolean)73 );
+	}
+	return 0;
+}
+
+static int TestMaterialStageSnapshot( void )
+{
+	static renderSubmissionState_t state;
+	const byte pixels[4] = { 255u, 255u, 255u, 255u };
+	renderMaterialStageSnapshot_t stage = { 0 }, invalid;
+	renderMaterialSnapshot_t snapshot, before;
+	qhandle_t material, frame0, frame1;
+
+	CHECK( RenderSubmission_Init( &state, 0x414e494du ) );
+	material = RenderSubmission_RegisterMaterialImage( &state,
+		RENDER_ASSET_MATERIAL, "textures/test/animated", qfalse,
+		pixels, 1u, 1u );
+	frame0 = RenderSubmission_RegisterStageTexture( &state,
+		RENDER_ASSET_MATERIAL, "textures/test/frame0", qfalse,
+		pixels, 1u, 1u );
+	frame1 = RenderSubmission_RegisterStageTexture( &state,
+		RENDER_ASSET_MATERIAL, "textures/test/frame1", qfalse,
+		pixels, 1u, 1u );
+	CHECK( material > 0 && frame0 > 0 && frame1 > 0
+		&& state.materialCount == 1u && state.stageTextureCount == 2u );
+	stage.material = frame0;
+	stage.animationMaterials[0] = frame0;
+	stage.animationMaterials[1] = frame1;
+	stage.animationFrameCount = 2u;
+	stage.animationFrequency = 8.0f;
+	stage.animationLooping = qtrue;
+	stage.tcGen = RENDER_MATERIAL_TCGEN_VECTOR;
+	stage.tcGenVectors[0][0] = 0.5f;
+	stage.tcGenVectors[1][1] = 0.25f;
+	stage.rgbGen = RAL_MATERIAL_COLOR_WAVE;
+	stage.alphaGen = RAL_MATERIAL_ALPHA_WAVE;
+	stage.rgbWave.function = RAL_MATERIAL_WAVE_SIN;
+	stage.rgbWave.base = 0.5f;
+	stage.rgbWave.amplitude = 0.5f;
+	stage.rgbWave.frequency = 2.0f;
+	stage.alphaWave.function = RAL_MATERIAL_WAVE_TRIANGLE;
+	stage.alphaWave.base = 0.75f;
+	stage.alphaWave.amplitude = 0.25f;
+	stage.alphaWave.frequency = 1.0f;
+	stage.constantColor[0] = stage.constantColor[1]
+		= stage.constantColor[2] = stage.constantColor[3] = 1.0f;
+	stage.scaleScroll[0] = stage.scaleScroll[1] = 1.0f;
+	CHECK( RenderSubmission_SetMaterialStages( &state, material, &stage, 1u )
+		&& RenderSubmission_MaterialSnapshot( &state, material, &snapshot )
+		&& snapshot.stageCount == 1u
+		&& snapshot.stages[0].animationFrameCount == 2u
+		&& snapshot.stages[0].animationMaterials[1] == frame1
+		&& snapshot.stages[0].animationFrequency == 8.0f
+		&& snapshot.stages[0].tcGenVectors[0][0] == 0.5f
+		&& snapshot.stages[0].rgbWave.frequency == 2.0f
+		&& snapshot.stages[0].alphaWave.function
+			== RAL_MATERIAL_WAVE_TRIANGLE );
+	before = snapshot;
+	invalid = stage;
+	invalid.animationMaterials[1] = 0;
+	CHECK( !RenderSubmission_SetMaterialStages( &state, material, &invalid, 1u )
+		&& RenderSubmission_MaterialSnapshot( &state, material, &snapshot )
+		&& !memcmp( &snapshot, &before, sizeof( snapshot ) ) );
+	/* Both depth operands participate in identity. Rejection must not publish
+	 * a new generation or partially replace the existing stage program. */
+	for ( unsigned operand = 0u; operand < 2u; ++operand ) {
+		if ( operand == 0u ) stage.depthWrite = qtrue;
+		else stage.depthFunc = RAL_MATERIAL_DEPTH_EQUAL;
+		CHECK( RenderSubmission_SetMaterialStages( &state, material, &stage, 1u )
+			&& RenderSubmission_MaterialSnapshot( &state, material, &snapshot )
+			&& snapshot.digest != before.digest
+			&& snapshot.generation != before.generation
+			&& snapshot.stages[0].depthWrite == stage.depthWrite
+			&& snapshot.stages[0].depthFunc == stage.depthFunc
+			&& snapshot.stageDepth.singleDraw
+			&& snapshot.stageDepth.depthWrite == stage.depthWrite
+			&& snapshot.stageDepth.depthFunc == stage.depthFunc );
+		before = snapshot;
+		CHECK( RenderSubmission_SetMaterialStages( &state, material, &stage, 1u )
+			&& RenderSubmission_MaterialSnapshot( &state, material, &snapshot )
+			&& !memcmp( &snapshot, &before, sizeof( snapshot ) ) );
+		invalid = stage;
+		if ( operand == 0u ) invalid.depthWrite = (qboolean)2;
+		else invalid.depthFunc = UINT32_MAX;
+		CHECK( !RenderSubmission_SetMaterialStages( &state, material, &invalid, 1u )
+			&& RenderSubmission_MaterialSnapshot( &state, material, &snapshot )
+			&& !memcmp( &snapshot, &before, sizeof( snapshot ) ) );
+	}
+	{
+		renderMaterialStageSnapshot_t pair[2] = { stage, stage };
+		pair[0].depthFunc = RAL_MATERIAL_DEPTH_LEQUAL;
+		pair[1].depthFunc = RAL_MATERIAL_DEPTH_EQUAL;
+		CHECK( RenderSubmission_SetMaterialStages( &state, material, pair, 2u )
+			&& RenderSubmission_MaterialSnapshot( &state, material, &snapshot )
+			&& snapshot.stageDepth.singleDraw && snapshot.stageDepth.depthWrite
+			&& snapshot.stageDepth.depthFunc == RAL_MATERIAL_DEPTH_LEQUAL );
+		before = snapshot;
+		pair[0].depthWrite = qfalse;
+		CHECK( RenderSubmission_SetMaterialStages( &state, material, pair, 2u )
+			&& RenderSubmission_MaterialSnapshot( &state, material, &snapshot )
+			&& !snapshot.stageDepth.singleDraw && snapshot.digest != before.digest );
+		before = snapshot;
+	}
+	{
+		renderMaterialStageSnapshot_t pair[2] = { stage, stage };
+		pair[0].sourceBlend = RENDER_MATERIAL_BLEND_SRC_ALPHA;
+		pair[1].sourceBlend = RENDER_MATERIAL_BLEND_ONE;
+		pair[0].destinationBlend = pair[1].destinationBlend = RENDER_MATERIAL_BLEND_ONE;
+		CHECK( RenderSubmission_SetMaterialStages( &state, material, pair, 2u )
+			&& RenderSubmission_MaterialSnapshot( &state, material, &snapshot )
+			&& snapshot.stageBlendAdditive );
+		before = snapshot;
+		CHECK( RenderSubmission_SetMaterialStages( &state, material, pair, 2u )
+			&& RenderSubmission_MaterialSnapshot( &state, material, &snapshot )
+			&& !memcmp( &before, &snapshot, sizeof( snapshot ) ) );
+		pair[1].destinationBlend = 11u;
+		CHECK( !RenderSubmission_SetMaterialStages( &state, material, pair, 2u )
+			&& RenderSubmission_MaterialSnapshot( &state, material, &snapshot )
+			&& !memcmp( &before, &snapshot, sizeof( snapshot ) ) );
+		pair[1].destinationBlend = RENDER_MATERIAL_BLEND_ONE_MINUS_SRC_ALPHA;
+		CHECK( RenderSubmission_SetMaterialStages( &state, material, pair, 2u )
+			&& RenderSubmission_MaterialSnapshot( &state, material, &snapshot )
+			&& !snapshot.stageBlendAdditive && before.digest != snapshot.digest
+			&& before.generation != snapshot.generation );
+		before = snapshot;
+	}
+	stage.tcModCount = 2u;
+	stage.tcMods[0].type = RAL_MATERIAL_TCMOD_SCROLL;
+	stage.tcMods[0].parameters[0] = 0.25f;
+	stage.tcMods[1].type = RAL_MATERIAL_TCMOD_SCALE;
+	stage.tcMods[1].parameters[0] = stage.tcMods[1].parameters[1] = 2.0f;
+	CHECK( RenderSubmission_SetMaterialStages( &state, material, &stage, 1u )
+		&& RenderSubmission_MaterialSnapshot( &state, material, &snapshot )
+		&& snapshot.digest != before.digest && snapshot.stages[0].tcModCount == 2u );
+	before = snapshot;
+	{ renderMaterialTcMod_t swap = stage.tcMods[0];
+		stage.tcMods[0] = stage.tcMods[1]; stage.tcMods[1] = swap; }
+	CHECK( RenderSubmission_SetMaterialStages( &state, material, &stage, 1u )
+		&& RenderSubmission_MaterialSnapshot( &state, material, &snapshot )
+		&& snapshot.digest != before.digest );
+	before = snapshot;
+	for ( unsigned defect = 0u; defect < 4u; ++defect ) {
+		invalid = stage;
+		if ( defect == 0u ) invalid.tcModCount = RAL_MATERIAL_SOURCE_MAX_TCMODS + 1u;
+		if ( defect == 1u ) invalid.tcMods[0].type = 99u;
+		if ( defect == 2u ) invalid.tcMods[0].parameters[0] = NAN;
+		if ( defect == 3u ) {
+			invalid.tcMods[0].type = RAL_MATERIAL_TCMOD_STRETCH;
+			invalid.tcMods[0].parameters[0] = 1.5f;
+		}
+		CHECK( !RenderSubmission_SetMaterialStages( &state, material, &invalid, 1u )
+			&& RenderSubmission_MaterialSnapshot( &state, material, &snapshot )
+			&& !memcmp( &snapshot, &before, sizeof( snapshot ) ) );
+	}
+	/* An authored zero scale is a valid constant texture coordinate, not an
+	 * absent flattened compatibility transform. */
+	stage.scaleScroll[0] = 0.0f;
+	stage.tcMods[0].parameters[0] = 0.0f;
+	CHECK( RenderSubmission_SetMaterialStages( &state, material, &stage, 1u ) );
+	RenderSubmission_Reset( &state );
+	return 0;
+}
+
+static int TestStageTextureMaterialCapacityIsolation( void )
+{
+	static renderSubmissionState_t state;
+	static renderMaterialFactorPublicationEntry_t factors[RENDER_SUBMISSION_MAX_MATERIALS];
+	const byte pixels[4] = { 255u, 255u, 255u, 255u };
+	char name[MAX_QPATH];
+	renderTextureSnapshot_t texture;
+	qhandle_t lastMaterial = 0, lastTexture = 0, gapHandle = 0;
+	uint32_t index = UINT32_MAX;
+
+	CHECK( RenderSubmission_Init( &state, 0x53544745u ) );
+	CHECK( !RenderSubmission_MaterialIndex( &state, 1, &index )
+		&& index == UINT32_MAX );
+	for ( uint32_t i = 0u; i < 256u; ++i ) {
+		snprintf( name, sizeof( name ), "textures/test/stage_%u", i );
+		lastTexture = RenderSubmission_RegisterStageTexture( &state,
+			RENDER_ASSET_MATERIAL, name, qfalse, pixels, 1u, 1u );
+		CHECK( lastTexture > 0 );
+	}
+	for ( uint32_t i = 0u; i < RENDER_SUBMISSION_MAX_MATERIALS; ++i ) {
+		snprintf( name, sizeof( name ), "textures/test/material_%u", i );
+		lastMaterial = RenderSubmission_RegisterMaterialImage( &state,
+			RENDER_ASSET_MATERIAL, name, qfalse, pixels, 1u, 1u );
+		CHECK( lastMaterial > 0 && RenderSubmission_MaterialIndex( &state,
+			lastMaterial, &index ) && index == i );
+		/* Interleaved model handles must not be treated as array indices. */
+		gapHandle = RenderSubmission_RegisterAsset( &state, RENDER_ASSET_MODEL,
+			"models/test/gap.md3" );
+		index = UINT32_MAX;
+		CHECK( gapHandle > lastMaterial
+			&& !RenderSubmission_MaterialIndex( &state, gapHandle, &index )
+			&& index == UINT32_MAX );
+		memset( &factors[i], 0, sizeof( factors[i] ) );
+		factors[i].material = lastMaterial;
+		factors[i].factors.baseColor[3] = 1.0f;
+		factors[i].factors.roughness = (float)i / RENDER_SUBMISSION_MAX_MATERIALS;
+	}
+	CHECK( state.materialCount == RENDER_SUBMISSION_MAX_MATERIALS
+		&& state.stageTextureCount == 256u
+		&& RenderSubmission_TextureSnapshot( &state, lastTexture, &texture )
+		&& texture.ready == qtrue
+		&& RenderSubmission_MaterialHandle( &state,
+			"textures/test/material_1023" ) == lastMaterial );
+	/* Full-capacity arbitrary publication order, duplicate/unknown rejection,
+	 * unchanged-generation identity and failure atomicity. */
+	for ( uint32_t i = 0u; i < RENDER_SUBMISSION_MAX_MATERIALS / 2u; ++i ) {
+		const uint32_t other = RENDER_SUBMISSION_MAX_MATERIALS - 1u - i;
+		renderMaterialFactorPublicationEntry_t swap = factors[i];
+		factors[i] = factors[other]; factors[other] = swap;
+	}
+	CHECK( RenderSubmission_PublishMaterialFactors( &state, 73u, factors,
+		RENDER_SUBMISSION_MAX_MATERIALS ) );
+	for ( uint32_t i = 0u; i < state.materialCount; ++i ) {
+		CHECK( RenderSubmission_MaterialIndex( &state,
+			state.materials[i].snapshot.handle, &index ) && index == i );
+		CHECK( state.materials[i].snapshot.factors.ready
+			&& state.materials[i].snapshot.factors.factors.roughness
+				== (float)i / RENDER_SUBMISSION_MAX_MATERIALS );
+	}
+	{
+		const uint64_t generation = state.nextMaterialGeneration;
+		const uint64_t digest = state.materialDigest;
+		const qhandle_t saved = factors[0].material;
+		CHECK( RenderSubmission_PublishMaterialFactors( &state, 73u, factors,
+			RENDER_SUBMISSION_MAX_MATERIALS ) );
+		CHECK( state.nextMaterialGeneration == generation && state.materialDigest == digest );
+		for ( unsigned defect = 0u; defect < 3u; ++defect ) {
+			factors[0].material = defect == 0u ? factors[1].material
+				: defect == 1u ? gapHandle : lastTexture;
+			CHECK( !RenderSubmission_PublishMaterialFactors( &state, 74u, factors,
+				RENDER_SUBMISSION_MAX_MATERIALS ) );
+			CHECK( state.nextMaterialGeneration == generation && state.materialDigest == digest );
+		}
+		factors[0].material = saved;
+		CHECK( RenderSubmission_PublishMaterialFactors( &state, 74u, factors,
+			RENDER_SUBMISSION_MAX_MATERIALS ) );
+		CHECK( state.nextMaterialGeneration == generation + state.materialCount );
+	}
+	CHECK( !RenderSubmission_MaterialIndex( NULL, lastMaterial, &index )
+		&& !RenderSubmission_MaterialIndex( &state, lastMaterial, NULL )
+		&& !RenderSubmission_MaterialIndex( &state, 0, &index ) );
+	CHECK( RenderSubmission_ResetRegistrationAssets( &state ) );
+	index = UINT32_MAX;
+	CHECK( !RenderSubmission_MaterialIndex( &state, lastMaterial, &index )
+		&& index == UINT32_MAX );
+	CHECK( RenderSubmission_RegisterMaterialImage( &state,
+		RENDER_ASSET_MATERIAL, "textures/test/reload", qfalse, pixels, 1u, 1u ) > lastMaterial );
+	CHECK( RenderSubmission_MaterialIndex( &state, state.materials[0].snapshot.handle,
+		&index ) && index == 0u );
+	RenderSubmission_Reset( &state );
+	return 0;
+}
+
+static int TestStageTextureDoesNotAliasShaderIdentity( void )
+{
+	static renderSubmissionState_t state;
+	const byte primary[4] = { 255u, 0u, 255u, 255u };
+	const byte body[4] = { 64u, 96u, 128u, 255u };
+	const byte proxyPixel[4] = { 255u, 255u, 255u, 255u };
+	renderTextureSnapshot_t texture;
+	ralTextureCacheKey_t residentKey, replacementKey;
+	qhandle_t material, stage, duplicate, proxy;
+
+	CHECK( RenderSubmission_Init( &state, 0x504c534du ) );
+	material = RenderSubmission_RegisterMaterialImage( &state,
+		RENDER_ASSET_MATERIAL, "models/test/body", qfalse,
+		primary, 1u, 1u );
+	stage = RenderSubmission_RegisterStageTexture( &state,
+		RENDER_ASSET_MATERIAL, "models/test/body", qfalse,
+		body, 1u, 1u );
+	duplicate = RenderSubmission_RegisterStageTexture( &state,
+		RENDER_ASSET_MATERIAL, "models/test/body", qfalse,
+		body, 1u, 1u );
+	CHECK( material > 0 && stage > 0 && stage != material
+		&& duplicate == stage && state.materialCount == 1u
+		&& state.stageTextureCount == 1u
+		&& RenderSubmission_TextureSnapshot( &state, stage, &texture )
+		&& texture.rgba8 && !memcmp( texture.rgba8, body, sizeof( body ) ) );
+	/* Q3 map/clampmap may use one image with different sampler addressing
+	 * across stages/maps. Both immutable bindings must coexist and deduplicate. */
+	qhandle_t clamped = RenderSubmission_RegisterStageTexture( &state,
+		RENDER_ASSET_MATERIAL, "models/test/body", qtrue, body, 1u, 1u );
+	CHECK( clamped > 0 && clamped != stage
+		&& state.stageTextureCount == 2u
+		&& RenderSubmission_RegisterStageTexture( &state, RENDER_ASSET_MATERIAL,
+			"models/test/body", qtrue, body, 1u, 1u ) == clamped
+		&& RenderSubmission_RegisterStageTexture( &state, RENDER_ASSET_MATERIAL,
+			"models/test/body", qfalse, body, 1u, 1u ) == stage
+		&& RenderSubmission_TextureSnapshot( &state, clamped, &texture )
+		&& texture.clampToEdge == qtrue
+		&& RenderSubmission_TextureSnapshot( &state, stage, &texture )
+		&& texture.clampToEdge == qfalse );
+	CHECK( !RenderSubmission_RegisterStageTexture( &state, RENDER_ASSET_MATERIAL,
+		"models/test/body", qtrue, primary, 1u, 1u ) );
+	proxy = RenderSubmission_RegisterMaterialImage( &state,
+		RENDER_ASSET_MATERIAL, "textures/native-resident-proxy", qtrue,
+		proxyPixel, 1u, 1u );
+	CHECK( proxy > 0
+		&& BuildTestTextureKey( 0x303u, 128u, 64u, &residentKey )
+		&& RenderSubmission_SetMaterialTextureCacheKey( &state, proxy,
+			&residentKey )
+		&& BuildTestTextureKey( 0x404u, 256u, 128u, &replacementKey )
+		&& !RenderSubmission_SetMaterialTextureCacheKey( &state, proxy,
+			&replacementKey ) );
+	RenderSubmission_Reset( &state );
+	return 0;
+}
+
+static int TestLensSourceSubmission( void )
+{
+	static renderSubmissionState_t state;
+	static renderSubmissionState_t directState;
+	renderLensSourceSnapshot_t snapshot;
+	renderLensSourceSnapshot_t directSnapshot;
+	renderSubmissionReceipt_t receipt;
+	const lensSourceDesc_t *sources = NULL;
+	lensSourceDesc_t source;
+	memset( &source, 0, sizeof( source ) );
+	source.id = LENS_BAND_MAPFLARE + 7;
+	source.origin[0] = 64.0f;
+	source.origin[1] = -32.0f;
+	source.origin[2] = 96.0f;
+	source.radius = 12.0f;
+	source.rgba[0] = source.rgba[1] = source.rgba[2] = source.rgba[3] = 1.0f;
+	CHECK( RenderSubmission_Init( &state, 0x4c454e53u ) );
+	CHECK( RenderSubmission_BeginFrame( &state, 1u ) );
+	CHECK( RenderSubmission_AddLensSource( &state, &source ) );
+	source.radius = 18.0f;
+	CHECK( RenderSubmission_AddLensSource( &state, &source ) );
+	CHECK( RenderSubmission_LensSourceSnapshot( &state, &snapshot, &sources )
+		&& snapshot.count == 1u && snapshot.droppedCount == 0u
+		&& sources && sources[0].id == source.id
+		&& sources[0].radius == 18.0f );
+	CHECK( RenderSubmission_Init( &directState, 0x4c454e53u ) );
+	CHECK( RenderSubmission_BeginFrame( &directState, 1u ) );
+	CHECK( RenderSubmission_AddLensSource( &directState, &source ) );
+	CHECK( RenderSubmission_LensSourceSnapshot( &directState, &directSnapshot,
+		&sources ) && directSnapshot.digest == snapshot.digest );
+	source.id = LENS_MAX_CGSOURCES;
+	CHECK( !RenderSubmission_AddLensSource( &state, &source ) );
+	CHECK( RenderSubmission_EndFrame( &state, 1u, &receipt )
+		&& receipt.lensSourceCount == 1u
+		&& receipt.lensSourceDroppedCount == 0u );
+	RenderSubmission_Reset( &state );
+	RenderSubmission_Reset( &directState );
+	return 0;
+}
+
+static int TestEffectParticlePlan( void )
+{
+	static renderSubmissionState_t state;
+	static ralParticleClassGpu_t classes[MAX_PARTICLE_CLASSES];
+	static ralParticleSpawnGpu_t spawns[RAL_PARTICLE_SPAWN_REQUEST_MAX];
+	static ralParticleClassGpu_t exactClasses[MAX_PARTICLE_CLASSES];
+	static ralParticleSpawnGpu_t exactSpawns[RAL_PARTICLE_SPAWN_REQUEST_MAX];
+	const byte pixel[4] = { 255u, 128u, 32u, 255u };
+	particleClass_t particleClass;
+	emitterDesc_t emitter;
+	renderEffectParticlePlanState_t current, candidate, exactCandidate;
+	renderEffectParticlePlanReceipt_t receipt, exactReceipt;
+	qhandle_t material;
+	CHECK( RenderSubmission_Init( &state, 0x50415254u ) );
+	material = RenderSubmission_RegisterMaterialImage( &state,
+		RENDER_ASSET_PRIMITIVE_MATERIAL, "gfx/fx/particle", qtrue,
+		pixel, 1u, 1u );
+	CHECK( material > 0 && RenderSubmission_SetMaterialRasterPolicy( &state,
+		material, RENDER_ALPHA_ALPHA_ADDITIVE, 0.0f, qfalse ) );
+	memset( &particleClass, 0, sizeof( particleClass ) );
+	particleClass.shader = material;
+	particleClass.emitMode = EMIT_POINT;
+	particleClass.scatterShape = SCATTER_SPHERE;
+	particleClass.velocityShape = VEL_AXIAL_PLUS_CUBE;
+	particleClass.scatterMagnitude = 2.0f;
+	particleClass.axialSpeed = 16.0f;
+	particleClass.cubeJitter = 4.0f;
+	particleClass.lifetimeMean = 1.0f;
+	particleClass.colorPalette[0][0] = 1.0f;
+	particleClass.colorPalette[0][1] = 0.5f;
+	particleClass.colorPalette[0][3] = 1.0f;
+	particleClass.paletteCount = 1;
+	particleClass.colorEndMult[0] = 1.0f;
+	particleClass.colorEndMult[1] = 1.0f;
+	particleClass.colorEndMult[2] = 1.0f;
+	particleClass.sizeStart = 1.0f;
+	particleClass.sizeEnd = 2.0f;
+	CHECK( RenderSubmission_RegisterParticleClass( &state, 1, &particleClass ) );
+	CHECK( RenderSubmission_BeginFrame( &state, 1u ) );
+	memset( &emitter, 0, sizeof( emitter ) );
+	emitter.cls = 1;
+	emitter.count = 8192;
+	emitter.axis[0] = 1.0f;
+	emitter.end[0] = 64.0f;
+	emitter.colorTint[0] = emitter.colorTint[1]
+		= emitter.colorTint[2] = emitter.colorTint[3] = 1.0f;
+	CHECK( RenderSubmission_AddEffectEmitter( &state, &emitter ) );
+	CHECK( RenderSubmission_AddEffectEmitter( &state, &emitter ) );
+	emitter.count = 1;
+	CHECK( RenderSubmission_AddEffectEmitter( &state, &emitter ) );
+	RenderEffectParticlePlan_Reset( &current );
+	CHECK( RenderEffectParticlePlan_Build( &state, &current, 7u, qtrue,
+		2.0f, classes, ARRAY_LEN( classes ), spawns, ARRAY_LEN( spawns ),
+		&candidate, &receipt ) );
+	CHECK( receipt.submittedEmitterCount == 3u
+		&& receipt.admittedEmitterCount == 2u
+		&& receipt.droppedEmitterCount == 1u
+		&& receipt.requestedParticleCount == 16385u
+		&& receipt.admittedParticleCount == RAL_PARTICLE_POOL_CAPACITY
+		&& receipt.droppedParticleCount == 1u
+		&& receipt.spawnRequestCount == 2u && receipt.classCount == 1u
+		&& receipt.nextSlot == 0u && receipt.nextSeed == 2u
+		&& classes[0].shader == (uint32_t)material
+		&& classes[0].shaderBlendIsAdditive == 1u
+		&& spawns[0].firstSlot == 0u && spawns[0].seed == 1u
+		&& spawns[1].firstSlot == 8192u && spawns[1].seed == 2u
+		&& RenderEffectParticlePlan_ReceiptExact( &candidate, classes,
+			spawns, &receipt ) );
+	exactCandidate = candidate;
+	exactReceipt = receipt;
+	memcpy( exactClasses, classes, sizeof( classes ) );
+	memcpy( exactSpawns, spawns, sizeof( spawns ) );
+	CHECK( !RenderEffectParticlePlan_Build( &state, &current, 8u, qtrue,
+		3.0f, classes, MAX_PARTICLE_CLASSES - 1u, spawns,
+		ARRAY_LEN( spawns ), &candidate, &receipt )
+		&& !memcmp( &candidate, &exactCandidate, sizeof( candidate ) )
+		&& !memcmp( &receipt, &exactReceipt, sizeof( receipt ) )
+		&& !memcmp( classes, exactClasses, sizeof( classes ) )
+		&& !memcmp( spawns, exactSpawns, sizeof( spawns ) ) );
+	receipt = exactReceipt;
+	receipt.admittedParticleCount--;
+	CHECK( !RenderEffectParticlePlan_ReceiptExact( &exactCandidate,
+		exactClasses, exactSpawns, &receipt ) );
+	/* An authored animation is indivisible: an absent frame must not become
+	 * the base texture, a white sampler, or a static particle. Rejection must
+	 * also leave the caller's GPU upload/publication payload untouched. */
+	particleClass.frameCount = 3;
+	particleClass.frameBlend = 1;
+	for ( int frame = 0; frame < particleClass.frameCount; ++frame )
+		particleClass.frameShaders[frame] = material;
+	for ( int missingFrame = 0; missingFrame <= particleClass.frameCount;
+			++missingFrame ) {
+		/* Classes are immutable within a scope. Each malformed declaration
+		 * needs its own scope; the final scope contains the complete asset. */
+		RenderSubmission_Reset( &state );
+		CHECK( RenderSubmission_Init( &state, 0x50415255u + missingFrame ) );
+		material = RenderSubmission_RegisterMaterialImage( &state,
+			RENDER_ASSET_PRIMITIVE_MATERIAL, "gfx/fx/particle", qtrue,
+			pixel, 1u, 1u );
+		CHECK( material > 0 );
+		particleClass.shader = material;
+		for ( int frame = 0; frame < particleClass.frameCount; ++frame )
+			particleClass.frameShaders[frame] = frame == missingFrame ? 0 : material;
+		CHECK( RenderSubmission_RegisterParticleClass( &state, 1, &particleClass ) );
+		CHECK( RenderSubmission_BeginFrame( &state, 1u ) );
+		CHECK( RenderSubmission_AddEffectEmitter( &state, &emitter ) );
+		if ( missingFrame == particleClass.frameCount ) break;
+		receipt = exactReceipt;
+		CHECK( !RenderEffectParticlePlan_Build( &state, &current, 8u, qtrue,
+			3.0f, classes, ARRAY_LEN( classes ), spawns, ARRAY_LEN( spawns ),
+			&candidate, &receipt ) );
+		CHECK( !memcmp( &candidate, &exactCandidate, sizeof( candidate ) )
+			&& !memcmp( &receipt, &exactReceipt, sizeof( receipt ) )
+			&& !memcmp( classes, exactClasses, sizeof( classes ) )
+			&& !memcmp( spawns, exactSpawns, sizeof( spawns ) ) );
+	}
+	CHECK( RenderEffectParticlePlan_Build( &state, &current, 8u, qtrue,
+		3.0f, classes, ARRAY_LEN( classes ), spawns, ARRAY_LEN( spawns ),
+		&candidate, &receipt ) );
+	CHECK( classes[0].frameCount == 3u && classes[0].frameBlend == 1u
+		&& classes[0].frameSlots[0] == MAX_PARTICLE_CLASSES
+		&& classes[0].frameSlots[1] == MAX_PARTICLE_CLASSES + 1u
+		&& classes[0].frameSlots[2] == MAX_PARTICLE_CLASSES + 2u
+		&& RenderEffectParticlePlan_ReceiptExact( &candidate, classes,
+			spawns, &receipt ) );
+	/* Narrow material reads must observe fresh metadata, preserve exact bytes
+	 * when restored, and reject unready records without publishing any output. */
+	{
+		uint32_t index;
+		CHECK( RenderSubmission_MaterialIndex( &state, material, &index ) );
+		renderMaterialSnapshot_t *snapshot = &state.materials[index].snapshot;
+		const renderAlphaMode_t oldAlpha = snapshot->alphaMode;
+		const qboolean oldSrgb = snapshot->srgb;
+		exactCandidate = candidate; exactReceipt = receipt;
+		memcpy( exactClasses, classes, sizeof( classes ) );
+		memcpy( exactSpawns, spawns, sizeof( spawns ) );
+		snapshot->alphaMode = RENDER_ALPHA_ALPHA_ADDITIVE;
+		snapshot->srgb = oldSrgb ? qfalse : qtrue;
+		CHECK( RenderEffectParticlePlan_Build( &state, &current, 8u, qtrue,
+			3.0f, classes, ARRAY_LEN( classes ), spawns, ARRAY_LEN( spawns ),
+			&candidate, &receipt ) );
+		CHECK( classes[0].shaderBlendIsAdditive == 1u
+			&& classes[0].colorDomain != exactClasses[0].colorDomain
+			&& receipt.classDigest != exactReceipt.classDigest
+			&& RenderEffectParticlePlan_ReceiptExact( &candidate, classes, spawns, &receipt ) );
+		snapshot->alphaMode = oldAlpha; snapshot->srgb = oldSrgb;
+		CHECK( RenderEffectParticlePlan_Build( &state, &current, 8u, qtrue,
+			3.0f, classes, ARRAY_LEN( classes ), spawns, ARRAY_LEN( spawns ),
+			&candidate, &receipt ) );
+		CHECK( !memcmp( classes, exactClasses, sizeof( classes ) )
+			&& !memcmp( spawns, exactSpawns, sizeof( spawns ) )
+			&& !memcmp( &candidate, &exactCandidate, sizeof( candidate ) )
+			&& !memcmp( &receipt, &exactReceipt, sizeof( receipt ) ) );
+		snapshot->ready = qfalse;
+		CHECK( !RenderEffectParticlePlan_Build( &state, &current, 8u, qtrue,
+			3.0f, classes, ARRAY_LEN( classes ), spawns, ARRAY_LEN( spawns ),
+			&candidate, &receipt ) );
+		CHECK( !memcmp( classes, exactClasses, sizeof( classes ) )
+			&& !memcmp( spawns, exactSpawns, sizeof( spawns ) )
+			&& !memcmp( &candidate, &exactCandidate, sizeof( candidate ) )
+			&& !memcmp( &receipt, &exactReceipt, sizeof( receipt ) ) );
+		snapshot->ready = qtrue;
+	}
+	RenderSubmission_Reset( &state );
+	return 0;
+}
+
+static int TestViewCameraCut( void ) {
+	static renderSubmissionState_t state;
+	renderSubmissionReceipt_t receipt;
+	refdef_t view = {0};
+	CHECK( RenderSubmission_Init( &state, 0x43414d45u ) );
+	CHECK( !RenderSubmission_ViewCameraCut( &state ) );
+	CHECK( RenderSubmission_BeginFrame( &state, 1u ) );
+	CHECK( !RenderSubmission_ViewCameraCut( &state ) );
+	view.rdflags = RDF_NOWORLDMODEL;
+	CHECK( RenderSubmission_RenderScene( &state, &view, 0 ) );
+	CHECK( !RenderSubmission_ViewCameraCut( &state ) );
+	view.rdflags |= RDF_CAMERA_CUT;
+	CHECK( RenderSubmission_RenderScene( &state, &view, 0 ) );
+	CHECK( RenderSubmission_ViewCameraCut( &state ) );
+	CHECK( !( state.worldSnapshot.rdflags & RDF_HYPERSPACE ) );
+	CHECK( RenderSubmission_EndFrame( &state, 1u, &receipt ) );
+	CHECK( RenderSubmission_ViewCameraCut( &state ) ); // sealed frame is readable
+	CHECK( RenderSubmission_BeginFrame( &state, 2u ) );
+	CHECK( !RenderSubmission_ViewCameraCut( &state ) ); // no stale UI-only cut
+	view.rdflags = RDF_NOWORLDMODEL | RDF_HYPERSPACE;
+	CHECK( RenderSubmission_RenderScene( &state, &view, 0 ) );
+	CHECK( RenderSubmission_ViewCameraCut( &state ) ); // legacy teleport still resets
+	RenderSubmission_Reset( &state );
+	CHECK( !RenderSubmission_ViewCameraCut( &state ) );
+	return 0;
+}
+
+static int TestMaterialStageTimeDependency( void ) {
+	renderMaterialSnapshot_t material;
+	CHECK( !RenderSubmission_MaterialStagesUseTime( NULL ) );
+	for ( unsigned slot = 0; slot < RENDER_MATERIAL_MAX_STAGES; ++slot ) {
+		memset( &material, 0, sizeof( material ) );
+		material.stageCount = slot + 1;
+		renderMaterialStageSnapshot_t *stage = &material.stages[slot];
+		CHECK( !RenderSubmission_MaterialStagesUseTime( &material ) );
+		stage->animationFrameCount = 2; stage->animationFrequency = 1;
+		CHECK( RenderSubmission_MaterialStagesUseTime( &material ) );
+		stage->animationFrameCount = 1;
+		CHECK( !RenderSubmission_MaterialStagesUseTime( &material ) );
+		stage->rgbGen = RAL_MATERIAL_COLOR_WAVE;
+		stage->rgbWave.function = RAL_MATERIAL_WAVE_SIN;
+		stage->rgbWave.amplitude = stage->rgbWave.frequency = 1;
+		CHECK( RenderSubmission_MaterialStagesUseTime( &material ) );
+		stage->rgbWave.frequency = 0;
+		CHECK( !RenderSubmission_MaterialStagesUseTime( &material ) );
+		stage->alphaGen = RAL_MATERIAL_ALPHA_WAVE;
+		stage->alphaWave.function = RAL_MATERIAL_WAVE_NOISE;
+		stage->alphaWave.amplitude = stage->alphaWave.frequency = 1;
+		CHECK( RenderSubmission_MaterialStagesUseTime( &material ) );
+		stage->alphaWave.amplitude = 0;
+		CHECK( !RenderSubmission_MaterialStagesUseTime( &material ) );
+		stage->scaleScroll[3] = 1;
+		CHECK( RenderSubmission_MaterialStagesUseTime( &material ) );
+		/* Ordered operations supersede the legacy projection fields. */
+		stage->tcModCount = 1;
+		stage->tcMods[0].type = RAL_MATERIAL_TCMOD_SCALE;
+		stage->tcMods[0].parameters[0] = 2;
+		CHECK( !RenderSubmission_MaterialStagesUseTime( &material ) );
+		const uint32_t animated[] = { RAL_MATERIAL_TCMOD_SCROLL, RAL_MATERIAL_TCMOD_ROTATE,
+			RAL_MATERIAL_TCMOD_TURBULENCE, RAL_MATERIAL_TCMOD_STRETCH };
+		for ( unsigned op = 0; op < 4; ++op ) {
+			stage->tcMods[0].type = animated[op];
+			for ( unsigned p = 0; p < 6; ++p ) stage->tcMods[0].parameters[p] = 1;
+			CHECK( RenderSubmission_MaterialStagesUseTime( &material ) );
+			memset( stage->tcMods[0].parameters, 0, sizeof( stage->tcMods[0].parameters ) );
+			CHECK( !RenderSubmission_MaterialStagesUseTime( &material ) );
+		}
+	}
+	return 0;
+}
+
+static int TestRegistrationAssetRetirement( void ) {
+	static renderSubmissionState_t state;
+	static const byte pixels[1024 * 1024 * 4] = { 255, 0, 0, 255 };
+	renderMaterialSnapshot_t snapshot;
+	renderTextureSnapshot_t texture;
+	qhandle_t previous = 0;
+	CHECK( RenderSubmission_Init( &state, 717u ) );
+	const void *frameStorage = state.uiPrimitives;
+	for ( unsigned cycle = 0; cycle < 40; ++cycle ) {
+		const qhandle_t material = RenderSubmission_RegisterMaterialImage( &state,
+			RENDER_ASSET_MATERIAL, "test/registration", qfalse, pixels, 1024, 1024 );
+		const qhandle_t stage = RenderSubmission_RegisterStageTexture( &state,
+			RENDER_ASSET_MATERIAL, "test/registration-stage", qfalse, pixels, 1, 1 );
+		CHECK( material > previous && stage > material );
+		CHECK( RenderSubmission_BeginFrame( &state, cycle + 1u ) );
+		CHECK( !RenderSubmission_ResetRegistrationAssets( &state ) );
+		CHECK( RenderSubmission_MaterialSnapshot( &state, material, &snapshot )
+			&& snapshot.byteCount == sizeof( pixels ) );
+		RenderSubmission_CancelFrame( &state );
+		/* Any resident secondary world also bars a global registration reset. */
+		state.worlds[1].loaded = qtrue;
+		CHECK( !RenderSubmission_ResetRegistrationAssets( &state )
+			&& state.materialBytes == sizeof( pixels ) );
+		state.worlds[1].loaded = qfalse;
+		CHECK( RenderSubmission_ResetRegistrationAssets( &state ) );
+		CHECK( !state.materialBytes && !state.materialCount
+			&& !state.stageTextureBytes && !state.stageTextureCount
+			&& !state.modelBytes && !state.modelCount
+			&& !state.registeredAssetCount && !state.registeredMaterialCount
+			&& state.ownerGeneration == 717u && state.uiPrimitives == frameStorage );
+		CHECK( !RenderSubmission_MaterialSnapshot( &state, material, &snapshot )
+			&& !RenderSubmission_TextureSnapshot( &state, stage, &texture ) );
+		CHECK( RenderSubmission_ResetRegistrationAssets( &state ) );
+		previous = stage;
+	}
+	RenderSubmission_Reset( &state );
+	return 0;
+}
+
 int main( int argc, char **argv )
 {
 	if ( argc == 3 && !strcmp( argv[1], "--write-irradiance-fixture" ) )
@@ -766,6 +2023,18 @@ int main( int argc, char **argv )
 	CHECK( TestLegacyLightGridIrradiance() == 0 );
 	CHECK( TestIrradianceVolumeOwner() == 0 );
 	CHECK( TestModelPayloads() == 0 );
+	CHECK( TestDistantWorldDrawPlanBridge() == 0 );
+	CHECK( TestMapAuthoredSkyAtmosphere() == 0 );
+	CHECK( TestMaterialStageSnapshot() == 0 );
+	CHECK( TestMaterialStageTimeDependency() == 0 );
+	CHECK( TestRegistrationAssetRetirement() == 0 );
+	CHECK( TestMaterialStageDepthCollapse() == 0 );
+	CHECK( TestMaterialStageBlendAdditive() == 0 );
+	CHECK( TestStageTextureMaterialCapacityIsolation() == 0 );
+	CHECK( TestStageTextureDoesNotAliasShaderIdentity() == 0 );
+	CHECK( TestLensSourceSubmission() == 0 );
+	CHECK( TestEffectParticlePlan() == 0 );
+	CHECK( TestViewCameraCut() == 0 );
 	static renderSubmissionState_t	  state;
 	renderSubmissionReceipt_t receipt, exact;
 	mapFile_t				  world;
@@ -964,7 +2233,91 @@ int main( int argc, char **argv )
 	CHECK( RenderSubmission_AtmosphereSnapshot( &state, &atmosphereSnapshot, &atmosphereEmitters ) &&
 		   atmosphereEmitters != NULL && atmosphereSnapshot.state.schemaVersion == WIRED_ATMOSPHERE_SCHEMA_VERSION &&
 		   atmosphereSnapshot.state.precipitation[0] == 1.0f && atmosphereSnapshot.active == qtrue &&
-		   atmosphereSnapshot.emitterCount == 0u );
+		   atmosphereSnapshot.emitterCount == 0u &&
+		   atmosphereSnapshot.state.skyEnvironment.schemaVersion == WIRED_SKY_ENVIRONMENT_SCHEMA_VERSION &&
+		   atmosphereSnapshot.state.skyEnvironment.mode == ATMOSPHERE_SKY_AUTHORED &&
+		   ( atmosphereSnapshot.state.skyEnvironment.flags & ATMOSPHERE_SKY_AUTHORED_AVAILABLE ) );
+	{
+		ralSkyEnvironmentRuntimeState_t skyRuntime;
+		ralSkyEnvironmentRuntimeRequest_t skyRuntimeRequest;
+		ralSkyEnvironmentRuntimeReceipt_t skyRuntimeReceipt;
+		ralSkyEnvironmentPlanRequest_t skyPlanRequest;
+		ralSkyEnvironmentPlanReceipt_t skyPlanReceipt;
+		ralSkyEnvironmentCapabilities_t skyCapabilities = { 0 };
+		renderAtmosphereSnapshot_t changed = atmosphereSnapshot;
+		renderAtmosphereSnapshot_t timelineOnly = atmosphereSnapshot;
+		renderAtmosphereSnapshot_t distant = atmosphereSnapshot;
+		const uint64_t skyDigest = RenderSubmission_SkyEnvironmentDigest(
+			&atmosphereSnapshot );
+		timelineOnly.state.timelineSeconds += 5.0f;
+		changed = timelineOnly;
+		CHECK( skyDigest != 0u &&
+			RenderSubmission_SkyEnvironmentDigest( &timelineOnly ) == skyDigest );
+		changed.state.skyEnvironment.sunDirection[0] += 0.25f;
+		CHECK( RenderSubmission_SkyEnvironmentDigest( &changed ) != skyDigest );
+		{
+			renderAtmosphereSnapshot_t clouds = atmosphereSnapshot;
+			clouds.state.skyEnvironment.cloudSunOcclusion = 1.0f;
+			clouds.state.cloudCover = 0.0f;
+			const uint64_t clear = RenderSubmission_SkyEnvironmentDigest( &clouds );
+			clouds.state.cloudCover = 0.5f;
+			CHECK( RenderSubmission_SkyEnvironmentDigest( &clouds ) != clear );
+			clouds.state.skyEnvironment.cloudSunOcclusion = 0.0f;
+			const uint64_t unshadowed = RenderSubmission_SkyEnvironmentDigest( &clouds );
+			clouds.state.cloudCover = 1.0f;
+			CHECK( RenderSubmission_SkyEnvironmentDigest( &clouds ) == unshadowed );
+			clouds.state.cloudCover = -1.0f;
+			CHECK( RenderSubmission_SkyEnvironmentDigest( &clouds ) == 0u );
+		}
+		distant.state.skyEnvironment.flags |= ATMOSPHERE_SKY_DISTANT_SCENE;
+		distant.state.skyEnvironment.distantSceneIdentity = 99u;
+		distant.state.skyEnvironment.distantSceneOrigin[0] = 10.0f;
+		distant.state.skyEnvironment.distantSceneOrigin[1] = 20.0f;
+		distant.state.skyEnvironment.distantSceneOrigin[2] = 30.0f;
+		distant.state.skyEnvironment.distantSceneScale = 8.0f;
+		distant.state.skyEnvironment.distantSceneLodBias = 1.5f;
+		CHECK( Ral_SkyEnvironmentRuntimeInit( RAL_BACKEND_VULKAN, &skyRuntime ) &&
+			RenderSubmission_BuildSkyEnvironmentRuntimeRequest( &atmosphereSnapshot,
+				&skyRuntime, RAL_BACKEND_VULKAN, 1u,
+				RAL_ATMOSPHERE_TIER_WEATHER, 0u, 0u, 0u, 0.0f,
+				&skyCapabilities, &skyRuntimeRequest ) &&
+				!( skyRuntimeRequest.eventMask & RAL_SKY_EVENT_SOURCE_CHANGE ) &&
+				Ral_SkyEnvironmentRuntimeAdvance( &skyRuntime, &skyRuntimeRequest,
+					&skyPlanRequest, &skyRuntimeReceipt ) &&
+				Ral_SkyEnvironmentPlan( &skyPlanRequest, &skyPlanReceipt ) &&
+				Ral_SkyEnvironmentRuntimeSchedule( &skyRuntime, &skyPlanReceipt ) &&
+				skyRuntime.targetReady &&
+				skyRuntimeRequest.timelineSeconds == 0.0f &&
+				skyRuntimeRequest.deltaSeconds == 0.0f &&
+				skyPlanReceipt.sunDirection[2] ==
+					atmosphereSnapshot.state.skyEnvironment.sunDirection[2] &&
+				skyPlanReceipt.exposure ==
+					atmosphereSnapshot.state.skyEnvironment.exposure );
+		CHECK( RenderSubmission_BuildSkyEnvironmentRuntimeRequest( &timelineOnly,
+			&skyRuntime, RAL_BACKEND_VULKAN, 2u,
+			RAL_ATMOSPHERE_TIER_WEATHER, 0u, 0u, 0u, 5.0f,
+			&skyCapabilities, &skyRuntimeRequest ) &&
+			!( skyRuntimeRequest.eventMask & RAL_SKY_EVENT_SOURCE_CHANGE ) &&
+			skyRuntimeRequest.timelineSeconds == 5.0f &&
+			skyRuntimeRequest.deltaSeconds == 5.0f );
+		CHECK( RenderSubmission_BuildSkyEnvironmentRuntimeRequest( &changed,
+			&skyRuntime, RAL_BACKEND_VULKAN, 2u,
+			RAL_ATMOSPHERE_TIER_WEATHER, 0u, 0u, 0u, 5.0f,
+			&skyCapabilities, &skyRuntimeRequest ) &&
+			( skyRuntimeRequest.eventMask & RAL_SKY_EVENT_SOURCE_CHANGE ) &&
+			skyRuntimeRequest.deltaSeconds == 0.0f );
+		CHECK( RenderSubmission_BuildSkyEnvironmentRuntimeRequest( &distant,
+			&skyRuntime, RAL_BACKEND_VULKAN, 3u,
+			RAL_ATMOSPHERE_TIER_WEATHER, 0u, 0u, 0u, 0.0f,
+			&skyCapabilities, &skyRuntimeRequest ) &&
+			skyRuntimeRequest.distantSceneRequested &&
+			skyRuntimeRequest.distantSceneIdentity == 99u &&
+			!memcmp( skyRuntimeRequest.distantSceneOrigin,
+				distant.state.skyEnvironment.distantSceneOrigin,
+				sizeof( skyRuntimeRequest.distantSceneOrigin ) ) &&
+			skyRuntimeRequest.distantSceneScale == 8.0f &&
+			skyRuntimeRequest.distantSceneLodBias == 1.5f );
+	}
 	atmosphereGeneration = atmosphereSnapshot.generation;
 	CHECK( RenderSubmission_SetAtmosphere( &state, &atmosphere ) );
 	CHECK( RenderSubmission_AtmosphereSnapshot( &state, &atmosphereSnapshot, &atmosphereEmitters ) &&
@@ -975,13 +2328,24 @@ int main( int argc, char **argv )
 	CHECK( RenderSubmission_AtmosphereSnapshot( &state, &atmosphereSnapshot, &atmosphereEmitters ) &&
 		   atmosphereSnapshot.generation == atmosphereGeneration &&
 		   atmosphereSnapshot.state.humidity == atmosphere.humidity );
+	invalidAtmosphere = atmosphere;
+	invalidAtmosphere.skyEnvironment.schemaVersion = WIRED_SKY_ENVIRONMENT_SCHEMA_VERSION;
+	invalidAtmosphere.skyEnvironment.mode = ATMOSPHERE_SKY_PHYSICAL;
+	invalidAtmosphere.skyEnvironment.sourceRevision = 2u;
+	invalidAtmosphere.skyEnvironment.exposure = 1.0f;
+	invalidAtmosphere.skyEnvironment.opticsVisibility = 1.0f;
+	invalidAtmosphere.skyEnvironment.distantSceneScale = 1.0f;
+	invalidAtmosphere.skyEnvironment.skyLuminance = -1.0f;
+	CHECK( !RenderSubmission_SetAtmosphere( &state, &invalidAtmosphere ) );
 	legacyAtmosphere.type	  = ATMOSPHERE_PRECIP_SNOW;
 	legacyAtmosphere.distance = 900.0f;
 	CHECK( RenderSubmission_SetAtmosphere( &state, &legacyAtmosphere ) );
 	CHECK( RenderSubmission_AtmosphereSnapshot( &state, &atmosphereSnapshot, &atmosphereEmitters ) &&
 		   atmosphereSnapshot.state.schemaVersion == WIRED_ATMOSPHERE_SCHEMA_VERSION &&
 		   atmosphereSnapshot.state.qualityTier == ATMOSPHERE_QUALITY_WEATHER &&
-		   atmosphereSnapshot.state.precipitation[1] == 1.0f );
+		   atmosphereSnapshot.state.precipitation[1] == 1.0f &&
+		   atmosphereSnapshot.state.skyEnvironment.schemaVersion == WIRED_SKY_ENVIRONMENT_SCHEMA_VERSION &&
+		   atmosphereSnapshot.state.skyEnvironment.mode == ATMOSPHERE_SKY_AUTHORED );
 	CHECK( RenderSubmission_SetAtmosphere( &state, &atmosphere ) );
 	model			= RenderSubmission_RegisterAsset( &state, RENDER_ASSET_MODEL, "models/a.md3" );
 	pendingMaterial = RenderSubmission_RegisterAsset( &state, RENDER_ASSET_MSDF, "textures/pending" );
@@ -1005,6 +2369,25 @@ int main( int argc, char **argv )
 		   materialSnapshot.msdf == qfalse && materialSnapshot.srgb == qtrue &&
 		   materialSnapshot.alphaMode == RENDER_ALPHA_OPAQUE && materialSnapshot.depthWrite == qtrue &&
 		   !memcmp( materialSnapshot.rgba8, materialPixels, sizeof( materialPixels ) ) );
+	{
+		ralTextureCacheKey_t exactKey, mismatchedKey;
+		const uint64_t generation = materialSnapshot.generation;
+		CHECK( BuildTestTextureKey( 0x101u, 2u, 2u, &exactKey ) );
+		CHECK( RenderSubmission_SetMaterialTextureCacheKey( &state, material,
+			&exactKey ) );
+		CHECK( RenderSubmission_MaterialSnapshot( &state, material,
+			&materialSnapshot ) && materialSnapshot.textureCacheKeyReady
+			&& Ral_TextureCacheKeyExact( &materialSnapshot.textureCacheKey,
+				&exactKey ) && materialSnapshot.generation > generation );
+		materialGeneration = materialSnapshot.generation;
+		CHECK( BuildTestTextureKey( 0x202u, 1u, 1u, &mismatchedKey ) );
+		CHECK( !RenderSubmission_SetMaterialTextureCacheKey( &state, material,
+			&mismatchedKey ) );
+		CHECK( RenderSubmission_MaterialSnapshot( &state, material,
+			&materialSnapshot ) && materialSnapshot.generation == materialGeneration
+			&& Ral_TextureCacheKeyExact( &materialSnapshot.textureCacheKey,
+				&exactKey ) );
+	}
 	materialGeneration = materialSnapshot.generation;
 	{
 		const byte transparentPixels[4] = { 200u, 100u, 50u, 0u };
@@ -1033,6 +2416,44 @@ int main( int argc, char **argv )
 		   materialSnapshot.alphaCutoff == 0.25f && materialSnapshot.depthWrite == qfalse );
 	CHECK( !RenderSubmission_SetMaterialRasterPolicy( &state, material, RENDER_ALPHA_BLEND, NAN, qfalse ) );
 	CHECK( RenderSubmission_LoadWorld( &state, &world, 0 ) );
+	{
+		renderMaterialFactorPublicationEntry_t factorEntry;
+		renderMaterialSnapshot_t beforeFactors;
+		memset( &factorEntry, 0, sizeof( factorEntry ) );
+		factorEntry.material = material;
+		factorEntry.factors.baseColor[0] = 0.8f;
+		factorEntry.factors.baseColor[1] = 0.7f;
+		factorEntry.factors.baseColor[2] = 0.6f;
+		factorEntry.factors.baseColor[3] = 1.0f;
+		factorEntry.factors.emissive[0] = 0.2f;
+		factorEntry.factors.metallic = 0.35f;
+		factorEntry.factors.roughness = 0.45f;
+		factorEntry.factors.normalScale = 1.0f;
+		factorEntry.factors.occlusionStrength = 0.9f;
+		CHECK( RenderSubmission_MaterialSnapshot( &state, material,
+			&beforeFactors ) && !beforeFactors.factors.ready );
+		factorEntry.factors.roughness = NAN;
+		CHECK( !RenderSubmission_PublishMaterialFactors( &state, 71u,
+			&factorEntry, 1u ) );
+		CHECK( RenderSubmission_MaterialSnapshot( &state, material,
+			&materialSnapshot )
+			&& materialSnapshot.generation == beforeFactors.generation
+			&& !materialSnapshot.factors.ready );
+		factorEntry.factors.roughness = 0.45f;
+		CHECK( RenderSubmission_PublishMaterialFactors( &state, 71u,
+			&factorEntry, 1u ) );
+		CHECK( RenderSubmission_MaterialSnapshot( &state, material,
+			&materialSnapshot ) && materialSnapshot.factors.ready
+			&& materialSnapshot.factors.schemaVersion
+				== RENDER_MATERIAL_FACTORS_SCHEMA_VERSION
+			&& materialSnapshot.factors.runtimeGeneration == 71u
+			&& materialSnapshot.factors.factors.metallic == 0.35f
+			&& materialSnapshot.factors.factors.roughness == 0.45f );
+		CHECK( RenderSubmission_PublishMaterialFactors( &state, 0u, NULL, 0u )
+			&& RenderSubmission_MaterialSnapshot( &state, material,
+				&materialSnapshot ) && !materialSnapshot.factors.ready
+			&& materialSnapshot.factors.runtimeGeneration == 0u );
+	}
 	memset( lightingTriangles, 0xa5, sizeof( lightingTriangles ) );
 	memset( &lightingReceipt, 0xa5, sizeof( lightingReceipt ) );
 	exactLightingTriangles[0] = lightingTriangles[0];
@@ -1243,6 +2664,76 @@ int main( int argc, char **argv )
 		&& effectRibbons[0].pointCount == 2u
 		&& effectRibbonPointsOut[1].pos[0] == 12.0f
 		&& effectBeams[0].duration == 0.25f );
+	{
+		renderEffectDecalPool_t pool, candidate, preserved;
+		renderEffectDecalPoolReceipt_t poolReceipt;
+		RenderEffectDecalPool_Reset( &pool );
+		CHECK( RenderEffectDecalPool_Advance( &pool, 1u, qtrue, 10.0f,
+			&effectDecal, 1u, &candidate, &poolReceipt )
+			&& RenderEffectDecalPool_ReceiptExact( &candidate, &poolReceipt )
+			&& poolReceipt.admittedCount == 1u
+			&& poolReceipt.activeCount == 1u
+			&& pool.activeCount == 0u );
+		pool = candidate;
+		CHECK( RenderEffectDecalPool_Advance( &pool, 2u, qtrue, 11.0f,
+			NULL, 0u, &candidate, &poolReceipt )
+			&& poolReceipt.retiredCount == 0u && candidate.activeCount == 1u );
+		pool = candidate;
+		CHECK( RenderEffectDecalPool_Advance( &pool, 3u, qtrue, 14.0f,
+			NULL, 0u, &candidate, &poolReceipt )
+			&& poolReceipt.retiredCount == 1u && candidate.activeCount == 0u );
+		pool = candidate;
+		CHECK( RenderEffectDecalPool_Advance( &pool, 4u, qtrue, 15.0f,
+			&effectDecal, 1u, &candidate, &poolReceipt ) );
+		pool = candidate;
+		CHECK( RenderEffectDecalPool_Advance( &pool, 5u, qfalse, 0.0f,
+			NULL, 0u, &preserved, &poolReceipt )
+			&& preserved.activeCount == 1u
+			&& preserved.digest == pool.digest );
+		CHECK( RenderEffectDecalPool_Advance( &pool, 6u, qtrue, 1.0f,
+			NULL, 0u, &candidate, &poolReceipt )
+			&& candidate.activeCount == 0u );
+		CHECK( !RenderEffectDecalPool_Advance( &pool, 7u, qfalse, 0.0f,
+			&effectDecal, 1u, &candidate, &poolReceipt ) );
+	}
+	{
+		renderEffectBeamPool_t pool, candidate, preserved;
+		renderEffectBeamPoolReceipt_t poolReceipt;
+		beamDesc_t transientBeam = effectBeam;
+		RenderEffectBeamPool_Reset( &pool );
+		CHECK( RenderEffectBeamPool_Advance( &pool, 1u, qtrue, 10.0f,
+			&effectBeam, 1u, &candidate, &poolReceipt )
+			&& RenderEffectBeamPool_ReceiptExact( &candidate, &poolReceipt )
+			&& poolReceipt.admittedCount == 1u
+			&& poolReceipt.activeCount == 1u
+			&& pool.activeCount == 0u );
+		pool = candidate;
+		CHECK( RenderEffectBeamPool_Advance( &pool, 2u, qtrue, 10.1f,
+			NULL, 0u, &candidate, &poolReceipt )
+			&& poolReceipt.retiredCount == 0u && candidate.activeCount == 1u );
+		pool = candidate;
+		transientBeam.duration = 0.0f;
+		CHECK( RenderEffectBeamPool_Advance( &pool, 3u, qtrue, 10.2f,
+			&transientBeam, 1u, &candidate, &poolReceipt )
+			&& candidate.activeCount == 2u );
+		pool = candidate;
+		CHECK( RenderEffectBeamPool_Advance( &pool, 4u, qtrue, 10.3f,
+			NULL, 0u, &candidate, &poolReceipt )
+			&& poolReceipt.retiredCount == 2u && candidate.activeCount == 0u );
+		pool = candidate;
+		CHECK( RenderEffectBeamPool_Advance( &pool, 5u, qtrue, 11.0f,
+			&effectBeam, 1u, &candidate, &poolReceipt ) );
+		pool = candidate;
+		CHECK( RenderEffectBeamPool_Advance( &pool, 6u, qfalse, 0.0f,
+			NULL, 0u, &preserved, &poolReceipt )
+			&& preserved.activeCount == 1u
+			&& preserved.digest == pool.digest );
+		CHECK( RenderEffectBeamPool_Advance( &pool, 7u, qtrue, 1.0f,
+			NULL, 0u, &candidate, &poolReceipt )
+			&& candidate.activeCount == 0u );
+		CHECK( !RenderEffectBeamPool_Advance( &pool, 8u, qfalse, 0.0f,
+			&effectBeam, 1u, &candidate, &poolReceipt ) );
+	}
 	{
 		atmosphereFrameState_t snowAtmosphere = atmosphere;
 		snowAtmosphere.timelineSeconds		  = 10.0f;

@@ -116,10 +116,12 @@ static void R_PerformanceCounters( void ) {
 				backEnd.pc.c_particleChildDroppedParticles );
 		}
 		if ( backEnd.pc.c_atmosphereComputes || backEnd.pc.c_atmosphereDraws ||
-			 backEnd.pc.c_atmosphereDispatches )
+			 backEnd.pc.c_atmosphereDispatches || backEnd.pc.c_skyPendingWork ||
+			 backEnd.pc.c_skyInFlightWork || backEnd.pc.c_skyAdmittedWork ||
+			 backEnd.pc.c_skyCompletedWork || backEnd.pc.c_skyCancelledWork )
 		{
 			R_LOG( rch_cmd, SEV_INFO,
-				"atmosphere particles:%i computes:%i draws:%i froxels:%i dispatches:%i clouds:%i heightgrid:%i depth:%i temporal:%i/%i surface-milli:%i/%i/%i/%i\n",
+				"atmosphere particles:%i computes:%i draws:%i froxels:%i dispatches:%i clouds:%i heightgrid:%i depth:%i temporal:%i/%i surface-milli:%i/%i/%i/%i sky-work pending:%i inflight:%i admitted:%i completed:%i cancelled:%i\n",
 				backEnd.pc.c_atmosphereParticles, backEnd.pc.c_atmosphereComputes,
 				backEnd.pc.c_atmosphereDraws, backEnd.pc.c_atmosphereFroxels,
 				backEnd.pc.c_atmosphereDispatches, backEnd.pc.c_atmosphereClouds,
@@ -128,7 +130,12 @@ static void R_PerformanceCounters( void ) {
 				(int)( vk.atm.surfaceTargets[0] * 1000.0f + 0.5f ),
 				(int)( vk.atm.surfaceTargets[1] * 1000.0f + 0.5f ),
 				(int)( vk.atm.surfaceTargets[2] * 1000.0f + 0.5f ),
-				(int)( vk.atm.surfaceTargets[3] * 1000.0f + 0.5f ) );
+				(int)( vk.atm.surfaceTargets[3] * 1000.0f + 0.5f ),
+				backEnd.pc.c_skyPendingWork,
+				backEnd.pc.c_skyInFlightWork,
+				backEnd.pc.c_skyAdmittedWork,
+				backEnd.pc.c_skyCompletedWork,
+				backEnd.pc.c_skyCancelledWork );
 		}
 	}
 	else if (r_speeds->integer == 8 )
@@ -223,6 +230,13 @@ static void *R_GetCommandBufferReserved( int bytes, int reservedBytes ) {
 	return cmdList->cmds + cmdList->used - bytes;
 }
 
+qboolean R_CommandBufferCanReserve( int bytes ) {
+	const int reservedBytes = PAD( sizeof( swapBuffersCommand_t ), sizeof(void *) );
+	bytes = PAD( bytes, sizeof(void *) );
+	return backEndData->commands.used + bytes + sizeof( int ) + reservedBytes
+		<= MAX_RENDER_COMMANDS ? qtrue : qfalse;
+}
+
 
 /*
 =============
@@ -243,7 +257,9 @@ void *R_GetCommandBuffer( int bytes ) {
 R_AddDrawSurfCmd
 =============
 */
-qboolean R_AddDrawSurfCmd( drawSurf_t *drawSurfs, int numDrawSurfs ) {
+qboolean R_AddDrawSurfPassCmd( drawSurf_t *drawSurfs, int numDrawSurfs,
+		int worldIndex, qboolean clearDepth, qboolean resetSkyVisibility,
+		qboolean finalizeView ) {
 	drawSurfsCommand_t	*cmd;
 
 	cmd = R_GetCommandBuffer( sizeof( *cmd ) );
@@ -257,6 +273,10 @@ qboolean R_AddDrawSurfCmd( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 
 	cmd->refdef = tr.refdef;
 	cmd->viewParms = tr.viewParms;
+	cmd->worldIndex = worldIndex;
+	cmd->clearDepth = clearDepth;
+	cmd->resetSkyVisibility = resetSkyVisibility;
+	cmd->finalizeView = finalizeView;
 
 #ifdef USE_VULKAN
 	tr.numDrawSurfCmds++;
@@ -273,6 +293,11 @@ qboolean R_AddDrawSurfCmd( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	}
 #endif
 	return qtrue;
+}
+
+qboolean R_AddDrawSurfCmd( drawSurf_t *drawSurfs, int numDrawSurfs ) {
+	return R_AddDrawSurfPassCmd( drawSurfs, numDrawSurfs,
+		tr.viewParms.temporalWorldIndex, qtrue, qtrue, qtrue );
 }
 
 

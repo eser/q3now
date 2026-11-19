@@ -103,7 +103,7 @@ foreach(path IN LISTS PRODUCT_H)
 endforeach()
 
 # W-41: ordinary draw payload and the existing raw entMat lifecycle stay exact.
-require_text(VKH "vec4_t advancedFogColorDensity;                   // offset 608, 16 B\n\tvec4_t advancedFogTypeFarEnabled;                 // offset 624, 16 B\n\tvec4_t emissionRadiance;                          // offset 640, 16 B\n} vkUniform_t;" "intentional 656-byte ordinary draw UBO lighting tail")
+require_text(VKH "vec4_t advancedFogColorDensity;                   // offset 608, 16 B\n\tvec4_t advancedFogTypeFarEnabled;                 // offset 624, 16 B\n\tvec4_t emissionRadiance;                          // offset 640, 16 B\n\t// Cooked material factors and the exact shared sky-product blend.  These are\n\t// appended so every established UBO offset remains stable across pipelines.\n\tvec4_t materialBaseColor;                         // offset 656, 16 B\n\tvec4_t materialFactors;                           // offset 672: metallic, roughness, occlusion, sky blend\n} vkUniform_t;" "intentional 688-byte ordinary draw UBO material tail")
 require_text(VKC "void vk_entmat_ensure_buffer( uint32_t requiredSlots )" "raw entMat bounded-capacity owner")
 
 require_text(BUILD "AUX_SOURCE_DIRECTORY(code/render/ral/backends/vulkan/renderer RENDERER_VK_SRCS)" "renderer product source ownership")

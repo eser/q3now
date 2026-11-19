@@ -567,7 +567,7 @@ static qboolean ParseStage( ComParser *parser, shaderStage_t *stage, const char 
 		// map <name>  /  Block 5d: linearMap / srgbMap / gammaMap <name>
 		//   linearMap forces CD_LINEAR (raw fetch) for this stage's texture;
 		//   srgbMap / gammaMap force CD_SRGB (sRGB->linear decode at sample).
-		//   When plain `map` is used, R_CreateImage auto-classifies by suffix.
+		//   Plain `map` is display colour, as in the shared Q3 material importer.
 		//
 		if ( !Q_stricmp( token, "map" ) || !Q_stricmp( token, "linearMap" )
 		  || !Q_stricmp( token, "srgbMap" ) || !Q_stricmp( token, "gammaMap" ) ) {
@@ -737,7 +737,8 @@ static qboolean ParseStage( ComParser *parser, shaderStage_t *stage, const char 
 				return qfalse;
 			}
 
-			stage->bundle[2].image[0] = R_FindImageFile( token, IMGFLAG_MIPMAP | IMGFLAG_NOLIGHTSCALE );
+			stage->bundle[2].image[0] = R_FindImageFile( token,
+				IMGFLAG_MIPMAP | IMGFLAG_NOLIGHTSCALE | IMGFLAG_DOMAIN_LINEAR );
 			if ( !stage->bundle[2].image[0] ) {
 				R_LOG( rch_shaders, SEV_WARN, "WARNING: R_FindImageFile could not find normalMap '%s' in shader '%s'\n", token,
 						shader.name );

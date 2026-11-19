@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "ral_resource.h"
+#include "render_texture_sampling.h"
 
 #include <float.h>
 #include <stdio.h>
@@ -30,6 +31,26 @@ static ralSamplerCreateInfo_t ValidInfo( void ) {
 
 int main( void ) {
 	ralSamplerCreateInfo_t ci = ValidInfo();
+	const char *modes[] = { "GL_NEAREST", "GL_LINEAR", "GL_NEAREST_MIPMAP_NEAREST",
+		"GL_LINEAR_MIPMAP_NEAREST", "GL_NEAREST_MIPMAP_LINEAR", "GL_LINEAR_MIPMAP_LINEAR" };
+	for ( unsigned i = 0; i < 6; ++i ) {
+		CHECK( wired_texture_sampling_policy( modes[i], qtrue, 8.0f, &ci ) );
+		CHECK( Ral_SamplerCreateInfoValid( &ci ) );
+		CHECK( ci.minFilter == ( ( i & 1 ) ? RAL_FILTER_LINEAR : RAL_FILTER_NEAREST ) );
+		CHECK( ci.magFilter == ci.minFilter );
+		CHECK( ci.mipmapMode == ( i >= 4 ? RAL_MIPMAP_LINEAR : RAL_MIPMAP_NEAREST ) );
+		CHECK( ci.maxLod == ( i < 2 ? 0.25f : 0.0f ) );
+		CHECK( ci.maxAnisotropy == ( i == 5 ? 8.0f : 1.0f ) );
+	}
+	CHECK( wired_texture_sampling_policy( "gl_linear_mipmap_linear", qfalse, 8.0f, &ci ) );
+	CHECK( ci.maxAnisotropy == 1.0f );
+	ralSamplerCreateInfo_t before = ci;
+	CHECK( !wired_texture_sampling_policy( "GL_LINEAR_INVALID", qtrue, 8.0f, &ci ) );
+	CHECK( !wired_texture_sampling_policy( NULL, qtrue, 8.0f, &ci ) );
+	CHECK( !wired_texture_sampling_policy( modes[5], qtrue, NAN, &ci ) );
+	CHECK( !wired_texture_sampling_policy( modes[5], qtrue, 0.0f, &ci ) );
+	CHECK( !memcmp( &before, &ci, sizeof( ci ) ) );
+	ci = ValidInfo();
 	CHECK( !Ral_SamplerCreateInfoValid( NULL ) );
 	CHECK( Ral_SamplerCreateInfoValid( &ci ) );
 	ci.maxLod = 0.0f;

@@ -14,6 +14,7 @@
 #include "vk_ral_shadow_storage.h"
 #include "../../../core/ral_atmosphere_conformance.h"
 #include "../../../core/ral_display_visibility.h"
+#include "../../../core/ral_bloom.h"
 #include "vk_generic_specialization_contract.h"
 #include "vk_temporal_pipeline_cohort.h"
 #include "vk_temporal_pipeline_factory.h"
@@ -36,6 +37,7 @@
 #include "../../../../frontend/render_submission_effects.h"
 #include "vk_ral_textures.h"   // parallel-paths RAL texture migration lifecycle
 #include "../../../core/ral.h"   // Ral_CreateGraphics/ComputePipeline + Ral_DestroyPipeline
+#include "vk_sky_capture.h"
 #include "../ral_vulkan_bridge.h"
 #ifndef _WIN32
 #include <pthread.h>
@@ -60,6 +62,8 @@ R_LOG_DECLARE_CHANNEL( rch_timing,  "renderer.timing"  );
 R_LOG_DECLARE_CHANNEL( rch_fbo,     "renderer.fbo"     );
 R_LOG_DECLARE_CHANNEL( rch_ral,     "renderer.ral"     );
 R_LOG_DECLARE_CHANNEL( rch_shaders, "renderer.shaders" );
+
+static wiredVkSkyCapture_t wired_sky_capture;
 
 // Phase 7.12 bounded leaf: semantic names for every renderer-owned RAL
 // dynamic-rendering scope. The cvar is default-off; the one-frame receipt
@@ -119,6 +123,15 @@ static vkRalShadowStorageOwner_t vk_particle_child_event_storage;
 static vkRalShadowStorageOwner_t vk_decal_pool_storage;
 static ralAllocationReceipt_t vk_exposure_accumulator_allocation;
 static ralBufferUploadReceipt_t vk_exposure_accumulator_seed;
+/* Immutable 1.0 seed; resets copy it on the graphics command, never mutate
+ * the in-flight accumulator from the CPU. */
+static ralBuffer_t *vk_exposure_reset_seed;
+static struct {
+	qboolean valid, recorded;
+	int32_t timeMs, pendingTimeMs;
+	uint64_t world, pendingWorld;
+	uint32_t width, height, pendingWidth, pendingHeight;
+} vk_exposure_history;
 static const vkRalFrameUniformConfig_t vk_particle_frame_config = {
 	sizeof( particleFrame_t ),
 	offsetof( particleFrame_t, dt ),
@@ -548,7 +561,7 @@ qboolean vk_ral_refresh_particle_render_bindgroups( uint32_t slotMask ) {
 	for ( i = 0u; i < NUM_COMMAND_BUFFERS; ++i ) {
 		if ( !( slotMask & ( 1u << i ) ) ) continue;
 		for ( pool = 0u; pool < 2u; pool++ ) {
-		ralBindingValue_t values[5];
+		ralBindingValue_t values[7];
 		ralBindGroupCreateInfo_t createInfo;
 		memset( values, 0, sizeof( values ) );
 		values[0] = (ralBindingValue_t){ .binding=0u, .type=RAL_BIND_UNIFORM_BUFFER,
@@ -563,6 +576,10 @@ qboolean vk_ral_refresh_particle_render_bindgroups( uint32_t slotMask ) {
 		values[4] = (ralBindingValue_t){ .binding=4u,
 			.type=RAL_BIND_COMBINED_TEXTURE_SAMPLER,
 			.textureView=vk.sceneDepth.ral_view, .sampler=vk.sceneDepth.ral_sampler };
+		values[5] = (ralBindingValue_t){ .binding=5u, .type=RAL_BIND_UNIFORM_BUFFER,
+			.buffer=vk.particle.ral_atmosphere_zero, .bufferRange=80u };
+		values[6] = (ralBindingValue_t){ .binding=6u, .type=RAL_BIND_STORAGE_BUFFER,
+			.buffer=vk.particle.ral_media_zero, .bufferRange=16u };
 		memset( &createInfo, 0, sizeof( createInfo ) );
 		createInfo.layout = vk.particle.ral_bgl_render;
 		createInfo.values = values;
@@ -1919,12 +1936,18 @@ static int s_sceneDepthConsumerState = -1;
 // single source of truth for "any scene-depth consumer is on".
 static qboolean vk_scene_depth_any_consumer( void ) {
 	int i;
+	/* Physical sky is a runtime-selectable RAL product, not a renderer-startup
+	 * cvar topology choice.  Its surface compositor needs the resolved scene
+	 * depth to distinguish sky/far pixels from world geometry, including when
+	 * the session boots in authored mode and switches to physical later.  Keep
+	 * the single shared copy resident while the FBO path is available; callers
+	 * retain the existing vk.fboActive gate. */
 	for ( i = 0; i < (int)ARRAY_LEN( s_sceneDepthConsumers ); i++ ) {
 		if ( (*s_sceneDepthConsumers[i].cvar)->integer ) {
 			return qtrue;
 		}
 	}
-	return qfalse;
+	return qtrue;
 }
 
 // Recompute vk.sceneDepth.active from the registry. The copy needs the FBO, so
@@ -1983,6 +2006,56 @@ static uint64_t vk_pipeline_cache_size_at_load  = 0;
 
 // Per-frame µs timestamps for r_frameSpikeUs profiler (single-threaded, main thread only).
 static int64_t vk_frame_t_start;
+
+// Per-frame pacing spike classifier (r_vkDebugTiming): each renderer frame
+// interval (vk_begin_frame to vk_begin_frame) above the 4ms steady-gameplay
+// budget is attributed to the previous frame's dominant main-thread wait -
+// swapchain acquire, slot-fence wait, submit call, present call - or to
+// "other" (CPU work/pacing outside those spans). Reported with the vk perf v2
+// row every 200 attempts as "vkPacing v1:".
+static int64_t  vk_pace_prev_start_us;
+static uint64_t vk_pace_frame_acquire_us, vk_pace_frame_slot_us,
+				vk_pace_frame_submit_us, vk_pace_frame_present_us;
+static uint32_t vk_pace_frames, vk_pace_over4ms, vk_pace_dominant[5];
+static uint64_t vk_pace_max_us[5];
+static const char *vk_pace_names[5] = { "acquire", "slot_wait", "submit", "present", "other" };
+
+static void vk_pace_classify_previous( int64_t now_us ) {
+	if ( vk_pace_prev_start_us > 0 ) {
+		uint64_t interval = (uint64_t)( now_us - vk_pace_prev_start_us );
+		uint64_t spans[5];
+		uint64_t known = vk_pace_frame_acquire_us + vk_pace_frame_slot_us
+			+ vk_pace_frame_submit_us + vk_pace_frame_present_us;
+		int i, best = 4;
+		spans[0] = vk_pace_frame_acquire_us; spans[1] = vk_pace_frame_slot_us;
+		spans[2] = vk_pace_frame_submit_us;  spans[3] = vk_pace_frame_present_us;
+		spans[4] = interval > known ? interval - known : 0;
+		vk_pace_frames++;
+		if ( interval > 4000u ) {
+			for ( i = 0; i < 5; i++ ) if ( spans[i] > spans[best] ) best = i;
+			vk_pace_over4ms++;
+			vk_pace_dominant[best]++;
+			for ( i = 0; i < 5; i++ ) if ( spans[i] > vk_pace_max_us[i] ) vk_pace_max_us[i] = spans[i];
+		}
+	}
+	vk_pace_prev_start_us = now_us;
+	vk_pace_frame_acquire_us = vk_pace_frame_slot_us = vk_pace_frame_submit_us = vk_pace_frame_present_us = 0;
+}
+
+static void vk_pace_report_and_reset( void ) {
+	if ( vk_pace_frames ) {
+		R_LOG( rch_timing, SEV_DEBUG,
+			"vkPacing v1: frames=%u over4ms=%u dominant=acquire:%u,slot_wait:%u,submit:%u,present:%u,other:%u max_us=acquire:%llu,slot_wait:%llu,submit:%llu,present:%llu,other:%llu\n",
+			vk_pace_frames, vk_pace_over4ms,
+			vk_pace_dominant[0], vk_pace_dominant[1], vk_pace_dominant[2], vk_pace_dominant[3], vk_pace_dominant[4],
+			(unsigned long long)vk_pace_max_us[0], (unsigned long long)vk_pace_max_us[1],
+			(unsigned long long)vk_pace_max_us[2], (unsigned long long)vk_pace_max_us[3],
+			(unsigned long long)vk_pace_max_us[4] );
+	}
+	vk_pace_frames = vk_pace_over4ms = 0;
+	memset( vk_pace_dominant, 0, sizeof( vk_pace_dominant ) );
+	memset( vk_pace_max_us, 0, sizeof( vk_pace_max_us ) );
+}
 static int64_t vk_frame_t_after_fence;
 static int64_t vk_frame_t_after_acquire;
 static int64_t vk_frame_t_after_begincb;
@@ -2919,6 +2992,12 @@ static void vk_create_swapchain( VkSurfaceFormatKHR surface_format, qboolean ver
 static vkRalBufferShadow_t vk_tess_geometry_shadows[NUM_COMMAND_BUFFERS];
 static vkRalBufferShadow_t vk_entmat_shadows[NUM_COMMAND_BUFFERS];
 static vkRalBufferShadow_t vk_exposure_shadows[NUM_COMMAND_BUFFERS];
+// Fence-split mode: the present buffer's gamma/overlay commands must not read
+// memory that slot reuse rewrites, so the exposure block and the overlay quad
+// vertices get per-slot copies whose lifetime is the present fence.
+static vkRalBufferShadow_t vk_exposure_present_shadows[NUM_COMMAND_BUFFERS];
+static vkRalBufferShadow_t vk_overlay_shadows[NUM_COMMAND_BUFFERS];
+#define VK_OVERLAY_VERTEX_BYTES ( (uint64_t)MAX_OVERLAY_QUADS * 256u )
 static vkRalBufferShadow_t vk_menubg_shadows[NUM_COMMAND_BUFFERS];
 static vkRalBufferShadow_t vk_msdf_shadows[NUM_COMMAND_BUFFERS];
 static vkRalBufferShadow_t vk_effects_ubo_shadows[NUM_COMMAND_BUFFERS];
@@ -4089,6 +4168,23 @@ static VkSampler vk_create_ral_sampler( const ralSamplerCreateInfo_t *info,
 	return native;
 }
 
+// FX filtering is fixed, unlike material filtering. Its owner must survive
+// GL_TextureMode rebuilding the material sampler pool and image descriptors.
+static VkSampler wired_create_fx_clamp_sampler( const char *name,
+		ralSampler_t **owner ) {
+	ralSamplerCreateInfo_t desc;
+	memset( &desc, 0, sizeof( desc ) );
+	desc.minFilter = desc.magFilter = RAL_FILTER_LINEAR;
+	desc.mipmapMode = RAL_MIPMAP_NEAREST;
+	desc.addressU = desc.addressV = desc.addressW = RAL_ADDRESS_CLAMP_TO_EDGE;
+	desc.maxAnisotropy = 1.0f;
+	desc.compareOp = RAL_COMPARE_ALWAYS;
+	desc.borderColor = RAL_BORDER_TRANSPARENT_BLACK;
+	desc.maxLod = 0.25f; // Preserve the previous GL_LINEAR non-mip policy.
+	desc.debugName = name;
+	return vk_create_ral_sampler( &desc, owner );
+}
+
 static VkSampler vk_find_sampler( const Vk_Sampler_Def *def ) {
 	ralSamplerCreateInfo_t desc;
 	VkSampler sampler;
@@ -4178,6 +4274,13 @@ static VkSampler vk_find_sampler( const Vk_Sampler_Def *def ) {
 
 	sampler = vk_create_ral_sampler( &desc,
 		&vk.samplers.ral_handle[samplerIndex] );
+	/* Report the actual descriptor for mipmapped material samplers, not just
+	 * requested cvars. Non-mip/attachment and no-anisotropy exceptions differ. */
+	if ( sampler && !def->noAnisotropy && !def->max_lod_1_0
+			&& def->gl_min_filter == gl_filter_min
+			&& def->gl_mag_filter == gl_filter_max )
+		R_LOG( rch_ral, SEV_INFO, "Wired vulkan material sampler: min=%d mag=%d mip=%d aniso=%g maxLod=%g\n",
+			desc.minFilter, desc.magFilter, desc.mipmapMode, desc.maxAnisotropy, desc.maxLod );
 
 	vk.samplers.def[ vk.samplers.count ] = *def;
 	vk.samplers.handle[ vk.samplers.count ] = sampler;
@@ -5142,6 +5245,55 @@ void vk_init_descriptors( void )
 						"Vulkan: failed to create exposure RAL bind group %u", i );
 				vk.exposure.descriptor[i] = (VkDescriptorSet)Ral_GetBindGroupHandle(
 					vk.exposure.ral_descriptor[i] );
+
+				// Present-lifetime exposure copy + overlay vertex buffer (fence split).
+				if ( !vk_exposure_present_shadows[i].buffer ) {
+					vk_exposure_block_t presentSeed;
+					vkRalBufferShadowWriteReceipt_t presentReceipt;
+					if ( vk_exposure_present_shadows[i].schemaVersion == 0u )
+						VK_RalBufferShadowInit( &vk_exposure_present_shadows[i] );
+					if ( !VK_RalBufferShadowEnsure( &vk_exposure_present_shadows[i],
+							vk_ral_get_backend(), expBytes, expUsage,
+							"wired-exposure-present-ubo" ) )
+						ri.Terminate( TERM_UNRECOVERABLE,
+							"Vulkan: failed to create present exposure RAL buffer %u", i );
+					memset( &presentSeed, 0, sizeof( presentSeed ) );
+					presentSeed.exposure_bias = 1.0f;
+					presentSeed.brightness = 1.0f;
+					if ( !VK_RalBufferShadowWrite( &vk_exposure_present_shadows[i],
+							0u, &presentSeed, sizeof( presentSeed ) )
+							|| !VK_RalBufferShadowPublish( &vk_exposure_present_shadows[i],
+								0u, expBytes, &presentReceipt ) )
+						ri.Terminate( TERM_UNRECOVERABLE,
+							"Vulkan: failed to seed present exposure RAL buffer %u", i );
+				}
+				vk.exposure.present_ptr[i] = vk_exposure_present_shadows[i].bytes;
+				memset( &expValue, 0, sizeof( expValue ) );
+				expValue.binding = 0u;
+				expValue.type = RAL_BIND_UNIFORM_BUFFER;
+				expValue.buffer = vk_exposure_present_shadows[i].buffer;
+				expValue.bufferRange = expBytes;
+				memset( &expCreate, 0, sizeof( expCreate ) );
+				expCreate.layout = vk.ral_bgl_exposure;
+				expCreate.values = &expValue;
+				expCreate.numValues = 1u;
+				expCreate.debugName = va( "present-exposure set %u", i );
+				expCreate.arena = vk.ral_descriptor_arena;
+				expCreate.arenaReceipt = &vk.ral_descriptor_arena_receipt;
+				vk.exposure.present_descriptor[i] = Ral_CreateBindGroup(
+					vk_ral_get_backend(), &expCreate );
+				if ( !vk.exposure.present_descriptor[i] )
+					ri.Terminate( TERM_UNRECOVERABLE,
+						"Vulkan: failed to create present exposure RAL bind group %u", i );
+				if ( !vk_overlay_shadows[i].buffer ) {
+					if ( vk_overlay_shadows[i].schemaVersion == 0u )
+						VK_RalBufferShadowInit( &vk_overlay_shadows[i] );
+					if ( !VK_RalBufferShadowEnsure( &vk_overlay_shadows[i],
+							vk_ral_get_backend(), VK_OVERLAY_VERTEX_BYTES,
+							RAL_BUFFER_VERTEX, "wired-overlay-present-vertices" ) )
+						ri.Terminate( TERM_UNRECOVERABLE,
+							"Vulkan: failed to create present overlay vertex buffer %u", i );
+				}
 			}
 		}
 
@@ -7735,7 +7887,7 @@ void vk_init_particle( void )
 	//            sampled in the fragment for the soft-particle depth fade. Same
 	//            resource + per-set combined-sampler convention as the decal pass.
 	{
-		ralBindEntry_t entries[5];
+		ralBindEntry_t entries[7];
 		memset( entries, 0, sizeof( entries ) );
 		entries[0] = (ralBindEntry_t){ 0u, RAL_BIND_UNIFORM_BUFFER, 1u,
 			RAL_STAGE_VERTEX | RAL_STAGE_FRAGMENT, RAL_BIND_TEXTURE_VIEW_UNSPECIFIED, qfalse };
@@ -7746,6 +7898,14 @@ void vk_init_particle( void )
 			PARTICLE_SAMPLER_COUNT, RAL_STAGE_FRAGMENT, RAL_BIND_TEXTURE_VIEW_2D, qfalse };
 		entries[4] = (ralBindEntry_t){ 4u, RAL_BIND_COMBINED_TEXTURE_SAMPLER,
 			1u, RAL_STAGE_FRAGMENT, RAL_BIND_TEXTURE_VIEW_2D, qfalse };
+		// binding 5/6: ParticleAtmosphere UBO + media SSBO (particle.frag). Vulkan
+		// fogs particles in the post-scene atmosphere composite, so it binds
+		// zeroed blocks; backends that draw after their fog (Metal) bind the live
+		// atmosphere params + froxel arena.
+		entries[5] = (ralBindEntry_t){ 5u, RAL_BIND_UNIFORM_BUFFER, 1u,
+			RAL_STAGE_FRAGMENT, RAL_BIND_TEXTURE_VIEW_UNSPECIFIED, qfalse };
+		entries[6] = (ralBindEntry_t){ 6u, RAL_BIND_STORAGE_BUFFER, 1u,
+			RAL_STAGE_FRAGMENT, RAL_BIND_TEXTURE_VIEW_UNSPECIFIED, qfalse };
 		if ( !vk_create_effect_bind_group_layout( entries, ARRAY_LEN( entries ),
 				"wired-particle-render-set-layout",
 				&vk.particle.ral_bgl_render,
@@ -7756,20 +7916,38 @@ void vk_init_particle( void )
 		}
 	}
 
-	// Shared sampler for the per-class texture array. Linear filter,
-	// clamp-to-edge, no anisotropy — appropriate for billboard
-	// particles regardless of class. vk_find_sampler deduplicates
-	// against existing samplers so this may return an already-built
-	// instance.
+	// Particle-owned; primitive clamp groups borrow this same RAL owner.
+	vk.particle.sampler = wired_create_fx_clamp_sampler(
+		"sampler - particle CLAMP", &vk.particle.ral_sampler );
+
+	// Zeroed ParticleAtmosphere / media blocks: particle.frag's media sample
+	// is identity on Vulkan (the composite fogs the scene after the draw).
 	{
-		Vk_Sampler_Def sd;
-		memset( &sd, 0, sizeof( sd ) );
-		sd.address_mode  = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-		sd.gl_mag_filter = GL_LINEAR;
-		sd.gl_min_filter = GL_LINEAR;
-		sd.noAnisotropy  = qtrue;
-		vk.particle.sampler = vk_find_sampler( &sd );
-		vk.particle.ral_sampler = vk_ral_sampler_for_definition( &sd );
+		static const float zeros[20];
+		ralBufferCreateInfo_t bci;
+		ralFence_t *upload;
+		if ( !vk.particle.ral_atmosphere_zero ) {
+			memset( &bci, 0, sizeof( bci ) );
+			bci.size = sizeof( zeros ); bci.usage = RAL_BUFFER_UNIFORM | RAL_BUFFER_TRANSFER_DST;
+			bci.memory = RAL_MEMORY_DEVICE_LOCAL; bci.debugName = "wired-particle-atmosphere-zero";
+			vk.particle.ral_atmosphere_zero = Ral_CreateBuffer( vk_ral_get_backend(), &bci );
+			upload = vk.particle.ral_atmosphere_zero
+				? Ral_BufferUploadAsync( vk.particle.ral_atmosphere_zero, 0, zeros, sizeof( zeros ) ) : NULL;
+			if ( upload ) { Ral_WaitFence( upload, ~(uint64_t)0 ); Ral_DestroyFence( upload ); }
+		}
+		if ( !vk.particle.ral_media_zero ) {
+			memset( &bci, 0, sizeof( bci ) );
+			bci.size = 16u; bci.usage = RAL_BUFFER_STORAGE | RAL_BUFFER_TRANSFER_DST;
+			bci.memory = RAL_MEMORY_DEVICE_LOCAL; bci.debugName = "wired-particle-media-zero";
+			vk.particle.ral_media_zero = Ral_CreateBuffer( vk_ral_get_backend(), &bci );
+			upload = vk.particle.ral_media_zero
+				? Ral_BufferUploadAsync( vk.particle.ral_media_zero, 0, zeros, 16u ) : NULL;
+			if ( upload ) { Ral_WaitFence( upload, ~(uint64_t)0 ); Ral_DestroyFence( upload ); }
+		}
+		if ( !vk.particle.ral_atmosphere_zero || !vk.particle.ral_media_zero ) {
+			ri.Terminate( TERM_UNRECOVERABLE, "Particle RAL atmosphere zero-block creation failed" );
+			return;
+		}
 	}
 
 	if ( !vk_create_single_bind_group_pipeline_layout(
@@ -8422,7 +8600,11 @@ void vk_shutdown_particle( void )
 	vk.particle.render_set_layout = VK_NULL_HANDLE;
 	vk.particle.compute_set_layout = VK_NULL_HANDLE;
 
+	if ( vk.particle.ral_sampler ) Ral_DestroySampler( vk.particle.ral_sampler );
 	vk.particle.ral_sampler = NULL;
+	vk.particle.sampler = VK_NULL_HANDLE;
+	if ( vk.particle.ral_atmosphere_zero ) { Ral_DestroyBuffer( vk.particle.ral_atmosphere_zero ); vk.particle.ral_atmosphere_zero = NULL; }
+	if ( vk.particle.ral_media_zero ) { Ral_DestroyBuffer( vk.particle.ral_media_zero ); vk.particle.ral_media_zero = NULL; }
 	vk.particle.textureGeneration = 0u;
 	vk.particle.available = qfalse;
 }
@@ -8541,18 +8723,10 @@ void vk_init_decal( void )
 		}
 	}
 
-	// Shared sampler for the texture array. Linear filter, clamp-to-edge,
-	// no anisotropy — a projected decal samples a single quad's worth of
-	// texels. vk_find_sampler deduplicates against existing samplers.
+	// Decal-owned fixed filtering, independent of the material sampler pool.
 	{
-		Vk_Sampler_Def sd;
-		memset( &sd, 0, sizeof( sd ) );
-		sd.address_mode  = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-		sd.gl_mag_filter = GL_LINEAR;
-		sd.gl_min_filter = GL_LINEAR;
-		sd.noAnisotropy  = qtrue;
-		vk.decal.sampler = vk_find_sampler( &sd );
-		vk.decal.ral_sampler = vk_ral_sampler_for_definition( &sd );
+		vk.decal.sampler = wired_create_fx_clamp_sampler(
+			"sampler - decal CLAMP", &vk.decal.ral_sampler );
 		if ( vk.decal.sampler == VK_NULL_HANDLE || !vk.decal.ral_sampler
 				|| Ral_GetSamplerHandle( vk.decal.ral_sampler )
 					!= (void *)vk.decal.sampler ) {
@@ -8796,7 +8970,9 @@ void vk_shutdown_decal( void )
 	if ( vk.decal.ral_bgl_render ) { Ral_DestroyBindGroupLayout( vk.decal.ral_bgl_render ); vk.decal.ral_bgl_render = NULL; }
 	vk.decal.render_set_layout = VK_NULL_HANDLE;
 
+	if ( vk.decal.ral_sampler ) Ral_DestroySampler( vk.decal.ral_sampler );
 	vk.decal.ral_sampler = NULL;
+	vk.decal.sampler = VK_NULL_HANDLE;
 	vk.decal.textureGeneration = 0u;
 	vk.decal.surfaceClimateGeneration = 0u;
 	vk.decal.surfaceClimateCount = 0u;
@@ -8854,9 +9030,90 @@ static void vk_atmospheric_create_heightgrid( void )
 // validated and every allocation has succeeded; only then are the old children
 // retired. compute_descriptor[i] reads pool[i], writes pool[1-i];
 // render_descriptor[i] reads pool[1-i] (the just-written pool).
+/* Semantic-emitter class texture views (families >= 16): the resolved class
+ * image per admitted workload, white fallback for unused/unauthored slots. */
+static qboolean vk_atmospheric_effect_texture_views(
+		ralTextureView_t *outViews[RENDER_SUBMISSION_MAX_ATMOSPHERE_EFFECT_WORKLOADS] )
+{
+	uint32_t k;
+	if ( !outViews || !tr.whiteImage || !tr.whiteImage->ralDescriptorView
+			|| !Ral_GetTextureViewHandle( tr.whiteImage->ralDescriptorView ) ) return qfalse;
+	for ( k = 0u; k < RENDER_SUBMISSION_MAX_ATMOSPHERE_EFFECT_WORKLOADS; ++k ) {
+		image_t *image = vk.atm.effectImages[k] ? vk.atm.effectImages[k] : tr.whiteImage;
+		if ( !image->ralDescriptorView
+				|| !Ral_GetTextureViewHandle( image->ralDescriptorView ) )
+			image = tr.whiteImage;
+		outViews[k] = image->ralDescriptorView;
+	}
+	return qtrue;
+}
+
+/* Re-create only this slot's render bind group after the semantic-emitter
+ * class images changed. The slot's previous command buffer has completed
+ * (frame fence) so its old group can be released, like the particle path. */
+static qboolean vk_atmospheric_refresh_render_descriptor( uint32_t slot )
+{
+	ralBackend_t *backend = vk_ral_get_backend();
+	vkAtmosphericPoolReceipt_t poolReceipt;
+	vkAtmosphericFrameResourcesReceipt_t frameReceipt;
+	ralTextureView_t *effectTextureViews[RENDER_SUBMISSION_MAX_ATMOSPHERE_EFFECT_WORKLOADS];
+	ralBindingValue_t values[4];
+	ralBindGroupCreateInfo_t createInfo;
+	ralBindGroup_t *candidate, *old;
+	const uint64_t frameBytes = sizeof( atmFrame_t );
+	const uint64_t poolBytes = (uint64_t)ATM_PARTICLES_PER_POOL * ATM_PARTICLE_BYTES;
+	const uint32_t renderPool = 1u - slot;
+	if ( slot >= NUM_COMMAND_BUFFERS || !backend || !vk.atm.available
+			|| !vk.atm.ral_bgl_render || !vk.atm.ral_effect_sampler
+			|| !vk.atm.ral_render_descriptor[slot]
+			|| !VK_AtmosphericPoolGetReceipt( &vk_atmospheric_pool, &poolReceipt )
+			|| !VK_AtmosphericFrameGetResources( &vk_atmospheric_frame, &frameReceipt )
+			|| !vk_atmospheric_effect_texture_views( effectTextureViews ) )
+		return qfalse;
+	memset( values, 0, sizeof( values ) );
+	values[0].binding = 0u;
+	values[0].type = RAL_BIND_UNIFORM_BUFFER;
+	values[0].buffer = frameReceipt.buffers[slot];
+	values[0].bufferRange = frameBytes;
+	values[1].binding = 1u;
+	values[1].type = RAL_BIND_STORAGE_BUFFER;
+	values[1].buffer = poolReceipt.buffers[renderPool];
+	values[1].bufferRange = poolBytes;
+	values[2].binding = 2u;
+	values[2].type = RAL_BIND_COMBINED_TEXTURE_SAMPLER;
+	values[2].textureView = vk.sceneDepth.ral_view;
+	values[2].sampler = vk.sceneDepth.ral_sampler;
+	values[3].binding = 3u;
+	values[3].type = RAL_BIND_TEXTURE_ARRAY;
+	values[3].textureArray = (const ralTextureView_t *const *)effectTextureViews;
+	values[3].textureArrayCount = RENDER_SUBMISSION_MAX_ATMOSPHERE_EFFECT_WORKLOADS;
+	values[3].sampler = vk.atm.ral_effect_sampler;
+	memset( &createInfo, 0, sizeof( createInfo ) );
+	createInfo.layout = vk.atm.ral_bgl_render;
+	createInfo.values = values;
+	createInfo.numValues = ARRAY_LEN( values );
+	createInfo.debugName = slot == 0u
+		? "wired-atmospheric-render-bg-0"
+		: "wired-atmospheric-render-bg-1";
+	createInfo.arena = vk.ral_descriptor_arena;
+	createInfo.arenaReceipt = &vk.ral_descriptor_arena_receipt;
+	candidate = Ral_CreateBindGroup( backend, &createInfo );
+	if ( !candidate || !Ral_GetBindGroupHandle( candidate ) ) {
+		if ( candidate ) Ral_DestroyBindGroup( candidate );
+		return qfalse;
+	}
+	old = vk.atm.ral_render_descriptor[slot];
+	vk.atm.ral_render_descriptor[slot] = candidate;
+	vk.atm.render_descriptor[slot] = (VkDescriptorSet)Ral_GetBindGroupHandle( candidate );
+	vk.atm.effectImageSlotGeneration[slot] = vk.atm.effectImageGeneration;
+	if ( old ) Ral_DestroyBindGroup( old );
+	return qtrue;
+}
+
 void vk_atmospheric_write_descriptors( void )
 {
 	ralBackend_t *backend = vk_ral_get_backend();
+	ralTextureView_t *effectTextureViews[RENDER_SUBMISSION_MAX_ATMOSPHERE_EFFECT_WORKLOADS];
 	ralTextureView_t *heightgridViewCandidate = NULL;
 	ralTextureView_t *oldHeightgridView;
 	ralBindGroup_t *computeCandidates[NUM_COMMAND_BUFFERS] = { NULL, NULL };
@@ -9016,8 +9273,9 @@ void vk_atmospheric_write_descriptors( void )
 		if ( computeRaw[i] == VK_NULL_HANDLE ) goto fail;
 	}
 
+	if ( !vk_atmospheric_effect_texture_views( effectTextureViews ) ) goto fail;
 	for ( i = 0u; i < NUM_COMMAND_BUFFERS; i++ ) {
-		ralBindingValue_t values[3];
+		ralBindingValue_t values[4];
 		ralBindGroupCreateInfo_t createInfo;
 		const uint32_t renderPool = 1u - i;
 		memset( values, 0, sizeof( values ) );
@@ -9033,6 +9291,12 @@ void vk_atmospheric_write_descriptors( void )
 		values[2].type = RAL_BIND_COMBINED_TEXTURE_SAMPLER;
 		values[2].textureView = vk.sceneDepth.ral_view;
 		values[2].sampler = vk.sceneDepth.ral_sampler;
+		/* Semantic-emitter class textures (families >= 16), white fallback. */
+		values[3].binding = 3u;
+		values[3].type = RAL_BIND_TEXTURE_ARRAY;
+		values[3].textureArray = (const ralTextureView_t *const *)effectTextureViews;
+		values[3].textureArrayCount = RENDER_SUBMISSION_MAX_ATMOSPHERE_EFFECT_WORKLOADS;
+		values[3].sampler = vk.atm.ral_effect_sampler;
 		memset( &createInfo, 0, sizeof( createInfo ) );
 		createInfo.layout = vk.atm.ral_bgl_render;
 		createInfo.values = values;
@@ -9047,6 +9311,7 @@ void vk_atmospheric_write_descriptors( void )
 			? (VkDescriptorSet)Ral_GetBindGroupHandle( renderCandidates[i] )
 			: VK_NULL_HANDLE;
 		if ( renderRaw[i] == VK_NULL_HANDLE ) goto fail;
+		vk.atm.effectImageSlotGeneration[i] = vk.atm.effectImageGeneration;
 	}
 
 	for ( i = 0u; i < NUM_COMMAND_BUFFERS; i++ ) {
@@ -9111,6 +9376,134 @@ fail:
 
 static void vk_init_atmospheric_compute_ral_pipeline( void );
 
+/* The atmospheric (weather) render pipeline bakes the MAIN attachment
+ * formats; vk_init_atmospheric creates it and the r_hdr live rebuild
+ * (vk_recreate_main_pass_primitive_pipelines) recreates it against the new
+ * colour format like the other standalone primitive pipelines. */
+static void vk_atmospheric_create_render_pipeline( void )
+{
+	VkGraphicsPipelineCreateInfo gpInfo;
+	VkPipelineShaderStageCreateInfo stages[2];
+	VkPipelineVertexInputStateCreateInfo vertexInput;
+	VkPipelineInputAssemblyStateCreateInfo inputAssembly;
+	VkPipelineViewportStateCreateInfo viewportState;
+	VkPipelineRasterizationStateCreateInfo rasterizer;
+	VkPipelineMultisampleStateCreateInfo multisampling;
+	VkPipelineDepthStencilStateCreateInfo depthStencil;
+	VkPipelineColorBlendAttachmentState blendAttach;
+	VkPipelineColorBlendStateCreateInfo colorBlend;
+	VkPipelineDynamicStateCreateInfo dynamicState;
+	VkDynamicState dynStates[2];
+	VkViewport viewport;
+	VkRect2D scissor;
+
+	memset( stages, 0, sizeof( stages ) );
+	stages[0].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	stages[0].stage  = VK_SHADER_STAGE_VERTEX_BIT;
+	stages[0].module = vk.modules.atmospheric_vs;
+	stages[0].pName  = "main";
+	stages[1].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	stages[1].stage  = VK_SHADER_STAGE_FRAGMENT_BIT;
+	stages[1].module = vk.modules.atmospheric_fs;
+	stages[1].pName  = "main";
+
+	memset( &vertexInput, 0, sizeof( vertexInput ) );
+	vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+	memset( &inputAssembly, 0, sizeof( inputAssembly ) );
+	inputAssembly.sType    = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+	inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+	dynStates[0] = VK_DYNAMIC_STATE_VIEWPORT;
+	dynStates[1] = VK_DYNAMIC_STATE_SCISSOR;
+	memset( &dynamicState, 0, sizeof( dynamicState ) );
+	dynamicState.sType             = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+	dynamicState.dynamicStateCount = 2;
+	dynamicState.pDynamicStates    = dynStates;
+
+	memset( &viewport, 0, sizeof( viewport ) );
+	viewport.width    = (float)vk.renderWidth;
+	viewport.height   = (float)vk.renderHeight;
+	viewport.maxDepth = 1.0f;
+	memset( &scissor, 0, sizeof( scissor ) );
+	scissor.extent.width  = vk.renderWidth;
+	scissor.extent.height = vk.renderHeight;
+
+	memset( &viewportState, 0, sizeof( viewportState ) );
+	viewportState.sType         = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+	viewportState.viewportCount = 1;
+	viewportState.pViewports    = &viewport;
+	viewportState.scissorCount  = 1;
+	viewportState.pScissors     = &scissor;
+
+	memset( &rasterizer, 0, sizeof( rasterizer ) );
+	rasterizer.sType       = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+	rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+	rasterizer.lineWidth   = 1.0f;
+	rasterizer.cullMode    = VK_CULL_MODE_NONE;
+	rasterizer.frontFace   = VK_FRONT_FACE_CLOCKWISE;
+
+	memset( &multisampling, 0, sizeof( multisampling ) );
+	multisampling.sType                = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+	multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+	memset( &depthStencil, 0, sizeof( depthStencil ) );
+	depthStencil.sType            = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+	depthStencil.depthTestEnable  = VK_TRUE;
+	depthStencil.depthWriteEnable = VK_FALSE;
+#ifdef USE_REVERSED_DEPTH
+	depthStencil.depthCompareOp   = VK_COMPARE_OP_GREATER_OR_EQUAL;
+#else
+	depthStencil.depthCompareOp   = VK_COMPARE_OP_LESS_OR_EQUAL;
+#endif
+
+	memset( &blendAttach, 0, sizeof( blendAttach ) );
+	blendAttach.blendEnable         = VK_TRUE;
+	blendAttach.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+	blendAttach.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+	blendAttach.colorBlendOp        = VK_BLEND_OP_ADD;
+	blendAttach.srcAlphaBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+	blendAttach.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+	blendAttach.alphaBlendOp        = VK_BLEND_OP_ADD;
+	blendAttach.colorWriteMask      = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
+	                                | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+	memset( &colorBlend, 0, sizeof( colorBlend ) );
+	colorBlend.sType           = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+	colorBlend.attachmentCount = 1;
+	colorBlend.pAttachments    = &blendAttach;
+
+	memset( &gpInfo, 0, sizeof( gpInfo ) );
+	gpInfo.sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+	gpInfo.stageCount          = 2;
+	gpInfo.pStages             = stages;
+	gpInfo.pVertexInputState   = &vertexInput;
+	gpInfo.pInputAssemblyState = &inputAssembly;
+	gpInfo.pViewportState      = &viewportState;
+	gpInfo.pRasterizationState = &rasterizer;
+	gpInfo.pMultisampleState   = &multisampling;
+	gpInfo.pDepthStencilState  = &depthStencil;
+	gpInfo.pColorBlendState    = &colorBlend;
+	gpInfo.pDynamicState       = &dynamicState;
+	gpInfo.layout              = vk.atm.render_pipeline_layout;
+	gpInfo.subpass             = 0;
+
+	vk.atm.ral_render_pipeline =
+		vk_ral_create_pipeline_from_gpinfo( &gpInfo, vk.atm.ral_render_pipeline_layout,
+			vk_attachment_format_to_ral( vk.color_format ),
+			vk_attachment_format_to_ral( vk.depth_format ),
+			"ral-atmospheric-render" );
+}
+
+static int vk_recreate_atmospheric_render_pipeline( void )
+{
+	if ( !vk.atm.available || !vk.atm.ral_render_pipeline_layout
+			|| vk.atm.render_pipeline_layout == VK_NULL_HANDLE ) return 0;
+	if ( vk.atm.ral_render_pipeline ) { Ral_DestroyPipeline( vk.atm.ral_render_pipeline ); vk.atm.ral_render_pipeline = NULL; }
+	vk_atmospheric_create_render_pipeline();
+	return vk.atm.ral_render_pipeline ? 1 : 0;
+}
+
 void vk_init_atmospheric( void )
 {
 	const uint32_t poolBytes  = ATM_PARTICLES_PER_POOL * ATM_PARTICLE_BYTES;
@@ -9140,6 +9533,18 @@ void vk_init_atmospheric( void )
 			&vk.atm.runtimeState ) ) {
 		ri.Terminate( TERM_UNRECOVERABLE,
 			"Atmospheric RAL lifecycle initialization failed" );
+		return;
+	}
+	if ( !Ral_SkyEnvironmentRuntimeInit( RAL_BACKEND_VULKAN,
+			&vk.atm.skyRuntimeState ) ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"Sky environment RAL lifecycle initialization failed" );
+		return;
+	}
+	if ( !Ral_SkyRadianceInit( RAL_BACKEND_VULKAN,
+			&vk.atm.skyRadianceState ) ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"Sky radiance RAL lifecycle initialization failed" );
 		return;
 	}
 
@@ -9177,13 +9582,15 @@ void vk_init_atmospheric( void )
 		return;
 	}
 
-	// ── Render descriptor set layout (3 bindings) ────────────────
+	// ── Render descriptor set layout (4 bindings) ────────────────
 	// 0 UBO (vertex + fragment: frag reads the soft-particle depth-fade params),
 	// 1 post-compute pool SSBO (vertex),
 	// 2 shared scene-depth copy (fragment) — same vk.sceneDepth + combined-sampler
 	//   convention as the decal/particle consumers, for the depth fade.
+	// 3 semantic-emitter class textures x 8 (fragment; families >= 16).
 	{
-		ralBindEntry_t entries[3];
+		ralBindEntry_t entries[4];
+		ralSamplerCreateInfo_t sci;
 		memset( entries, 0, sizeof( entries ) );
 		entries[0].binding = 0; entries[0].count = 1;
 		entries[0].type = RAL_BIND_UNIFORM_BUFFER;
@@ -9195,6 +9602,23 @@ void vk_init_atmospheric( void )
 		entries[2].type = RAL_BIND_COMBINED_TEXTURE_SAMPLER;
 		entries[2].stageFlags = RAL_STAGE_FRAGMENT;
 		entries[2].textureViewType = RAL_BIND_TEXTURE_VIEW_2D;
+		entries[3].binding = 3; entries[3].count = RENDER_SUBMISSION_MAX_ATMOSPHERE_EFFECT_WORKLOADS;
+		entries[3].type = RAL_BIND_COMBINED_TEXTURE_SAMPLER;
+		entries[3].stageFlags = RAL_STAGE_FRAGMENT;
+		entries[3].textureViewType = RAL_BIND_TEXTURE_VIEW_2D;
+		memset( &sci, 0, sizeof( sci ) );
+		sci.minFilter = sci.magFilter = RAL_FILTER_LINEAR;
+		sci.mipmapMode = RAL_MIPMAP_LINEAR;
+		sci.addressU = sci.addressV = sci.addressW = RAL_ADDRESS_CLAMP_TO_EDGE;
+		sci.maxAnisotropy = 1.0f;
+		sci.debugName = "wired-atmospheric-effect-sampler";
+		if ( !vk.atm.ral_effect_sampler )
+			vk.atm.ral_effect_sampler = Ral_CreateSampler( vk_ral_get_backend(), &sci );
+		if ( !vk.atm.ral_effect_sampler ) {
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Atmospheric RAL effect sampler creation failed" );
+			return;
+		}
 		if ( !vk_create_effect_bind_group_layout( entries, ARRAY_LEN( entries ),
 				"wired-atmospheric-render-set-layout",
 				&vk.atm.ral_bgl_render, &vk.atm.render_set_layout ) ) {
@@ -9244,119 +9668,7 @@ void vk_init_atmospheric( void )
 	vk_init_atmospheric_compute_ral_pipeline();
 
 	// ── Render pipeline (single alpha-blend variant) ─────────────
-	{
-		VkGraphicsPipelineCreateInfo gpInfo;
-		VkPipelineShaderStageCreateInfo stages[2];
-		VkPipelineVertexInputStateCreateInfo vertexInput;
-		VkPipelineInputAssemblyStateCreateInfo inputAssembly;
-		VkPipelineViewportStateCreateInfo viewportState;
-		VkPipelineRasterizationStateCreateInfo rasterizer;
-		VkPipelineMultisampleStateCreateInfo multisampling;
-		VkPipelineDepthStencilStateCreateInfo depthStencil;
-		VkPipelineColorBlendAttachmentState blendAttach;
-		VkPipelineColorBlendStateCreateInfo colorBlend;
-		VkPipelineDynamicStateCreateInfo dynamicState;
-		VkDynamicState dynStates[2];
-		VkViewport viewport;
-		VkRect2D scissor;
-
-		memset( stages, 0, sizeof( stages ) );
-		stages[0].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		stages[0].stage  = VK_SHADER_STAGE_VERTEX_BIT;
-		stages[0].module = vk.modules.atmospheric_vs;
-		stages[0].pName  = "main";
-		stages[1].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		stages[1].stage  = VK_SHADER_STAGE_FRAGMENT_BIT;
-		stages[1].module = vk.modules.atmospheric_fs;
-		stages[1].pName  = "main";
-
-		memset( &vertexInput, 0, sizeof( vertexInput ) );
-		vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-
-		memset( &inputAssembly, 0, sizeof( inputAssembly ) );
-		inputAssembly.sType    = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-		inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-
-		dynStates[0] = VK_DYNAMIC_STATE_VIEWPORT;
-		dynStates[1] = VK_DYNAMIC_STATE_SCISSOR;
-		memset( &dynamicState, 0, sizeof( dynamicState ) );
-		dynamicState.sType             = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-		dynamicState.dynamicStateCount = 2;
-		dynamicState.pDynamicStates    = dynStates;
-
-		memset( &viewport, 0, sizeof( viewport ) );
-		viewport.width    = (float)vk.renderWidth;
-		viewport.height   = (float)vk.renderHeight;
-		viewport.maxDepth = 1.0f;
-		memset( &scissor, 0, sizeof( scissor ) );
-		scissor.extent.width  = vk.renderWidth;
-		scissor.extent.height = vk.renderHeight;
-
-		memset( &viewportState, 0, sizeof( viewportState ) );
-		viewportState.sType         = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-		viewportState.viewportCount = 1;
-		viewportState.pViewports    = &viewport;
-		viewportState.scissorCount  = 1;
-		viewportState.pScissors     = &scissor;
-
-		memset( &rasterizer, 0, sizeof( rasterizer ) );
-		rasterizer.sType       = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-		rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-		rasterizer.lineWidth   = 1.0f;
-		rasterizer.cullMode    = VK_CULL_MODE_NONE;
-		rasterizer.frontFace   = VK_FRONT_FACE_CLOCKWISE;
-
-		memset( &multisampling, 0, sizeof( multisampling ) );
-		multisampling.sType                = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-		multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-		memset( &depthStencil, 0, sizeof( depthStencil ) );
-		depthStencil.sType            = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-		depthStencil.depthTestEnable  = VK_TRUE;
-		depthStencil.depthWriteEnable = VK_FALSE;
-#ifdef USE_REVERSED_DEPTH
-		depthStencil.depthCompareOp   = VK_COMPARE_OP_GREATER_OR_EQUAL;
-#else
-		depthStencil.depthCompareOp   = VK_COMPARE_OP_LESS_OR_EQUAL;
-#endif
-
-		memset( &blendAttach, 0, sizeof( blendAttach ) );
-		blendAttach.blendEnable         = VK_TRUE;
-		blendAttach.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-		blendAttach.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-		blendAttach.colorBlendOp        = VK_BLEND_OP_ADD;
-		blendAttach.srcAlphaBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-		blendAttach.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-		blendAttach.alphaBlendOp        = VK_BLEND_OP_ADD;
-		blendAttach.colorWriteMask      = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
-		                                | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-
-		memset( &colorBlend, 0, sizeof( colorBlend ) );
-		colorBlend.sType           = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-		colorBlend.attachmentCount = 1;
-		colorBlend.pAttachments    = &blendAttach;
-
-		memset( &gpInfo, 0, sizeof( gpInfo ) );
-		gpInfo.sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-		gpInfo.stageCount          = 2;
-		gpInfo.pStages             = stages;
-		gpInfo.pVertexInputState   = &vertexInput;
-		gpInfo.pInputAssemblyState = &inputAssembly;
-		gpInfo.pViewportState      = &viewportState;
-		gpInfo.pRasterizationState = &rasterizer;
-		gpInfo.pMultisampleState   = &multisampling;
-		gpInfo.pDepthStencilState  = &depthStencil;
-		gpInfo.pColorBlendState    = &colorBlend;
-		gpInfo.pDynamicState       = &dynamicState;
-		gpInfo.layout              = vk.atm.render_pipeline_layout;
-		gpInfo.subpass             = 0;
-
-		vk.atm.ral_render_pipeline =
-			vk_ral_create_pipeline_from_gpinfo( &gpInfo, vk.atm.ral_render_pipeline_layout,
-				vk_attachment_format_to_ral( vk.color_format ),
-				vk_attachment_format_to_ral( vk.depth_format ),
-				"ral-atmospheric-render" );
-	}
+	vk_atmospheric_create_render_pipeline();
 
 	vk.atm.pingPongRead  = 0;
 	vk.atm.prevSceneTime = 0.0f;
@@ -9395,6 +9707,9 @@ void vk_shutdown_atmospheric( void )
 
 	if ( vk.atm.ral_render_pipeline ) { Ral_DestroyPipeline( vk.atm.ral_render_pipeline ); vk.atm.ral_render_pipeline = NULL; }
 	if ( vk.atm.ral_compute_pipeline ) { Ral_DestroyPipeline( vk.atm.ral_compute_pipeline ); vk.atm.ral_compute_pipeline = NULL; }
+	if ( vk.atm.ral_effect_sampler ) { Ral_DestroySampler( vk.atm.ral_effect_sampler ); vk.atm.ral_effect_sampler = NULL; }
+	memset( vk.atm.effectImages, 0, sizeof( vk.atm.effectImages ) );
+	vk.atm.effectImageGeneration = 0u;
 
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		if ( vk.atm.ral_compute_descriptor[i] ) {
@@ -9449,34 +9764,61 @@ void vk_shutdown_atmospheric( void )
 // frame.
 void RE_SetAtmosphere( const atmosphericDesc_t *desc )
 {
+	atmosphereFrameState_t normalized;
 	renderSurfaceClimateTargets_t surfaceTargets;
+	ralSkyTierBudgetReceipt_t skyBudget;
+	uint64_t previousSkyRevision;
+	uint32_t previousSkyMode;
 	if ( !vk.atm.available || desc == NULL )
 		return;
-	if ( !RenderSubmission_AtmosphereSurfaceTargets( desc, &surfaceTargets ) )
+	if ( !RenderSubmission_NormalizeAtmosphereState( desc, &normalized ) ||
+		 !RenderSubmission_AtmosphereSurfaceTargets( &normalized, &surfaceTargets ) )
 		return;
+	/* World surfaces consume IBL before the scene-to-UI sky update. Withdraw
+	 * here as well, so the first OFF/analytic draw cannot use the old tier.
+	 * Cached products and pending GPU completions remain owned by the runtime. */
+	if ( !Ral_SkyTierBudget( ( normalized.flags & ATMOSPHERE_FLAG_ENABLED )
+			? (ralAtmosphereTier_t)normalized.qualityTier : RAL_ATMOSPHERE_TIER_OFF,
+			&skyBudget ) || !Ral_SkyRadianceConsumerAdmit( &skyBudget,
+			&vk.atm.skyRadianceConsumer, &vk.atm.skyRadianceConsumer ) ) return;
 
-	vk.atm.state = *desc;
+	previousSkyRevision = vk.atm.state.skyEnvironment.sourceRevision;
+	previousSkyMode = vk.atm.state.skyEnvironment.mode;
+	vk.atm.state = normalized;
+	/* Authored/analytic tiers do not necessarily execute the full atmosphere
+	 * plan.  Update the lens oracle at state acceptance as well, so its cloud
+	 * attenuation cannot retain a value from the previous environment. */
+	vk.lensOpticsVisibility = Com_Clamp( 0.0f, 1.0f,
+		normalized.skyEnvironment.opticsVisibility );
 	vk.atm.surfaceTargets[0] = surfaceTargets.wetness;
 	vk.atm.surfaceTargets[1] = surfaceTargets.frost;
 	vk.atm.surfaceTargets[2] = surfaceTargets.snow;
 	vk.atm.surfaceTargets[3] = surfaceTargets.melt;
-	vk.atm.type     = desc->type;
-	vk.atm.distance = desc->distance;
-	vk.atm.gridSize = desc->gridSize;
-	vk.atm.flags = desc->flags;
-	vk.atm.qualityTier = desc->qualityTier;
-	vk.atm.seed = desc->seed;
-	memcpy( vk.atm.wind, desc->wind, sizeof( vk.atm.wind ) );
-	vk.atm.gustStrength = desc->gustStrength;
-	memcpy( vk.atm.precipitation, desc->precipitation,
+	vk.atm.type     = normalized.type;
+	vk.atm.distance = normalized.distance;
+	vk.atm.gridSize = normalized.gridSize;
+	vk.atm.flags = normalized.flags;
+	vk.atm.qualityTier = normalized.qualityTier;
+	vk.atm.seed = normalized.seed;
+	memcpy( vk.atm.wind, normalized.wind, sizeof( vk.atm.wind ) );
+	vk.atm.gustStrength = normalized.gustStrength;
+	memcpy( vk.atm.precipitation, normalized.precipitation,
 		sizeof( vk.atm.precipitation ) );
-	vk.atm.indoorExposure = desc->indoorExposure;
-	vk.atm.timelineSeconds = desc->timelineSeconds;
-	memcpy( vk.atm.bounds, desc->bounds, sizeof( vk.atm.bounds ) );
-	vk.atm.worldMins[0] = desc->worldMins[0];
-	vk.atm.worldMins[1] = desc->worldMins[1];
-	vk.atm.worldMaxs[0] = desc->worldMaxs[0];
-	vk.atm.worldMaxs[1] = desc->worldMaxs[1];
+	vk.atm.indoorExposure = normalized.indoorExposure;
+	vk.atm.timelineSeconds = normalized.timelineSeconds;
+	memcpy( vk.atm.bounds, normalized.bounds, sizeof( vk.atm.bounds ) );
+	vk.atm.worldMins[0] = normalized.worldMins[0];
+	vk.atm.worldMins[1] = normalized.worldMins[1];
+	vk.atm.worldMaxs[0] = normalized.worldMaxs[0];
+	vk.atm.worldMaxs[1] = normalized.worldMaxs[1];
+	if ( previousSkyRevision != normalized.skyEnvironment.sourceRevision
+			|| previousSkyMode != normalized.skyEnvironment.mode ) {
+		R_LOG( rch_ral, SEV_INFO,
+			"sky state accepted source=%llu mode=%u tier=%u flags=0x%x\n",
+			(unsigned long long)normalized.skyEnvironment.sourceRevision,
+			(unsigned)normalized.skyEnvironment.mode,
+			(unsigned)normalized.qualityTier, normalized.flags );
+	}
 
 	// A weather change resets the dt baseline so the first compute pass after
 	// the change integrates a small step (not a huge map-load delta).
@@ -9517,6 +9859,15 @@ static qboolean vk_atmospheric_weather_plan(
 	request.depthIntersectionRequested = qtrue;
 	request.depthIntersectionAvailable = vk.sceneDepth.active
 		&& vk.sceneDepth.copied && vk.sceneDepth.ral_view != NULL;
+	{
+		/* Semantic emitters (breath/mist/debris) share the pool after the
+		 * precipitation range, as on Metal/OpenGL/WebGPU. */
+		renderAtmosphereEffectWorkloadSnapshot_t effects;
+		if ( R_FrontendAtmosphereEffectWorkloadSnapshot( request.maxParticles, &effects ) ) {
+			request.semanticEmitterCount = effects.admittedEmitterCount;
+			request.semanticParticleCount = effects.admittedParticleCount;
+		}
+	}
 	return Ral_AtmospherePlanWeather( &request, outReceipt );
 }
 
@@ -9540,6 +9891,54 @@ void RE_SetAtmosphereHeightgrid( const float *grid, int count )
 		return;
 	(void)VK_AtmosphericHeightgridUpload( &vk_atmospheric_heightgrid,
 		grid, count, &receipt );
+}
+
+// Quantized sun / weather identities for the atmosphere runtime lifecycle.
+// A change in either is an explicit RAL_ATMOSPHERE_EVENT_SUN_CHANGE /
+// RAL_ATMOSPHERE_EVENT_WEATHER_TRANSITION (history invalidation); the
+// quantization (~1 degree, 1/16 radiance, 1/64 precipitation) keeps sub-visible
+// float noise from invalidating history every frame. Zero is reserved for
+// "unused", so a real digest is never zero.
+static uint64_t vk_atmosphere_digest_mix( uint64_t h, int64_t v ) {
+	h ^= (uint64_t)v;
+	h *= 0x100000001b3ull;
+	return h;
+}
+static uint64_t vk_atmosphere_sun_digest( void ) {
+	uint64_t h = 0xcbf29ce484222325ull;
+	vec3_t dir;
+	VectorCopy( tr.sunDirection, dir );
+	if ( VectorNormalize( dir ) < 0.01f ) VectorClear( dir );
+	h = vk_atmosphere_digest_mix( h, tr.sunHasSource ? 1 : 0 );
+	h = vk_atmosphere_digest_mix( h, (int64_t)floorf( dir[0] * 64.0f ) );
+	h = vk_atmosphere_digest_mix( h, (int64_t)floorf( dir[1] * 64.0f ) );
+	h = vk_atmosphere_digest_mix( h, (int64_t)floorf( dir[2] * 64.0f ) );
+	h = vk_atmosphere_digest_mix( h, (int64_t)floorf( tr.sunLight[0] * 16.0f ) );
+	h = vk_atmosphere_digest_mix( h, (int64_t)floorf( tr.sunLight[1] * 16.0f ) );
+	h = vk_atmosphere_digest_mix( h, (int64_t)floorf( tr.sunLight[2] * 16.0f ) );
+	return h ? h : 1ull;
+}
+static uint64_t vk_atmosphere_weather_digest( void ) {
+	uint64_t h = 0x84222325cbf29ce4ull;
+	int i;
+	h = vk_atmosphere_digest_mix( h, vk.atm.type );
+	h = vk_atmosphere_digest_mix( h, (int64_t)vk.atm.qualityTier );
+	h = vk_atmosphere_digest_mix( h, (int64_t)vk.atm.flags );
+	for ( i = 0; i < 5; i++ )
+		h = vk_atmosphere_digest_mix( h, (int64_t)floorf( vk.atm.precipitation[i] * 64.0f ) );
+	h = vk_atmosphere_digest_mix( h, (int64_t)floorf( vk.atm.indoorExposure * 64.0f ) );
+	return h ? h : 1ull;
+}
+// Fill the shared sun/weather identity and declare their transitions once
+// the lifecycle has a previous frame to compare against.
+static void vk_atmosphere_declare_identity_events( ralAtmosphereRuntimeRequest_t *request ) {
+	request->sunDigest	   = vk_atmosphere_sun_digest();
+	request->weatherDigest = vk_atmosphere_weather_digest();
+	if ( vk.atm.runtimeState.lastFrameGeneration == 0u ) return;
+	if ( request->sunDigest != vk.atm.runtimeState.sunDigest )
+		request->eventMask |= RAL_ATMOSPHERE_EVENT_SUN_CHANGE;
+	if ( request->weatherDigest != vk.atm.runtimeState.weatherDigest )
+		request->eventMask |= RAL_ATMOSPHERE_EVENT_WEATHER_TRANSITION;
 }
 
 
@@ -9604,6 +10003,7 @@ void RB_RunAtmosphericCompute( void )
 				< vk.atm.runtimeState.timelineSeconds )
 			runtimeRequest.eventMask |= RAL_ATMOSPHERE_EVENT_MAP_TRANSITION;
 	}
+	vk_atmosphere_declare_identity_events( &runtimeRequest );
 	if ( !Ral_AtmosphereRuntimeAdvance( &vk.atm.runtimeState,
 			&runtimeRequest, &vk.atm.runtimeReceipt )
 			|| !Ral_AtmosphereRuntimeReceiptExact( &vk.atm.runtimeReceipt,
@@ -9665,14 +10065,31 @@ void RB_RunAtmosphericCompute( void )
 	frameDst->climate[3] = vk.atm.state.transitionSeconds;
 	memcpy( frameDst->surfaceClimate, vk.atm.surfaceTargets,
 		sizeof( frameDst->surfaceClimate ) );
-	memcpy( frameDst->sun, vk.atm.state.sunDirection, sizeof( vec3_t ) );
-	frameDst->sun[3] = vk.atm.state.sunIntensity;
-	memcpy( frameDst->moon, vk.atm.state.moonDirection, sizeof( vec3_t ) );
-	frameDst->moon[3] = vk.atm.state.moonIntensity;
-	memcpy( frameDst->ambientCloud, vk.atm.state.ambientColor,
+	/* Weather particles are a sky-lighting consumer too.  Source their light
+	 * from the versioned sky authority rather than the parallel legacy mirror,
+	 * otherwise a sky revision can relight clouds/fog one frame before weather. */
+	memcpy( frameDst->sun, vk.atm.state.skyEnvironment.sunDirection,
+		sizeof( vec3_t ) );
+	frameDst->sun[3] = sqrtf(
+		vk.atm.state.skyEnvironment.sunRadiance[0]
+			* vk.atm.state.skyEnvironment.sunRadiance[0]
+		+ vk.atm.state.skyEnvironment.sunRadiance[1]
+			* vk.atm.state.skyEnvironment.sunRadiance[1]
+		+ vk.atm.state.skyEnvironment.sunRadiance[2]
+			* vk.atm.state.skyEnvironment.sunRadiance[2] );
+	memcpy( frameDst->moon, vk.atm.state.skyEnvironment.moonDirection,
+		sizeof( vec3_t ) );
+	frameDst->moon[3] = sqrtf(
+		vk.atm.state.skyEnvironment.moonRadiance[0]
+			* vk.atm.state.skyEnvironment.moonRadiance[0]
+		+ vk.atm.state.skyEnvironment.moonRadiance[1]
+			* vk.atm.state.skyEnvironment.moonRadiance[1]
+		+ vk.atm.state.skyEnvironment.moonRadiance[2]
+			* vk.atm.state.skyEnvironment.moonRadiance[2] );
+	memcpy( frameDst->ambientCloud, vk.atm.state.skyEnvironment.ambientSh,
 		sizeof( vec3_t ) );
 	frameDst->ambientCloud[3] = vk.atm.state.cloudCover;
-	frameDst->cloudMedia[0] = vk.atm.state.cloudShadow;
+	frameDst->cloudMedia[0] = vk.atm.state.skyEnvironment.cloudSunOcclusion;
 	frameDst->cloudMedia[1] = vk.atm.state.lightning;
 	frameDst->cloudMedia[2] = vk.atm.state.mediaDensity;
 	frameDst->cloudMedia[3] = vk.atm.state.mediaHeightFalloff;
@@ -9681,6 +10098,41 @@ void RB_RunAtmosphericCompute( void )
 	frameDst->effectMeta[2] = frameDst->effectMeta[3] = 0.0f;
 	memset( frameDst->effectWorkloads, 0,
 		sizeof( frameDst->effectWorkloads ) );
+	{
+		/* Publish the shared semantic-emitter workloads (breath/mist/debris)
+		 * after the precipitation range; the class images feed the render
+		 * bind group of this slot when they change. */
+		ralAtmosphereWeatherReceipt_t weather;
+		renderAtmosphereEffectWorkloadSnapshot_t effects;
+		image_t *images[RENDER_SUBMISSION_MAX_ATMOSPHERE_EFFECT_WORKLOADS];
+		uint32_t k;
+		if ( vk_atmospheric_weather_plan( &weather ) && weather.semanticEmitterCount
+				&& weather.semanticParticleCount
+				&& R_FrontendAtmosphereEffectGpuPayload( weather.semanticParticleCount,
+					weather.precipitationParticleCount,
+					(renderAtmosphereEffectGpuWorkload_t *)frameDst->effectWorkloads, &effects )
+				&& effects.admittedEmitterCount == weather.semanticEmitterCount
+				&& effects.admittedParticleCount == weather.semanticParticleCount ) {
+			frameDst->effectMeta[0] = (float)weather.precipitationParticleCount;
+			frameDst->effectMeta[1] = (float)weather.semanticEmitterCount;
+		} else {
+			memset( frameDst->effectWorkloads, 0, sizeof( frameDst->effectWorkloads ) );
+			frameDst->effectMeta[1] = 0.0f;
+		}
+		if ( R_FrontendAtmosphereEffectImages( ATM_PARTICLES_PER_POOL, images ) ) {
+			qboolean changed = qfalse;
+			for ( k = 0u; k < RENDER_SUBMISSION_MAX_ATMOSPHERE_EFFECT_WORKLOADS; ++k )
+				if ( vk.atm.effectImages[k] != images[k] ) { changed = qtrue; break; }
+			if ( changed ) {
+				memcpy( vk.atm.effectImages, images, sizeof( vk.atm.effectImages ) );
+				vk.atm.effectImageGeneration++;
+			}
+		}
+		if ( vk.atm.effectImageSlotGeneration[frameIdx] != vk.atm.effectImageGeneration
+				&& !vk_atmospheric_refresh_render_descriptor( (uint32_t)frameIdx ) ) {
+			R_LOG( rch_ral, SEV_WARN, "atmospheric semantic-effect textures: render bind group refresh rejected for slot %d\n", frameIdx );
+		}
+	}
 	if ( !VK_AtmosphericFramePublishCompute( &vk_atmospheric_frame,
 			(uint32_t)frameIdx ) ) return;
 
@@ -10846,7 +11298,6 @@ qboolean vk_alloc_vbo( const byte *vbo_data, int vbo_size )
 		uploadDone += uploadSize;
 	}
 
-	vk_release_vbo();
 	vk.vbo.ral_vertex_buffer = candidate;
 	return qtrue;
 }
@@ -11383,6 +11834,54 @@ void vk_temporal_iqm_reset_drawsurf_ordinal( void ) {
 #define VK_ATMOSPHERE_FULL_MAX_FROXELS 262144u
 #define VK_ATMOSPHERE_FULL_PARAM_BLOCKS 5u
 #define VK_ATMOSPHERE_FULL_VOLUME_BYTES 80u
+#define VK_SKY_TRANSMITTANCE_WIDTH 256u
+#define VK_SKY_TRANSMITTANCE_HEIGHT 64u
+#define VK_SKY_MULTISCATTER_WIDTH 32u
+#define VK_SKY_MULTISCATTER_HEIGHT 32u
+#define VK_SKY_VIEW_WIDTH 192u
+#define VK_SKY_VIEW_HEIGHT 108u
+#define VK_SKY_PHYSICAL_WORK_MASK ( RAL_SKY_DIRTY_TRANSMITTANCE | \
+	RAL_SKY_DIRTY_MULTISCATTER | RAL_SKY_DIRTY_SKY_VIEW )
+
+typedef struct {
+	float sunDirectionAngularRadius[4];
+	float sunRadiance[4];
+	float moonDirectionAngularRadius[4];
+	float moonRadiance[4];
+	float atmosphereRadii[4];
+	float scatteringScale[4];
+	float groundExposure[4];
+} vkSkyPhysicalParams_t;
+
+typedef struct {
+	qboolean ready;
+	uint32_t readableMask;
+	uint32_t submittedWorkMask[NUM_COMMAND_BUFFERS];
+	uint64_t dispatchCount;
+	ralBuffer_t *params[NUM_COMMAND_BUFFERS];
+	ralTexture_t *transmittance;
+	ralTexture_t *multiscatter;
+	ralTexture_t *skyView;
+	ralTextureView_t *transmittanceView;
+	ralTextureView_t *multiscatterView;
+	ralTextureView_t *skyViewView;
+	ralSampler_t *sampler;
+	ralBindGroupLayout_t *transmittanceBgl;
+	ralBindGroupLayout_t *multiscatterBgl;
+	ralBindGroupLayout_t *skyViewBgl;
+	ralBindGroup_t *transmittanceBg[NUM_COMMAND_BUFFERS];
+	ralBindGroup_t *multiscatterBg[NUM_COMMAND_BUFFERS];
+	ralBindGroup_t *skyViewBg[NUM_COMMAND_BUFFERS];
+	ralPipeline_t *transmittancePipeline;
+	ralPipeline_t *multiscatterPipeline;
+	ralPipeline_t *skyViewPipeline;
+} vkSkyPhysicalState_t;
+
+static vkSkyPhysicalState_t vk_sky_physical;
+static void vk_sky_physical_shutdown( void );
+static void vk_sky_physical_init( ralBackend_t *backend );
+static qboolean vk_sky_physical_dispatch( uint32_t workMask,
+		const atmosphereSkyEnvironment_t *sky );
 
 typedef struct {
 	float originRadius[4];
@@ -11432,8 +11931,15 @@ typedef struct {
 
 typedef struct {
 	uint32_t outputGrid[4];
-	float depthRange[4];
+	float depthRange[4]; /* near, far, depth-valid, sun dir x (aerial haze) */
+	float invViewProjection[16];
+	float eyeSkyControl[4]; /* eye.xyz, physical sky-view blend */
+	float radianceControl[4]; /* enabled, previous-to-current blend, use previous, sun dir y (aerial haze) */
+	float mediaColorDensity[4]; /* linear scattering colour, analytic extinction */
+	float mediaHeight[4]; /* base height, height falloff, sun dir z, aerial-haze weight */
 } vkAtmosphereCompositeParams_t;
+_Static_assert( sizeof( vkAtmosphereCompositeParams_t ) == 160,
+	"sky/analytic composite uniform ABI must remain 160 bytes" );
 
 typedef struct {
 	qboolean ready;
@@ -11448,7 +11954,6 @@ typedef struct {
 	uint32_t froxelCount;
 	uint32_t volumeCount;
 	uint64_t volumeDigest;
-	uint64_t frameGeneration;
 	atmosphereMediaVolume_t volumes[RAL_ATMOSPHERE_MAX_VOLUMES];
 	ralAtmospherePlanReceipt_t lastPlan;
 	ralBuffer_t *params[NUM_COMMAND_BUFFERS];
@@ -11477,6 +11982,7 @@ typedef struct {
 	ralPipeline_t *cloudPipeline;
 	ralPipeline_t *integratePipeline;
 	ralPipeline_t *compositePipeline;
+	ralPipeline_t *skyCompositePipeline;
 } vkAtmosphereFullState_t;
 
 static vkAtmosphereFullState_t vk_atmosphere_full;
@@ -11497,9 +12003,10 @@ static ralBuffer_t *vk_atmosphere_full_buffer( ralBackend_t *backend,
 }
 
 static ralBindGroupLayout_t *vk_atmosphere_full_bgl(
-		ralBackend_t *backend, const ralBindType_t *types, uint32_t count,
+		ralBackend_t *backend, const ralBindType_t *types,
+		const ralBindTextureViewType_t *viewTypes, uint32_t count,
 		const char *debugName ) {
-	ralBindEntry_t entries[6];
+	ralBindEntry_t entries[8];
 	ralBindGroupLayoutCreateInfo_t ci;
 	if ( !backend || !types || count == 0u || count > ARRAY_LEN( entries ) )
 		return NULL;
@@ -11509,13 +12016,84 @@ static ralBindGroupLayout_t *vk_atmosphere_full_bgl(
 		entries[i].type = types[i];
 		entries[i].count = 1u;
 		entries[i].stageFlags = RAL_STAGE_COMPUTE;
-		entries[i].textureViewType = RAL_BIND_TEXTURE_VIEW_2D;
+		entries[i].textureViewType = viewTypes
+			? viewTypes[i] : RAL_BIND_TEXTURE_VIEW_2D;
 	}
 	memset( &ci, 0, sizeof( ci ) );
 	ci.entries = entries;
 	ci.numEntries = count;
 	ci.debugName = debugName;
 	return Ral_CreateBindGroupLayout( backend, &ci );
+}
+
+static qboolean vk_atmosphere_full_rebuild_composite_bindgroups( void ) {
+	ralBackend_t *backend = vk_ral_get_backend();
+	ralBindGroup_t *candidates[NUM_COMMAND_BUFFERS] = { NULL, NULL };
+	uint32_t i;
+
+	if ( !backend || !vk_atmosphere_full.compositeBgl
+			|| !vk_atmosphere_full.composedView
+			|| !vk_atmosphere_full.integrated
+			|| !vk_atmosphere_full.sampler
+			|| !vk.ral_color_view || !vk.sceneDepth.ral_view
+			|| !vk.sceneDepth.ral_sampler
+			|| !vk.ral_probe_radiance_cube_view
+			|| !vk.ral_probe_radiance_target_cube_view ) return qfalse;
+
+	for ( i = 0u; i < NUM_COMMAND_BUFFERS; ++i ) {
+		ralBindingValue_t values[8];
+		ralBindGroupCreateInfo_t ci;
+		memset( values, 0, sizeof( values ) );
+		values[0] = (ralBindingValue_t){ .binding=0u,
+			.type=RAL_BIND_UNIFORM_BUFFER, .buffer=vk_atmosphere_full.params[i],
+			.bufferOffset=4u * vk_atmosphere_full.paramStride,
+			.bufferRange=sizeof( vkAtmosphereCompositeParams_t ) };
+		values[1] = (ralBindingValue_t){ .binding=1u,
+			.type=RAL_BIND_COMBINED_TEXTURE_SAMPLER,
+			.textureView=vk.ral_color_view, .sampler=vk_atmosphere_full.sampler };
+		values[2] = (ralBindingValue_t){ .binding=2u,
+			.type=RAL_BIND_COMBINED_TEXTURE_SAMPLER,
+			.textureView=vk.sceneDepth.ral_view,
+			.sampler=vk.sceneDepth.ral_sampler };
+		values[3] = (ralBindingValue_t){ .binding=3u,
+			.type=RAL_BIND_STORAGE_BUFFER, .buffer=vk_atmosphere_full.integrated,
+			.bufferRange=(uint64_t)vk_atmosphere_full.froxelCount
+				* sizeof( vec4_t ) };
+		values[4] = (ralBindingValue_t){ .binding=4u,
+			.type=RAL_BIND_STORAGE_TEXTURE,
+			.textureView=vk_atmosphere_full.composedView };
+		values[5] = (ralBindingValue_t){ .binding=5u,
+			.type=RAL_BIND_COMBINED_TEXTURE_SAMPLER,
+			.textureView=vk_sky_physical.ready
+				? vk_sky_physical.skyViewView : vk.ral_color_view,
+			.sampler=vk_atmosphere_full.sampler };
+		values[6] = (ralBindingValue_t){ .binding=6u,
+			.type=RAL_BIND_COMBINED_TEXTURE_SAMPLER,
+			.textureView=vk.ral_probe_radiance_cube_view,
+			.sampler=vk_atmosphere_full.sampler };
+		values[7] = (ralBindingValue_t){ .binding=7u,
+			.type=RAL_BIND_COMBINED_TEXTURE_SAMPLER,
+			.textureView=vk.ral_probe_radiance_target_cube_view,
+			.sampler=vk_atmosphere_full.sampler };
+		memset( &ci, 0, sizeof( ci ) );
+		ci.layout = vk_atmosphere_full.compositeBgl;
+		ci.values = values;
+		ci.numValues = ARRAY_LEN( values );
+		ci.debugName = "wired-atmosphere-composite-bg";
+		candidates[i] = Ral_CreateBindGroup( backend, &ci );
+		if ( !candidates[i] ) goto fail;
+	}
+	for ( i = 0u; i < NUM_COMMAND_BUFFERS; ++i ) {
+		if ( vk_atmosphere_full.compositeBg[i] )
+			Ral_DestroyBindGroup( vk_atmosphere_full.compositeBg[i] );
+		vk_atmosphere_full.compositeBg[i] = candidates[i];
+	}
+	return qtrue;
+
+fail:
+	for ( i = 0u; i < NUM_COMMAND_BUFFERS; ++i )
+		if ( candidates[i] ) Ral_DestroyBindGroup( candidates[i] );
+	return qfalse;
 }
 
 static ralPipeline_t *vk_atmosphere_full_pipeline( ralBackend_t *backend,
@@ -11534,12 +12112,287 @@ static ralPipeline_t *vk_atmosphere_full_pipeline( ralBackend_t *backend,
 	return Ral_CreateComputePipeline( backend, &ci );
 }
 
+static qboolean vk_sky_physical_texture( ralBackend_t *backend,
+		uint32_t width, uint32_t height, const char *debugName,
+		ralTexture_t **outTexture, ralTextureView_t **outView )
+{
+	ralTextureCreateInfo_t tci;
+	ralTextureViewCreateInfo_t vci;
+	if ( !backend || !width || !height || !debugName || !outTexture || !outView )
+		return qfalse;
+	memset( &tci, 0, sizeof( tci ) );
+	tci.type = RAL_TEXTURE_2D;
+	tci.format = RAL_FORMAT_R16G16B16A16_SFLOAT;
+	tci.width = width;
+	tci.height = height;
+	tci.depthOrArrayLayers = 1u;
+	tci.mipLevels = 1u;
+	tci.sampleCount = 1u;
+	tci.usage = RAL_TEXTURE_USAGE_STORAGE | RAL_TEXTURE_USAGE_SAMPLED;
+	tci.memory = RAL_MEMORY_DEVICE_LOCAL;
+	tci.debugName = debugName;
+	*outTexture = Ral_CreateTexture( backend, &tci );
+	if ( !*outTexture ) return qfalse;
+	memset( &vci, 0, sizeof( vci ) );
+	vci.texture = *outTexture;
+	vci.viewType = RAL_TEXTURE_2D;
+	vci.format = RAL_FORMAT_UNDEFINED;
+	vci.mipLevelCount = 1u;
+	vci.arrayLayerCount = 1u;
+	*outView = Ral_CreateTextureView( backend, &vci );
+	return *outView ? qtrue : qfalse;
+}
+
+static void vk_sky_physical_shutdown( void )
+{
+	#define SKY_DESTROY_PIPELINE(x) do { if (x) Ral_DestroyPipeline(x); } while (0)
+	#define SKY_DESTROY_GROUP(x) do { if (x) Ral_DestroyBindGroup(x); } while (0)
+	#define SKY_DESTROY_BGL(x) do { if (x) Ral_DestroyBindGroupLayout(x); } while (0)
+	#define SKY_DESTROY_VIEW(x) do { if (x) Ral_DestroyTextureView(x); } while (0)
+	#define SKY_DESTROY_TEXTURE(x) do { if (x) Ral_DestroyTexture(x); } while (0)
+	#define SKY_DESTROY_BUFFER(x) do { if (x) Ral_DestroyBuffer(x); } while (0)
+	SKY_DESTROY_PIPELINE( vk_sky_physical.skyViewPipeline );
+	SKY_DESTROY_PIPELINE( vk_sky_physical.multiscatterPipeline );
+	SKY_DESTROY_PIPELINE( vk_sky_physical.transmittancePipeline );
+	for ( uint32_t i = 0u; i < NUM_COMMAND_BUFFERS; ++i ) {
+		SKY_DESTROY_GROUP( vk_sky_physical.skyViewBg[i] );
+		SKY_DESTROY_GROUP( vk_sky_physical.multiscatterBg[i] );
+		SKY_DESTROY_GROUP( vk_sky_physical.transmittanceBg[i] );
+	}
+	SKY_DESTROY_BGL( vk_sky_physical.skyViewBgl );
+	SKY_DESTROY_BGL( vk_sky_physical.multiscatterBgl );
+	SKY_DESTROY_BGL( vk_sky_physical.transmittanceBgl );
+	if ( vk_sky_physical.sampler ) Ral_DestroySampler( vk_sky_physical.sampler );
+	SKY_DESTROY_VIEW( vk_sky_physical.skyViewView );
+	SKY_DESTROY_VIEW( vk_sky_physical.multiscatterView );
+	SKY_DESTROY_VIEW( vk_sky_physical.transmittanceView );
+	SKY_DESTROY_TEXTURE( vk_sky_physical.skyView );
+	SKY_DESTROY_TEXTURE( vk_sky_physical.multiscatter );
+	SKY_DESTROY_TEXTURE( vk_sky_physical.transmittance );
+	for ( uint32_t i = 0u; i < NUM_COMMAND_BUFFERS; ++i )
+		SKY_DESTROY_BUFFER( vk_sky_physical.params[i] );
+	#undef SKY_DESTROY_BUFFER
+	#undef SKY_DESTROY_TEXTURE
+	#undef SKY_DESTROY_VIEW
+	#undef SKY_DESTROY_BGL
+	#undef SKY_DESTROY_GROUP
+	#undef SKY_DESTROY_PIPELINE
+	memset( &vk_sky_physical, 0, sizeof( vk_sky_physical ) );
+}
+
+static void vk_sky_physical_init( ralBackend_t *backend )
+{
+	static const ralBindType_t transmittanceTypes[] = {
+		RAL_BIND_UNIFORM_BUFFER, RAL_BIND_STORAGE_TEXTURE };
+	static const ralBindType_t multiscatterTypes[] = {
+		RAL_BIND_UNIFORM_BUFFER, RAL_BIND_COMBINED_TEXTURE_SAMPLER,
+		RAL_BIND_STORAGE_TEXTURE };
+	static const ralBindType_t skyViewTypes[] = {
+		RAL_BIND_UNIFORM_BUFFER, RAL_BIND_COMBINED_TEXTURE_SAMPLER,
+		RAL_BIND_COMBINED_TEXTURE_SAMPLER, RAL_BIND_STORAGE_TEXTURE };
+	ralSamplerCreateInfo_t sci;
+	if ( !backend ) return;
+	vk_sky_physical_shutdown();
+	for ( uint32_t i = 0u; i < NUM_COMMAND_BUFFERS; ++i ) {
+		vk_sky_physical.params[i] = vk_atmosphere_full_buffer( backend,
+			sizeof( vkSkyPhysicalParams_t ),
+			RAL_BUFFER_UNIFORM | RAL_BUFFER_TRANSFER_DST,
+			RAL_MEMORY_HOST_COHERENT, "wired-sky-physical-params" );
+		if ( !vk_sky_physical.params[i] ) goto fail;
+	}
+	if ( !vk_sky_physical_texture( backend, VK_SKY_TRANSMITTANCE_WIDTH,
+			VK_SKY_TRANSMITTANCE_HEIGHT, "wired-sky-transmittance",
+			&vk_sky_physical.transmittance,
+			&vk_sky_physical.transmittanceView ) ||
+		 !vk_sky_physical_texture( backend, VK_SKY_MULTISCATTER_WIDTH,
+			VK_SKY_MULTISCATTER_HEIGHT, "wired-sky-multiscatter",
+			&vk_sky_physical.multiscatter,
+			&vk_sky_physical.multiscatterView ) ||
+		 !vk_sky_physical_texture( backend, VK_SKY_VIEW_WIDTH,
+			VK_SKY_VIEW_HEIGHT, "wired-sky-view",
+			&vk_sky_physical.skyView, &vk_sky_physical.skyViewView ) ) goto fail;
+	memset( &sci, 0, sizeof( sci ) );
+	sci.minFilter = sci.magFilter = RAL_FILTER_LINEAR;
+	sci.mipmapMode = RAL_MIPMAP_NEAREST;
+	sci.addressU = sci.addressV = sci.addressW = RAL_ADDRESS_CLAMP_TO_EDGE;
+	sci.maxAnisotropy = 1.0f;
+	sci.debugName = "wired-sky-lut-sampler";
+	vk_sky_physical.sampler = Ral_CreateSampler( backend, &sci );
+	vk_sky_physical.transmittanceBgl = vk_atmosphere_full_bgl( backend,
+		transmittanceTypes, NULL, ARRAY_LEN( transmittanceTypes ),
+		"wired-sky-transmittance-bgl" );
+	vk_sky_physical.multiscatterBgl = vk_atmosphere_full_bgl( backend,
+		multiscatterTypes, NULL, ARRAY_LEN( multiscatterTypes ),
+		"wired-sky-multiscatter-bgl" );
+	vk_sky_physical.skyViewBgl = vk_atmosphere_full_bgl( backend,
+		skyViewTypes, NULL, ARRAY_LEN( skyViewTypes ),
+		"wired-sky-view-bgl" );
+	if ( !vk_sky_physical.sampler || !vk_sky_physical.transmittanceBgl ||
+		 !vk_sky_physical.multiscatterBgl || !vk_sky_physical.skyViewBgl ) goto fail;
+	for ( uint32_t i = 0u; i < NUM_COMMAND_BUFFERS; ++i ) {
+		ralBindingValue_t values[4];
+		ralBindGroupCreateInfo_t ci;
+		memset( &ci, 0, sizeof( ci ) );
+		memset( values, 0, sizeof( values ) );
+		values[0] = (ralBindingValue_t){ .binding=0u,
+			.type=RAL_BIND_UNIFORM_BUFFER, .buffer=vk_sky_physical.params[i],
+			.bufferRange=sizeof( vkSkyPhysicalParams_t ) };
+		values[1] = (ralBindingValue_t){ .binding=1u,
+			.type=RAL_BIND_STORAGE_TEXTURE,
+			.textureView=vk_sky_physical.transmittanceView };
+		ci.layout = vk_sky_physical.transmittanceBgl;
+		ci.values = values; ci.numValues = 2u;
+		ci.debugName = "wired-sky-transmittance-bg";
+		vk_sky_physical.transmittanceBg[i] = Ral_CreateBindGroup( backend, &ci );
+
+		memset( values, 0, sizeof( values ) );
+		values[0] = (ralBindingValue_t){ .binding=0u,
+			.type=RAL_BIND_UNIFORM_BUFFER, .buffer=vk_sky_physical.params[i],
+			.bufferRange=sizeof( vkSkyPhysicalParams_t ) };
+		values[1] = (ralBindingValue_t){ .binding=1u,
+			.type=RAL_BIND_COMBINED_TEXTURE_SAMPLER,
+			.textureView=vk_sky_physical.transmittanceView,
+			.sampler=vk_sky_physical.sampler };
+		values[2] = (ralBindingValue_t){ .binding=2u,
+			.type=RAL_BIND_STORAGE_TEXTURE,
+			.textureView=vk_sky_physical.multiscatterView };
+		ci.layout = vk_sky_physical.multiscatterBgl;
+		ci.values = values; ci.numValues = 3u;
+		ci.debugName = "wired-sky-multiscatter-bg";
+		vk_sky_physical.multiscatterBg[i] = Ral_CreateBindGroup( backend, &ci );
+
+		memset( values, 0, sizeof( values ) );
+		values[0] = (ralBindingValue_t){ .binding=0u,
+			.type=RAL_BIND_UNIFORM_BUFFER, .buffer=vk_sky_physical.params[i],
+			.bufferRange=sizeof( vkSkyPhysicalParams_t ) };
+		values[1] = (ralBindingValue_t){ .binding=1u,
+			.type=RAL_BIND_COMBINED_TEXTURE_SAMPLER,
+			.textureView=vk_sky_physical.transmittanceView,
+			.sampler=vk_sky_physical.sampler };
+		values[2] = (ralBindingValue_t){ .binding=2u,
+			.type=RAL_BIND_COMBINED_TEXTURE_SAMPLER,
+			.textureView=vk_sky_physical.multiscatterView,
+			.sampler=vk_sky_physical.sampler };
+		values[3] = (ralBindingValue_t){ .binding=3u,
+			.type=RAL_BIND_STORAGE_TEXTURE,
+			.textureView=vk_sky_physical.skyViewView };
+		ci.layout = vk_sky_physical.skyViewBgl;
+		ci.values = values; ci.numValues = 4u;
+		ci.debugName = "wired-sky-view-bg";
+		vk_sky_physical.skyViewBg[i] = Ral_CreateBindGroup( backend, &ci );
+		if ( !vk_sky_physical.transmittanceBg[i] ||
+			 !vk_sky_physical.multiscatterBg[i] ||
+			 !vk_sky_physical.skyViewBg[i] ) goto fail;
+	}
+	vk_sky_physical.transmittancePipeline = vk_atmosphere_full_pipeline( backend,
+		vk_sky_physical.transmittanceBgl, sky_transmittance_comp_spv,
+		sizeof( sky_transmittance_comp_spv ), "wired-sky-transmittance-cs" );
+	vk_sky_physical.multiscatterPipeline = vk_atmosphere_full_pipeline( backend,
+		vk_sky_physical.multiscatterBgl, sky_multiscatter_comp_spv,
+		sizeof( sky_multiscatter_comp_spv ), "wired-sky-multiscatter-cs" );
+	vk_sky_physical.skyViewPipeline = vk_atmosphere_full_pipeline( backend,
+		vk_sky_physical.skyViewBgl, sky_view_comp_spv,
+		sizeof( sky_view_comp_spv ), "wired-sky-view-cs" );
+	if ( !vk_sky_physical.transmittancePipeline ||
+		 !vk_sky_physical.multiscatterPipeline ||
+		 !vk_sky_physical.skyViewPipeline ) goto fail;
+	vk_sky_physical.ready = qtrue;
+	R_LOG( rch_ral, SEV_INFO,
+		"sky environment: bounded physical LUT executor ready (256x64, 32x32, 192x108)\n" );
+	return;
+fail:
+	R_LOG( rch_ral, SEV_WARN,
+		"sky environment: physical LUT executor setup incomplete; authored fallback remains active\n" );
+	vk_sky_physical_shutdown();
+}
+
+static qboolean vk_sky_physical_dispatch( uint32_t workMask,
+		const atmosphereSkyEnvironment_t *sky )
+{
+	vkSkyPhysicalParams_t params;
+	ralBufferUploadReceipt_t upload;
+	ralTexture_t *output = NULL;
+	ralPipeline_t *pipeline = NULL;
+	ralBindGroup_t *group = NULL;
+	uint32_t width = 0u, height = 0u;
+	if ( !workMask ) return qtrue;
+	if ( !vk_sky_physical.ready || !vk.cmd || !vk.cmd->ral_cmd || !sky ||
+		 ( workMask & ~VK_SKY_PHYSICAL_WORK_MASK ) != 0u ||
+		 ( workMask & ( workMask - 1u ) ) != 0u ) return qfalse;
+	memset( &params, 0, sizeof( params ) );
+	memcpy( params.sunDirectionAngularRadius, sky->sunDirection,
+		3u * sizeof( float ) );
+	params.sunDirectionAngularRadius[3] = sky->sunAngularRadius;
+	memcpy( params.sunRadiance, sky->sunRadiance, 3u * sizeof( float ) );
+	memcpy( params.moonDirectionAngularRadius, sky->moonDirection,
+		3u * sizeof( float ) );
+	params.moonDirectionAngularRadius[3] = sky->moonAngularRadius;
+	memcpy( params.moonRadiance, sky->moonRadiance, 3u * sizeof( float ) );
+	params.atmosphereRadii[0] = 6360.0f;
+	params.atmosphereRadii[1] = 6460.0f;
+	params.atmosphereRadii[2] = 0.0f;
+	params.scatteringScale[0] = 1.0f;
+	params.scatteringScale[1] = 1.0f;
+	params.scatteringScale[2] = 1.0f;
+	params.scatteringScale[3] = 0.8f;
+	params.groundExposure[0] = sky->ambientSh[0];
+	params.groundExposure[1] = sky->ambientSh[1];
+	params.groundExposure[2] = sky->ambientSh[2];
+	params.groundExposure[3] = sky->exposure;
+	if ( !Ral_BufferWriteImmediate( vk_sky_physical.params[vk.cmd_index], 0u,
+			&params, sizeof( params ), &upload ) ) return qfalse;
+	if ( workMask == RAL_SKY_DIRTY_TRANSMITTANCE ) {
+		output = vk_sky_physical.transmittance;
+		pipeline = vk_sky_physical.transmittancePipeline;
+		group = vk_sky_physical.transmittanceBg[vk.cmd_index];
+		width = VK_SKY_TRANSMITTANCE_WIDTH;
+		height = VK_SKY_TRANSMITTANCE_HEIGHT;
+	} else if ( workMask == RAL_SKY_DIRTY_MULTISCATTER ) {
+		if ( !( vk_sky_physical.readableMask & RAL_SKY_DIRTY_TRANSMITTANCE ) )
+			return qfalse;
+		output = vk_sky_physical.multiscatter;
+		pipeline = vk_sky_physical.multiscatterPipeline;
+		group = vk_sky_physical.multiscatterBg[vk.cmd_index];
+		width = VK_SKY_MULTISCATTER_WIDTH;
+		height = VK_SKY_MULTISCATTER_HEIGHT;
+	} else {
+		if ( ( vk_sky_physical.readableMask &
+				( RAL_SKY_DIRTY_TRANSMITTANCE | RAL_SKY_DIRTY_MULTISCATTER ) ) !=
+				( RAL_SKY_DIRTY_TRANSMITTANCE | RAL_SKY_DIRTY_MULTISCATTER ) )
+			return qfalse;
+		output = vk_sky_physical.skyView;
+		pipeline = vk_sky_physical.skyViewPipeline;
+		group = vk_sky_physical.skyViewBg[vk.cmd_index];
+		width = VK_SKY_VIEW_WIDTH;
+		height = VK_SKY_VIEW_HEIGHT;
+	}
+	Ral_CmdTransitionTexture( vk.cmd->ral_cmd, output,
+		( vk_sky_physical.readableMask & workMask )
+			? RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT : RAL_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+		RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_IMAGE_LAYOUT_GENERAL );
+	Ral_CmdBindPipeline( vk.cmd->ral_cmd, pipeline );
+	Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 0u, group );
+	Ral_CmdDispatch( vk.cmd->ral_cmd, ( width + 7u ) / 8u,
+		( height + 7u ) / 8u, 1u );
+	Ral_CmdTransitionTexture( vk.cmd->ral_cmd, output,
+		RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+	vk.cmd->last_ral_pipeline = NULL;
+	vk_sky_physical.readableMask |= workMask;
+	vk_sky_physical.submittedWorkMask[vk.cmd_index] = workMask;
+	vk_sky_physical.dispatchCount++;
+	return qtrue;
+}
+
 void vk_atmosphere_full_shutdown( void ) {
 	uint32_t i, h;
+	vk_sky_physical_shutdown();
 	#define DESTROY_PIPELINE(x) do { if (x) Ral_DestroyPipeline(x); } while (0)
 	#define DESTROY_GROUP(x) do { if (x) Ral_DestroyBindGroup(x); } while (0)
 	#define DESTROY_BGL(x) do { if (x) Ral_DestroyBindGroupLayout(x); } while (0)
 	#define DESTROY_BUFFER(x) do { if (x) Ral_DestroyBuffer(x); } while (0)
+	DESTROY_PIPELINE( vk_atmosphere_full.skyCompositePipeline );
 	DESTROY_PIPELINE( vk_atmosphere_full.compositePipeline );
 	DESTROY_PIPELINE( vk_atmosphere_full.integratePipeline );
 	DESTROY_PIPELINE( vk_atmosphere_full.cloudPipeline );
@@ -11615,7 +12468,14 @@ void vk_atmosphere_full_init( ralBackend_t *backend ) {
 	static const ralBindType_t compositeTypes[] = {
 		RAL_BIND_UNIFORM_BUFFER, RAL_BIND_COMBINED_TEXTURE_SAMPLER,
 		RAL_BIND_COMBINED_TEXTURE_SAMPLER, RAL_BIND_STORAGE_BUFFER,
-		RAL_BIND_STORAGE_TEXTURE };
+		RAL_BIND_STORAGE_TEXTURE, RAL_BIND_COMBINED_TEXTURE_SAMPLER,
+		RAL_BIND_COMBINED_TEXTURE_SAMPLER,
+		RAL_BIND_COMBINED_TEXTURE_SAMPLER };
+	static const ralBindTextureViewType_t compositeViewTypes[] = {
+		RAL_BIND_TEXTURE_VIEW_2D, RAL_BIND_TEXTURE_VIEW_2D,
+		RAL_BIND_TEXTURE_VIEW_2D, RAL_BIND_TEXTURE_VIEW_2D,
+		RAL_BIND_TEXTURE_VIEW_2D, RAL_BIND_TEXTURE_VIEW_2D,
+		RAL_BIND_TEXTURE_VIEW_CUBE, RAL_BIND_TEXTURE_VIEW_CUBE };
 	ralAtmospherePlanRequest_t request;
 	ralAtmospherePlanReceipt_t plan;
 	ralTextureCreateInfo_t tci;
@@ -11625,18 +12485,33 @@ void vk_atmosphere_full_init( ralBackend_t *backend ) {
 	uint32_t i, h;
 
 	vk_atmosphere_full_shutdown();
-	if ( !backend || vk.color_format != VK_FORMAT_R16G16B16A16_SFLOAT
-			|| !vk.ral_color_image || !vk.ral_color_view
+	vk_sky_physical_init( backend );
+	if ( !backend || !vk.ral_color_image || !vk.ral_color_view
 			|| !vk.sceneDepth.ral_image || !vk.sceneDepth.ral_view
 			|| !vk.sceneDepth.ral_sampler || !vk.ral_fp_tilelights[0]
 			|| !vk.ral_fp_tilelights[1] || !vk.ral_fp_lights[0]
-			|| !vk.ral_fp_lights[1] ) return;
+			|| !vk.ral_fp_lights[1] ) {
+		R_LOG( rch_ral, SEV_WARN,
+			"atmosphere full prerequisites missing backend=%d color=%d color-view=%d depth=%d depth-view=%d depth-sampler=%d fp=%d%d%d%d\n",
+			backend ? 1 : 0,
+			vk.ral_color_image ? 1 : 0, vk.ral_color_view ? 1 : 0,
+			vk.sceneDepth.ral_image ? 1 : 0,
+			vk.sceneDepth.ral_view ? 1 : 0,
+			vk.sceneDepth.ral_sampler ? 1 : 0,
+			vk.ral_fp_tilelights[0] ? 1 : 0,
+			vk.ral_fp_tilelights[1] ? 1 : 0,
+			vk.ral_fp_lights[0] ? 1 : 0,
+			vk.ral_fp_lights[1] ? 1 : 0 );
+		return;
+	}
 	memset( &request, 0, sizeof( request ) );
 	request.schemaVersion = RAL_ATMOSPHERE_PLAN_SCHEMA_VERSION;
 	request.backendType = RAL_BACKEND_VULKAN;
 	request.frameGeneration = 1u;
 	request.width = (uint32_t)glConfig.vidWidth;
 	request.height = (uint32_t)glConfig.vidHeight;
+	/* Provision maximum supported capacity independently of the initial map
+	 * tier. Per-frame execution below admits only the accepted current tier. */
 	request.requestedTier = RAL_ATMOSPHERE_TIER_FULL;
 	request.maxFroxelCount = VK_ATMOSPHERE_FULL_MAX_FROXELS;
 	request.maxLocalVolumes = RAL_ATMOSPHERE_MAX_VOLUMES;
@@ -11727,16 +12602,19 @@ void vk_atmosphere_full_init( ralBackend_t *backend ) {
 			|| !vk_atmosphere_full.sampler ) goto fail;
 
 	vk_atmosphere_full.injectBgl = vk_atmosphere_full_bgl( backend,
-		injectTypes, ARRAY_LEN( injectTypes ), "wired-atmosphere-inject-bgl" );
+		injectTypes, NULL, ARRAY_LEN( injectTypes ),
+		"wired-atmosphere-inject-bgl" );
 	vk_atmosphere_full.lightBgl = vk_atmosphere_full_bgl( backend,
-		lightTypes, ARRAY_LEN( lightTypes ), "wired-atmosphere-light-bgl" );
+		lightTypes, NULL, ARRAY_LEN( lightTypes ),
+		"wired-atmosphere-light-bgl" );
 	vk_atmosphere_full.cloudBgl = vk_atmosphere_full_bgl( backend,
-		cloudTypes, ARRAY_LEN( cloudTypes ), "wired-atmosphere-cloud-bgl" );
+		cloudTypes, NULL, ARRAY_LEN( cloudTypes ),
+		"wired-atmosphere-cloud-bgl" );
 	vk_atmosphere_full.integrateBgl = vk_atmosphere_full_bgl( backend,
-		integrateTypes, ARRAY_LEN( integrateTypes ),
+		integrateTypes, NULL, ARRAY_LEN( integrateTypes ),
 		"wired-atmosphere-integrate-bgl" );
 	vk_atmosphere_full.compositeBgl = vk_atmosphere_full_bgl( backend,
-		compositeTypes, ARRAY_LEN( compositeTypes ),
+		compositeTypes, compositeViewTypes, ARRAY_LEN( compositeTypes ),
 		"wired-atmosphere-composite-bgl" );
 	if ( !vk_atmosphere_full.injectBgl || !vk_atmosphere_full.lightBgl
 			|| !vk_atmosphere_full.cloudBgl
@@ -11823,37 +12701,15 @@ void vk_atmosphere_full_init( ralBackend_t *backend ) {
 			vk_atmosphere_full.integrateCloudBg[i][h] =
 				Ral_CreateBindGroup( backend, &ci );
 		}
-
-		memset( values, 0, sizeof( values ) );
-		values[0] = (ralBindingValue_t){ .binding=0u,
-			.type=RAL_BIND_UNIFORM_BUFFER, .buffer=vk_atmosphere_full.params[i],
-			.bufferOffset=4u * vk_atmosphere_full.paramStride,
-			.bufferRange=sizeof( vkAtmosphereCompositeParams_t ) };
-		values[1] = (ralBindingValue_t){ .binding=1u,
-			.type=RAL_BIND_COMBINED_TEXTURE_SAMPLER,
-			.textureView=vk.ral_color_view, .sampler=vk_atmosphere_full.sampler };
-		values[2] = (ralBindingValue_t){ .binding=2u,
-			.type=RAL_BIND_COMBINED_TEXTURE_SAMPLER,
-			.textureView=vk.sceneDepth.ral_view,
-			.sampler=vk.sceneDepth.ral_sampler };
-		values[3] = (ralBindingValue_t){ .binding=3u,
-			.type=RAL_BIND_STORAGE_BUFFER, .buffer=vk_atmosphere_full.integrated,
-			.bufferRange=froxelBytes };
-		values[4] = (ralBindingValue_t){ .binding=4u,
-			.type=RAL_BIND_STORAGE_TEXTURE,
-			.textureView=vk_atmosphere_full.composedView };
-		ci.layout = vk_atmosphere_full.compositeBgl; ci.values = values;
-		ci.numValues = 5u; ci.debugName = "wired-atmosphere-composite-bg";
-		vk_atmosphere_full.compositeBg[i] = Ral_CreateBindGroup( backend, &ci );
 		if ( !vk_atmosphere_full.injectBg[i]
 				|| !vk_atmosphere_full.lightBg[i]
 				|| !vk_atmosphere_full.cloudBg[i]
 				|| !vk_atmosphere_full.integrateBg[i][0]
 				|| !vk_atmosphere_full.integrateBg[i][1]
 				|| !vk_atmosphere_full.integrateCloudBg[i][0]
-				|| !vk_atmosphere_full.integrateCloudBg[i][1]
-				|| !vk_atmosphere_full.compositeBg[i] ) goto fail;
+				|| !vk_atmosphere_full.integrateCloudBg[i][1] ) goto fail;
 	}
+	if ( !vk_atmosphere_full_rebuild_composite_bindgroups() ) goto fail;
 
 	vk_atmosphere_full.injectPipeline = vk_atmosphere_full_pipeline( backend,
 		vk_atmosphere_full.injectBgl, atmosphere_froxel_inject_comp_spv,
@@ -11875,11 +12731,16 @@ void vk_atmosphere_full_init( ralBackend_t *backend ) {
 		vk_atmosphere_full.compositeBgl, atmosphere_composite_comp_spv,
 		sizeof( atmosphere_composite_comp_spv ),
 		"wired-atmosphere-composite-cs" );
+	vk_atmosphere_full.skyCompositePipeline = vk_atmosphere_full_pipeline( backend,
+		vk_atmosphere_full.compositeBgl, sky_surface_composite_comp_spv,
+		sizeof( sky_surface_composite_comp_spv ),
+		"wired-sky-surface-composite-cs" );
 	if ( !vk_atmosphere_full.injectPipeline
 			|| !vk_atmosphere_full.lightPipeline
 			|| !vk_atmosphere_full.cloudPipeline
 			|| !vk_atmosphere_full.integratePipeline
-			|| !vk_atmosphere_full.compositePipeline ) goto fail;
+			|| !vk_atmosphere_full.compositePipeline
+			|| !vk_atmosphere_full.skyCompositePipeline ) goto fail;
 	vk_atmosphere_full.ready = qtrue;
 	R_LOG( rch_ral, SEV_INFO,
 		"atmosphere full: native RAL executor ready (%ux%ux%u, %u froxels)\n",
@@ -13173,11 +14034,15 @@ static void vk_create_shader_modules( void )
 	vk.modules.light_pbr_frag[1][0] = SHADER_MODULE( frag_light_pbr_line_bindless );
 	vk.modules.light_pbr_frag[1][1] = SHADER_MODULE( frag_light_pbr_line_fog_bindless );
 
-	// Base-pass IBL receiver modules — [tx 1|2][colour-mode 0=mul/1=cl][fog 0|1].
+	// Base-pass IBL modules: [tx][colour 0=mul/1=cl/2=identity/3=fixed][fog].
 	vk.modules.gen_ibl_vert[1][0][0] = SHADER_MODULE( vert_tx1_ibl );
 	vk.modules.gen_ibl_vert[1][0][1] = SHADER_MODULE( vert_tx1_ibl_fog );
 	vk.modules.gen_ibl_vert[1][1][0] = SHADER_MODULE( vert_tx1_cl_ibl );
 	vk.modules.gen_ibl_vert[1][1][1] = SHADER_MODULE( vert_tx1_cl_ibl_fog );
+	vk.modules.gen_ibl_vert[1][2][0] = SHADER_MODULE( vert_tx1_ident1_ibl );
+	vk.modules.gen_ibl_vert[1][2][1] = SHADER_MODULE( vert_tx1_ident1_ibl_fog );
+	vk.modules.gen_ibl_vert[1][3][0] = SHADER_MODULE( vert_tx1_fixed_ibl );
+	vk.modules.gen_ibl_vert[1][3][1] = SHADER_MODULE( vert_tx1_fixed_ibl_fog );
 	vk.modules.gen_ibl_vert[2][0][0] = SHADER_MODULE( vert_tx2_ibl );
 	vk.modules.gen_ibl_vert[2][0][1] = SHADER_MODULE( vert_tx2_ibl_fog );
 	vk.modules.gen_ibl_vert[2][1][0] = SHADER_MODULE( vert_tx2_cl_ibl );
@@ -13186,6 +14051,10 @@ static void vk_create_shader_modules( void )
 	vk.modules.gen_ibl_frag[1][0][1] = SHADER_MODULE( frag_tx1_ibl_fog_bindless );
 	vk.modules.gen_ibl_frag[1][1][0] = SHADER_MODULE( frag_tx1_cl_ibl_bindless );
 	vk.modules.gen_ibl_frag[1][1][1] = SHADER_MODULE( frag_tx1_cl_ibl_fog_bindless );
+	vk.modules.gen_ibl_frag[1][2][0] = SHADER_MODULE( frag_tx1_ident1_ibl_bindless );
+	vk.modules.gen_ibl_frag[1][2][1] = SHADER_MODULE( frag_tx1_ident1_ibl_fog_bindless );
+	vk.modules.gen_ibl_frag[1][3][0] = SHADER_MODULE( frag_tx1_fixed_ibl_bindless );
+	vk.modules.gen_ibl_frag[1][3][1] = SHADER_MODULE( frag_tx1_fixed_ibl_fog_bindless );
 	vk.modules.gen_ibl_frag[2][0][0] = SHADER_MODULE( frag_tx2_ibl_bindless );
 	vk.modules.gen_ibl_frag[2][0][1] = SHADER_MODULE( frag_tx2_ibl_fog_bindless );
 	vk.modules.gen_ibl_frag[2][1][0] = SHADER_MODULE( frag_tx2_cl_ibl_bindless );
@@ -14498,6 +15367,7 @@ static int vk_recreate_main_pass_primitive_pipelines( void )
 	n += vk_recreate_sprite_pipelines();
 	n += vk_recreate_particle_render_pipelines();
 	n += vk_recreate_iqm_gpu_pipeline();
+	n += vk_recreate_atmospheric_render_pipeline();
 	return n;
 }
 
@@ -14991,9 +15861,9 @@ void vk_update_post_process_pipelines( void )
 					vk_create_downsample_pipeline( lvl, srcW, srcH, ( lvl == 0 ) ? qtrue : qfalse );
 					// upsample at level lvl reads the SMALLER mip (srcW/2) and writes
 					// the larger one (srcW); spec texel = 1 / smaller-mip resolution.
-					vk_create_upsample_pipeline( lvl, srcW / 2, srcH / 2 );
-					srcW /= 2;
-					srcH /= 2;
+					vk_create_upsample_pipeline( lvl, Ral_BloomNextExtent(srcW), Ral_BloomNextExtent(srcH) );
+					srcW = Ral_BloomNextExtent(srcW);
+					srcH = Ral_BloomNextExtent(srcH);
 				}
 				vk_create_bloom_dual_composite_pipeline();
 			}
@@ -16605,8 +17475,8 @@ static void vk_create_attachments( void )
 
 			// One image per pyramid mip (dual-filtering): slot i = captureW/2^i.
 			for ( i = 1; i < ARRAY_LEN( vk.ral_bloom_image ); i++ ) {
-				width /= 2;
-				height /= 2;
+				width = Ral_BloomNextExtent(width);
+				height = Ral_BloomNextExtent(height);
 				vk.ral_bloom_image[i] = vk_create_attachment_texture( width,
 					height, vk.bloom_format, usage,
 					va( "wired-img-bloom-%u", i ) );
@@ -16772,6 +17642,11 @@ static void vk_create_sync_primitives( void ) {
 #endif
 		vk.tess[i].ral_rendering_finished_fence = vk_create_fence(
 			va( "rendering_finished fence %i", i ) );
+		vk.tess[i].ral_present_fence = vk_create_fence(
+			va( "present fence %i", i ) );
+		vk.tess[i].present_fence_pending = qfalse;
+		vk.tess[i].gpu_ts_readback_deferred = qfalse;
+		vk.tess[i].slot_fence_handed = qfalse;
 		vk.tess[i].rendering_finished_fence = Ral_GetFenceHandle(
 			vk.tess[i].ral_rendering_finished_fence );
 		vk.tess[i].waitForFence = qfalse;
@@ -16828,6 +17703,15 @@ static void vk_destroy_sync_primitives( void  ) {
 			Ral_DestroyFence( vk.tess[i].ral_rendering_finished_fence );
 			vk.tess[i].ral_rendering_finished_fence = NULL;
 		}
+		if ( vk.tess[i].ral_present_fence ) {
+			if ( vk.tess[i].present_fence_pending )
+				(void)Ral_WaitFenceExact( vk.tess[i].ral_present_fence, 10000000000ULL );
+			Ral_DestroyFence( vk.tess[i].ral_present_fence );
+			vk.tess[i].ral_present_fence = NULL;
+		}
+		vk.tess[i].present_fence_pending = qfalse;
+		vk.tess[i].gpu_ts_readback_deferred = qfalse;
+		vk.tess[i].slot_fence_handed = qfalse;
 		vk.tess[i].rendering_finished_fence = VK_NULL_HANDLE;
 		vk.tess[i].waitForFence = qfalse;
 		vk.tess[i].swapchain_image_acquired = qfalse;
@@ -16970,6 +17854,16 @@ static void vk_restart_swapchain( const char *funcname, VkResult res )
 	vk_ral_refresh_internal_texture_dependents();
 
 	vk_update_post_process_pipelines();
+	/* setup_surface_formats() may have changed the MAIN colour format (an
+	 * r_hdr / presentation change applied through this path before the map
+	 * loads). The standalone primitive pipelines (ribbon, beam, sprite,
+	 * particle, iqmGpu, atmospheric weather) bake that format and live outside
+	 * vk.pipelines[]; rebuild them like the r_hdr live path does, otherwise the
+	 * weather quads render through an LDR pipeline into the HDR attachment. */
+	{
+		const int rebuilt = vk_recreate_main_pass_primitive_pipelines();
+		R_LOG( rch_vk, SEV_INFO, "vk_restart_swapchain: rebuilt %d standalone primitive pipeline(s)\n", rebuilt );
+	}
 }
 
 void vk_request_presentation_change( const refPresentationChange_t *change ) {
@@ -17074,6 +17968,12 @@ static void vk_fence_thread_stop( void );
 static void vk_gpu_ts_init( void );
 static void vk_gpu_ts_shutdown( void );
 static void vk_gpu_ts_write( const char *label );
+static void vk_sky_gpu_ts_pool_reset( void );
+static void vk_sky_gpu_ts_frame_begin( qboolean slotFenceCompleted );
+static void vk_sky_gpu_ts_begin( qboolean radiance, uint64_t frameGeneration );
+static void vk_sky_gpu_ts_end( qboolean radiance );
+static void vk_sky_gpu_ts_copy_timing(
+		ralSkyGpuTelemetryReceipt_t *telemetry );
 
 
 // Free the HDR histogram compute resources. Idempotent (NULL-safe per handle);
@@ -17232,6 +18132,10 @@ void vk_hdr_histogram_init( ralBackend_t *backend )
 // Called at the top of vk_gtao_init (re-mints the depth view over the re-adopted
 // depth copy on vid_restart) and from the texture-teardown path so no RAL handle
 // outlives the device. A NULL ral_gtao_main_pipeline disables the dispatch.
+// XeGTAO depth pyramid depth (XE_GTAO_DEPTH_MIP_LEVELS). Must match gtao.comp /
+// gtao_prefilter.comp.
+#define RAL_GTAO_DEPTH_MIP_LEVELS 5u
+
 void vk_gtao_shutdown( void )
 {
 	if ( vk.ral_gtao_main_pipeline )       { Ral_DestroyPipeline( vk.ral_gtao_main_pipeline ); vk.ral_gtao_main_pipeline = NULL; }
@@ -17242,6 +18146,18 @@ void vk_gtao_shutdown( void )
 	if ( vk.ral_gtao_main_bgl )            { Ral_DestroyBindGroupLayout( vk.ral_gtao_main_bgl ); vk.ral_gtao_main_bgl = NULL; }
 	if ( vk.ral_gtao_denoise_bgl )         { Ral_DestroyBindGroupLayout( vk.ral_gtao_denoise_bgl ); vk.ral_gtao_denoise_bgl = NULL; }
 	if ( vk.ral_gtao_sampler )             { Ral_DestroySampler( vk.ral_gtao_sampler ); vk.ral_gtao_sampler = NULL; }
+	if ( vk.ral_gtao_prefilter_pipeline )   { Ral_DestroyPipeline( vk.ral_gtao_prefilter_pipeline ); vk.ral_gtao_prefilter_pipeline = NULL; }
+	if ( vk.ral_gtao_prefilter_descriptor ) { Ral_DestroyBindGroup( vk.ral_gtao_prefilter_descriptor ); vk.ral_gtao_prefilter_descriptor = NULL; }
+	if ( vk.ral_gtao_prefilter_bgl )        { Ral_DestroyBindGroupLayout( vk.ral_gtao_prefilter_bgl ); vk.ral_gtao_prefilter_bgl = NULL; }
+	if ( vk.ral_gtao_point_sampler )        { Ral_DestroySampler( vk.ral_gtao_point_sampler ); vk.ral_gtao_point_sampler = NULL; }
+	{
+		uint32_t mip;
+		for ( mip = 0; mip < RAL_GTAO_DEPTH_MIP_LEVELS; mip++ ) {
+			if ( vk.ral_gtao_depth_mip_views[mip] ) { Ral_DestroyTextureView( vk.ral_gtao_depth_mip_views[mip] ); vk.ral_gtao_depth_mip_views[mip] = NULL; }
+		}
+	}
+	if ( vk.ral_gtao_depth_pyramid_view )   { Ral_DestroyTextureView( vk.ral_gtao_depth_pyramid_view ); vk.ral_gtao_depth_pyramid_view = NULL; }
+	if ( vk.ral_gtao_depth_pyramid )        { Ral_DestroyTexture( vk.ral_gtao_depth_pyramid ); vk.ral_gtao_depth_pyramid = NULL; }
 	if ( vk.ral_gtao_depth_view )          { Ral_DestroyTextureView( vk.ral_gtao_depth_view ); vk.ral_gtao_depth_view = NULL; }
 	if ( vk.ral_gtao_ao_view )             { Ral_DestroyTextureView( vk.ral_gtao_ao_view ); vk.ral_gtao_ao_view = NULL; }
 	if ( vk.ral_gtao_ao_image )            { Ral_DestroyTexture( vk.ral_gtao_ao_image ); vk.ral_gtao_ao_image = NULL; }
@@ -17266,12 +18182,14 @@ void vk_gtao_init( ralBackend_t *backend )
 	ralTextureCreateInfo_t      tci;
 	ralTextureViewCreateInfo_t  vci;
 	ralSamplerCreateInfo_t      sci;
-	ralBindEntry_t              bgle[4];
+	ralBindEntry_t              bgle[7];
 	ralBindGroupLayoutCreateInfo_t bglci;
-	ralBindingValue_t           bv[4];
+	ralBindingValue_t           bv[7];
 	ralBindGroupCreateInfo_t    bgci;
 	ralComputePipelineCreateInfo_t cpci;
 	const ralBindGroupLayout_t *layouts[1];
+	uint32_t                    mip;
+	qboolean                    pyramidViewsOk;
 
 	vk_gtao_shutdown();
 
@@ -17340,7 +18258,89 @@ void vk_gtao_init( ralBackend_t *backend )
 	sci.debugName  = "wired-gtao-sampler";
 	vk.ral_gtao_sampler = Ral_CreateSampler( backend, &sci );
 
-	// ── main pass set 0: depth tex (0), sampler (1), AO storage (2) ──
+	// ── XeGTAO depth prefilter pyramid: view-space linear depth, R32F, 5 mips.
+	// The prefilter writes every mip through per-mip STORAGE views; the main
+	// pass samples the whole chain (SAMPLED view) with a point/clamp sampler and
+	// picks the mip per tap, which keeps the wide horizon reads cache-coherent.
+	memset( &tci, 0, sizeof( tci ) );
+	tci.type               = RAL_TEXTURE_2D;
+	tci.format             = RAL_FORMAT_R32_SFLOAT;
+	tci.width              = (uint32_t)glConfig.vidWidth;
+	tci.height             = (uint32_t)glConfig.vidHeight;
+	tci.depthOrArrayLayers = 1;
+	tci.mipLevels          = RAL_GTAO_DEPTH_MIP_LEVELS;
+	tci.sampleCount        = 1;
+	tci.usage              = RAL_TEXTURE_USAGE_STORAGE | RAL_TEXTURE_USAGE_SAMPLED;
+	tci.memory             = RAL_MEMORY_DEVICE_LOCAL;
+	tci.concurrentGraphicsCompute = qtrue;
+	tci.debugName          = "wired-gtao-depth-pyramid";
+	vk.ral_gtao_depth_pyramid = Ral_CreateTexture( backend, &tci );
+	if ( !vk.ral_gtao_depth_pyramid ) {
+		R_LOG( rch_ral, SEV_WARN, "gtao: depth pyramid create failed; SSAO disabled\n" );
+		vk_gtao_shutdown();
+		return;
+	}
+	memset( &vci, 0, sizeof( vci ) );
+	vci.texture       = vk.ral_gtao_depth_pyramid;
+	vci.viewType      = RAL_TEXTURE_2D;
+	vci.format        = RAL_FORMAT_UNDEFINED;
+	vci.baseMipLevel  = 0;
+	vci.mipLevelCount = RAL_GTAO_DEPTH_MIP_LEVELS;
+	vk.ral_gtao_depth_pyramid_view = Ral_CreateTextureView( backend, &vci );
+	pyramidViewsOk = ( vk.ral_gtao_depth_pyramid_view != NULL ) ? qtrue : qfalse;
+	for ( mip = 0; mip < RAL_GTAO_DEPTH_MIP_LEVELS; mip++ ) {
+		memset( &vci, 0, sizeof( vci ) );
+		vci.texture       = vk.ral_gtao_depth_pyramid;
+		vci.viewType      = RAL_TEXTURE_2D;
+		vci.format        = RAL_FORMAT_UNDEFINED;
+		vci.baseMipLevel  = mip;
+		vci.mipLevelCount = 1;
+		vk.ral_gtao_depth_mip_views[mip] = Ral_CreateTextureView( backend, &vci );
+		if ( !vk.ral_gtao_depth_mip_views[mip] )
+			pyramidViewsOk = qfalse;
+	}
+
+	memset( &sci, 0, sizeof( sci ) );
+	sci.minFilter  = RAL_FILTER_NEAREST;
+	sci.magFilter  = RAL_FILTER_NEAREST;
+	sci.mipmapMode = RAL_MIPMAP_NEAREST;
+	sci.addressU   = RAL_ADDRESS_CLAMP_TO_EDGE;
+	sci.addressV   = RAL_ADDRESS_CLAMP_TO_EDGE;
+	sci.addressW   = RAL_ADDRESS_CLAMP_TO_EDGE;
+	sci.maxAnisotropy = 1.0f;
+	sci.maxLod     = (float)RAL_GTAO_DEPTH_MIP_LEVELS;
+	sci.debugName  = "wired-gtao-point-sampler";
+	vk.ral_gtao_point_sampler = Ral_CreateSampler( backend, &sci );
+
+	// ── prefilter set 0: depth tex (0), sampler (1), pyramid mip storage (2..6) ──
+	memset( bgle, 0, sizeof( bgle ) );
+	bgle[0].binding = 0; bgle[0].type = RAL_BIND_SAMPLED_TEXTURE; bgle[0].count = 1; bgle[0].stageFlags = RAL_STAGE_COMPUTE;
+	bgle[1].binding = 1; bgle[1].type = RAL_BIND_SAMPLER;         bgle[1].count = 1; bgle[1].stageFlags = RAL_STAGE_COMPUTE;
+	for ( mip = 0; mip < RAL_GTAO_DEPTH_MIP_LEVELS; mip++ ) {
+		bgle[2 + mip].binding = 2 + mip; bgle[2 + mip].type = RAL_BIND_STORAGE_TEXTURE; bgle[2 + mip].count = 1; bgle[2 + mip].stageFlags = RAL_STAGE_COMPUTE;
+	}
+	memset( &bglci, 0, sizeof( bglci ) );
+	bglci.entries    = bgle;
+	bglci.numEntries = 2 + RAL_GTAO_DEPTH_MIP_LEVELS;
+	bglci.debugName  = "wired-gtao-prefilter-bgl";
+	vk.ral_gtao_prefilter_bgl = Ral_CreateBindGroupLayout( backend, &bglci );
+
+	if ( vk.ral_gtao_depth_view && vk.ral_gtao_point_sampler && pyramidViewsOk && vk.ral_gtao_prefilter_bgl ) {
+		memset( bv, 0, sizeof( bv ) );
+		bv[0].binding = 0; bv[0].type = RAL_BIND_SAMPLED_TEXTURE; bv[0].textureView = vk.ral_gtao_depth_view;
+		bv[1].binding = 1; bv[1].type = RAL_BIND_SAMPLER;         bv[1].sampler     = vk.ral_gtao_point_sampler;
+		for ( mip = 0; mip < RAL_GTAO_DEPTH_MIP_LEVELS; mip++ ) {
+			bv[2 + mip].binding = 2 + mip; bv[2 + mip].type = RAL_BIND_STORAGE_TEXTURE; bv[2 + mip].textureView = vk.ral_gtao_depth_mip_views[mip];
+		}
+		memset( &bgci, 0, sizeof( bgci ) );
+		bgci.layout    = vk.ral_gtao_prefilter_bgl;
+		bgci.values    = bv;
+		bgci.numValues = 2 + RAL_GTAO_DEPTH_MIP_LEVELS;
+		bgci.debugName = "wired-gtao-prefilter-bg";
+		vk.ral_gtao_prefilter_descriptor = Ral_CreateBindGroup( backend, &bgci );
+	}
+
+	// ── main pass set 0: depth pyramid (0), point sampler (1), AO storage (2) ──
 	memset( bgle, 0, sizeof( bgle ) );
 	bgle[0].binding = 0; bgle[0].type = RAL_BIND_SAMPLED_TEXTURE; bgle[0].count = 1; bgle[0].stageFlags = RAL_STAGE_COMPUTE;
 	bgle[1].binding = 1; bgle[1].type = RAL_BIND_SAMPLER;         bgle[1].count = 1; bgle[1].stageFlags = RAL_STAGE_COMPUTE;
@@ -17351,10 +18351,10 @@ void vk_gtao_init( ralBackend_t *backend )
 	bglci.debugName  = "wired-gtao-main-bgl";
 	vk.ral_gtao_main_bgl = Ral_CreateBindGroupLayout( backend, &bglci );
 
-	if ( vk.ral_gtao_depth_view && vk.ral_gtao_sampler && vk.ral_gtao_ao_view && vk.ral_gtao_main_bgl ) {
+	if ( vk.ral_gtao_depth_pyramid_view && vk.ral_gtao_point_sampler && vk.ral_gtao_ao_view && vk.ral_gtao_main_bgl ) {
 		memset( bv, 0, sizeof( bv ) );
-		bv[0].binding = 0; bv[0].type = RAL_BIND_SAMPLED_TEXTURE; bv[0].textureView = vk.ral_gtao_depth_view;
-		bv[1].binding = 1; bv[1].type = RAL_BIND_SAMPLER;         bv[1].sampler     = vk.ral_gtao_sampler;
+		bv[0].binding = 0; bv[0].type = RAL_BIND_SAMPLED_TEXTURE; bv[0].textureView = vk.ral_gtao_depth_pyramid_view;
+		bv[1].binding = 1; bv[1].type = RAL_BIND_SAMPLER;         bv[1].sampler     = vk.ral_gtao_point_sampler;
 		bv[2].binding = 2; bv[2].type = RAL_BIND_STORAGE_TEXTURE; bv[2].textureView = vk.ral_gtao_ao_view;
 		memset( &bgci, 0, sizeof( bgci ) );
 		bgci.layout    = vk.ral_gtao_main_bgl;
@@ -17409,6 +18409,18 @@ void vk_gtao_init( ralBackend_t *backend )
 		vk.ral_gtao_composite_descriptor = Ral_CreateBindGroup( backend, &bgci );
 	}
 
+	if ( vk.ral_gtao_prefilter_bgl && vk.ral_gtao_prefilter_descriptor ) {
+		layouts[0] = vk.ral_gtao_prefilter_bgl;
+		memset( &cpci, 0, sizeof( cpci ) );
+		cpci.computeSpirv        = (const uint32_t *)gtao_prefilter_comp_spv;
+		cpci.computeSpirvSize    = sizeof( gtao_prefilter_comp_spv );
+		cpci.bindGroupLayouts    = layouts;
+		cpci.numBindGroupLayouts = 1;
+		cpci.pushConstantSize    = 24;   // PrefilterPush (vec2 + 4 floats)
+		cpci.debugName           = "wired-gtao-prefilter-cs";
+		vk.ral_gtao_prefilter_pipeline = Ral_CreateComputePipeline( backend, &cpci );
+	}
+
 	if ( vk.ral_gtao_main_bgl && vk.ral_gtao_main_descriptor ) {
 		layouts[0] = vk.ral_gtao_main_bgl;
 		memset( &cpci, 0, sizeof( cpci ) );
@@ -17433,8 +18445,8 @@ void vk_gtao_init( ralBackend_t *backend )
 		vk.ral_gtao_denoise_pipeline = Ral_CreateComputePipeline( backend, &cpci );
 	}
 
-	if ( vk.ral_gtao_main_pipeline && vk.ral_gtao_denoise_pipeline && vk.ral_gtao_composite_descriptor ) {
-		R_LOG( rch_ral, SEV_INFO, "gtao: RAL compute AO ready (%dx%d, R16F)\n", glConfig.vidWidth, glConfig.vidHeight );
+	if ( vk.ral_gtao_prefilter_pipeline && vk.ral_gtao_main_pipeline && vk.ral_gtao_denoise_pipeline && vk.ral_gtao_composite_descriptor ) {
+		R_LOG( rch_ral, SEV_INFO, "gtao: RAL compute AO ready (%dx%d, R16F, depth pyramid R32F x%u)\n", glConfig.vidWidth, glConfig.vidHeight, (unsigned)RAL_GTAO_DEPTH_MIP_LEVELS );
 	} else {
 		R_LOG( rch_ral, SEV_WARN, "gtao: compute setup incomplete; SSAO disabled\n" );
 		vk_gtao_shutdown();
@@ -17479,6 +18491,13 @@ void vk_gtao_dispatch( struct ralCommandBuffer_s *cb )
 		float viewportSize[2];
 		float zNear, zFar;
 	} dpush;
+	struct PrefilterPush {
+		float viewportSize[2];
+		float zNear, zFar;
+		float effectRadius;
+		float falloffRange;
+	} ppush;
+	uint32_t prefilterGroupsX, prefilterGroupsY;
 	const float *p;
 	float tanHalfFovX, tanHalfFovY;
 	uint32_t groupsX, groupsY;
@@ -17487,7 +18506,7 @@ void vk_gtao_dispatch( struct ralCommandBuffer_s *cb )
 #if FEAT_SSAO
 	if ( !vk.fboActive || !r_ssao->integer )
 		return;
-	if ( !vk.ral_gtao_main_pipeline || !vk.ral_gtao_denoise_pipeline )
+	if ( !vk.ral_gtao_prefilter_pipeline || !vk.ral_gtao_main_pipeline || !vk.ral_gtao_denoise_pipeline )
 		return;
 	if ( !vk.sceneDepth.ral_image || !vk.sceneDepth.copied )
 		return;   // no valid depth this frame (the tonemap force-copy guarantees it when SSAO is on)
@@ -17564,6 +18583,29 @@ void vk_gtao_dispatch( struct ralCommandBuffer_s *cb )
 		RAL_PIPELINE_STAGE_TOP_OF_PIPE_BIT, RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 		VK_IMAGE_LAYOUT_GENERAL );
 
+	// ── XeGTAO depth prefilter: device depth → view-space linear depth pyramid ──
+	// One 8x8 group produces a 16x16 mip-0 tile and reduces it to mips 1..4.
+	ppush.viewportSize[0] = push.viewportSize[0];
+	ppush.viewportSize[1] = push.viewportSize[1];
+	ppush.zNear        = push.zNear;
+	ppush.zFar         = push.zFar;
+	ppush.effectRadius = push.effectRadius;
+	ppush.falloffRange = push.falloffRange;
+	prefilterGroupsX = ( (uint32_t)glConfig.vidWidth  + 15u ) / 16u;
+	prefilterGroupsY = ( (uint32_t)glConfig.vidHeight + 15u ) / 16u;
+	Ral_CmdTransitionTexture( cb, vk.ral_gtao_depth_pyramid,
+		RAL_PIPELINE_STAGE_TOP_OF_PIPE_BIT, RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_IMAGE_LAYOUT_GENERAL );
+	Ral_CmdBindPipeline( cb, vk.ral_gtao_prefilter_pipeline );
+	Ral_CmdBindBindGroup( cb, 0, vk.ral_gtao_prefilter_descriptor );
+	Ral_CmdPushConstants( cb, RAL_STAGE_COMPUTE, 0, sizeof( ppush ), &ppush );
+	Ral_CmdDispatch( cb, prefilterGroupsX, prefilterGroupsY, 1 );
+	// Pyramid storage writes must be visible to the main pass's sampled reads.
+	Ral_CmdPipelineBarrier( cb, RAL_BARRIER_ALL );
+	Ral_CmdTransitionTexture( cb, vk.ral_gtao_depth_pyramid,
+		RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT, RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+
 	// ── main horizon-search pass ──
 	Ral_CmdBindPipeline( cb, vk.ral_gtao_main_pipeline );
 	Ral_CmdBindBindGroup( cb, 0, vk.ral_gtao_main_descriptor );
@@ -17573,6 +18615,7 @@ void vk_gtao_dispatch( struct ralCommandBuffer_s *cb )
 	// The main pass's AO writes (storage) must be visible to the denoise read
 	// (storage). A full compute barrier covers the compute->compute image dep.
 	Ral_CmdPipelineBarrier( cb, RAL_BARRIER_ALL );
+	if ( cb == vk.cmd->ral_cmd ) vk_gpu_ts_write( "gtao_horizon" );
 
 	// ── depth-aware denoise pass ──
 	dpush.viewportSize[0] = (float)glConfig.vidWidth;
@@ -17762,6 +18805,7 @@ void vk_lens_shutdown( void )
 	if ( vk.ral_lens_depth_view )  { Ral_DestroyTextureView( vk.ral_lens_depth_view ); vk.ral_lens_depth_view = NULL; }
 	if ( vk.lensSourcesPtr )        { free( vk.lensSourcesPtr ); vk.lensSourcesPtr = NULL; }
 	vk.lensSourceCount = 0;
+	vk.lensOpticsVisibility = 1.0f;
 }
 
 // Bring up the lens oracle RAL compute resources. A NEAREST sampling view over the
@@ -17793,6 +18837,7 @@ void vk_lens_init( ralBackend_t *backend )
 	lensBytes = (uint64_t)LENS_TOTAL_SOURCES * LENS_SOURCE_VEC4S * 4u * sizeof( float ); // flares + sun
 	vk.lensSourcesPtr = calloc( 1u, (size_t)lensBytes );
 	if ( !vk.lensSourcesPtr ) return;
+	vk.lensOpticsVisibility = 1.0f;
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; ++i ) {
 		ralBufferCreateInfo_t bci;
 		memset( &bci, 0, sizeof( bci ) );
@@ -17862,7 +18907,7 @@ void vk_lens_init( ralBackend_t *backend )
 		cpci.computeSpirvSize    = sizeof( lens_occlusion_comp_spv );
 		cpci.bindGroupLayouts    = layouts;
 		cpci.numBindGroupLayouts = 1;
-		cpci.pushConstantSize    = 16;   // LensPush { vec2 viewport; int count; float radiusPx }
+		cpci.pushConstantSize    = 32;   // LensPush including explicit native depth convention
 		cpci.debugName           = "wired-lens-cs";
 		vk.ral_lens_pipeline = Ral_CreateComputePipeline( backend, &cpci );
 	}
@@ -17883,6 +18928,7 @@ void vk_lens_dispatch( struct ralCommandBuffer_s *cb )
 		float viewport[2];
 		int   count;
 		float radiusPx;
+		float depthConvention[4];
 	} push;
 	const uint64_t lensBytes = (uint64_t)LENS_TOTAL_SOURCES * LENS_SOURCE_VEC4S * 4u * sizeof( float );
 	const uint32_t slot = (uint32_t)vk.cmd_index;
@@ -17904,6 +18950,8 @@ void vk_lens_dispatch( struct ralCommandBuffer_s *cb )
 		return;
 	if ( vk.lensSourceCount <= 0 )
 		return;
+	for ( i = 0; i < (uint32_t)vk.lensSourceCount; ++i )
+		shadow[(size_t)i * 8u + 4u] = vk.lensOpticsVisibility;
 
 	// The current command slot's fence was waited before reuse. Consume only
 	// that slot's prior GPU result, copy visibility into the CPU shadow, then
@@ -17926,6 +18974,10 @@ void vk_lens_dispatch( struct ralCommandBuffer_s *cb )
 	push.viewport[1] = (float)glConfig.vidHeight;
 	push.count       = vk.lensSourceCount;
 	push.radiusPx    = 1.5f;   // disc radius in depth-copy texels — smooth edge fade
+	push.depthConvention[0] = 1.0f; // reversed-Z; preserve Vulkan's authored probe footprint
+	push.depthConvention[1] = 0.0008f;
+	push.depthConvention[2] = 0.0f;
+	push.depthConvention[3] = 0.0f;
 
 	Ral_CmdBindPipeline( cb, vk.ral_lens_pipeline );
 	memset( &transition, 0, sizeof( transition ) );
@@ -18067,6 +19119,100 @@ typedef struct vkCullFrame_s {
 } vkCullFrame_t;
 
 static vkCullFrame_t vk_cull_frame;
+
+typedef struct vkCullWorldSlot_s {
+	qboolean                     resident;
+	int                          surfaceCount;
+	struct ralBuffer_s          *aabb;
+	void                         *aabbCpu;
+	uint32_t                     *reachedCpu;
+	struct ralBuffer_s          *reached[NUM_COMMAND_BUFFERS];
+	struct ralBuffer_s          *visible;
+	struct ralBindGroupLayout_s *bgl;
+	struct ralBindGroup_s       *descriptor[NUM_COMMAND_BUFFERS];
+	struct ralPipeline_s        *pipeline;
+} vkCullWorldSlot_t;
+
+static vkCullWorldSlot_t vk_cull_world_slots[MAX_RENDER_WORLDS];
+static int vk_cull_active_world = -1;
+
+static void vk_cull_clear_active( void )
+{
+	vk.cullSurfaceCount = 0;
+	vk.ral_cull_aabb = NULL;
+	vk.cullAabbCpu = NULL;
+	vk.cullReachedCpu = NULL;
+	memset( vk.ral_cull_reached, 0, sizeof( vk.ral_cull_reached ) );
+	vk.ral_cull_visible = NULL;
+	vk.ral_cull_bgl = NULL;
+	memset( vk.ral_cull_descriptor, 0, sizeof( vk.ral_cull_descriptor ) );
+	vk.ral_cull_pipeline = NULL;
+	vk_cull_frame.valid = qfalse;
+	vk_cull_active_world = -1;
+}
+
+static void vk_cull_capture_world_slot( int worldIndex )
+{
+	vkCullWorldSlot_t *slot;
+	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS ) return;
+	slot = &vk_cull_world_slots[worldIndex];
+	slot->resident = qtrue;
+	slot->surfaceCount = vk.cullSurfaceCount;
+	slot->aabb = vk.ral_cull_aabb;
+	slot->aabbCpu = vk.cullAabbCpu;
+	slot->reachedCpu = vk.cullReachedCpu;
+	memcpy( slot->reached, vk.ral_cull_reached, sizeof( slot->reached ) );
+	slot->visible = vk.ral_cull_visible;
+	slot->bgl = vk.ral_cull_bgl;
+	memcpy( slot->descriptor, vk.ral_cull_descriptor, sizeof( slot->descriptor ) );
+	slot->pipeline = vk.ral_cull_pipeline;
+	vk_cull_active_world = worldIndex;
+}
+
+void vk_cull_select_world( int worldIndex )
+{
+	vkCullWorldSlot_t *slot;
+	vk_cull_clear_active();
+	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS ) return;
+	slot = &vk_cull_world_slots[worldIndex];
+	if ( !slot->resident ) return;
+	vk.cullSurfaceCount = slot->surfaceCount;
+	vk.ral_cull_aabb = slot->aabb;
+	vk.cullAabbCpu = slot->aabbCpu;
+	vk.cullReachedCpu = slot->reachedCpu;
+	memcpy( vk.ral_cull_reached, slot->reached, sizeof( slot->reached ) );
+	vk.ral_cull_visible = slot->visible;
+	vk.ral_cull_bgl = slot->bgl;
+	memcpy( vk.ral_cull_descriptor, slot->descriptor, sizeof( slot->descriptor ) );
+	vk.ral_cull_pipeline = slot->pipeline;
+	vk_cull_active_world = worldIndex;
+}
+
+void vk_cull_unload_world( int worldIndex )
+{
+	int previous = vk_cull_active_world;
+	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS
+			|| !vk_cull_world_slots[worldIndex].resident ) return;
+	if ( vk.active ) vk_wait_idle();
+	vk_cull_select_world( worldIndex );
+	vk_cull_shutdown();
+	memset( &vk_cull_world_slots[worldIndex], 0,
+		sizeof( vk_cull_world_slots[worldIndex] ) );
+	if ( previous >= 0 && previous != worldIndex )
+		vk_cull_select_world( previous );
+}
+
+void vk_cull_shutdown_worlds( void )
+{
+	for ( int worldIndex = 0; worldIndex < MAX_RENDER_WORLDS; ++worldIndex ) {
+		if ( !vk_cull_world_slots[worldIndex].resident ) continue;
+		vk_cull_select_world( worldIndex );
+		vk_cull_shutdown();
+		memset( &vk_cull_world_slots[worldIndex], 0,
+			sizeof( vk_cull_world_slots[worldIndex] ) );
+	}
+	vk_cull_clear_active();
+}
 
 void vk_cull_shutdown( void )
 {
@@ -18302,7 +19448,7 @@ void vk_cull_init( ralBackend_t *backend )
 // Build the per-surface AABB SSBO once at map load. Static world geometry, so the
 // buffer is uploaded once and reused every frame. backend NULL or no surfaces ⇒
 // the dispatch stays disabled (cullSurfaceCount = 0).
-void vk_cull_build_world_aabbs( const msurface_t *surfaces, int numSurfaces )
+void vk_cull_build_world_aabbs( const msurface_t *surfaces, int numSurfaces, int worldIndex )
 {
 	ralBackend_t          *backend = vk_ral_get_backend();
 	ralBufferCreateInfo_t  bci;
@@ -18310,7 +19456,7 @@ void vk_cull_build_world_aabbs( const msurface_t *surfaces, int numSurfaces )
 	size_t                 recSize;
 	int                    i;
 
-	vk_cull_shutdown();
+	vk_cull_select_world( -1 );
 
 	if ( !backend || numSurfaces <= 0 )
 		return;
@@ -18358,6 +19504,7 @@ void vk_cull_build_world_aabbs( const msurface_t *surfaces, int numSurfaces )
 
 	// Bring up the per-frame buffers + pipeline now that the surface count is known.
 	vk_cull_init( backend );
+	vk_cull_capture_world_slot( worldIndex );
 }
 
 // ── per-frame cull capture + dispatch + verify ──────────────────────────────
@@ -18596,7 +19743,7 @@ static qboolean vk_atmosphere_full_transition_begin( void ) {
 static qboolean vk_atmosphere_full_copy_to_scene( void ) {
 	ralTextureTransition_t transitions[2];
 	ralResourceTransitionBatch_t batch;
-	ralImageCopy_t region;
+	ralImageBlit_t region;
 	memset( transitions, 0, sizeof( transitions ) );
 	transitions[0].texture = vk_atmosphere_full.composed;
 	transitions[0].aspects = RAL_TEXTURE_ASPECT_COLOR;
@@ -18625,13 +19772,20 @@ static qboolean vk_atmosphere_full_copy_to_scene( void ) {
 	memset( &region, 0, sizeof( region ) );
 	region.srcSubresource.aspectMask = RAL_TEXTURE_ASPECT_COLOR;
 	region.srcSubresource.layerCount = 1u;
+	region.srcOffsets[1].x = glConfig.vidWidth;
+	region.srcOffsets[1].y = glConfig.vidHeight;
+	region.srcOffsets[1].z = 1;
 	region.dstSubresource.aspectMask = RAL_TEXTURE_ASPECT_COLOR;
 	region.dstSubresource.layerCount = 1u;
-	region.extent.width = (uint32_t)glConfig.vidWidth;
-	region.extent.height = (uint32_t)glConfig.vidHeight;
-	region.extent.depth = 1u;
-	Ral_CmdCopyImage( vk.cmd->ral_cmd, vk_atmosphere_full.composed,
-		vk.ral_color_image, 1u, &region );
+	region.dstOffsets[1].x = glConfig.vidWidth;
+	region.dstOffsets[1].y = glConfig.vidHeight;
+	region.dstOffsets[1].z = 1;
+	/* The composed storage target is always RGBA16F, while the canonical scene
+	 * target may be RGBA16F, the portable RGBA16 UNORM fallback, or an LDR
+	 * format.  A RAL blit performs the required format conversion; a raw image
+	 * copy would only be valid for copy-compatible formats. */
+	Ral_CmdBlitImage( vk.cmd->ral_cmd, vk_atmosphere_full.composed,
+		vk.ral_color_image, 1u, &region, RAL_FILTER_NEAREST );
 
 	for ( uint32_t i = 0u; i < 2u; ++i ) {
 		ralResourceState_t before = transitions[i].after;
@@ -18647,11 +19801,512 @@ static qboolean vk_atmosphere_full_copy_to_scene( void ) {
 	return qtrue;
 }
 
-qboolean vk_atmosphere_full_execute( void ) {
-	static char receiptMap[MAX_QPATH];
+static qboolean vk_ibl_rebuild_target_bindgroups( void ) {
+	ralBackend_t *backend = vk_ral_get_backend();
+	uint32_t mip;
+
+	if ( !backend || !vk.ral_probe_conv_bgl || !vk.ral_probe_sh_bgl
+			|| !vk.ral_probe_conv_sampler || !vk.ral_probe_source_array_view
+			|| !vk.ral_probe_irradiance_target_array_view
+			|| !vk.ral_probe_sh_target_buffer ) return qfalse;
+	if ( vk.ral_probe_irradiance_bg ) {
+		Ral_DestroyBindGroup( vk.ral_probe_irradiance_bg );
+		vk.ral_probe_irradiance_bg = NULL;
+	}
+	if ( vk.ral_probe_sh_bg ) {
+		Ral_DestroyBindGroup( vk.ral_probe_sh_bg );
+		vk.ral_probe_sh_bg = NULL;
+	}
+	for ( mip = 0u; mip < VK_PROBE_RADIANCE_MIPS; ++mip ) {
+		if ( vk.ral_probe_radiance_bg[mip] )
+			Ral_DestroyBindGroup( vk.ral_probe_radiance_bg[mip] );
+		vk.ral_probe_radiance_bg[mip] = NULL;
+	}
+
+	{
+		ralBindingValue_t values[3];
+		ralBindGroupCreateInfo_t info;
+		memset( values, 0, sizeof( values ) );
+		values[0].binding = 0; values[0].type = RAL_BIND_SAMPLED_TEXTURE;
+		values[0].textureView = vk.ral_probe_source_array_view;
+		values[1].binding = 1; values[1].type = RAL_BIND_SAMPLER;
+		values[1].sampler = vk.ral_probe_conv_sampler;
+		values[2].binding = 2; values[2].type = RAL_BIND_STORAGE_TEXTURE;
+		values[2].textureView = vk.ral_probe_irradiance_target_array_view;
+		memset( &info, 0, sizeof( info ) );
+		info.layout = vk.ral_probe_conv_bgl;
+		info.values = values;
+		info.numValues = 3;
+		info.debugName = "wired-ibl-irradiance-target-bg";
+		vk.ral_probe_irradiance_bg = Ral_CreateBindGroup( backend, &info );
+	}
+	{
+		ralBindingValue_t values[3];
+		ralBindGroupCreateInfo_t info;
+		memset( values, 0, sizeof( values ) );
+		values[0].binding = 0; values[0].type = RAL_BIND_SAMPLED_TEXTURE;
+		values[0].textureView = vk.ral_probe_source_array_view;
+		values[1].binding = 1; values[1].type = RAL_BIND_SAMPLER;
+		values[1].sampler = vk.ral_probe_conv_sampler;
+		values[2].binding = 2; values[2].type = RAL_BIND_STORAGE_BUFFER;
+		values[2].buffer = vk.ral_probe_sh_target_buffer;
+		values[2].bufferRange = RAL_SKY_RADIANCE_AMBIENT_SH_COEFFICIENT_COUNT
+			* 4u * sizeof( float );
+		memset( &info, 0, sizeof( info ) );
+		info.layout = vk.ral_probe_sh_bgl;
+		info.values = values;
+		info.numValues = 3;
+		info.debugName = "wired-ibl-sky-sh-target-bg";
+		vk.ral_probe_sh_bg = Ral_CreateBindGroup( backend, &info );
+	}
+	for ( mip = 0u; mip < VK_PROBE_RADIANCE_MIPS; ++mip ) {
+		ralBindingValue_t values[3];
+		ralBindGroupCreateInfo_t info;
+		if ( !vk.ral_probe_radiance_target_mip_view[mip] ) return qfalse;
+		memset( values, 0, sizeof( values ) );
+		values[0].binding = 0; values[0].type = RAL_BIND_SAMPLED_TEXTURE;
+		values[0].textureView = vk.ral_probe_source_array_view;
+		values[1].binding = 1; values[1].type = RAL_BIND_SAMPLER;
+		values[1].sampler = vk.ral_probe_conv_sampler;
+		values[2].binding = 2; values[2].type = RAL_BIND_STORAGE_TEXTURE;
+		values[2].textureView = vk.ral_probe_radiance_target_mip_view[mip];
+		memset( &info, 0, sizeof( info ) );
+		info.layout = vk.ral_probe_conv_bgl;
+		info.values = values;
+		info.numValues = 3;
+		info.debugName = "wired-ibl-radiance-target-bg";
+		vk.ral_probe_radiance_bg[mip] = Ral_CreateBindGroup( backend, &info );
+	}
+	if ( !vk.ral_probe_irradiance_bg || !vk.ral_probe_sh_bg ) return qfalse;
+	for ( mip = 0u; mip < VK_PROBE_RADIANCE_MIPS; ++mip )
+		if ( !vk.ral_probe_radiance_bg[mip] ) return qfalse;
+	return qtrue;
+}
+
+typedef ralSkyRadianceSourceParams_t vkSkySourcePush_t;
+
+static qboolean vk_sky_source_descriptor_ensure( void ) {
+	ralFrontendSkySource_t source;
+	ralBindingValue_t values[8];
+	ralBindGroupCreateInfo_t info;
+	ralBindGroup_t *candidate;
+	ralBackend_t *backend = vk_ral_get_backend();
+	if ( !backend || !vk.ral_probe_source_bgl
+			|| !vk.ral_probe_source_array_view
+			|| !vk.ral_probe_conv_sampler
+			|| !R_FrontendActiveSkySource( &source ) ) return qfalse;
+	if ( vk.ral_probe_source_descriptor
+			&& vk.probeSourceDescriptorRevision == source.revision
+			&& vk.probeSourceHasAuthoredFaces == source.authoredOuterBox )
+		return qtrue;
+	memset( values, 0, sizeof( values ) );
+	values[0].binding = 0u;
+	values[0].type = RAL_BIND_STORAGE_TEXTURE;
+	values[0].textureView = vk.ral_probe_source_array_view;
+	for ( uint32_t face = 0u; face < RAL_MATERIAL_SKY_FACE_COUNT; ++face ) {
+		values[1u + face].binding = 1u + face;
+		values[1u + face].type = RAL_BIND_SAMPLED_TEXTURE;
+		values[1u + face].textureView = source.outerFaces[face];
+	}
+	values[7].binding = 7u;
+	values[7].type = RAL_BIND_SAMPLER;
+	values[7].sampler = vk.ral_probe_conv_sampler;
+	memset( &info, 0, sizeof( info ) );
+	info.layout = vk.ral_probe_source_bgl;
+	info.values = values;
+	info.numValues = 8u;
+	info.debugName = "wired-ibl-authored-source-bg";
+	candidate = Ral_CreateBindGroup( backend, &info );
+	if ( !candidate ) return qfalse;
+	if ( vk.ral_probe_source_descriptor )
+		Ral_DestroyBindGroup( vk.ral_probe_source_descriptor );
+	vk.ral_probe_source_descriptor = candidate;
+	vk.probeSourceDescriptorRevision = source.revision;
+	vk.probeSourceHasAuthoredFaces = source.authoredOuterBox;
+	return qtrue;
+}
+
+static qboolean vk_sky_source_push( const ralSkyEnvironmentPlanReceipt_t *sky,
+		uint32_t face, vkSkySourcePush_t *out ) {
+	memset( out, 0, sizeof( *out ) );
+	out->meta[0] = face;
+	if ( !sky ) {
+		/* Boot-only compatibility dispatch before the shared runtime is armed.
+		 * Neutral grey is intentional: the first receipt-owned rebuild replaces
+		 * it, and no fixed Earth-sky colour becomes map authority. */
+		out->authoredRadiance[0] = 0.04f;
+		out->authoredRadiance[1] = 0.04f;
+		out->authoredRadiance[2] = 0.04f;
+		out->authoredRadiance[3] = 0.04f;
+		out->sunDirectionIntensity[2] = 1.0f;
+		out->sunRadianceExposure[3] = 1.0f;
+		return qtrue;
+	}
+	if ( !Ral_SkyRadianceSourceParamsBuild( sky, vk.atm.state.cloudCover,
+			vk.probeSourceHasAuthoredFaces ? RAL_SKY_SOURCE_AUTHORED_FACES
+				: RAL_SKY_SOURCE_ANALYTIC, out ) ) return qfalse;
+	out->meta[0] = face;
+	return qtrue;
+}
+
+static qboolean vk_sky_radiance_execute(
+		const ralSkyEnvironmentPlanReceipt_t *skyPlan,
+		ralAtmosphereTier_t tier, uint32_t eventMask ) {
+	ralSkyRadianceRequest_t request;
+	ralSkyTierBudgetReceipt_t budget;
+	uint32_t completedMask, admittedMask, bit;
+	uint64_t completedRevision;
+	float deltaSeconds;
+	int captureTimeMs, sceneTimeMs;
+
+	if ( !skyPlan || !Ral_SkyEnvironmentPlanReceiptExact( skyPlan, skyPlan )
+			|| !vk.cmd || !vk.cmd->ral_cmd ) return qfalse;
+	if ( !Ral_SkyTierBudget( tier, &budget )
+			|| !Ral_SkyTierBudgetReceiptExact( &budget, &budget ) ) return qfalse;
+	if ( budget.maxRadianceSlicesPerFrame == 0u )
+		return Ral_SkyRadianceConsumerAdmit( &budget,
+			&vk.atm.skyRadianceConsumer, &vk.atm.skyRadianceConsumer );
+	// RB_SetGL2D replaces backEnd.refdef.time with wall time before this pass.
+	// Capture animation belongs to the submitted world (and its shader pin).
+	// UI-only frames have no world capture work and retain the current product.
+	if ( !R_FrontendSkyCaptureTime( &captureTimeMs, &sceneTimeMs ) ) return qtrue;
+	if ( !vk.ral_probe_source_pipeline || !vk.ral_probe_sh_pipeline
+			|| !vk.ral_probe_irradiance_pipeline
+			|| !vk.ral_probe_radiance_pipeline ) return qtrue;
+	if ( !vk_sky_source_descriptor_ensure() ) return qfalse;
+
+	completedMask = vk.probeSubmittedSliceMask[vk.cmd_index];
+	completedRevision = vk.probeSubmittedRevision[vk.cmd_index];
+	vk.probeSubmittedSliceMask[vk.cmd_index] = 0u;
+	vk.probeSubmittedRevision[vk.cmd_index] = 0u;
+	// Weather OFF is published once by cgame, so its descriptor clock may
+	// legitimately stop while authored sky animation continues. The rendered
+	// world's clock drives slicing/crossfade; shader pinning only holds sampling.
+	const float sceneSeconds = (float)sceneTimeMs * 0.001f;
+	if ( sceneSeconds < vk.atm.skyRadianceTimelineSeconds )
+		eventMask |= RAL_SKY_EVENT_TIME_CHANGE;
+	deltaSeconds = sceneSeconds >= vk.atm.skyRadianceTimelineSeconds
+		? sceneSeconds - vk.atm.skyRadianceTimelineSeconds : 0.0f;
+	vk.atm.skyRadianceTimelineSeconds = sceneSeconds;
+
+	memset( &request, 0, sizeof( request ) );
+	request.schemaVersion = RAL_SKY_RADIANCE_SCHEMA_VERSION;
+	request.backendType = RAL_BACKEND_VULKAN;
+	if ( vk.atm.skyRadianceFrameGeneration == UINT64_MAX ) return qfalse;
+	request.frameGeneration = ++vk.atm.skyRadianceFrameGeneration;
+	request.sourceRevision = skyPlan->sourceRevision;
+	request.completedProductRevision = completedRevision;
+	request.mode = skyPlan->selectedMode;
+	request.specularMipCount = VK_PROBE_RADIANCE_MIPS;
+	request.eventMask = eventMask;
+	request.completedSliceMask = completedMask;
+	request.maxSlicesPerFrame = budget.maxRadianceSlicesPerFrame;
+	if ( skyPlan->selectedMode == RAL_SKY_ENVIRONMENT_PHYSICAL
+			&& !Ral_SkyPhysicalSourceReady( skyPlan, vk_sky_physical.skyViewView != NULL ) )
+		request.maxSlicesPerFrame = 0u;
+	request.deltaSeconds = deltaSeconds;
+	request.crossfadeSeconds = 0.35f;
+	request.refreshIntervalSeconds = wired_sky_capture.animated
+		&& captureTimeMs != wired_sky_capture.timeMs ? 0.5f : 0.0f;
+	if ( !Ral_SkyRadianceAdvance( &vk.atm.skyRadianceState, &request,
+			&vk.atm.skyRadianceReceipt ) ) {
+		R_LOG( rch_ral, SEV_WARN,
+			"sky-radiance advance rejected frame=%llu source=%llu mode=%u events=0x%x completed=0x%x revision=%llu\n",
+			(unsigned long long)request.frameGeneration,
+			(unsigned long long)request.sourceRevision,
+			(unsigned)request.mode, request.eventMask,
+			request.completedSliceMask,
+			(unsigned long long)request.completedProductRevision );
+		return qfalse;
+	}
+
+	if ( vk.atm.skyRadianceReceipt.sourceChanged
+			|| vk.atm.skyRadianceReceipt.refreshStarted || eventMask ) {
+		// A soft revision only invalidates the writable target.  The complete current
+		// product remains sampled until the replacement is fence-complete and swapped.
+		// Map/device invalidation rebuilds this resource cohort through normal teardown.
+		vk.probeSourceWriteStarted = qfalse;
+		vk.probeIrradianceWriteStarted = qfalse;
+		vk.probeRadianceWriteStarted = qfalse;
+		R_LOG( rch_ral, SEV_INFO,
+			"sky-radiance rebuild target=%llu source=%llu mode=%u events=0x%x cancelled=0x%x\n",
+			(unsigned long long)vk.atm.skyRadianceReceipt.targetProductRevision,
+			(unsigned long long)vk.atm.skyRadianceReceipt.sourceRevision,
+			(unsigned)request.mode, eventMask,
+			vk.atm.skyRadianceReceipt.cancelledSliceMask );
+	}
+
+	// Fence completion of all six capture slices makes the source eligible for
+	// sampled compute reads.  This happens before SH/specular work is admitted.
+	if ( ( vk.atm.skyRadianceReceipt.completedSliceMask
+			& RAL_SKY_RADIANCE_CAPTURE_MASK ) == RAL_SKY_RADIANCE_CAPTURE_MASK
+			&& !vk.probeSourceReadable ) {
+		Ral_CmdTransitionTexture( vk.cmd->ral_cmd, vk.ral_probe_source,
+			wired_sky_capture.images ? RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+				: RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+		vk.probeSourceReadable = qtrue;
+	}
+
+	admittedMask = vk.atm.skyRadianceReceipt.admittedSliceMask;
+	if ( admittedMask )
+		vk_sky_gpu_ts_begin( qtrue, skyPlan->frameGeneration );
+	if ( admittedMask & RAL_SKY_RADIANCE_CAPTURE_MASK ) {
+		const uint32_t groups = ( VK_PROBE_SOURCE_SIZE + 7u ) / 8u;
+		const uint64_t revision = vk.atm.skyRadianceReceipt.targetProductRevision;
+		if ( wired_sky_capture.productRevision != revision ) {
+			ralFrontendSkyMaterial_t material;
+			ralFrontendSkySource_t source;
+			if ( !R_FrontendSkyMaterialPacket( captureTimeMs, &material )
+					|| !R_FrontendActiveSkySource( &source ) ) return qfalse;
+			if ( material.ready ) {
+				const qboolean physical = Ral_SkyPhysicalSourceReady( skyPlan,
+					vk_sky_physical.skyViewView != NULL );
+				if ( !wired_vk_sky_capture_init( &wired_sky_capture, vk_ral_get_backend(),
+						(const uint32_t *)ral_opengl_product_vert_spv, sizeof(ral_opengl_product_vert_spv),
+						(const uint32_t *)ral_sky_capture_frag_spv, sizeof(ral_sky_capture_frag_spv) )
+						|| !wired_vk_sky_capture_prepare( &wired_sky_capture, vk_ral_get_backend(),
+							&material, source.outerFaces, vk.ral_probe_conv_sampler,
+							physical ? vk_sky_physical.skyViewView : tr.whiteImage->ralDescriptorView,
+							physical ? vk_sky_physical.sampler : tr.whiteImage->ralDescriptorSampler,
+							physical, revision, captureTimeMs ) ) return qfalse;
+				R_LOG( rch_ral, SEV_INFO,
+					"sky-radiance material-capture revision=%llu stages=%u outer=%u physical=%u time=%d\n",
+					(unsigned long long)revision, material.params.meta[0],
+					material.params.meta[1], (unsigned)physical, captureTimeMs );
+			} else {
+				// A world with no sky material retains its explicit environment
+				// source. A rejected authored packet never takes this branch.
+				wired_vk_sky_capture_retire( &wired_sky_capture );
+				wired_sky_capture.productRevision = revision;
+				wired_sky_capture.animated = qfalse;
+			}
+		}
+		if ( !vk.probeSourceWriteStarted ) {
+			Ral_CmdTransitionTexture( vk.cmd->ral_cmd, vk.ral_probe_source,
+				RAL_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+				wired_sky_capture.images ? RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+					: RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+				wired_sky_capture.images ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+					: VK_IMAGE_LAYOUT_GENERAL );
+			vk.probeSourceWriteStarted = qtrue;
+			vk.probeSourceReadable = qfalse;
+		}
+		if ( wired_sky_capture.images ) {
+			if ( !wired_vk_sky_capture_draw( &wired_sky_capture, vk.cmd->ral_cmd,
+					vk.ral_probe_source, VK_PROBE_SOURCE_SIZE,
+					admittedMask & RAL_SKY_RADIANCE_CAPTURE_MASK ) ) return qfalse;
+		} else {
+		Ral_CmdBindPipeline( vk.cmd->ral_cmd, vk.ral_probe_source_pipeline );
+		Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 0,
+			vk.ral_probe_source_descriptor );
+		for ( bit = 0u; bit < RAL_SKY_RADIANCE_CAPTURE_FACE_COUNT; ++bit ) {
+			const uint32_t slice = 1u << bit;
+			vkSkySourcePush_t push;
+			if ( !( admittedMask & slice ) ) continue;
+			if ( !vk_sky_source_push( skyPlan, bit, &push ) ) return qfalse;
+			Ral_CmdPushConstants( vk.cmd->ral_cmd, RAL_STAGE_COMPUTE, 0,
+				sizeof( push ), &push );
+			Ral_CmdDispatch( vk.cmd->ral_cmd, groups, groups, 1u );
+		}
+		Ral_CmdPipelineBarrier( vk.cmd->ral_cmd,
+			RAL_BARRIER_COMPUTE_TO_COMPUTE );
+		}
+	}
+
+	if ( admittedMask & RAL_SKY_RADIANCE_AMBIENT_SH_MASK ) {
+		if ( ( admittedMask & ( 1u << 6u ) )
+				&& !vk.probeIrradianceWriteStarted ) {
+			const uint32_t groups = ( VK_PROBE_IRRADIANCE_SIZE + 7u ) / 8u;
+			const uint32_t reserved = 0u;
+			Ral_CmdTransitionTexture( vk.cmd->ral_cmd,
+				vk.ral_probe_irradiance_target,
+				vk.probeIrradianceTargetReadable
+					? RAL_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+					: RAL_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+				RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+				VK_IMAGE_LAYOUT_GENERAL );
+			Ral_CmdBindPipeline( vk.cmd->ral_cmd,
+				vk.ral_probe_irradiance_pipeline );
+			Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 0,
+				vk.ral_probe_irradiance_bg );
+			Ral_CmdPushConstants( vk.cmd->ral_cmd, RAL_STAGE_COMPUTE, 0,
+				sizeof( reserved ), &reserved );
+			Ral_CmdDispatch( vk.cmd->ral_cmd, groups, groups, 6u );
+			Ral_CmdPipelineBarrier( vk.cmd->ral_cmd,
+				RAL_BARRIER_COMPUTE_TO_COMPUTE );
+			vk.probeIrradianceWriteStarted = qtrue;
+			vk.probeIrradianceTargetReadable = qfalse;
+		}
+		Ral_CmdBindPipeline( vk.cmd->ral_cmd, vk.ral_probe_sh_pipeline );
+		Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 0, vk.ral_probe_sh_bg );
+		for ( bit = 0u; bit < RAL_SKY_RADIANCE_AMBIENT_SH_COEFFICIENT_COUNT;
+				++bit ) {
+			const uint32_t slice = 1u << ( 6u + bit );
+			if ( !( admittedMask & slice ) ) continue;
+			Ral_CmdPushConstants( vk.cmd->ral_cmd, RAL_STAGE_COMPUTE, 0,
+				sizeof( bit ), &bit );
+			Ral_CmdDispatch( vk.cmd->ral_cmd, 1u, 1u, 1u );
+		}
+		Ral_CmdPipelineBarrier( vk.cmd->ral_cmd,
+			RAL_BARRIER_COMPUTE_TO_COMPUTE );
+	}
+
+	if ( admittedMask & RAL_SKY_RADIANCE_SPECULAR_MASK ) {
+		if ( !vk.probeRadianceWriteStarted ) {
+			Ral_CmdTransitionTexture( vk.cmd->ral_cmd,
+				vk.ral_probe_radiance_target,
+				vk.probeRadianceTargetReadable
+					? RAL_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+					: RAL_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+				RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+				VK_IMAGE_LAYOUT_GENERAL );
+			vk.probeRadianceWriteStarted = qtrue;
+			vk.probeRadianceTargetReadable = qfalse;
+		}
+		Ral_CmdBindPipeline( vk.cmd->ral_cmd, vk.ral_probe_radiance_pipeline );
+		for ( bit = 0u; bit < VK_PROBE_RADIANCE_MIPS; ++bit ) {
+			const uint32_t slice = 1u << ( 15u + bit );
+			uint32_t push[2], mipSize, groups;
+			if ( !( admittedMask & slice ) ) continue;
+			mipSize = VK_PROBE_RADIANCE_SIZE >> bit;
+			groups = ( mipSize + 7u ) / 8u;
+			push[0] = bit;
+			push[1] = VK_PROBE_RADIANCE_MIPS;
+			Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 0,
+				vk.ral_probe_radiance_bg[bit] );
+			Ral_CmdPushConstants( vk.cmd->ral_cmd, RAL_STAGE_COMPUTE, 0,
+				sizeof( push ), push );
+			Ral_CmdDispatch( vk.cmd->ral_cmd, groups, groups, 6u );
+		}
+		Ral_CmdPipelineBarrier( vk.cmd->ral_cmd,
+			RAL_BARRIER_COMPUTE_TO_COMPUTE );
+	}
+	if ( admittedMask ) vk_sky_gpu_ts_end( qtrue );
+
+	if ( vk.atm.skyRadianceReceipt.targetPublished
+			&& vk.probeIrradianceWriteStarted
+			&& vk.probeRadianceWriteStarted ) {
+		struct ralTexture_s *textureSwap;
+		struct ralTextureView_s *viewSwap;
+		struct ralBuffer_s *bufferSwap;
+		Ral_CmdTransitionTexture( vk.cmd->ral_cmd,
+			vk.ral_probe_irradiance_target,
+			RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			RAL_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+		Ral_CmdTransitionTexture( vk.cmd->ral_cmd,
+			vk.ral_probe_radiance_target,
+			RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			RAL_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+		Ral_CmdPipelineBarrier( vk.cmd->ral_cmd,
+			RAL_BARRIER_COMPUTE_TO_GRAPHICS );
+		// The target is complete, but this command still owns its final transitions.
+		// Retire all in-flight descriptor readers before publishing the pointer swap;
+		// rebuilds are rare/dirty-revision driven, never a per-frame stall.
+		vk_wait_idle();
+		textureSwap = vk.ral_probe_irradiance;
+		vk.ral_probe_irradiance = vk.ral_probe_irradiance_target;
+		vk.ral_probe_irradiance_target = textureSwap;
+		viewSwap = vk.ral_probe_irradiance_cube_view;
+		vk.ral_probe_irradiance_cube_view =
+			vk.ral_probe_irradiance_target_cube_view;
+		vk.ral_probe_irradiance_target_cube_view = viewSwap;
+		viewSwap = vk.ral_probe_irradiance_array_view;
+		vk.ral_probe_irradiance_array_view =
+			vk.ral_probe_irradiance_target_array_view;
+		vk.ral_probe_irradiance_target_array_view = viewSwap;
+		textureSwap = vk.ral_probe_radiance;
+		vk.ral_probe_radiance = vk.ral_probe_radiance_target;
+		vk.ral_probe_radiance_target = textureSwap;
+		viewSwap = vk.ral_probe_radiance_cube_view;
+		vk.ral_probe_radiance_cube_view = vk.ral_probe_radiance_target_cube_view;
+		vk.ral_probe_radiance_target_cube_view = viewSwap;
+		for ( bit = 0u; bit < VK_PROBE_RADIANCE_MIPS; ++bit ) {
+			viewSwap = vk.ral_probe_radiance_mip_view[bit];
+			vk.ral_probe_radiance_mip_view[bit] =
+				vk.ral_probe_radiance_target_mip_view[bit];
+			vk.ral_probe_radiance_target_mip_view[bit] = viewSwap;
+		}
+		bufferSwap = vk.ral_probe_sh_buffer;
+		vk.ral_probe_sh_buffer = vk.ral_probe_sh_target_buffer;
+		vk.ral_probe_sh_target_buffer = bufferSwap;
+		vk.probeIrradianceTargetReadable = vk.probeIrradianceReadable;
+		vk.probeRadianceTargetReadable = vk.probeRadianceReadable;
+		if ( !vk_ibl_rebuild_target_bindgroups()
+				|| ( vk_atmosphere_full.compositeBgl
+					&& !vk_atmosphere_full_rebuild_composite_bindgroups() )
+				|| !vk_ral_refresh_engine_resources_bindgroup() ) return qfalse;
+		vk.probeIrradianceWriteStarted = qfalse;
+		vk.probeRadianceWriteStarted = qfalse;
+		vk.probeIrradianceReadable = qtrue;
+		vk.probeRadianceReadable = qtrue;
+		vk.probeCurrentProductValid = qtrue;
+		R_LOG( rch_ral, SEV_INFO,
+			"sky-radiance published revision=%llu previous=%llu source=%llu mode=%u slices=%u crossfade=%.3f\n",
+			(unsigned long long)vk.atm.skyRadianceReceipt.currentProductRevision,
+			(unsigned long long)vk.atm.skyRadianceReceipt.previousProductRevision,
+			(unsigned long long)vk.atm.skyRadianceReceipt.sourceRevision,
+			(unsigned)request.mode,
+			vk.atm.skyRadianceReceipt.completedSliceCount,
+			vk.atm.skyRadianceReceipt.crossfadeAlpha );
+	}
+	if ( vk.atm.skyRadianceReceipt.currentProductRevision ) {
+		const uint32_t currentReadable = vk.probeCurrentProductValid
+			? ( vk.probeRadianceReadable
+				? RAL_SKY_RADIANCE_PRODUCT_VISIBLE_RADIANCE
+					| RAL_SKY_RADIANCE_PRODUCT_SPECULAR_RADIANCE : 0u )
+				| ( vk.probeIrradianceReadable
+					? RAL_SKY_RADIANCE_PRODUCT_DIFFUSE_IRRADIANCE : 0u )
+				| ( vk.ral_probe_sh_buffer != VK_NULL_HANDLE
+					? RAL_SKY_RADIANCE_PRODUCT_AMBIENT_SH : 0u )
+			: 0u;
+		const uint32_t previousReadable =
+			vk.atm.skyRadianceReceipt.previousProductValid
+			? ( vk.probeRadianceTargetReadable
+				? RAL_SKY_RADIANCE_PRODUCT_VISIBLE_RADIANCE
+					| RAL_SKY_RADIANCE_PRODUCT_SPECULAR_RADIANCE : 0u )
+				| ( vk.probeIrradianceTargetReadable
+					? RAL_SKY_RADIANCE_PRODUCT_DIFFUSE_IRRADIANCE : 0u )
+				| ( vk.ral_probe_sh_target_buffer != VK_NULL_HANDLE
+					? RAL_SKY_RADIANCE_PRODUCT_AMBIENT_SH : 0u )
+			: 0u;
+		if ( !Ral_SkyRadianceConsumerPlan( &vk.atm.skyRadianceReceipt,
+				currentReadable, previousReadable,
+				&vk.atm.skyRadianceConsumer ) ) return qfalse;
+	} else memset( &vk.atm.skyRadianceConsumer, 0,
+		sizeof( vk.atm.skyRadianceConsumer ) );
+
+	if ( admittedMask ) {
+		vk.probeSubmittedSliceMask[vk.cmd_index] = admittedMask;
+		vk.probeSubmittedRevision[vk.cmd_index] =
+			vk.atm.skyRadianceReceipt.targetProductRevision;
+		vk.cmd->last_ral_pipeline = NULL;
+	}
+	return qtrue;
+}
+
+/* Frame-local work only: preparing a medium must not also overwrite the
+ * scene. The caller decides when to composite, independently of producer
+ * dispatches; no retained handles or cross-frame pending work are added. */
+typedef struct {
+	vkRalComputePlan_t dispatch;
+	qboolean full;
+	qboolean analytic;
+	qboolean historyReusable;
+} vkAtmosphereCompositeWork_t;
+
+static qboolean vk_atmosphere_full_prepare( vkAtmosphereCompositeWork_t *work ) {
+	renderAtmosphereSnapshot_t skySnapshot;
 	ralAtmospherePlanRequest_t request;
 	ralAtmospherePlanReceipt_t plan;
 	ralAtmosphereRuntimeRequest_t runtimeRequest;
+	ralSkyEnvironmentPlanRequest_t skyPlan;
+	ralSkyEnvironmentRuntimeRequest_t skyRuntimeRequest;
+	ralSkyEnvironmentCapabilities_t skyCapabilities;
+	ralSkySurfaceReceipt_t skySurface;
 	ralBufferUploadReceipt_t paramWrite, volumeWrite;
 	vkAtmosphereVolumeGPU_t gpuVolumes[RAL_ATMOSPHERE_MAX_VOLUMES];
 	unsigned char paramBytes[4096];
@@ -18661,31 +20316,66 @@ qboolean vk_atmosphere_full_execute( void ) {
 	vkAtmosphereIntegrateParams_t *integrate;
 	vkAtmosphereCompositeParams_t *composite;
 	vkRalComputePlan_t dispatch;
-	float viewProjection[16], inverseViewProjection[16];
+	float projection[16], viewProjection[16], inverseViewProjection[16];
 	float nearZ, farZ, cloudBase, cloudTop, cloudSpan;
+	float sunRadianceLength, moonRadianceLength;
 	uint32_t slot, groupsX, groupsY, groupsZ;
-	qboolean historyReusable;
+	uint32_t skyCompletedWorkMask, skyAdmittedWorkMask, skyEvents;
+	uint64_t worldLifecycleGeneration = 0u;
+	qboolean historyReusable, atmosphereActive, skyExecutionReady;
+	qboolean physicalSkyCandidate, skyCompositeReady, analyticMediaActive;
+	qboolean worldLifecycleChanged;
 
-	if ( !vk_atmosphere_full.ready || !vk.fboActive || !vk.cmd
-			|| !vk.cmd->ral_cmd || !tr.world || !r_atmosphericGPU
-			|| !r_atmosphericGPU->integer
-			|| vk.atm.state.qualityTier != ATMOSPHERE_QUALITY_FULL
-			|| ( vk.atm.state.flags & ( ATMOSPHERE_FLAG_ENABLED
-				| ATMOSPHERE_FLAG_VOLUMETRIC_MEDIA ) )
-				!= ( ATMOSPHERE_FLAG_ENABLED
-					| ATMOSPHERE_FLAG_VOLUMETRIC_MEDIA ) ) return qtrue;
+	if ( !vk.fboActive || !vk.cmd || !vk.cmd->ral_cmd || !tr.world )
+		return qtrue;
+	atmosphereActive = vk_atmosphere_full.ready && r_atmosphericGPU
+		&& r_atmosphericGPU->integer
+		&& vk.atm.state.qualityTier == ATMOSPHERE_QUALITY_FULL
+		&& ( vk.atm.state.flags & ( ATMOSPHERE_FLAG_ENABLED
+			| ATMOSPHERE_FLAG_VOLUMETRIC_MEDIA ) )
+			== ( ATMOSPHERE_FLAG_ENABLED | ATMOSPHERE_FLAG_VOLUMETRIC_MEDIA );
+	/* Visibility also requests analytic extinction at WEATHER/ANALYTIC tiers.
+	 * It must not depend on the full-froxel flag or physical sky selection. */
+	analyticMediaActive = !atmosphereActive
+		&& ( vk.atm.state.flags & ATMOSPHERE_FLAG_ENABLED )
+		&& vk.atm.state.qualityTier >= ATMOSPHERE_QUALITY_ANALYTIC
+		&& ( vk.atm.state.mediaDensity > 0.0f || vk.atm.state.visibility > 0.0f );
+	skyExecutionReady = vk_sky_physical.ready
+		|| ( vk.ral_probe_source_pipeline && vk.ral_probe_sh_pipeline
+			&& vk.ral_probe_irradiance_pipeline
+			&& vk.ral_probe_radiance_pipeline );
+	if ( !atmosphereActive && !analyticMediaActive && !skyExecutionReady ) return qtrue;
+	skyCompositeReady = vk_atmosphere_full.ready
+		&& vk_atmosphere_full.skyCompositePipeline
+		&& vk_atmosphere_full.params[vk.cmd_index]
+		&& vk_atmosphere_full.compositeBg[vk.cmd_index]
+		&& vk_atmosphere_full.composed
+		&& vk_atmosphere_full.composedView;
+	physicalSkyCandidate = skyCompositeReady && vk_sky_physical.ready
+		&& vk.atm.state.skyEnvironment.mode == ATMOSPHERE_SKY_PHYSICAL
+		&& ( vk_sky_physical.readableMask & RAL_SKY_DIRTY_SKY_VIEW );
+	if ( !R_FrontendWorldLifecycleGeneration( &worldLifecycleGeneration ) )
+		return qfalse;
+	worldLifecycleChanged = vk.atm.skyWorldLifecycleGeneration != 0u
+		&& vk.atm.skyWorldLifecycleGeneration != worldLifecycleGeneration;
 
-	if ( vk.cmd->open_dynamic_pass != VK_DYN_PASS_NONE
+	if ( ( atmosphereActive || analyticMediaActive || physicalSkyCandidate )
+			&& vk.cmd->open_dynamic_pass != VK_DYN_PASS_NONE
 			&& vk.sceneDepth.active && !vk.sceneDepth.copied )
 		vk_scene_depth_copy();
-	if ( !vk.sceneDepth.copied ) return qtrue;
+	if ( ( atmosphereActive || analyticMediaActive || physicalSkyCandidate )
+			&& !vk.sceneDepth.copied ) return qtrue;
 	if ( vk.cmd->open_dynamic_pass != VK_DYN_PASS_NONE ) vk_end_render_pass();
 
-	if ( vk.atm.runtimeState.lastFrameGeneration == 0u
-			|| vk.atm.runtimeState.width != vk.renderWidth
-			|| vk.atm.runtimeState.height != vk.renderHeight
-			|| vk.atm.runtimeState.timelineSeconds != vk.atm.timelineSeconds
-			|| vk.atm.runtimeState.climateSeed != vk.atm.seed ) {
+	/* The preceding interval includes scene rasterization/depth capture, not
+	 * atmosphere preparation. Keep that boundary explicit in GPU telemetry. */
+	vk_gpu_ts_write( "scene_to_media" );
+
+	/* The receipt carries frame-local invalidation events, not cached scene
+	 * state. Advance on every rendered frame even when scene time is frozen:
+	 * reusing a rewind/cut receipt would cancel sky work on every paused frame
+	 * and permanently suppress the physical surface contribution. */
+	{
 		memset( &runtimeRequest, 0, sizeof( runtimeRequest ) );
 		runtimeRequest.schemaVersion = RAL_ATMOSPHERE_RUNTIME_SCHEMA_VERSION;
 		runtimeRequest.backendType = RAL_BACKEND_VULKAN;
@@ -18696,9 +20386,19 @@ qboolean vk_atmosphere_full_execute( void ) {
 		runtimeRequest.height = vk.renderHeight;
 		runtimeRequest.timelineSeconds = vk.atm.timelineSeconds;
 		runtimeRequest.timeScale = 1.0f;
-		runtimeRequest.climateSeed = vk.atm.seed;
+		// Authored sky remains a live renderer input even when weather is off.  The
+		// atmosphere descriptor legitimately carries seed=0 in that state, whereas
+		// the runtime receipt requires a non-zero replay identity.  Use a stable
+		// receipt-only identity; particle/content seed semantics remain untouched.
+		runtimeRequest.climateSeed = vk.atm.seed ? vk.atm.seed : 1u;
 		runtimeRequest.capabilityDigest = 0x564b41544d46554cull;
+		if ( backEnd.refdef.rdflags & ( RDF_CAMERA_CUT | RDF_HYPERSPACE ) ) {
+			runtimeRequest.eventMask |= RAL_ATMOSPHERE_EVENT_CAMERA_CUT;
+			vk_atmosphere_full.historyValid = qfalse;
+		}
 		if ( vk.atm.runtimeState.lastFrameGeneration != 0u ) {
+			if ( worldLifecycleChanged )
+				runtimeRequest.eventMask |= RAL_ATMOSPHERE_EVENT_MAP_TRANSITION;
 			if ( runtimeRequest.width != vk.atm.runtimeState.width
 					|| runtimeRequest.height != vk.atm.runtimeState.height )
 				runtimeRequest.eventMask |= RAL_ATMOSPHERE_EVENT_RESIZE;
@@ -18706,6 +20406,7 @@ qboolean vk_atmosphere_full_execute( void ) {
 					< vk.atm.runtimeState.timelineSeconds )
 				runtimeRequest.eventMask |= RAL_ATMOSPHERE_EVENT_MAP_TRANSITION;
 		}
+		vk_atmosphere_declare_identity_events( &runtimeRequest );
 		if ( !Ral_AtmosphereRuntimeAdvance( &vk.atm.runtimeState,
 				&runtimeRequest, &vk.atm.runtimeReceipt ) ) return qfalse;
 	}
@@ -18715,11 +20416,16 @@ qboolean vk_atmosphere_full_execute( void ) {
 	memset( &request, 0, sizeof( request ) );
 	request.schemaVersion = RAL_ATMOSPHERE_PLAN_SCHEMA_VERSION;
 	request.backendType = RAL_BACKEND_VULKAN;
-	if ( vk_atmosphere_full.frameGeneration == UINT64_MAX ) return qfalse;
-	request.frameGeneration = ++vk_atmosphere_full.frameGeneration;
+	/* The atmosphere plan and its nested sky plan form one exact receipt and
+	 * therefore must share a generation.  Keep that generation in the
+	 * device-owned state: REF_LEVEL_ONLY recreates vk_atmosphere_full between
+	 * maps, while the sky runtime intentionally survives the transition. */
+	if ( vk.atm.skyPlanFrameGeneration == UINT64_MAX ) return qfalse;
+	request.frameGeneration = ++vk.atm.skyPlanFrameGeneration;
 	request.width = (uint32_t)glConfig.vidWidth;
 	request.height = (uint32_t)glConfig.vidHeight;
-	request.requestedTier = RAL_ATMOSPHERE_TIER_FULL;
+	request.requestedTier = ( vk.atm.state.flags & ATMOSPHERE_FLAG_ENABLED )
+		? (ralAtmosphereTier_t)vk.atm.state.qualityTier : RAL_ATMOSPHERE_TIER_OFF;
 	request.localVolumeCount = vk_atmosphere_full.volumeCount;
 	request.lightCount = (uint32_t)Com_Clamp( 0, RAL_ATMOSPHERE_MAX_LIGHTS,
 		vk.fpLightCount );
@@ -18741,9 +20447,215 @@ qboolean vk_atmosphere_full_execute( void ) {
 	request.capabilities.storageBuffers = qtrue;
 	request.capabilities.temporalHistory = qtrue;
 	request.capabilities.fullClouds = qtrue;
-	if ( !Ral_AtmospherePlan( &request, &plan )
-			|| !Ral_AtmospherePlanReceiptExact( &plan, &plan ) ) return qfalse;
+	memset( &skySnapshot, 0, sizeof( skySnapshot ) );
+	skySnapshot.state = vk.atm.state;
+	skySnapshot.active = ( vk.atm.state.flags & ATMOSPHERE_FLAG_ENABLED )
+		? qtrue : qfalse;
+	memset( &skyCapabilities, 0, sizeof( skyCapabilities ) );
+	skyCapabilities.physicalLuts = vk_sky_physical.ready;
+	/* The native command stream lowers the shared bounded distant-world
+	 * submission into explicit sky/distant/foreground passes.  Keep this false
+	 * until that lowering exists; it is now a real adapter capability rather
+	 * than a planner-only promise. */
+	skyCapabilities.distantScene = qtrue;
+	{
+		skyEvents = 0u;
+		skyCompletedWorkMask = vk_sky_physical.ready
+			? vk_sky_physical.submittedWorkMask[vk.cmd_index] : 0u;
+		if ( !Ral_AtmosphereSkyEventMask(
+				vk.atm.runtimeReceipt.invalidationMask, &skyEvents ) ) {
+			R_LOG( rch_ral, SEV_WARN,
+				"sky environment rejected atmosphere invalidation mask=0x%x\n",
+				vk.atm.runtimeReceipt.invalidationMask );
+			return qfalse;
+		}
+		if ( !RenderSubmission_BuildSkyEnvironmentRuntimeRequest( &skySnapshot,
+				&vk.atm.skyRuntimeState, RAL_BACKEND_VULKAN,
+				request.frameGeneration,
+				request.requestedTier, skyEvents,
+				skyCompletedWorkMask,
+				1u, skySnapshot.state.timelineSeconds, &skyCapabilities,
+				&skyRuntimeRequest ) ) {
+			R_LOG( rch_ral, SEV_WARN,
+				"sky environment request build rejected frame=%llu tier=%u completed=0x%x\n",
+				(unsigned long long)request.frameGeneration,
+				(unsigned)request.requestedTier, skyCompletedWorkMask );
+			return qfalse;
+		}
+		if ( skyRuntimeRequest.eventMask & ( RAL_SKY_EVENT_MAP_TRANSITION |
+				RAL_SKY_EVENT_DEVICE_RECREATE | RAL_SKY_EVENT_SOURCE_CHANGE ) ) {
+			if ( skyRuntimeRequest.eventMask & ( RAL_SKY_EVENT_MAP_TRANSITION |
+					RAL_SKY_EVENT_DEVICE_RECREATE ) )
+				vk.probeCurrentProductValid = qfalse;
+			memset( vk_sky_physical.submittedWorkMask, 0,
+				sizeof( vk_sky_physical.submittedWorkMask ) );
+			skyRuntimeRequest.completedWorkMask = 0u;
+			skyCompletedWorkMask = 0u;
+		}
+		if ( !Ral_SkyEnvironmentRuntimeAdvance( &vk.atm.skyRuntimeState,
+				&skyRuntimeRequest, &skyPlan, &vk.atm.skyRuntimeReceipt ) ) {
+			R_LOG( rch_ral, SEV_WARN,
+				"sky environment advance rejected frame=%llu source=%llu mode=%u events=0x%x completed=0x%x\n",
+				(unsigned long long)skyRuntimeRequest.frameGeneration,
+				(unsigned long long)skyRuntimeRequest.sourceRevision,
+				(unsigned)skyRuntimeRequest.mode,
+				skyRuntimeRequest.eventMask,
+				skyRuntimeRequest.completedWorkMask );
+			return qfalse;
+		}
+		if ( skyCompletedWorkMask )
+			vk_sky_physical.submittedWorkMask[vk.cmd_index] = 0u;
+	}
+	request.skyEnvironment = skyPlan;
+	if ( !Ral_AtmospherePlan( &request, &plan ) ||
+		 !Ral_AtmospherePlanReceiptExact( &plan, &plan ) ) {
+		R_LOG( rch_ral, SEV_WARN,
+			"sky atmosphere plan rejected frame=%llu source=%llu mode=%u\n",
+			(unsigned long long)request.frameGeneration,
+			(unsigned long long)skyRuntimeRequest.sourceRevision,
+			(unsigned)skyRuntimeRequest.mode );
+		return qfalse;
+	}
+	/* Visibility is backend work, while flare shape remains frontend/WiredFX
+	 * authoring.  Publish the same normalized cloud/optics factor consumed by
+	 * Metal into the Vulkan depth oracle; never synthesize a second weather
+	 * authority or a cgame fallback. */
+	vk.lensOpticsVisibility = Com_Clamp( 0.0f, 1.0f,
+		plan.skyEnvironment.opticsVisibility );
+	if ( !vk_sky_radiance_execute( &plan.skyEnvironment,
+			plan.selectedTier, skyRuntimeRequest.eventMask ) )
+		return qfalse;
+	skyAdmittedWorkMask = plan.skyEnvironment.admittedWorkMask;
+	if ( skyAdmittedWorkMask ) {
+		vk_sky_gpu_ts_begin( qfalse, plan.frameGeneration );
+		if ( !vk_sky_physical_dispatch( skyAdmittedWorkMask,
+				&vk.atm.state.skyEnvironment ) ) return qfalse;
+		vk_sky_gpu_ts_end( qfalse );
+	}
+	if ( !Ral_SkyEnvironmentRuntimeSchedule( &vk.atm.skyRuntimeState,
+			&plan.skyEnvironment ) ) {
+		R_LOG( rch_ral, SEV_WARN,
+			"sky environment schedule rejected frame=%llu admitted=0x%x pending=0x%x inflight=0x%x\n",
+			(unsigned long long)plan.skyEnvironment.frameGeneration,
+			plan.skyEnvironment.admittedWorkMask,
+			vk.atm.skyRuntimeState.pendingDirtyMask,
+			vk.atm.skyRuntimeState.inFlightWorkMask );
+		return qfalse;
+	}
+	vk.atm.skyWorldLifecycleGeneration = worldLifecycleGeneration;
+	backEnd.pc.c_skyPendingWork = (int)vk_profile_marker_popcount(
+		vk.atm.skyRuntimeState.pendingDirtyMask );
+	backEnd.pc.c_skyInFlightWork = (int)vk_profile_marker_popcount(
+		vk.atm.skyRuntimeState.inFlightWorkMask );
+	backEnd.pc.c_skyAdmittedWork = (int)vk_profile_marker_popcount(
+		plan.skyEnvironment.admittedWorkMask );
+	backEnd.pc.c_skyCompletedWork = (int)vk_profile_marker_popcount(
+		vk.atm.skyRuntimeState.completedProductMask );
+	backEnd.pc.c_skyCancelledWork = (int)vk_profile_marker_popcount(
+		vk.atm.skyRuntimeReceipt.cancelledWorkMask );
+	memset( &vk.atm.skyGpuTelemetry, 0,
+		sizeof( vk.atm.skyGpuTelemetry ) );
+	vk.atm.skyGpuTelemetry.schemaVersion =
+		RAL_SKY_GPU_TELEMETRY_SCHEMA_VERSION;
+	vk.atm.skyGpuTelemetry.backendType = RAL_BACKEND_VULKAN;
+	vk.atm.skyGpuTelemetry.frameGeneration = plan.frameGeneration;
+	vk.atm.skyGpuTelemetry.sourceRevision =
+		plan.skyEnvironment.sourceRevision;
+	vk.atm.skyGpuTelemetry.selectedTier = plan.selectedTier;
+	vk.atm.skyGpuTelemetry.selectedMode =
+		plan.skyEnvironment.selectedMode;
+	vk.atm.skyGpuTelemetry.submittedWorkMask =
+		plan.skyEnvironment.admittedWorkMask;
+	vk.atm.skyGpuTelemetry.completedWorkMask = skyCompletedWorkMask;
+	vk.atm.skyGpuTelemetry.deferredWorkMask =
+		plan.skyEnvironment.deferredWorkMask;
+	vk.atm.skyGpuTelemetry.cancelledWorkMask =
+		plan.skyEnvironment.cancelledWorkMask |
+		vk.atm.skyRuntimeReceipt.cancelledWorkMask;
+	vk.atm.skyGpuTelemetry.submittedSliceMask =
+		vk.atm.skyRadianceReceipt.admittedSliceMask;
+	vk.atm.skyGpuTelemetry.completedSliceMask =
+		vk.atm.skyRadianceReceipt.acceptedCompletionMask;
+	vk.atm.skyGpuTelemetry.deferredSliceCount =
+		vk.atm.skyRadianceReceipt.pendingSliceCount;
+	vk.atm.skyGpuTelemetry.cancelledSliceCount =
+		vk.atm.skyRadianceReceipt.cancelledSliceCount;
+	vk.atm.skyGpuTelemetry.currentRadianceRevision =
+		vk.atm.skyRadianceReceipt.currentProductRevision;
+	vk.atm.skyGpuTelemetry.targetRadianceRevision =
+		vk.atm.skyRadianceReceipt.targetProductRevision;
+	vk_sky_gpu_ts_copy_timing( &vk.atm.skyGpuTelemetry );
+	vk.atm.skyGpuTelemetry.ready = qtrue;
+	if ( !Ral_SkyGpuTelemetryReceiptExact( &vk.atm.skyGpuTelemetry,
+			&vk.atm.skyGpuTelemetry ) ) return qfalse;
 	vk_atmosphere_full.lastPlan = plan;
+	if ( r_skyPhysicalBlend
+			&& !Ral_SkySurfaceSetPhysicalBlendScale( r_skyPhysicalBlend->value ) ) return qfalse;
+	if ( !Ral_SkySurfacePlan( &plan.skyEnvironment,
+			vk_sky_physical.ready &&
+			( vk_sky_physical.readableMask & RAL_SKY_DIRTY_SKY_VIEW ),
+			&skySurface ) ) return qfalse;
+	if ( !atmosphereActive ) {
+		if ( ( skySurface.physicalBlend <= 0.0f && !analyticMediaActive ) || !skyCompositeReady )
+			return qtrue;
+		/* Separate sky/radiance preparation, surface compute and the scene
+		 * format-converting transfer in the existing non-blocking GPU profile. */
+		vk_gpu_ts_write( "sky_media_prepare" );
+		slot = (uint32_t)vk.cmd_index;
+		memset( paramBytes, 0, sizeof( paramBytes ) );
+		composite = (vkAtmosphereCompositeParams_t *)( paramBytes
+			+ 4u * vk_atmosphere_full.paramStride );
+		memcpy( projection, backEnd.viewParms.projectionMatrix,
+			sizeof( projection ) );
+		projection[5] = -projection[5];
+		myGlMultMatrix( backEnd.viewParms.world.modelMatrix,
+			projection, viewProjection );
+		if ( !vk_mat4_inverse( viewProjection, inverseViewProjection ) )
+			return qfalse;
+		composite->outputGrid[0] = (uint32_t)glConfig.vidWidth;
+		composite->outputGrid[1] = (uint32_t)glConfig.vidHeight;
+		composite->depthRange[2] = vk.sceneDepth.copied ? 1.0f : 0.0f;
+		memcpy( composite->invViewProjection, inverseViewProjection,
+			sizeof( inverseViewProjection ) );
+		memcpy( composite->eyeSkyControl, backEnd.refdef.vieworg,
+			sizeof( vec3_t ) );
+		composite->eyeSkyControl[3] = skySurface.physicalBlend;
+		if ( analyticMediaActive ) {
+			float cloudTransmission = 1.0f - vk.atm.state.cloudCover
+				* plan.skyEnvironment.cloudSunOcclusion;
+			for ( uint32_t channel = 0u; channel < 3u; ++channel )
+				composite->mediaColorDensity[channel] = fminf( 16.0f,
+					plan.skyEnvironment.ambientSh[channel]
+					+ 0.08f * plan.skyEnvironment.sunRadiance[channel]
+						* cloudTransmission + vk.atm.state.lightning );
+			composite->mediaColorDensity[3] = vk.atm.state.mediaDensity;
+			if ( vk.atm.state.visibility > 0.0f )
+				composite->mediaColorDensity[3] = fmaxf(
+					composite->mediaColorDensity[3], 3.912023f / vk.atm.state.visibility );
+			composite->mediaHeight[0] = vk.atm.state.bounds[2];
+			composite->mediaHeight[1] = vk.atm.state.mediaHeightFalloff;
+			/* Opt-in aerial-perspective haze (prototype for TASK-239 visual
+			 * review). Sun direction rides the unused ABI slots; weight 0 keeps
+			 * the flat media colour bit-identical. */
+			if ( r_atmosphereAerialHaze && r_atmosphereAerialHaze->value > 0.0f
+					&& vk.atm.skyRadianceConsumer.ready ) {
+				composite->depthRange[3]      = plan.skyEnvironment.sunDirection[0];
+				composite->radianceControl[3] = plan.skyEnvironment.sunDirection[1];
+				composite->mediaHeight[2]     = plan.skyEnvironment.sunDirection[2];
+				composite->mediaHeight[3]     = fminf( 1.0f, r_atmosphereAerialHaze->value );
+			}
+		}
+		if ( !Ral_BufferWriteImmediate( vk_atmosphere_full.params[slot], 0u,
+				paramBytes, vk_atmosphere_full.paramBytes, &paramWrite ) ) return qfalse;
+		work->dispatch.commandBuffer = vk.cmd->ral_cmd;
+		work->dispatch.pipeline = vk_atmosphere_full.skyCompositePipeline;
+		work->dispatch.bindGroup = vk_atmosphere_full.compositeBg[slot];
+		work->dispatch.groupCountX = ( (uint32_t)glConfig.vidWidth + 7u ) / 8u;
+		work->dispatch.groupCountY = ( (uint32_t)glConfig.vidHeight + 7u ) / 8u;
+		work->dispatch.groupCountZ = 1u;
+		work->analytic = analyticMediaActive;
+		return qtrue;
+	}
 	if ( plan.selectedTier != RAL_ATMOSPHERE_TIER_FULL
 			|| plan.froxelCount != vk_atmosphere_full.froxelCount ) return qtrue;
 	backEnd.pc.c_atmosphereFroxels = (int)plan.froxelCount;
@@ -18764,13 +20676,20 @@ qboolean vk_atmosphere_full_execute( void ) {
 		+ 3u * vk_atmosphere_full.paramStride );
 	composite = (vkAtmosphereCompositeParams_t *)( paramBytes
 		+ 4u * vk_atmosphere_full.paramStride );
-	myGlMultMatrix( backEnd.viewParms.world.modelMatrix,
-		backEnd.viewParms.projectionMatrix, viewProjection );
+	nearZ = WIRED_ATMOSPHERE_GRID_NEAR;
+	farZ = wired_atmosphere_grid_far( vk.atm.state.visibility );
+	/* Canonical froxel producers use forward-infinite clip z = 1-near/distance.
+	 * Keep that grid projection distinct from the reversed/oblique scene depth
+	 * projection consumed by composite. Match framebuffer Y for every stage,
+	 * not only the final composite (otherwise local media/lights are mirrored).
+	 * Portal clipping belongs to scene visibility, not to the volume grid. */
+	memcpy( projection, backEnd.viewParms.projectionMatrix, sizeof( projection ) );
+	projection[5] = -projection[5];
+	projection[2] = projection[6] = 0.0f;
+	projection[10] = -1.0f;
+	projection[14] = -nearZ;
+	myGlMultMatrix( backEnd.viewParms.world.modelMatrix, projection, viewProjection );
 	if ( !vk_mat4_inverse( viewProjection, inverseViewProjection ) ) return qfalse;
-	nearZ = r_znear ? r_znear->value : 4.0f;
-	if ( nearZ < 0.01f ) nearZ = 0.01f;
-	farZ = backEnd.viewParms.zFar;
-	if ( farZ <= nearZ ) farZ = nearZ + 1.0f;
 	memcpy( inject->invViewProjection, inverseViewProjection,
 		sizeof( inverseViewProjection ) );
 	memcpy( inject->eyeNear, backEnd.refdef.vieworg, sizeof( vec3_t ) );
@@ -18814,17 +20733,29 @@ qboolean vk_atmosphere_full_execute( void ) {
 	light->gridLightCount[1] = plan.froxelHeight;
 	light->gridLightCount[2] = plan.froxelDepth;
 	light->gridLightCount[3] = plan.admittedLightCount;
-	memcpy( light->sunDirectionIntensity, vk.atm.state.sunDirection,
+	memcpy( light->sunDirectionIntensity, plan.skyEnvironment.sunDirection,
 		sizeof( vec3_t ) );
-	light->sunDirectionIntensity[3] = vk.atm.state.sunIntensity;
-	VectorSet( light->sunColorCloudShadow, 1.0f, 0.97f, 0.9f );
-	light->sunColorCloudShadow[3] = vk.atm.state.cloudShadow;
-	memcpy( light->moonDirectionIntensity, vk.atm.state.moonDirection,
+	sunRadianceLength = sqrtf(
+		plan.skyEnvironment.sunRadiance[0] * plan.skyEnvironment.sunRadiance[0]
+		+ plan.skyEnvironment.sunRadiance[1] * plan.skyEnvironment.sunRadiance[1]
+		+ plan.skyEnvironment.sunRadiance[2] * plan.skyEnvironment.sunRadiance[2] );
+	moonRadianceLength = sqrtf(
+		plan.skyEnvironment.moonRadiance[0] * plan.skyEnvironment.moonRadiance[0]
+		+ plan.skyEnvironment.moonRadiance[1] * plan.skyEnvironment.moonRadiance[1]
+		+ plan.skyEnvironment.moonRadiance[2] * plan.skyEnvironment.moonRadiance[2] );
+	light->sunDirectionIntensity[3] = sunRadianceLength;
+	for ( uint32_t channel = 0u; channel < 3u; ++channel )
+		light->sunColorCloudShadow[channel] = sunRadianceLength > 0.0f
+			? plan.skyEnvironment.sunRadiance[channel] / sunRadianceLength : 0.0f;
+	light->sunColorCloudShadow[3] = plan.skyEnvironment.cloudSunOcclusion;
+	memcpy( light->moonDirectionIntensity, plan.skyEnvironment.moonDirection,
 		sizeof( vec3_t ) );
-	light->moonDirectionIntensity[3] = vk.atm.state.moonIntensity;
-	VectorSet( light->moonColorLightning, 0.45f, 0.55f, 0.8f );
+	light->moonDirectionIntensity[3] = moonRadianceLength;
+	for ( uint32_t channel = 0u; channel < 3u; ++channel )
+		light->moonColorLightning[channel] = moonRadianceLength > 0.0f
+			? plan.skyEnvironment.moonRadiance[channel] / moonRadianceLength : 0.0f;
 	light->moonColorLightning[3] = vk.atm.state.lightning;
-	memcpy( light->ambientCloud, vk.atm.state.ambientColor,
+	memcpy( light->ambientCloud, plan.skyEnvironment.ambientSh,
 		sizeof( vec3_t ) );
 	light->ambientCloud[3] = vk.atm.state.cloudCover;
 	memcpy( cloud->invViewProjection, inverseViewProjection,
@@ -18833,7 +20764,7 @@ qboolean vk_atmosphere_full_execute( void ) {
 	cloud->farTimeCoverageShadow[0] = farZ;
 	cloud->farTimeCoverageShadow[1] = vk.atm.timelineSeconds;
 	cloud->farTimeCoverageShadow[2] = vk.atm.state.cloudCover;
-	cloud->farTimeCoverageShadow[3] = vk.atm.state.cloudShadow;
+	cloud->farTimeCoverageShadow[3] = plan.skyEnvironment.cloudSunOcclusion;
 	memcpy( cloud->windDensity, vk.atm.wind, sizeof( vec3_t ) );
 	cloud->windDensity[3] = 0.012f;
 	cloudSpan = vk.atm.bounds[5] - vk.atm.bounds[2];
@@ -18848,12 +20779,14 @@ qboolean vk_atmosphere_full_execute( void ) {
 	cloud->layerErosion[1] = cloudTop;
 	cloud->layerErosion[2] = 0.18f;
 	cloud->layerErosion[3] = 0.22f;
-	memcpy( cloud->sunDirectionIntensity, vk.atm.state.sunDirection,
+	memcpy( cloud->sunDirectionIntensity, plan.skyEnvironment.sunDirection,
 		sizeof( vec3_t ) );
-	cloud->sunDirectionIntensity[3] = vk.atm.state.sunIntensity;
-	VectorSet( cloud->sunColorLightning, 1.0f, 0.97f, 0.9f );
+	cloud->sunDirectionIntensity[3] = sunRadianceLength;
+	for ( uint32_t channel = 0u; channel < 3u; ++channel )
+		cloud->sunColorLightning[channel] = sunRadianceLength > 0.0f
+			? plan.skyEnvironment.sunRadiance[channel] / sunRadianceLength : 0.0f;
 	cloud->sunColorLightning[3] = vk.atm.state.lightning;
-	memcpy( cloud->ambientColor, vk.atm.state.ambientColor,
+	memcpy( cloud->ambientColor, plan.skyEnvironment.ambientSh,
 		sizeof( vec3_t ) );
 	cloud->grid[0] = plan.froxelWidth;
 	cloud->grid[1] = plan.froxelHeight;
@@ -18874,13 +20807,27 @@ qboolean vk_atmosphere_full_execute( void ) {
 	composite->depthRange[1] = farZ;
 	composite->depthRange[2] = vk.sceneDepth.copied ? 1.0f : 0.0f;
 	composite->depthRange[3] = (float)plan.froxelDepth;
+	memcpy( projection, backEnd.viewParms.projectionMatrix,
+		sizeof( projection ) );
+	projection[5] = -projection[5];
+	myGlMultMatrix( backEnd.viewParms.world.modelMatrix,
+		projection, viewProjection );
+	if ( !vk_mat4_inverse( viewProjection, inverseViewProjection ) )
+		return qfalse;
+	memcpy( composite->invViewProjection, inverseViewProjection,
+		sizeof( inverseViewProjection ) );
+	memcpy( composite->eyeSkyControl, backEnd.refdef.vieworg,
+		sizeof( vec3_t ) );
+	/* A sky-view LUT becomes visible only after the runtime accepted the GPU
+	 * completion receipt.  Authored and hybrid backgrounds therefore retain
+	 * their exact legacy pixels; the shared atmosphere path still supplies
+	 * hybrid haze/cloud lighting without a parallel sky renderer. */
+	composite->eyeSkyControl[3] = skySurface.physicalBlend;
 	if ( !Ral_BufferWriteImmediate( vk_atmosphere_full.params[slot], 0u,
 			paramBytes, vk_atmosphere_full.paramBytes, &paramWrite )
 			|| !Ral_BufferWriteImmediate(
 				vk_atmosphere_full.volumeBuffer[slot], 0u, gpuVolumes,
 				sizeof( gpuVolumes ), &volumeWrite ) ) return qfalse;
-	if ( !vk_atmosphere_full_transition_begin() ) return qfalse;
-
 	groupsX = ( plan.froxelWidth + 3u ) / 4u;
 	groupsY = ( plan.froxelHeight + 3u ) / 4u;
 	groupsZ = ( plan.froxelDepth + 3u ) / 4u;
@@ -18914,29 +20861,53 @@ qboolean vk_atmosphere_full_execute( void ) {
 	dispatch.groupCountZ = 1u;
 	if ( !VK_RalComputeExecute( &dispatch ) ) return qfalse;
 	Ral_CmdPipelineBarrier( vk.cmd->ral_cmd, RAL_BARRIER_COMPUTE_TO_COMPUTE );
-	dispatch.pipeline = vk_atmosphere_full.compositePipeline;
-	dispatch.bindGroup = vk_atmosphere_full.compositeBg[slot];
-	dispatch.groupCountX = ( (uint32_t)glConfig.vidWidth + 7u ) / 8u;
-	dispatch.groupCountY = ( (uint32_t)glConfig.vidHeight + 7u ) / 8u;
-	dispatch.groupCountZ = 1u;
-	if ( !VK_RalComputeExecute( &dispatch ) ) return qfalse;
+	work->dispatch.commandBuffer = vk.cmd->ral_cmd;
+	work->dispatch.pipeline = vk_atmosphere_full.compositePipeline;
+	work->dispatch.bindGroup = vk_atmosphere_full.compositeBg[slot];
+	work->dispatch.groupCountX = ( (uint32_t)glConfig.vidWidth + 7u ) / 8u;
+	work->dispatch.groupCountY = ( (uint32_t)glConfig.vidHeight + 7u ) / 8u;
+	work->dispatch.groupCountZ = 1u;
+	work->full = qtrue;
+	work->historyReusable = historyReusable;
+	return qtrue;
+}
+
+static qboolean vk_atmosphere_full_composite( const vkAtmosphereCompositeWork_t *work ) {
+	static char receiptMap[MAX_QPATH];
+	const ralAtmospherePlanReceipt_t *plan = &vk_atmosphere_full.lastPlan;
+	if ( !work->dispatch.pipeline ) return qtrue;
+	if ( !vk_atmosphere_full_transition_begin()
+			|| !VK_RalComputeExecute( &work->dispatch ) ) return qfalse;
+	if ( work->analytic ) backEnd.pc.c_atmosphereDispatches = 1;
 	Ral_CmdPipelineBarrier( vk.cmd->ral_cmd, RAL_BARRIER_COMPUTE_TO_TRANSFER );
+	if ( !work->full ) vk_gpu_ts_write( "sky_media_compute" );
 	if ( !vk_atmosphere_full_copy_to_scene() ) return qfalse;
+	if ( !work->full ) {
+		vk_gpu_ts_write( "sky_media_transfer" );
+		return qtrue;
+	}
 	vk_atmosphere_full.historyRead = 1u - vk_atmosphere_full.historyRead;
 	vk_atmosphere_full.historyValid = qtrue;
-	if ( r_ralEffectsSmoke && r_ralEffectsSmoke->integer && plan.cloudsActive
+	if ( r_ralEffectsSmoke && r_ralEffectsSmoke->integer && plan->cloudsActive
 			&& Q_stricmp( receiptMap, tr.world->baseName ) ) {
 		R_LOG( rch_ral, SEV_INFO,
 			"ral-atmosphere-full schema=1 map=%s tier=full froxels=%u volumes=%u lights=%u dispatches=%u clouds=%u coverage-milli=%u composite=1 history=%s scene-hdr=copy-back\n",
-			tr.world->baseName, plan.froxelCount,
-			plan.admittedVolumeCount, plan.admittedLightCount,
-			4u + ( plan.cloudsActive ? 1u : 0u ),
-			plan.cloudsActive ? 1u : 0u,
+			tr.world->baseName, plan->froxelCount,
+			plan->admittedVolumeCount, plan->admittedLightCount,
+			4u + ( plan->cloudsActive ? 1u : 0u ),
+			plan->cloudsActive ? 1u : 0u,
 			(uint32_t)( vk.atm.state.cloudCover * 1000.0f + 0.5f ),
-			historyReusable ? "reused" : "rejected" );
+			work->historyReusable ? "reused" : "rejected" );
 		Q_strncpyz( receiptMap, tr.world->baseName, sizeof( receiptMap ) );
 	}
 	return qtrue;
+}
+
+qboolean vk_atmosphere_full_execute( void ) {
+	vkAtmosphereCompositeWork_t work;
+	memset( &work, 0, sizeof( work ) );
+	if ( !vk_atmosphere_full_prepare( &work ) ) return qfalse;
+	return vk_atmosphere_full_composite( &work );
 }
 
 // Tile grid for the current render extent.
@@ -20184,6 +22155,7 @@ void vk_brdf_lut_init( ralBackend_t *backend )
 void vk_ibl_probes_shutdown( void )
 {
 	uint32_t i;
+	wired_vk_sky_capture_shutdown( &wired_sky_capture );
 
 	// Readbacks.
 	if ( vk.ral_probe_source_readback )     { Ral_DestroyBuffer( vk.ral_probe_source_readback ); vk.ral_probe_source_readback = NULL; }
@@ -20195,40 +22167,66 @@ void vk_ibl_probes_shutdown( void )
 	if ( vk.ral_probe_source_pipeline )     { Ral_DestroyPipeline( vk.ral_probe_source_pipeline ); vk.ral_probe_source_pipeline = NULL; }
 	if ( vk.ral_probe_irradiance_pipeline ) { Ral_DestroyPipeline( vk.ral_probe_irradiance_pipeline ); vk.ral_probe_irradiance_pipeline = NULL; }
 	if ( vk.ral_probe_radiance_pipeline )   { Ral_DestroyPipeline( vk.ral_probe_radiance_pipeline ); vk.ral_probe_radiance_pipeline = NULL; }
+	if ( vk.ral_probe_sh_pipeline )         { Ral_DestroyPipeline( vk.ral_probe_sh_pipeline ); vk.ral_probe_sh_pipeline = NULL; }
 	if ( vk.ral_probe_source_descriptor )   { Ral_DestroyBindGroup( vk.ral_probe_source_descriptor ); vk.ral_probe_source_descriptor = NULL; }
 	if ( vk.ral_probe_irradiance_bg )       { Ral_DestroyBindGroup( vk.ral_probe_irradiance_bg ); vk.ral_probe_irradiance_bg = NULL; }
+	if ( vk.ral_probe_sh_bg )               { Ral_DestroyBindGroup( vk.ral_probe_sh_bg ); vk.ral_probe_sh_bg = NULL; }
 	for ( i = 0; i < VK_PROBE_RADIANCE_MIPS; i++ ) {
 		if ( vk.ral_probe_radiance_bg[i] ) { Ral_DestroyBindGroup( vk.ral_probe_radiance_bg[i] ); vk.ral_probe_radiance_bg[i] = NULL; }
 	}
 	if ( vk.ral_probe_source_bgl ) { Ral_DestroyBindGroupLayout( vk.ral_probe_source_bgl ); vk.ral_probe_source_bgl = NULL; }
 	if ( vk.ral_probe_conv_bgl )   { Ral_DestroyBindGroupLayout( vk.ral_probe_conv_bgl ); vk.ral_probe_conv_bgl = NULL; }
+	if ( vk.ral_probe_sh_bgl )     { Ral_DestroyBindGroupLayout( vk.ral_probe_sh_bgl ); vk.ral_probe_sh_bgl = NULL; }
 	if ( vk.ral_probe_conv_sampler ) { Ral_DestroySampler( vk.ral_probe_conv_sampler ); vk.ral_probe_conv_sampler = NULL; }
+	if ( vk.ral_probe_sh_buffer )  { Ral_DestroyBuffer( vk.ral_probe_sh_buffer ); vk.ral_probe_sh_buffer = NULL; }
+	if ( vk.ral_probe_sh_target_buffer ) { Ral_DestroyBuffer( vk.ral_probe_sh_target_buffer ); vk.ral_probe_sh_target_buffer = NULL; }
 
 	// Storage array views (source fill + convolve targets), then the cube sampled
 	// views, then the images.
 	if ( vk.ral_probe_source_array_view )     { Ral_DestroyTextureView( vk.ral_probe_source_array_view ); vk.ral_probe_source_array_view = NULL; }
 	if ( vk.ral_probe_irradiance_array_view ) { Ral_DestroyTextureView( vk.ral_probe_irradiance_array_view ); vk.ral_probe_irradiance_array_view = NULL; }
+	if ( vk.ral_probe_irradiance_target_array_view ) { Ral_DestroyTextureView( vk.ral_probe_irradiance_target_array_view ); vk.ral_probe_irradiance_target_array_view = NULL; }
 	for ( i = 0; i < VK_PROBE_RADIANCE_MIPS; i++ ) {
 		if ( vk.ral_probe_radiance_mip_view[i] ) { Ral_DestroyTextureView( vk.ral_probe_radiance_mip_view[i] ); vk.ral_probe_radiance_mip_view[i] = NULL; }
+		if ( vk.ral_probe_radiance_target_mip_view[i] ) { Ral_DestroyTextureView( vk.ral_probe_radiance_target_mip_view[i] ); vk.ral_probe_radiance_target_mip_view[i] = NULL; }
 	}
 	if ( vk.ral_probe_source_cube_view )     { Ral_DestroyTextureView( vk.ral_probe_source_cube_view ); vk.ral_probe_source_cube_view = NULL; }
 	if ( vk.ral_probe_irradiance_cube_view ) { Ral_DestroyTextureView( vk.ral_probe_irradiance_cube_view ); vk.ral_probe_irradiance_cube_view = NULL; }
 	if ( vk.ral_probe_radiance_cube_view )   { Ral_DestroyTextureView( vk.ral_probe_radiance_cube_view ); vk.ral_probe_radiance_cube_view = NULL; }
+	if ( vk.ral_probe_irradiance_target_cube_view ) { Ral_DestroyTextureView( vk.ral_probe_irradiance_target_cube_view ); vk.ral_probe_irradiance_target_cube_view = NULL; }
+	if ( vk.ral_probe_radiance_target_cube_view ) { Ral_DestroyTextureView( vk.ral_probe_radiance_target_cube_view ); vk.ral_probe_radiance_target_cube_view = NULL; }
 	if ( vk.ral_probe_source )     { Ral_DestroyTexture( vk.ral_probe_source ); vk.ral_probe_source = NULL; }
 	if ( vk.ral_probe_irradiance ) { Ral_DestroyTexture( vk.ral_probe_irradiance ); vk.ral_probe_irradiance = NULL; }
 	if ( vk.ral_probe_radiance )   { Ral_DestroyTexture( vk.ral_probe_radiance ); vk.ral_probe_radiance = NULL; }
+	if ( vk.ral_probe_irradiance_target ) { Ral_DestroyTexture( vk.ral_probe_irradiance_target ); vk.ral_probe_irradiance_target = NULL; }
+	if ( vk.ral_probe_radiance_target ) { Ral_DestroyTexture( vk.ral_probe_radiance_target ); vk.ral_probe_radiance_target = NULL; }
 
 	// Re-arm all one-shot guards: the recreated cubes must be (re)filled + convolved.
 	vk.probeSourceDispatched     = qfalse;
 	vk.probeIrradianceDispatched = qfalse;
 	vk.probeRadianceDispatched   = qfalse;
+	memset( vk.probeSubmittedSliceMask, 0,
+		sizeof( vk.probeSubmittedSliceMask ) );
+	memset( vk.probeSubmittedRevision, 0,
+		sizeof( vk.probeSubmittedRevision ) );
+	vk.probeSourceWriteStarted = qfalse;
+	vk.probeSourceReadable = qfalse;
+	vk.probeSourceDescriptorRevision = 0u;
+	vk.probeSourceHasAuthoredFaces = qfalse;
+	vk.probeIrradianceWriteStarted = qfalse;
+	vk.probeIrradianceReadable = qfalse;
+	vk.probeIrradianceTargetReadable = qfalse;
+	vk.probeRadianceWriteStarted = qfalse;
+	vk.probeRadianceReadable = qfalse;
+	vk.probeRadianceTargetReadable = qfalse;
+	vk.probeCurrentProductValid = qfalse;
 }
 
 // Create a cube texture (6 layers) + its full-cube SAMPLED view. STORAGE so the
 // compute can imageStore per face; SAMPLED so the IBL term can sample the cube;
 // TRANSFER_SRC for the debug readback. Returns qtrue on success. The sampled
 // view is RAL_TEXTURE_CUBE over all mips/faces.
-static qboolean vk_ibl_create_cube( ralBackend_t *backend, uint32_t size, uint32_t mips,
+static qboolean vk_ibl_create_cube( ralBackend_t *backend, uint32_t size, uint32_t mips, uint32_t extraUsage,
 	const char *name, struct ralTexture_s **outImage, struct ralTextureView_s **outCubeView )
 {
 	ralTextureCreateInfo_t     tci;
@@ -20242,7 +22240,7 @@ static qboolean vk_ibl_create_cube( ralBackend_t *backend, uint32_t size, uint32
 	tci.depthOrArrayLayers = 6;
 	tci.mipLevels          = mips;
 	tci.sampleCount        = 1;
-	tci.usage              = RAL_TEXTURE_USAGE_STORAGE | RAL_TEXTURE_USAGE_SAMPLED | RAL_TEXTURE_USAGE_TRANSFER_SRC;
+	tci.usage              = RAL_TEXTURE_USAGE_STORAGE | RAL_TEXTURE_USAGE_SAMPLED | RAL_TEXTURE_USAGE_TRANSFER_SRC | extraUsage;
 	tci.memory             = RAL_MEMORY_DEVICE_LOCAL;
 	tci.debugName          = name;
 	*outImage = Ral_CreateTexture( backend, &tci );
@@ -20312,7 +22310,7 @@ static struct ralTextureView_s *vk_ibl_create_array_view( ralBackend_t *backend,
 // adopt sweep purely for lifecycle symmetry; no color-image dependency.
 void vk_ibl_probes_init( ralBackend_t *backend )
 {
-	ralBindEntry_t                 bgle[3];
+	ralBindEntry_t                 bgle[8];
 	ralBindGroupLayoutCreateInfo_t bglci;
 	ralComputePipelineCreateInfo_t cpci;
 	ralSamplerCreateInfo_t         sci;
@@ -20325,7 +22323,7 @@ void vk_ibl_probes_init( ralBackend_t *backend )
 		return;
 
 	// (1) SOURCE sky cube + one 2D-array storage view (all 6 layers) for the fill.
-	if ( !vk_ibl_create_cube( backend, VK_PROBE_SOURCE_SIZE, 1, "wired-ibl-source",
+	if ( !vk_ibl_create_cube( backend, VK_PROBE_SOURCE_SIZE, 1, RAL_TEXTURE_USAGE_COLOR_ATTACHMENT, "wired-ibl-source",
 			&vk.ral_probe_source, &vk.ral_probe_source_cube_view ) ) {
 		R_LOG( rch_ral, SEV_WARN, "ibl probes: source cube create failed; IBL probes disabled\n" );
 		vk_ibl_probes_shutdown();
@@ -20335,17 +22333,28 @@ void vk_ibl_probes_init( ralBackend_t *backend )
 
 	// (2) IRRADIANCE cube (1 mip) + one all-6-faces array storage view (the convolve
 	// fills the whole cube in one z=6 dispatch).
-	if ( !vk_ibl_create_cube( backend, VK_PROBE_IRRADIANCE_SIZE, 1, "wired-ibl-irradiance",
+	if ( !vk_ibl_create_cube( backend, VK_PROBE_IRRADIANCE_SIZE, 1, 0, "wired-ibl-irradiance",
 			&vk.ral_probe_irradiance, &vk.ral_probe_irradiance_cube_view ) ) {
 		R_LOG( rch_ral, SEV_WARN, "ibl probes: irradiance cube create failed; IBL probes disabled\n" );
 		vk_ibl_probes_shutdown();
 		return;
 	}
 	vk.ral_probe_irradiance_array_view = vk_ibl_create_array_view( backend, vk.ral_probe_irradiance, 0 );
+	if ( !vk_ibl_create_cube( backend, VK_PROBE_IRRADIANCE_SIZE, 1, 0,
+			"wired-ibl-irradiance-target",
+			&vk.ral_probe_irradiance_target,
+			&vk.ral_probe_irradiance_target_cube_view ) ) {
+		R_LOG( rch_ral, SEV_WARN,
+			"ibl probes: target irradiance cube create failed; IBL probes disabled\n" );
+		vk_ibl_probes_shutdown();
+		return;
+	}
+	vk.ral_probe_irradiance_target_array_view = vk_ibl_create_array_view(
+		backend, vk.ral_probe_irradiance_target, 0 );
 
 	// (3) RADIANCE cube (N mips) + a per-MIP all-6-faces array storage view (the
 	// prefilter convolve fills each roughness mip in one z=6 dispatch).
-	if ( !vk_ibl_create_cube( backend, VK_PROBE_RADIANCE_SIZE, VK_PROBE_RADIANCE_MIPS, "wired-ibl-radiance",
+	if ( !vk_ibl_create_cube( backend, VK_PROBE_RADIANCE_SIZE, VK_PROBE_RADIANCE_MIPS, 0, "wired-ibl-radiance",
 			&vk.ral_probe_radiance, &vk.ral_probe_radiance_cube_view ) ) {
 		R_LOG( rch_ral, SEV_WARN, "ibl probes: radiance cube create failed; IBL probes disabled\n" );
 		vk_ibl_probes_shutdown();
@@ -20353,41 +22362,65 @@ void vk_ibl_probes_init( ralBackend_t *backend )
 	}
 	for ( mip = 0; mip < VK_PROBE_RADIANCE_MIPS; mip++ )
 		vk.ral_probe_radiance_mip_view[mip] = vk_ibl_create_array_view( backend, vk.ral_probe_radiance, mip );
+	if ( !vk_ibl_create_cube( backend, VK_PROBE_RADIANCE_SIZE,
+			VK_PROBE_RADIANCE_MIPS, 0, "wired-ibl-radiance-target",
+			&vk.ral_probe_radiance_target,
+			&vk.ral_probe_radiance_target_cube_view ) ) {
+		R_LOG( rch_ral, SEV_WARN,
+			"ibl probes: target radiance cube create failed; IBL probes disabled\n" );
+		vk_ibl_probes_shutdown();
+		return;
+	}
+	for ( mip = 0; mip < VK_PROBE_RADIANCE_MIPS; mip++ )
+		vk.ral_probe_radiance_target_mip_view[mip] = vk_ibl_create_array_view(
+			backend, vk.ral_probe_radiance_target, mip );
 
 	// Source-fill compute: set 0 / binding 0 = the 2D-array storage view (all 6
 	// layers). One dispatch with z=6 writes the whole cube — the shader's
 	// image2DArray imageStore targets layer = gl_GlobalInvocationID.z = face.
 	memset( bgle, 0, sizeof( bgle ) );
 	bgle[0].binding = 0; bgle[0].type = RAL_BIND_STORAGE_TEXTURE; bgle[0].count = 1; bgle[0].stageFlags = RAL_STAGE_COMPUTE;
+	for ( uint32_t face = 0u; face < RAL_MATERIAL_SKY_FACE_COUNT; ++face ) {
+		bgle[1u + face].binding = 1u + face;
+		bgle[1u + face].type = RAL_BIND_SAMPLED_TEXTURE;
+		bgle[1u + face].count = 1u;
+		bgle[1u + face].stageFlags = RAL_STAGE_COMPUTE;
+	}
+	bgle[7].binding = 7u; bgle[7].type = RAL_BIND_SAMPLER;
+	bgle[7].count = 1u; bgle[7].stageFlags = RAL_STAGE_COMPUTE;
 	memset( &bglci, 0, sizeof( bglci ) );
 	bglci.entries    = bgle;
-	bglci.numEntries = 1;
+	bglci.numEntries = 8;
 	bglci.debugName  = "wired-ibl-source-bgl";
 	vk.ral_probe_source_bgl = Ral_CreateBindGroupLayout( backend, &bglci );
 
-	if ( vk.ral_probe_source_bgl && vk.ral_probe_source_array_view ) {
-		ralBindingValue_t        bv[1];
-		ralBindGroupCreateInfo_t bgci;
-		memset( bv, 0, sizeof( bv ) );
-		bv[0].binding = 0; bv[0].type = RAL_BIND_STORAGE_TEXTURE; bv[0].textureView = vk.ral_probe_source_array_view;
-		memset( &bgci, 0, sizeof( bgci ) );
-		bgci.layout    = vk.ral_probe_source_bgl;
-		bgci.values    = bv;
-		bgci.numValues = 1;
-		bgci.debugName = "wired-ibl-source-bg";
-		vk.ral_probe_source_descriptor = Ral_CreateBindGroup( backend, &bgci );
-	}
-
-	if ( vk.ral_probe_source_bgl && vk.ral_probe_source_descriptor ) {
+	if ( vk.ral_probe_source_bgl ) {
 		layouts[0] = vk.ral_probe_source_bgl;
 		memset( &cpci, 0, sizeof( cpci ) );
 		cpci.computeSpirv        = (const uint32_t *)source_sky_comp_spv;
 		cpci.computeSpirvSize    = sizeof( source_sky_comp_spv );
 		cpci.bindGroupLayouts    = layouts;
 		cpci.numBindGroupLayouts = 1;
-		cpci.pushConstantSize    = 0;   // the shader derives extent from imageSize()
+		cpci.pushConstantSize    = sizeof( vkSkySourcePush_t );
 		cpci.debugName           = "wired-ibl-source-cs";
 		vk.ral_probe_source_pipeline = Ral_CreateComputePipeline( backend, &cpci );
+	}
+
+	// Ambient L2 SH projection: the same source cube + sampler feed one bounded
+	// coefficient dispatch at a time.  Keeping the 9 vec4 result in a native RAL
+	// buffer gives the scheduler a real GPU-owned product instead of a receipt-only
+	// placeholder.
+	{
+		ralBufferCreateInfo_t bufferInfo;
+		memset( &bufferInfo, 0, sizeof( bufferInfo ) );
+		bufferInfo.size = RAL_SKY_RADIANCE_AMBIENT_SH_COEFFICIENT_COUNT
+			* 4u * sizeof( float );
+		bufferInfo.usage = RAL_BUFFER_STORAGE;
+		bufferInfo.memory = RAL_MEMORY_DEVICE_LOCAL;
+		bufferInfo.debugName = "wired-ibl-sky-sh";
+		vk.ral_probe_sh_buffer = Ral_CreateBuffer( backend, &bufferInfo );
+		bufferInfo.debugName = "wired-ibl-sky-sh-target";
+		vk.ral_probe_sh_target_buffer = Ral_CreateBuffer( backend, &bufferInfo );
 	}
 
 	// CONVOLVE setup (prefilter radiance + irradiance). Both read the source as a
@@ -20416,15 +22449,57 @@ void vk_ibl_probes_init( ralBackend_t *backend )
 	bglci.debugName  = "wired-ibl-conv-bgl";
 	vk.ral_probe_conv_bgl = Ral_CreateBindGroupLayout( backend, &bglci );
 
+	memset( bgle, 0, sizeof( bgle ) );
+	bgle[0].binding = 0; bgle[0].type = RAL_BIND_SAMPLED_TEXTURE; bgle[0].count = 1; bgle[0].stageFlags = RAL_STAGE_COMPUTE;
+	bgle[1].binding = 1; bgle[1].type = RAL_BIND_SAMPLER; bgle[1].count = 1; bgle[1].stageFlags = RAL_STAGE_COMPUTE;
+	bgle[2].binding = 2; bgle[2].type = RAL_BIND_STORAGE_BUFFER; bgle[2].count = 1; bgle[2].stageFlags = RAL_STAGE_COMPUTE;
+	memset( &bglci, 0, sizeof( bglci ) );
+	bglci.entries = bgle;
+	bglci.numEntries = 3;
+	bglci.debugName = "wired-ibl-sky-sh-bgl";
+	vk.ral_probe_sh_bgl = Ral_CreateBindGroupLayout( backend, &bglci );
+	if ( vk.ral_probe_sh_bgl && vk.ral_probe_conv_sampler
+			&& vk.ral_probe_source_array_view && vk.ral_probe_sh_target_buffer ) {
+		ralBindingValue_t values[3];
+		ralBindGroupCreateInfo_t bgci;
+		memset( values, 0, sizeof( values ) );
+		values[0].binding = 0; values[0].type = RAL_BIND_SAMPLED_TEXTURE;
+		values[0].textureView = vk.ral_probe_source_array_view;
+		values[1].binding = 1; values[1].type = RAL_BIND_SAMPLER;
+		values[1].sampler = vk.ral_probe_conv_sampler;
+		values[2].binding = 2; values[2].type = RAL_BIND_STORAGE_BUFFER;
+		values[2].buffer = vk.ral_probe_sh_target_buffer;
+		values[2].bufferRange = RAL_SKY_RADIANCE_AMBIENT_SH_COEFFICIENT_COUNT
+			* 4u * sizeof( float );
+		memset( &bgci, 0, sizeof( bgci ) );
+		bgci.layout = vk.ral_probe_sh_bgl;
+		bgci.values = values;
+		bgci.numValues = 3;
+		bgci.debugName = "wired-ibl-sky-sh-bg";
+		vk.ral_probe_sh_bg = Ral_CreateBindGroup( backend, &bgci );
+	}
+	if ( vk.ral_probe_sh_bgl && vk.ral_probe_sh_bg ) {
+		layouts[0] = vk.ral_probe_sh_bgl;
+		memset( &cpci, 0, sizeof( cpci ) );
+		cpci.computeSpirv = (const uint32_t *)project_sky_sh_comp_spv;
+		cpci.computeSpirvSize = sizeof( project_sky_sh_comp_spv );
+		cpci.bindGroupLayouts = layouts;
+		cpci.numBindGroupLayouts = 1;
+		cpci.pushConstantSize = sizeof( uint32_t );
+		cpci.debugName = "wired-ibl-sky-sh-cs";
+		vk.ral_probe_sh_pipeline = Ral_CreateComputePipeline( backend, &cpci );
+	}
+
 	// Irradiance bind-group: source sampled cube + sampler + the irradiance array view.
 	if ( vk.ral_probe_conv_bgl && vk.ral_probe_conv_sampler
-	  && vk.ral_probe_source_cube_view && vk.ral_probe_irradiance_array_view ) {
+	  && vk.ral_probe_source_array_view
+	  && vk.ral_probe_irradiance_target_array_view ) {
 		ralBindingValue_t        bv[3];
 		ralBindGroupCreateInfo_t bgci;
 		memset( bv, 0, sizeof( bv ) );
-		bv[0].binding = 0; bv[0].type = RAL_BIND_SAMPLED_TEXTURE; bv[0].textureView = vk.ral_probe_source_cube_view;
+		bv[0].binding = 0; bv[0].type = RAL_BIND_SAMPLED_TEXTURE; bv[0].textureView = vk.ral_probe_source_array_view;
 		bv[1].binding = 1; bv[1].type = RAL_BIND_SAMPLER;         bv[1].sampler     = vk.ral_probe_conv_sampler;
-		bv[2].binding = 2; bv[2].type = RAL_BIND_STORAGE_TEXTURE; bv[2].textureView = vk.ral_probe_irradiance_array_view;
+		bv[2].binding = 2; bv[2].type = RAL_BIND_STORAGE_TEXTURE; bv[2].textureView = vk.ral_probe_irradiance_target_array_view;
 		memset( &bgci, 0, sizeof( bgci ) );
 		bgci.layout    = vk.ral_probe_conv_bgl;
 		bgci.values    = bv;
@@ -20435,16 +22510,16 @@ void vk_ibl_probes_init( ralBackend_t *backend )
 
 	// Radiance bind-groups: one per mip (the storage view changes per roughness mip;
 	// the source + sampler are shared).
-	if ( vk.ral_probe_conv_bgl && vk.ral_probe_conv_sampler && vk.ral_probe_source_cube_view ) {
+	if ( vk.ral_probe_conv_bgl && vk.ral_probe_conv_sampler && vk.ral_probe_source_array_view ) {
 		for ( mip = 0; mip < VK_PROBE_RADIANCE_MIPS; mip++ ) {
 			ralBindingValue_t        bv[3];
 			ralBindGroupCreateInfo_t bgci;
-			if ( !vk.ral_probe_radiance_mip_view[mip] )
+			if ( !vk.ral_probe_radiance_target_mip_view[mip] )
 				continue;
 			memset( bv, 0, sizeof( bv ) );
-			bv[0].binding = 0; bv[0].type = RAL_BIND_SAMPLED_TEXTURE; bv[0].textureView = vk.ral_probe_source_cube_view;
+			bv[0].binding = 0; bv[0].type = RAL_BIND_SAMPLED_TEXTURE; bv[0].textureView = vk.ral_probe_source_array_view;
 			bv[1].binding = 1; bv[1].type = RAL_BIND_SAMPLER;         bv[1].sampler     = vk.ral_probe_conv_sampler;
-			bv[2].binding = 2; bv[2].type = RAL_BIND_STORAGE_TEXTURE; bv[2].textureView = vk.ral_probe_radiance_mip_view[mip];
+			bv[2].binding = 2; bv[2].type = RAL_BIND_STORAGE_TEXTURE; bv[2].textureView = vk.ral_probe_radiance_target_mip_view[mip];
 			memset( &bgci, 0, sizeof( bgci ) );
 			bgci.layout    = vk.ral_probe_conv_bgl;
 			bgci.values    = bv;
@@ -20484,7 +22559,8 @@ void vk_ibl_probes_init( ralBackend_t *backend )
 		}
 	}
 
-	if ( vk.ral_probe_source_pipeline && vk.ral_probe_irradiance_pipeline && vk.ral_probe_radiance_pipeline ) {
+	if ( vk.ral_probe_source_pipeline && vk.ral_probe_sh_pipeline
+			&& vk.ral_probe_irradiance_pipeline && vk.ral_probe_radiance_pipeline ) {
 		R_LOG( rch_ral, SEV_INFO, "ibl probes: source=%d³ irradiance=%d³ radiance=%d³x%dmip ready (convolve armed)\n",
 			VK_PROBE_SOURCE_SIZE, VK_PROBE_IRRADIANCE_SIZE, VK_PROBE_RADIANCE_SIZE, VK_PROBE_RADIANCE_MIPS );
 
@@ -20628,6 +22704,9 @@ done:
 void vk_hdr_exposure_reduce_shutdown( void )
 {
 	uint32_t i;
+	if ( vk_exposure_reset_seed ) Ral_DestroyBuffer( vk_exposure_reset_seed );
+	vk_exposure_reset_seed = NULL;
+	memset( &vk_exposure_history, 0, sizeof( vk_exposure_history ) );
 	if ( vk.ral_exposure_reduce_pipeline ) { Ral_DestroyPipeline( vk.ral_exposure_reduce_pipeline ); vk.ral_exposure_reduce_pipeline = NULL; }
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		if ( vk.ral_exposure_reduce_descriptor[i] ) { Ral_DestroyBindGroup( vk.ral_exposure_reduce_descriptor[i] ); vk.ral_exposure_reduce_descriptor[i] = NULL; }
@@ -20672,6 +22751,22 @@ void vk_hdr_exposure_reduce_init( ralBackend_t *backend )
 	if ( !vk_hdr_exposure_accumulator_create_seeded( backend ) ) {
 		R_LOG( rch_ral, SEV_WARN, "hdr exposure reduce: seeded accumulator create failed; auto-exposure reduce disabled\n" );
 		return;
+	}
+	{
+		const float identity = 1.0f;
+		ralBufferUploadReceipt_t seedReceipt;
+		ralBufferCreateInfo_t seedInfo = {0};
+		seedInfo.size = sizeof(identity);
+		seedInfo.usage = RAL_BUFFER_TRANSFER_SRC | RAL_BUFFER_TRANSFER_DST;
+		seedInfo.memory = RAL_MEMORY_HOST_COHERENT;
+		seedInfo.debugName = "wired-exposure-reset-seed";
+		vk_exposure_reset_seed = Ral_CreateBuffer( backend, &seedInfo );
+		if ( !vk_exposure_reset_seed || !Ral_BufferWriteImmediate( vk_exposure_reset_seed,
+				0u, &identity, sizeof(identity), &seedReceipt ) ) {
+			vk_hdr_exposure_reduce_shutdown();
+			ri.Terminate( TERM_UNRECOVERABLE, "Vulkan: exposure reset seed rejected" );
+			return;
+		}
 	}
 
 	// set 0: histogram SSBO (0), accumulator SSBO (1), exposure UBO-as-SSBO (2).
@@ -20983,6 +23078,13 @@ qboolean vk_initialize( void )
 				ri.Terminate( TERM_UNRECOVERABLE, "vk_initialize: Ral_AcquireCommandBuffer(GRAPHICS) returned NULL for per-frame slot %u", (unsigned)i );
 			}
 			vk.tess[i].command_buffer = (VkCommandBuffer)Ral_GetCommandBufferHandle( vk.tess[i].ral_cmd );
+			vk.tess[i].ral_cmd_present = Ral_AcquireCommandBuffer( vk_ral_get_backend(), RAL_QUEUE_GRAPHICS );
+			vk.tess[i].ral_scene_finished = Ral_CreateSemaphore( vk_ral_get_backend(), RAL_SEMAPHORE_BINARY );
+			if ( vk.tess[i].ral_cmd_present == NULL || vk.tess[i].ral_scene_finished == NULL ) {
+				ri.Terminate( TERM_UNRECOVERABLE, "vk_initialize: split-present command buffer/semaphore allocation failed for slot %u", (unsigned)i );
+			}
+			vk.tess[i].ral_cmd_scene = NULL;
+			vk.tess[i].split_active = vk.tess[i].split_pending_recycle = vk.tess[i].split_upload_waited = qfalse;
 		}
 	}
 
@@ -21193,19 +23295,20 @@ qboolean vk_initialize( void )
 	// vk_ral_register_screenmap_view). Stage FRAGMENT only — shadowMap is
 	// not sampled in vertex.
 	{
-		// 5 COMBINED_IMAGE_SAMPLER bindings, FRAGMENT stage: 0=CSM shadow 2DArray,
-		// 1=BRDF LUT (2D), 2=irradiance cube, 3=radiance cube, 4=screen-space GTAO
+		// 7 COMBINED_IMAGE_SAMPLER bindings, FRAGMENT stage: 0=CSM shadow 2DArray,
+		// 1=BRDF LUT (2D), 2=irradiance cube, 3=radiance cube, 4=screen-space GTAO,
+		// 5=previous irradiance cube, 6=previous radiance cube.
 		// visibility (R16F). All are GLOBAL scene resources (not per-draw) so they share
-		// this set, mirroring the shadowMap. The layout is born with all 5 bindings here
+		// this set, mirroring the shadowMap. The layout is born with all 7 bindings here
 		// on the init path BEFORE any pipeline is created against it, so every pipeline
-		// is 5-binding-compatible — this is not a live layout mutation. binding 4 is
+		// is 7-binding-compatible — this is not a live layout mutation. binding 4 is
 		// always written with a valid view (denoised GTAO, or tr.whiteImage as a 1.0
 		// fallback) so no pipeline reads an unbound descriptor.
-		ralBindEntry_t binds[ 5 ];
+		ralBindEntry_t binds[ 7 ];
 		ralBindGroupLayoutCreateInfo_t desc;
 		int bi;
 		memset( binds, 0, sizeof( binds ) );
-		for ( bi = 0; bi < 5; bi++ ) {
+		for ( bi = 0; bi < 7; bi++ ) {
 			binds[bi].binding = (uint32_t)bi;
 			binds[bi].type = RAL_BIND_COMBINED_TEXTURE_SAMPLER;
 			binds[bi].count = 1u;
@@ -21961,6 +24064,16 @@ void vk_shutdown( refShutdownCode_t code )
 			vk.tess[i].ral_cmd = NULL;
 			vk.tess[i].command_buffer = VK_NULL_HANDLE;
 		}
+		if ( vk.tess[i].ral_cmd_present != NULL ) {
+			Ral_DestroyCommandBuffer( vk.tess[i].ral_cmd_present );
+			vk.tess[i].ral_cmd_present = NULL;
+		}
+		if ( vk.tess[i].ral_scene_finished != NULL ) {
+			Ral_DestroySemaphore( vk.tess[i].ral_scene_finished );
+			vk.tess[i].ral_scene_finished = NULL;
+		}
+		vk.tess[i].ral_cmd_scene = NULL;
+		vk.tess[i].split_active = vk.tess[i].split_pending_recycle = qfalse;
 	}
 
 #ifdef USE_UPLOAD_QUEUE
@@ -22013,6 +24126,10 @@ void vk_shutdown( refShutdownCode_t code )
 		VK_RalBufferShadowRelease( &vk_exposure_shadows[i] );
 		vk.exposure.ral_buffer[i] = NULL;
 		vk.exposure.ptr[i] = NULL;
+		VK_RalBufferShadowRelease( &vk_exposure_present_shadows[i] );
+		vk.exposure.present_ptr[i] = NULL;
+		vk.exposure.present_descriptor[i] = NULL;
+		VK_RalBufferShadowRelease( &vk_overlay_shadows[i] );
 	}
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		VK_RalBufferShadowRelease( &vk_menubg_shadows[i] );
@@ -22395,6 +24512,9 @@ void vk_release_resources( void ) {
 
 	vk_wait_idle();
 	vk_temporal_iqm_resources_release_after_idle( "release-resources" );
+#ifdef USE_VBO
+	VBO_ShutdownWorlds();
+#endif
 
 #if FEAT_IQM
 	// destroy per-model IQM GPU skinning VBOs before hunk is reset
@@ -24107,9 +26227,14 @@ static void vk_replay_overlay_quads( struct ralPipeline_s *pipeline )
 	Ral_CmdBindPipeline( vk.cmd->ral_cmd, pipeline );
 
 	// The mapped tess RAL buffer retains VERTEX capability; one owner covers every
-	// quad and only the byte offset differs.
+	// quad and only the byte offset differs. In fence-split mode the quads are
+	// recorded into the present buffer after the slot fence was handed over, so
+	// they stream into the per-slot present-lifetime overlay buffer instead.
 	{
-		ralBuffer_t *vb = vk.cmd->ral_vertex_buffer;
+		const qboolean presentLifetime = vk.cmd->slot_fence_handed
+			&& vk_overlay_shadows[vk.cmd_index].buffer != NULL;
+		vkRalBufferShadow_t *overlayShadow = &vk_overlay_shadows[vk.cmd_index];
+		ralBuffer_t *vb = presentLifetime ? overlayShadow->buffer : vk.cmd->ral_vertex_buffer;
 		if ( !vb )
 			return;
 
@@ -24153,13 +26278,25 @@ static void vk_replay_overlay_quads( struct ralPipeline_s *pipeline )
 
 		// Stream the 6 vertices into the shared dynamic vertex buffer (32-byte aligned,
 		// the same alignment vk_bind_attr uses).
-		off = PAD( vk.cmd->vertex_buffer_offset, 32 );
-		if ( off + sizeof( v ) > vk.geometry_buffer_size )
-			break;   // out of dynamic vertex space this frame — drop the rest
-		memcpy( vk.cmd->vertex_buffer_ptr + off, v, sizeof( v ) );
-		vk.cmd->vertex_buffer_offset = off + sizeof( v );
-		if ( !vk_tess_publish_shadow_range( off, sizeof( v ) ) )
-			break;
+		if ( presentLifetime ) {
+			vkRalBufferShadowWriteReceipt_t overlayReceipt;
+			off = PAD( vk.cmd->overlay_vertex_offset, 32 );
+			if ( off + sizeof( v ) > overlayShadow->byteSize )
+				break;   // out of present-lifetime overlay space — drop the rest
+			if ( !VK_RalBufferShadowWrite( overlayShadow, off, v, sizeof( v ) )
+					|| !VK_RalBufferShadowPublish( overlayShadow, off, sizeof( v ),
+						&overlayReceipt ) )
+				break;
+			vk.cmd->overlay_vertex_offset = off + sizeof( v );
+		} else {
+			off = PAD( vk.cmd->vertex_buffer_offset, 32 );
+			if ( off + sizeof( v ) > vk.geometry_buffer_size )
+				break;   // out of dynamic vertex space this frame — drop the rest
+			memcpy( vk.cmd->vertex_buffer_ptr + off, v, sizeof( v ) );
+			vk.cmd->vertex_buffer_offset = off + sizeof( v );
+			if ( !vk_tess_publish_shadow_range( off, sizeof( v ) ) )
+				break;
+		}
 
 		// The overlay pipeline shares the post-process sampler layout at set 0.
 		// image_t retains a non-owning wrapper around the renderer-pool set, so
@@ -24181,7 +26318,7 @@ static void vk_replay_overlay_quads( struct ralPipeline_s *pipeline )
 // path's energy-conserving reconstruction is one mip, so at equal r_bloomIntensity
 // it reads dimmer. This scales the dual composite back up to the legacy perceived
 // brightness without re-introducing the blocky over-sum.
-#define DUAL_BLOOM_ENERGY_SCALE 2.5f
+#define DUAL_BLOOM_ENERGY_SCALE WIRED_BLOOM_ENERGY_SCALE
 
 /*
 ================
@@ -25002,10 +27139,20 @@ static void create_pipeline( const Vk_Pipeline_Def *def,
 		// Base-pass IBL receiver pipelines. They use the universal
 		// vk.pipeline_layout (already carries set 2 / the probe cubes + LUT); the
 		// fog ++ below applies the fog variant as for every gen type. Module
-		// indexing [tx 1|2][colour-mode 0=mul/1=cl][fog].
+		// indexing [tx][colour 0=mul/1=cl/2=identity/3=fixed][fog].
 		case TYPE_MULTI_TEXTURE_MUL2_IBL:
 			vs_module = &vk.modules.gen_ibl_vert[1][0][0];
 			fs_module = &vk.modules.gen_ibl_frag[1][0][0];
+			break;
+
+		case TYPE_MULTI_TEXTURE_MUL2_IDENTITY_IBL:
+			vs_module = &vk.modules.gen_ibl_vert[1][2][0];
+			fs_module = &vk.modules.gen_ibl_frag[1][2][0];
+			break;
+
+		case TYPE_MULTI_TEXTURE_MUL2_FIXED_COLOR_IBL:
+			vs_module = &vk.modules.gen_ibl_vert[1][3][0];
+			fs_module = &vk.modules.gen_ibl_frag[1][3][0];
 			break;
 
 		case TYPE_BLEND2_MUL_IBL:
@@ -25313,11 +27460,10 @@ static void create_pipeline( const Vk_Pipeline_Def *def,
 	// id 15 so the value is ignored regardless.
 	frag_spec_data[12].i = def->normal_format;
 
-	// Base-pass IBL ambient gate (constant id 14, gen_frag.tmpl USE_IBL). 0 for
-	// every non-IBL def (memset-zeroed at the def-build site); set to 1 at the
-	// base-pass IBL pipeline-swap site for a pbrMap worldspawn surface. Ignored
-	// by every shader that doesn't declare id 14.
-	frag_spec_data[13].i = def->ibl_enabled ? 1 : 0;
+	// Base-pass IBL route (constant id 14, gen_frag.tmpl USE_IBL): 0 disables,
+	// 1 samples an ORM texture, 2 uses cooked scalar material factors only.
+	// Ignored by every shader that doesn't declare id 14.
+	frag_spec_data[13].i = def->ibl_enabled;
 
 	// Lightmap slot (constant id 26, gen_frag.tmpl lightmap_slot). 0 = none, else the
 	// 1-based colour slot holding the lightmap. gen_frag boosts exactly this operand by
@@ -25366,6 +27512,14 @@ static void create_pipeline( const Vk_Pipeline_Def *def,
 
 	// multutexture mode
 	switch ( def->shader_type ) {
+#if FEAT_PBR
+		case TYPE_MULTI_TEXTURE_MUL2_IBL:
+		case TYPE_MULTI_TEXTURE_MUL2_IDENTITY_IBL:
+		case TYPE_MULTI_TEXTURE_MUL2_FIXED_COLOR_IBL:
+		case TYPE_MULTI_TEXTURE_MUL3_IBL:
+		case TYPE_BLEND2_MUL_IBL:
+		case TYPE_BLEND3_MUL_IBL:
+#endif
 		case TYPE_MULTI_TEXTURE_MUL2_IDENTITY:
 		case TYPE_MULTI_TEXTURE_MUL2_IDENTITY_ENV:
 		case TYPE_MULTI_TEXTURE_MUL2_FIXED_COLOR:
@@ -25787,6 +27941,18 @@ static void create_pipeline( const Vk_Pipeline_Def *def,
 		// lightmap layout PLUS the world normal at location 5 (gen_vert reads
 		// in_normal for the ambient term; the lightmap base layouts omit it, so
 		// IBL must add it — the draw site ORs TESS_NNN for these surfaces).
+		case TYPE_MULTI_TEXTURE_MUL2_IDENTITY_IBL:
+		case TYPE_MULTI_TEXTURE_MUL2_FIXED_COLOR_IBL:
+			push_bind( 0, sizeof( vec4_t ) );
+			push_bind( 2, sizeof( vec2_t ) );
+			push_bind( 3, sizeof( vec2_t ) );
+			push_bind( 5, sizeof( vec4_t ) );
+			push_attr( 0, 0, VK_FORMAT_R32G32B32A32_SFLOAT );
+			push_attr( 2, 2, VK_FORMAT_R32G32_SFLOAT );
+			push_attr( 3, 3, VK_FORMAT_R32G32_SFLOAT );
+			push_attr( 5, 5, VK_FORMAT_R32G32B32A32_SFLOAT );
+			break;
+
 		case TYPE_MULTI_TEXTURE_MUL2_IBL:
 			push_bind( 0, sizeof( vec4_t ) );					// xyz array
 			push_bind( 1, sizeof( color4ub_t ) );				// color array
@@ -28748,10 +30914,12 @@ void vk_tonemap( void )
 		if ( r_colorGrading->integer ) varIdx |= TONEMAP_VAR_CG;
 #endif
 #if FEAT_SUNRAYS
-	// Sun-rays require a real map sun: tr.sunHasSource is false on q3map_sun-less maps
-	// (tr.sunDirection is the engine default), so the rays would otherwise radiate from a
-	// nonexistent sun. Gate the variant off in that case.
-		if ( r_drawSunRays->integer && vk.sceneDepth.active && tr.sunHasSource ) varIdx |= TONEMAP_VAR_SUNRAYS;
+	// Sun-rays require both a real map sun and the native scene-depth visibility
+	// oracle.  There is deliberately no draw-through-geometry fallback when the
+	// oracle is unavailable or still cold.
+		if ( r_drawSunRays->integer && r_lens->integer && vk.sceneDepth.active
+				&& tr.sunHasSource && vk.ral_lens_pipeline && vk.lensSourcesPtr )
+			varIdx |= TONEMAP_VAR_SUNRAYS;
 #endif
 	}
 
@@ -28838,9 +31006,14 @@ void vk_tonemap( void )
 	//   - auto OFF: no reduce dispatch; the CPU writes the visibility plan's
 	//               bounded exposure scale directly.
 	// Layout mirrors ExposureBlock in tonemap.frag (std140).
-	qboolean autoExposureOn = ( vk.fboActive && r_hdrAutoExposure->integer
+	uint64_t exposureWorldGeneration = 0u;
+	/* UI/loading frames have no world to meter and cannot advance scene history. */
+	qboolean exposureWorldReady = R_FrontendWorldLifecycleGeneration( &exposureWorldGeneration );
+	qboolean autoExposureOn = ( exposureWorldReady && vk.fboActive && r_hdrAutoExposure->integer
 		&& vk.ral_exposure_reduce_pipeline
 		&& vk_hdr_exposure_seed_valid() ) ? qtrue : qfalse;
+	if ( !autoExposureOn || (backEnd.refdef.rdflags & (RDF_CAMERA_CUT | RDF_HYPERSPACE)) )
+		vk_exposure_history.valid = qfalse;
 	if ( vk.exposure.ptr[ vk.cmd_index ] ) {
 		vk_exposure_block_t *eb = (vk_exposure_block_t *)vk.exposure.ptr[ vk.cmd_index ];
 		vkRalBufferShadowWriteReceipt_t exposureWrite;
@@ -28867,7 +31040,7 @@ void vk_tonemap( void )
 		// AO path and does its own depth reconstruction in the compute pass.)
 #if FEAT_SUNRAYS
 		// Sun-ray sun-screen params for computeSunRays (read only under USE_SUNRAYS).
-		// Project the scene sun (tr.sunDirection, the directional CSM sun) to screen so
+		// Project the shared sky-environment sun to screen so
 		// the rays radiate from the sun's actual on-screen position. The sun is
 		// directional/at-infinity, so a far world point along the direction projects to
 		// the right screen point: sunPoint = viewOrigin + sunDir * (zFar / 1.75). Transform
@@ -28877,11 +31050,17 @@ void vk_tonemap( void )
 		{
 			vec3_t sunPoint;
 			lensScreenProj_t sunProj;
+			const float *skySunDirection = vk.atm.state.skyEnvironment.sunDirection;
+			const float *skySunRadiance = vk.atm.state.skyEnvironment.sunRadiance;
+			float skySunEnergy = sqrtf(
+				skySunRadiance[0] * skySunRadiance[0]
+				+ skySunRadiance[1] * skySunRadiance[1]
+				+ skySunRadiance[2] * skySunRadiance[2] );
 			float  dist = backEnd.viewParms.zFar / 1.75f;   // ~zFar / sqrt(3)
 			// Project the synthesised at-infinity sun point through the world
 			// orientation (the flare/halo path). screenU/V == the original
 			// 0.5 + clip.xy * (0.5/clip.w); behindNear == the original clip.w<=0.
-			VectorMA( backEnd.viewParms.or.origin, dist, tr.sunDirection, sunPoint );
+			VectorMA( backEnd.viewParms.or.origin, dist, skySunDirection, sunPoint );
 			R_ProjectLightToScreen( sunPoint, &backEnd.viewParms.world,
 				&backEnd.viewParms, &sunProj );
 			if ( !sunProj.behindNear ) {
@@ -28918,9 +31097,9 @@ void vk_tonemap( void )
 				// sunProj (no second projection) for the screen UV; write the record into
 				// the dedicated sun slot; the oracle samples it next frame (1-frame delay,
 				// like halo — the sun is static/slow on real maps), and read the
-				// visibility it wrote LAST frame here. sunVisibility defaults to 1.0 when the
-				// oracle is off/cold → god-rays behave exactly as before (zero-feature-loss).
-				float sunVisibility = 1.0f;
+				// visibility it wrote LAST frame here.  A missing/cold oracle is
+				// fail-closed: sun rays become visible only after a native receipt.
+				float sunVisibility = 0.0f;
 				if ( r_lens->integer && vk.ral_lens_pipeline && vk.lensSourcesPtr ) {
 					float *sunRec = (float *)vk.lensSourcesPtr + (size_t)LENS_SLOT_SUN * ( LENS_SOURCE_VEC4S * 4 );
 					sunVisibility = sunRec[7];          // visibility the oracle wrote last frame
@@ -28935,10 +31114,11 @@ void vk_tonemap( void )
 				}
 				// Zero-amplitude on sunless maps (tr.sunHasSource false) even if the variant
 				// were mis-selected — belt-and-suspenders for the variant gate above. The
-				// edge-fade then tapers the in-front off-screen case. sunVisibility is an
-				// ADDITIONAL occlusion factor (1.0 when the oracle is off → unchanged).
+				// edge-fade then tapers the in-front off-screen case. sunVisibility is the
+				// native scene-depth + sky-optics receipt; no alternate visibility path exists.
 				eb->sunrayIntensity = ( r_drawSunRays->integer && tr.sunHasSource )
-					? r_sunRayIntensity->value * edgeFade * sunVisibility : 0.0f;
+					? r_sunRayIntensity->value * skySunEnergy * edgeFade
+						* sunVisibility : 0.0f;
 			} else {
 				// Sun behind the near plane: the projection is undefined, so emit no rays
 				// this frame rather than streaming them from a garbage screen point.
@@ -28979,7 +31159,7 @@ void vk_tonemap( void )
 	// SHADER_READ_ONLY_OPTIMAL (vk_end_render_pass landed it there); the compute
 	// pass samples it. The exposure-reduce pass that follows turns the histogram
 	// into the exposure_bias tonemap reads. Gated on the pipeline coming up.
-	if ( vk.fboActive && r_hdrAutoExposure->integer && vk.ral_histogram_pipeline ) {
+	if ( autoExposureOn && vk.ral_histogram_pipeline ) {
 		uint32_t            dims[2];
 		uint32_t            groupsX = ( (uint32_t)glConfig.vidWidth  + 15u ) / 16u;
 		uint32_t            groupsY = ( (uint32_t)glConfig.vidHeight + 15u ) / 16u;
@@ -29049,6 +31229,16 @@ void vk_tonemap( void )
 							gi ? "," : "", (unsigned long long)g );
 					}
 					R_LOG( rch_ral, SEV_WARN, "HISTPROF16 %s\n", prof );
+					/* Exact fenced bins let offline acceptance compute its own
+					 * target, independently of the exposure accumulator. Bounded
+					 * chunks fit the logger; this remains Debug-only at ~1 Hz. */
+					for ( b = 0u; b < VK_HDR_HISTOGRAM_BINS; b += 64u ) {
+						char exact[768]; int length = 0;
+						for ( uint32_t i = b; i < b + 64u; ++i )
+							length += Com_sprintf( exact + length, sizeof( exact ) - length,
+								"%s%u", i == b ? "" : ",", bins[i] );
+						R_LOG( rch_ral, SEV_WARN, "HISTAUDIT start=%u bins=%s\n", b, exact );
+					}
 				}
 				Ral_BufferMapUnmap( vk.ral_histogram_readback[vk.cmd_index], &ticket );
 				lastLogMs = nowMs;
@@ -29088,9 +31278,14 @@ void vk_tonemap( void )
 		if ( autoExposureOn && vk.ral_exposure_reduce_pipeline
 				&& vk.ral_exposure_reduce_descriptor[ vk.cmd_index ]
 				&& vk_hdr_exposure_seed_valid() ) {
-			float    dtPush;
-			uint32_t curMs;
-			static int prevExposureMs = 0;
+			ralExposureHistoryStep_t step;
+			float dtPush;
+			step = Ral_ExposureHistoryStep( vk_exposure_history.valid,
+				vk_exposure_history.timeMs, backEnd.refdef.sceneTime,
+				vk_exposure_history.world != exposureWorldGeneration
+				|| vk_exposure_history.width != (uint32_t)glConfig.vidWidth
+				|| vk_exposure_history.height != (uint32_t)glConfig.vidHeight );
+			dtPush = step.deltaSeconds;
 
 			vk_exposure_seed_smoke_receipt();
 
@@ -29098,13 +31293,18 @@ void vk_tonemap( void )
 			// a full barrier covers the compute→compute SSBO dependency RAL-side.
 			Ral_CmdPipelineBarrier( vk.cmd->ral_cmd, RAL_BARRIER_ALL );
 
-			// dt since last exposure dispatch (seconds), for the temporal smoothing.
-			// Clamp covers first frame / pauses / breakpoints (mirrors the particle dt).
-			curMs  = (uint32_t)ri.Milliseconds();
-			dtPush = ( prevExposureMs != 0 ) ? ( (float)( curMs - prevExposureMs ) * 0.001f ) : 0.0f;
-			if ( dtPush < 0.0f ) dtPush = 0.0f;
-			if ( dtPush > 0.1f ) dtPush = 0.1f;
-			prevExposureMs = (int)curMs;
+			if ( step.reset ) {
+				ralBufferCopy_t copy = {0};
+				copy.size = sizeof(float);
+				Ral_CmdCopyBuffer( vk.cmd->ral_cmd, vk_exposure_reset_seed,
+					vk.ral_exposure_accumulator, &copy );
+				Ral_CmdPipelineBarrier( vk.cmd->ral_cmd, RAL_BARRIER_ALL );
+			}
+			vk_exposure_history.pendingTimeMs = backEnd.refdef.sceneTime;
+			vk_exposure_history.pendingWorld = exposureWorldGeneration;
+			vk_exposure_history.pendingWidth = (uint32_t)glConfig.vidWidth;
+			vk_exposure_history.pendingHeight = (uint32_t)glConfig.vidHeight;
+			vk_exposure_history.recorded = qtrue;
 
 			Ral_CmdBindPipeline( vk.cmd->ral_cmd, vk.ral_exposure_reduce_pipeline );
 			Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 0, vk.ral_exposure_reduce_descriptor[ vk.cmd_index ] );
@@ -29475,6 +31675,7 @@ static void vk_scene_depth_copy_internal( qboolean forceFinal,
 	// barriers below move depth_image to TRANSFER_SRC and back explicitly, so the
 	// RAL depth tracker is re-synced before the dynamic depth-fade re-begin.
 	vk_end_render_pass();
+	if ( !forceFinal ) vk_gpu_ts_write( "opaque_to_depth" );
 
 	// Whole-resource layout authority covers depth+stencil for combined formats;
 	// the copy region below remains depth-plane only. Both transitions are
@@ -29551,6 +31752,8 @@ static void vk_scene_depth_copy_internal( qboolean forceFinal,
 			"vk_scene_depth_copy: portable post-copy transition failed" );
 	}
 
+	if ( !forceFinal ) vk_gpu_ts_write( "depth_transfer" );
+
 	// The snapshot is now valid (SHADER_READ_ONLY) and the render pass is closed —
 	// the legal window for a compute dispatch. SERIAL FALLBACK: when async GTAO did
 	// NOT run this frame (no dedicated compute queue, r_asyncCompute off, or the
@@ -29561,6 +31764,7 @@ static void vk_scene_depth_copy_internal( qboolean forceFinal,
 	vk.sceneDepth.copied = qtrue;   // set before dispatch: vk_gtao_dispatch's guard reads it
 	if ( dispatchDepthConsumers && !vk.gtaoAsyncActive )
 		vk_gtao_dispatch( vk.cmd->ral_cmd );
+	if ( !forceFinal ) vk_gpu_ts_write( "gtao_denoise" );
 
 	// Lens-glow occlusion oracle — same seam, same SHADER_READ_ONLY depth copy.
 	// Unconditionally on the graphics queue (no async variant); self-gates on r_lens
@@ -29572,6 +31776,8 @@ static void vk_scene_depth_copy_internal( qboolean forceFinal,
 		vk_lens_dispatch( vk.cmd->ral_cmd );
 		vk.lensSourceCount = 0;
 	}
+
+	if ( !forceFinal ) vk_gpu_ts_write( "lens_depth" );
 
 	// Re-open the scene pass as dynamic rendering, LOADing color + depth (the
 	// soft-transparent geometry that follows binds the same dynamic MAIN-slot
@@ -30819,6 +33025,7 @@ static void vk_diag_attempt_finish( qboolean presented )
 				(unsigned long long)( worker_count ? worker_queue_us / worker_count : 0 ),
 				(unsigned long long)( worker_count ? ( worker_wait_us + worker_reset_us ) / worker_count : 0 ),
 				worker_count, max_queue );
+			vk_pace_report_and_reset();
 			R_LOG( rch_timing, SEV_DEBUG,
 				"vk perf v2: epoch=%llu bucket=%u count=%u valid=%u acquire_total_us=%llu submit_total_us=%llu present_call_total_us=%llu main_slot_wait_total_us=%llu worker_queue_total_us=%llu worker_wait_total_us=%llu worker_reset_total_us=%llu worker_count=%u maxq=%u generation=%llu mode=%s r_swapInterval=%d policy_intent=%d requested_images=%u actual_images=%u frames_in_flight=%u vrr_preferred=%d slots=%u extent=%ux%u platform=%s worker_mode=%s draws_total=%llu image_hits=%s identity_stable=%d\n",
 				(unsigned long long)vk_diag_v2_epoch,
@@ -30895,7 +33102,7 @@ static void vk_diag_attempt_begin( void )
 // Usage: r_gpuSpeeds 0=off 1=200f-avg N>=2=per-frame when total>=N ms
 // ---------------------------------------------------------------------------
 
-#define VK_GPU_TS_MAX 16
+#define VK_GPU_TS_MAX ( RAL_PROFILE_MAX_LANES + 1 ) // interval lanes plus initial timestamp
 
 static qboolean       vk_gpu_ts_active;
 static ralQueryPool_t *vk_gpu_ts_ral_pool;  // native RAL ownership; no renderer-side VkQueryPool bridge
@@ -30909,11 +33116,221 @@ static struct {
 	const char *labels[ VK_GPU_TS_MAX ];
 } vk_gpu_ts_inflight[ NUM_COMMAND_BUFFERS ];
 
+// Per-frame GPU spike attribution inside the 200-frame averaged report. The
+// averaged lanes cannot show single-frame spikes, so each completed sample also
+// updates: frames whose lane sum exceeds the 4ms steady-gameplay budget, the
+// worst single-frame total, which lane dominated each spike frame, and every
+// lane's single-frame maximum. Indexed by accumulator lane (label identity).
+static uint32_t vk_gpu_spike_frames;                       // completed samples in the window
+static uint32_t vk_gpu_spike_over4ms;                      // samples with lane sum > 4ms
+static double   vk_gpu_spike_max_frame_ms;
+static uint32_t vk_gpu_spike_dominant[ RAL_PROFILE_MAX_LANES ];
+static double   vk_gpu_lane_max_ms[ RAL_PROFILE_MAX_LANES ];
+
+
 static ralProfileAccumulator_t vk_gpu_ts_accum;
+
+static int vk_gpu_ts_accum_lane_index( const char *label ) {
+	uint32_t i;
+	for ( i = 0; i < vk_gpu_ts_accum.laneCount; i++ )
+		if ( vk_gpu_ts_accum.labels[i] && label && strcmp( vk_gpu_ts_accum.labels[i], label ) == 0 )
+			return (int)i;
+	return -1;
+}
+
+static void vk_gpu_spike_track( const char **labels, const double *ms, uint32_t lanes ) {
+	double frameTotal = 0.0, best = -1.0;
+	int bestLane = -1, lane;
+	uint32_t i;
+	for ( i = 0; i < lanes; i++ ) {
+		frameTotal += ms[i];
+		lane = vk_gpu_ts_accum_lane_index( labels[i] );
+		if ( lane >= 0 && ms[i] > vk_gpu_lane_max_ms[lane] )
+			vk_gpu_lane_max_ms[lane] = ms[i];
+		if ( ms[i] > best ) { best = ms[i]; bestLane = lane; }
+	}
+	vk_gpu_spike_frames++;
+	if ( frameTotal > vk_gpu_spike_max_frame_ms )
+		vk_gpu_spike_max_frame_ms = frameTotal;
+	if ( frameTotal > 4.0 ) {
+		vk_gpu_spike_over4ms++;
+		if ( bestLane >= 0 ) vk_gpu_spike_dominant[bestLane]++;
+	}
+}
+
+static void vk_gpu_spike_report_and_reset( void ) {
+	char dominant[512], laneMax[512];
+	int dn = 0, ln = 0;
+	uint32_t i;
+	dominant[0] = laneMax[0] = '\0';
+	for ( i = 0; i < vk_gpu_ts_accum.laneCount && i < RAL_PROFILE_MAX_LANES; i++ ) {
+		if ( vk_gpu_spike_dominant[i] && dn < (int)sizeof( dominant ) - 64 )
+			dn += Com_sprintf( dominant + dn, sizeof( dominant ) - dn, "%s%s:%u", dn ? "," : "",
+				vk_gpu_ts_accum.labels[i], vk_gpu_spike_dominant[i] );
+		if ( vk_gpu_lane_max_ms[i] > 0.0 && ln < (int)sizeof( laneMax ) - 64 )
+			ln += Com_sprintf( laneMax + ln, sizeof( laneMax ) - ln, "%s%s:%.3f", ln ? "," : "",
+				vk_gpu_ts_accum.labels[i], vk_gpu_lane_max_ms[i] );
+	}
+	if ( vk_gpu_spike_frames )
+		R_LOG( rch_timing, SEV_DEBUG,
+			"gpuSpike v1: frames=%u over4ms=%u max_frame_ms=%.3f dominant=%s lane_max=%s\n",
+			vk_gpu_spike_frames, vk_gpu_spike_over4ms, vk_gpu_spike_max_frame_ms,
+			dn ? dominant : "-", ln ? laneMax : "-" );
+	vk_gpu_spike_frames = vk_gpu_spike_over4ms = 0;
+	vk_gpu_spike_max_frame_ms = 0.0;
+	memset( vk_gpu_spike_dominant, 0, sizeof( vk_gpu_spike_dominant ) );
+	memset( vk_gpu_lane_max_ms, 0, sizeof( vk_gpu_lane_max_ms ) );
+}
 static uint32_t vk_gpu_ts_generation_counter;
 static uint32_t vk_gpu_ts_generation;
 static uint64_t vk_gpu_ts_sequence;
 static uint64_t vk_gpu_ts_produced_usec;
+
+#define VK_SKY_GPU_TS_QUERY_COUNT 4u
+#define VK_SKY_GPU_TS_PHYSICAL_BEGIN 0u
+#define VK_SKY_GPU_TS_PHYSICAL_END 1u
+#define VK_SKY_GPU_TS_RADIANCE_BEGIN 2u
+#define VK_SKY_GPU_TS_RADIANCE_END 3u
+
+static ralQueryPool_t *vk_sky_gpu_ts_ral_pool;
+static qboolean vk_sky_gpu_ts_active;
+static struct {
+	qboolean pending[2];
+	uint64_t frameGeneration[2];
+} vk_sky_gpu_ts_inflight[ NUM_COMMAND_BUFFERS ];
+static ralSkyGpuTimingState_t vk_sky_gpu_ts_state[2];
+static uint64_t vk_sky_gpu_ts_frame_generation[2];
+static uint64_t vk_sky_gpu_ts_duration_ns[2];
+
+static void vk_sky_gpu_ts_init( void )
+{
+	ralQueryPoolCreateInfo_t info;
+	ralBackend_t *backend;
+
+	vk_sky_gpu_ts_active = qfalse;
+	vk_sky_gpu_ts_ral_pool = NULL;
+	memset( vk_sky_gpu_ts_inflight, 0, sizeof( vk_sky_gpu_ts_inflight ) );
+	memset( vk_sky_gpu_ts_frame_generation, 0,
+		sizeof( vk_sky_gpu_ts_frame_generation ) );
+	memset( vk_sky_gpu_ts_duration_ns, 0,
+		sizeof( vk_sky_gpu_ts_duration_ns ) );
+	vk_sky_gpu_ts_state[0] = RAL_SKY_GPU_TIMING_UNAVAILABLE;
+	vk_sky_gpu_ts_state[1] = RAL_SKY_GPU_TIMING_UNAVAILABLE;
+	if ( !vk.timestampSupported ) return;
+	backend = vk_ral_get_backend();
+	if ( !backend ) return;
+	memset( &info, 0, sizeof( info ) );
+	info.type = RAL_QUERY_TIMESTAMP;
+	info.count = VK_SKY_GPU_TS_QUERY_COUNT * NUM_COMMAND_BUFFERS;
+	info.debugName = "wired-qp-sky-gpu-ts";
+	vk_sky_gpu_ts_ral_pool = Ral_CreateQueryPool( backend, &info );
+	if ( !vk_sky_gpu_ts_ral_pool ) {
+		R_LOG( rch_timing, SEV_WARN,
+			"skyGpuTelemetry: native timestamp query pool unavailable\n" );
+		return;
+	}
+	vk_sky_gpu_ts_active = qtrue;
+}
+
+static void vk_sky_gpu_ts_shutdown( void )
+{
+	if ( vk_sky_gpu_ts_ral_pool ) {
+		Ral_DestroyQueryPool( vk_sky_gpu_ts_ral_pool );
+		vk_sky_gpu_ts_ral_pool = NULL;
+	}
+	vk_sky_gpu_ts_active = qfalse;
+	memset( vk_sky_gpu_ts_inflight, 0, sizeof( vk_sky_gpu_ts_inflight ) );
+	memset( vk_sky_gpu_ts_frame_generation, 0,
+		sizeof( vk_sky_gpu_ts_frame_generation ) );
+	memset( vk_sky_gpu_ts_duration_ns, 0,
+		sizeof( vk_sky_gpu_ts_duration_ns ) );
+	vk_sky_gpu_ts_state[0] = RAL_SKY_GPU_TIMING_UNAVAILABLE;
+	vk_sky_gpu_ts_state[1] = RAL_SKY_GPU_TIMING_UNAVAILABLE;
+}
+
+static void vk_sky_gpu_ts_frame_begin( qboolean slotFenceCompleted )
+{
+	uint32_t lane;
+	const uint32_t slot = (uint32_t)vk.cmd_index;
+	if ( !vk_sky_gpu_ts_active || !slotFenceCompleted ) return;
+	for ( lane = 0u; lane < 2u; ++lane ) {
+		uint64_t result[2];
+		const uint32_t first = slot * VK_SKY_GPU_TS_QUERY_COUNT + lane * 2u;
+		if ( !vk_sky_gpu_ts_inflight[slot].pending[lane] ) continue;
+		memset( result, 0, sizeof( result ) );
+		vk_sky_gpu_ts_frame_generation[lane] =
+			vk_sky_gpu_ts_inflight[slot].frameGeneration[lane];
+		vk_sky_gpu_ts_duration_ns[lane] = 0u;
+		if ( Ral_GetQueryResults( vk_sky_gpu_ts_ral_pool, first, 2u,
+				result, qfalse ) && result[1] > result[0] ) {
+			const double nanoseconds = (double)( result[1] - result[0] )
+				* (double)vk.timestampPeriodNs;
+			if ( isfinite( nanoseconds ) && nanoseconds >= 1.0
+					&& nanoseconds < (double)UINT64_MAX ) {
+				vk_sky_gpu_ts_duration_ns[lane] =
+					(uint64_t)( nanoseconds + 0.5 );
+				vk_sky_gpu_ts_state[lane] = RAL_SKY_GPU_TIMING_VALID;
+			} else vk_sky_gpu_ts_state[lane] = RAL_SKY_GPU_TIMING_FAILED;
+		} else vk_sky_gpu_ts_state[lane] = RAL_SKY_GPU_TIMING_FAILED;
+		vk_sky_gpu_ts_inflight[slot].pending[lane] = qfalse;
+		vk_sky_gpu_ts_inflight[slot].frameGeneration[lane] = 0u;
+	}
+}
+
+static void vk_sky_gpu_ts_pool_reset( void )
+{
+	const uint32_t slot = (uint32_t)vk.cmd_index;
+	if ( !vk_sky_gpu_ts_active ) return;
+	Ral_CmdResetQueryPool( vk.cmd->ral_cmd, vk_sky_gpu_ts_ral_pool,
+		slot * VK_SKY_GPU_TS_QUERY_COUNT, VK_SKY_GPU_TS_QUERY_COUNT );
+}
+
+static void vk_sky_gpu_ts_begin( qboolean radiance,
+		uint64_t frameGeneration )
+{
+	const uint32_t slot = (uint32_t)vk.cmd_index;
+	const uint32_t lane = radiance ? 1u : 0u;
+	const uint32_t query = slot * VK_SKY_GPU_TS_QUERY_COUNT
+		+ ( radiance ? VK_SKY_GPU_TS_RADIANCE_BEGIN
+			: VK_SKY_GPU_TS_PHYSICAL_BEGIN );
+	if ( !vk_sky_gpu_ts_active ) return;
+	Ral_CmdWriteTimestamp( vk.cmd->ral_cmd,
+		RAL_PIPELINE_STAGE_TOP_OF_PIPE_BIT, vk_sky_gpu_ts_ral_pool, query );
+	vk_sky_gpu_ts_inflight[slot].pending[lane] = qtrue;
+	vk_sky_gpu_ts_inflight[slot].frameGeneration[lane] = frameGeneration;
+	vk_sky_gpu_ts_frame_generation[lane] = frameGeneration;
+	vk_sky_gpu_ts_duration_ns[lane] = 0u;
+	vk_sky_gpu_ts_state[lane] = RAL_SKY_GPU_TIMING_PENDING;
+}
+
+static void vk_sky_gpu_ts_end( qboolean radiance )
+{
+	const uint32_t slot = (uint32_t)vk.cmd_index;
+	const uint32_t lane = radiance ? 1u : 0u;
+	const uint32_t query = slot * VK_SKY_GPU_TS_QUERY_COUNT
+		+ ( radiance ? VK_SKY_GPU_TS_RADIANCE_END
+			: VK_SKY_GPU_TS_PHYSICAL_END );
+	if ( !vk_sky_gpu_ts_active ||
+			!vk_sky_gpu_ts_inflight[slot].pending[lane] ) return;
+	Ral_CmdWriteTimestamp( vk.cmd->ral_cmd,
+		RAL_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, vk_sky_gpu_ts_ral_pool, query );
+}
+
+static void vk_sky_gpu_ts_copy_timing(
+		ralSkyGpuTelemetryReceipt_t *telemetry )
+{
+	if ( !telemetry ) return;
+	telemetry->physicalTimingFrameGeneration =
+		vk_sky_gpu_ts_frame_generation[0];
+	telemetry->radianceTimingFrameGeneration =
+		vk_sky_gpu_ts_frame_generation[1];
+	telemetry->physicalTimingState = vk_sky_gpu_ts_state[0];
+	telemetry->radianceTimingState = vk_sky_gpu_ts_state[1];
+	telemetry->physicalGpuDurationNanoseconds =
+		vk_sky_gpu_ts_duration_ns[0];
+	telemetry->radianceGpuDurationNanoseconds =
+		vk_sky_gpu_ts_duration_ns[1];
+}
 
 static void vk_gpu_ts_format_topology( char *buffer, int bufferSize,
 		const char *const *labels, uint32_t laneCount )
@@ -30950,6 +33367,7 @@ static void vk_gpu_ts_init( void )
 	vk_gpu_ts_sequence = 0;
 	vk_gpu_ts_produced_usec = 0;
 	memset( vk_gpu_ts_inflight, 0, sizeof( vk_gpu_ts_inflight ) );
+	vk_sky_gpu_ts_init();
 
 	if ( !vk.timestampSupported ) {
 		R_LOG( rch_timing, SEV_DEBUG, "r_gpuSpeeds: device lacks timestampComputeAndGraphics, disabled\n" );
@@ -30982,6 +33400,7 @@ static void vk_gpu_ts_init( void )
 
 static void vk_gpu_ts_shutdown( void )
 {
+	vk_sky_gpu_ts_shutdown();
 	if ( vk_gpu_ts_ral_pool ) {
 		Ral_DestroyQueryPool( vk_gpu_ts_ral_pool );
 		vk_gpu_ts_ral_pool = NULL;
@@ -31109,11 +33528,12 @@ static void vk_gpu_ts_frame_begin( void )
 				R_LOG( rch_timing, SEV_WARN, "gpuProfile: action=sample-rejected reason=invalid-semantic-layout\n" );
 			} else {
 				sampleReady = qtrue;
+				vk_gpu_spike_track( sampleLabels, sampleMs, sampleLanes );
 				vk_gpu_ts_sequence++;
 				if ( !vk_gpu_ts_sequence ) vk_gpu_ts_sequence++;
 				vk_gpu_ts_produced_usec = (uint64_t)ri.Microseconds();
 				if ( accumulateResult == 0 && vk_gpu_ts_accum.topologyEpoch == 1
-					&& vk_gpu_ts_accum.sampleFrames == 1 ) {
+					&& vk_gpu_ts_sequence == 1 ) {
 					vk_gpu_ts_format_topology( topology, sizeof( topology ),
 						vk_gpu_ts_accum.labels, vk_gpu_ts_accum.laneCount );
 					R_LOG( rch_timing, SEV_INFO,
@@ -31161,6 +33581,7 @@ static void vk_gpu_ts_frame_begin( void )
 		for ( i = 0; i < vk_gpu_ts_accum.laneCount; i++ )
 			R_LOG( rch_timing, SEV_DEBUG, "  %s=%.3f", vk_gpu_ts_accum.labels[i], vk_gpu_ts_accum.totalMs[i] / n );
 		R_LOG( rch_timing, SEV_DEBUG, "  total=%.3f\n", total_ms / n );
+		vk_gpu_spike_report_and_reset();
 	}
 
 #if FEAT_SHADOW_MAPPING
@@ -31184,6 +33605,7 @@ static void vk_gpu_ts_frame_begin( void )
 #endif
 
 reset_accum:
+	if ( vk_gpu_spike_frames ) vk_gpu_spike_report_and_reset();
 	Ral_ProfileAccumulatorClearSamples( &vk_gpu_ts_accum );
 }
 
@@ -31248,11 +33670,13 @@ void vk_begin_frame( const temporalBatchRequest_t *temporalRequest )
 		VK_TemporalGenericRecipeTableDisarm( &vk_temporal_generic_recipe_table );
 	if ( vk.frame_count++ ) // might happen during stereo rendering
 		return;
+	vk_exposure_history.recorded = qfalse;
 #if FEAT_IQM
 	vk_temporal_iqm_geometry_frame_ready = qfalse;
 #endif
 
 	vk_frame_t_start = ri.Microseconds();
+	vk_pace_classify_previous( vk_frame_t_start );
 	vk_frame_present_done = qfalse;
 	vk_diag_attempt_begin();
 
@@ -31311,14 +33735,23 @@ void vk_begin_frame( const temporalBatchRequest_t *temporalRequest )
 			}
 			slotFenceCompleted = qtrue;
 #endif
-			if ( slotFenceCompleted )
+			if ( slotFenceCompleted ) {
 				vk_ral_recycle_completed_command( vk.cmd->ral_cmd,
 					"vk_begin_frame slot fence" );
+				// shared-fence mode (r_vkSplitPresent 1): the present blit is
+				// covered by the slot fence, so its buffer is recycled here.
+				if ( vk.cmd->split_pending_recycle && !vk.cmd->present_fence_pending ) {
+					vk_ral_recycle_completed_command( vk.cmd->ral_cmd_present,
+						"vk_begin_frame slot fence (present split)" );
+					vk.cmd->split_pending_recycle = qfalse;
+				}
+			}
 		}
 		{
 			uint64_t slot_wait_us = (uint64_t)( ri.Microseconds() - slot_wait_start_us );
 			vk_diag_slot_wait_us += slot_wait_us;
 			vk_diag_v2.main_slot_wait_total_us += slot_wait_us;
+			vk_pace_frame_slot_us = slot_wait_us;
 		}
 		{
 			int fence_ms = ri.Milliseconds() - t_diag;
@@ -31338,8 +33771,15 @@ void vk_begin_frame( const temporalBatchRequest_t *temporalRequest )
 		vk_temporal_history_consume_collect_slot(
 			(uint32_t)vk.cmd_index, slotFenceCompleted );
 
-	// GPU timestamp readback: fence above guarantees this slot's GPU work is done.
-	vk_gpu_ts_frame_begin();
+	// GPU timestamp readback: the slot fence guarantees the scene work is done;
+	// with split-present the slot's present blit may still be in flight, so the
+	// readback is deferred to the point where its fence is waited.
+	if ( vk.cmd->present_fence_pending && vk.cmd->ral_present_fence
+			&& !Ral_FenceSignaled( vk.cmd->ral_present_fence ) )
+		vk.cmd->gpu_ts_readback_deferred = qtrue;
+	else
+		vk_gpu_ts_frame_begin();
+	vk_sky_gpu_ts_frame_begin( slotFenceCompleted );
 
 	// drain the RAL deferred-destroy ring on a real per-frame cadence.
 	// The renderer runs its own render loop (vk.frame_count) and never calls
@@ -31351,7 +33791,14 @@ void vk_begin_frame( const temporalBatchRequest_t *temporalRequest )
 	// (== RAL_VK_MAX_FRAMES_IN_FLIGHT), so resources queued past that window are
 	// safe to free here. Ral_DrainDeferred advances the RAL frame counter and
 	// reclaims them without touching RAL's internal frame fences / queue.
-	Ral_DrainDeferred( vk_ral_get_backend() );
+	// Fence split: the slot's previous present blit may still be executing
+	// (its fence is waited late, at the split point); destroying resources it
+	// references is deferred to that retire.
+	if ( vk.cmd->present_fence_pending && vk.cmd->ral_present_fence
+			&& !Ral_FenceSignaled( vk.cmd->ral_present_fence ) )
+		vk.cmd->drains_deferred = qtrue;
+	else
+		Ral_DrainDeferred( vk_ral_get_backend() );
 	if ( vk.atm.available
 			&& !VK_AtmosphericFrameBeginSlot( &vk_atmospheric_frame,
 				(uint32_t)vk.cmd_index, slotFenceRequired,
@@ -31389,7 +33836,8 @@ void vk_begin_frame( const temporalBatchRequest_t *temporalRequest )
 	// (the same per-frame safe boundary the deferred-destroy drain + upload drain
 	// use). The poll thread only ever marked the flag — all eviction state mutation
 	// is render-thread-single-threaded by construction.
-	vk_ral_drain_evictions();
+	if ( !vk.cmd->drains_deferred )
+		vk_ral_drain_evictions();
 
 	// Phase 7.15.3: automatic bind-miss recovery. Re-streams evicted textures that
 	// were sampled this frame (marked IMGFLAG_REREGISTER_PENDING in vk_bindless_track)
@@ -31397,7 +33845,8 @@ void vk_begin_frame( const temporalBatchRequest_t *temporalRequest )
 	// only sampled-evicted textures restore; a still-pending one stays white-sentinel
 	// (graceful) until its turn. No-op when nothing is pending. Closes the 7.15
 	// lazy-residency/eviction chain.
-	vk_ral_drain_reregisters();
+	if ( !vk.cmd->drains_deferred )
+		vk_ral_drain_reregisters();
 
 	// Consume a deferred depth-fade rebuild requested by a live consumer toggle
 	// (r_drawSunRays). This is the safe boundary: the per-frame fence above guarantees this
@@ -31842,6 +34291,7 @@ _retry:
 			vk.cmd->swapchain_image_acquired = qtrue;
 		vk_diag_acquire_ms += ri.Milliseconds() - t_acquire;
 		vk_diag_v2.acquire_total_us += (uint64_t)( ri.Microseconds() - t_acquire_us );
+		vk_pace_frame_acquire_us = (uint64_t)( ri.Microseconds() - t_acquire_us );
 		vk_diag_attempt_acquired = vk.cmd->swapchain_image_acquired;
 	}
 	vk_frame_t_after_acquire = ri.Microseconds();
@@ -31864,6 +34314,7 @@ _retry:
 	// retired.
 
 	vk_gpu_ts_pool_reset();
+	vk_sky_gpu_ts_pool_reset();
 
 	// Ensure visibility of geometry buffers writes.
 	//record_buffer_memory_barrier( vk.cmd->command_buffer, vk.cmd->vertex_buffer, vk.geometry_buffer_size, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, VK_ACCESS_HOST_WRITE_BIT, VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT );
@@ -32015,7 +34466,9 @@ _retry:
 	// simplest correct image2DArray→cube-layer mapping). The COMPUTE→GRAPHICS
 	// barrier readies it for the future convolve sample (nothing samples it yet —
 	// inert, byte-identical). vid_restart re-arms the guard (vk_ibl_probes_shutdown).
-	if ( !vk.probeSourceDispatched && vk.ral_probe_source_pipeline ) {
+	if ( !vk.probeSourceDispatched && vk.ral_probe_source_pipeline
+			&& vk.ral_probe_source_descriptor
+			&& vk.atm.skyRadianceState.schemaVersion == 0u ) {
 		uint32_t groupsXY = ( (uint32_t)VK_PROBE_SOURCE_SIZE + 7u ) / 8u;
 
 		// UNDEFINED → GENERAL for the compute imageStore across all 6 layers.
@@ -32023,11 +34476,18 @@ _retry:
 			RAL_PIPELINE_STAGE_TOP_OF_PIPE_BIT, RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 			VK_IMAGE_LAYOUT_GENERAL );
 
-		// One dispatch over the whole cube: z = 6 faces (the shader bounds-checks
-		// coord.z < 6 and uses it as the cube layer / face direction).
+		// The shader ABI owns one face per dispatch.  The legacy boot path still
+		// records all faces here; TASK-239's receipt scheduler replaces this loop
+		// with bounded per-frame admission without changing the shader contract.
 		Ral_CmdBindPipeline( vk.cmd->ral_cmd, vk.ral_probe_source_pipeline );
 		Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 0, vk.ral_probe_source_descriptor );
-		Ral_CmdDispatch( vk.cmd->ral_cmd, groupsXY, groupsXY, 6 );
+		for ( uint32_t face = 0u; face < 6u; ++face ) {
+			vkSkySourcePush_t push;
+			vk_sky_source_push( NULL, face, &push );
+			Ral_CmdPushConstants( vk.cmd->ral_cmd, RAL_STAGE_COMPUTE, 0,
+				sizeof( push ), &push );
+			Ral_CmdDispatch( vk.cmd->ral_cmd, groupsXY, groupsXY, 1u );
+		}
 
 #ifndef NDEBUG
 		// Developer sanity readback (r_probeSourceDebug): copy the filled source cube
@@ -32077,6 +34537,7 @@ _retry:
 	// earlier) are in the layout a future IBL sampler expects. Nothing samples the
 	// cubes yet — inert, byte-identical. vid_restart re-arms the guards.
 	if ( !vk.probeRadianceDispatched && vk.probeSourceDispatched
+	  && vk.atm.skyRadianceState.schemaVersion == 0u
 	  && vk.ral_probe_irradiance_pipeline && vk.ral_probe_radiance_pipeline ) {
 		uint32_t mip;
 		uint32_t irrGroups = ( (uint32_t)VK_PROBE_IRRADIANCE_SIZE + 7u ) / 8u;
@@ -32457,6 +34918,34 @@ qboolean vk_temporal_motion_seal_primary( void )
 	return vk_temporal_main_activation.submissionPending ? qtrue : qfalse;
 }
 
+// Fence split: retire this slot's previous present blit. Waited late (here,
+// not at slot reuse) so a drawable-cadence stall overlaps the scene recording;
+// everything the present buffer referenced is recycled only now.
+static void vk_split_retire_present_slot( void ) {
+	if ( vk.cmd->present_fence_pending ) {
+		ralResult_t presentWait = Ral_WaitFenceExact( vk.cmd->ral_present_fence, 10000000000ULL );
+		if ( presentWait != ralSuccess
+				|| Ral_ResetFenceExact( vk.cmd->ral_present_fence ) != ralSuccess )
+			ri.Terminate( TERM_UNRECOVERABLE, "present fence wait/reset failed (%s)",
+				ral_result_string( presentWait ) );
+		vk.cmd->present_fence_pending = qfalse;
+		vk_ral_recycle_completed_command( vk.cmd->ral_cmd_present,
+			"vk_end_frame present fence" );
+		vk.cmd->split_pending_recycle = qfalse;
+		if ( vk.cmd->gpu_ts_readback_deferred ) {
+			vk.cmd->gpu_ts_readback_deferred = qfalse;
+			vk_gpu_ts_frame_begin();
+		}
+	}
+	if ( vk.cmd->drains_deferred ) {
+		vk.cmd->drains_deferred = qfalse;
+		Ral_DrainDeferred( vk_ral_get_backend() );
+		vk_ral_drain_evictions();
+		vk_ral_drain_reregisters();
+	}
+	vk.cmd->overlay_vertex_offset = 0u;
+}
+
 void vk_end_frame( void )
 {
 	// per-frame submit migrated to Ral_Submit.
@@ -32605,6 +35094,105 @@ void vk_end_frame( void )
 			vk.renderScaleX = 1.0;
 			vk.renderScaleY = 1.0;
 
+			// Split-present: everything recorded so far is offscreen work. Submit
+			// it now without the swapchain-acquire wait so the GPU starts the scene
+			// while MoltenVK still waits for a drawable; the present blit below is
+			// recorded into the per-slot present command buffer, which alone waits
+			// on the acquire (and on this scene submit) in vk_end_frame's submit.
+			if ( r_vkSplitPresent && r_vkSplitPresent->integer && vk.fboActive
+					&& vk.cmd->swapchain_image_acquired && !vk.cmd->split_active ) {
+				ralSubmitInfo_t     sceneSubmit;
+				ralCommandBuffer_t *sceneCbs[1];
+				ralSemaphore_t     *sceneWaits[2];
+				ralSemaphore_t     *sceneSignals[1];
+				uint32_t            sceneWaitCount = 0;
+				ralResult_t         sceneResult;
+				// Retire this slot's previous present blit before reusing its
+				// command buffer: waited here (late) instead of at slot reuse, so a
+				// drawable-cadence stall overlaps the whole scene recording.
+				vk_split_retire_present_slot();
+				if ( r_vkSplitPresent->integer >= 2
+						&& vk_exposure_present_shadows[vk.cmd_index].buffer
+						&& vk.exposure.ptr[vk.cmd_index] ) {
+					// Snapshot this frame's exposure block for the present-lifetime
+					// gamma read; the previous blit of this slot retired just above.
+					vkRalBufferShadowWriteReceipt_t exposureCopyReceipt;
+					const uint64_t copyBytes = vk_exposure_present_shadows[vk.cmd_index].byteSize
+						< vk_exposure_shadows[vk.cmd_index].byteSize
+						? vk_exposure_present_shadows[vk.cmd_index].byteSize
+						: vk_exposure_shadows[vk.cmd_index].byteSize;
+					if ( !VK_RalBufferShadowWrite( &vk_exposure_present_shadows[vk.cmd_index],
+							0u, vk.exposure.ptr[vk.cmd_index], copyBytes )
+							|| !VK_RalBufferShadowPublish( &vk_exposure_present_shadows[vk.cmd_index],
+								0u, copyBytes, &exposureCopyReceipt ) )
+						ri.Terminate( TERM_UNRECOVERABLE, "present exposure copy failed" );
+				}
+				vk_ral_end_command_exact( vk.cmd->ral_cmd, "vk_end_frame scene split" );
+				memset( &sceneSubmit, 0, sizeof( sceneSubmit ) );
+				sceneCbs[0] = vk.cmd->ral_cmd;
+				sceneSubmit.commandBuffers    = sceneCbs;
+				sceneSubmit.numCommandBuffers = 1;
+				vk.cmd->split_upload_waited = qfalse;
+#ifdef USE_UPLOAD_QUEUE
+				if ( vk.image_uploaded != VK_NULL_HANDLE ) {
+					sceneWaits[ sceneWaitCount++ ] = vk.ral_image_uploaded;
+					vk.image_uploaded     = VK_NULL_HANDLE;
+					vk.ral_image_uploaded = NULL;
+					vk.cmd->split_upload_waited = qtrue;
+				}
+#endif
+				if ( vk_gtao_async_is_active() ) {
+					ralSemaphore_t *gtaoSem = vk_gtao_async_wait_sem();
+					if ( gtaoSem ) sceneWaits[ sceneWaitCount++ ] = gtaoSem;
+				}
+				sceneSubmit.waitSemaphores    = sceneWaitCount ? sceneWaits : NULL;
+				sceneSubmit.numWaitSemaphores = sceneWaitCount;
+				sceneSignals[0] = vk.cmd->ral_scene_finished;
+				sceneSubmit.signalSemaphores    = sceneSignals;
+				sceneSubmit.numSignalSemaphores = 1;
+				// The slot fence follows the scene work: slot reuse never waits on
+				// the present blit's drawable-gated completion.
+				// r_vkSplitPresent 1 keeps the slot fence on the present submit: the
+				// per-slot resources recorded after this point (post-process and UI
+				// staging, bind-group arena) are recycled at slot reuse, so the slot
+				// fence must cover the present buffer too. Value 2 signals the slot
+				// fence here and gives the present blit its own fence; the resources
+				// the present buffer references (overlay quad vertices, the exposure
+				// block, deferred destroys/evictions) then live on that fence
+				// (vk_split_retire_present_slot) instead of on slot reuse.
+				// Value 2 (separate present fence) is not enabled: even with the
+				// present-lifetime copies (overlay vertices, exposure block, deferred
+				// drains) the per-slot acquire semaphore is re-signalled by the next
+				// vkAcquireNextImage while the previous present submit of the slot
+				// may still hold its pending wait, and MoltenVK reports device loss
+				// (regime-pinned gameplay, 2026-09-12). Until acquire semaphores are
+				// pooled per retire, 2 behaves as 1 and says so once.
+				if ( r_vkSplitPresent->integer >= 2 ) {
+					static qboolean warnedFenceSplit = qfalse;
+					if ( !warnedFenceSplit ) {
+						warnedFenceSplit = qtrue;
+						R_LOG( rch_vk, SEV_WARN,
+							"r_vkSplitPresent 2 (separate present fence) is disabled pending acquire-semaphore pooling; using the shared slot fence\n" );
+					}
+				}
+				sceneSubmit.signalFence         = NULL;
+				sceneResult = Ral_Submit( vk_ral_get_backend(), RAL_QUEUE_GRAPHICS, &sceneSubmit );
+				if ( sceneResult != ralSuccess )
+					ri.Terminate( TERM_UNRECOVERABLE, "Ral_Submit (scene split) failed: %s",
+						ral_result_string( sceneResult ) );
+				if ( sceneSubmit.signalFence ) {
+					vk_fence_submit( vk.cmd_index, vk.cmd->ral_rendering_finished_fence );
+					vk.cmd->waitForFence = qtrue;
+					vk.cmd->slot_fence_handed = qtrue;
+				}
+				vk.cmd->ral_cmd_scene   = vk.cmd->ral_cmd;
+				vk.cmd->ral_cmd         = vk.cmd->ral_cmd_present;
+				// (vk.cmd->command_buffer, the retired raw alias, has no runtime readers; left untouched.)
+				vk_ral_begin_command_exact( vk.cmd->ral_cmd, "vk_end_frame present split" );
+				vk.cmd->last_ral_pipeline = NULL;
+				vk.cmd->split_active = qtrue;
+			}
+
 #ifdef __APPLE__
 			// MoltenVK/TBDR: flush tile cache so gamma pass sees writes
 			// of the upstream tonemap pass. The target image
@@ -32691,7 +35279,12 @@ void vk_end_frame( void )
 				// bound whenever available so the declared set-1 sampler is satisfied.
 				if ( vk.blueNoise.ral_descriptor )
 					Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 1, vk.blueNoise.ral_descriptor );
-				Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 2, vk.exposure.ral_descriptor[ vk.cmd_index ] );
+				// Fence split: read the present-lifetime exposure copy, refreshed at
+				// the split point after this slot's previous blit retired.
+				Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 2,
+					( vk.cmd->slot_fence_handed && vk.exposure.present_descriptor[ vk.cmd_index ] )
+						? vk.exposure.present_descriptor[ vk.cmd_index ]
+						: vk.exposure.ral_descriptor[ vk.cmd_index ] );
 				Ral_CmdDraw( vk.cmd->ral_cmd, 4, 1, 0, 0 );
 				// Composite-overlay HUD quads: drawn onto the swapchain in display/sRGB
 				// space right after the gamma blit, before the pass closes to PRESENT_SRC.
@@ -32815,7 +35408,35 @@ void vk_end_frame( void )
 	ralSubmit.commandBuffers     = ralCbs;
 	ralSubmit.numCommandBuffers  = 1;
 	ralSubmit.signalFence        = vk.cmd->ral_rendering_finished_fence;
-	if ( !ri.CL_IsMinimized() && vk.cmd->swapchain_image_acquired ) {
+	if ( !vk.cmd->split_active && vk.cmd->present_fence_pending ) {
+		// No split this frame (no swapchain image or split disabled): the slot's
+		// previous present blit still owns its present-lifetime resources.
+		vk_split_retire_present_slot();
+	}
+	if ( vk.cmd->split_active ) {
+		// Present submit: waits for the swapchain image and the scene submit;
+		// signals presentation/upload-recycle semaphores and the slot's present
+		// fence (the slot fence already rides the scene submit).
+		if ( vk.cmd->slot_fence_handed ) {
+			ralSubmit.signalFence = vk.cmd->ral_present_fence;
+			vk.cmd->present_fence_pending = qtrue;
+		}
+		ralWaits[0] = vk.cmd->ral_image_acquired;
+		ralWaits[1] = vk.cmd->ral_scene_finished;
+		ralSubmit.waitSemaphores    = ralWaits;
+		ralSubmit.numWaitSemaphores = 2;
+		ralSignals[0] = vk.ral_swapchain_rendering_finished[ vk.cmd->swapchain_image_index ];
+		ralSubmit.signalSemaphores    = ralSignals;
+		ralSubmit.numSignalSemaphores = 1;
+#ifdef USE_UPLOAD_QUEUE
+		if ( vk.cmd->split_upload_waited ) {
+			ralSignals[1] = vk.cmd->ral_rendering_finished2;
+			ralSubmit.numSignalSemaphores = 2;
+			vk.rendering_finished     = vk.cmd->rendering_finished2;
+			vk.ral_rendering_finished = vk.cmd->ral_rendering_finished2;
+		}
+#endif
+	} else if ( !ri.CL_IsMinimized() && vk.cmd->swapchain_image_acquired ) {
 #ifdef USE_UPLOAD_QUEUE
 		if ( vk.image_uploaded != VK_NULL_HANDLE ) {
 			ralWaits[0] = vk.cmd->ral_image_acquired;
@@ -32858,7 +35479,7 @@ void vk_end_frame( void )
 	// branches above built (ralWaits has a spare 3rd slot). Only when we actually set
 	// up waits (not minimised / acquire-failed — that path carries no graphics work
 	// that reads the AO either).
-	if ( ralSubmit.numWaitSemaphores > 0 && vk_gtao_async_is_active() ) {
+	if ( !vk.cmd->split_active && ralSubmit.numWaitSemaphores > 0 && vk_gtao_async_is_active() ) {
 		ralSemaphore_t *gtaoSem = vk_gtao_async_wait_sem();
 		if ( gtaoSem ) {
 			ralWaits[ ralSubmit.numWaitSemaphores ] = gtaoSem;
@@ -32900,6 +35521,14 @@ void vk_end_frame( void )
 			ri.Terminate( TERM_UNRECOVERABLE,
 				"temporal submit authority invalid before graphics submit" );
 		submitResult = Ral_Submit( vk_ral_get_backend(), RAL_QUEUE_GRAPHICS, &ralSubmit );
+		if ( submitResult == ralSuccess && vk_exposure_history.recorded ) {
+			vk_exposure_history.timeMs = vk_exposure_history.pendingTimeMs;
+			vk_exposure_history.world = vk_exposure_history.pendingWorld;
+			vk_exposure_history.width = vk_exposure_history.pendingWidth;
+			vk_exposure_history.height = vk_exposure_history.pendingHeight;
+			vk_exposure_history.valid = qtrue;
+		} else vk_exposure_history.valid = qfalse;
+		vk_exposure_history.recorded = qfalse;
 		producerAccepted = submitResult == ralSuccess && havePendingWrite
 			? vk_temporal_history_prevalidate_submit( &pendingWrite ) : qtrue;
 		if ( backendQuery == TEMPORAL_BACKEND_SUBMIT_EXACT
@@ -32966,9 +35595,18 @@ void vk_end_frame( void )
 				"temporal producer publication did not match committed history" );
 		if ( submitResult != ralSuccess )
 			ri.Terminate( TERM_UNRECOVERABLE, "Ral_Submit failed" );
+		if ( vk.cmd->split_active ) {
+			// Restore the scene buffer as the slot's primary command buffer; the
+			// present buffer is recycled with the scene buffer at the slot fence.
+			vk.cmd->ral_cmd        = vk.cmd->ral_cmd_scene;
+			vk.cmd->ral_cmd_scene  = NULL;
+			vk.cmd->split_active   = qfalse;
+			vk.cmd->split_pending_recycle = qtrue;
+		}
 		vk_diag_submit_ms += ri.Milliseconds() - t_submit;
 		vk_frame_t_after_submit = ri.Microseconds();
 		vk_diag_v2.submit_total_us += (uint64_t)( vk_frame_t_after_submit - vk_frame_t_submit_start );
+		vk_pace_frame_submit_us = (uint64_t)( vk_frame_t_after_submit - vk_frame_t_submit_start );
 		vk_diag_attempt_submitted = qtrue;
 	}
 
@@ -33021,8 +35659,13 @@ void vk_end_frame( void )
 
 	// Hand this slot's fence to the background thread: it will vkWaitForFences +
 	// vkResetFences off the main thread, then signal vk_slot_ready[cmd_index].
-	vk_fence_submit( vk.cmd_index, vk.cmd->ral_rendering_finished_fence );
-	vk.cmd->waitForFence = qtrue;
+	if ( vk.cmd->slot_fence_handed ) {
+		// split-present: the slot fence was handed over at the scene submit
+		vk.cmd->slot_fence_handed = qfalse;
+	} else {
+		vk_fence_submit( vk.cmd_index, vk.cmd->ral_rendering_finished_fence );
+		vk.cmd->waitForFence = qtrue;
+	}
 
 	// presentation may take undefined time to complete, we can't measure it in a reliable way
 	backEnd.pc.msec = ri.Milliseconds() - backEnd.pc.msec;
@@ -33090,6 +35733,7 @@ void vk_present_frame( void )
 		vk_diag_present_ms += ri.Milliseconds() - t_present;
 		vk_frame_t_after_present = ri.Microseconds();
 		vk_diag_v2.present_call_total_us += (uint64_t)( vk_frame_t_after_present - vk_frame_t_present_start );
+		vk_pace_frame_present_us = (uint64_t)( vk_frame_t_after_present - vk_frame_t_present_start );
 		vk_frame_present_done = qtrue;
 
 		if ( ralRes == ralSurfaceLost ) {
@@ -35233,6 +37877,12 @@ qboolean vk_bloom( void )
 {
 	const vkHdrPostprocessSource_t *postRoute = vk_temporal_postprocess_route();
 	uint32_t i;
+	ralBloomPlan_t bloomPlan;
+	const ralBloomSettings_t bloomSettings = { 1u,
+		(uint32_t)Com_Clamp( 1, WIRED_BLOOM_MAX_LEVELS, r_bloomPasses->integer ),
+		(uint32_t)r_bloomThresholdMode->integer, r_bloomThreshold->value, r_bloomIntensity->value };
+	if ( !Ral_BloomPlanBuild( &bloomSettings, glConfig.vidWidth,
+			glConfig.vidHeight, &bloomPlan ) ) return qfalse;
 
 	if ( vk.renderPassIndex == RENDER_PASS_SCREENMAP )
 	{
@@ -35274,7 +37924,7 @@ qboolean vk_bloom( void )
 	vk_end_render_pass();
 
 	{
-	const int num_bloom_passes = Com_Clamp( 1, VK_NUM_BLOOM_PASSES, r_bloomPasses->integer );
+	const int num_bloom_passes = (int)bloomPlan.levels;
 
 	// ── Dual-filtering bloom (CoD/Jimenez), the sole bloom path ──
 	// Per-mip pyramid in bloom_image[1+VK_NUM_BLOOM_PASSES]: slot 0 = full (the
@@ -35284,13 +37934,11 @@ qboolean vk_bloom( void )
 	// additively onto slot lvl. The top reconstructed mip is slot 1, which the
 	// composite blends into the scene scaled by r_bloomIntensity.
 	uint32_t lvl;
-	uint32_t w = glConfig.vidWidth;
-	uint32_t h = glConfig.vidHeight;
 
 	// downsample: read slot lvl -> write slot lvl+1
 	for ( lvl = 0; lvl < (uint32_t)num_bloom_passes; lvl++ ) {
-		uint32_t dstW = w / 2;
-		uint32_t dstH = h / 2;
+		uint32_t dstW = bloomPlan.width[lvl + 1u];
+		uint32_t dstH = bloomPlan.height[lvl + 1u];
 		vk_begin_bloom_mip_render_pass( lvl + 1, dstW, dstH, qfalse );
 		Ral_CmdBindPipeline( vk.cmd->ral_cmd, vk.ral_downsample_pipeline[lvl] );
 		Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 0, vk.ral_bloom_image_descriptor[ lvl ] );
@@ -35299,24 +37947,20 @@ qboolean vk_bloom( void )
 		Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 2, vk.exposure.ral_descriptor[ vk.cmd_index ] );
 		Ral_CmdDraw( vk.cmd->ral_cmd, 4, 1, 0, 0 );
 		vk_end_render_pass();
-		w = dstW;
-		h = dstH;
 	}
 
 	// upsample: for lvl = N-1 .. 1, tent of slot lvl+1 additively onto slot lvl.
 	// After the loop slot 1 holds the full reconstruction.
-	// (w,h currently = the smallest mip's resolution.)
+	// Read exact planned extents; doubling a truncated odd mip loses pixels.
 	for ( lvl = (uint32_t)num_bloom_passes - 1; lvl >= 1; lvl-- ) {
-		uint32_t dstW = w * 2;   // resolution of the larger mip (slot lvl)
-		uint32_t dstH = h * 2;
+		uint32_t dstW = bloomPlan.width[lvl];
+		uint32_t dstH = bloomPlan.height[lvl];
 		vk_begin_bloom_mip_render_pass( lvl, dstW, dstH, qtrue );
 		Ral_CmdBindPipeline( vk.cmd->ral_cmd, vk.ral_upsample_pipeline[lvl] );
 		Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 0, vk.ral_bloom_image_descriptor[ lvl + 1 ] );
 		Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 2, vk.exposure.ral_descriptor[ vk.cmd_index ] );
 		Ral_CmdDraw( vk.cmd->ral_cmd, 4, 1, 0, 0 );
 		vk_end_render_pass();
-		w = dstW;
-		h = dstH;
 	}
 
 	// composite top mip (slot 1) additively into the scene.

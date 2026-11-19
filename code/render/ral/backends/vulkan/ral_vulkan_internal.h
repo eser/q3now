@@ -717,7 +717,9 @@ struct ralBackend_s {
 	uint32_t          graphicsFamily;
 	uint32_t          computeFamily;   // == graphicsFamily if no dedicated async-compute family
 	uint32_t          transferFamily;  // == graphicsFamily if no dedicated async-transfer family
+	uint32_t          graphicsQueueCount; // 2 when RAL requested an independent present queue
 	VkQueue           graphicsQueue;
+	VkQueue           presentQueue;     // aliases graphicsQueue when the family exposes one queue
 	VkQueue           computeQueue;     // == graphicsQueue if shared
 	VkQueue           transferQueue;    // == graphicsQueue if shared
 

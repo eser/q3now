@@ -154,6 +154,13 @@ static const ralShaderBindingAbi_t *ralShaderFindBinding(
 	return NULL;
 }
 
+static qboolean ralShaderSpecPayloadValid(ralShaderSpecType_t type, uint32_t bits) {
+	if (type < RAL_SHADER_SPEC_U32 || type >= RAL_SHADER_SPEC_TYPE_COUNT) return qfalse;
+	if (type == RAL_SHADER_SPEC_BOOL) return bits <= 1u;
+	/* Reject NaN/Inf without aliasing, conversion, or platform FP assumptions. */
+	if (type == RAL_SHADER_SPEC_F32) return (bits & 0x7f800000u) != 0x7f800000u;
+	return qtrue;
+}
 qboolean Ral_ShaderAbiManifestValid( const ralShaderAbiManifest_t *manifest ) {
 	uint32_t i;
 	if ( !manifest || manifest->schemaVersion != RAL_SHADER_ABI_SCHEMA_VERSION
@@ -211,6 +218,8 @@ qboolean Ral_ShaderAbiManifestValid( const ralShaderAbiManifest_t *manifest ) {
 	}
 	for ( i = 0; i < manifest->specConstantCount; ++i ) {
 		if ( !ralShaderStagesValid( manifest->specConstants[i].stageFlags )
+		  || !ralShaderSpecPayloadValid(manifest->specConstants[i].valueType,
+			manifest->specConstants[i].defaultValue)
 		  || ( i > 0 && manifest->specConstants[i - 1].constantId >= manifest->specConstants[i].constantId ) )
 			return qfalse;
 	}
@@ -230,7 +239,9 @@ qboolean Ral_ShaderVariantAbiValid( const ralShaderAbiManifest_t *manifest,
 		if ( !ralShaderArtifactValid( &manifest->modules[i].artifacts[variant->artifactTarget],
 		                              variant->artifactTarget, qtrue ) ) return qfalse;
 	for ( i = 0; i < variant->specValueCount; ++i )
-		if ( variant->specValues[i].constantId != manifest->specConstants[i].constantId ) return qfalse;
+		if ( variant->specValues[i].constantId != manifest->specConstants[i].constantId
+			|| !ralShaderSpecPayloadValid(manifest->specConstants[i].valueType,
+				variant->specValues[i].value) ) return qfalse;
 	return qtrue;
 }
 
@@ -289,6 +300,7 @@ ralResult_t Ral_ShaderAbiBuildPipelineKey( const ralShaderAbiManifest_t *manifes
 		ralShaderHashU32( &hash, manifest->specConstants[i].constantId );
 		ralShaderHashU32( &hash, manifest->specConstants[i].stageFlags );
 		ralShaderHashU32( &hash, manifest->specConstants[i].defaultValue );
+		ralShaderHashU32( &hash, manifest->specConstants[i].valueType );
 	}
 	ralShaderHashU32( &hash, variant->artifactTarget );
 	ralShaderHashU64( &hash, variant->generation );

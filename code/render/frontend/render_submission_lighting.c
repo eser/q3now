@@ -473,7 +473,7 @@ qboolean RenderSubmission_AttachLegacyLightGridEntityIrradiance(
 	receipt.coefficientHash = Ral_IrradianceCoefficientHash(
 		receipt.blendedCoefficientsQ16 );
 	receipt.ready = qtrue;
-	return RenderSubmission_AttachEntityIrradiance( state, entityIndex, &receipt );
+	return wired_render_attach_legacy_grid_irradiance( state, entityIndex, &receipt );
 }
 
 qboolean RenderSubmission_IrradianceVolumeSnapshot(

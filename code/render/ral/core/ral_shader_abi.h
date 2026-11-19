@@ -12,7 +12,7 @@
 extern "C" {
 #endif
 
-#define RAL_SHADER_ABI_SCHEMA_VERSION 1u
+#define RAL_SHADER_ABI_SCHEMA_VERSION 2u
 #define RAL_SHADER_ABI_MAX_MODULES 2u
 #define RAL_SHADER_ABI_MAX_BINDINGS 64u
 #define RAL_SHADER_ABI_MAX_BIND_GROUPS 8u
@@ -109,10 +109,18 @@ typedef struct {
 	uint32_t webgpuUniformBinding;
 } ralShaderInlineDataAbi_t;
 
+typedef enum {
+	RAL_SHADER_SPEC_U32 = 0,
+	RAL_SHADER_SPEC_I32,
+	RAL_SHADER_SPEC_F32,
+	RAL_SHADER_SPEC_BOOL,
+	RAL_SHADER_SPEC_TYPE_COUNT
+} ralShaderSpecType_t;
 typedef struct {
 	uint32_t constantId;
 	uint32_t stageFlags;
-	uint32_t defaultValue;
+	uint32_t defaultValue; /* Raw 32-bit payload, including IEEE-754 for F32. */
+	ralShaderSpecType_t valueType;
 } ralShaderSpecConstantAbi_t;
 
 typedef struct {

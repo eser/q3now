@@ -67,6 +67,12 @@ typedef enum {
 	RAL_BACKEND_COUNT
 } ralBackendType_t;
 
+static inline qboolean Ral_BackendTypeValid( ralBackendType_t backendType )
+{
+	return backendType >= RAL_BACKEND_VULKAN && backendType < RAL_BACKEND_COUNT
+		? qtrue : qfalse;
+}
+
 // ralBackendCreateInfo_t::flags
 // RAL_FLAG_VALIDATION retired
 // (superseded by ralBackendCreateInfo_t::enableValidation field).

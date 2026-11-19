@@ -14,6 +14,8 @@
 #define FNV_OFFSET UINT64_C( 1469598103934665603 )
 #define FNV_PRIME  UINT64_C( 1099511628211 )
 
+static void RebuildMaterialDigest( renderSubmissionState_t *state );
+
 static qboolean PositionQ16( float value, int32_t *outValue )
 {
 	double scaled;
@@ -46,6 +48,14 @@ static uint64_t HashU32( uint64_t digest, uint32_t value )
 static uint64_t MaterialSnapshotDigest( const char *name, const renderMaterialSnapshot_t *snapshot )
 {
 	uint64_t digest = HashBytes( FNV_OFFSET, name, strlen( name ) + 1u );
+	digest			= HashBytes( digest, &snapshot->textureCacheKeyReady,
+							 sizeof( snapshot->textureCacheKeyReady ) );
+	if ( snapshot->textureCacheKeyReady ) {
+		digest = HashBytes( digest, &snapshot->textureCacheKey,
+			sizeof( snapshot->textureCacheKey ) );
+		digest = HashBytes( digest, &snapshot->textureCacheKeyHash,
+			sizeof( snapshot->textureCacheKeyHash ) );
+	}
 	digest			= HashBytes( digest, &snapshot->width, sizeof( snapshot->width ) );
 	digest			= HashBytes( digest, &snapshot->height, sizeof( snapshot->height ) );
 	digest			= HashBytes( digest, &snapshot->clampToEdge, sizeof( snapshot->clampToEdge ) );
@@ -53,6 +63,39 @@ static uint64_t MaterialSnapshotDigest( const char *name, const renderMaterialSn
 	digest			= HashBytes( digest, &snapshot->srgb, sizeof( snapshot->srgb ) );
 	digest			= HashBytes( digest, &snapshot->sky, sizeof( snapshot->sky ) );
 	digest			= HashBytes( digest, &snapshot->skyBox, sizeof( snapshot->skyBox ) );
+	digest = HashBytes( digest, &snapshot->authoredSkySourceReady,
+		sizeof( snapshot->authoredSkySourceReady ) );
+	if ( snapshot->authoredSkySourceReady ) {
+		const ralMaterialSourceSky_t *sky = &snapshot->authoredSkySource;
+		digest = HashU32( digest, (uint32_t)sky->outerBox );
+		digest = HashU32( digest, (uint32_t)sky->innerBox );
+		for ( uint32_t face = 0u; face < RAL_MATERIAL_SKY_FACE_COUNT; ++face ) {
+			digest = HashU32( digest, sky->outerDependencies[face] );
+			digest = HashU32( digest, sky->innerDependencies[face] );
+		}
+		digest = HashU32( digest, (uint32_t)sky->hasSun );
+		digest = HashU32( digest, (uint32_t)sky->sunExtended );
+		digest = HashBytes( digest, sky->sunColor, sizeof( sky->sunColor ) );
+		digest = HashBytes( digest, &sky->sunIntensity,
+			sizeof( sky->sunIntensity ) );
+		digest = HashBytes( digest, &sky->sunAzimuthDegrees,
+			sizeof( sky->sunAzimuthDegrees ) );
+		digest = HashBytes( digest, &sky->sunElevationDegrees,
+			sizeof( sky->sunElevationDegrees ) );
+		digest = HashBytes( digest, &sky->sunDevianceDegrees,
+			sizeof( sky->sunDevianceDegrees ) );
+		digest = HashU32( digest, sky->sunSamples );
+	}
+	digest = HashBytes( digest, &snapshot->authoredSkyTexturesReady,
+		sizeof( snapshot->authoredSkyTexturesReady ) );
+	if ( snapshot->authoredSkyTexturesReady ) {
+		digest = HashBytes( digest, snapshot->authoredSkyOuterTextures,
+			sizeof( snapshot->authoredSkyOuterTextures ) );
+		digest = HashBytes( digest, snapshot->authoredSkyInnerTextures,
+			sizeof( snapshot->authoredSkyInnerTextures ) );
+		digest = HashBytes( digest, snapshot->authoredSkyAverage,
+			sizeof( snapshot->authoredSkyAverage ) );
+	}
 	digest			= HashBytes( digest, &snapshot->noDraw, sizeof( snapshot->noDraw ) );
 	digest			= HashBytes( digest, &snapshot->skyCloudHeight,
 						 sizeof( snapshot->skyCloudHeight ) );
@@ -73,6 +116,15 @@ static uint64_t MaterialSnapshotDigest( const char *name, const renderMaterialSn
 						 sizeof( snapshot->stageCount ) );
 	digest			= HashBytes( digest, snapshot->stages,
 						 (size_t)snapshot->stageCount * sizeof( snapshot->stages[0] ) );
+	digest = HashBytes( digest, &snapshot->factors.schemaVersion,
+		sizeof( snapshot->factors.schemaVersion ) );
+	digest = HashBytes( digest, &snapshot->factors.runtimeGeneration,
+		sizeof( snapshot->factors.runtimeGeneration ) );
+	digest = HashBytes( digest, &snapshot->factors.ready,
+		sizeof( snapshot->factors.ready ) );
+	if ( snapshot->factors.ready )
+		digest = HashBytes( digest, &snapshot->factors.factors,
+			sizeof( snapshot->factors.factors ) );
 	digest			= HashBytes( digest, &snapshot->lighting.schemaVersion,
 							 sizeof( snapshot->lighting.schemaVersion ) );
 	digest			= HashBytes( digest, &snapshot->lighting.sourceGeneration,
@@ -104,6 +156,93 @@ static uint64_t MaterialSnapshotDigest( const char *name, const renderMaterialSn
 	return digest;
 }
 
+static uint64_t TextureSnapshotDigest( const char *name,
+		const renderTextureSnapshot_t *snapshot ) {
+	uint64_t digest = HashBytes( FNV_OFFSET, name, strlen( name ) + 1u );
+	digest = HashBytes( digest, &snapshot->textureCacheKeyReady,
+		sizeof( snapshot->textureCacheKeyReady ) );
+	if ( snapshot->textureCacheKeyReady ) {
+		digest = HashBytes( digest, &snapshot->textureCacheKey,
+			sizeof( snapshot->textureCacheKey ) );
+		digest = HashBytes( digest, &snapshot->textureCacheKeyHash,
+			sizeof( snapshot->textureCacheKeyHash ) );
+	}
+	digest = HashBytes( digest, &snapshot->width, sizeof( snapshot->width ) );
+	digest = HashBytes( digest, &snapshot->height, sizeof( snapshot->height ) );
+	digest = HashBytes( digest, &snapshot->clampToEdge,
+		sizeof( snapshot->clampToEdge ) );
+	digest = HashBytes( digest, &snapshot->msdf, sizeof( snapshot->msdf ) );
+	digest = HashBytes( digest, &snapshot->srgb, sizeof( snapshot->srgb ) );
+	digest = HashBytes( digest, &snapshot->ready, sizeof( snapshot->ready ) );
+	if ( snapshot->rgba8 && snapshot->byteCount )
+		digest = HashBytes( digest, snapshot->rgba8, snapshot->byteCount );
+	return digest;
+}
+
+qboolean RenderSubmission_SetMaterialTextureCacheKey(
+		renderSubmissionState_t *state, qhandle_t handle,
+		const ralTextureCacheKey_t *textureCacheKey ) {
+	if ( !state || !state->initialized || handle <= 0
+			|| !Ral_TextureCacheKeyValid( textureCacheKey )
+			|| state->nextMaterialGeneration == UINT64_MAX ) return qfalse;
+	for ( uint32_t i = 0u; i < state->materialCount; ++i ) {
+		renderMaterialSnapshot_t *snapshot = &state->materials[i].snapshot;
+		if ( snapshot->handle != handle ) continue;
+		if ( snapshot->ready != qtrue ) return qfalse;
+		if ( snapshot->textureCacheKeyReady
+				&& Ral_TextureCacheKeyExact( &snapshot->textureCacheKey,
+					textureCacheKey ) )
+			return qtrue;
+		/* Texture identity is immutable after first publication. Metal/OpenGL/
+		 * WebGPU publish the decoded payload and therefore matching dimensions;
+		 * the established Vulkan adapter publishes a bounded 1x1 CPU shadow for
+		 * an already-resident native image, whose authoritative dimensions live
+		 * in this first cache key. Never let a later re-registration replace it. */
+		if ( snapshot->textureCacheKeyReady ) return qfalse;
+		if ( ( textureCacheKey->asset.width != snapshot->width
+				|| textureCacheKey->asset.height != snapshot->height )
+				&& ( snapshot->width != 1u || snapshot->height != 1u
+					|| snapshot->byteCount != 4u ) ) return qfalse;
+		snapshot->textureCacheKey = *textureCacheKey;
+		snapshot->textureCacheKeyHash = textureCacheKey->keyHash;
+		snapshot->textureCacheKeyReady = qtrue;
+		snapshot->generation = state->nextMaterialGeneration++;
+		snapshot->digest = MaterialSnapshotDigest( state->materials[i].name,
+			snapshot );
+		RebuildMaterialDigest( state );
+		return qtrue;
+	}
+	return qfalse;
+}
+
+qboolean RenderSubmission_SetTextureCacheKey( renderSubmissionState_t *state,
+		qhandle_t handle, const ralTextureCacheKey_t *textureCacheKey ) {
+	if ( !state || !state->initialized || handle <= 0
+			|| !Ral_TextureCacheKeyValid( textureCacheKey )
+			|| state->nextMaterialGeneration == UINT64_MAX ) return qfalse;
+	if ( RenderSubmission_SetMaterialTextureCacheKey( state, handle,
+			textureCacheKey ) ) return qtrue;
+	for ( uint32_t i = 0u; i < state->stageTextureCount; ++i ) {
+		renderTextureSnapshot_t *snapshot = &state->stageTextures[i].snapshot;
+		if ( snapshot->handle != handle ) continue;
+		if ( snapshot->ready != qtrue
+				|| textureCacheKey->asset.width != snapshot->width
+				|| textureCacheKey->asset.height != snapshot->height ) return qfalse;
+		if ( snapshot->textureCacheKeyReady
+				&& Ral_TextureCacheKeyExact( &snapshot->textureCacheKey,
+					textureCacheKey ) ) return qtrue;
+		snapshot->textureCacheKey = *textureCacheKey;
+		snapshot->textureCacheKeyHash = textureCacheKey->keyHash;
+		snapshot->textureCacheKeyReady = qtrue;
+		snapshot->generation = state->nextMaterialGeneration++;
+		snapshot->digest = TextureSnapshotDigest( state->stageTextures[i].name,
+			snapshot );
+		RebuildMaterialDigest( state );
+		return qtrue;
+	}
+	return qfalse;
+}
+
 static void RebuildMaterialDigest( renderSubmissionState_t *state )
 {
 	uint32_t i;
@@ -115,6 +254,16 @@ static void RebuildMaterialDigest( renderSubmissionState_t *state )
 		state->materialDigest =
 			HashBytes( state->materialDigest, &snapshot->generation, sizeof( snapshot->generation ) );
 		state->materialDigest = HashBytes( state->materialDigest, &snapshot->digest, sizeof( snapshot->digest ) );
+	}
+	for ( i = 0u; i < state->stageTextureCount; ++i ) {
+		const renderTextureSnapshot_t *snapshot =
+			&state->stageTextures[i].snapshot;
+		state->materialDigest = HashBytes( state->materialDigest,
+			&snapshot->handle, sizeof( snapshot->handle ) );
+		state->materialDigest = HashBytes( state->materialDigest,
+			&snapshot->generation, sizeof( snapshot->generation ) );
+		state->materialDigest = HashBytes( state->materialDigest,
+			&snapshot->digest, sizeof( snapshot->digest ) );
 	}
 }
 
@@ -153,6 +302,49 @@ static int WorldBatchSortCompare( const void *leftValue,
 	if ( left->sourceSurfaceIndex < right->sourceSurfaceIndex ) return -1;
 	if ( left->sourceSurfaceIndex > right->sourceSurfaceIndex ) return 1;
 	return 0;
+}
+
+static qboolean WorldSurfaceBounds( const mapFile_t *bsp,
+		const dsurface_t *surface, renderWorldBatch_t *batch ) {
+	float mins[3], maxs[3], radiusSquared = 0.0f;
+	if ( !bsp || !surface || !batch || surface->numVerts < 0
+			|| surface->firstVert < 0
+			|| surface->firstVert > bsp->numDrawVerts - surface->numVerts )
+		return qfalse;
+	if ( !surface->numVerts ) {
+		memset( batch->boundsCenter, 0, sizeof( batch->boundsCenter ) );
+		batch->boundsRadius = 0.0f;
+		return qtrue;
+	}
+	for ( uint32_t axis = 0u; axis < 3u; ++axis ) {
+		mins[axis] = maxs[axis] = bsp->drawVerts[surface->firstVert].xyz[axis];
+		if ( !isfinite( mins[axis] ) ) return qfalse;
+	}
+	for ( int vertex = 1; vertex < surface->numVerts; ++vertex ) {
+		const vec3_t point = {
+			bsp->drawVerts[surface->firstVert + vertex].xyz[0],
+			bsp->drawVerts[surface->firstVert + vertex].xyz[1],
+			bsp->drawVerts[surface->firstVert + vertex].xyz[2]
+		};
+		for ( uint32_t axis = 0u; axis < 3u; ++axis ) {
+			if ( !isfinite( point[axis] ) ) return qfalse;
+			if ( point[axis] < mins[axis] ) mins[axis] = point[axis];
+			if ( point[axis] > maxs[axis] ) maxs[axis] = point[axis];
+		}
+	}
+	for ( uint32_t axis = 0u; axis < 3u; ++axis )
+		batch->boundsCenter[axis] = 0.5f * ( mins[axis] + maxs[axis] );
+	for ( int vertex = 0; vertex < surface->numVerts; ++vertex ) {
+		float distanceSquared = 0.0f;
+		for ( uint32_t axis = 0u; axis < 3u; ++axis ) {
+			const float delta = bsp->drawVerts[surface->firstVert + vertex].xyz[axis]
+				- batch->boundsCenter[axis];
+			distanceSquared += delta * delta;
+		}
+		if ( distanceSquared > radiusSquared ) radiusSquared = distanceSquared;
+	}
+	batch->boundsRadius = sqrtf( radiusSquared );
+	return isfinite( batch->boundsRadius ) ? qtrue : qfalse;
 }
 
 static void DefaultMaterialRasterPolicy( renderAssetKind_t kind, const byte *rgba8, uint32_t byteCount,
@@ -222,6 +414,7 @@ qboolean RenderSubmission_Init( renderSubmissionState_t *state, uint64_t ownerGe
 	state->irradianceVolumes = state->fallbackIrradianceVolumes;
 	state->directionalLighting = &state->fallbackDirectionalLighting;
 	state->activeWorldIndex       = -1;
+	state->pbrEnabled = qtrue;
 	state->ownerGeneration		  = ownerGeneration;
 	state->assetDigest			  = FNV_OFFSET;
 	state->materialDigest		  = FNV_OFFSET;
@@ -229,6 +422,7 @@ qboolean RenderSubmission_Init( renderSubmissionState_t *state, uint64_t ownerGe
 	state->directionalLightingDigest = FNV_OFFSET;
 	state->sceneDigest			  = FNV_OFFSET;
 	state->effectPrimitiveDigest = FNV_OFFSET;
+	state->lensSourceDigest       = FNV_OFFSET;
 	state->uiDigest				  = FNV_OFFSET;
 	state->nextHandle			  = 1u;
 	state->nextMaterialGeneration = 1u;
@@ -275,6 +469,7 @@ static void RenderSubmission_FreeWorldSlot( renderSubmissionWorldSlot_t *slot )
 	free( (void *)slot->snapshot.indices );
 	free( (void *)slot->snapshot.batches );
 	free( slot->surfaceVisibility );
+	free( (void *)slot->heightgrid.samples );
 	for ( index = 0u; index < slot->irradianceVolumeCount; ++index )
 		free( slot->irradianceVolumes[index].ownedArtifactBytes );
 	free( slot->directionalLighting.ownedArtifactBytes );
@@ -369,6 +564,7 @@ qboolean RenderSubmission_UnloadWorld( renderSubmissionState_t *state, int world
 	if ( !state->worlds[worldIndex].loaded ) return qtrue;
 	if ( state->activeWorldIndex == worldIndex )
 		RenderSubmission_ClearActiveWorld( state );
+	RenderSubmission_ReleaseWorldModels( state, worldIndex );
 	RenderSubmission_FreeWorldSlot( &state->worlds[worldIndex] );
 	if ( state->activeWorldIndex < 0 ) {
 		for ( replacement = 0; replacement < MAX_RENDER_WORLDS; ++replacement )
@@ -380,23 +576,56 @@ qboolean RenderSubmission_UnloadWorld( renderSubmissionState_t *state, int world
 	return qtrue;
 }
 
+static void FreeRegistrationAssets( renderSubmissionState_t *state )
+{
+	for ( uint32_t i = 0u; i < state->materialCount; ++i )
+		free( (void *)state->materials[i].snapshot.rgba8 );
+	for ( uint32_t i = 0u; i < state->stageTextureCount; ++i )
+		free( (void *)state->stageTextures[i].snapshot.rgba8 );
+	for ( uint32_t i = 0u; i < state->modelCount; ++i ) {
+		free( (void *)state->models[i].snapshot.positions );
+		free( (void *)state->models[i].snapshot.normals );
+		free( (void *)state->models[i].snapshot.texCoords );
+		free( (void *)state->models[i].snapshot.colors );
+		free( (void *)state->models[i].snapshot.indices );
+		free( (void *)state->models[i].snapshot.batches );
+		free( (void *)state->models[i].snapshot.tags );
+	}
+}
+
+qboolean RenderSubmission_ResetRegistrationAssets( renderSubmissionState_t *state )
+{
+	if ( !state || !state->initialized || state->frameOpen
+			|| RenderSubmission_ResidentWorldCount( state ) ) return qfalse;
+	RenderSubmission_CancelFrame( state );
+	FreeRegistrationAssets( state );
+	memset( state->materials, 0, sizeof( state->materials ) );
+	memset( state->stageTextures, 0, sizeof( state->stageTextures ) );
+	memset( state->models, 0, sizeof( state->models ) );
+	state->materialCount = state->materialBytes = state->resolvedMaterialCount = 0u;
+	state->stageTextureCount = state->stageTextureBytes = 0u;
+	state->modelCount = state->modelBytes = 0u;
+	state->registeredAssetCount = state->registeredMaterialCount = 0u;
+	state->assetDigest = state->materialDigest = state->modelDigest = FNV_OFFSET;
+	return qtrue;
+}
+
 void RenderSubmission_Reset( renderSubmissionState_t *state )
 {
+	/* A renderer module may fail before frontend ownership is initialized (for
+	 * example WebGPU without a browser runtime). Shutdown must remain idempotent
+	 * and must not dereference the zero-state pointer aliases. */
+	if ( !state ) return;
+	if ( !state->initialized ) {
+		memset( state, 0, sizeof( *state ) );
+		return;
+	}
 	if ( state ) {
 		uint32_t i;
 		state->frameOpen = qfalse;
 		(void)RenderSubmission_ClearIrradianceVolumes( state );
 		(void)RenderSubmission_ClearDirectionalLighting( state );
-		for ( i = 0u; i < state->materialCount; ++i )
-			free( (void *)state->materials[i].snapshot.rgba8 );
-	for ( i = 0u; i < state->modelCount; ++i ) {
-		free( (void *)state->models[i].snapshot.positions );
-		free( (void *)state->models[i].snapshot.normals );
-		free( (void *)state->models[i].snapshot.texCoords );
-			free( (void *)state->models[i].snapshot.indices );
-			free( (void *)state->models[i].snapshot.batches );
-			free( (void *)state->models[i].snapshot.tags );
-		}
+		FreeRegistrationAssets( state );
 		for ( i = 0u; i < MAX_RENDER_WORLDS; ++i )
 			RenderSubmission_FreeWorldSlot( &state->worlds[i] );
 		free( state->polyCommands );
@@ -411,6 +640,18 @@ void RenderSubmission_Reset( renderSubmissionState_t *state )
 		free( state->effectBeams );
 		memset( state, 0, sizeof( *state ) );
 	}
+}
+
+qboolean RenderSubmission_ReadableFrameGeneration(
+		const renderSubmissionState_t *state, uint64_t *outFrameGeneration ) {
+	uint64_t generation;
+	if ( !state || !outFrameGeneration || !state->initialized
+			|| ( state->frameOpen == state->frameSealed ) ) return qfalse;
+	generation = state->frameOpen ? state->currentFrameGeneration
+		: state->sealedFrameGeneration;
+	if ( !generation || generation == UINT64_MAX ) return qfalse;
+	*outFrameGeneration = generation;
+	return qtrue;
 }
 
 qhandle_t RenderSubmission_RegisterAsset( renderSubmissionState_t *state, renderAssetKind_t kind, const char *name )
@@ -520,6 +761,80 @@ qhandle_t RenderSubmission_RegisterMaterialImage( renderSubmissionState_t *state
 	return handle;
 }
 
+qhandle_t RenderSubmission_RegisterStageTexture( renderSubmissionState_t *state,
+		renderAssetKind_t kind, const char *name, qboolean clampToEdge,
+		const byte *rgba8, uint32_t width, uint32_t height ) {
+	renderTextureRecord_t *record;
+	byte *owned;
+	uint64_t byteCount64;
+	uint32_t byteCount;
+	qhandle_t semanticHandle;
+	if ( !state || !state->initialized || !MaterialKind( kind ) || !name
+			|| !name[0] || strlen( name ) >= MAX_QPATH || !rgba8
+			|| !width || !height
+			|| width > RENDER_SUBMISSION_MAX_IMAGE_DIMENSION
+			|| height > RENDER_SUBMISSION_MAX_IMAGE_DIMENSION
+			|| ( clampToEdge != qfalse && clampToEdge != qtrue ) ) return 0;
+	byteCount64 = (uint64_t)width * (uint64_t)height * 4u;
+	if ( byteCount64 > UINT32_MAX ) return 0;
+	byteCount = (uint32_t)byteCount64;
+	/* A semantic material name may be the shader identity while its snapshot
+	 * carries that shader's primary stage.  Reuse it only when the requested
+	 * stage is the exact same texture payload; otherwise a later stage whose
+	 * authored image happens to equal the shader name would incorrectly sample
+	 * the primary image (for example the plasma body's glow map). */
+	semanticHandle = RenderSubmission_MaterialHandle( state, name );
+	if ( semanticHandle > 0 ) {
+		renderTextureSnapshot_t snapshot;
+		if ( RenderSubmission_TextureSnapshot( state, semanticHandle, &snapshot )
+				&& snapshot.ready && snapshot.width == width
+				&& snapshot.height == height && snapshot.byteCount == byteCount
+				&& snapshot.clampToEdge == clampToEdge
+				&& snapshot.rgba8 && !memcmp( snapshot.rgba8, rgba8, byteCount ) )
+			return semanticHandle;
+	}
+	for ( uint32_t i = 0u; i < state->stageTextureCount; ++i ) {
+		const renderTextureSnapshot_t *snapshot =
+			&state->stageTextures[i].snapshot;
+		if ( strcasecmp( state->stageTextures[i].name, name ) ) continue;
+		/* A stage binding includes sampler addressing: map and clampmap are
+		 * valid simultaneous uses of the same immutable image. */
+		if ( snapshot->clampToEdge != clampToEdge ) continue;
+		if ( snapshot->width != width || snapshot->height != height
+				|| snapshot->byteCount != byteCount
+				|| !snapshot->rgba8
+				|| memcmp( snapshot->rgba8, rgba8, byteCount ) ) return 0;
+		return snapshot->handle;
+	}
+	if ( state->stageTextureCount >= RENDER_SUBMISSION_MAX_STAGE_TEXTURES
+			|| state->nextHandle >= INT_MAX
+			|| state->nextMaterialGeneration == UINT64_MAX ) return 0;
+	if ( byteCount64 > RENDER_SUBMISSION_MAX_STAGE_TEXTURE_BYTES
+				- state->stageTextureBytes ) return 0;
+	owned = (byte *)malloc( byteCount );
+	if ( !owned ) return 0;
+	memcpy( owned, rgba8, byteCount );
+	record = &state->stageTextures[state->stageTextureCount++];
+	memset( record, 0, sizeof( *record ) );
+	(void)snprintf( record->name, sizeof( record->name ), "%s", name );
+	record->snapshot.handle = (qhandle_t)state->nextHandle++;
+	record->snapshot.generation = state->nextMaterialGeneration++;
+	record->snapshot.width = width;
+	record->snapshot.height = height;
+	record->snapshot.rowBytes = width * 4u;
+	record->snapshot.byteCount = byteCount;
+	record->snapshot.rgba8 = owned;
+	record->snapshot.clampToEdge = clampToEdge;
+	record->snapshot.msdf = kind == RENDER_ASSET_MSDF ? qtrue : qfalse;
+	record->snapshot.srgb = record->snapshot.msdf ? qfalse : qtrue;
+	record->snapshot.ready = qtrue;
+	record->snapshot.digest = TextureSnapshotDigest( record->name,
+		&record->snapshot );
+	state->stageTextureBytes += byteCount;
+	RebuildMaterialDigest( state );
+	return record->snapshot.handle;
+}
+
 qboolean RenderSubmission_SetMaterialRasterPolicy( renderSubmissionState_t *state, qhandle_t handle,
 												   renderAlphaMode_t alphaMode, float alphaCutoff, qboolean depthWrite )
 {
@@ -599,6 +914,217 @@ qboolean RenderSubmission_SetMaterialSky( renderSubmissionState_t *state,
 			snapshot );
 		RebuildMaterialDigest( state );
 		return qtrue;
+	}
+	return qfalse;
+}
+
+qboolean RenderSubmission_SetMaterialAuthoredSkySource(
+		renderSubmissionState_t *state, qhandle_t handle,
+		const ralMaterialSourceSky_t *source ) {
+	if ( !state || !state->initialized || handle <= 0 || !source
+			|| state->nextMaterialGeneration == UINT64_MAX
+			|| ( source->hasSun != qfalse && source->hasSun != qtrue )
+			|| !isfinite( source->sunIntensity ) || source->sunIntensity < 0.0f
+			|| !isfinite( source->sunAzimuthDegrees )
+			|| !isfinite( source->sunElevationDegrees )
+			|| !isfinite( source->sunDevianceDegrees )
+			|| source->sunDevianceDegrees < 0.0f ) return qfalse;
+	for ( uint32_t channel = 0u; channel < 3u; ++channel )
+		if ( !isfinite( source->sunColor[channel] )
+				|| source->sunColor[channel] < 0.0f ) return qfalse;
+	for ( uint32_t i = 0u; i < state->materialCount; ++i ) {
+		renderMaterialSnapshot_t *snapshot = &state->materials[i].snapshot;
+		if ( snapshot->handle != handle ) continue;
+		if ( !snapshot->sky || !snapshot->rgba8 || !snapshot->width
+				|| !snapshot->height ) return qfalse;
+		snapshot->authoredSkySource = *source;
+		/* Source metadata does not imply a colour source.  In particular, the
+		 * frontend material record may still contain its 1x1 white registration
+		 * placeholder.  Cube faces or ordered Q3 sky stages publish the actual
+		 * environment average separately. */
+		for ( uint32_t channel = 0u; channel < 3u; ++channel )
+			snapshot->authoredSkyAverage[channel] = 0.04f;
+		snapshot->authoredSkySourceReady = qtrue;
+		snapshot->generation = state->nextMaterialGeneration++;
+		snapshot->digest = MaterialSnapshotDigest( state->materials[i].name,
+			snapshot );
+		RebuildMaterialDigest( state );
+		return qtrue;
+	}
+	return qfalse;
+}
+
+qboolean RenderSubmission_SetMaterialAuthoredSkyAverage(
+		renderSubmissionState_t *state, qhandle_t handle,
+		const float average[3] ) {
+	if ( !state || !state->initialized || handle <= 0 || !average
+			|| state->nextMaterialGeneration == UINT64_MAX ) return qfalse;
+	for ( uint32_t channel = 0u; channel < 3u; ++channel )
+		if ( !isfinite( average[channel] ) || average[channel] < 0.0f
+				|| average[channel] > 16.0f ) return qfalse;
+	for ( uint32_t i = 0u; i < state->materialCount; ++i ) {
+		renderMaterialSnapshot_t *snapshot = &state->materials[i].snapshot;
+		if ( snapshot->handle != handle ) continue;
+		if ( !snapshot->sky || !snapshot->authoredSkySourceReady ) return qfalse;
+		if ( !memcmp( snapshot->authoredSkyAverage, average,
+				sizeof( snapshot->authoredSkyAverage ) ) ) return qtrue;
+		memcpy( snapshot->authoredSkyAverage, average,
+			sizeof( snapshot->authoredSkyAverage ) );
+		snapshot->generation = state->nextMaterialGeneration++;
+		snapshot->digest = MaterialSnapshotDigest( state->materials[i].name,
+			snapshot );
+		RebuildMaterialDigest( state );
+		return qtrue;
+	}
+	return qfalse;
+}
+
+qboolean RenderSubmission_SetMaterialAuthoredSkyTextures(
+		renderSubmissionState_t *state, qhandle_t handle,
+		const qhandle_t outerTextures[RAL_MATERIAL_SKY_FACE_COUNT],
+		const qhandle_t innerTextures[RAL_MATERIAL_SKY_FACE_COUNT] ) {
+	if ( !state || !state->initialized || handle <= 0 || !outerTextures
+			|| !innerTextures || state->nextMaterialGeneration == UINT64_MAX )
+		return qfalse;
+	for ( uint32_t i = 0u; i < state->materialCount; ++i ) {
+		renderMaterialSnapshot_t *snapshot = &state->materials[i].snapshot;
+		uint64_t red = 0u, green = 0u, blue = 0u, samples = 0u;
+		const qhandle_t *averageTextures;
+		if ( snapshot->handle != handle ) continue;
+		if ( !snapshot->sky || !snapshot->authoredSkySourceReady ) return qfalse;
+		for ( uint32_t box = 0u; box < 2u; ++box ) {
+			const qboolean required = box == 0u
+				? snapshot->authoredSkySource.outerBox
+				: snapshot->authoredSkySource.innerBox;
+			const qhandle_t *textures = box == 0u ? outerTextures : innerTextures;
+			for ( uint32_t face = 0u; face < RAL_MATERIAL_SKY_FACE_COUNT; ++face ) {
+				renderTextureSnapshot_t texture;
+				if ( !required ) {
+					if ( textures[face] != 0 ) return qfalse;
+					continue;
+				}
+				if ( textures[face] <= 0
+						|| !RenderSubmission_TextureSnapshot( state,
+							textures[face], &texture ) || !texture.ready
+						|| !texture.rgba8 || !texture.width || !texture.height )
+					return qfalse;
+			}
+		}
+		averageTextures = snapshot->authoredSkySource.outerBox
+			? outerTextures : ( snapshot->authoredSkySource.innerBox
+				? innerTextures : NULL );
+		if ( averageTextures ) {
+			for ( uint32_t face = 0u; face < RAL_MATERIAL_SKY_FACE_COUNT; ++face ) {
+				renderTextureSnapshot_t texture;
+				uint32_t pixelCount, step;
+				if ( !RenderSubmission_TextureSnapshot( state,
+						averageTextures[face], &texture ) ) return qfalse;
+				pixelCount = texture.width * texture.height;
+				step = pixelCount > 1024u ? pixelCount / 1024u : 1u;
+				for ( uint32_t pixel = 0u; pixel < pixelCount; pixel += step ) {
+					red += texture.rgba8[4u * pixel + 0u];
+					green += texture.rgba8[4u * pixel + 1u];
+					blue += texture.rgba8[4u * pixel + 2u];
+					samples++;
+				}
+			}
+			if ( !samples ) return qfalse;
+		} else {
+			/* Stage-only skies have no cube faces. Derive their environment
+			 * seed from the already registered canonical stage images on every
+			 * backend. This is load-time metadata, not the animated sky capture:
+			 * the ordered GPU stage program remains the radiance authority. */
+			for ( uint32_t stageIndex = 0u; stageIndex < snapshot->stageCount; ++stageIndex ) {
+				const renderMaterialStageSnapshot_t *stage = &snapshot->stages[stageIndex];
+				renderTextureSnapshot_t texture;
+				uint32_t pixelCount, step;
+				if ( stage->imageSource != 0u ) continue;
+				if ( !RenderSubmission_TextureSnapshot( state, stage->material, &texture )
+						|| !texture.ready || !texture.rgba8 || !texture.width || !texture.height )
+					return qfalse;
+				pixelCount = texture.width * texture.height;
+				step = pixelCount > 2048u ? pixelCount / 2048u : 1u;
+				for ( uint32_t pixel = 0u; pixel < pixelCount; pixel += step ) {
+					red += texture.rgba8[4u * pixel + 0u];
+					green += texture.rgba8[4u * pixel + 1u];
+					blue += texture.rgba8[4u * pixel + 2u];
+					samples++;
+				}
+			}
+		}
+		memcpy( snapshot->authoredSkyOuterTextures, outerTextures,
+			sizeof( snapshot->authoredSkyOuterTextures ) );
+		memcpy( snapshot->authoredSkyInnerTextures, innerTextures,
+			sizeof( snapshot->authoredSkyInnerTextures ) );
+		if ( samples ) {
+			snapshot->authoredSkyAverage[0] = (float)red / ( 255.0f * samples );
+			snapshot->authoredSkyAverage[1] = (float)green / ( 255.0f * samples );
+			snapshot->authoredSkyAverage[2] = (float)blue / ( 255.0f * samples );
+		}
+		snapshot->authoredSkyTexturesReady = qtrue;
+		snapshot->generation = state->nextMaterialGeneration++;
+		snapshot->digest = MaterialSnapshotDigest( state->materials[i].name,
+			snapshot );
+		RebuildMaterialDigest( state );
+		return qtrue;
+	}
+	return qfalse;
+}
+
+qboolean RenderSubmission_MaterialStagesUseTime( const renderMaterialSnapshot_t *material ) {
+	if ( !material || material->stageCount > RENDER_MATERIAL_MAX_STAGES ) return qfalse;
+	for ( uint32_t slot = 0u; slot < material->stageCount; ++slot ) {
+		const renderMaterialStageSnapshot_t *stage = &material->stages[slot];
+		if ( stage->animationFrameCount > 1u && stage->animationFrequency > 0.0f ) return qtrue;
+		if ( stage->rgbGen == RAL_MATERIAL_COLOR_WAVE
+				&& stage->rgbWave.function != RAL_MATERIAL_WAVE_NONE
+				&& stage->rgbWave.amplitude != 0.0f && stage->rgbWave.frequency != 0.0f ) return qtrue;
+		if ( stage->alphaGen == RAL_MATERIAL_ALPHA_WAVE
+				&& stage->alphaWave.function != RAL_MATERIAL_WAVE_NONE
+				&& stage->alphaWave.amplitude != 0.0f && stage->alphaWave.frequency != 0.0f ) return qtrue;
+		if ( !stage->tcModCount ) {
+			if ( stage->scaleScroll[2] != 0.0f || stage->scaleScroll[3] != 0.0f
+					|| stage->rotateDegrees != 0.0f
+					|| ( stage->hasTurbulence && stage->turbulence[1] != 0.0f && stage->turbulence[3] != 0.0f )
+					|| ( stage->hasStretch && stage->stretch[1] != 0.0f && stage->stretch[3] != 0.0f ) ) return qtrue;
+		} else for ( uint32_t op = 0u; op < stage->tcModCount && op < RAL_MATERIAL_SOURCE_MAX_TCMODS; ++op ) {
+			const renderMaterialTcMod_t *tcMod = &stage->tcMods[op];
+			const float *p = tcMod->parameters;
+			if ( ( tcMod->type == RAL_MATERIAL_TCMOD_SCROLL && ( p[0] != 0.0f || p[1] != 0.0f ) )
+					|| ( tcMod->type == RAL_MATERIAL_TCMOD_ROTATE && p[0] != 0.0f )
+					|| ( tcMod->type == RAL_MATERIAL_TCMOD_TURBULENCE && p[1] != 0.0f && p[3] != 0.0f )
+					|| ( tcMod->type == RAL_MATERIAL_TCMOD_STRETCH
+						&& p[0] != (float)RAL_MATERIAL_WAVE_NONE && p[2] != 0.0f && p[4] != 0.0f ) ) return qtrue;
+		}
+	}
+	return qfalse;
+}
+
+qboolean RenderSubmission_ActiveSkyMaterial(
+		const renderSubmissionState_t *state,
+		renderMaterialSnapshot_t *outMaterial,
+		char outSemanticName[MAX_QPATH] ) {
+	const renderSubmissionWorldSlot_t *world;
+	if ( !state || !state->initialized || !outMaterial || !outSemanticName
+			|| state->activeWorldIndex < 0
+			|| state->activeWorldIndex >= MAX_RENDER_WORLDS ) return qfalse;
+	world = &state->worlds[state->activeWorldIndex];
+	if ( !world->loaded || !world->snapshot.ready ) return qfalse;
+	for ( uint32_t batchIndex = 0u; batchIndex < world->snapshot.batchCount;
+			++batchIndex ) {
+		const renderWorldBatch_t *batch = &world->snapshot.batches[batchIndex];
+		if ( !batch->sky || batch->noDraw || batch->baseMaterial <= 0 ) continue;
+		for ( uint32_t materialIndex = 0u;
+				materialIndex < state->materialCount; ++materialIndex ) {
+			const renderMaterialRecord_t *record = &state->materials[materialIndex];
+			if ( record->snapshot.handle != batch->baseMaterial
+					|| !record->snapshot.sky
+					|| !record->snapshot.authoredSkySourceReady ) continue;
+			*outMaterial = record->snapshot;
+			memcpy( outSemanticName, record->name, MAX_QPATH );
+			outSemanticName[MAX_QPATH - 1u] = '\0';
+			return qtrue;
+		}
 	}
 	return qfalse;
 }
@@ -722,23 +1248,45 @@ qboolean RenderSubmission_SetMaterialSkySecondary( renderSubmissionState_t *stat
 qboolean RenderSubmission_SetMaterialStages( renderSubmissionState_t *state,
 		qhandle_t handle, const renderMaterialStageSnapshot_t *stages,
 		uint32_t stageCount ) {
+	ralMaterialStageDepth_t depthStages[RENDER_MATERIAL_MAX_STAGES];
+	ralMaterialStageDepthPlan_t depthPlan;
+	ralMaterialStageBlend_t blendStages[RENDER_MATERIAL_MAX_STAGES];
+	qboolean blendAdditive;
 	if ( !state || !state->initialized || handle <= 0 || !stages
 			|| !stageCount || stageCount > RENDER_MATERIAL_MAX_STAGES
 			|| state->nextMaterialGeneration == UINT64_MAX ) return qfalse;
 	for ( uint32_t stageIndex = 0u; stageIndex < stageCount; ++stageIndex ) {
 		const renderMaterialStageSnapshot_t *stage = &stages[stageIndex];
+		depthStages[stageIndex].depthFunc = stage->depthFunc;
+		depthStages[stageIndex].depthWrite = stage->depthWrite;
+		depthStages[stageIndex].alphaTest = stage->alphaTest;
+		blendStages[stageIndex].sourceBlend = stage->sourceBlend;
+		blendStages[stageIndex].destinationBlend = stage->destinationBlend;
 		qboolean materialExists = stage->imageSource != 0u;
 		if ( stage->imageSource > 2u
-				|| stage->tcGen > RENDER_MATERIAL_TCGEN_ENVIRONMENT
+				|| stage->tcModCount > RAL_MATERIAL_SOURCE_MAX_TCMODS
+				|| stage->tcGen > RENDER_MATERIAL_TCGEN_VECTOR
 				|| stage->sourceBlend > 10u
-				|| stage->destinationBlend > 10u || stage->alphaTest > 1u
+				|| stage->destinationBlend > 10u
+				|| stage->alphaTest > RAL_MATERIAL_ALPHA_TEST_KEEP_GREATER_EQUAL
+				|| stage->depthFunc > RAL_MATERIAL_DEPTH_EQUAL
+				|| ( stage->depthWrite != qfalse && stage->depthWrite != qtrue )
+				|| stage->rgbGen > RAL_MATERIAL_COLOR_CONST
+				|| stage->alphaGen > RAL_MATERIAL_ALPHA_CONST
+				|| stage->animationFrameCount > RENDER_MATERIAL_MAX_ANIMATION_FRAMES
+				|| ( stage->animationFrameCount
+					&& ( !isfinite( stage->animationFrequency )
+						|| stage->animationFrequency <= 0.0f ) )
+				|| ( stage->animationLooping != qfalse
+					&& stage->animationLooping != qtrue )
 				|| !isfinite( stage->alphaCutoff ) || stage->alphaCutoff < 0.0f
 				|| stage->alphaCutoff > 1.0f
 				|| !isfinite( stage->scaleScroll[0] )
 				|| !isfinite( stage->scaleScroll[1] )
 				|| !isfinite( stage->scaleScroll[2] )
 				|| !isfinite( stage->scaleScroll[3] )
-				|| stage->scaleScroll[0] == 0.0f || stage->scaleScroll[1] == 0.0f
+				|| ( !stage->tcModCount
+					&& ( stage->scaleScroll[0] == 0.0f || stage->scaleScroll[1] == 0.0f ) )
 				|| !isfinite( stage->rotateDegrees )
 				|| ( stage->hasTurbulence != qfalse
 					&& stage->hasTurbulence != qtrue )
@@ -746,16 +1294,51 @@ qboolean RenderSubmission_SetMaterialStages( renderSubmissionState_t *state,
 			return qfalse;
 		for ( uint32_t component = 0u; component < 4u; ++component )
 			if ( !isfinite( stage->turbulence[component] )
-					|| !isfinite( stage->stretch[component] ) ) return qfalse;
+					|| !isfinite( stage->stretch[component] )
+					|| !isfinite( stage->constantColor[component] ) ) return qfalse;
+		for ( uint32_t op = 0u; op < stage->tcModCount; ++op ) {
+			const renderMaterialTcMod_t *mod = &stage->tcMods[op];
+			if ( mod->type < RAL_MATERIAL_TCMOD_SCALE
+					|| mod->type > RAL_MATERIAL_TCMOD_TRANSFORM ) return qfalse;
+			for ( uint32_t p = 0u; p < 6u; ++p )
+				if ( !isfinite( mod->parameters[p] ) ) return qfalse;
+			if ( mod->type == RAL_MATERIAL_TCMOD_STRETCH
+					&& ( mod->parameters[0] < RAL_MATERIAL_WAVE_SIN
+						|| mod->parameters[0] > RAL_MATERIAL_WAVE_NOISE
+						|| floorf( mod->parameters[0] ) != mod->parameters[0] ) )
+				return qfalse;
+		}
+		for ( uint32_t vector = 0u; vector < 2u; ++vector )
+			for ( uint32_t component = 0u; component < 3u; ++component )
+				if ( !isfinite( stage->tcGenVectors[vector][component] ) )
+					return qfalse;
+		if ( !isfinite( stage->portalRange )
+				|| !isfinite( stage->rgbWave.base )
+				|| !isfinite( stage->rgbWave.amplitude )
+				|| !isfinite( stage->rgbWave.phase )
+				|| !isfinite( stage->rgbWave.frequency )
+				|| !isfinite( stage->alphaWave.base )
+				|| !isfinite( stage->alphaWave.amplitude )
+				|| !isfinite( stage->alphaWave.phase )
+				|| !isfinite( stage->alphaWave.frequency ) ) return qfalse;
 		if ( stage->imageSource == 0u ) {
+			renderTextureSnapshot_t texture;
 			if ( stage->material <= 0 ) return qfalse;
-			for ( uint32_t materialIndex = 0u;
-					materialIndex < state->materialCount; ++materialIndex )
-				if ( state->materials[materialIndex].snapshot.handle
-						== stage->material ) { materialExists = qtrue; break; }
+			materialExists = RenderSubmission_TextureSnapshot( state,
+				stage->material, &texture );
 		}
 		if ( !materialExists ) return qfalse;
+		for ( uint32_t frame = 0u; frame < stage->animationFrameCount; ++frame ) {
+			renderTextureSnapshot_t texture;
+			if ( stage->animationMaterials[frame] <= 0 ) return qfalse;
+			if ( !RenderSubmission_TextureSnapshot( state,
+					stage->animationMaterials[frame], &texture ) ) return qfalse;
+		}
 	}
+	if ( !Ral_MaterialStageDepthCollapse( depthStages, stageCount, &depthPlan ) )
+		return qfalse;
+	if ( !Ral_MaterialStageBlendAdditive( blendStages, stageCount, &blendAdditive ) )
+		return qfalse;
 	for ( uint32_t materialIndex = 0u;
 			materialIndex < state->materialCount; ++materialIndex ) {
 		renderMaterialSnapshot_t *snapshot =
@@ -768,6 +1351,8 @@ qboolean RenderSubmission_SetMaterialStages( renderSubmissionState_t *state,
 		memcpy( snapshot->stages, stages,
 			(size_t)stageCount * sizeof( stages[0] ) );
 		snapshot->stageCount = stageCount;
+		snapshot->stageDepth = depthPlan;
+		snapshot->stageBlendAdditive = blendAdditive;
 		snapshot->generation = state->nextMaterialGeneration++;
 		snapshot->digest = MaterialSnapshotDigest(
 			state->materials[materialIndex].name, snapshot );
@@ -834,6 +1419,95 @@ qboolean RenderSubmission_SetMaterialLighting( renderSubmissionState_t *state, q
 	return qfalse;
 }
 
+static qboolean MaterialFactorsValid( const ralMaterialFactors_t *factors )
+{
+	uint32_t channel;
+	if ( !factors ) return qfalse;
+	for ( channel = 0u; channel < 4u; ++channel )
+		if ( !isfinite( factors->baseColor[channel] )
+				|| factors->baseColor[channel] < 0.0f
+				|| factors->baseColor[channel] > 1.0f ) return qfalse;
+	for ( channel = 0u; channel < 3u; ++channel )
+		if ( !isfinite( factors->emissive[channel] )
+				|| factors->emissive[channel] < 0.0f ) return qfalse;
+	return isfinite( factors->metallic ) && factors->metallic >= 0.0f
+		&& factors->metallic <= 1.0f
+		&& isfinite( factors->roughness ) && factors->roughness >= 0.0f
+		&& factors->roughness <= 1.0f
+		&& isfinite( factors->normalScale ) && factors->normalScale >= 0.0f
+		&& isfinite( factors->occlusionStrength )
+		&& factors->occlusionStrength >= 0.0f
+		&& factors->occlusionStrength <= 1.0f;
+}
+
+qboolean RenderSubmission_PublishMaterialFactors(
+		renderSubmissionState_t *state, uint64_t runtimeGeneration,
+		const renderMaterialFactorPublicationEntry_t *entries,
+		uint32_t entryCount )
+{
+	ralMaterialFactors_t candidates[RENDER_SUBMISSION_MAX_MATERIALS];
+	qboolean candidateReady[RENDER_SUBMISSION_MAX_MATERIALS];
+	uint32_t changedCount = 0u;
+	if ( !state || !state->initialized
+			|| entryCount > state->materialCount
+			|| ( entryCount && ( !entries || !runtimeGeneration
+				|| runtimeGeneration == UINT64_MAX ) )
+			|| ( !entryCount && runtimeGeneration ) ) return qfalse;
+	memset( candidates, 0, sizeof( candidates ) );
+	memset( candidateReady, 0, sizeof( candidateReady ) );
+	for ( uint32_t entry = 0u; entry < entryCount; ++entry ) {
+		uint32_t index;
+		if ( entries[entry].material <= 0
+				|| !MaterialFactorsValid( &entries[entry].factors )
+				|| !RenderSubmission_MaterialIndex( state, entries[entry].material,
+					&index ) || candidateReady[index] ) return qfalse;
+		candidates[index] = entries[entry].factors;
+		candidateReady[index] = qtrue;
+	}
+	if ( state->worldLoaded ) {
+		for ( uint32_t batch = 0u; batch < state->worldSnapshot.batchCount;
+				++batch ) {
+			const renderWorldBatch_t *worldBatch =
+				&state->worldSnapshot.batches[batch];
+			uint32_t index;
+			qboolean found = worldBatch->noDraw
+				|| ( RenderSubmission_MaterialIndex( state, worldBatch->baseMaterial,
+					&index ) && candidateReady[index] );
+			if ( !found && entryCount ) return qfalse;
+		}
+	}
+	for ( uint32_t index = 0u; index < state->materialCount; ++index ) {
+		const renderMaterialFactorsSnapshot_t *current =
+			&state->materials[index].snapshot.factors;
+		if ( current->ready != candidateReady[index]
+				|| ( candidateReady[index]
+					&& ( current->schemaVersion
+						!= RENDER_MATERIAL_FACTORS_SCHEMA_VERSION
+						|| current->runtimeGeneration != runtimeGeneration
+						|| memcmp( &current->factors, &candidates[index],
+							sizeof( current->factors ) ) ) ) ) changedCount++;
+	}
+	if ( changedCount > UINT64_MAX - state->nextMaterialGeneration ) return qfalse;
+	for ( uint32_t index = 0u; index < state->materialCount; ++index ) {
+		renderMaterialSnapshot_t *snapshot = &state->materials[index].snapshot;
+		renderMaterialFactorsSnapshot_t next;
+		memset( &next, 0, sizeof( next ) );
+		if ( candidateReady[index] ) {
+			next.schemaVersion = RENDER_MATERIAL_FACTORS_SCHEMA_VERSION;
+			next.runtimeGeneration = runtimeGeneration;
+			next.factors = candidates[index];
+			next.ready = qtrue;
+		}
+		if ( !memcmp( &snapshot->factors, &next, sizeof( next ) ) ) continue;
+		snapshot->factors = next;
+		snapshot->generation = state->nextMaterialGeneration++;
+		snapshot->digest = MaterialSnapshotDigest(
+			state->materials[index].name, snapshot );
+	}
+	if ( changedCount ) RebuildMaterialDigest( state );
+	return qtrue;
+}
+
 qboolean RenderSubmission_RecordAsset( renderSubmissionState_t *state, renderAssetKind_t kind, const char *name,
 									   qhandle_t handle )
 {
@@ -861,6 +1535,7 @@ qboolean RenderSubmission_RecordAsset( renderSubmissionState_t *state, renderAss
 qboolean RenderSubmission_LoadWorld( renderSubmissionState_t *state, const mapFile_t *bsp, int worldIndex )
 {
 	uint64_t			 digest		 = FNV_OFFSET;
+	uint64_t			 contentIdentity = FNV_OFFSET;
 	renderWorldVertex_t *vertices	 = NULL;
 	uint32_t			*indices	 = NULL;
 	renderWorldBatch_t	*batches	 = NULL;
@@ -877,6 +1552,7 @@ qboolean RenderSubmission_LoadWorld( renderSubmissionState_t *state, const mapFi
 		 ( bsp->numShaders && !bsp->shaders ) || bsp->numSubModels < 0 ||
 		 ( bsp->numSubModels && !bsp->subModels ) )
 		return qfalse;
+	if ( state->nextWorldLifecycleGeneration >= UINT64_MAX - 1u ) return qfalse;
 	/* The BSP surface lump also owns inline brush-model surfaces.  Model 0 is
 	 * the static world; later models are submitted through refEntity_t and must
 	 * not be lowered here as a second, origin-space copy. */
@@ -896,6 +1572,22 @@ qboolean RenderSubmission_LoadWorld( renderSubmissionState_t *state, const mapFi
 	digest = HashBytes( digest, bsp->drawVerts, (size_t)bsp->numDrawVerts * sizeof( *bsp->drawVerts ) );
 	digest = HashBytes( digest, bsp->drawIndexes, (size_t)bsp->numDrawIndexes * sizeof( *bsp->drawIndexes ) );
 	digest = HashBytes( digest, bsp->shaders, (size_t)bsp->numShaders * sizeof( *bsp->shaders ) );
+	contentIdentity = HashBytes( contentIdentity, bsp->name,
+		strnlen( bsp->name, sizeof( bsp->name ) ) );
+	contentIdentity = HashBytes( contentIdentity, &bsp->checksum,
+		sizeof( bsp->checksum ) );
+	contentIdentity = HashBytes( contentIdentity, bsp->surfaces,
+		(size_t)bsp->numSurfaces * sizeof( *bsp->surfaces ) );
+	contentIdentity = HashBytes( contentIdentity, bsp->drawVerts,
+		(size_t)bsp->numDrawVerts * sizeof( *bsp->drawVerts ) );
+	contentIdentity = HashBytes( contentIdentity, bsp->drawIndexes,
+		(size_t)bsp->numDrawIndexes * sizeof( *bsp->drawIndexes ) );
+	contentIdentity = HashBytes( contentIdentity, bsp->shaders,
+		(size_t)bsp->numShaders * sizeof( *bsp->shaders ) );
+	if ( !contentIdentity || contentIdentity == UINT64_MAX )
+		contentIdentity = HashU32( FNV_OFFSET, (uint32_t)bsp->checksum );
+	if ( !contentIdentity || contentIdentity == UINT64_MAX )
+		contentIdentity = 1u;
 	for ( int surfaceIndex = surfaceFirst; surfaceIndex < surfaceEnd; ++surfaceIndex ) {
 		const dsurface_t *surface = &bsp->surfaces[surfaceIndex];
 		uint64_t		  addVertices, addIndices;
@@ -973,6 +1665,12 @@ qboolean RenderSubmission_LoadWorld( renderSubmissionState_t *state, const mapFi
 			batch->depthWrite		  = qtrue;
 			batch->sort               = RENDER_MATERIAL_SORT_OPAQUE;
 			batch->visible			  = qtrue;
+			if ( !WorldSurfaceBounds( bsp, surface, batch ) ) {
+				free( batches );
+				free( indices );
+				free( vertices );
+				return qfalse;
+			}
 			batch->baseMaterial = RenderSubmission_MaterialHandle( state, bsp->shaders[surface->shaderNum].shader );
 			if ( batch->baseMaterial ) {
 				renderMaterialSnapshot_t material;
@@ -1111,8 +1809,10 @@ qboolean RenderSubmission_LoadWorld( renderSubmissionState_t *state, const mapFi
 	slot = &state->worlds[worldIndex];
 	if ( state->activeWorldIndex == worldIndex )
 		RenderSubmission_ClearActiveWorld( state );
+	RenderSubmission_ReleaseWorldModels( state, worldIndex );
 	RenderSubmission_FreeWorldSlot( slot );
 	slot->map = bsp;
+	slot->lifecycleGeneration = ++state->nextWorldLifecycleGeneration;
 	slot->surfaceVisibility = visibility;
 	slot->surfaceVisibilityBytes = visibilityBytes;
 	slot->snapshot.vertices = vertices;
@@ -1125,6 +1825,7 @@ qboolean RenderSubmission_LoadWorld( renderSubmissionState_t *state, const mapFi
 	slot->snapshot.patchTriangleCount = patchTriangleCount;
 	slot->snapshot.ready = qtrue;
 	slot->digest = digest;
+	slot->contentIdentity = contentIdentity;
 	slot->surfaceCount = (uint32_t)bsp->numSurfaces;
 	slot->vertexCount = (uint32_t)bsp->numDrawVerts;
 	slot->indexCount = (uint32_t)bsp->numDrawIndexes;
@@ -1141,75 +1842,6 @@ qboolean RenderSubmission_LoadWorld( renderSubmissionState_t *state, const mapFi
 	return qtrue;
 }
 
-static qboolean RenderSubmission_UpdateWorldVisibility(
-		renderSubmissionState_t *state, const refdef_t *view ) {
-	const mapFile_t *bsp;
-	renderWorldBatch_t *batches;
-	const byte *clusterVisibility = NULL;
-	int nodeIndex = 0, viewLeaf = -1, viewCluster = -1;
-	if ( !state || !view || !state->worldLoaded || !state->worldMap )
-		return qtrue;
-	bsp = state->worldMap;
-	batches = (renderWorldBatch_t *)state->worldSnapshot.batches;
-	if ( !batches ) return qfalse;
-	for ( uint32_t batch = 0u; batch < state->worldSnapshot.batchCount; ++batch )
-		batches[batch].visible = qtrue;
-	if ( !state->worldSurfaceVisibility || !state->worldSurfaceVisibilityBytes
-			|| bsp->numNodes <= 0 || !bsp->nodes || bsp->numLeafs <= 0
-			|| !bsp->leafs || bsp->numLeafSurfaces <= 0 || !bsp->leafSurfaces )
-		return qtrue;
-	while ( nodeIndex >= 0 ) {
-		const dnode_t *node;
-		const dplane_t *plane;
-		float distance;
-		if ( nodeIndex >= bsp->numNodes ) return qfalse;
-		node = &bsp->nodes[nodeIndex];
-		if ( node->planeNum < 0 || node->planeNum >= bsp->numPlanes
-				|| !bsp->planes ) return qfalse;
-		plane = &bsp->planes[node->planeNum];
-		distance = view->vieworg[0] * plane->normal[0]
-			+ view->vieworg[1] * plane->normal[1]
-			+ view->vieworg[2] * plane->normal[2] - plane->dist;
-		nodeIndex = node->children[distance >= 0.0f ? 0 : 1];
-	}
-	viewLeaf = -1 - nodeIndex;
-	if ( viewLeaf < 0 || viewLeaf >= bsp->numLeafs ) return qfalse;
-	viewCluster = bsp->leafs[viewLeaf].cluster;
-	if ( viewCluster >= 0 && viewCluster < bsp->numClusters
-			&& bsp->visibility && bsp->clusterBytes > 0
-			&& bsp->visibilityLength >= bsp->clusterBytes * bsp->numClusters )
-		clusterVisibility = bsp->visibility
-			+ (size_t)viewCluster * (size_t)bsp->clusterBytes;
-	memset( state->worldSurfaceVisibility, 0,
-		state->worldSurfaceVisibilityBytes );
-	for ( int leafIndex = 0; leafIndex < bsp->numLeafs; ++leafIndex ) {
-		const dleaf_t *leaf = &bsp->leafs[leafIndex];
-		if ( leaf->firstLeafSurface < 0 || leaf->numLeafSurfaces < 0
-				|| leaf->firstLeafSurface
-					> bsp->numLeafSurfaces - leaf->numLeafSurfaces ) return qfalse;
-		if ( leaf->area >= 0 && leaf->area < MAX_MAP_AREA_BYTES * 8
-				&& ( view->areamask[leaf->area >> 3]
-					& ( 1u << ( leaf->area & 7 ) ) ) ) continue;
-		if ( clusterVisibility && ( leaf->cluster < 0
-				|| leaf->cluster >= bsp->numClusters
-				|| !( clusterVisibility[leaf->cluster >> 3]
-					& ( 1u << ( leaf->cluster & 7 ) ) ) ) ) continue;
-		for ( int offset = 0; offset < leaf->numLeafSurfaces; ++offset ) {
-			int surface = bsp->leafSurfaces[leaf->firstLeafSurface + offset];
-			if ( surface >= 0 && surface < bsp->numSurfaces )
-				state->worldSurfaceVisibility[(uint32_t)surface >> 3]
-					|= (byte)( 1u << ( (uint32_t)surface & 7u ) );
-		}
-	}
-	for ( uint32_t batch = 0u; batch < state->worldSnapshot.batchCount; ++batch ) {
-		uint32_t surface = batches[batch].sourceSurfaceIndex;
-		batches[batch].visible = surface < (uint32_t)bsp->numSurfaces
-			&& ( state->worldSurfaceVisibility[surface >> 3]
-				& ( 1u << ( surface & 7u ) ) ) ? qtrue : qfalse;
-	}
-	return qtrue;
-}
-
 qboolean RenderSubmission_BeginFrame( renderSubmissionState_t *state, uint64_t frameGeneration )
 {
 	if ( !state || !state->initialized || state->frameOpen || frameGeneration == 0u || frameGeneration == UINT64_MAX )
@@ -1219,12 +1851,14 @@ qboolean RenderSubmission_BeginFrame( renderSubmissionState_t *state, uint64_t f
 		(uint32_t)( frameGeneration ^ ( frameGeneration >> 32u ) ) );
 	state->uiDigest	   = HashU32( FNV_OFFSET, (uint32_t)( frameGeneration >> 32u ) );
 	state->currentFrameGeneration = frameGeneration;
+	state->sealedFrameGeneration = 0u;
 	state->entityCount = state->temporalEntityCount = state->localIrradianceEntityCount = 0u;
 	state->characterSkinCount = 0u;
 	state->polygonCount = state->lightCount = state->emissiveProxyFrameLightCount = 0u;
 	state->effectSpriteCount = state->effectEmitterCount = 0u;
 	state->effectDecalCount = state->effectRibbonCount = state->effectBeamCount = 0u;
 	state->effectRibbonPointCount = state->effectPrimitiveDroppedCount = 0u;
+	state->lensSourceCount = state->lensSourceDroppedCount = 0u;
 	state->polyCommandCount = state->polyVertexCount = 0u;
 	state->uiPrimitiveCount							 = 0u;
 	state->uiTransformActive                         = qfalse;
@@ -1243,6 +1877,7 @@ void RenderSubmission_CancelFrame( renderSubmissionState_t *state )
 		state->frameOpen   = qfalse;
 		state->frameSealed = qfalse;
 		state->currentFrameGeneration = 0u;
+		state->sealedFrameGeneration = 0u;
 	}
 }
 
@@ -1261,6 +1896,8 @@ qboolean RenderSubmission_ClearScene( renderSubmissionState_t *state )
 	state->effectDecalCount = state->effectRibbonCount = state->effectBeamCount = 0u;
 	state->effectRibbonPointCount = state->effectPrimitiveDroppedCount = 0u;
 	state->effectPrimitiveDigest = FNV_OFFSET;
+	state->lensSourceCount = state->lensSourceDroppedCount = 0u;
+	state->lensSourceDigest = FNV_OFFSET;
 	state->polyCommandCount = state->polyVertexCount = 0u;
 	RenderSubmission_ClearAtmosphereEmitters( state );
 	RenderSubmission_ClearAtmosphereSurfaceEvents( state );
@@ -1326,8 +1963,9 @@ qboolean RenderSubmission_AddEntitySkinned( renderSubmissionState_t *state,
 	return qtrue;
 }
 
-qboolean RenderSubmission_AttachEntityIrradiance( renderSubmissionState_t *state,
-		uint32_t entityIndex, const ralIrradianceEntitySampleReceipt_t *receipt )
+static qboolean wired_attach_entity_lighting( renderSubmissionState_t *state,
+		uint32_t entityIndex, const ralIrradianceEntitySampleReceipt_t *receipt,
+		qboolean legacyLightGrid )
 {
 	renderEntityCommand_t *command;
 	ralLightingCompositionRequest_t compositionRequest;
@@ -1350,9 +1988,22 @@ qboolean RenderSubmission_AttachEntityIrradiance( renderSubmissionState_t *state
 	command->localIrradiance = *receipt;
 	command->lightingComposition = compositionReceipt;
 	command->hasLocalIrradiance = qtrue;
+	command->legacyLightGrid = legacyLightGrid;
 	state->localIrradianceEntityCount++;
 	state->sceneDigest = HashBytes( state->sceneDigest, receipt, sizeof( *receipt ) );
+	state->sceneDigest = HashBytes( state->sceneDigest, &legacyLightGrid,
+		sizeof( legacyLightGrid ) );
 	return qtrue;
+}
+
+qboolean RenderSubmission_AttachEntityIrradiance( renderSubmissionState_t *state,
+		uint32_t entityIndex, const ralIrradianceEntitySampleReceipt_t *receipt ) {
+	return wired_attach_entity_lighting( state, entityIndex, receipt, qfalse );
+}
+
+qboolean wired_render_attach_legacy_grid_irradiance( renderSubmissionState_t *state,
+		uint32_t entityIndex, const ralIrradianceEntitySampleReceipt_t *receipt ) {
+	return wired_attach_entity_lighting( state, entityIndex, receipt, qtrue );
 }
 
 qboolean RenderSubmission_AddPoly( renderSubmissionState_t *state, qhandle_t material, int verticesPerPoly,
@@ -1530,8 +2181,9 @@ qboolean RenderSubmission_RenderScene( renderSubmissionState_t *state, const ref
 	if ( RenderSubmission_WorldResident( state, worldIndex ) ) {
 		if ( !RenderSubmission_SelectWorld( state, worldIndex ) ) return qfalse;
 	}
-	if ( !( view->rdflags & RDF_NOWORLDMODEL )
-			&& !RenderSubmission_UpdateWorldVisibility( state, view ) )
+	if ( !( view->rdflags & RDF_NOWORLDMODEL ) && state->worldLoaded
+			&& !RenderSubmission_UpdateWorldVisibilityForView(
+				state, state->activeWorldIndex, view ) )
 		return qfalse;
 	if ( !AppendEmissiveProxyLights( state ) ) return qfalse;
 	if ( state->irradianceVolumeCount ) {
@@ -1719,6 +2371,12 @@ uint64_t RenderSubmission_FrameDigest( const renderSubmissionState_t *state )
 		sizeof( state->effectBeamCount ) );
 	digest = HashBytes( digest, &state->effectPrimitiveDroppedCount,
 		sizeof( state->effectPrimitiveDroppedCount ) );
+	digest = HashBytes( digest, &state->lensSourceDigest,
+		sizeof( state->lensSourceDigest ) );
+	digest = HashBytes( digest, &state->lensSourceCount,
+		sizeof( state->lensSourceCount ) );
+	digest = HashBytes( digest, &state->lensSourceDroppedCount,
+		sizeof( state->lensSourceDroppedCount ) );
 	digest = HashBytes( digest, &state->uiDigest, sizeof( state->uiDigest ) );
 	{
 		uint64_t atmosphereDigest = RenderSubmission_AtmosphereDigest( state );
@@ -1779,6 +2437,8 @@ qboolean RenderSubmission_EndFrame( renderSubmissionState_t *state, uint64_t fra
 	receipt.registeredMaterialCount		= state->registeredMaterialCount;
 	receipt.resolvedMaterialCount		= state->resolvedMaterialCount;
 	receipt.materialBytes				= state->materialBytes;
+	receipt.stageTextureCount			= state->stageTextureCount;
+	receipt.stageTextureBytes			= state->stageTextureBytes;
 	receipt.registeredModelCount		= state->modelCount;
 	receipt.modelBytes					= state->modelBytes;
 	receipt.entityCount					= state->entityCount;
@@ -1795,6 +2455,8 @@ qboolean RenderSubmission_EndFrame( renderSubmissionState_t *state, uint64_t fra
 	receipt.effectRibbonPointCount     = state->effectRibbonPointCount;
 	receipt.effectBeamCount            = state->effectBeamCount;
 	receipt.effectPrimitiveDroppedCount = state->effectPrimitiveDroppedCount;
+	receipt.lensSourceCount             = state->lensSourceCount;
+	receipt.lensSourceDroppedCount      = state->lensSourceDroppedCount;
 	receipt.atmosphereEmitterCount		= state->atmosphereEmitterCount;
 	receipt.atmosphereProfileCount		= state->atmosphereProfileCount;
 	receipt.particleClassCount			= state->particleClassCount;
@@ -1814,6 +2476,7 @@ qboolean RenderSubmission_EndFrame( renderSubmissionState_t *state, uint64_t fra
 		return qfalse;
 	state->frameOpen   = qfalse;
 	state->frameSealed = qtrue;
+	state->sealedFrameGeneration = frameGeneration;
 	state->currentFrameGeneration = 0u;
 	if ( state->emissiveAuthorityDirty &&
 		 RenderSubmission_RebuildEmissiveAuthority( state, state->nextMaterialGeneration ) )

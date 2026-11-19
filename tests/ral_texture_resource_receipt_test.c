@@ -41,6 +41,8 @@ int main( void ) {
 	MUTATE( bad.usage ^= RAL_TEXTURE_USAGE_TRANSFER_SRC );
 	MUTATE( bad.width++ ); MUTATE( bad.height++ );
 	MUTATE( bad.mipLevels++ ); MUTATE( bad.arrayLayers++ );
+	MUTATE( bad.sampleEncoding =
+		(ralTextureSampleEncoding_t)( RAL_TEXTURE_SAMPLE_ENCODING_MANUAL_SRGB + 1 ) );
 	MUTATE( bad.imported = qfalse ); MUTATE( bad.ready = qfalse );
 #undef MUTATE
 	second = Ral_AdoptTextureExact( &backend, (void *)(uintptr_t)0x101u, NULL,

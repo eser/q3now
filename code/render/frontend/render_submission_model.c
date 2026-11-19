@@ -3,6 +3,7 @@
 
 #include "render_submission.h"
 #include "qfiles.h"
+#include "maps/map_format_registry.h"
 
 #include <limits.h>
 #include <math.h>
@@ -38,6 +39,8 @@ enum {
 	NEUTRAL_IQM_POSITION = 0,
 	NEUTRAL_IQM_TEXCOORD = 1,
 	NEUTRAL_IQM_NORMAL = 2,
+	NEUTRAL_IQM_COLOR = 6,
+	NEUTRAL_IQM_UBYTE = 1,
 	NEUTRAL_IQM_FLOAT = 7
 };
 
@@ -66,6 +69,7 @@ static void FreeSnapshot( renderModelSnapshot_t *snapshot ) {
 	free( (void *)snapshot->positions );
 	free( (void *)snapshot->normals );
 	free( (void *)snapshot->texCoords );
+	free( (void *)snapshot->colors );
 	free( (void *)snapshot->indices );
 	free( (void *)snapshot->batches );
 	free( (void *)snapshot->tags );
@@ -76,6 +80,7 @@ static uint64_t SnapshotBytes( const renderModelSnapshot_t *snapshot ) {
 	return (uint64_t)snapshot->frameCount * snapshot->vertexCount * 3u * sizeof( float )
 		+ (uint64_t)snapshot->frameCount * snapshot->vertexCount * 3u * sizeof( float )
 		+ (uint64_t)snapshot->vertexCount * 2u * sizeof( float )
+		+ ( snapshot->colors ? (uint64_t)snapshot->vertexCount * sizeof( color4ub_t ) : 0u )
 		+ (uint64_t)snapshot->indexCount * sizeof( uint32_t )
 		+ (uint64_t)snapshot->batchCount * sizeof( renderModelBatch_t )
 		+ (uint64_t)snapshot->frameCount * snapshot->tagCount
@@ -95,6 +100,8 @@ static uint64_t SnapshotDigest( const char *name,
 		(size_t)snapshot->frameCount * snapshot->vertexCount * 3u * sizeof( float ) );
 	digest = ModelHash( digest, snapshot->texCoords,
 		(size_t)snapshot->vertexCount * 2u * sizeof( float ) );
+	if ( snapshot->colors ) digest = ModelHash( digest, snapshot->colors,
+		(size_t)snapshot->vertexCount * sizeof( color4ub_t ) );
 	digest = ModelHash( digest, snapshot->indices,
 		(size_t)snapshot->indexCount * sizeof( uint32_t ) );
 	digest = ModelHash( digest, snapshot->tags,
@@ -124,6 +131,53 @@ static qhandle_t RegisterModelAsset( renderSubmissionState_t *state,
 	state->assetDigest = ModelHash( state->assetDigest, name, strlen( name ) + 1u );
 	state->registeredAssetCount++;
 	return handle;
+}
+
+static void CacheModelBounds( renderModelRecord_t *record ) {
+	const renderModelSnapshot_t *s = &record->snapshot;
+	uint32_t count = s->format == RENDER_MODEL_INLINE_BSP ? s->indexCount : s->vertexCount;
+	memset( record->bounds, 0, sizeof( record->bounds ) );
+	/* First pose only. Inline geometry stores all world vertices, but its
+	 * index set identifies the brush; never include another brush's vertices. */
+	for ( uint32_t v = 0; s->positions && v < count; ++v ) {
+		uint32_t vertex = s->format == RENDER_MODEL_INLINE_BSP ? s->indices[v] : v;
+		for ( unsigned axis = 0; axis < 3u; ++axis ) {
+			float value = s->positions[(size_t)vertex * 3u + axis];
+			if ( !v || value < record->bounds[0][axis] ) record->bounds[0][axis] = value;
+			if ( !v || value > record->bounds[1][axis] ) record->bounds[1][axis] = value;
+		}
+	}
+}
+
+static void CacheFileModelBounds( renderModelRecord_t *record,
+		const void *bytes, uint32_t byteCount ) {
+	uint32_t offset = 0u, limit = byteCount, boundsSize = 0u;
+	float bounds[6];
+	CacheModelBounds( record );
+	/* Preserve authored first-frame bounds when the source includes them.
+	 * Geometry-only imports supported by the decoder retain computed bounds. */
+	if ( record->snapshot.format == RENDER_MODEL_MD3 ) {
+		md3Header_t header;
+		memcpy( &header, bytes, sizeof( header ) );
+		offset = (uint32_t)LittleLong( header.ofsFrames );
+		limit = (uint32_t)LittleLong( header.ofsEnd );
+		boundsSize = sizeof( md3Frame_t );
+		if ( offset < sizeof( header ) ) return;
+	} else if ( record->snapshot.format == RENDER_MODEL_IQM ) {
+		neutralIqmHeader_t header;
+		memcpy( &header, bytes, sizeof( header ) );
+		offset = (uint32_t)LittleLong( header.ofsBounds );
+		limit = (uint32_t)LittleLong( header.filesize );
+		boundsSize = 8u * sizeof( float ); /* IQM bounds plus XY/full radii. */
+		if ( offset < sizeof( header ) ) return;
+	}
+	if ( !offset || limit > byteCount || !ModelRange( limit, offset, 1u, boundsSize ) ) return;
+	memcpy( bounds, (const byte *)bytes + offset, sizeof( bounds ) );
+	for ( unsigned i = 0u; i < 6u; ++i ) bounds[i] = LittleFloat( bounds[i] );
+	if ( !ModelFinite( bounds, 6u ) ) return;
+	for ( unsigned axis = 0; axis < 3u; ++axis )
+		if ( bounds[axis] > bounds[axis + 3u] ) return;
+	memcpy( record->bounds, bounds, sizeof( bounds ) );
 }
 
 static qboolean DecodeMd3( const void *fileBytes, uint32_t byteCount,
@@ -347,6 +401,7 @@ static qboolean DecodeIqm( const void *fileBytes, uint32_t byteCount,
 	const byte *bytes = (const byte *)fileBytes;
 	neutralIqmHeader_t header;
 	const float *positions = NULL, *normals = NULL, *texCoords = NULL;
+	const byte *colors = NULL;
 	if ( byteCount < sizeof( header ) ) return qfalse;
 	memcpy( &header, bytes, sizeof( header ) );
 	if ( memcmp( header.magic, magic, sizeof( magic ) ) ) return qfalse;
@@ -372,6 +427,12 @@ static qboolean DecodeIqm( const void *fileBytes, uint32_t byteCount,
 			+ (size_t)i * sizeof( array ), sizeof( array ) );
 		array.type = LittleLong( array.type ); array.format = LittleLong( array.format );
 		array.size = LittleLong( array.size ); array.offset = LittleLong( array.offset );
+		if ( array.type == NEUTRAL_IQM_COLOR ) {
+			if ( colors || array.format != NEUTRAL_IQM_UBYTE || array.size != 4u
+					|| !ModelRange( header.filesize, array.offset,
+						header.numVertexes, sizeof( color4ub_t ) ) ) return qfalse;
+			colors = bytes + array.offset;
+		}
 		if ( array.type == NEUTRAL_IQM_POSITION && array.format == NEUTRAL_IQM_FLOAT
 				&& array.size == 3u && ModelRange( header.filesize, array.offset,
 					header.numVertexes, 3u * sizeof( float ) ) ) positions =
@@ -386,6 +447,11 @@ static qboolean DecodeIqm( const void *fileBytes, uint32_t byteCount,
 					(const float *)( bytes + array.offset );
 	}
 	if ( !positions ) return qfalse;
+	if ( colors ) {
+		out->colors = (color4ub_t *)malloc( (size_t)header.numVertexes * sizeof( color4ub_t ) );
+		if ( !out->colors ) return qfalse;
+		memcpy( (void *)out->colors, colors, (size_t)header.numVertexes * sizeof( color4ub_t ) );
+	}
 	out->format = RENDER_MODEL_IQM; out->frameCount = 1u;
 	out->vertexCount = header.numVertexes; out->indexCount = header.numTriangles * 3u;
 	out->batchCount = header.numMeshes;
@@ -479,9 +545,109 @@ qhandle_t RenderSubmission_RegisterModelData( renderSubmissionState_t *state,
 	candidate.handle = handle; candidate.generation = state->nextModelGeneration++;
 	candidate.ready = qtrue; candidate.digest = SnapshotDigest( name, &candidate );
 	record->snapshot = candidate; state->modelBytes += (uint32_t)ownedBytes;
+	CacheFileModelBounds( record, bytes, byteCount );
 	state->modelDigest = ModelHash( state->modelDigest, &candidate.digest,
 		sizeof( candidate.digest ) );
 	return handle;
+}
+
+/* Bounds queries are not draw submissions. In particular *0 is metadata for
+ * the already resident world, never a second copy of all world geometry. */
+qhandle_t RenderSubmission_RegisterBspModel( renderSubmissionState_t *state,
+		const char *name ) {
+	const renderSubmissionWorldSlot_t *slot;
+	const dmodel_t *source;
+	renderModelRecord_t *record;
+	uint32_t index = 0u;
+	qhandle_t handle;
+	if ( !state || !state->initialized || !name || name[0] != '*'
+			|| !name[1] || strlen( name ) >= MAX_QPATH
+			|| state->activeWorldIndex < 0 ) return 0;
+	slot = &state->worlds[state->activeWorldIndex];
+	if ( !slot->loaded || !slot->map || !slot->map->subModels
+			|| slot->map->numSubModels <= 0 ) return 0;
+	for ( const char *p = name + 1; *p; ++p ) {
+		if ( *p < '0' || *p > '9' || index > ( UINT32_MAX - 9u ) / 10u ) return 0;
+		index = index * 10u + (uint32_t)( *p - '0' );
+	}
+	if ( index >= (uint32_t)slot->map->numSubModels ) return 0;
+	source = &slot->map->subModels[index];
+	if ( !ModelFinite( source->mins, 3u ) || !ModelFinite( source->maxs, 3u ) ) return 0;
+	for ( unsigned axis = 0; axis < 3u; ++axis )
+		if ( source->mins[axis] > source->maxs[axis] ) return 0;
+	for ( uint32_t i = 0u; i < state->modelCount; ++i ) {
+		record = &state->models[i];
+		if ( record->worldLifecycleGeneration == slot->lifecycleGeneration
+				&& record->worldIndex == state->activeWorldIndex
+				&& !strcmp( record->name, name ) ) return record->snapshot.handle;
+	}
+	if ( index ) {
+		handle = RenderSubmission_RegisterInlineModel( state, name,
+			(uint32_t)source->firstSurface, (uint32_t)source->numSurfaces );
+		if ( !handle ) return 0;
+		record = NULL;
+		for ( uint32_t i = 0u; i < state->modelCount; ++i )
+			if ( state->models[i].snapshot.handle == handle ) record = &state->models[i];
+		if ( !record ) return 0;
+	} else {
+		if ( state->modelCount >= RENDER_SUBMISSION_MAX_MODELS
+				|| state->nextModelGeneration == UINT64_MAX ) return 0;
+		handle = RegisterModelAsset( state, name );
+		if ( !handle ) return 0;
+		record = &state->models[state->modelCount++];
+		memset( record, 0, sizeof( *record ) );
+		(void)snprintf( record->name, sizeof( record->name ), "%s", name );
+		record->snapshot.handle = handle;
+		record->snapshot.format = RENDER_MODEL_INLINE_BSP;
+		record->snapshot.generation = state->nextModelGeneration++;
+		/* No renderable snapshot is published for the metadata-only world. */
+		record->snapshot.digest = SnapshotDigest( name, &record->snapshot );
+		state->modelDigest = ModelHash( state->modelDigest,
+			&record->snapshot.digest, sizeof( uint64_t ) );
+	}
+	memcpy( record->bounds[0], source->mins, sizeof( vec3_t ) );
+	memcpy( record->bounds[1], source->maxs, sizeof( vec3_t ) );
+	record->worldIndex = state->activeWorldIndex;
+	record->worldLifecycleGeneration = slot->lifecycleGeneration;
+	return handle;
+}
+
+void RenderSubmission_ModelBounds( const renderSubmissionState_t *state,
+		qhandle_t handle, vec3_t mins, vec3_t maxs ) {
+	if ( mins ) memset( mins, 0, sizeof( vec3_t ) );
+	if ( maxs ) memset( maxs, 0, sizeof( vec3_t ) );
+	if ( !state || !state->initialized || !mins || !maxs || handle <= 0 ) return;
+	for ( uint32_t i = 0u; i < state->modelCount; ++i ) {
+		const renderModelRecord_t *record = &state->models[i];
+		if ( record->snapshot.handle != handle ) continue;
+		if ( record->worldLifecycleGeneration ) {
+			const renderSubmissionWorldSlot_t *slot = &state->worlds[record->worldIndex];
+			if ( !slot->loaded || slot->lifecycleGeneration != record->worldLifecycleGeneration ) return;
+		}
+		memcpy( mins, record->bounds[0], sizeof( vec3_t ) );
+		memcpy( maxs, record->bounds[1], sizeof( vec3_t ) );
+		return;
+	}
+}
+
+void RenderSubmission_ReleaseWorldModels( renderSubmissionState_t *state, int worldIndex ) {
+	uint32_t kept = 0u;
+	if ( !state ) return;
+	state->modelDigest = MODEL_FNV_OFFSET;
+	for ( uint32_t i = 0u; i < state->modelCount; ++i ) {
+		renderModelRecord_t *record = &state->models[i];
+		if ( record->worldLifecycleGeneration && record->worldIndex == worldIndex ) {
+			state->modelBytes -= (uint32_t)SnapshotBytes( &record->snapshot );
+			FreeSnapshot( &record->snapshot );
+		} else {
+			state->modelDigest = ModelHash( state->modelDigest,
+				&record->snapshot.digest, sizeof( uint64_t ) );
+			if ( kept != i ) state->models[kept] = *record;
+			kept++;
+		}
+	}
+	memset( state->models + kept, 0, (state->modelCount - kept) * sizeof( state->models[0] ) );
+	state->modelCount = kept;
 }
 
 qhandle_t RenderSubmission_RegisterInlineModel( renderSubmissionState_t *state,
@@ -494,11 +660,14 @@ qhandle_t RenderSubmission_RegisterInlineModel( renderSubmissionState_t *state,
 	qhandle_t handle;
 	if ( !state || !state->initialized || !name || name[0] != '*'
 			|| !name[1] || strlen( name ) >= MAX_QPATH || !surfaceCount
+			|| state->activeWorldIndex < 0
 			|| firstSurface > state->worldSurfaceCount
 			|| surfaceCount > state->worldSurfaceCount - firstSurface
 			|| !state->worldSnapshot.ready ) return 0;
 	for ( uint32_t i = 0u; i < state->modelCount; ++i )
-		if ( !strcasecmp( state->models[i].name, name ) )
+		if ( state->models[i].worldLifecycleGeneration == state->worlds[state->activeWorldIndex].lifecycleGeneration
+				&& state->models[i].worldIndex == state->activeWorldIndex
+				&& !strcasecmp( state->models[i].name, name ) )
 			return state->models[i].snapshot.handle;
 	if ( state->modelCount >= RENDER_SUBMISSION_MAX_MODELS ) return 0;
 	world = &state->worldSnapshot;
@@ -523,12 +692,15 @@ qhandle_t RenderSubmission_RegisterInlineModel( renderSubmissionState_t *state,
 		sizeof( float ) );
 	candidate.texCoords = (float *)calloc( (size_t)candidate.vertexCount * 2u,
 		sizeof( float ) );
+	candidate.colors = (color4ub_t *)calloc( candidate.vertexCount, sizeof( color4ub_t ) );
 	candidate.indices = (uint32_t *)calloc( indexCount, sizeof( uint32_t ) );
 	candidate.batches = (renderModelBatch_t *)calloc( batchCount,
 		sizeof( renderModelBatch_t ) );
 	if ( !candidate.positions || !candidate.normals || !candidate.texCoords || !candidate.indices
-			|| !candidate.batches ) { FreeSnapshot( &candidate ); return 0; }
+			|| !candidate.batches || !candidate.colors ) { FreeSnapshot( &candidate ); return 0; }
 	for ( uint32_t vertex = 0u; vertex < candidate.vertexCount; ++vertex ) {
+		memcpy( ((color4ub_t *)candidate.colors)[vertex].rgba,
+			world->vertices[vertex].color, sizeof( color4ub_t ) );
 		memcpy( (float *)candidate.positions + (size_t)vertex * 3u,
 			world->vertices[vertex].position, 3u * sizeof( float ) );
 		memcpy( (float *)candidate.normals + (size_t)vertex * 3u,
@@ -562,6 +734,9 @@ qhandle_t RenderSubmission_RegisterInlineModel( renderSubmissionState_t *state,
 	candidate.handle = handle; candidate.generation = state->nextModelGeneration++;
 	candidate.ready = qtrue; candidate.digest = SnapshotDigest( name, &candidate );
 	record->snapshot = candidate; state->modelBytes += (uint32_t)ownedBytes;
+	record->worldIndex = state->activeWorldIndex;
+	record->worldLifecycleGeneration = state->worlds[state->activeWorldIndex].lifecycleGeneration;
+	CacheModelBounds( record );
 	state->modelDigest = ModelHash( state->modelDigest, &candidate.digest,
 		sizeof( candidate.digest ) );
 	return handle;
@@ -592,6 +767,7 @@ qboolean RenderSubmission_ModelSnapshot( const renderSubmissionState_t *state,
 	if ( !state || !state->initialized || handle <= 0 || !outSnapshot ) return qfalse;
 	for ( uint32_t i = 0u; i < state->modelCount; ++i ) {
 		if ( state->models[i].snapshot.handle != handle ) continue;
+		if ( !state->models[i].snapshot.ready ) return qfalse;
 		*outSnapshot = state->models[i].snapshot; return qtrue;
 	}
 	return qfalse;

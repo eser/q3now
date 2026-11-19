@@ -253,8 +253,8 @@ export default [
 	{ stage: 'vert', source: 'gen_vert.tmpl', defines: ['USE_FIXED_COLOR', 'USE_FOG', 'USE_SHADOWMAP'],            output: 'vert_tx0_fixed_shadow_fog'  },
 	// base-pass IBL receiver variants (USE_IBL) — always-on environment ambient
 	// for pbrMap worldspawn lightmap surfaces. Worldspawn lightmap-modulate only
-	// (the same subset the sun-shadow variants cover); USE_IBL is exclusive with
-	// USE_ATEST / USE_DEPTH_FADE / USE_ENT_COLOR / USE_FIXED_COLOR / USE_ENV.
+	// (constant-colour variants are appended below to preserve ordinals).
+	// USE_IBL is exclusive with USE_ATEST / USE_DEPTH_FADE / USE_ENT_COLOR / USE_ENV.
 	{ stage: 'vert', source: 'gen_vert.tmpl', defines: ['USE_TX1', 'USE_IBL'],                                output: 'vert_tx1_ibl'              },
 	{ stage: 'vert', source: 'gen_vert.tmpl', defines: ['USE_TX1', 'USE_FOG', 'USE_IBL'],                     output: 'vert_tx1_ibl_fog'          },
 	{ stage: 'vert', source: 'gen_vert.tmpl', defines: ['USE_CL1', 'USE_TX1', 'USE_IBL'],                     output: 'vert_tx1_cl_ibl'           },
@@ -404,4 +404,36 @@ export default [
 	{ stage: 'comp', source: 'atmosphere_froxel_integrate.comp', output: 'atmosphere_froxel_integrate_comp_spv' },
 	{ stage: 'comp', source: 'atmosphere_composite.comp', output: 'atmosphere_composite_comp_spv' },
 	{ stage: 'comp', source: 'atmosphere_froxel_cloud.comp', output: 'atmosphere_froxel_cloud_comp_spv' },
+
+	// Modern sky environment LUT chain. Append-only placement preserves every
+	// established shader ordinal and keeps the products portable across RAL backends.
+	{ stage: 'comp', source: 'sky_transmittance.comp', output: 'sky_transmittance_comp_spv' },
+	{ stage: 'comp', source: 'sky_multiscatter.comp', output: 'sky_multiscatter_comp_spv' },
+	{ stage: 'comp', source: 'sky_view.comp', output: 'sky_view_comp_spv' },
+
+	// Sky SH projection joins as an append-only module so the previous sealed
+	// portable corpus remains a valid bootstrap prefix during regeneration.
+	{ stage: 'comp', source: 'project_sky_sh.comp', output: 'project_sky_sh_comp_spv' },
+
+	// Physical-sky surface replacement is independent from volumetric media.
+	// Append-only placement preserves all established shader ordinals.
+	{ stage: 'comp', source: 'sky_surface_composite.comp', output: 'sky_surface_composite_comp_spv' },
+	// Ordered authored sky raster program, within the baseline texture budget.
+	{ stage: 'frag', source: 'ral_sky_material.frag', output: 'ral_sky_material_frag_spv' },
+	{ stage: 'frag', source: 'ral_sky_material.frag', defines: ['WIRED_SKY_SEPARATE_FACES=1'], output: 'ral_sky_capture_frag_spv' },
+
+	// Constant-colour lightmap IBL receivers: no vertex colour input. Append
+	// rather than reorder the sealed cross-backend shader corpus.
+	{ stage: 'vert', source: 'gen_vert.tmpl', defines: ['USE_CLX_IDENT', 'USE_TX1', 'USE_IBL'], output: 'vert_tx1_ident1_ibl' },
+	{ stage: 'vert', source: 'gen_vert.tmpl', defines: ['USE_CLX_IDENT', 'USE_TX1', 'USE_IBL', 'USE_FOG'], output: 'vert_tx1_ident1_ibl_fog' },
+	{ stage: 'vert', source: 'gen_vert.tmpl', defines: ['USE_FIXED_COLOR', 'USE_TX1', 'USE_IBL'], output: 'vert_tx1_fixed_ibl' },
+	{ stage: 'vert', source: 'gen_vert.tmpl', defines: ['USE_FIXED_COLOR', 'USE_TX1', 'USE_IBL', 'USE_FOG'], output: 'vert_tx1_fixed_ibl_fog' },
+	{ stage: 'frag', source: 'gen_frag.tmpl', defines: ['USE_CLX_IDENT', 'USE_TX1', 'USE_IBL'], output: 'frag_tx1_ident1_ibl_bindless' },
+	{ stage: 'frag', source: 'gen_frag.tmpl', defines: ['USE_CLX_IDENT', 'USE_TX1', 'USE_IBL', 'USE_FOG'], output: 'frag_tx1_ident1_ibl_fog_bindless' },
+	{ stage: 'frag', source: 'gen_frag.tmpl', defines: ['USE_FIXED_COLOR', 'USE_TX1', 'USE_IBL'], output: 'frag_tx1_fixed_ibl_bindless' },
+	{ stage: 'frag', source: 'gen_frag.tmpl', defines: ['USE_FIXED_COLOR', 'USE_TX1', 'USE_IBL', 'USE_FOG'], output: 'frag_tx1_fixed_ibl_fog_bindless' },
+
+	// XeGTAO depth prefilter (view-space linear depth pyramid for gtao.comp).
+	// Appended: the sealed corpus is never reordered.
+	{ stage: 'comp', source: 'gtao_prefilter.comp',      output: 'gtao_prefilter_comp_spv'      },
 ];

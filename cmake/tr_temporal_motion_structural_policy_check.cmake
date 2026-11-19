@@ -67,7 +67,7 @@ require_text(VKH "VK_TEMPORAL_PIPELINE_PRESERVE = 0" "append-only preserve slot"
 require_text(VKH "VK_TEMPORAL_PIPELINE_WRITE" "reserved write slot")
 require_text(VKH "VK_TEMPORAL_PIPELINE_INVALIDATE" "reserved invalidate slot")
 require_text(VKH "ral_temporal_handle[ VK_TEMPORAL_PIPELINE_COHORT_COUNT ]" "distinct cohort ownership")
-require_text(VKH "vec4_t advancedFogColorDensity;                   // offset 608, 16 B\n\tvec4_t advancedFogTypeFarEnabled;                 // offset 624, 16 B\n\tvec4_t emissionRadiance;                          // offset 640, 16 B\n} vkUniform_t;" "intentional 656-byte draw-uniform lighting tail")
+require_text(VKH "vec4_t advancedFogColorDensity;                   // offset 608, 16 B\n\tvec4_t advancedFogTypeFarEnabled;                 // offset 624, 16 B\n\tvec4_t emissionRadiance;                          // offset 640, 16 B\n\t// Cooked material factors and the exact shared sky-product blend.  These are\n\t// appended so every established UBO offset remains stable across pipelines.\n\tvec4_t materialBaseColor;                         // offset 656, 16 B\n\tvec4_t materialFactors;                           // offset 672: metallic, roughness, occlusion, sky blend\n} vkUniform_t;" "intentional 688-byte draw-uniform material tail")
 forbid_text(VKH "temporalCurrentMvp" "unconditional temporal uniform payload")
 forbid_text(VKH "temporalPreviousMvp" "unconditional temporal uniform payload")
 require_text(VKC "VK_TemporalPreservePipelineCreate( backend, base, layout," "shipping wrapper delegates to tested factory")

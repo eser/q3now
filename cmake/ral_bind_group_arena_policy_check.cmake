@@ -261,7 +261,7 @@ string(SUBSTRING "${PRODUCT_BINDINGS}" ${ENGINE_OWNER_BEGIN}
 	${ENGINE_OWNER_LEN} ENGINE_OWNER)
 foreach(NEEDLE IN ITEMS
 	"Ral_BindGroupArenaReceiptValid("
-	"ralBindingValue_t values[5];"
+	"ralBindingValue_t values[7];"
 	"viewInfo.texture = vk.shadowMap.ral_image;"
 	"shadowViewCandidate = Ral_CreateTextureView( s_ral_backend, &viewInfo );"
 	"WIRED_ENGINE_RES_BIND_SHADOWMAP"
@@ -954,19 +954,19 @@ require_text(ATM_INIT
 	"Defer the\n\t// four-group transaction to that descriptor-init boundary"
 	"atmospheric cold-boot deferral")
 
-string(FIND "${PRODUCT}" "void vk_init_descriptors( void )"
+string(FIND "${PRODUCT}" "void vk_update_attachment_descriptors( void )"
 	ATM_DESCRIPTOR_INIT_BEGIN)
-string(FIND "${PRODUCT}" "static void vk_release_geometry_buffers( void )"
+string(FIND "${PRODUCT}" "static ralBuffer_t *vk_create_device_local_buffer("
 	ATM_DESCRIPTOR_INIT_END)
 if(ATM_DESCRIPTOR_INIT_BEGIN EQUAL -1 OR ATM_DESCRIPTOR_INIT_END EQUAL -1
 		OR ATM_DESCRIPTOR_INIT_END LESS ATM_DESCRIPTOR_INIT_BEGIN)
-	message(FATAL_ERROR "cannot isolate descriptor initialization")
+	message(FATAL_ERROR "cannot isolate attachment descriptor publication")
 endif()
 math(EXPR ATM_DESCRIPTOR_INIT_LEN
 	"${ATM_DESCRIPTOR_INIT_END} - ${ATM_DESCRIPTOR_INIT_BEGIN}")
 string(SUBSTRING "${PRODUCT}" ${ATM_DESCRIPTOR_INIT_BEGIN}
 	${ATM_DESCRIPTOR_INIT_LEN} ATM_DESCRIPTOR_INIT)
-string(FIND "${ATM_DESCRIPTOR_INIT}" "vk_update_attachment_descriptors();"
+string(FIND "${ATM_DESCRIPTOR_INIT}" "vk_ral_register_depthfade_view()"
 	ATM_DEPTH_VIEW_PUBLISH)
 string(FIND "${ATM_DESCRIPTOR_INIT}" "vk_atmospheric_write_descriptors();"
 	ATM_GROUP_CREATE)

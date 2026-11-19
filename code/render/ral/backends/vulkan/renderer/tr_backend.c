@@ -534,7 +534,8 @@ Any mirrored or portaled views have already been drawn, so prepare
 to actually render the visible surfaces for this view
 =================
 */
-static void RB_BeginDrawingView( void ) {
+static void RB_BeginDrawingView( qboolean clearDepth,
+		qboolean resetSkyVisibility ) {
 #ifndef USE_VULKAN
 	int clearBits = 0;
 #endif
@@ -561,7 +562,7 @@ static void RB_BeginDrawingView( void ) {
 	SetViewportAndScissor();
 
 #ifdef USE_VULKAN
-	vk_clear_depth( qtrue );
+	if ( clearDepth ) vk_clear_depth( qtrue );
 #else
 	// ensures that depth writes are enabled for the depth clear
 	GL_State( GLS_DEFAULT );
@@ -593,7 +594,7 @@ static void RB_BeginDrawingView( void ) {
 	glState.faceCulling = -1;		// force face culling to set next time
 
 	// we will only draw a sun if there was sky rendered in this view
-	backEnd.skyRenderedThisView = qfalse;
+	if ( resetSkyVisibility ) backEnd.skyRenderedThisView = qfalse;
 }
 
 #ifdef USE_PMLIGHT
@@ -2076,15 +2077,18 @@ static const void *RB_DrawSurfs( const void *data ) {
 	RB_EndSurface();
 
 	cmd = (const drawSurfsCommand_t *)data;
+	if ( cmd->worldIndex >= 0 && cmd->worldIndex < MAX_RENDER_WORLDS )
+		R_SetWorldSlot( cmd->worldIndex );
 	backEnd.refdef = cmd->refdef;
 	backEnd.viewParms = cmd->viewParms;
-	if ( cmd->viewParms.temporalFrameId ) {
+	if ( cmd->finalizeView && cmd->viewParms.temporalFrameId ) {
 		R_TemporalBackendRecorded( cmd->viewParms.temporalWorldIndex,
 			cmd->viewParms.temporalFrameId );
 	}
-	RB_RecordTemporalEntityReceipts( cmd );
+	if ( cmd->finalizeView ) RB_RecordTemporalEntityReceipts( cmd );
 #ifdef USE_VULKAN
-	temporalPrimaryCommand = vk_temporal_motion_begin_primary_command();
+	if ( cmd->finalizeView )
+		temporalPrimaryCommand = vk_temporal_motion_begin_primary_command();
 #if FEAT_IQM
 	if ( temporalPrimaryCommand ) {
 		(void)vk_temporal_iqm_prescan_primary_command(
@@ -2099,14 +2103,14 @@ static const void *RB_DrawSurfs( const void *data ) {
 	// no-render-pass seam that renders the omni shadow runs before this command, so it
 	// can't see this frame's dlights — next frame's seam consumes the capture, the
 	// 1-frame lag the CSM cascade fit also accepts).
-	vk_dlight_shadow_capture_light();
+	if ( cmd->finalizeView ) vk_dlight_shadow_capture_light();
 #endif
 #if defined(USE_VULKAN)
 	// Same seam-ordering workaround for the Forward+ tile-cull consumer: snapshot this
 	// frame's dlights here (viewParms.dlights live) so next frame's seam dispatch sees
 	// them (backEnd.viewParms.num_dlights is 0 in the seam). Without this, fpActive was
 	// never true and dlights never reached the Forward+ tile-lit path.
-	vk_forwardplus_capture_dlights();
+	if ( cmd->finalizeView ) vk_forwardplus_capture_dlights();
 	if ( r_dlightShadowProfile && r_dlightShadowProfile->integer ) {
 		static int nextProfileLog;
 		int now = ri.Milliseconds();
@@ -2129,7 +2133,7 @@ static const void *RB_DrawSurfs( const void *data ) {
 #endif
 
 	// clear the z buffer, set the modelview, etc
-	RB_BeginDrawingView();
+	RB_BeginDrawingView( cmd->clearDepth, cmd->resetSkyVisibility );
 
 	RB_RenderDrawSurfList( cmd->drawSurfs, cmd->numDrawSurfs
 #ifdef USE_VULKAN
@@ -2140,6 +2144,9 @@ static const void *RB_DrawSurfs( const void *data ) {
 #ifdef USE_VBO
 	VBO_UnBind();
 #endif
+
+	if ( !cmd->finalizeView )
+		return (const void *)(cmd + 1);
 
 	// GPU decals are surface material, not free-floating translucency. Composite
 	// them against the scene before ribbons, sprites, beams, particles, and

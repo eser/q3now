@@ -71,4 +71,9 @@ require_text("code/cgame/cg_players.c" "ent->customShader = cgs.media.invisShade
 require_text("code/cgame/cg_players.c" "trap_R_AddRefEntityToScene( ent );")
 require_text("code/cgame/cg_ents.c" "REF_ENTITY_MOTION_ROLE_NONE")
 
+# The post-evaluation scene provenance must reach the existing public cut flag.
+require_text("code/cgame/cg_view.c" "cinematicView ? cg.scenePlayback.cameraCutRevision : 0")
+require_text("code/cgame/cg_view.c" "wired_camera_history_step( &cg.cameraHistory, camera )")
+require_text("code/cgame/cg_view.c" "cg.refdef.rdflags |= RDF_CAMERA_CUT;")
+
 message(STATUS "cgame temporal identity producer/source policy: PASS")

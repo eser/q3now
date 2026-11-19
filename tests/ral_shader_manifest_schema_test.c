@@ -42,7 +42,8 @@ int main( void ) {
 	bindings[0].minBufferBindingSize = 544u;
 	input.location = 0u; input.format = RAL_FORMAT_R32G32B32_SFLOAT;
 	spec.constantId = 4u; spec.stageFlags = RAL_STAGE_FRAGMENT; spec.defaultValue = 0u;
-	manifest.schemaVersion = 1u; manifest.generation = 1u;
+	spec.valueType = RAL_SHADER_SPEC_U32;
+	manifest.schemaVersion = RAL_SHADER_ABI_SCHEMA_VERSION; manifest.generation = 1u;
 	manifest.pipelineKind = RAL_SHADER_PIPELINE_GRAPHICS;
 	manifest.modules = modules; manifest.moduleCount = 2u;
 	manifest.bindings = bindings; manifest.bindingCount = 1u;
@@ -57,7 +58,7 @@ int main( void ) {
 	bindings[0].bindingClass = RAL_SHADER_BIND_STORAGE_TEXTURE_WRITE;
 	bindings[0].viewDimension = RAL_SHADER_VIEW_2D;
 	bindings[0].storageTextureFormat = RAL_FORMAT_R16G16_SFLOAT;
-	manifest.schemaVersion = 1u; manifest.generation = 2u;
+	manifest.schemaVersion = RAL_SHADER_ABI_SCHEMA_VERSION; manifest.generation = 2u;
 	manifest.pipelineKind = RAL_SHADER_PIPELINE_COMPUTE;
 	manifest.modules = modules; manifest.moduleCount = 1u;
 	manifest.bindings = bindings; manifest.bindingCount = 1u;

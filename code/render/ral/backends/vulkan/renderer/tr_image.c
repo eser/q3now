@@ -3,6 +3,8 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 // tr_image.c
 #include "tr_local.h"
+#include "../../../../frontend/render_image_decode.h"
+#include "../../../../frontend/render_submission_material.h"
 #include "../../../../frontend/r_log.h"  // rilog-channel-mechanism — renderer.assets
 #ifdef USE_VULKAN
 #include "vk_ral_textures.h"   // parallel-paths RAL texture migration
@@ -553,6 +555,8 @@ static void R_MipMap2( unsigned * const out, unsigned * const in, int inWidth, i
 
 	outWidth = inWidth >> 1;
 	outHeight = inHeight >> 1;
+	if ( outWidth < 1 ) outWidth = 1;
+	if ( outHeight < 1 ) outHeight = 1;
 
 	if ( out == in )
 		temp = ri.Hunk_AllocateTempMemory( outWidth * outHeight * 4 );
@@ -569,7 +573,10 @@ static void R_MipMap2( unsigned * const out, unsigned * const in, int inWidth, i
 	// Sample helper: lifts the 4-fold byte-address arithmetic into
 	// a single expression and lets both branches reuse the same
 	// 16-tap pattern without duplicating the address-mask math.
-#define SRC(yi, xi, ch) ((byte *)&in[((yi) & inHeightMask) * inWidth + ((xi) & inWidthMask)])[(ch)]
+#define WRAP(v, size, mask) (((size) & (mask)) == 0 ? ((v) & (mask)) \
+	: ((v) < 0 ? (v) + (size) : ((v) >= (size) ? (v) - (size) : (v))))
+#define SRC(yi, xi, ch) ((byte *)&in[WRAP(yi, inHeight, inHeightMask) * inWidth \
+	+ WRAP(xi, inWidth, inWidthMask)])[(ch)]
 
 	for ( i = 0 ; i < outHeight ; i++ ) {
 		for ( j = 0 ; j < outWidth ; j++ ) {
@@ -625,6 +632,7 @@ static void R_MipMap2( unsigned * const out, unsigned * const in, int inWidth, i
 	}
 
 #undef SRC
+#undef WRAP
 
 	if ( out == in ) {
 		memcpy( out, temp, outWidth * outHeight * 4 );
@@ -643,6 +651,7 @@ Operates in place, quartering the size of the texture
 static void R_MipMap( byte *out, byte *in, int width, int height, qboolean isSRGB ) {
 	int		i, j;
 	int		row;
+	int		rowAdvance;
 
 	if ( in == NULL )
 		return;
@@ -661,6 +670,7 @@ static void R_MipMap( byte *out, byte *in, int width, int height, qboolean isSRG
 	}
 
 	row = width * 4;
+	rowAdvance = row + ( width & 1 ) * 4;
 	width >>= 1;
 	height >>= 1;
 
@@ -694,7 +704,7 @@ static void R_MipMap( byte *out, byte *in, int width, int height, qboolean isSRG
 	}
 
 	if ( isSRGB ) {
-		for ( i = 0 ; i < height ; i++, in += row ) {
+		for ( i = 0 ; i < height ; i++, in += rowAdvance ) {
 			for ( j = 0 ; j < width ; j++, out += 4, in += 8 ) {
 				int kk;
 				for ( kk = 0 ; kk < 3 ; kk++ ) {
@@ -711,7 +721,7 @@ static void R_MipMap( byte *out, byte *in, int width, int height, qboolean isSRG
 			}
 		}
 	} else {
-		for ( i = 0 ; i < height ; i++, in += row ) {
+		for ( i = 0 ; i < height ; i++, in += rowAdvance ) {
 			for ( j = 0 ; j < width ; j++, out += 4, in += 8 ) {
 				out[0] = ( in[0] + in[4] + in[row+0] + in[row+4] ) >> 2;
 				out[1] = ( in[1] + in[5] + in[row+1] + in[row+5] ) >> 2;
@@ -807,34 +817,15 @@ static void generate_image_upload_data( image_t *image, byte *data, Image_Upload
 
 	memset( upload_data, 0, sizeof( *upload_data ) );
 
-	// Guard against a zero-dimension image: under IMGFLAG_NOSCALE the
-	// power-of-two normalization is skipped, so a 0 width/height would flow
-	// straight into the size math below and Hunk_AllocateTempMemory(0), with
-	// downstream memset/ResampleTexture/mip-gen then operating on a 0-byte
-	// buffer. Clamp to at least 1×1.
+	// Keep allocation math valid even for a malformed internal image.
 	if ( width < 1 )  width = 1;
 	if ( height < 1 ) height = 1;
 
-	if ( image->flags & IMGFLAG_NOSCALE ) {
-		//
-		// keep original dimensions
-		//
-		scaled_width = width;
-		scaled_height = height;
-	} else {
-		//
-		// convert to exact power of 2 sizes
-		//
-		for (scaled_width = 1 ; scaled_width < width ; scaled_width<<=1)
-			;
-		for (scaled_height = 1 ; scaled_height < height ; scaled_height<<=1)
-			;
-
-		if ( r_roundImagesDown->integer && scaled_width > width )
-			scaled_width >>= 1;
-		if ( r_roundImagesDown->integer && scaled_height > height )
-			scaled_height >>= 1;
-	}
+	/* Vulkan accepts NPOT images. Preserve the authored/cooked dimensions;
+	 * legacy power-of-two rounding changes the resource creation contract.
+	 * Explicit picmip and device-size limits remain separate policies. */
+	scaled_width = width;
+	scaled_height = height;
 
 	//
 	// clamp to the current upper OpenGL limit
@@ -845,6 +836,8 @@ static void generate_image_upload_data( image_t *image, byte *data, Image_Upload
 		|| scaled_height > glConfig.maxTextureSize ) {
 		scaled_width >>= 1;
 		scaled_height >>= 1;
+		if ( scaled_width < 1 ) scaled_width = 1;
+		if ( scaled_height < 1 ) scaled_height = 1;
 	}
 
 	upload_data->buffer = (byte*) ri.Hunk_AllocateTempMemory( 2 * 4 * scaled_width * scaled_height );
@@ -959,7 +952,9 @@ static void generate_image_upload_data( image_t *image, byte *data, Image_Upload
 	if ( mipmap ) {
 		qboolean isSRGB = ( !( image->flags & IMGFLAG_NOLIGHTSCALE )
 		                    || ( image->flags & IMGFLAG_LIGHTMAP ) ) ? qtrue : qfalse;
-		while (scaled_width > 1 && scaled_height > 1) {
+		/* The RAL texture contract requires the full chain through 1x1,
+		 * including the one-dimensional tail of rectangular textures. */
+		while (scaled_width > 1 || scaled_height > 1) {
 			R_MipMap((byte *)scaled_buffer, (byte *)scaled_buffer, scaled_width, scaled_height, isSRGB);
 
 			scaled_width >>= 1;
@@ -1352,61 +1347,16 @@ void R_UploadSubImage( byte *data, int x, int y, int width, int height, image_t 
 
 /*
 ================
-R_ClassifyColorDomain
+R_ImageColorDomain
 
-Block 5d: auto-classify a texture's colour domain from its filename suffix
-(case-insensitive, basename before the last '.'). Channel-data maps
-(normal / spec / roughness / metallic / AO / height) are CD_LINEAR (sampled
-raw); everything else — including emissive, which is display content — is
-CD_SRGB (decoded sRGB->linear at sample time). Matches the modern-engine
-convention (Unreal SamplerType, Unity HDRP sRGB checkbox, Source 2 explicit
-declaration). Overridable per shader stage via linearMap / srgbMap / gammaMap
-(IMGFLAG_DOMAIN_LINEAR / IMGFLAG_DOMAIN_SRGB), handled at the call site.
-
-Only the unambiguous long-form suffixes are auto-detected. The bare
-single-letter forms (_n / _s / _r / _m / _h) are deliberately NOT in the
-table: in id-tech-3-era content they are common variant markers on plain
-diffuse textures (lion_m.tga, spawn3_r.tga, ...) and auto-classifying them
-as CD_LINEAR mis-renders stock maps. Content that genuinely ships a
-single-letter-suffixed channel map should declare it with the linearMap
-shader keyword.
+Colour encoding is creation metadata, never a filename heuristic. Q3 map,
+clampMap, animMap, sky and implicit images are display colour by default,
+matching the shared material importer/cooker. Explicit data roles (normal,
+ORM, linearMap) select linear sampling at their registration sites.
 ================
 */
-static colorDomain_t R_ClassifyColorDomain( const char *name ) {
-	static const char *linTok[] = {
-		"_normal", "_norm", "_nrm",
-		"_spec", "_specular", "_shiny", "_shiney",
-		"_rough", "_roughness",
-		"_metal", "_metallic",
-		"_ao", "_occlusion",
-		"_height", "_disp", "_displacement",
-		NULL
-	};
-	const char	*slash, *dot, *us;
-	char		base[MAX_QPATH];
-	int			i, n;
-
-	slash = strrchr( name, '/' );
-	if ( slash )
-		name = slash + 1;
-	dot = strrchr( name, '.' );
-	n = dot ? (int)( dot - name ) : (int)strlen( name );
-	if ( n <= 0 || n >= (int)sizeof( base ) )
-		return CD_SRGB;
-	memcpy( base, name, n );
-	base[n] = '\0';
-	for ( i = 0; i < n; i++ )
-		if ( base[i] >= 'A' && base[i] <= 'Z' )
-			base[i] += 32;
-
-	us = strrchr( base, '_' );
-	if ( !us )
-		return CD_SRGB;	// no trailing "_<token>" — display content
-	for ( i = 0; linTok[i] != NULL; i++ )
-		if ( strcmp( us, linTok[i] ) == 0 )
-			return CD_LINEAR;
-	// _e / _emissive / _emit and everything else → CD_SRGB (display content)
-	return CD_SRGB;
+static colorDomain_t R_ImageColorDomain( imgFlags_t flags ) {
+	return ( flags & IMGFLAG_DOMAIN_LINEAR ) ? CD_LINEAR : CD_SRGB;
 }
 
 
@@ -1479,16 +1429,7 @@ image_t *R_CreateImage( const char *name, const char *name2, byte *pic, int widt
 	image->height     = height;
 	image->layerCount = 1;
 
-	// Block 5d: colour domain — explicit shader-keyword override wins;
-	// otherwise auto-classify by filename suffix. Built-in images ("*white",
-	// "*default", ...) have no path/suffix → CD_SRGB, which is harmless
-	// (sRGBToLinear is identity at 0 and 1).
-	if ( flags & IMGFLAG_DOMAIN_LINEAR )
-		image->colorDomain = CD_LINEAR;
-	else if ( flags & IMGFLAG_DOMAIN_SRGB )
-		image->colorDomain = CD_SRGB;
-	else
-		image->colorDomain = R_ClassifyColorDomain( name );
+	image->colorDomain = R_ImageColorDomain( flags );
 
 	if ( namelen > 6 && Q_stristr( image->imgName, "maps/" ) == image->imgName && Q_stristr( image->imgName + 6, "/lm_" ) != NULL ) {
 		// external lightmap atlases stored in maps/<mapname>/lm_XXXX textures
@@ -1730,6 +1671,83 @@ static const char *R_LoadImage( const char *name, byte **pic, int *width, int *h
 	}
 
 	return localName;
+}
+
+#ifdef USE_VULKAN
+static qboolean R_RefreshMaterialRuntimeResource( image_t *image )
+{
+	ralTextureResourceReceipt_t resource;
+	if ( !image || !image->ral || image->ralTextureCacheKeyReady != qtrue
+			|| !Ral_TextureGetResourceReceipt( image->ral, &resource ) ) return qfalse;
+	/* Vulkan's established renderer stores display colour in UNORM and performs
+	 * the sRGB transfer in shader code.  Publish that physical/logical split
+	 * explicitly; never relabel the native allocation as an sRGB image. */
+	resource.sampleEncoding = image->colorDomain == CD_SRGB
+		? RAL_TEXTURE_SAMPLE_ENCODING_MANUAL_SRGB
+		: RAL_TEXTURE_SAMPLE_ENCODING_NATIVE;
+	return Ral_MaterialRuntimeResourceBuild( &image->ralTextureCacheKey,
+		&resource, &image->ralMaterialRuntimeResource );
+}
+
+static void R_PublishMaterialTextureIdentity( image_t *image,
+		const char *resolvedName, const byte *pixels, uint32_t width,
+		uint32_t height )
+{
+	char canonical[MAX_QPATH];
+	uint64_t sourceId = 0u, byteSize = 0u;
+	unsigned filesystemGeneration = 0u;
+	ralTextureCacheKey_t key;
+	if ( !image || !image->ral || !resolvedName || !resolvedName[0] || !pixels
+			|| !width || !height || !ri.FS_ResolveResource
+			|| !ri.FS_ResolveResource( resolvedName, canonical,
+				sizeof( canonical ), &sourceId, &byteSize,
+				&filesystemGeneration )
+			|| !sourceId || !byteSize || !filesystemGeneration
+			|| !Ral_MaterialRuntimeTextureKeyBuild( sourceId,
+				filesystemGeneration, pixels, width, height,
+				image->colorDomain == CD_SRGB ? qtrue : qfalse,
+				( image->flags & IMGFLAG_MIPMAP ) ? qfalse : qtrue,
+				RAL_TEXTURE_RESIDENCY_STREAMED, &key ) ) return;
+	image->ralTextureCacheKey = key;
+	image->ralTextureCacheKeyReady = qtrue;
+	if ( !R_RefreshMaterialRuntimeResource( image ) ) {
+		/* Resampling, picmip, reduced native formats, or a non-full legacy mip
+		 * chain are real creation-option differences.  They must not impersonate
+		 * the cooked source receipt. */
+		memset( &image->ralTextureCacheKey, 0,
+			sizeof( image->ralTextureCacheKey ) );
+		memset( &image->ralMaterialRuntimeResource, 0,
+			sizeof( image->ralMaterialRuntimeResource ) );
+		image->ralTextureCacheKeyReady = qfalse;
+	}
+}
+#endif
+
+qboolean RenderImage_DecodeRgba8( const char *name, byte **outPixels,
+		uint32_t *outWidth, uint32_t *outHeight,
+		char outResolved[MAX_QPATH] )
+{
+	byte *pixels = NULL;
+	int width = 0, height = 0;
+	const char *resolved;
+	uint64_t bytes;
+	if ( !name || !name[0] || !outPixels || !outWidth || !outHeight
+			|| !outResolved ) return qfalse;
+	resolved = R_LoadImage( name, &pixels, &width, &height );
+	bytes = width > 0 && height > 0
+		? (uint64_t)width * (uint64_t)height * 4u : 0u;
+	if ( !pixels || width <= 0 || height <= 0
+			|| (uint32_t)width > RENDER_SUBMISSION_MAX_IMAGE_DIMENSION
+			|| (uint32_t)height > RENDER_SUBMISSION_MAX_IMAGE_DIMENSION
+			|| bytes > RENDER_SUBMISSION_MAX_MATERIAL_BYTES ) {
+		if ( pixels ) ri.Free( pixels );
+		return qfalse;
+	}
+	*outPixels = pixels;
+	*outWidth = (uint32_t)width;
+	*outHeight = (uint32_t)height;
+	Q_strncpyz( outResolved, resolved, MAX_QPATH );
+	return qtrue;
 }
 
 
@@ -2009,6 +2027,17 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 	if ( pic == NULL ) {
 		return NULL;
 	}
+	/* An extensionless Q3 stage is resolved by the decoder. Repeat the cache
+	 * lookup using that exact result before allocating: an earlier explicit
+	 * .jpg registration must not create a second native image. Never strip
+	 * this resolved extension or alias distinct creation flags here. */
+	hash = generateHashValue( localName );
+	for ( image = hashTable[hash]; image; image = image->next ) {
+		if ( !Q_stricmp( localName, image->imgName ) && image->flags == flags ) {
+			ri.Free( pic );
+			return image;
+		}
+	}
 
 	if ( tr.mapLoading && r_mapSaturation->value != 1.0f ) {
 		const float sat = r_mapSaturation->value;
@@ -2042,7 +2071,11 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 		}
 	}
 
-	image = R_CreateImage( name, localName, pic, width, height, flags );
+	image = R_CreateImage( localName, NULL, pic, width, height, flags );
+#ifdef USE_VULKAN
+	R_PublishMaterialTextureIdentity( image, localName, pic,
+		(uint32_t)width, (uint32_t)height );
+#endif
 	ri.Free( pic );
 	return image;
 }
@@ -2101,6 +2134,13 @@ void vk_ral_reregister_image( image_t *image ) {
 
 	// Recreate the single exact RAL texture and its descriptor/residency views.
 	upload_vk_image( image, pic );
+	if ( image->ralTextureCacheKeyReady
+			&& !R_RefreshMaterialRuntimeResource( image ) ) {
+		/* The source key remains useful for diagnostics, but a recreated native
+		 * cohort that no longer matches it must not be published as resident. */
+		memset( &image->ralMaterialRuntimeResource, 0,
+			sizeof( image->ralMaterialRuntimeResource ) );
+	}
 
 	ri.Free( pic );
 }

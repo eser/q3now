@@ -2,6 +2,8 @@
 // SPDX-FileCopyrightText: 2026 Wired Engine contributors
 
 #include "cg_temporal_identity.h"
+#include "cg_camera_history.h"
+#include "../code/game/bg_public.h"
 
 #include <limits.h>
 #include <stdio.h>
@@ -54,11 +56,47 @@ static entityState_t MakeState( int number ) {
 	return state;
 }
 
+static int CameraHistory( void ) {
+	wiredCameraHistory_t history = {0};
+	wiredCameraSample_t sample = {0};
+	sample.timeMs = 100;
+	CHECK( wired_camera_history_step( &history, sample ) );
+	CHECK( wired_camera_history_step( &history, sample ) ); // stereo/repeated frame
+	sample.timeMs++;
+	CHECK( !wired_camera_history_step( &history, sample ) );
+	CHECK( !wired_camera_history_step( &history, sample ) ); // pause
+	for ( int change = 0; change < 9; ++change ) {
+		sample.timeMs++;
+		switch ( change ) {
+		case 0: sample.teleportBit = EF_TELEPORT_BIT; break;
+		case 1: sample.teleportBit = 0; break; // both teleport edges
+		case 2: sample.spawnCount++; break;
+		case 3: sample.clientNum++; break; // spectator follow
+		case 4: sample.thirdPerson = 1; break;
+		case 5: sample.intermission = 1; break;
+		case 6: sample.cinematic = 1; sample.sceneStartMs = sample.timeMs; break;
+		case 7: sample.sceneStartMs++; break; // a new scene while already cinematic
+		case 8: sample.sceneCutRevision++; break; // hard cut inside the same scene
+		}
+		CHECK( wired_camera_history_step( &history, sample ) );
+		sample.timeMs++;
+		CHECK( !wired_camera_history_step( &history, sample ) );
+	}
+	sample.timeMs++; sample.cinematic = 0; sample.sceneStartMs = 0;
+	CHECK( wired_camera_history_step( &history, sample ) );
+	sample.timeMs = 10;
+	CHECK( wired_camera_history_step( &history, sample ) ); // rewind
+	memset( &history, 0, sizeof( history ) );
+	CHECK( wired_camera_history_step( &history, sample ) ); // level lifetime
+	return 0;
+}
+
 int main( void ) {
 	cgTemporalIdentity_t identity;
 	entityState_t state;
 	refEntityMotion_t motion, before;
 	refEntity_t entity;
+	CHECK( CameraHistory() == 0 );
 
 	memset( &identity, 0, sizeof( identity ) );
 	memset( &entity, 0, sizeof( entity ) );

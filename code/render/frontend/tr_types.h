@@ -79,6 +79,7 @@ typedef struct {
 // refdef flags
 #define RDF_NOWORLDMODEL	0x0001		// used for player configuration screen
 #define RDF_HYPERSPACE		0x0004		// teleportation effect
+#define RDF_CAMERA_CUT       0x0080      // discontinuous view; invalidate temporal history, no visual effect
 #define RDF_TEMPORAL_PRIMARY	0x0040		// authoritative full-window gameplay scene
 
 typedef struct {
