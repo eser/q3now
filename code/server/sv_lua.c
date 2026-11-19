@@ -6,7 +6,7 @@
 #include "sv_entity_events.h"
 #include "../qcommon/wired/core/scripting/user_vm.h"
 
-#include "../game/chars.h"
+#include "../qcommon/wired/bot_characteristics.h"
 
 #include <lua.h>
 #include <lauxlib.h>
@@ -1014,7 +1014,7 @@ void SV_Lua_Init( void ) {
 	SV_EntityEvents_LuaRegister( L );
 
 	// inject wired.characteristics: name -> CHARACTERISTIC_* index
-	// single source of truth — derived from chars.h #defines, zero drift
+	// single source of truth — derived from bot_characteristics.h #defines, zero drift
 	lua_newtable( L );
 	for ( int i = 0; s_characteristicNames[i].name; i++ ) {
 		lua_pushinteger( L, s_characteristicNames[i].index );

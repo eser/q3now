@@ -5,7 +5,7 @@
 #define SV_LUA_H
 
 #include "../qcommon/q_shared.h"
-#include "../game/wired/bots/g_bot_scripts_shared.h"
+#include "../qcommon/wired/bot_scripts_shared.h"
 
 void SV_Lua_Init( void );
 void SV_Lua_Shutdown( void );

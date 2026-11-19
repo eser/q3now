@@ -37,7 +37,7 @@
 #include "ai_weapsel.h"
 #include "wired/bots/g_bot_scripts.h"
 //
-#include "chars.h"				//characteristics
+#include "../qcommon/wired/bot_characteristics.h"				//characteristics
 #include "../qcommon/q_feats.h"
 #if FEAT_RECAST_NAVMESH
 #include "g_bot_nav.h"

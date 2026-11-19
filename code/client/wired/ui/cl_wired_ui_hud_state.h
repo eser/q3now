@@ -14,7 +14,7 @@ cl_wired_ui_hud_state.h — Wired UI HUD: state + receivers + tick.
 #ifndef CL_WIRED_UI_HUD_STATE_H
 #define CL_WIRED_UI_HUD_STATE_H
 
-#include "../../../cgame/cg_public.h"
+#include "../../../qcommon/wired/ui_hud_state_types.h"
 
 #if FEAT_WIRED_UI
 

@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
-#ifndef G_BOT_SCRIPTS_SHARED_H
-#define G_BOT_SCRIPTS_SHARED_H
+#ifndef QCOMMON_WIRED_BOT_SCRIPTS_SHARED_H
+#define QCOMMON_WIRED_BOT_SCRIPTS_SHARED_H
 
-#include "../../../qcommon/q_shared.h"
+#include "../q_shared.h"
 // This header is consumed by both game-module bot AI code AND by the
-// engine-side server bot-scripting bridge (sv_lua.h). To keep the engine
-// free of any game-side header dependency, source the protocol-shared
-// types (WP_NUM_WEAPONS, gitem_t, etc.) from wired/protocol.h directly.
-#include "../../../qcommon/wired/protocol.h"
+// engine-side server bot-scripting bridge (sv_lua.h). It lives in qcommon/wired
+// so neither side includes the other's headers; the protocol-shared types
+// (WP_NUM_WEAPONS, gitem_t, etc.) come from wired/protocol.h directly.
+#include "protocol.h"
 
 #define WI_WEAPONKEY_STR 16
 #define WI_ITEMTYPE_STR 32

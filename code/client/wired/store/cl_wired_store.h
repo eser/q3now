@@ -14,7 +14,7 @@ cgame writes via staging buffer + batch syscall, client reads at render time.
 #define CL_WIRED_STORE_H
 
 #include "../../../qcommon/q_shared.h"
-#include "../../../cgame/cg_public.h"	/* wuiMarker_t (WA-2a marker-list channel) */
+#include "../../../qcommon/wired/ui_store_types.h"	/* wuiMarker_t (WA-2a marker-list channel) */
 
 #if FEAT_WIRED_UI
 
@@ -49,8 +49,8 @@ typedef struct wuiStoreEntry_s {
  * pushed this frame are cleared in WiredStore_BeginFrame (frame-transient, no
  * stale accumulation). MAX_MARKERS_PER_LIST 64 = 32 damage plums + headroom. */
 #define WUI_MAX_MARKER_LISTS        4
-/* WUI_MAX_MARKERS_PER_LIST is defined in cg_public.h (shared with the cgame
- * staging scratch) — included above. */
+/* WUI_MAX_MARKERS_PER_LIST is defined in qcommon/wired/ui_store_types.h (shared
+ * with the cgame staging scratch) — included above. */
 
 typedef struct {
 	char        key[64];                            /* listKey (e.g. "markers.plums"); empty = free slot */

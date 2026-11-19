@@ -7,7 +7,7 @@
 #include "../qcommon/q_shared.h"
 #include "bg_public.h"
 #include "g_public.h"
-#include "wired/bots/g_bot_scripts_shared.h"
+#include "../qcommon/wired/bot_scripts_shared.h"
 
 //==================================================================
 

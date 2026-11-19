@@ -18,7 +18,7 @@
 #include "ai_dmq3.h"
 #include "g_bot_scripts.h"
 #include "g_belief.h"
-#include "chars.h"
+#include "../../../qcommon/wired/bot_characteristics.h"
 #include "inv.h"
 
 #include <math.h>

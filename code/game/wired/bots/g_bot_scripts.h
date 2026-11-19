@@ -4,7 +4,7 @@
 #ifndef G_BOT_SCRIPTS_H
 #define G_BOT_SCRIPTS_H
 
-#include "g_bot_scripts_shared.h"
+#include "../../../qcommon/wired/bot_scripts_shared.h"
 
 typedef struct bot_state_s bot_state_t;
 typedef struct bot_goal_s bot_goal_t;

@@ -31,7 +31,7 @@
 #include "ai_team.h"
 #include "ai_vcmd.h"
 //
-#include "chars.h"				//characteristics
+#include "../qcommon/wired/bot_characteristics.h"				//characteristics
 #include "inv.h"				//indexes into the inventory
 #include "syn.h"				//synonyms
 #include "match.h"				//string matching types and vars

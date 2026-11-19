@@ -39,7 +39,7 @@
 #endif
 
 //
-#include "chars.h"
+#include "../qcommon/wired/bot_characteristics.h"
 #include "inv.h"
 #include "syn.h"
 LOG_DECLARE_CHANNEL( ch_botlib, "botlib" );
