@@ -27,6 +27,10 @@ code/qcommon/wired/wired_build_stamp_gen.h
 
 # build output
 build/
+# The Wails launcher keeps its project assets (icons, manifests, installer
+# scripts) in launcher/build; only its compiled output is ignored.
+!launcher/build/
+launcher/build/bin/
 dist/
 cmake-*
 
@@ -40,6 +44,13 @@ __pycache__/
 tools/visual_regression/__pycache__/
 .scratch/
 tools/png2raw/png2raw
+# Locally built helper-tool binaries (Go) and the layout dump the engine writes
+# into its working directory; all are reproducible, none belong in git.
+tools/**/*.exe
+tools/png-perturb/png-perturb
+tests/visual/scripts/anchor_extract
+tests/visual/scripts/*.exe
+layoutdump.jsonl
 
 # Visual-gate harness vendor tree (built by tests/visual/scripts/vendor_sync.mjs).
 # Reproducible local artifact: React UMD + repo-local fonts + design JSX compiled
@@ -58,3 +69,5 @@ tools/visual-diff/vdiff
 
 # Agent worktrees (transient, never committed)
 .claude/worktrees/
+# Per-user agent settings (machine-local; also covered by some global ignores)
+.claude/settings.local.json
