@@ -3,6 +3,7 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "tr_local.h"
+#include "tr_fixtures.h"
 #include "vk.h"
 #include "vk_ral_attachment_translate.h"
 #include "vk_ral_pool_render.h"
@@ -6204,7 +6205,7 @@ static char vk_exposure_seed_smoke_map[MAX_QPATH];
 static void vk_storage_clear_smoke_receipt( uint32_t family,
 		const char *name, uint64_t bytes ) {
 	const char *map;
-	if ( !r_ralEffectsSmoke || !r_ralEffectsSmoke->integer || !tr.world
+	if ( !WIRED_FIXTURE_EFFECTS_SMOKE() || !tr.world
 			|| family >= 4u || !name || bytes == 0u ) return;
 	map = tr.world->baseName;
 	if ( !map[0] || !Q_stricmp( vk_storage_clear_smoke_map[family], map ) )
@@ -6218,7 +6219,7 @@ static void vk_storage_clear_smoke_receipt( uint32_t family,
 
 static void vk_exposure_seed_smoke_receipt( void ) {
 	const char *map;
-	if ( !r_ralEffectsSmoke || !r_ralEffectsSmoke->integer || !tr.world
+	if ( !WIRED_FIXTURE_EFFECTS_SMOKE() || !tr.world
 			|| !vk_hdr_exposure_seed_valid() ) return;
 	map = tr.world->baseName;
 	if ( !map[0] || !Q_stricmp( vk_exposure_seed_smoke_map, map ) ) return;
@@ -6234,7 +6235,7 @@ static void vk_effects_smoke_receipt( int family, const char *name,
 {
 	static char lastMap[VK_EFFECT_SMOKE_COUNT][MAX_QPATH];
 	const char *map;
-	if ( !r_ralEffectsSmoke || !r_ralEffectsSmoke->integer || drawCalls == 0
+	if ( !WIRED_FIXTURE_EFFECTS_SMOKE() || drawCalls == 0
 	  || family < 0 || family >= VK_EFFECT_SMOKE_COUNT || !tr.world ) return;
 	map = tr.world->baseName;
 	if ( !Q_stricmp( lastMap[family], map ) ) return;
@@ -6248,7 +6249,7 @@ static void vk_particle_compute_smoke_receipt( void )
 {
 	static char lastMap[MAX_QPATH];
 	const char *map;
-	if ( !r_ralEffectsSmoke || !r_ralEffectsSmoke->integer || !tr.world ) return;
+	if ( !WIRED_FIXTURE_EFFECTS_SMOKE() || !tr.world ) return;
 	map = tr.world->baseName;
 	if ( !map[0] || !Q_stricmp( lastMap, map ) ) return;
 	Q_strncpyz( lastMap, map, sizeof( lastMap ) );
@@ -6259,7 +6260,7 @@ static void vk_particle_compute_smoke_receipt( void )
 
 static void vk_atmosphere_graph_compute_smoke_receipt( void ) {
 	const char *map;
-	if ( !r_ralEffectsSmoke || !r_ralEffectsSmoke->integer || !tr.world
+	if ( !WIRED_FIXTURE_EFFECTS_SMOKE() || !tr.world
 			|| !vk.particle.atmosphereGraphSmokePending
 			|| vk.particle.atmosphereGraphSmokeRequests == 0u
 			|| vk.particle.atmosphereGraphSmokeParticles == 0u ) return;
@@ -6281,7 +6282,7 @@ static void vk_frame_uniform_smoke_receipt( uint32_t family,
 		const char *name, const vkRalFrameUniformReceipt_t *receipt ) {
 	const char *map;
 	uint64_t partialWrite;
-	if ( !r_ralEffectsSmoke || !r_ralEffectsSmoke->integer || !tr.world
+	if ( !WIRED_FIXTURE_EFFECTS_SMOKE() || !tr.world
 			|| family >= 2u || !name || !receipt
 			|| !VK_RalFrameUniformReceiptExact( receipt, receipt ) ) return;
 	map = tr.world->baseName;
@@ -6304,7 +6305,7 @@ static void vk_frame_uniform_smoke_receipt( uint32_t family,
 static void vk_shadow_storage_smoke_receipt( uint32_t family,
 		const char *name, const vkRalShadowStorageFlushReceipt_t *receipt ) {
 	const char *map;
-	if ( !r_ralEffectsSmoke || !r_ralEffectsSmoke->integer || !tr.world
+	if ( !WIRED_FIXTURE_EFFECTS_SMOKE() || !tr.world
 			|| family >= 3u || !name || !receipt
 			|| !VK_RalShadowStorageFlushReceiptExact( receipt, receipt ) ) return;
 	map = tr.world->baseName;
@@ -6327,7 +6328,7 @@ static void vk_shadow_storage_smoke_receipt( uint32_t family,
 static void vk_atmospheric_compute_smoke_receipt( void )
 {
 	const char *map;
-	if ( !r_ralEffectsSmoke || !r_ralEffectsSmoke->integer || !tr.world ) return;
+	if ( !WIRED_FIXTURE_EFFECTS_SMOKE() || !tr.world ) return;
 	map = tr.world->baseName;
 	if ( !map[0] || !Q_stricmp( vk_atmospheric_compute_smoke_map, map ) ) return;
 	Q_strncpyz( vk_atmospheric_compute_smoke_map, map,
@@ -6341,7 +6342,7 @@ static void vk_atmospheric_frame_smoke_receipt(
 		const vkAtmosphericFrameReceipt_t *receipt )
 {
 	const char *map;
-	if ( !r_ralEffectsSmoke || !r_ralEffectsSmoke->integer || !tr.world
+	if ( !WIRED_FIXTURE_EFFECTS_SMOKE() || !tr.world
 			|| !VK_AtmosphericFrameReceiptExact( receipt, receipt ) ) return;
 	map = tr.world->baseName;
 	if ( !map[0] || !Q_stricmp( vk_atmospheric_frame_smoke_map, map ) ) return;
@@ -6363,7 +6364,7 @@ static qboolean vk_atmospheric_weather_plan(
 static void vk_atmospheric_weather_smoke_receipt(
 		const ralAtmosphereWeatherReceipt_t *receipt ) {
 	const char *map;
-	if ( !r_ralEffectsSmoke || !r_ralEffectsSmoke->integer || !tr.world
+	if ( !WIRED_FIXTURE_EFFECTS_SMOKE() || !tr.world
 			|| vk.atm.seed != 0x52414c41u || !receipt
 			|| !Ral_AtmosphereWeatherReceiptExact( receipt, receipt )
 			|| receipt->familyMask != RAL_ATMOSPHERE_WEATHER_ALL
@@ -6387,7 +6388,7 @@ void vk_atmosphere_fixture_smoke_receipt( void )
 	ralAtmosphereFixtureState_t authored;
 	ralAtmosphereWeatherReceipt_t weather;
 	uint32_t fixtureIndex;
-	if ( !r_ralEffectsSmoke || !r_ralEffectsSmoke->integer || !tr.world ||
+	if ( !WIRED_FIXTURE_EFFECTS_SMOKE() || !tr.world ||
 			vk.atm.seed < 216u || vk.atm.seed >= 216u + RAL_ATMOSPHERE_FIXTURE_COUNT ) return;
 	if ( Q_stricmp( receiptMap, tr.world->baseName ) ) {
 		Q_strncpyz( receiptMap, tr.world->baseName, sizeof( receiptMap ) );
@@ -10427,8 +10428,7 @@ static void vk_particle_child_telemetry_consume( uint32_t slot )
 	backEnd.pc.c_particleChildParticles += (int)acceptedParticles;
 	backEnd.pc.c_particleChildDroppedEvents += (int)header.droppedEvents;
 	backEnd.pc.c_particleChildDroppedParticles += (int)header.droppedParticles;
-	if ( acceptedEvents > 0u && r_ralEffectsSmoke &&
-			r_ralEffectsSmoke->integer && tr.world &&
+	if ( acceptedEvents > 0u && WIRED_FIXTURE_EFFECTS_SMOKE() && tr.world &&
 			Q_stricmp( receiptMap, tr.world->baseName ) ) {
 		R_LOG( rch_ral, SEV_INFO,
 			"ral-atmosphere-impact schema=1 map=%s gpu-events=%u gpu-spawned=%u dropped-events=%u dropped-particles=%u readback-bytes=%u\n",
@@ -20897,7 +20897,7 @@ static qboolean vk_atmosphere_full_composite( const vkAtmosphereCompositeWork_t 
 	}
 	vk_atmosphere_full.historyRead = 1u - vk_atmosphere_full.historyRead;
 	vk_atmosphere_full.historyValid = qtrue;
-	if ( r_ralEffectsSmoke && r_ralEffectsSmoke->integer && plan->cloudsActive
+	if ( WIRED_FIXTURE_EFFECTS_SMOKE() && plan->cloudsActive
 			&& Q_stricmp( receiptMap, tr.world->baseName ) ) {
 		R_LOG( rch_ral, SEV_INFO,
 			"ral-atmosphere-full schema=1 map=%s tier=full froxels=%u volumes=%u lights=%u dispatches=%u clouds=%u coverage-milli=%u composite=1 history=%s scene-hdr=copy-back\n",

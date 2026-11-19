@@ -1771,8 +1771,6 @@ extern	cvar_t	*r_drawWorld;			// disable/enable world rendering
 extern	cvar_t	*r_speeds;				// various levels of information display
 extern	cvar_t	*r_gpuSpeeds;			// per-pass GPU timestamp report
 extern	cvar_t	*r_profileMarkers;		// semantic RAL dynamic-rendering GPU labels
-extern	cvar_t	*r_ralEffectsSmoke;		// default-off procedural-effects RAL native smoke
-extern	cvar_t	*r_lightingReferenceFixture;	// stable canonical lighting-reference atmosphere
 extern	cvar_t	*r_temporalInputTest;		// default-off projection-jitter diagnostic consumer
 extern	cvar_t	*r_vkDebugTiming;		// 200-frame Vulkan host-side timing averages
 extern	cvar_t	*r_frameSpikeUs;		// per-frame host-side stage-timing spike report

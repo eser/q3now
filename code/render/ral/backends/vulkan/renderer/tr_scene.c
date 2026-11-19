@@ -5,6 +5,7 @@
 #include "tr_local.h"
 #include "../../../../frontend/r_log.h"  // rilog-channel-mechanism Turn B — renderer.cmd
 #include "../../../../frontend/render_submission_effects.h"
+#include "tr_fixtures.h"
 
 R_LOG_DECLARE_CHANNEL( rch_cmd, "renderer.cmd" );
 
@@ -24,79 +25,6 @@ static int			r_firstScenePoly;
 
 static int			r_numpolyverts;
 
-#ifdef USE_VULKAN
-static char s_ralEffectsSmokeMap[MAX_QPATH];
-
-static void R_InjectRalEffectsSmoke( const refdef_t *fd ) {
-	ribbonPoint_t points[3];
-	ribbonDesc_t ribbon;
-	railRibbonDesc_t rail;
-	beamDesc_t beam;
-	spriteDesc_t sprite;
-	qhandle_t shader;
-	vec3_t center;
-	int i;
-
-	if ( !r_ralEffectsSmoke || !r_ralEffectsSmoke->integer || !tr.world
-	  || ( fd->rdflags & RDF_NOWORLDMODEL ) ) return;
-	if ( !Q_stricmp( s_ralEffectsSmokeMap, tr.world->baseName ) ) return;
-	if ( !vk.ribbon.available || !vk.railRibbon.available
-	  || !vk.beam.available || !vk.sprite.available
-	  || !vk.atm.available ) return;
-
-	shader = RE_RegisterPrimitiveShader( "gfx/misc/particle" );
-	if ( shader == 0 ) return;
-	VectorMA( fd->vieworg, 72.0f, fd->viewaxis[0], center );
-
-	memset( points, 0, sizeof( points ) );
-	for ( i = 0; i < 3; i++ ) {
-		VectorMA( center, (float)( i - 1 ) * 18.0f, fd->viewaxis[1], points[i].pos );
-		points[i].pos[2] += ( i == 1 ) ? 12.0f : 0.0f;
-		points[i].width = 2.5f;
-		points[i].rgba[0] = 0.2f; points[i].rgba[1] = 0.8f;
-		points[i].rgba[2] = 1.0f; points[i].rgba[3] = 1.0f;
-	}
-	memset( &ribbon, 0, sizeof( ribbon ) );
-	ribbon.points = points; ribbon.numPoints = 3; ribbon.shader = shader;
-	ribbon.flags = PRIM_FLAG_CAMERA_FACING;
-	RE_AddRibbonToScene( &ribbon );
-
-	memset( &beam, 0, sizeof( beam ) );
-	VectorMA( center, -20.0f, fd->viewaxis[2], beam.start );
-	VectorMA( center,  20.0f, fd->viewaxis[2], beam.end );
-	beam.startWidth = 2.0f; beam.endWidth = 1.0f;
-	beam.startColor[0] = beam.endColor[0] = 1.0f;
-	beam.startColor[1] = beam.endColor[1] = 0.5f;
-	beam.startColor[2] = beam.endColor[2] = 0.1f;
-	beam.startColor[3] = beam.endColor[3] = 1.0f;
-	beam.shader = shader; beam.axialCopies = 1;
-	beam.startEntityNum = beam.endEntityNum = -1;
-	RE_AddBeamToScene( &beam );
-
-	memset( &rail, 0, sizeof( rail ) );
-	VectorMA( center, -14.0f, fd->viewaxis[1], rail.start );
-	VectorCopy( fd->viewaxis[0], rail.beamAxis );
-	rail.beamLen = 64.0f; rail.duration = 1.0f; rail.shader = shader;
-	rail.color[0] = 0.5f; rail.color[1] = 0.2f;
-	rail.color[2] = 1.0f; rail.color[3] = 1.0f;
-	for ( i = 0; i < RAIL_RIBBON_RING_COUNT; i++ ) {
-		float a = (float)i * ( 2.0f * (float)M_PI / RAIL_RIBBON_RING_COUNT );
-		VectorScale( fd->viewaxis[1], cosf( a ), rail.perpAxis[i] );
-		VectorMA( rail.perpAxis[i], sinf( a ), fd->viewaxis[2], rail.perpAxis[i] );
-	}
-	RE_AddRailRibbonToScene( &rail );
-
-	memset( &sprite, 0, sizeof( sprite ) );
-	VectorMA( center, 18.0f, fd->viewaxis[2], sprite.origin );
-	sprite.radius = 7.0f; sprite.shader = shader;
-	sprite.rgba[0] = 1.0f; sprite.rgba[1] = 0.25f;
-	sprite.rgba[2] = 0.1f; sprite.rgba[3] = 1.0f;
-	RE_AddSpriteToScene( &sprite );
-
-	Q_strncpyz( s_ralEffectsSmokeMap, tr.world->baseName,
-		sizeof( s_ralEffectsSmokeMap ) );
-}
-#endif
 
 // Lens-source occlusion stash (lens-glow B2). The game adds sources each frame;
 // they are projected + written to the oracle registry at render time (see
@@ -1580,9 +1508,7 @@ void RE_RenderScene( const refdef_t *fd, int worldIndex ) {
 
 	tr.refdef.floatTime = (double)tr.refdef.time * 0.001; // -EC-: cast to double
 
-#ifdef USE_VULKAN
-	R_InjectRalEffectsSmoke( fd );
-#endif
+	wired_renderer_fixtures_inject_scene( fd );
 
 	tr.refdef.numDrawSurfs = r_firstSceneDrawSurf;
 	tr.refdef.drawSurfs = backEndData->drawSurfs;
