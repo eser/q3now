@@ -3,12 +3,42 @@
 
 #include "ral_irradiance_runtime.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
 
+#if defined( _WIN32 )
+#include <windows.h>
+#elif defined( __APPLE__ )
+#include <mach/mach_time.h>
+#endif
+
 #define CHECK(x) do { if ( !(x) ) { fprintf( stderr, "FAIL %d: %s\n", __LINE__, #x ); return 1; } } while ( 0 )
 #define Q(x) ((x) * RAL_LIGHT_Q16_ONE)
+
+// Monotonic nanoseconds for the --benchmark mode, on every platform the test
+// builds for. clock_gettime and CLOCK_MONOTONIC_RAW do not exist on Windows.
+static uint64_t NowNanoseconds( void ) {
+#if defined( _WIN32 )
+	LARGE_INTEGER counter, frequency;
+	QueryPerformanceCounter( &counter );
+	QueryPerformanceFrequency( &frequency );
+	// Split into whole seconds and remainder: counter * 1e9 overflows 64 bits
+	// after about fifteen minutes of uptime at a 10 MHz counter.
+	return (uint64_t)( counter.QuadPart / frequency.QuadPart ) * UINT64_C(1000000000)
+		+ (uint64_t)( counter.QuadPart % frequency.QuadPart ) * UINT64_C(1000000000)
+			/ (uint64_t)frequency.QuadPart;
+#elif defined( __APPLE__ )
+	static mach_timebase_info_data_t timebase;
+	if ( timebase.denom == 0 ) mach_timebase_info( &timebase );
+	return mach_absolute_time() * timebase.numer / timebase.denom;
+#else
+	struct timespec ts;
+	clock_gettime( CLOCK_MONOTONIC, &ts );
+	return (uint64_t)ts.tv_sec * UINT64_C(1000000000) + (uint64_t)ts.tv_nsec;
+#endif
+}
 
 static void PutHalf( uint8_t *bytes, uint16_t half ) {
 	bytes[0] = (uint8_t)half; bytes[1] = (uint8_t)( half >> 8u );
@@ -124,9 +154,8 @@ int main( int argc, char **argv ) {
 	request.position.x = Q(1) / 2;
 	if ( argc == 2 && !strcmp( argv[1], "--benchmark" ) ) {
 		const uint32_t sampleCount = 500000u;
-		struct timespec start, end;
-		uint64_t elapsedNanoseconds, sink = 0u;
-		CHECK( clock_gettime( CLOCK_MONOTONIC_RAW, &start ) == 0 );
+		uint64_t startNanoseconds, elapsedNanoseconds, sink = 0u;
+		startNanoseconds = NowNanoseconds();
 		for ( uint32_t sample = 0u; sample < sampleCount; ++sample ) {
 			request.queryGeneration = 1000u + sample;
 			request.position.x = (int32_t)( (int64_t)Q(1) * ( sample & 255u ) / 255u );
@@ -135,9 +164,7 @@ int main( int argc, char **argv ) {
 				sizeof( validity ), &sweepReceipt ) );
 			sink ^= sweepReceipt.coefficientHash;
 		}
-		CHECK( clock_gettime( CLOCK_MONOTONIC_RAW, &end ) == 0 );
-		elapsedNanoseconds = (uint64_t)( end.tv_sec - start.tv_sec ) * UINT64_C(1000000000)
-			+ (uint64_t)( end.tv_nsec - start.tv_nsec );
+		elapsedNanoseconds = NowNanoseconds() - startNanoseconds;
 		printf( "probeSampleNanoseconds=%.3f samples=%u sink=%llu\n",
 			(double)elapsedNanoseconds / (double)sampleCount, sampleCount,
 			(unsigned long long)sink );
