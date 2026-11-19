@@ -8831,4 +8831,12 @@ WIRED_LINK_MATH(
 	tr_temporal_motion_test
 	particle_curve_test
 	nav_coord_test
+	ral_display_visibility_test
+	ral_atmosphere_test
+	ral_atmosphere_frame_graph_test
+	ral_sky_radiance_test
+	render_material_script_source_test
+	render_submission_test
+	render_lighting_project_source_test
+	wired_profile_imgui_ral_test
 )
