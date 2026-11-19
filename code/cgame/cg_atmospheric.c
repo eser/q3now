@@ -7,12 +7,13 @@
 ===========================================================================
 cg_atmospheric.c -- app-authored unified atmosphere (FEAT_ATMOSPHERIC)
 
-Environment state is server-controlled via g_envWeather.  The cgame resolves
-content presets into one semantic AtmosphereFrameState and contextual emitter
-stream; the renderer remains unaware of game rules and owns all per-particle,
-froxel, surface-climate and composition work.  The small immutable state is
-published each frame so its authoritative timeline advances, while the large
-collision heightgrid is uploaded only when the preset/world changes.
+Environment state is server-controlled via g_envWeather and the map-authored
+g_envSkyMode value.  The cgame resolves content presets into one semantic
+AtmosphereFrameState and contextual emitter stream; the renderer remains
+unaware of game rules and owns all per-particle, froxel, surface-climate and
+composition work.  The small immutable state is published each frame so its
+authoritative timeline advances, while the large collision heightgrid is
+uploaded only when the preset/world changes.
 
 Supported authored presets are rain, snow, sleet, hail, dust/ash, cold, fog,
 storm and clean/empty.  Visual particles are deterministic derivatives of the
@@ -46,11 +47,87 @@ typedef enum {
 
 static struct {
 	atmPreset_t preset;
+	atmosphereSkyEnvironmentMode_t skyMode;
+	uint64_t	sourceRevision;
 	qhandle_t	shader;
 	qboolean	tracemapGenerated;
 	qboolean	heightgridEmitted;
 	qboolean	offEmitted;
 } atm;
+
+static atmosphereSkyEnvironmentMode_t CG_AtmosphericSkyMode( const char *value )
+{
+	if ( !value || !value[0] || !Q_stricmp( value, "authored" ) )
+		return ATMOSPHERE_SKY_AUTHORED;
+	if ( value && !Q_stricmp( value, "physical" ) )
+		return ATMOSPHERE_SKY_PHYSICAL;
+	if ( value && !Q_stricmp( value, "hybrid" ) )
+		return ATMOSPHERE_SKY_HYBRID;
+	trap_Print( va( "WARNING: unknown skyMode '%s'; using authored\n", value ) );
+	return ATMOSPHERE_SKY_AUTHORED;
+}
+
+/* Sun direction for the sky environment. The fixed noon vector is the
+ * historical default; g_envSunElevation / g_envSunAzimuth (degrees, q3map_sun
+ * convention: azimuth CCW from +X, elevation above the horizon) override it so
+ * fixtures and servers can author sunset/night without a map rebuild. */
+static qboolean CG_AtmosphericSunOverridden( void )
+{
+	return ( cg_envSunElevation.string[0] || cg_envSunAzimuth.string[0] ) ? qtrue : qfalse;
+}
+
+static void CG_AtmosphericSunDirection( vec3_t out )
+{
+	const float defaultAzimuth = RAD2DEG( atan2f( 0.20f, 0.30f ) );
+	float elevation, azimuth;
+	out[0] = 0.30f; out[1] = 0.20f; out[2] = 0.93f;
+	if ( !CG_AtmosphericSunOverridden() )
+		return;
+	elevation = cg_envSunElevation.string[0] ? atof( cg_envSunElevation.string )
+		: RAD2DEG( asinf( 0.93f / 0.9975f ) );
+	azimuth = cg_envSunAzimuth.string[0] ? atof( cg_envSunAzimuth.string ) : defaultAzimuth;
+	out[0] = cosf( DEG2RAD( elevation ) ) * cosf( DEG2RAD( azimuth ) );
+	out[1] = cosf( DEG2RAD( elevation ) ) * sinf( DEG2RAD( azimuth ) );
+	out[2] = sinf( DEG2RAD( elevation ) );
+}
+
+static void CG_AtmosphericBuildSkyEnvironment( atmosphericDesc_t *desc )
+{
+	atmosphereSkyEnvironment_t *sky;
+	int channel;
+
+	if ( !desc )
+		return;
+	sky = &desc->skyEnvironment;
+	memset( sky, 0, sizeof( *sky ) );
+	sky->schemaVersion = WIRED_SKY_ENVIRONMENT_SCHEMA_VERSION;
+	sky->mode = (uint32_t)atm.skyMode;
+	/* The BSP/material sky remains the map-authored colour and detail authority
+	 * in every mode.  PHYSICAL adds GPU atmosphere/lighting products; it does
+	 * not discard the Q3 sky stages that identify the map. */
+	sky->flags |= ATMOSPHERE_SKY_AUTHORED_AVAILABLE;
+	if ( CG_AtmosphericSunOverridden() )
+		sky->flags |= ATMOSPHERE_SKY_SUN_OVERRIDE;
+	sky->sourceRevision = atm.sourceRevision;
+	VectorCopy( desc->sunDirection, sky->sunDirection );
+	VectorCopy( desc->moonDirection, sky->moonDirection );
+	for ( channel = 0; channel < 3; ++channel ) {
+		sky->sunRadiance[channel] = desc->sunIntensity;
+		sky->moonRadiance[channel] = desc->moonIntensity;
+		sky->ambientSh[channel] = desc->ambientColor[channel];
+	}
+	sky->sunAngularRadius = 0.00465f;
+	sky->moonAngularRadius = 0.00436f;
+	sky->cloudSunOcclusion = desc->cloudShadow;
+	sky->skyLuminance = desc->ambientColor[0];
+	if ( desc->ambientColor[1] > sky->skyLuminance )
+		sky->skyLuminance = desc->ambientColor[1];
+	if ( desc->ambientColor[2] > sky->skyLuminance )
+		sky->skyLuminance = desc->ambientColor[2];
+	sky->exposure = 1.0f;
+	sky->opticsVisibility = 1.0f - desc->cloudShadow;
+	sky->distantSceneScale = 1.0f;
+}
 
 /*
 ==================
@@ -64,6 +141,9 @@ descriptor stale on a type change so the next frame re-emits it to the pool.
 void CG_AtmosphericInit( void )
 {
 	atmPreset_t newPreset;
+	atmosphereSkyEnvironmentMode_t newSkyMode;
+
+	newSkyMode = CG_AtmosphericSkyMode( cgs.skyMode );
 
 	// determine weather type from server setting
 	if ( !Q_stricmp( cgs.weather, "rain" ) ) {
@@ -87,13 +167,22 @@ void CG_AtmosphericInit( void )
 	}
 
 	// no change — skip reinit
-	if ( newPreset == atm.preset && ( newPreset == ATM_NONE || atm.shader ) ) {
+	if ( newPreset == atm.preset && newSkyMode == atm.skyMode &&
+		 ( newPreset == ATM_NONE || atm.shader ) ) {
 		return;
 	}
 
 	atm.preset			  = newPreset;
+	atm.skyMode			  = newSkyMode;
+	atm.sourceRevision += 1u;
+	if ( atm.sourceRevision == 0u || atm.sourceRevision == UINT64_MAX )
+		atm.sourceRevision = 1u;
 	atm.heightgridEmitted = qfalse;
 	atm.offEmitted		  = qfalse;
+	trap_Print( va( "atmosphere sky-mode=%s revision=%llu\n",
+		atm.skyMode == ATMOSPHERE_SKY_PHYSICAL ? "physical" :
+		atm.skyMode == ATMOSPHERE_SKY_HYBRID ? "hybrid" : "authored",
+		(unsigned long long)atm.sourceRevision ) );
 
 	if ( newPreset == ATM_RAIN || newPreset == ATM_SLEET || newPreset == ATM_HAIL || newPreset == ATM_STORM ) {
 		atm.shader = trap_R_RegisterShader( "gfx/misc/raindrop" );
@@ -115,7 +204,7 @@ void CG_AtmosphericInit( void )
 static qboolean CG_AtmosphericBuildState( atmosphericDesc_t *desc, const vec2_t mins2, const vec2_t maxs2,
 										  int gridSize )
 {
-	if ( !desc || atm.preset == ATM_NONE )
+	if ( !desc )
 		return qfalse;
 	memset( desc, 0, sizeof( *desc ) );
 	desc->schemaVersion		= WIRED_ATMOSPHERE_SCHEMA_VERSION;
@@ -132,9 +221,7 @@ static qboolean CG_AtmosphericBuildState( atmosphericDesc_t *desc, const vec2_t 
 	desc->ambientColor[0]	= 0.16f;
 	desc->ambientColor[1]	= 0.18f;
 	desc->ambientColor[2]	= 0.22f;
-	desc->sunDirection[0]	= 0.30f;
-	desc->sunDirection[1]	= 0.20f;
-	desc->sunDirection[2]	= 0.93f;
+	CG_AtmosphericSunDirection( desc->sunDirection );
 	desc->sunIntensity		= 0.9f;
 	desc->moonDirection[0]	= -0.30f;
 	desc->moonDirection[1]	= -0.20f;
@@ -151,6 +238,20 @@ static qboolean CG_AtmosphericBuildState( atmosphericDesc_t *desc, const vec2_t 
 	desc->worldMaxs[0]		= maxs2[0];
 	desc->worldMaxs[1]		= maxs2[1];
 	desc->gridSize			= gridSize;
+	if ( atm.preset == ATM_NONE ) {
+		/* An explicit physical/hybrid sky requires the physical LUT work admitted
+		 * only by the FULL tier.  Keeping this at ANALYTIC made the RAL correctly
+		 * fall back to authored even though g_envSkyMode reported "physical". */
+		desc->qualityTier = atm.skyMode >= ATMOSPHERE_SKY_PHYSICAL
+			? ATMOSPHERE_QUALITY_FULL : ATMOSPHERE_QUALITY_ANALYTIC;
+		/* A physical sky without a weather preset is clear air. `visibility` is
+		 * an extinction distance, not the sky draw radius; leaving the generic
+		 * atmosphere distance here made direct-present RAL backends synthesize
+		 * dense white fog over otherwise clear authored maps. */
+		desc->visibility = 0.0f;
+		CG_AtmosphericBuildSkyEnvironment( desc );
+		return qtrue;
+	}
 
 	switch ( atm.preset ) {
 	case ATM_RAIN:
@@ -253,12 +354,18 @@ static qboolean CG_AtmosphericBuildState( atmosphericDesc_t *desc, const vec2_t 
 	default:
 		return qfalse;
 	}
+	/* Weather complexity and sky authoring are independent axes.  If content or
+	 * the server explicitly selects physical/hybrid, retain the preset but admit
+	 * the physical sky products instead of silently downgrading to authored. */
+	if ( atm.skyMode >= ATMOSPHERE_SKY_PHYSICAL )
+		desc->qualityTier = ATMOSPHERE_QUALITY_FULL;
 
 	if ( atm.preset == ATM_RAIN || atm.preset == ATM_SNOW || atm.preset == ATM_SLEET || atm.preset == ATM_HAIL ||
 		 atm.preset == ATM_STORM )
 		desc->flags |= ATMOSPHERE_FLAG_HEIGHTGRID;
 	if ( atm.preset != ATM_DUST_ASH && atm.preset != ATM_FOG )
 		desc->flags |= ATMOSPHERE_FLAG_SURFACE_CLIMATE;
+	CG_AtmosphericBuildSkyEnvironment( desc );
 	return qtrue;
 }
 
@@ -329,7 +436,8 @@ simulation, collision, effect-graph expansion and drawing remains GPU-owned.
 */
 void CG_AddAtmosphericEffects( void )
 {
-	if ( atm.preset == ATM_NONE || !cg_atmosphericEffects.integer ) {
+	if ( !cg_atmosphericEffects.integer ||
+		 ( atm.preset == ATM_NONE && atm.skyMode == ATMOSPHERE_SKY_AUTHORED ) ) {
 		if ( !atm.offEmitted ) {
 			atmosphericDesc_t desc;
 			memset( &desc, 0, sizeof( desc ) );
@@ -339,12 +447,32 @@ void CG_AddAtmosphericEffects( void )
 			desc.temperatureC	 = 15.0f;
 			desc.humidity		 = 0.5f;
 			desc.indoorExposure	 = 1.0f;
+			CG_AtmosphericSunDirection( desc.sunDirection );
+			desc.sunIntensity = 0.9f;
+			desc.moonDirection[0] = -0.30f;
+			desc.moonDirection[1] = -0.20f;
+			desc.moonDirection[2] = 0.93f;
+			desc.moonIntensity = 0.08f;
+			desc.ambientColor[0] = 0.16f;
+			desc.ambientColor[1] = 0.18f;
+			desc.ambientColor[2] = 0.22f;
+			CG_AtmosphericBuildSkyEnvironment( &desc );
 			trap_R_SetAtmosphere( &desc );
 			atm.offEmitted = qtrue;
 		}
 		return;
 	}
 	atm.offEmitted = qfalse;
+
+	/* A physical/hybrid clear sky needs no collision tracemap. */
+	if ( atm.preset == ATM_NONE ) {
+		atmosphericDesc_t desc;
+		vec2_t mins2 = { 0.0f, 0.0f };
+		vec2_t maxs2 = { 0.0f, 0.0f };
+		if ( CG_AtmosphericBuildState( &desc, mins2, maxs2, 0 ) )
+			trap_R_SetAtmosphere( &desc );
+		return;
+	}
 
 	// generate tracemap on first frame (deferred — collision map must be loaded first)
 	if ( !atm.tracemapGenerated ) {

@@ -15,23 +15,29 @@ Intel XeGTAO formulation), and writes a single-channel visibility texture
 the tonemap pass multiplies the scene radiance by it.
 
 Inputs:
-  - depthTex (set 0, binding 0) + depthSampler (binding 1): the non-MSAA device
-    depth copy (reversed-Z). The same copy the legacy SSAO/sunrays variants
-    sample; produced every frame the AO is on (the tonemap force-copy).
+  - depthTex (set 0, binding 0) + depthSampler (binding 1): the view-space
+    linear depth pyramid (R16F, XE_GTAO_DEPTH_MIP_LEVELS = 5 mips) written by
+    gtao_prefilter.comp from the non-MSAA device depth copy every frame the AO
+    is on. Sky is stored as the far plane (zFar, clamped to R16F range).
   - push constants: the projection-derived reconstruction terms + viewport.
 
 Output:
   - aoImage (set 0, binding 2): R8_UNORM visibility, GENERAL layout.
 
-Single-pass note: XeGTAO's reference uses a depth-MIP prefilter pass to bound
-sample-tap cost; this port samples full-res depth at LOD 0 to stay one pass
-(simplest, WebGPU-portable). A MIP prefilter is a future perf refinement.
-Normals are reconstructed from depth (XeGTAO's built-in path), so no new
-attachment is needed.
+Depth-MIP note: XeGTAO's reference samples a prefiltered view-space depth
+pyramid so far horizon taps read coarser mips (XE_GTAO_DEPTH_MIP_SAMPLING_OFFSET
+= 3.30). Slice/step counts and the AO resolution are unchanged; the prefilter
+only turns the wide, incoherent depth reads of the horizon loop into
+cache-coherent ones and removes the per-tap linearize. Normals are
+reconstructed from the mip-0 linear depth (XeGTAO's built-in path).
 */
 
 const float PI      = 3.14159265358979323846;
 const float HALF_PI = 1.57079632679489661923;
+// XeGTAO depth pyramid: 5 mips, taps pick mip = log2(offsetPixels) - 3.30.
+const float DEPTH_MIP_LEVELS          = 5.0;
+const float DEPTH_MIP_SAMPLING_OFFSET = 3.30;
+const float DEPTH_MAX_STORED          = 65000.0;   // R16F clamp used by the prefilter
 
 // 8x8 = 64 invocations/group — within the WebGPU ≤256 envelope.
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
@@ -68,25 +74,28 @@ layout(push_constant) uniform GtaoPush {
 	int   sscsEnabled;      // 1 = run the contact march, 0 = skip (sunless / off)
 } pc;
 
-// Reversed-Z linear (view-space) depth — distance in front of the eye. Matches
-// the engine's reversed-Z mapping (device z = 1 at near, 0 at far), the same
-// reconstruction the .1 linearDepth fix verified against the projection matrix.
-float linearizeDepth( float z ) {
-	return pc.zNear * pc.zFar / ( pc.zNear + z * ( pc.zFar - pc.zNear ) );
+// Sky threshold: the prefilter stores sky (reversed-Z device 0) as zFar
+// clamped to the R16F range; anything at or beyond it is "no geometry".
+float skyDepthThreshold() {
+	return min( pc.zFar, DEPTH_MAX_STORED ) * 0.999;
 }
 
-// Reconstruct a view-space position from a screen UV [0,1] + device depth.
-// view.z = linear depth (positive, into the screen); view.xy from the NDC->view
-// terms. (We keep +Z forward here; only relative geometry matters to GTAO.)
-vec3 viewPosFromUV( vec2 uv, float deviceZ ) {
-	float vz  = linearizeDepth( deviceZ );
+// Reconstruct a view-space position from a screen UV [0,1] + view-space
+// linear depth. view.z = linear depth (positive, into the screen); view.xy
+// from the NDC->view terms. (+Z forward; only relative geometry matters.)
+vec3 viewPosFromUV( vec2 uv, float vz ) {
 	vec2  ndc = uv * 2.0 - 1.0;
 	vec2  vxy = ( ndc * pc.ndcToViewMul + pc.ndcToViewAdd ) * vz;
 	return vec3( vxy, vz );
 }
 
-float sampleDeviceDepth( vec2 uv ) {
-	return textureLod( sampler2D( depthTex, depthSampler ), uv, 0.0 ).r;
+// View-space linear depth from the prefiltered pyramid at an explicit mip.
+float sampleViewDepth( vec2 uv, float mip ) {
+	return textureLod( sampler2D( depthTex, depthSampler ), uv, mip ).r;
+}
+
+float sampleViewDepth0( vec2 uv ) {
+	return sampleViewDepth( uv, 0.0 );
 }
 
 // Lagarde fast acos (max abs error ~7e-5 rad) — avoids a true acos per horizon.
@@ -102,10 +111,10 @@ float fastAcos( float x ) {
 // silhouette edge (the artifact naive ddx/ddy produces). Sufficient for AO,
 // which wants the geometric face normal, not the high-frequency mapped normal.
 vec3 normalFromDepth( vec2 uv, vec3 P, vec2 texel ) {
-	float zL = sampleDeviceDepth( uv - vec2( texel.x, 0.0 ) );
-	float zR = sampleDeviceDepth( uv + vec2( texel.x, 0.0 ) );
-	float zU = sampleDeviceDepth( uv - vec2( 0.0, texel.y ) );
-	float zD = sampleDeviceDepth( uv + vec2( 0.0, texel.y ) );
+	float zL = sampleViewDepth0( uv - vec2( texel.x, 0.0 ) );
+	float zR = sampleViewDepth0( uv + vec2( texel.x, 0.0 ) );
+	float zU = sampleViewDepth0( uv - vec2( 0.0, texel.y ) );
+	float zD = sampleViewDepth0( uv + vec2( 0.0, texel.y ) );
 
 	vec3 Pl = viewPosFromUV( uv - vec2( texel.x, 0.0 ), zL );
 	vec3 Pr = viewPosFromUV( uv + vec2( texel.x, 0.0 ), zR );
@@ -155,10 +164,9 @@ float sscsContact( vec3 P, vec2 texel, float noise ) {
 		if ( uvS.x < 0.0 || uvS.x > 1.0 || uvS.y < 0.0 || uvS.y > 1.0 )
 			break;                               // marched off-screen
 
-		float zScene = sampleDeviceDepth( uvS );
-		if ( zScene <= 0.0 )                      // sky — never an occluder
+		float sceneVz = sampleViewDepth0( uvS );  // scene linear depth at uvS
+		if ( sceneVz >= skyDepthThreshold() )     // sky — never an occluder
 			continue;
-		float sceneVz = linearizeDepth( zScene ); // scene linear depth at uvS
 		float diff    = sp.z - sceneVz;           // >0: ray point is BEHIND geometry
 
 		// Occluder only when the scene surface is in front of the ray sample by a
@@ -181,9 +189,9 @@ void main() {
 	vec2 texel = 1.0 / pc.viewportSize;
 	vec2 uv    = ( vec2( pix ) + 0.5 ) * texel;
 
-	float centerZ = sampleDeviceDepth( uv );
-	// Sky / far plane (reversed-Z: device 0 = far): no geometry, fully visible.
-	if ( centerZ <= 0.0 ) {
+	float centerZ = sampleViewDepth0( uv );
+	// Sky / far plane: no geometry, fully visible.
+	if ( centerZ >= skyDepthThreshold() ) {
 		imageStore( aoImage, pix, vec4( 1.0 ) );
 		return;
 	}
@@ -238,10 +246,15 @@ void main() {
 			s += minS;
 			vec2 off = dir * s * screenRadiusUV;
 
+			// XeGTAO depth-MIP selection: coarser mips for farther taps.
+			float offPixels = length( off * pc.viewportSize );
+			float mip = clamp( log2( max( offPixels, 1.0 ) ) - DEPTH_MIP_SAMPLING_OFFSET,
+			                   0.0, DEPTH_MIP_LEVELS - 1.0 );
+
 			vec2 uv0 = uv + off;
 			vec2 uv1 = uv - off;
-			float z0 = sampleDeviceDepth( uv0 );
-			float z1 = sampleDeviceDepth( uv1 );
+			float z0 = sampleViewDepth( uv0, mip );
+			float z1 = sampleViewDepth( uv1, mip );
 			vec3  s0 = viewPosFromUV( uv0, z0 );
 			vec3  s1 = viewPosFromUV( uv1, z1 );
 
@@ -258,9 +271,10 @@ void main() {
 			float shc0 = dot( d0 / max( dist0, 1e-5 ), V );
 			float shc1 = dot( d1 / max( dist1, 1e-5 ), V );
 
-			// Sky samples (z<=0) must not raise the horizon.
-			if ( z0 <= 0.0 ) shc0 = horizonCos0;
-			if ( z1 <= 0.0 ) shc1 = horizonCos1;
+			// Sky samples must not raise the horizon.
+			float skyZ = skyDepthThreshold();
+			if ( z0 >= skyZ ) shc0 = horizonCos0;
+			if ( z1 >= skyZ ) shc1 = horizonCos1;
 
 			horizonCos0 = max( horizonCos0, mix( horizonCos0, shc0, w0 ) );
 			horizonCos1 = max( horizonCos1, mix( horizonCos1, shc1, w1 ) );

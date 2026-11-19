@@ -1,0 +1,122 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Wired Engine contributors
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(set=0,binding=0) uniform Params {
+	uvec4 outputGrid;
+	vec4 depthRange; // near, far, depth-valid, unused
+	mat4 invViewProjection;
+	vec4 eyeSkyControl; // eye.xyz, physical sky-view blend
+	vec4 radianceControl; // enabled, previous-to-current blend, use previous, unused
+	vec4 mediaColorDensity; // linear scattering colour, analytic extinction
+	vec4 mediaHeight; // base height, height falloff, sun dir z, aerial-haze weight
+} p;
+
+layout(set=0,binding=1) uniform sampler2D sceneHdr;
+layout(set=0,binding=2) uniform sampler2D sceneDepth;
+layout(set=0,binding=4,rgba16f) uniform writeonly image2D composedHdr;
+layout(set=0,binding=5) uniform sampler2D skyViewLut;
+layout(set=0,binding=6) uniform samplerCube currentSkyRadiance;
+layout(set=0,binding=7) uniform samplerCube previousSkyRadiance;
+
+const float PI = 3.14159265358979323846;
+
+vec3 skyDirection(vec2 screenUv) {
+	vec4 worldH = p.invViewProjection * vec4(screenUv * 2.0 - 1.0, 0.0, 1.0);
+	vec3 world = worldH.xyz / max(abs(worldH.w), 1e-6);
+	return normalize(world - p.eyeSkyControl.xyz);
+}
+
+vec2 skyViewUv(vec3 direction) {
+	float azimuth = atan(direction.y, direction.x);
+	float elevation = asin(clamp(direction.z, -1.0, 1.0));
+	return vec2(fract(azimuth / (2.0 * PI) + 0.5),
+		clamp(elevation / PI + 0.5, 0.0, 1.0));
+}
+
+/* Aerial-perspective haze (opt-in, r_atmosphereAerialHaze > 0). The sun
+ * direction is packed into otherwise unused slots to keep the 160-byte ABI:
+ * depthRange.w = sun.x, radianceControl.w = sun.y, mediaHeight.z = sun.z. With
+ * mediaHeight.w == 0 the output is bit-identical to the flat media colour. */
+vec3 wiredAerialInscatter(vec3 mediaColor, vec3 viewDir) {
+	float aerial = clamp(p.mediaHeight.w, 0.0, 1.0);
+	if (aerial <= 0.0)
+		return mediaColor;
+	vec3 skyIn = p.eyeSkyControl.w > 0.0
+		? textureLod(skyViewLut, skyViewUv(viewDir), 0.0).rgb
+		: textureLod(currentSkyRadiance, viewDir, 4.0).rgb;
+	/* Keep the media energy scale: tint the flat colour by the directional sky
+	 * radiance normalised to its own mean luminance, so the haze picks up
+	 * horizon/sun colour and brightness variation without changing exposure. */
+	/* Mean luminance over the six face centres of the coarsest prefiltered mip:
+	 * face-centre taps read the same texels through cube and 2D-array
+	 * sampling, so the normalisation is backend-invariant. */
+	const vec3 luma = vec3(0.2126, 0.7152, 0.0722);
+	vec3 skySum = textureLod(currentSkyRadiance, vec3(1.0, 0.0, 0.0), 7.0).rgb
+		+ textureLod(currentSkyRadiance, vec3(-1.0, 0.0, 0.0), 7.0).rgb
+		+ textureLod(currentSkyRadiance, vec3(0.0, 1.0, 0.0), 7.0).rgb
+		+ textureLod(currentSkyRadiance, vec3(0.0, -1.0, 0.0), 7.0).rgb
+		+ textureLod(currentSkyRadiance, vec3(0.0, 0.0, 1.0), 7.0).rgb
+		+ textureLod(currentSkyRadiance, vec3(0.0, 0.0, -1.0), 7.0).rgb;
+	float skyMean = max(dot(skySum / 6.0, luma), 1e-4);
+	vec3 directional = skyIn / skyMean;
+	vec3 sunDir = normalize(vec3(p.depthRange.w, p.radianceControl.w, p.mediaHeight.z) + vec3(1e-6));
+	float cosT = dot(viewDir, sunDir);
+	const float g = 0.55;
+	float hg = (1.0 - g * g) / max(pow(1.0 + g * g - 2.0 * g * cosT, 1.5), 1e-4); // isotropic = 1
+	vec3 tinted = mediaColor * mix(vec3(1.0), clamp(directional, vec3(0.35), vec3(3.0)), aerial);
+	return tinted * mix(1.0, 0.75 + 0.25 * hg, aerial);
+}
+
+/* Preserve the map-authored Q3 sky as the high-frequency/color authority.
+ * The physical product contributes bounded illumination and aerial energy;
+ * it does not replace every map with the same procedural blue background. */
+vec3 wiredComposeAuthoredPhysicalSky(vec3 authored, vec3 physical, float blend) {
+	const vec3 luma = vec3(0.2126, 0.7152, 0.0722);
+	float authoredEnergy = dot(max(authored, vec3(0.0)), luma);
+	float physicalEnergy = dot(max(physical, vec3(0.0)), luma);
+	if (authoredEnergy <= 1e-5)
+		return mix(authored, physical, blend);
+	float scale = clamp(physicalEnergy / max(authoredEnergy, 0.18), 0.65, 1.75);
+	vec3 physicalTint = physicalEnergy > 1e-5
+		? physical / physicalEnergy : vec3(1.0);
+	vec3 relit = authored * scale
+		* mix(vec3(1.0), clamp(physicalTint, vec3(0.5), vec3(2.0)), 0.12)
+		+ physical * 0.08;
+	return mix(authored, relit, blend);
+}
+
+void main() {
+	uvec2 pixel = gl_GlobalInvocationID.xy;
+	if (any(greaterThanEqual(pixel, p.outputGrid.xy))) return;
+	vec2 uv = (vec2(pixel) + 0.5) / vec2(p.outputGrid.xy);
+	vec3 scene = texture(sceneHdr, uv).rgb;
+	float depth = p.depthRange.z > 0.5 ? texture(sceneDepth, uv).r : 1.0;
+	// Reverse-Z clear is exactly zero. Distant geometry is not sky merely
+	// because its depth is small; reconstruct it with the actual projection.
+	if (depth <= 0.0) {
+		vec3 direction = skyDirection(uv);
+		/* Radiance cubes are the shared IBL/lighting product.  They do not
+		 * contain ordered Q3 stage programs, so replacing the rasterized sky here
+		 * would discard animation, blending and map-authored detail. */
+		if (p.eyeSkyControl.w > 0.0) {
+			vec3 physicalSky = textureLod(skyViewLut,
+				skyViewUv(direction), 0.0).rgb;
+			scene = wiredComposeAuthoredPhysicalSky(scene, physicalSky,
+				clamp(p.eyeSkyControl.w, 0.0, 1.0));
+		}
+	} else if (p.depthRange.z > 0.5 && p.mediaColorDensity.w > 0.0) {
+		vec4 worldH = p.invViewProjection * vec4(uv * 2.0 - 1.0, depth, 1.0);
+		if (abs(worldH.w) > 1e-6) {
+			vec3 world = worldH.xyz / worldH.w;
+			float distanceToEye = length(world - p.eyeSkyControl.xyz);
+			float heightWeight = exp(-p.mediaHeight.y * max(world.z - p.mediaHeight.x, 0.0));
+			float transmittance = exp(-p.mediaColorDensity.w * heightWeight * distanceToEye);
+			vec3 inscatter = wiredAerialInscatter(p.mediaColorDensity.rgb,
+				normalize(world - p.eyeSkyControl.xyz));
+			scene = mix(inscatter, scene, clamp(transmittance, 0.0, 1.0));
+		}
+	}
+	imageStore(composedHdr, ivec2(pixel), vec4(scene, 1.0));
+}

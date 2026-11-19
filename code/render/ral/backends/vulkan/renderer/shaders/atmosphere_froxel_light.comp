@@ -57,6 +57,15 @@ void main() {
 		if (lightIndex >= p.gridLightCount.w) continue;
 		ForwardLight l = light[lightIndex];
 		vec3 delta = l.positionRadius.xyz - world;
+		if (l.endpointLinear.w > 0.5) {
+			// The tile producer conservatively admits the entire segment. Use
+			// its closest point, including both end caps, for local extinction
+			// lighting. A collapsed segment has exactly point-light behaviour.
+			vec3 segment = l.endpointLinear.xyz - l.positionRadius.xyz;
+			float lengthSquared = dot(segment, segment);
+			if (lengthSquared > 0.0)
+				delta += segment * clamp(-dot(delta, segment) / lengthSquared, 0.0, 1.0);
+		}
 		float radius = max(l.positionRadius.w, 0.001);
 		float attenuation = max(1.0 - length(delta) / radius, 0.0);
 		attenuation *= attenuation;

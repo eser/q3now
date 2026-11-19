@@ -41,13 +41,29 @@ float linearAt( ivec2 p ) {
 	return linearizeDepth( textureLod( sampler2D( depthTex, depthSampler ), uv, 0.0 ).r );
 }
 
+// An 8x8 output group shares a 12x12 input tile including the two-pixel
+// halo. Load each AO/depth pair once instead of 25 times per output pixel.
+// Keep full-resolution inputs, edge clamping, weights and accumulation order.
+shared vec2 tile[144]; // raw AO, linear depth; 1152 bytes per workgroup
+
 void main() {
 	ivec2 pix = ivec2( gl_GlobalInvocationID.xy );
 	ivec2 dim = ivec2( pc.viewportSize );
+	ivec2 origin = ivec2( gl_WorkGroupID.xy ) * 8 - ivec2( 2 );
+	for ( uint i = gl_LocalInvocationIndex; i < 144u; i += 64u ) {
+		ivec2 q = clamp( origin + ivec2( int( i % 12u ), int( i / 12u ) ),
+			ivec2( 0 ), dim - 1 );
+		tile[i] = vec2( imageLoad( aoIn, q ).r, linearAt( q ) );
+	}
+	// Edge workgroups also need every invocation to publish its halo texels.
+	// No invocation may return until the cooperative load is complete.
+	barrier();
 	if ( pix.x >= dim.x || pix.y >= dim.y )
 		return;
 
-	float centerLin = linearAt( pix );
+	ivec2 local = ivec2( gl_LocalInvocationID.xy ) + ivec2( 2 );
+	int center = local.y * 12 + local.x;
+	float centerLin = tile[center].y;
 	// Depth-difference tolerance scales with distance (far surfaces have larger
 	// absolute depth steps for the same geometry).
 	float depthScale = 1.0 / max( centerLin * 0.05, 1e-3 );
@@ -57,9 +73,9 @@ void main() {
 	const int R  = 2;   // 5x5 kernel
 	for ( int dy = -R; dy <= R; ++dy ) {
 		for ( int dx = -R; dx <= R; ++dx ) {
-			ivec2 q = clamp( pix + ivec2( dx, dy ), ivec2( 0 ), dim - 1 );
-			float ao = imageLoad( aoIn, q ).r;
-			float dl = linearAt( q );
+			vec2 sampleValue = tile[center + dy * 12 + dx];
+			float ao = sampleValue.x;
+			float dl = sampleValue.y;
 			// Bilateral weight: spatial (gaussian-ish) * depth (edge-stopping).
 			float wd = exp( -float( dx * dx + dy * dy ) * 0.5 );
 			float ddiff = abs( dl - centerLin ) * depthScale;
@@ -70,6 +86,6 @@ void main() {
 		}
 	}
 
-	float result = ( wsum > 1e-5 ) ? ( sum / wsum ) : imageLoad( aoIn, pix ).r;
+	float result = ( wsum > 1e-5 ) ? ( sum / wsum ) : tile[center].x;
 	imageStore( aoOut, pix, vec4( result ) );
 }

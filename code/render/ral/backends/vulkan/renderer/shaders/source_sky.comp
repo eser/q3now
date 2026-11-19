@@ -2,23 +2,22 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #version 450
+#extension GL_GOOGLE_include_directive : require
+#include "../../../../core/ral_sky_cube.glsl"
 
 /*
-source_sky.comp — wired-render analytic sky environment source cube.
+source_sky.comp — wired-render map-authored sky environment source cube.
 
-Fills a 6-face cube (as a 2D array storage image) with an analytic sky
-radiance: a horizon-to-zenith colour gradient plus a soft sun disk. This is the
-SOURCE that the IBL convolve later prefilters into the irradiance + radiance
-probe cubes — a neutral-but-directional ambient (sky-tone above, ground-tone
-below, a warm sun lobe), far better than flat grey for showing PBR shading.
+Fills a 6-face cube (as a 2D array storage image) from the shared sky receipt's
+already-cooked Q3 outer cube faces. This is the SOURCE that the IBL convolve
+later prefilters into the irradiance + radiance probe cubes. It deliberately
+has no universal Earth-blue palette or fixed sun: each map remains the colour
+and directional-light authority.
 
-SWAP-READY SEAM: this analytic fill is a placeholder for a real captured HDR
-environment. When one is provided, ONLY the host-side source fill is swapped
-(the analytic compute dispatch is replaced by an R_LoadDDS of an HDR cube into
-the same vk.ral_probe_source image); the per-face/per-mip views, the convolve,
-the probe binding, and the IBL term all stay unchanged. Keep this shader's
-output format (RGBA16F linear radiance, GL cube-face order) identical to what a
-loaded HDR cube would present so the downstream is asset-source-agnostic.
+Ordered inner/cloud stages remain a separate follow-up consumer rather than
+being approximated inside this radiance capture. Keep this shader's output
+format (RGBA16F linear radiance, GL cube-face order) identical so downstream
+SH/specular consumers remain asset-source-agnostic.
 
 Vulkan compute cannot imageStore into an imageCube (that type is sampled-only),
 so the storage target is an image2DArray of 6 layers in GL cube-face order
@@ -28,75 +27,128 @@ reinterprets the 6 layers as a cube for later sampling.
 
 const float PI = 3.14159265358979323846;
 
-// Linear-radiance sky palette (pre-tonemap scene scale; co-tuned with the
-// engine's ~0.0123 middle-grey). Tuned to read as a clear daytime sky without
-// blowing the auto-exposure — zenith deep blue, horizon pale, ground muted.
-const vec3  SKY_ZENITH  = vec3( 0.045, 0.090, 0.190 );
-const vec3  SKY_HORIZON = vec3( 0.130, 0.150, 0.180 );
-const vec3  GROUND      = vec3( 0.045, 0.040, 0.034 );
-
-// Fixed sun: a normalized direction (up and to one side) + a warm disk colour.
-// The lobe is a soft power falloff on the dir·sun cosine, not a hard disk, so
-// the later roughness convolve has something smooth to spread.
-const vec3  SUN_DIR     = vec3( 0.40, 0.82, 0.41 );  // normalized below
-const vec3  SUN_COLOR   = vec3( 1.30, 1.05, 0.70 );
 const float SUN_TIGHT   = 320.0;  // higher = tighter disk
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 layout(rgba16f, set = 0, binding = 0) uniform writeonly image2DArray skyImage;
+layout(set = 0, binding = 1) uniform texture2D authoredRt;
+layout(set = 0, binding = 2) uniform texture2D authoredBk;
+layout(set = 0, binding = 3) uniform texture2D authoredLf;
+layout(set = 0, binding = 4) uniform texture2D authoredFt;
+layout(set = 0, binding = 5) uniform texture2D authoredUp;
+layout(set = 0, binding = 6) uniform texture2D authoredDn;
+layout(set = 0, binding = 7) uniform sampler authoredSampler;
+
+layout(push_constant) uniform Push {
+	uvec4 meta;                  // face, selected mode, authored available, reserved
+	vec4 authoredRadiance;       // rgb map-authored average, sky luminance
+	vec4 sunDirectionIntensity;  // xyz world direction, scalar energy
+	vec4 sunRadianceExposure;    // rgb linear radiance, exposure
+} p;
 
 // GL cube-face (layer) + face-uv → world direction. Layer order is the Vulkan
 // cube-array convention (+X,-X,+Y,-Y,+Z,-Z); u,v are the face-local [-1,1].
-vec3 cubeFaceDir( uint face, vec2 uv )
-{
-	float u = uv.x;
-	float v = uv.y;
-	vec3 dir;
-	if      ( face == 0u ) dir = vec3(  1.0,  -v,  -u );  // +X
-	else if ( face == 1u ) dir = vec3( -1.0,  -v,   u );  // -X
-	else if ( face == 2u ) dir = vec3(  u,   1.0,   v );  // +Y
-	else if ( face == 3u ) dir = vec3(  u,  -1.0,  -v );  // -Y
-	else if ( face == 4u ) dir = vec3(  u,   -v,   1.0 ); // +Z
-	else                   dir = vec3( -u,   -v,  -1.0 ); // -Z
-	return normalize( dir );
-}
 
 vec3 analyticSky( vec3 dir )
 {
-	// up = dir.y in [-1,1]. Sky hemisphere blends horizon→zenith; below the
-	// horizon fades to the ground tone.
-	float up = dir.y;
+	const vec3 luma = vec3( 0.2126, 0.7152, 0.0722 );
+	vec3 authored = max( p.authoredRadiance.rgb, vec3( 0.002 ) );
+	float authoredEnergy = max( dot( authored, luma ), 0.002 );
+	vec3 authoredTint = authored / authoredEnergy;
+	vec3 horizon = authored;
+	vec3 zenith = authoredTint * authoredEnergy * 0.55;
+	vec3 ground = authored * 0.18;
+
+	// up = dir.z in [-1,1] in the engine's Z-up world. The source hemisphere
+	// stays chromatically tied to the authored material rather than a global
+	// clear-day preset.
+	float up = dir.z;
 
 	vec3 sky;
 	if ( up >= 0.0 ) {
 		float t = smoothstep( 0.0, 1.0, up );
-		sky = mix( SKY_HORIZON, SKY_ZENITH, t );
+		sky = mix( horizon, zenith, t );
 	} else {
-		float t = smoothstep( 0.0, -0.35, up );
-		sky = mix( SKY_HORIZON, GROUND, t );
+		// smoothstep requires ascending edges on every target language.
+		// Negate the input instead: horizon=0, lower hemisphere=1.
+		float t = smoothstep( 0.0, 0.35, -up );
+		sky = mix( horizon, ground, t );
 	}
 
 	// Soft sun lobe (only above the horizon so the ground stays unlit).
-	float sd = max( dot( dir, normalize( SUN_DIR ) ), 0.0 );
+	vec3 sunDirection = p.sunDirectionIntensity.xyz;
+	float sunLength = length( sunDirection );
+	float sd = sunLength > 1e-5
+		? max( dot( dir, sunDirection / sunLength ), 0.0 ) : 0.0;
 	float lobe = pow( sd, SUN_TIGHT );
 	if ( up > 0.0 )
-		sky += SUN_COLOR * lobe;
+		sky += max( p.sunRadianceExposure.rgb, vec3( 0.0 ) )
+			* max( p.sunDirectionIntensity.w, 0.0 ) * lobe;
 
-	return sky;
+	return max( sky, vec3( 0.0 ) );
+}
+
+vec3 authoredSky( vec3 dir )
+{
+	vec3 a = abs( dir );
+	uint axis;
+	vec2 st;
+	if ( a.x >= a.y && a.x >= a.z ) {
+		if ( dir.x >= 0.0 ) {
+			axis = 0u; st = vec2( -dir.y, dir.z ) / a.x;
+		} else {
+			axis = 1u; st = vec2( dir.y, dir.z ) / a.x;
+		}
+	} else if ( a.y >= a.z ) {
+		if ( dir.y >= 0.0 ) {
+			axis = 2u; st = vec2( dir.x, dir.z ) / a.y;
+		} else {
+			axis = 3u; st = vec2( -dir.x, dir.z ) / a.y;
+		}
+	} else if ( dir.z >= 0.0 ) {
+		axis = 4u; st = vec2( -dir.y, -dir.x ) / a.z;
+	} else {
+		axis = 5u; st = vec2( -dir.y, dir.x ) / a.z;
+	}
+	/* Match MakeSkyVec + sky_texorder exactly.  Q3 authored face order is
+	 * rt,bk,lf,ft,up,dn while the geometric axis order is +X,-X,+Y,-Y,+Z,-Z. */
+	vec2 uv = vec2( st.x * 0.5 + 0.5, 0.5 - st.y * 0.5 );
+	if ( axis == 0u ) return texture( sampler2D( authoredRt, authoredSampler ), uv ).rgb;
+	if ( axis == 1u ) return texture( sampler2D( authoredLf, authoredSampler ), uv ).rgb;
+	if ( axis == 2u ) return texture( sampler2D( authoredBk, authoredSampler ), uv ).rgb;
+	if ( axis == 3u ) return texture( sampler2D( authoredFt, authoredSampler ), uv ).rgb;
+	if ( axis == 4u ) return texture( sampler2D( authoredUp, authoredSampler ), uv ).rgb;
+	return texture( sampler2D( authoredDn, authoredSampler ), uv ).rgb;
 }
 
 void main()
 {
 	uvec2 size  = uvec2( imageSize( skyImage ).xy );
-	ivec3 coord = ivec3( gl_GlobalInvocationID.xyz );
-	if ( uint( coord.x ) >= size.x || uint( coord.y ) >= size.y || uint( coord.z ) >= 6u )
+	uint face = p.meta.x;
+	ivec3 coord = ivec3( gl_GlobalInvocationID.xy, int( face ) );
+	if ( uint( coord.x ) >= size.x || uint( coord.y ) >= size.y || face >= 6u )
 		return;
 
 	// Face-local uv at the texel centre, mapped to [-1,1].
 	vec2 uv = ( ( vec2( coord.xy ) + 0.5 ) / vec2( size.xy ) ) * 2.0 - 1.0;
-	vec3 dir = cubeFaceDir( uint( coord.z ), uv );
+	vec3 dir = wired_sky_cube_direction( face, uv );
 
-	vec3 radiance = analyticSky( dir );
+	vec3 radiance = p.meta.w != 0u
+		? max( authoredSky( dir ), vec3( 0.0 ) )
+		: analyticSky( dir );
+	/* Physical mode preserves the authored environment but still layers the
+	 * map-authored q3map_sun energy into the radiance product. */
+	if ( p.meta.w != 0u ) {
+		vec3 sunDirection = p.sunDirectionIntensity.xyz;
+		float sunLength = length( sunDirection );
+		float sd = sunLength > 1e-5
+			? max( dot( dir, sunDirection / sunLength ), 0.0 ) : 0.0;
+		radiance += max( p.sunRadianceExposure.rgb, vec3( 0.0 ) )
+			* max( p.sunDirectionIntensity.w, 0.0 ) * pow( sd, SUN_TIGHT );
+	}
+	// Apply exposure once to the complete environment, including its sun.
+	// Both source paths must feed the same radiance scale to SH and IBL.
+	radiance *= clamp( p.sunRadianceExposure.w, 0.0, 8.0 );
 	imageStore( skyImage, coord, vec4( radiance, 1.0 ) );
 }

@@ -6,24 +6,69 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(set=0,binding=0) uniform Params {
 	uvec4 outputGrid;
 	vec4 depthRange; // near, far, depth-valid, froxel slice count
+	mat4 invViewProjection;
+	vec4 eyeSkyControl; // eye.xyz, physical sky-view blend
 } p;
 layout(set=0,binding=1) uniform sampler2D sceneHdr;
 layout(set=0,binding=2) uniform sampler2D sceneDepth;
 layout(std430,set=0,binding=3) readonly buffer Integrated { vec4 media[]; };
 layout(set=0,binding=4,rgba16f) uniform writeonly image2D composedHdr;
+layout(set=0,binding=5) uniform sampler2D skyViewLut;
+
+const float PI = 3.14159265358979323846;
+
+vec2 skyViewUv(vec2 screenUv) {
+	vec4 worldH = p.invViewProjection * vec4(screenUv * 2.0 - 1.0, 0.0, 1.0);
+	vec3 direction = normalize(worldH.xyz - p.eyeSkyControl.xyz * worldH.w);
+	float azimuth = atan(direction.y, direction.x);
+	float elevation = asin(clamp(direction.z, -1.0, 1.0));
+	return vec2(fract(azimuth / (2.0 * PI) + 0.5),
+		clamp(elevation / PI + 0.5, 0.0, 1.0));
+}
+
+vec3 wiredComposeAuthoredPhysicalSky(vec3 authored, vec3 physical, float blend) {
+	const vec3 luma = vec3(0.2126, 0.7152, 0.0722);
+	float authoredEnergy = dot(max(authored, vec3(0.0)), luma);
+	float physicalEnergy = dot(max(physical, vec3(0.0)), luma);
+	if (authoredEnergy <= 1e-5)
+		return mix(authored, physical, blend);
+	float scale = clamp(physicalEnergy / max(authoredEnergy, 0.18), 0.65, 1.75);
+	vec3 physicalTint = physicalEnergy > 1e-5
+		? physical / physicalEnergy : vec3(1.0);
+	vec3 relit = authored * scale
+		* mix(vec3(1.0), clamp(physicalTint, vec3(0.5), vec3(2.0)), 0.12)
+		+ physical * 0.08;
+	return mix(authored, relit, blend);
+}
 
 void main() {
 	uvec2 pixel = gl_GlobalInvocationID.xy;
 	if (any(greaterThanEqual(pixel, p.outputGrid.xy))) return;
 	vec2 uv = (vec2(pixel) + 0.5) / vec2(p.outputGrid.xy);
 	float depth = p.depthRange.z > 0.5 ? texture(sceneDepth, uv).r : 0.0;
-	float linearFraction = depth <= 0.0 ? 1.0 : clamp(1.0 - depth, 0.0, 1.0);
+	// The producer/integrator partitions view distance logarithmically, not
+	// device depth linearly. Inverse homogeneous w is 1/view-distance for the
+	// scene perspective; using the actual matrix also respects oblique portal
+	// clipping and a depth-clamp-adjusted near plane. The grid range is separate.
+	float nearZ = max(p.depthRange.x, 0.01);
+	float farZ = max(p.depthRange.y, nearZ + 0.01);
+	vec4 inverseW = vec4(p.invViewProjection[0].w, p.invViewProjection[1].w,
+		p.invViewProjection[2].w, p.invViewProjection[3].w);
+	float reciprocalDistance = dot(inverseW, vec4(uv * 2.0 - 1.0, depth, 1.0));
+	float distanceZ = depth <= 0.0 ? farZ
+		: clamp(1.0 / max(reciprocalDistance, 1.0 / farZ), nearZ, farZ);
+	float sliceFraction = clamp(log(distanceZ / nearZ) / log(farZ / nearZ), 0.0, 1.0);
 	uvec2 froxelXY = min(uvec2(uv * vec2(p.outputGrid.zw)), p.outputGrid.zw - 1u);
 	uint slices = uint(max(p.depthRange.w, 1.0));
-	uint z = min(uint(linearFraction * float(slices)), slices - 1u);
+	uint z = min(uint(sliceFraction * float(slices)), slices - 1u);
 	uint index = (z * p.outputGrid.w + froxelXY.y) * p.outputGrid.z + froxelXY.x;
 	vec4 atmosphere = media[index];
 	vec3 scene = texture(sceneHdr, uv).rgb;
+	if (depth <= 0.0 && p.eyeSkyControl.w > 0.0) {
+		vec3 physicalSky = textureLod(skyViewLut, skyViewUv(uv), 0.0).rgb;
+		scene = wiredComposeAuthoredPhysicalSky(scene, physicalSky,
+			clamp(p.eyeSkyControl.w, 0.0, 1.0));
+	}
 	imageStore(composedHdr, ivec2(pixel),
 		vec4(scene * atmosphere.a + atmosphere.rgb, 1.0));
 }

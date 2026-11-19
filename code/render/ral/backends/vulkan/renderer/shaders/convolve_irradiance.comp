@@ -2,6 +2,8 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #version 450
+#extension GL_GOOGLE_include_directive : require
+#include "../../../../core/ral_sky_cube.glsl"
 
 /*
 convolve_irradiance.comp — wired-render IBL diffuse irradiance.
@@ -25,7 +27,7 @@ const uint SAMPLE_COUNT = 256u;
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-layout(set = 0, binding = 0) uniform textureCube srcTex;
+layout(set = 0, binding = 0) uniform texture2DArray srcTex;
 layout(set = 0, binding = 1) uniform sampler     srcSamp;
 layout(rgba16f, set = 0, binding = 2) uniform writeonly image2DArray dstIrradiance;
 
@@ -49,18 +51,11 @@ vec2 hammersley( uint i, uint n )
 }
 
 // Cube face (layer) + face-uv [-1,1] → world direction (GL cube-array order).
-vec3 cubeFaceDir( uint face, vec2 uv )
+
+vec3 sampleSource( vec3 dir )
 {
-	float u = uv.x;
-	float v = uv.y;
-	vec3 dir;
-	if      ( face == 0u ) dir = vec3(  1.0,  -v,  -u );  // +X
-	else if ( face == 1u ) dir = vec3( -1.0,  -v,   u );  // -X
-	else if ( face == 2u ) dir = vec3(  u,   1.0,   v );  // +Y
-	else if ( face == 3u ) dir = vec3(  u,  -1.0,  -v );  // -Y
-	else if ( face == 4u ) dir = vec3(  u,   -v,   1.0 ); // +Z
-	else                   dir = vec3( -u,   -v,  -1.0 ); // -Z
-	return normalize( dir );
+	return textureLod( sampler2DArray( srcTex, srcSamp ),
+		wired_sky_cube_uv_layer( dir ), 0.0 ).rgb;
 }
 
 void main()
@@ -71,7 +66,7 @@ void main()
 		return;
 
 	vec2 uv = ( ( vec2( coord.xy ) + 0.5 ) / vec2( size.xy ) ) * 2.0 - 1.0;
-	vec3 N  = cubeFaceDir( uint( coord.z ), uv );
+	vec3 N  = wired_sky_cube_direction( uint( coord.z ), uv );
 
 	// Tangent frame around N for the hemisphere parameterisation.
 	vec3 up        = abs( N.z ) < 0.999 ? vec3( 0.0, 0.0, 1.0 ) : vec3( 1.0, 0.0, 0.0 );
@@ -93,7 +88,7 @@ void main()
 		vec3 s = vec3( cos( phi ) * sinTheta, sin( phi ) * sinTheta, cosTheta );
 		vec3 sampleDir = s.x * tangent + s.y * bitangent + s.z * N;
 
-		irradiance += texture( samplerCube( srcTex, srcSamp ), sampleDir ).rgb;
+		irradiance += sampleSource( sampleDir );
 	}
 
 	irradiance = PI * irradiance / float( SAMPLE_COUNT );

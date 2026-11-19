@@ -1,0 +1,124 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
+#version 450
+
+/*
+gtao_prefilter.comp — GTAO depth prefilter (XeGTAO PrefilterDepths16x16).
+
+Converts the reversed-Z device depth copy into a view-space linear depth
+pyramid (R16F, 5 mip levels) that the GTAO horizon search samples instead of
+the full-resolution device depth. Far horizon taps read coarser mips, which
+turns the wide, incoherent depth reads of the horizon loop into cache-friendly
+ones without changing slice/step counts or the AO resolution (Intel XeGTAO
+reference: XeGTAO_PrefilterDepths16x16 + XeGTAO_DepthMIPFilter).
+
+One 8x8 workgroup produces a 16x16 tile of mip 0 (each thread handles a 2x2
+quad) and reduces it through shared memory to mip 1..4. Sky (device z = 0 in
+reversed-Z) linearizes to zFar and is preserved as "far" by the depth-biased
+MIP filter.
+*/
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform texture2D depthTex;
+layout(set = 0, binding = 1) uniform sampler   depthSampler;
+layout(r16f, set = 0, binding = 2) uniform writeonly image2D depthMip0;
+layout(r16f, set = 0, binding = 3) uniform writeonly image2D depthMip1;
+layout(r16f, set = 0, binding = 4) uniform writeonly image2D depthMip2;
+layout(r16f, set = 0, binding = 5) uniform writeonly image2D depthMip3;
+layout(r16f, set = 0, binding = 6) uniform writeonly image2D depthMip4;
+
+layout(push_constant) uniform PrefilterPush {
+	vec2  viewportSize;     // mip 0 extent in pixels
+	float zNear;            // reversed-Z near (device z = 1 at near)
+	float zFar;             // reversed-Z far  (device z = 0 at far)
+	float effectRadius;     // world-space AO radius (units) — MIP filter falloff scale
+	float falloffRange;     // [0,1] fraction of radius over which falloff ramps
+} pc;
+
+// XE_GTAO_DEPTH_MIP_LEVELS = 5 → shared tiles for mip1 (8x8), mip2 (4x4), mip3 (2x2).
+shared float s_mip1[8][8];
+shared float s_mip2[4][4];
+shared float s_mip3[2][2];
+
+float linearizeDepth( float z ) {
+	// Same reversed-Z mapping as gtao.comp: device 1 = near, 0 = far (sky → zFar).
+	float vz = pc.zNear * pc.zFar / ( pc.zNear + z * ( pc.zFar - pc.zNear ) );
+	// R16F max is 65504; keep sky/far representable.
+	return min( vz, 65000.0 );
+}
+
+// XeGTAO_DepthMIPFilter: weighted average biased toward the farthest of the
+// four depths so a near occluder does not smear a halo over the far surface.
+float depthMipFilter( float d0, float d1, float d2, float d3 ) {
+	float maxDepth = max( max( d0, d1 ), max( d2, d3 ) );
+	const float depthRangeScaleFactor = 0.75;
+	float effectRadius = depthRangeScaleFactor * pc.effectRadius;
+	float falloffRange = pc.falloffRange * effectRadius;
+	float falloffFrom  = effectRadius * ( 1.0 - pc.falloffRange );
+	float falloffMul   = -1.0 / max( falloffRange, 1e-4 );
+	float falloffAdd   = falloffFrom / max( falloffRange, 1e-4 ) + 1.0;
+	float w0 = clamp( ( maxDepth - d0 ) * falloffMul + falloffAdd, 0.0, 1.0 );
+	float w1 = clamp( ( maxDepth - d1 ) * falloffMul + falloffAdd, 0.0, 1.0 );
+	float w2 = clamp( ( maxDepth - d2 ) * falloffMul + falloffAdd, 0.0, 1.0 );
+	float w3 = clamp( ( maxDepth - d3 ) * falloffMul + falloffAdd, 0.0, 1.0 );
+	float weightSum = w0 + w1 + w2 + w3;
+	return ( w0 * d0 + w1 * d1 + w2 * d2 + w3 * d3 ) / weightSum;
+}
+
+float fetchDeviceDepth( ivec2 p ) {
+	ivec2 dim = ivec2( pc.viewportSize );
+	p = clamp( p, ivec2( 0 ), dim - 1 );
+	return texelFetch( sampler2D( depthTex, depthSampler ), p, 0 ).r;
+}
+
+void main() {
+	ivec2 dim   = ivec2( pc.viewportSize );
+	ivec2 local = ivec2( gl_LocalInvocationID.xy );
+	ivec2 base  = ivec2( gl_WorkGroupID.xy ) * 16 + local * 2;   // mip0 2x2 quad origin
+
+	// Mip 0: four linearized texels of this thread's quad.
+	float d00 = linearizeDepth( fetchDeviceDepth( base + ivec2( 0, 0 ) ) );
+	float d10 = linearizeDepth( fetchDeviceDepth( base + ivec2( 1, 0 ) ) );
+	float d01 = linearizeDepth( fetchDeviceDepth( base + ivec2( 0, 1 ) ) );
+	float d11 = linearizeDepth( fetchDeviceDepth( base + ivec2( 1, 1 ) ) );
+	if ( base.x     < dim.x && base.y     < dim.y ) imageStore( depthMip0, base + ivec2( 0, 0 ), vec4( d00 ) );
+	if ( base.x + 1 < dim.x && base.y     < dim.y ) imageStore( depthMip0, base + ivec2( 1, 0 ), vec4( d10 ) );
+	if ( base.x     < dim.x && base.y + 1 < dim.y ) imageStore( depthMip0, base + ivec2( 0, 1 ), vec4( d01 ) );
+	if ( base.x + 1 < dim.x && base.y + 1 < dim.y ) imageStore( depthMip0, base + ivec2( 1, 1 ), vec4( d11 ) );
+
+	// Mip 1: one texel per thread.
+	float m1 = depthMipFilter( d00, d10, d01, d11 );
+	ivec2 p1 = ivec2( gl_WorkGroupID.xy ) * 8 + local;
+	if ( p1.x < ( dim.x + 1 ) / 2 && p1.y < ( dim.y + 1 ) / 2 ) imageStore( depthMip1, p1, vec4( m1 ) );
+	s_mip1[local.y][local.x] = m1;
+	barrier();
+
+	// Mip 2: 4x4 threads.
+	if ( local.x < 4 && local.y < 4 ) {
+		ivec2 q = local * 2;
+		float m2 = depthMipFilter( s_mip1[q.y][q.x], s_mip1[q.y][q.x + 1], s_mip1[q.y + 1][q.x], s_mip1[q.y + 1][q.x + 1] );
+		ivec2 p2 = ivec2( gl_WorkGroupID.xy ) * 4 + local;
+		if ( p2.x < ( dim.x + 3 ) / 4 && p2.y < ( dim.y + 3 ) / 4 ) imageStore( depthMip2, p2, vec4( m2 ) );
+		s_mip2[local.y][local.x] = m2;
+	}
+	barrier();
+
+	// Mip 3: 2x2 threads.
+	if ( local.x < 2 && local.y < 2 ) {
+		ivec2 q = local * 2;
+		float m3 = depthMipFilter( s_mip2[q.y][q.x], s_mip2[q.y][q.x + 1], s_mip2[q.y + 1][q.x], s_mip2[q.y + 1][q.x + 1] );
+		ivec2 p3 = ivec2( gl_WorkGroupID.xy ) * 2 + local;
+		if ( p3.x < ( dim.x + 7 ) / 8 && p3.y < ( dim.y + 7 ) / 8 ) imageStore( depthMip3, p3, vec4( m3 ) );
+		s_mip3[local.y][local.x] = m3;
+	}
+	barrier();
+
+	// Mip 4: one thread.
+	if ( local.x == 0 && local.y == 0 ) {
+		float m4 = depthMipFilter( s_mip3[0][0], s_mip3[0][1], s_mip3[1][0], s_mip3[1][1] );
+		ivec2 p4 = ivec2( gl_WorkGroupID.xy );
+		if ( p4.x < ( dim.x + 15 ) / 16 && p4.y < ( dim.y + 15 ) / 16 ) imageStore( depthMip4, p4, vec4( m4 ) );
+	}
+}

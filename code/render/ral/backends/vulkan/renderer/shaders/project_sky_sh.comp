@@ -1,0 +1,73 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Wired Engine contributors
+
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "../../../../core/ral_sky_cube.glsl"
+
+/*
+project_sky_sh.comp — bounded L2 spherical-harmonic projection.
+
+Each dispatch owns exactly one coefficient.  The deliberately serial kernel is
+used only when the sky source revision changes: it avoids float atomics and
+therefore preserves the same contract on Vulkan, Metal, OpenGL 4.6 and WebGPU.
+Nine dispatches are time-sliced by ral_sky_radiance rather than being hidden in
+one unbounded frame.
+*/
+
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform texture2DArray srcTex;
+layout(set = 0, binding = 1) uniform sampler srcSamp;
+layout(std430, set = 0, binding = 2) writeonly buffer SkySH {
+	vec4 coefficients[9];
+} dstSH;
+
+layout(push_constant) uniform Push {
+	uint coefficient;
+};
+
+const uint SAMPLE_EDGE = 16u;
+
+
+vec3 sampleSource( vec3 dir )
+{
+	return textureLod( sampler2DArray( srcTex, srcSamp ),
+		wired_sky_cube_uv_layer( dir ), 0.0 ).rgb;
+}
+
+float shBasis( uint index, vec3 d )
+{
+	if ( index == 0u ) return 0.2820947918;
+	if ( index == 1u ) return 0.4886025119 * d.y;
+	if ( index == 2u ) return 0.4886025119 * d.z;
+	if ( index == 3u ) return 0.4886025119 * d.x;
+	if ( index == 4u ) return 1.0925484306 * d.x * d.y;
+	if ( index == 5u ) return 1.0925484306 * d.y * d.z;
+	if ( index == 6u ) return 0.3153915653 * ( 3.0 * d.z * d.z - 1.0 );
+	if ( index == 7u ) return 1.0925484306 * d.x * d.z;
+	return 0.5462742153 * ( d.x * d.x - d.y * d.y );
+}
+
+void main()
+{
+	if ( coefficient >= 9u ) return;
+	vec3 sum = vec3( 0.0 );
+	float weightSum = 0.0;
+	for ( uint face = 0u; face < 6u; ++face ) {
+		for ( uint y = 0u; y < SAMPLE_EDGE; ++y ) {
+			for ( uint x = 0u; x < SAMPLE_EDGE; ++x ) {
+				vec2 uv = ( ( vec2( x, y ) + 0.5 ) / float( SAMPLE_EDGE ) ) * 2.0 - 1.0;
+				vec3 dir = wired_sky_cube_direction( face, uv );
+				float q = 1.0 + dot( uv, uv );
+				float weight = 1.0 / ( q * sqrt( q ) );
+				sum += sampleSource( dir )
+					* shBasis( coefficient, dir ) * weight;
+				weightSum += weight;
+			}
+		}
+	}
+	/* Normalize the cubemap quadrature to the sphere's 4*pi solid angle. */
+	dstSH.coefficients[coefficient] = vec4(
+		sum * ( 12.566370614359172 / max( weightSum, 0.000001 ) ), 0.0 );
+}

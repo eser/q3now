@@ -18,6 +18,7 @@ alpha-blend is correct; alpha stays raw.
 
 layout(location = 0) in vec2 fragUV;
 layout(location = 1) in vec4 fragColor;
+layout(location = 2) flat in uint fragFamily;
 
 // Same UBO the vertex shader binds. The fragment consumes the trailing
 // soft-particle depth-fade params (invResX/Y, depthValid); the rest keeps the
@@ -62,6 +63,7 @@ layout(set = 0, binding = 0) uniform AtmFrame {
 // Shared scene-depth copy (vk.sceneDepth) — same resource the decal / particle /
 // gtao / lens consumers sample. Used for the soft-particle depth fade.
 layout(set = 0, binding = 2) uniform sampler2D sceneDepthTex;
+layout(set = 0, binding = 3) uniform sampler2D effectTextures[8];
 
 layout(location = 0) out vec4 outColor;
 
@@ -107,13 +109,35 @@ float softParticleFade() {
 	return smoothstep( 0.0, ATM_DEPTH_FADE_BAND, depthDiff );
 }
 
+// Semantic emitter class textures (breath/mist/debris), binding 3 x 8. A
+// switch keeps the sampler index uniform without nonuniformEXT.
+vec4 effectTexel( uint effect, vec2 uv ) {
+	switch ( effect ) {
+	case 0u: return texture( effectTextures[0], uv );
+	case 1u: return texture( effectTextures[1], uv );
+	case 2u: return texture( effectTextures[2], uv );
+	case 3u: return texture( effectTextures[3], uv );
+	case 4u: return texture( effectTextures[4], uv );
+	case 5u: return texture( effectTextures[5], uv );
+	case 6u: return texture( effectTextures[6], uv );
+	default: return texture( effectTextures[7], uv );
+	}
+}
+
 void main() {
 	// Horizontal in-quad taper (streak/flake shape) — orthogonal to the depth
 	// fade below: the taper shapes the edge across the quad WIDTH, the depth fade
 	// dissolves the streak where it crosses geometry. Both kept.
 	float edge  = 1.0 - smoothstep( 0.0, 0.5, abs( fragUV.x - 0.5 ) );
 	float alpha = fragColor.a * edge * softParticleFade();
-
 	vec3 rgb = displayVisibility( sRGBToLinear( fragColor.rgb ) );
+	if ( fragFamily >= 16u ) {
+		// Semantic emitter sprite: the class image owns shape and coverage
+		// (same textured contract as the Metal/OpenGL/WebGPU weather passes);
+		// the streak taper does not apply to these quads.
+		vec4 texel = effectTexel( fragFamily - 16u, fragUV );
+		rgb *= texel.rgb;
+		alpha = fragColor.a * softParticleFade() * texel.a;
+	}
 	outColor = vec4( rgb, alpha );
 }

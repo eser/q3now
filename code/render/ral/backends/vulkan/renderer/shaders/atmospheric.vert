@@ -69,6 +69,7 @@ layout(std430, set = 0, binding = 1) readonly buffer Pool {
 
 layout(location = 0) out vec2 fragUV;
 layout(location = 1) out vec4 fragColor;
+layout(location = 2) flat out uint fragFamily;
 
 out gl_PerVertex {
 	vec4 gl_Position;
@@ -93,6 +94,7 @@ void emitDegenerate() {
 	gl_Position = vec4(0.0, 0.0, 0.0, 1.0);
 	fragUV    = vec2(0.0);
 	fragColor = vec4(0.0);
+	fragFamily = 0u;
 }
 
 void main() {
@@ -169,4 +171,5 @@ void main() {
 	gl_Position = mvp * vec4(worldPos, 1.0);
 	fragUV      = uvCorner[vertInQuad];
 	fragColor   = color;
+	fragFamily  = family;
 }

@@ -1,0 +1,40 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Wired Engine contributors
+
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(std140, set = 0, binding = 0) uniform SkyParams {
+	vec4 sunDirectionAngularRadius;
+	vec4 sunRadiance;
+	vec4 moonDirectionAngularRadius;
+	vec4 moonRadiance;
+	vec4 atmosphereRadii;
+	vec4 scatteringScale;
+	vec4 groundExposure;
+} sky;
+
+layout(set = 0, binding = 1) uniform sampler2D transmittanceLut;
+layout(rgba16f, set = 0, binding = 2) uniform writeonly image2D multiscatterLut;
+
+void main()
+{
+	ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+	ivec2 extent = imageSize(multiscatterLut);
+	if (any(greaterThanEqual(coord, extent))) return;
+
+	vec2 uv = (vec2(coord) + 0.5) / vec2(extent);
+	vec3 accumulated = vec3(0.0);
+	const int SAMPLE_COUNT = 16;
+	for (int i = 0; i < SAMPLE_COUNT; ++i) {
+		float u = (float(i) + 0.5) / float(SAMPLE_COUNT);
+		vec2 sampleUv = vec2(fract(u + uv.x), uv.y);
+		vec3 transmittance = textureLod(transmittanceLut, sampleUv, 0.0).rgb;
+		accumulated += (vec3(1.0) - transmittance) * transmittance;
+	}
+	vec3 energy = accumulated / float(SAMPLE_COUNT);
+	energy *= max(sky.sunRadiance.rgb, vec3(0.001));
+	energy *= 0.35 + 0.65 * clamp(sky.groundExposure.a, 0.0, 4.0);
+	imageStore(multiscatterLut, coord, vec4(max(energy, vec3(0.0)), 1.0));
+}

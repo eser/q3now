@@ -13,7 +13,7 @@
 extern "C" {
 #endif
 
-#define RAL_WEBGPU_ATMOSPHERE_SCHEMA_VERSION 1u
+#define RAL_WEBGPU_ATMOSPHERE_SCHEMA_VERSION 2u
 #define RAL_WEBGPU_ATMOSPHERE_FROXEL_CAPACITY 262144u
 
 typedef struct ralWebGpuAtmosphere_s ralWebGpuAtmosphere_t;
@@ -27,6 +27,7 @@ typedef struct {
 	ralWebGpuCommandReceipt_t command;
 	ralWebGpuSubmissionReceipt_t submission;
 	uint32_t dispatchCount;
+	uint32_t nativeDispatchCount; /* Includes the canonical local-light tile pass. */
 	uint32_t froxelCount;
 	qboolean historyReused;
 	qboolean ready;
@@ -59,6 +60,7 @@ qboolean RalWebGpu_AtmosphereHistoryValid(
 	const ralWebGpuAtmosphere_t *atmosphere );
 void RalWebGpu_AtmosphereInvalidateHistory(
 	ralWebGpuAtmosphere_t *atmosphere );
+float RalWebGpu_AtmosphereFarDistance(const atmosphereFrameState_t *state);
 
 #ifdef __cplusplus
 }

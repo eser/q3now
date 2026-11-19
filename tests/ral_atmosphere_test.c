@@ -40,6 +40,441 @@ static ralAtmospherePlanRequest_t Fixture( ralBackendType_t backend, ralAtmosphe
 
 int main( void )
 {
+	ralSkyDistantDrawPlanReceipt_t distantParity;
+	qboolean distantParityReady = qfalse;
+	{
+		const float visibility[] = { -1.0f, 0.0f, 0.001f, 1.0f, 4.0f, 4.005f,
+			4.01f, 64.0f, 4096.0f, 65536.0f, 100000.0f };
+		const float expected[] = { 65536.0f, 65536.0f, 4.01f, 4.01f, 4.01f,
+			4.01f, 4.01f, 64.0f, 4096.0f, 65536.0f, 100000.0f };
+		CHECK( WIRED_ATMOSPHERE_GRID_NEAR == 4.0f );
+		for ( unsigned i = 0; i < sizeof( visibility ) / sizeof( visibility[0] ); ++i ) {
+			CHECK( wired_atmosphere_grid_far( visibility[i] ) == expected[i] );
+			CHECK( wired_atmosphere_grid_far( visibility[i] ) > WIRED_ATMOSPHERE_GRID_NEAR );
+		}
+	}
+	{
+		ralSkyTierBudgetReceipt_t budgets[4], exact;
+		ralSkyGpuTelemetryReceipt_t gpuTelemetry, gpuTelemetryExact;
+		for ( int tier = RAL_ATMOSPHERE_TIER_OFF;
+				tier <= RAL_ATMOSPHERE_TIER_FULL; ++tier ) {
+			CHECK( Ral_SkyTierBudget( (ralAtmosphereTier_t)tier,
+				&budgets[tier] ) );
+			exact = budgets[tier];
+			CHECK( Ral_SkyTierBudgetReceiptExact( &budgets[tier], &exact ) );
+			exact.maxWorkItemsPerFrame++;
+			CHECK( !Ral_SkyTierBudgetReceiptExact( &budgets[tier], &exact ) );
+		}
+		CHECK( budgets[RAL_ATMOSPHERE_TIER_OFF].allowedWorkMask == 0u &&
+			budgets[RAL_ATMOSPHERE_TIER_OFF].maxWorkItemsPerFrame == 0u &&
+			!budgets[RAL_ATMOSPHERE_TIER_OFF].distantScene );
+		CHECK( budgets[RAL_ATMOSPHERE_TIER_ANALYTIC].allowedWorkMask == 0u &&
+			budgets[RAL_ATMOSPHERE_TIER_ANALYTIC].maxWorkItemsPerFrame == 0u &&
+			budgets[RAL_ATMOSPHERE_TIER_ANALYTIC].distantScene );
+		CHECK( budgets[RAL_ATMOSPHERE_TIER_WEATHER].allowedWorkMask ==
+			( RAL_SKY_DIRTY_RADIANCE | RAL_SKY_DIRTY_AMBIENT_SH |
+				RAL_SKY_DIRTY_SPECULAR_IBL ) &&
+			budgets[RAL_ATMOSPHERE_TIER_WEATHER].maxWorkItemsPerFrame == 1u &&
+			budgets[RAL_ATMOSPHERE_TIER_WEATHER].temporalCrossfade );
+		CHECK( budgets[RAL_ATMOSPHERE_TIER_FULL].allowedWorkMask ==
+			RAL_SKY_DIRTY_ALL &&
+			budgets[RAL_ATMOSPHERE_TIER_FULL].maxWorkItemsPerFrame ==
+				RAL_SKY_TIER_MAX_RADIANCE_SLICES_PER_FRAME &&
+			budgets[RAL_ATMOSPHERE_TIER_FULL].physicalMode );
+		memset( &gpuTelemetry, 0, sizeof( gpuTelemetry ) );
+		gpuTelemetry.schemaVersion = RAL_SKY_GPU_TELEMETRY_SCHEMA_VERSION;
+		gpuTelemetry.backendType = RAL_BACKEND_METAL;
+		gpuTelemetry.frameGeneration = 9u;
+		gpuTelemetry.sourceRevision = 4u;
+		gpuTelemetry.selectedTier = RAL_ATMOSPHERE_TIER_FULL;
+		gpuTelemetry.selectedMode = RAL_SKY_ENVIRONMENT_HYBRID;
+		gpuTelemetry.submittedWorkMask = RAL_SKY_DIRTY_SKY_VIEW;
+		gpuTelemetry.deferredWorkMask = RAL_SKY_DIRTY_RADIANCE;
+		gpuTelemetry.physicalTimingFrameGeneration = 8u;
+		gpuTelemetry.physicalTimingState = RAL_SKY_GPU_TIMING_VALID;
+		gpuTelemetry.physicalGpuDurationNanoseconds = 1234u;
+		gpuTelemetry.radianceTimingState = RAL_SKY_GPU_TIMING_UNAVAILABLE;
+		gpuTelemetry.ready = qtrue;
+		gpuTelemetryExact = gpuTelemetry;
+		CHECK( Ral_SkyGpuTelemetryReceiptExact( &gpuTelemetry,
+			&gpuTelemetryExact ) );
+		gpuTelemetryExact.radianceGpuDurationNanoseconds = 1u;
+		CHECK( !Ral_SkyGpuTelemetryReceiptExact( &gpuTelemetryExact,
+			&gpuTelemetryExact ) );
+		gpuTelemetryExact = gpuTelemetry;
+		gpuTelemetryExact.physicalTimingState = RAL_SKY_GPU_TIMING_PENDING;
+		CHECK( !Ral_SkyGpuTelemetryReceiptExact( &gpuTelemetryExact,
+			&gpuTelemetryExact ) );
+	}
+	memset( &distantParity, 0, sizeof( distantParity ) );
+	for ( int backend = RAL_BACKEND_VULKAN; backend < RAL_BACKEND_COUNT; ++backend ) {
+		ralSkyEnvironmentPlanRequest_t sky;
+		ralSkyEnvironmentPlanReceipt_t receipt, exact, before;
+		memset( &sky, 0, sizeof( sky ) );
+		sky.schemaVersion = RAL_SKY_ENVIRONMENT_SCHEMA_VERSION;
+		sky.backendType = (ralBackendType_t)backend;
+		sky.frameGeneration = (uint64_t)backend + 1u;
+		sky.requestedTier = RAL_ATMOSPHERE_TIER_FULL;
+		sky.mode = RAL_SKY_ENVIRONMENT_HYBRID;
+		sky.sourceRevision = 11u;
+		sky.currentRadianceRevision = 10u;
+		sky.previousRadianceRevision = 9u;
+		sky.dirtyMask = RAL_SKY_DIRTY_ALL;
+		sky.maxWorkItems = 2u;
+		sky.crossfadeSeconds = 0.5f;
+		sky.crossfadeProgress = 0.25f;
+		sky.sunDirection[2] = 1.0f;
+		sky.sunRadiance[0] = 3.0f;
+		sky.sunRadiance[1] = 2.0f;
+		sky.sunRadiance[2] = 1.0f;
+		sky.moonDirection[2] = -1.0f;
+		sky.moonRadiance[0] = 0.1f;
+		sky.ambientSh[0] = 0.2f;
+		sky.ambientSh[1] = 0.3f;
+		sky.ambientSh[2] = 0.4f;
+		sky.cloudSunOcclusion = 0.6f;
+		sky.skyLuminance = 2.0f;
+		sky.exposure = 1.25f;
+		sky.opticsVisibility = 0.4f;
+		sky.authoredSkyAvailable = qtrue;
+		sky.distantSceneRequested = qtrue;
+		sky.distantSceneIdentity = 77u;
+		sky.distantSceneOrigin[0] = 1.0f;
+		sky.distantSceneOrigin[1] = 2.0f;
+		sky.distantSceneOrigin[2] = 3.0f;
+		sky.distantSceneScale = 16.0f;
+		sky.distantSceneLodBias = 2.0f;
+		sky.capabilities.physicalLuts = qtrue;
+		sky.capabilities.radianceCapture = qtrue;
+		sky.capabilities.convolution = qtrue;
+		sky.capabilities.cloudLighting = qtrue;
+		sky.capabilities.distantScene = qtrue;
+		sky.capabilities.temporalCrossfade = qtrue;
+		CHECK( Ral_SkyEnvironmentPlan( &sky, &receipt ) &&
+			receipt.selectedMode == RAL_SKY_ENVIRONMENT_HYBRID &&
+			receipt.admittedWorkCount == 2u && receipt.deferredWorkCount == 5u &&
+			receipt.admittedWorkMask == ( RAL_SKY_DIRTY_TRANSMITTANCE |
+				RAL_SKY_DIRTY_MULTISCATTER ) && receipt.distantSceneActive &&
+			receipt.previousProductValid && receipt.crossfadeAlpha == 0.25f &&
+			receipt.sunDirection[2] == 1.0f &&
+			receipt.sunRadiance[0] == 3.0f &&
+			receipt.moonDirection[2] == -1.0f &&
+			receipt.ambientSh[2] == 0.4f && receipt.exposure == 1.25f &&
+			receipt.distantSceneIdentity == 77u &&
+			!memcmp( receipt.distantSceneOrigin, sky.distantSceneOrigin,
+				sizeof( receipt.distantSceneOrigin ) ) &&
+			receipt.distantSceneScale == 16.0f &&
+			receipt.distantSceneLodBias == 2.0f &&
+			( receipt.passMask & RAL_SKY_PASS_AUTHORED_BACKGROUND ) &&
+			( receipt.passMask & RAL_SKY_PASS_CROSSFADE ) );
+		{
+			ralSkyEnvironmentPlanRequest_t tiered = sky;
+			ralSkyEnvironmentPlanReceipt_t tieredReceipt;
+			tiered.requestedTier = RAL_ATMOSPHERE_TIER_OFF;
+			tiered.mode = RAL_SKY_ENVIRONMENT_AUTHORED;
+			CHECK( Ral_SkyEnvironmentPlan( &tiered, &tieredReceipt ) &&
+				tieredReceipt.selectedMode == RAL_SKY_ENVIRONMENT_AUTHORED &&
+				tieredReceipt.fallbackReason == RAL_SKY_FALLBACK_TIER &&
+				tieredReceipt.admittedWorkCount == 0u &&
+				tieredReceipt.deferredWorkCount == 0u &&
+				!tieredReceipt.distantSceneActive && tieredReceipt.zeroWork &&
+				tieredReceipt.crossfadeAlpha == 1.0f );
+			tiered.requestedTier = RAL_ATMOSPHERE_TIER_ANALYTIC;
+			CHECK( Ral_SkyEnvironmentPlan( &tiered, &tieredReceipt ) &&
+				tieredReceipt.admittedWorkCount == 0u &&
+				tieredReceipt.deferredWorkCount == 0u &&
+				tieredReceipt.distantSceneActive && tieredReceipt.zeroWork );
+			tiered.requestedTier = RAL_ATMOSPHERE_TIER_WEATHER;
+			tiered.distantSceneRequested = qfalse;
+			tiered.previousRadianceRevision = 0u;
+			tiered.dirtyMask = RAL_SKY_DIRTY_RADIANCE |
+				RAL_SKY_DIRTY_AMBIENT_SH | RAL_SKY_DIRTY_SPECULAR_IBL;
+			tiered.maxWorkItems = RAL_SKY_ENVIRONMENT_MAX_WORK_ITEMS;
+			CHECK( Ral_SkyEnvironmentPlan( &tiered, &tieredReceipt ) &&
+				tieredReceipt.fallbackReason == RAL_SKY_FALLBACK_NONE &&
+				tieredReceipt.admittedWorkMask == RAL_SKY_DIRTY_RADIANCE &&
+				tieredReceipt.admittedWorkCount == 1u &&
+				tieredReceipt.deferredWorkCount == 2u );
+		}
+		{
+			ralSkyDistantDrawCandidate_t candidates[5];
+			ralSkyDistantDrawPlanRequest_t drawRequest;
+			ralSkyDistantDrawPlanReceipt_t drawReceipt, drawExact, drawBefore;
+			memset( candidates, 0, sizeof( candidates ) );
+			memset( &drawRequest, 0, sizeof( drawRequest ) );
+			for ( uint32_t index = 0u; index < 5u; ++index ) {
+				candidates[index].drawIdentity = 100u + index;
+				candidates[index].sourceDrawIndex = 20u + index;
+				candidates[index].lodLevelCount = 4u;
+				candidates[index].visible = qtrue;
+			}
+			candidates[0].projectedCoverageQ16 = 65536u;
+			candidates[1].projectedCoverageQ16 = 4095u;
+			candidates[2].projectedCoverageQ16 = 255u;
+			candidates[3].projectedCoverageQ16 = 1u;
+			candidates[4].projectedCoverageQ16 = 0u;
+			candidates[4].visible = qfalse;
+			drawRequest.schemaVersion = RAL_SKY_DISTANT_DRAW_SCHEMA_VERSION;
+			drawRequest.skyEnvironment = receipt;
+			drawRequest.candidates = candidates;
+			drawRequest.candidateCount = 5u;
+			drawRequest.maxVisibleDraws = 3u;
+			CHECK( Ral_SkyDistantDrawPlan( &drawRequest, &drawReceipt ) &&
+				drawReceipt.drawClass == RAL_SKY_DRAW_CLASS_DISTANT_SCENE &&
+				drawReceipt.candidateCount == 5u &&
+				drawReceipt.maxVisibleDraws == 3u &&
+				drawReceipt.visibleCount == 4u &&
+				drawReceipt.admittedCount == 3u &&
+				drawReceipt.visibilityCulledCount == 1u &&
+				drawReceipt.budgetDroppedCount == 1u &&
+				drawReceipt.collisionQueryCount == 0u &&
+				drawReceipt.entityDrawCount == 0u &&
+				drawReceipt.selections[0].lodLevel == 2u &&
+				drawReceipt.selections[1].lodLevel == 4u - 1u &&
+				drawReceipt.selections[2].lodLevel == 4u - 1u );
+			drawExact = drawReceipt;
+			CHECK( Ral_SkyDistantDrawPlanReceiptExact( &drawReceipt,
+				&drawExact ) );
+			/* Backend and frame identity are intentionally backend-local; every
+			 * semantic admission/LOD byte must otherwise remain identical. */
+			drawExact.backendType = RAL_BACKEND_VULKAN;
+			drawExact.frameGeneration = 1u;
+			if ( !distantParityReady ) {
+				distantParity = drawExact;
+				distantParityReady = qtrue;
+			} else CHECK( !memcmp( &distantParity, &drawExact,
+				sizeof( distantParity ) ) );
+			drawExact.entityDrawCount = 1u;
+			CHECK( !Ral_SkyDistantDrawPlanReceiptExact( &drawReceipt,
+				&drawExact ) );
+			drawBefore = drawReceipt;
+			candidates[1].visible = 2;
+			CHECK( !Ral_SkyDistantDrawPlan( &drawRequest, &drawReceipt ) &&
+				!memcmp( &drawReceipt, &drawBefore, sizeof( drawReceipt ) ) );
+		}
+		{
+			ralSkyEnvironmentPlanRequest_t dependency = sky;
+			ralSkyEnvironmentPlanReceipt_t dependencyReceipt;
+			dependency.dirtyMask = RAL_SKY_DIRTY_RADIANCE |
+				RAL_SKY_DIRTY_AMBIENT_SH | RAL_SKY_DIRTY_SPECULAR_IBL;
+			dependency.previousRadianceRevision = 0u;
+			dependency.maxWorkItems = 3u;
+			CHECK( Ral_SkyEnvironmentPlan( &dependency, &dependencyReceipt ) &&
+				dependencyReceipt.admittedWorkMask == 0u &&
+				dependencyReceipt.deferredWorkMask == dependency.dirtyMask );
+			dependency.completedProductMask = RAL_SKY_DIRTY_SKY_VIEW;
+			CHECK( Ral_SkyEnvironmentPlan( &dependency, &dependencyReceipt ) &&
+				dependencyReceipt.admittedWorkMask == dependency.dirtyMask &&
+				dependencyReceipt.deferredWorkMask == 0u );
+		}
+		{
+			ralAtmospherePlanRequest_t atmosphere = Fixture(
+				(ralBackendType_t)backend, RAL_ATMOSPHERE_TIER_FULL );
+			ralAtmospherePlanReceipt_t integrated, integratedExact;
+			atmosphere.mediaActive = qtrue;
+			atmosphere.skyLightingActive = qtrue;
+			atmosphere.skyEnvironment = sky;
+			CHECK( Ral_AtmospherePlan( &atmosphere, &integrated ) &&
+				Ral_SkyEnvironmentPlanReceiptExact(
+					&integrated.skyEnvironment, &receipt ) );
+			integratedExact = integrated;
+			CHECK( Ral_AtmospherePlanReceiptExact( &integrated,
+				&integratedExact ) );
+			atmosphere = Fixture( (ralBackendType_t)backend,
+				RAL_ATMOSPHERE_TIER_OFF );
+			atmosphere.skyEnvironment = sky;
+			atmosphere.skyEnvironment.requestedTier =
+				RAL_ATMOSPHERE_TIER_OFF;
+			atmosphere.skyEnvironment.mode = RAL_SKY_ENVIRONMENT_AUTHORED;
+			CHECK( Ral_AtmospherePlan( &atmosphere, &integrated ) &&
+				integrated.zeroWork && integrated.passMask == 0u &&
+				integrated.skyEnvironment.zeroWork &&
+				integrated.skyEnvironment.admittedWorkCount == 0u &&
+				!integrated.skyEnvironment.distantSceneActive );
+			atmosphere = Fixture( (ralBackendType_t)backend,
+				RAL_ATMOSPHERE_TIER_FULL );
+			atmosphere.skyEnvironment = sky;
+			atmosphere.skyEnvironment.frameGeneration++;
+			CHECK( !Ral_AtmospherePlan( &atmosphere, &integrated ) );
+		}
+		exact = receipt;
+		CHECK( Ral_SkyEnvironmentPlanReceiptExact( &receipt, &exact ) );
+		{
+			ralSkySurfaceReceipt_t surface, surfaceExact, surfaceBefore;
+			receipt.selectedMode = RAL_SKY_ENVIRONMENT_PHYSICAL;
+			receipt.completedProductMask |= RAL_SKY_DIRTY_SKY_VIEW;
+			receipt.currentRadianceRevision = 10u;
+			receipt.previousProductValid = qfalse;
+			receipt.crossfadeAlpha = 0.0f;
+			/* A first target must consume the physical LUT without waiting for
+			 * its own radiance publication; display still waits for that target. */
+			receipt.currentRadianceRevision = 0u;
+			CHECK( Ral_SkyPhysicalSourceReady( &receipt, qtrue ) );
+			CHECK( !Ral_SkyPhysicalSourceReady( &receipt, qfalse ) );
+			CHECK( !Ral_SkyPhysicalSourceReady( &receipt, (qboolean)2 ) );
+			CHECK( !Ral_SkyPhysicalSourceReady( NULL, qtrue ) );
+			CHECK( Ral_SkySurfacePlan( &receipt, qtrue, &surface ) && !surface.physicalReadable );
+			receipt.completedProductMask &= ~RAL_SKY_DIRTY_SKY_VIEW;
+			CHECK( !Ral_SkyPhysicalSourceReady( &receipt, qtrue ) );
+			receipt.completedProductMask |= RAL_SKY_DIRTY_SKY_VIEW;
+			receipt.currentRadianceRevision = 10u;
+			CHECK( Ral_SkySurfacePlan( &receipt, qtrue, &surface ) &&
+				surface.physicalReadable && surface.physicalBlend == 1.0f &&
+				surface.authoredComposite && !surface.authoredFallback &&
+				surface.physicalProductRevision == 10u );
+			surfaceExact = surface;
+			CHECK( Ral_SkySurfaceReceiptExact( &surface, &surfaceExact ) );
+			receipt.previousProductValid = qtrue;
+			receipt.crossfadeAlpha = 0.25f;
+			CHECK( Ral_SkySurfacePlan( &receipt, qtrue, &surface ) &&
+				surface.physicalBlend == 0.25f && surface.authoredFallback );
+			CHECK( Ral_SkySurfacePlan( &receipt, qfalse, &surface ) &&
+				!surface.physicalReadable && surface.physicalBlend == 0.0f &&
+				surface.authoredComposite && surface.authoredFallback );
+			receipt.selectedMode = RAL_SKY_ENVIRONMENT_HYBRID;
+			/* HYBRID consumes the physical product for lighting only; the visible
+			 * sky stays authored (no surface composite). */
+			CHECK( Ral_SkyPhysicalSourceReady( &receipt, qtrue ) );
+			CHECK( Ral_SkySurfacePlan( &receipt, qtrue, &surface ) &&
+				!surface.physicalReadable && surface.physicalBlend == 0.0f &&
+				surface.authoredFallback );
+			receipt.selectedMode = RAL_SKY_ENVIRONMENT_PHYSICAL;
+			receipt.previousProductValid = qfalse;
+			/* r_skyPhysicalBlend scales the PHYSICAL relight; 0 degrades to authored. */
+			CHECK( !Ral_SkySurfaceSetPhysicalBlendScale( -0.1f ) && !Ral_SkySurfaceSetPhysicalBlendScale( 1.5f )
+				&& !Ral_SkySurfaceSetPhysicalBlendScale( NAN ) && Ral_SkySurfacePhysicalBlendScale() == 1.0f );
+			CHECK( Ral_SkySurfaceSetPhysicalBlendScale( 0.5f ) && Ral_SkySurfacePlan( &receipt, qtrue, &surface )
+				&& surface.physicalReadable && surface.physicalBlend == 0.5f && surface.authoredFallback );
+			CHECK( Ral_SkySurfaceSetPhysicalBlendScale( 0.0f ) && Ral_SkySurfacePlan( &receipt, qtrue, &surface )
+				&& !surface.physicalReadable && surface.physicalBlend == 0.0f && surface.authoredFallback
+				&& Ral_SkySurfaceReceiptExact( &surface, &surface ) );
+			CHECK( Ral_SkySurfaceSetPhysicalBlendScale( 1.0f ) );
+			receipt.previousProductValid = qtrue;
+			receipt.selectedMode = RAL_SKY_ENVIRONMENT_HYBRID;
+			CHECK( Ral_SkySurfacePlan( &receipt, qtrue, &surface ) &&
+				!surface.physicalReadable && surface.authoredFallback );
+			surfaceBefore = surface;
+			receipt.selectedMode = RAL_SKY_ENVIRONMENT_PHYSICAL;
+			receipt.crossfadeAlpha = NAN;
+			CHECK( !Ral_SkySurfacePlan( &receipt, qtrue, &surface ) &&
+				!memcmp( &surface, &surfaceBefore, sizeof( surface ) ) );
+			surfaceExact = surfaceBefore;
+			surfaceExact.physicalBlend = NAN;
+			CHECK( !Ral_SkySurfaceReceiptExact( &surfaceExact, &surfaceExact ) );
+			CHECK( Ral_SkyEnvironmentPlan( &sky, &receipt ) );
+		}
+		exact.exposure = -1.0f;
+		CHECK( !Ral_SkyEnvironmentPlanReceiptExact( &exact, &exact ) );
+		exact = receipt;
+		exact.cloudSunOcclusion = NAN;
+		CHECK( !Ral_SkyEnvironmentPlanReceiptExact( &exact, &exact ) );
+		exact = receipt;
+		exact.admittedWorkCount++;
+		CHECK( !Ral_SkyEnvironmentPlanReceiptExact( &receipt, &exact ) );
+		before = receipt;
+		sky.distantSceneIdentity = 0u;
+		CHECK( !Ral_SkyEnvironmentPlan( &sky, &receipt ) &&
+			!memcmp( &receipt, &before, sizeof( receipt ) ) );
+		sky.distantSceneIdentity = 77u;
+		sky.maxWorkItems = RAL_SKY_ENVIRONMENT_MAX_WORK_ITEMS + 1u;
+		CHECK( !Ral_SkyEnvironmentPlan( &sky, &receipt ) &&
+			!memcmp( &receipt, &before, sizeof( receipt ) ) );
+		sky.maxWorkItems = 2u;
+		sky.eventMask = RAL_SKY_EVENT_MAP_TRANSITION;
+		sky.inFlightWorkMask = RAL_SKY_DIRTY_RADIANCE | RAL_SKY_DIRTY_AMBIENT_SH;
+		CHECK( Ral_SkyEnvironmentPlan( &sky, &receipt ) &&
+			receipt.cancelledWorkMask == sky.inFlightWorkMask &&
+			!receipt.previousProductValid && receipt.crossfadeAlpha == 0.0f );
+		sky.eventMask = 0u;
+		sky.requestedTier = RAL_ATMOSPHERE_TIER_WEATHER;
+		CHECK( Ral_SkyEnvironmentPlan( &sky, &receipt ) &&
+			receipt.selectedMode == RAL_SKY_ENVIRONMENT_AUTHORED &&
+			receipt.fallbackReason == RAL_SKY_FALLBACK_TIER &&
+			( receipt.passMask & RAL_SKY_PASS_AUTHORED_BACKGROUND ) );
+		{
+			ralSkyEnvironmentRuntimeState_t runtime;
+			ralSkyEnvironmentRuntimeRequest_t runtimeRequest;
+			ralSkyEnvironmentRuntimeReceipt_t runtimeReceipt, runtimeExact;
+			ralSkyEnvironmentPlanRequest_t runtimePlan, planBefore;
+			uint64_t frame = 100u + (uint64_t)backend * 16u;
+			memset( &runtimeRequest, 0, sizeof( runtimeRequest ) );
+			CHECK( Ral_SkyEnvironmentRuntimeInit( (ralBackendType_t)backend,
+				&runtime ) );
+			runtimeRequest.schemaVersion = RAL_SKY_ENVIRONMENT_RUNTIME_SCHEMA_VERSION;
+			runtimeRequest.backendType = (ralBackendType_t)backend;
+			runtimeRequest.frameGeneration = frame;
+			runtimeRequest.requestedTier = RAL_ATMOSPHERE_TIER_FULL;
+			runtimeRequest.mode = RAL_SKY_ENVIRONMENT_HYBRID;
+			runtimeRequest.sourceRevision = 11u;
+			runtimeRequest.maxWorkItems = 2u;
+			runtimeRequest.crossfadeSeconds = 0.5f;
+			memcpy( runtimeRequest.sunDirection, sky.sunDirection,
+				sizeof( runtimeRequest.sunDirection ) );
+			memcpy( runtimeRequest.sunRadiance, sky.sunRadiance,
+				sizeof( runtimeRequest.sunRadiance ) );
+			memcpy( runtimeRequest.moonDirection, sky.moonDirection,
+				sizeof( runtimeRequest.moonDirection ) );
+			memcpy( runtimeRequest.moonRadiance, sky.moonRadiance,
+				sizeof( runtimeRequest.moonRadiance ) );
+			memcpy( runtimeRequest.ambientSh, sky.ambientSh,
+				sizeof( runtimeRequest.ambientSh ) );
+			runtimeRequest.cloudSunOcclusion = 0.6f;
+			runtimeRequest.skyLuminance = 2.0f;
+			runtimeRequest.exposure = 1.25f;
+			runtimeRequest.opticsVisibility = 0.4f;
+			runtimeRequest.authoredSkyAvailable = qtrue;
+			runtimeRequest.distantSceneRequested = qtrue;
+			runtimeRequest.distantSceneIdentity = 77u;
+			runtimeRequest.distantSceneOrigin[0] = 1.0f;
+			runtimeRequest.distantSceneOrigin[1] = 2.0f;
+			runtimeRequest.distantSceneOrigin[2] = 3.0f;
+			runtimeRequest.distantSceneScale = 16.0f;
+			runtimeRequest.distantSceneLodBias = 2.0f;
+			runtimeRequest.capabilities = sky.capabilities;
+			CHECK( Ral_SkyEnvironmentRuntimeAdvance( &runtime,
+				&runtimeRequest, &runtimePlan, &runtimeReceipt ) &&
+				runtimeReceipt.sourceChanged &&
+				runtimeReceipt.invalidatedWorkMask == RAL_SKY_DIRTY_ALL &&
+				runtimePlan.dirtyMask == RAL_SKY_DIRTY_ALL &&
+				runtimePlan.sunRadiance[0] == 3.0f &&
+				runtimePlan.ambientSh[2] == 0.4f &&
+				runtimePlan.exposure == 1.25f &&
+				runtimePlan.distantSceneIdentity == 77u &&
+				runtimePlan.distantSceneScale == 16.0f &&
+				runtimePlan.distantSceneLodBias == 2.0f &&
+				!runtimeReceipt.targetReady );
+			runtimeExact = runtimeReceipt;
+			CHECK( Ral_SkyEnvironmentRuntimeReceiptExact( &runtimeReceipt,
+				&runtimeExact ) && Ral_SkyEnvironmentPlan( &runtimePlan, &receipt ) &&
+				Ral_SkyEnvironmentRuntimeSchedule( &runtime, &receipt ) &&
+				runtime.inFlightWorkMask == receipt.admittedWorkMask );
+			for ( uint32_t slice = 0u; slice < 4u; ++slice ) {
+				runtimeRequest.frameGeneration = ++frame;
+				runtimeRequest.completedWorkMask = runtime.inFlightWorkMask;
+				CHECK( Ral_SkyEnvironmentRuntimeAdvance( &runtime,
+					&runtimeRequest, &runtimePlan, &runtimeReceipt ) &&
+					Ral_SkyEnvironmentPlan( &runtimePlan, &receipt ) &&
+					Ral_SkyEnvironmentRuntimeSchedule( &runtime, &receipt ) );
+			}
+			CHECK( runtime.targetReady && runtime.currentRadianceRevision == 11u &&
+				runtime.completedProductMask == RAL_SKY_DIRTY_ALL &&
+				runtime.pendingDirtyMask == 0u && runtime.inFlightWorkMask == 0u );
+			planBefore = runtimePlan;
+			runtimeRequest.frameGeneration = ++frame;
+			runtimeRequest.completedWorkMask = 0u;
+			runtimeRequest.sourceRevision = 12u;
+			CHECK( !Ral_SkyEnvironmentRuntimeAdvance( &runtime,
+				&runtimeRequest, &runtimePlan, &runtimeReceipt ) &&
+				!memcmp( &runtimePlan, &planBefore, sizeof( runtimePlan ) ) );
+			runtimeRequest.eventMask = RAL_SKY_EVENT_SOURCE_CHANGE;
+			CHECK( Ral_SkyEnvironmentRuntimeAdvance( &runtime,
+				&runtimeRequest, &runtimePlan, &runtimeReceipt ) &&
+				runtime.currentRadianceRevision == 11u &&
+				runtime.targetRadianceRevision == 12u &&
+				runtime.completedProductMask == 0u &&
+				runtimePlan.dirtyMask == RAL_SKY_DIRTY_ALL );
+		}
+	}
 	{
 		ralAtmosphereWeatherRequest_t weather;
 		ralAtmosphereWeatherReceipt_t weatherReceipt, weatherExact;
@@ -279,6 +714,22 @@ int main( void )
 		event.climateSeed++;
 		CHECK( Ral_AtmosphereRuntimeAdvance( &runtime, &event, &lifecycle ) &&
 			   ( lifecycle.invalidationMask & RAL_ATMOSPHERE_INVALIDATE_MAP ) && !lifecycle.historyReusable );
+		/* A rendered frame is not a scene-time tick. After rewind, each pinned
+		 * or paused frame must consume a new receipt instead of replaying the
+		 * old map/time invalidation into the sliced sky scheduler. */
+		event.eventMask = 0u;
+		event.timeScale = 0.0f;
+		for ( unsigned heldFrame = 0u; heldFrame < 16u; ++heldFrame ) {
+			uint32_t skyEvents = UINT32_MAX;
+			event.frameGeneration++;
+			CHECK( Ral_AtmosphereRuntimeAdvance( &runtime, &event, &lifecycle ) &&
+				lifecycle.frameGeneration == event.frameGeneration &&
+				lifecycle.invalidationMask == 0u && lifecycle.historyReusable &&
+				lifecycle.zeroTimeStep && runtime.timelineSeconds == 0.0f );
+			CHECK( Ral_AtmosphereSkyEventMask( lifecycle.invalidationMask,
+				&skyEvents ) && skyEvents == 0u );
+		}
+		event.timeScale = 0.5f;
 		event.frameGeneration++;
 		event.eventMask = RAL_ATMOSPHERE_EVENT_CAPABILITY_DOWNGRADE;
 		event.capabilityDigest++;
@@ -294,6 +745,73 @@ int main( void )
 		event.deviceGeneration++;
 		CHECK( Ral_AtmosphereRuntimeAdvance( &runtime, &event, &lifecycle ) && lifecycle.renderAllowed &&
 			   !lifecycle.historyReusable && lifecycle.invalidationMask == RAL_ATMOSPHERE_INVALIDATE_DEVICE );
+		/* Sun/time-of-day and weather transitions are explicit invalidation
+		 * events. Undeclared digest drift is rejected output-atomically; a
+		 * declared change invalidates history exactly once, and a stable digest
+		 * reuses history again on the following frame. */
+		event.frameGeneration++;
+		event.eventMask = 0u;
+		event.sunDigest = 0x51u;
+		runtimeExact = runtime;
+		CHECK( !Ral_AtmosphereRuntimeAdvance( &runtime, &event, &lifecycle ) &&
+			   !memcmp( &runtime, &runtimeExact, sizeof( runtime ) ) );
+		event.eventMask = RAL_ATMOSPHERE_EVENT_SUN_CHANGE;
+		CHECK( Ral_AtmosphereRuntimeAdvance( &runtime, &event, &lifecycle ) &&
+			   lifecycle.invalidationMask == RAL_ATMOSPHERE_INVALIDATE_SUN &&
+			   !lifecycle.historyReusable && runtime.sunDigest == 0x51u );
+		event.frameGeneration++;
+		event.eventMask = 0u;
+		CHECK( Ral_AtmosphereRuntimeAdvance( &runtime, &event, &lifecycle ) &&
+			   lifecycle.invalidationMask == 0u && lifecycle.historyReusable );
+		event.frameGeneration++;
+		event.weatherDigest = 0x77u;
+		runtimeExact = runtime;
+		CHECK( !Ral_AtmosphereRuntimeAdvance( &runtime, &event, &lifecycle ) &&
+			   !memcmp( &runtime, &runtimeExact, sizeof( runtime ) ) );
+		event.eventMask = RAL_ATMOSPHERE_EVENT_WEATHER_TRANSITION;
+		CHECK( Ral_AtmosphereRuntimeAdvance( &runtime, &event, &lifecycle ) &&
+			   lifecycle.invalidationMask == RAL_ATMOSPHERE_INVALIDATE_WEATHER &&
+			   !lifecycle.historyReusable && runtime.weatherDigest == 0x77u );
+		event.frameGeneration++;
+		event.eventMask = 0u;
+		CHECK( Ral_AtmosphereRuntimeAdvance( &runtime, &event, &lifecycle ) &&
+			   lifecycle.invalidationMask == 0u && lifecycle.historyReusable );
+		/* A map transition may carry a new sun/weather identity without separate events. */
+		event.frameGeneration++;
+		event.eventMask = RAL_ATMOSPHERE_EVENT_MAP_TRANSITION;
+		event.sunDigest = 0x52u;
+		event.weatherDigest = 0x78u;
+		event.timelineSeconds = 0.0f;
+		event.climateSeed++;
+		CHECK( Ral_AtmosphereRuntimeAdvance( &runtime, &event, &lifecycle ) &&
+			   ( lifecycle.invalidationMask & RAL_ATMOSPHERE_INVALIDATE_MAP ) &&
+			   !( lifecycle.invalidationMask & ( RAL_ATMOSPHERE_INVALIDATE_SUN | RAL_ATMOSPHERE_INVALIDATE_WEATHER ) ) &&
+			   runtime.sunDigest == 0x52u && runtime.weatherDigest == 0x78u );
+		{
+			uint32_t skyEvents = UINT32_C( 0xfeedbeef );
+			CHECK( Ral_AtmosphereSkyEventMask(
+				RAL_ATMOSPHERE_INVALIDATE_SUN | RAL_ATMOSPHERE_INVALIDATE_WEATHER,
+				&skyEvents ) && skyEvents ==
+				( RAL_SKY_EVENT_TIME_CHANGE | RAL_SKY_EVENT_WEATHER_CHANGE ) );
+		}
+		{
+			uint32_t skyEvents = UINT32_C( 0xfeedbeef );
+			CHECK( Ral_AtmosphereSkyEventMask(
+				RAL_ATMOSPHERE_INVALIDATE_CAMERA |
+				RAL_ATMOSPHERE_INVALIDATE_MAP |
+				RAL_ATMOSPHERE_INVALIDATE_DEVICE |
+				RAL_ATMOSPHERE_INVALIDATE_TIMELINE |
+				RAL_ATMOSPHERE_INVALIDATE_RESIZE |
+				RAL_ATMOSPHERE_INVALIDATE_CAPABILITY,
+				&skyEvents ) && skyEvents ==
+				( RAL_SKY_EVENT_CAMERA_CUT |
+				  RAL_SKY_EVENT_MAP_TRANSITION |
+				  RAL_SKY_EVENT_DEVICE_RECREATE |
+				  RAL_SKY_EVENT_TIME_CHANGE ) );
+			skyEvents = UINT32_C( 0xfeedbeef );
+			CHECK( !Ral_AtmosphereSkyEventMask( UINT32_C( 0x80000000 ),
+				&skyEvents ) && skyEvents == UINT32_C( 0xfeedbeef ) );
+		}
 	}
 	puts( "RAL atmosphere plan: PASS" );
 	return 0;
