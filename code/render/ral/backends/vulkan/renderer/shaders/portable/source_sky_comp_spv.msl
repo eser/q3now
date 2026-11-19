@@ -5,15 +5,30 @@
 
 using namespace metal;
 
+struct Push
+{
+    uint4 meta;
+    float4 authoredRadiance;
+    float4 sunDirectionIntensity;
+    float4 sunRadianceExposure;
+};
+
 constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(8u, 8u, 1u);
 
 struct spvDescriptorSetBuffer0
 {
-    texture2d_array<float, access::write> skyImage [[id(0)]];
+    texture2d<float> authoredRt [[id(0)]];
+    sampler authoredSampler [[id(1)]];
+    texture2d<float> authoredLf [[id(2)]];
+    texture2d<float> authoredBk [[id(3)]];
+    texture2d<float> authoredFt [[id(4)]];
+    texture2d<float> authoredUp [[id(5)]];
+    texture2d<float> authoredDn [[id(6)]];
+    texture2d_array<float, access::write> skyImage [[id(7)]];
 };
 
 static inline __attribute__((always_inline))
-float3 cubeFaceDir(thread const uint& face, thread const float2& uv)
+float3 wired_sky_cube_direction(thread const uint& face, thread const float2& uv)
 {
     float u = uv.x;
     float v = uv.y;
@@ -58,62 +73,180 @@ float3 cubeFaceDir(thread const uint& face, thread const float2& uv)
 }
 
 static inline __attribute__((always_inline))
-float3 analyticSky(thread const float3& dir)
+float3 authoredSky(thread const float3& dir, texture2d<float> authoredRt, sampler authoredSampler, texture2d<float> authoredLf, texture2d<float> authoredBk, texture2d<float> authoredFt, texture2d<float> authoredUp, texture2d<float> authoredDn)
 {
-    float up = dir.y;
+    float3 a = abs(dir);
+    bool _221 = a.x >= a.y;
+    bool _229;
+    if (_221)
+    {
+        _229 = a.x >= a.z;
+    }
+    else
+    {
+        _229 = _221;
+    }
+    uint axis;
+    float2 st;
+    if (_229)
+    {
+        if (dir.x >= 0.0)
+        {
+            axis = 0u;
+            st = float2(-dir.y, dir.z) / float2(a.x);
+        }
+        else
+        {
+            axis = 1u;
+            st = float2(dir.y, dir.z) / float2(a.x);
+        }
+    }
+    else
+    {
+        if (a.y >= a.z)
+        {
+            if (dir.y >= 0.0)
+            {
+                axis = 2u;
+                st = float2(dir.x, dir.z) / float2(a.y);
+            }
+            else
+            {
+                axis = 3u;
+                st = float2(-dir.x, dir.z) / float2(a.y);
+            }
+        }
+        else
+        {
+            if (dir.z >= 0.0)
+            {
+                axis = 4u;
+                st = float2(-dir.y, -dir.x) / float2(a.z);
+            }
+            else
+            {
+                axis = 5u;
+                st = float2(-dir.y, dir.x) / float2(a.z);
+            }
+        }
+    }
+    float2 uv = float2((st.x * 0.5) + 0.5, 0.5 - (st.y * 0.5));
+    if (axis == 0u)
+    {
+        return authoredRt.sample(authoredSampler, uv, level(0.0)).xyz;
+    }
+    if (axis == 1u)
+    {
+        return authoredLf.sample(authoredSampler, uv, level(0.0)).xyz;
+    }
+    if (axis == 2u)
+    {
+        return authoredBk.sample(authoredSampler, uv, level(0.0)).xyz;
+    }
+    if (axis == 3u)
+    {
+        return authoredFt.sample(authoredSampler, uv, level(0.0)).xyz;
+    }
+    if (axis == 4u)
+    {
+        return authoredUp.sample(authoredSampler, uv, level(0.0)).xyz;
+    }
+    return authoredDn.sample(authoredSampler, uv, level(0.0)).xyz;
+}
+
+static inline __attribute__((always_inline))
+float3 analyticSky(thread const float3& dir, constant Push& p)
+{
+    float3 authored = fast::max(p.authoredRadiance.xyz, float3(0.00200000009499490261077880859375));
+    float authoredEnergy = fast::max(dot(authored, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875)), 0.00200000009499490261077880859375);
+    float3 authoredTint = authored / float3(authoredEnergy);
+    float3 horizon = authored;
+    float3 zenith = (authoredTint * authoredEnergy) * 0.550000011920928955078125;
+    float3 ground = authored * 0.180000007152557373046875;
+    float up = dir.z;
     float3 sky;
     if (up >= 0.0)
     {
         float t = smoothstep(0.0, 1.0, up);
-        sky = mix(float3(0.12999999523162841796875, 0.1500000059604644775390625, 0.180000007152557373046875), float3(0.04500000178813934326171875, 0.0900000035762786865234375, 0.189999997615814208984375), float3(t));
+        sky = mix(horizon, zenith, float3(t));
     }
     else
     {
-        float t_1 = smoothstep(0.0, -0.3499999940395355224609375, up);
-        sky = mix(float3(0.12999999523162841796875, 0.1500000059604644775390625, 0.180000007152557373046875), float3(0.04500000178813934326171875, 0.039999999105930328369140625, 0.034000001847743988037109375), float3(t_1));
+        float t_1 = smoothstep(0.0, 0.3499999940395355224609375, -up);
+        sky = mix(horizon, ground, float3(t_1));
     }
-    float sd = fast::max(dot(dir, float3(0.3999000489711761474609375, 0.819795072078704833984375, 0.4098975360393524169921875)), 0.0);
+    float3 sunDirection = p.sunDirectionIntensity.xyz;
+    float sunLength = length(sunDirection);
+    float _175;
+    if (sunLength > 9.9999997473787516355514526367188e-06)
+    {
+        _175 = fast::max(dot(dir, sunDirection / float3(sunLength)), 0.0);
+    }
+    else
+    {
+        _175 = 0.0;
+    }
+    float sd = _175;
     float lobe = powr(sd, 320.0);
     if (up > 0.0)
     {
-        sky += (float3(1.2999999523162841796875, 1.0499999523162841796875, 0.699999988079071044921875) * lobe);
+        sky += ((fast::max(p.sunRadianceExposure.xyz, float3(0.0)) * fast::max(p.sunDirectionIntensity.w, 0.0)) * lobe);
     }
-    return sky;
+    return fast::max(sky, float3(0.0));
 }
 
-kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], constant Push& p [[buffer(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
 {
     uint2 size = uint2(int3(spvDescriptorSet0.skyImage.get_width(), spvDescriptorSet0.skyImage.get_height(), spvDescriptorSet0.skyImage.get_array_size()).xy);
-    int3 coord = int3(gl_GlobalInvocationID);
-    bool _179 = uint(coord.x) >= size.x;
-    bool _189;
-    if (!_179)
+    uint face = p.meta.x;
+    int3 coord = int3(int2(gl_GlobalInvocationID.xy), int(face));
+    bool _443 = uint(coord.x) >= size.x;
+    bool _453;
+    if (!_443)
     {
-        _189 = uint(coord.y) >= size.y;
+        _453 = uint(coord.y) >= size.y;
     }
     else
     {
-        _189 = _179;
+        _453 = _443;
     }
-    bool _198;
-    if (!_189)
-    {
-        _198 = uint(coord.z) >= 6u;
-    }
-    else
-    {
-        _198 = _189;
-    }
-    if (_198)
+    if (_453 || (face >= 6u))
     {
         return;
     }
     float2 uv = (((float2(coord.xy) + float2(0.5)) / float2(size)) * 2.0) - float2(1.0);
-    uint param = uint(coord.z);
+    uint param = face;
     float2 param_1 = uv;
-    float3 dir = cubeFaceDir(param, param_1);
-    float3 param_2 = dir;
-    float3 radiance = analyticSky(param_2);
+    float3 dir = wired_sky_cube_direction(param, param_1);
+    float3 _484;
+    if (p.meta.w != 0u)
+    {
+        float3 param_2 = dir;
+        _484 = fast::max(authoredSky(param_2, spvDescriptorSet0.authoredRt, spvDescriptorSet0.authoredSampler, spvDescriptorSet0.authoredLf, spvDescriptorSet0.authoredBk, spvDescriptorSet0.authoredFt, spvDescriptorSet0.authoredUp, spvDescriptorSet0.authoredDn), float3(0.0));
+    }
+    else
+    {
+        float3 param_3 = dir;
+        _484 = analyticSky(param_3, p);
+    }
+    float3 radiance = _484;
+    if (p.meta.w != 0u)
+    {
+        float3 sunDirection = p.sunDirectionIntensity.xyz;
+        float sunLength = length(sunDirection);
+        float _511;
+        if (sunLength > 9.9999997473787516355514526367188e-06)
+        {
+            _511 = fast::max(dot(dir, sunDirection / float3(sunLength)), 0.0);
+        }
+        else
+        {
+            _511 = 0.0;
+        }
+        float sd = _511;
+        radiance += ((fast::max(p.sunRadianceExposure.xyz, float3(0.0)) * fast::max(p.sunDirectionIntensity.w, 0.0)) * powr(sd, 320.0));
+    }
+    radiance *= fast::clamp(p.sunRadianceExposure.w, 0.0, 8.0);
     spvDescriptorSet0.skyImage.write(float4(radiance, 1.0), uint2(coord.xy), uint(coord.z));
 }
 

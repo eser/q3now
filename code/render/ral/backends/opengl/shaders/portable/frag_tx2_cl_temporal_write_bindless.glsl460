@@ -3,18 +3,18 @@
 layout(constant_id = 4) const int tex_domain = 0;
 layout(constant_id = 26) const int lightmap_slot = 0;
 layout(constant_id = 6) const int tex_mode = 0;
-const bool _458 = (tex_mode == 1);
-const bool _459 = (tex_mode == 2);
-const bool _460 = (_458 || _459);
-const bool _503 = (tex_mode == 3);
-const bool _556 = (tex_mode == 4);
-const bool _612 = (tex_mode == 5);
-const bool _644 = (tex_mode == 6);
-const bool _676 = (tex_mode == 7);
-const bool _748 = (lightmap_slot != 0);
+const bool _474 = (tex_mode == 1);
+const bool _475 = (tex_mode == 2);
+const bool _476 = (_474 || _475);
+const bool _509 = (tex_mode == 3);
+const bool _554 = (tex_mode == 4);
+const bool _602 = (tex_mode == 5);
+const bool _626 = (tex_mode == 6);
+const bool _650 = (tex_mode == 7);
+const bool _706 = (lightmap_slot != 0);
 layout(constant_id = 7) const int discard_mode = 0;
-const bool _837 = (discard_mode == 1);
-const bool _847 = (discard_mode == 2);
+const bool _806 = (discard_mode == 1);
+const bool _816 = (discard_mode == 2);
 layout(constant_id = 3) const int alpha_to_coverage = 0;
 
 layout(binding = 0, std140) uniform UBO
@@ -33,6 +33,8 @@ layout(binding = 0, std140) uniform UBO
     vec4 advancedFogColorDensity;
     vec4 advancedFogTypeFarEnabled;
     vec4 emissionRadiance;
+    vec4 materialBaseColor;
+    vec4 materialFactors;
 } _193;
 
 layout(binding = 0) uniform texture2D wired_bindless_images[64];
@@ -246,32 +248,29 @@ void main()
     uint param_3 = 0u;
     vec2 param_4 = frag_tex_coord0;
     int param_5 = 0;
-    vec4 color0 = wired_bl_sample_domain(param_3, param_4, param_5) * frag_color0;
+    vec4 sampledColor0 = wired_bl_sample_domain(param_3, param_4, param_5);
+    uint param_6 = 1u;
+    vec2 param_7 = frag_tex_coord1;
+    int param_8 = 1;
+    vec4 sampledColor1 = wired_bl_sample_domain(param_6, param_7, param_8);
+    uint param_9 = 2u;
+    vec2 param_10 = frag_tex_coord2;
+    int param_11 = 2;
+    vec4 sampledColor2 = wired_bl_sample_domain(param_9, param_10, param_11);
+    vec4 color0 = sampledColor0 * frag_color0;
     vec4 base;
-    if (_460)
+    if (_476)
     {
-        uint param_6 = 1u;
-        vec2 param_7 = frag_tex_coord1;
-        int param_8 = 1;
-        vec4 color1 = wired_bl_sample_domain(param_6, param_7, param_8) * frag_color1;
-        uint param_9 = 2u;
-        vec2 param_10 = frag_tex_coord2;
-        int param_11 = 2;
-        vec4 color2 = wired_bl_sample_domain(param_9, param_10, param_11) * frag_color2;
+        vec4 color1 = sampledColor1 * frag_color1;
+        vec4 color2 = sampledColor2 * frag_color2;
         base = vec4((color0.xyz + color1.xyz) + color2.xyz, (color0.w * color1.w) * color2.w);
     }
     else
     {
-        if (_503)
+        if (_509)
         {
-            uint param_12 = 1u;
-            vec2 param_13 = frag_tex_coord1;
-            int param_14 = 1;
-            vec4 color1_1 = wired_bl_sample_domain(param_12, param_13, param_14) * frag_color1;
-            uint param_15 = 2u;
-            vec2 param_16 = frag_tex_coord2;
-            int param_17 = 2;
-            vec4 color2_1 = wired_bl_sample_domain(param_15, param_16, param_17) * frag_color2;
+            vec4 color1_1 = sampledColor1 * frag_color1;
+            vec4 color2_1 = sampledColor2 * frag_color2;
             color0 *= color0.w;
             color1_1 *= color1_1.w;
             color2_1 *= color2_1.w;
@@ -279,16 +278,10 @@ void main()
         }
         else
         {
-            if (_556)
+            if (_554)
             {
-                uint param_18 = 1u;
-                vec2 param_19 = frag_tex_coord1;
-                int param_20 = 1;
-                vec4 color1_2 = wired_bl_sample_domain(param_18, param_19, param_20) * frag_color1;
-                uint param_21 = 2u;
-                vec2 param_22 = frag_tex_coord2;
-                int param_23 = 2;
-                vec4 color2_2 = wired_bl_sample_domain(param_21, param_22, param_23) * frag_color2;
+                vec4 color1_2 = sampledColor1 * frag_color1;
+                vec4 color2_2 = sampledColor2 * frag_color2;
                 color0 *= (1.0 - color0.w);
                 color1_2 *= (1.0 - color1_2.w);
                 color2_2 *= (1.0 - color2_2.w);
@@ -296,60 +289,36 @@ void main()
             }
             else
             {
-                if (_612)
+                if (_602)
                 {
-                    uint param_24 = 1u;
-                    vec2 param_25 = frag_tex_coord1;
-                    int param_26 = 1;
-                    vec4 color1_3 = wired_bl_sample_domain(param_24, param_25, param_26) * frag_color1;
-                    uint param_27 = 2u;
-                    vec2 param_28 = frag_tex_coord2;
-                    int param_29 = 2;
-                    vec4 color2_3 = wired_bl_sample_domain(param_27, param_28, param_29) * frag_color2;
+                    vec4 color1_3 = sampledColor1 * frag_color1;
+                    vec4 color2_3 = sampledColor2 * frag_color2;
                     base = mix(mix(color0, color1_3, vec4(color1_3.w)), color2_3, vec4(color2_3.w));
                 }
                 else
                 {
-                    if (_644)
+                    if (_626)
                     {
-                        uint param_30 = 1u;
-                        vec2 param_31 = frag_tex_coord1;
-                        int param_32 = 1;
-                        vec4 color1_4 = wired_bl_sample_domain(param_30, param_31, param_32) * frag_color1;
-                        uint param_33 = 2u;
-                        vec2 param_34 = frag_tex_coord2;
-                        int param_35 = 2;
-                        vec4 color2_4 = wired_bl_sample_domain(param_33, param_34, param_35) * frag_color2;
+                        vec4 color1_4 = sampledColor1 * frag_color1;
+                        vec4 color2_4 = sampledColor2 * frag_color2;
                         base = mix(color2_4, mix(color1_4, color0, vec4(color1_4.w)), vec4(color2_4.w));
                     }
                     else
                     {
-                        if (_676)
+                        if (_650)
                         {
-                            uint param_36 = 1u;
-                            vec2 param_37 = frag_tex_coord1;
-                            int param_38 = 1;
-                            vec4 color1_5 = wired_bl_sample_domain(param_36, param_37, param_38) * frag_color1;
-                            uint param_39 = 2u;
-                            vec2 param_40 = frag_tex_coord2;
-                            int param_41 = 2;
-                            vec4 color2_5 = wired_bl_sample_domain(param_39, param_40, param_41) * frag_color2;
+                            vec4 color1_5 = sampledColor1 * frag_color1;
+                            vec4 color2_5 = sampledColor2 * frag_color2;
                             base = ((color2_5 + vec4(color2_5.w)) * (color1_5 + vec4(color1_5.w))) * color0;
                         }
                         else
                         {
-                            uint param_42 = 1u;
-                            vec2 param_43 = frag_tex_coord1;
-                            int param_44 = 1;
-                            vec4 color1_6 = wired_bl_sample_domain(param_42, param_43, param_44) * frag_color1;
-                            uint param_45 = 2u;
-                            vec2 param_46 = frag_tex_coord2;
-                            int param_47 = 2;
-                            vec4 color2_6 = wired_bl_sample_domain(param_45, param_46, param_47) * frag_color2;
-                            vec3 _732 = (color0.xyz * color1_6.xyz) * color2_6.xyz;
-                            base.x = _732.x;
-                            base.y = _732.y;
-                            base.z = _732.z;
+                            vec4 color1_6 = sampledColor1 * frag_color1;
+                            vec4 color2_6 = sampledColor2 * frag_color2;
+                            vec3 _690 = (color0.xyz * color1_6.xyz) * color2_6.xyz;
+                            base.x = _690.x;
+                            base.y = _690.y;
+                            base.z = _690.z;
                             base.w = (color0.w * color1_6.w) * color2_6.w;
                         }
                     }
@@ -357,37 +326,41 @@ void main()
             }
         }
     }
-    if (_748)
+    if (_706)
     {
         float wetness = clamp(_193.worldLightParams.y, 0.0, 1.0);
         float frost = clamp(_193.worldLightParams.z, 0.0, 1.0);
         float luminance = dot(base.xyz, vec3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
-        vec4 _770 = base;
-        vec3 _772 = _770.xyz * mix(1.0, 0.819999992847442626953125, wetness);
-        base.x = _772.x;
-        base.y = _772.y;
-        base.z = _772.z;
-        vec4 _779 = base;
-        vec3 _793 = mix(_779.xyz, vec3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), vec3(frost * 0.550000011920928955078125));
-        base.x = _793.x;
-        base.y = _793.y;
-        base.z = _793.z;
+        vec4 _728 = base;
+        vec3 _730 = _728.xyz * mix(1.0, 0.819999992847442626953125, wetness);
+        base.x = _730.x;
+        base.y = _730.y;
+        base.z = _730.z;
+        vec4 _737 = base;
+        vec3 _751 = mix(_737.xyz, vec3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), vec3(frost * 0.550000011920928955078125));
+        base.x = _751.x;
+        base.y = _751.y;
+        base.z = _751.z;
     }
-    vec4 _808 = base;
-    vec3 _810 = _808.xyz + (color0.xyz * _193.emissionRadiance.xyz);
-    base.x = _810.x;
-    base.y = _810.y;
-    base.z = _810.z;
+    if (_193.materialFactors.x >= 0.0)
+    {
+        base *= _193.materialBaseColor;
+    }
+    vec4 _777 = base;
+    vec3 _779 = _777.xyz + (color0.xyz * _193.emissionRadiance.xyz);
+    base.x = _779.x;
+    base.y = _779.y;
+    base.z = _779.z;
     if (wired_advanced_fog_enabled())
     {
         float fogAmount = wired_advanced_fog_amount();
-        vec4 _822 = base;
-        vec3 _829 = mix(_822.xyz, _193.advancedFogColorDensity.xyz, vec3(fogAmount));
-        base.x = _829.x;
-        base.y = _829.y;
-        base.z = _829.z;
+        vec4 _791 = base;
+        vec3 _798 = mix(_791.xyz, _193.advancedFogColorDensity.xyz, vec3(fogAmount));
+        base.x = _798.x;
+        base.y = _798.y;
+        base.z = _798.z;
     }
-    if (_837)
+    if (_806)
     {
         if (base.w == 0.0)
         {
@@ -396,7 +369,7 @@ void main()
     }
     else
     {
-        if (_847)
+        if (_816)
         {
             if (dot(base.xyz, base.xyz) == 0.0)
             {
@@ -405,7 +378,7 @@ void main()
         }
     }
     out_color = base;
-    float param_48 = 1.0;
-    wiredTemporalWriteAux(param_48);
+    float param_12 = 1.0;
+    wiredTemporalWriteAux(param_12);
 }
 

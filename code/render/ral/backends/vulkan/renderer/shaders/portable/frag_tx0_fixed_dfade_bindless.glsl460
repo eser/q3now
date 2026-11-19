@@ -5,14 +5,14 @@ layout(constant_id = 26) const int lightmap_slot = 0;
 layout(constant_id = 8) const float identity_color = 1.0;
 layout(constant_id = 9) const float identity_alpha = 1.0;
 layout(constant_id = 0) const int alpha_test_func = 0;
-const bool _292 = (alpha_test_func == 1);
+const bool _294 = (alpha_test_func == 1);
 layout(constant_id = 1) const float alpha_test_value = 0.0;
-const bool _303 = (alpha_test_func == 2);
-const bool _313 = (alpha_test_func == 3);
-const bool _323 = (lightmap_slot != 0);
+const bool _305 = (alpha_test_func == 2);
+const bool _315 = (alpha_test_func == 3);
+const bool _325 = (lightmap_slot != 0);
 layout(constant_id = 7) const int discard_mode = 0;
-const bool _412 = (discard_mode == 1);
-const bool _422 = (discard_mode == 2);
+const bool _425 = (discard_mode == 1);
+const bool _435 = (discard_mode == 2);
 layout(constant_id = 11) const float depth_fade_scale = 2.0;
 layout(constant_id = 3) const int alpha_to_coverage = 0;
 
@@ -32,6 +32,8 @@ layout(binding = 0, std140) uniform UBO
     vec4 advancedFogColorDensity;
     vec4 advancedFogTypeFarEnabled;
     vec4 emissionRadiance;
+    vec4 materialBaseColor;
+    vec4 materialFactors;
 } _45;
 
 layout(binding = 0) uniform texture2D wired_bindless_images[64];
@@ -116,17 +118,18 @@ float wired_advanced_fog_amount()
 
 void main()
 {
+    uint param = 0u;
+    vec2 param_1 = frag_tex_coord0;
+    int param_2 = 0;
+    vec4 sampledColor0 = wired_bl_sample_domain(param, param_1, param_2);
     vec4 frag_color;
     frag_color.x = identity_color;
     frag_color.y = identity_color;
     frag_color.z = identity_color;
     frag_color.w = identity_alpha;
-    uint param = 0u;
-    vec2 param_1 = frag_tex_coord0;
-    int param_2 = 0;
-    vec4 color0 = wired_bl_sample_domain(param, param_1, param_2) * frag_color;
+    vec4 color0 = sampledColor0 * frag_color;
     vec4 base = color0;
-    if (_292)
+    if (_294)
     {
         if (color0.w == alpha_test_value)
         {
@@ -135,7 +138,7 @@ void main()
     }
     else
     {
-        if (_303)
+        if (_305)
         {
             if (color0.w >= alpha_test_value)
             {
@@ -144,7 +147,7 @@ void main()
         }
         else
         {
-            if (_313)
+            if (_315)
             {
                 if (color0.w < alpha_test_value)
                 {
@@ -154,37 +157,41 @@ void main()
         }
     }
     base = color0;
-    if (_323)
+    if (_325)
     {
         float wetness = clamp(_45.worldLightParams.y, 0.0, 1.0);
         float frost = clamp(_45.worldLightParams.z, 0.0, 1.0);
         float luminance = dot(base.xyz, vec3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
-        vec4 _345 = base;
-        vec3 _347 = _345.xyz * mix(1.0, 0.819999992847442626953125, wetness);
-        base.x = _347.x;
-        base.y = _347.y;
-        base.z = _347.z;
-        vec4 _354 = base;
-        vec3 _368 = mix(_354.xyz, vec3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), vec3(frost * 0.550000011920928955078125));
-        base.x = _368.x;
-        base.y = _368.y;
-        base.z = _368.z;
+        vec4 _347 = base;
+        vec3 _349 = _347.xyz * mix(1.0, 0.819999992847442626953125, wetness);
+        base.x = _349.x;
+        base.y = _349.y;
+        base.z = _349.z;
+        vec4 _356 = base;
+        vec3 _370 = mix(_356.xyz, vec3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), vec3(frost * 0.550000011920928955078125));
+        base.x = _370.x;
+        base.y = _370.y;
+        base.z = _370.z;
     }
-    vec4 _383 = base;
-    vec3 _385 = _383.xyz + (color0.xyz * _45.emissionRadiance.xyz);
-    base.x = _385.x;
-    base.y = _385.y;
-    base.z = _385.z;
+    if (_45.materialFactors.x >= 0.0)
+    {
+        base *= _45.materialBaseColor;
+    }
+    vec4 _396 = base;
+    vec3 _398 = _396.xyz + (color0.xyz * _45.emissionRadiance.xyz);
+    base.x = _398.x;
+    base.y = _398.y;
+    base.z = _398.z;
     if (wired_advanced_fog_enabled())
     {
         float fogAmount = wired_advanced_fog_amount();
-        vec4 _397 = base;
-        vec3 _404 = mix(_397.xyz, _45.advancedFogColorDensity.xyz, vec3(fogAmount));
-        base.x = _404.x;
-        base.y = _404.y;
-        base.z = _404.z;
+        vec4 _410 = base;
+        vec3 _417 = mix(_410.xyz, _45.advancedFogColorDensity.xyz, vec3(fogAmount));
+        base.x = _417.x;
+        base.y = _417.y;
+        base.z = _417.z;
     }
-    if (_412)
+    if (_425)
     {
         if (base.w == 0.0)
         {
@@ -193,7 +200,7 @@ void main()
     }
     else
     {
-        if (_422)
+        if (_435)
         {
             if (dot(base.xyz, base.xyz) == 0.0)
             {
@@ -201,22 +208,22 @@ void main()
             }
         }
     }
-    uint _440 = _45.packed_indices[1].x & 4095u;
-    uint _447 = (_45.packed_indices[1].x >> uint(12)) & 255u;
-    vec2 screenUV = gl_FragCoord.xy / vec2(textureSize(sampler2D(wired_bindless_images[_440], wired_bindless_samplers[_447]), 0));
-    uint _460 = _45.packed_indices[1].x & 4095u;
-    uint _467 = (_45.packed_indices[1].x >> uint(12)) & 255u;
-    float sceneDepth = texture(sampler2D(wired_bindless_images[_460], wired_bindless_samplers[_467]), screenUV).x;
+    uint _453 = _45.packed_indices[1].x & 4095u;
+    uint _460 = (_45.packed_indices[1].x >> uint(12)) & 255u;
+    vec2 screenUV = gl_FragCoord.xy / vec2(textureSize(sampler2D(wired_bindless_images[_453], wired_bindless_samplers[_460]), 0));
+    uint _473 = _45.packed_indices[1].x & 4095u;
+    uint _480 = (_45.packed_indices[1].x >> uint(12)) & 255u;
+    float sceneDepth = texture(sampler2D(wired_bindless_images[_473], wired_bindless_samplers[_480]), screenUV).x;
     float fragDepth = gl_FragCoord.z;
     float depthDiff = fragDepth - sceneDepth;
-    float _484 = depth_fade_scale * 0.0005000000237487256526947021484375;
-    float fadeFactor = smoothstep(0.0, _484, depthDiff);
+    float _497 = depth_fade_scale * 0.0005000000237487256526947021484375;
+    float fadeFactor = smoothstep(0.0, _497, depthDiff);
     base.w *= fadeFactor;
-    vec4 _493 = base;
-    vec3 _495 = _493.xyz * fadeFactor;
-    base.x = _495.x;
-    base.y = _495.y;
-    base.z = _495.z;
+    vec4 _506 = base;
+    vec3 _508 = _506.xyz * fadeFactor;
+    base.x = _508.x;
+    base.y = _508.y;
+    base.z = _508.z;
     out_color = base;
 }
 

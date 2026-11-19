@@ -13,13 +13,27 @@ const DEFAULT_OUTPUT = join(HERE, '..', 'ral_opengl_product_shader_catalog.inc')
 const MODULES = [
 	{ symbol: 'ral_opengl_product_vert_spv', name: 'Vertex' },
 	{ symbol: 'ral_opengl_product_frag_spv', name: 'Fragment' },
+	{ symbol: 'ral_sky_material_frag_spv', name: 'SkyMaterial' },
 	{ symbol: 'atmosphere_froxel_inject_comp_spv', name: 'AtmosphereInject' },
 	{ symbol: 'atmosphere_froxel_light_comp_spv', name: 'AtmosphereLight' },
 	{ symbol: 'atmosphere_froxel_cloud_comp_spv', name: 'AtmosphereCloud' },
 	{ symbol: 'atmosphere_froxel_integrate_comp_spv', name: 'AtmosphereIntegrate' },
+	{ symbol: 'forwardplus_tile_comp_spv', name: 'AtmosphereTile' },
 	{ symbol: 'atmospheric_integrate_comp_spv', name: 'WeatherIntegrate' },
 	{ symbol: 'atmospheric_vert_spv', name: 'WeatherVertex' },
 	{ symbol: 'atmospheric_frag_spv', name: 'WeatherFragment' },
+	{ symbol: 'sky_transmittance_comp_spv', name: 'SkyTransmittance' },
+	{ symbol: 'sky_multiscatter_comp_spv', name: 'SkyMultiscatter' },
+	{ symbol: 'sky_view_comp_spv', name: 'SkyView' },
+	{ symbol: 'source_sky_comp_spv', name: 'SkySource' },
+	{ symbol: 'project_sky_sh_comp_spv', name: 'SkyProjectSh' },
+	{ symbol: 'convolve_irradiance_comp_spv', name: 'SkyIrradiance' },
+	{ symbol: 'prefilter_radiance_comp_spv', name: 'SkyPrefilterRadiance' },
+	{ symbol: 'lens_occlusion_comp_spv', name: 'LensOcclusion' },
+	{ symbol: 'hdr_histogram_comp_spv', name: 'HdrHistogram' },
+	{ symbol: 'exposure_comp_spv', name: 'Exposure' },
+	{ symbol: 'gamma_vert_spv', name: 'FullscreenVertex' },
+	{ symbol: 'tonemap_tonemap_frag_spv', name: 'Tonemap' },
 ];
 
 function parseArgs(argv) {
@@ -51,7 +65,7 @@ function render(portable) {
 	const catalog = JSON.parse(readFileSync(join(portable, 'translation_catalog.json'), 'utf8'));
 	if (catalog.schemaVersion !== 2
 			|| JSON.stringify(catalog.requiredTargets) !== JSON.stringify(['glsl460'])
-			|| !Array.isArray(catalog.entries) || catalog.entries.length !== 299)
+			|| !Array.isArray(catalog.entries) || catalog.entries.length !== 315)
 		throw new Error('OpenGL GLSL 4.60 catalog is not the exact canonical corpus');
 	const rendered = [];
 	for (const module of MODULES) {

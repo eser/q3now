@@ -82,49 +82,49 @@ fn main_1() {
     ibl_N = _e58;
     let _e60 = ubo.eyePos;
     let _e62 = in_position_1;
-    ibl_V = normalize((_e60.xyz - _e62));
-    let _e65 = in_color0_1;
-    frag_color0_ = _e65;
-    let _e66 = in_color1_1;
-    frag_color1_ = _e66;
-    let _e67 = in_color2_1;
-    frag_color2_ = _e67;
-    let _e68 = in_tex_coord0_1;
-    frag_tex_coord0_ = _e68;
-    let _e69 = in_tex_coord1_1;
-    frag_tex_coord1_ = _e69;
-    let _e70 = in_tex_coord2_1;
-    frag_tex_coord2_ = _e70;
-    let _e71 = in_position_1;
-    let _e73 = ubo.fogDistanceVector;
-    let _e78 = ubo.fogDistanceVector[3u];
-    s = (dot(_e71, _e73.xyz) + _e78);
-    let _e80 = in_position_1;
-    let _e82 = ubo.fogDepthVector;
-    let _e87 = ubo.fogDepthVector[3u];
-    t = (dot(_e80, _e82.xyz) + _e87);
-    let _e91 = ubo.fogEyeT[1u];
-    if (_e91 == 1f) {
-        let _e93 = t;
-        if (_e93 < 0f) {
+    ibl_V = (_e60.xyz - _e62);
+    let _e64 = in_color0_1;
+    frag_color0_ = _e64;
+    let _e65 = in_color1_1;
+    frag_color1_ = _e65;
+    let _e66 = in_color2_1;
+    frag_color2_ = _e66;
+    let _e67 = in_tex_coord0_1;
+    frag_tex_coord0_ = _e67;
+    let _e68 = in_tex_coord1_1;
+    frag_tex_coord1_ = _e68;
+    let _e69 = in_tex_coord2_1;
+    frag_tex_coord2_ = _e69;
+    let _e70 = in_position_1;
+    let _e72 = ubo.fogDistanceVector;
+    let _e77 = ubo.fogDistanceVector[3u];
+    s = (dot(_e70, _e72.xyz) + _e77);
+    let _e79 = in_position_1;
+    let _e81 = ubo.fogDepthVector;
+    let _e86 = ubo.fogDepthVector[3u];
+    t = (dot(_e79, _e81.xyz) + _e86);
+    let _e90 = ubo.fogEyeT[1u];
+    if (_e90 == 1f) {
+        let _e92 = t;
+        if (_e92 < 0f) {
             t = 0.03125f;
         } else {
             t = 0.96875f;
         }
     } else {
-        let _e95 = t;
-        if (_e95 < 1f) {
+        let _e94 = t;
+        if (_e94 < 1f) {
             t = 0.03125f;
         } else {
-            let _e97 = t;
-            let _e99 = t;
-            let _e102 = ubo.fogEyeT[0u];
-            t = (0.03125f + ((0.9375f * _e97) / (_e99 - _e102)));
+            let _e96 = t;
+            let _e98 = t;
+            let _e101 = ubo.fogEyeT[0u];
+            t = (0.03125f + ((0.9375f * _e96) / (_e98 - _e101)));
         }
     }
-    let _e106 = s;
-    let _e107 = t;
-    fog_tex_coord = vec2<f32>(_e106, _e107);
+    let _e105 = s;
+    let _e106 = t;
+    fog_tex_coord = vec2<f32>(_e105, _e106);
     return;
 }
 

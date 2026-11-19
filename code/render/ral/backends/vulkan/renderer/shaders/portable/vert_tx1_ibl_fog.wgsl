@@ -73,43 +73,43 @@ fn main_1() {
     ibl_N = _e52;
     let _e54 = ubo.eyePos;
     let _e56 = in_position_1;
-    ibl_V = normalize((_e54.xyz - _e56));
-    let _e59 = in_color0_1;
-    frag_color0_ = _e59;
-    let _e60 = in_tex_coord0_1;
-    frag_tex_coord0_ = _e60;
-    let _e61 = in_tex_coord1_1;
-    frag_tex_coord1_ = _e61;
-    let _e62 = in_position_1;
-    let _e64 = ubo.fogDistanceVector;
-    let _e69 = ubo.fogDistanceVector[3u];
-    s = (dot(_e62, _e64.xyz) + _e69);
-    let _e71 = in_position_1;
-    let _e73 = ubo.fogDepthVector;
-    let _e78 = ubo.fogDepthVector[3u];
-    t = (dot(_e71, _e73.xyz) + _e78);
-    let _e82 = ubo.fogEyeT[1u];
-    if (_e82 == 1f) {
-        let _e84 = t;
-        if (_e84 < 0f) {
+    ibl_V = (_e54.xyz - _e56);
+    let _e58 = in_color0_1;
+    frag_color0_ = _e58;
+    let _e59 = in_tex_coord0_1;
+    frag_tex_coord0_ = _e59;
+    let _e60 = in_tex_coord1_1;
+    frag_tex_coord1_ = _e60;
+    let _e61 = in_position_1;
+    let _e63 = ubo.fogDistanceVector;
+    let _e68 = ubo.fogDistanceVector[3u];
+    s = (dot(_e61, _e63.xyz) + _e68);
+    let _e70 = in_position_1;
+    let _e72 = ubo.fogDepthVector;
+    let _e77 = ubo.fogDepthVector[3u];
+    t = (dot(_e70, _e72.xyz) + _e77);
+    let _e81 = ubo.fogEyeT[1u];
+    if (_e81 == 1f) {
+        let _e83 = t;
+        if (_e83 < 0f) {
             t = 0.03125f;
         } else {
             t = 0.96875f;
         }
     } else {
-        let _e86 = t;
-        if (_e86 < 1f) {
+        let _e85 = t;
+        if (_e85 < 1f) {
             t = 0.03125f;
         } else {
-            let _e88 = t;
-            let _e90 = t;
-            let _e93 = ubo.fogEyeT[0u];
-            t = (0.03125f + ((0.9375f * _e88) / (_e90 - _e93)));
+            let _e87 = t;
+            let _e89 = t;
+            let _e92 = ubo.fogEyeT[0u];
+            t = (0.03125f + ((0.9375f * _e87) / (_e89 - _e92)));
         }
     }
-    let _e97 = s;
-    let _e98 = t;
-    fog_tex_coord = vec2<f32>(_e97, _e98);
+    let _e96 = s;
+    let _e97 = t;
+    fog_tex_coord = vec2<f32>(_e96, _e97);
     return;
 }
 

@@ -15,13 +15,13 @@ constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(8u, 8u, 1u);
 
 struct spvDescriptorSetBuffer0
 {
-    texture2d_array<float, access::write> dstRadiance [[id(0)]];
-    texturecube<float> srcTex [[id(1)]];
-    sampler srcSamp [[id(2)]];
+    texture2d_array<float> srcTex [[id(0)]];
+    sampler srcSamp [[id(1)]];
+    texture2d_array<float, access::write> dstRadiance [[id(2)]];
 };
 
 static inline __attribute__((always_inline))
-float3 cubeFaceDir(thread const uint& face, thread const float2& uv)
+float3 wired_sky_cube_direction(thread const uint& face, thread const float2& uv)
 {
     float u = uv.x;
     float v = uv.y;
@@ -66,6 +66,75 @@ float3 cubeFaceDir(thread const uint& face, thread const float2& uv)
 }
 
 static inline __attribute__((always_inline))
+float3 wired_sky_cube_uv_layer(thread const float3& dir)
+{
+    float3 a = abs(dir);
+    bool _117 = a.x >= a.y;
+    bool _125;
+    if (_117)
+    {
+        _125 = a.x >= a.z;
+    }
+    else
+    {
+        _125 = _117;
+    }
+    uint face;
+    float2 uv;
+    if (_125)
+    {
+        if (dir.x >= 0.0)
+        {
+            face = 0u;
+            uv = float2(-dir.z, -dir.y) / float2(a.x);
+        }
+        else
+        {
+            face = 1u;
+            uv = float2(dir.z, -dir.y) / float2(a.x);
+        }
+    }
+    else
+    {
+        if (a.y >= a.z)
+        {
+            if (dir.y >= 0.0)
+            {
+                face = 2u;
+                uv = float2(dir.x, dir.z) / float2(a.y);
+            }
+            else
+            {
+                face = 3u;
+                uv = float2(dir.x, -dir.z) / float2(a.y);
+            }
+        }
+        else
+        {
+            if (dir.z >= 0.0)
+            {
+                face = 4u;
+                uv = float2(dir.x, -dir.y) / float2(a.z);
+            }
+            else
+            {
+                face = 5u;
+                uv = float2(-dir.x, -dir.y) / float2(a.z);
+            }
+        }
+    }
+    return float3((uv * 0.5) + float2(0.5), float(face));
+}
+
+static inline __attribute__((always_inline))
+float3 sampleSource(thread const float3& dir, texture2d_array<float> srcTex, sampler srcSamp)
+{
+    float3 param = dir;
+    float3 _383 = wired_sky_cube_uv_layer(param);
+    return srcTex.sample(srcSamp, _383.xy, uint(rint(_383.z)), level(0.0)).xyz;
+}
+
+static inline __attribute__((always_inline))
 float radicalInverse_VdC(thread uint& bits)
 {
     bits = (bits << 16u) | (bits >> 16u);
@@ -80,8 +149,8 @@ static inline __attribute__((always_inline))
 float2 hammersley(thread const uint& i, thread const uint& n)
 {
     uint param = i;
-    float _93 = radicalInverse_VdC(param);
-    return float2(float(i) / float(n), _93);
+    float _288 = radicalInverse_VdC(param);
+    return float2(float(i) / float(n), _288);
 }
 
 static inline __attribute__((always_inline))
@@ -101,52 +170,53 @@ float3 importanceSampleGGX(thread const float2& xi, thread const float& roughnes
     return fast::normalize(((tangent * H.x) + (bitangent * H.y)) + (N * H.z));
 }
 
-kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], constant Push& _295 [[buffer(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], constant Push& _441 [[buffer(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
 {
     uint2 size = uint2(int3(spvDescriptorSet0.dstRadiance.get_width(), spvDescriptorSet0.dstRadiance.get_height(), spvDescriptorSet0.dstRadiance.get_array_size()).xy);
     int3 coord = int3(gl_GlobalInvocationID);
-    bool _269 = uint(coord.x) >= size.x;
-    bool _279;
-    if (!_269)
+    bool _415 = uint(coord.x) >= size.x;
+    bool _425;
+    if (!_415)
     {
-        _279 = uint(coord.y) >= size.y;
+        _425 = uint(coord.y) >= size.y;
     }
     else
     {
-        _279 = _269;
+        _425 = _415;
     }
-    bool _288;
-    if (!_279)
+    bool _434;
+    if (!_425)
     {
-        _288 = uint(coord.z) >= 6u;
+        _434 = uint(coord.z) >= 6u;
     }
     else
     {
-        _288 = _279;
+        _434 = _425;
     }
-    if (_288)
+    if (_434)
     {
         return;
     }
-    float _301;
-    if (_295.roughnessMips > 1u)
+    float _447;
+    if (_441.roughnessMips > 1u)
     {
-        _301 = float(_295.roughnessIdx) / float(_295.roughnessMips - 1u);
+        _447 = float(_441.roughnessIdx) / float(_441.roughnessMips - 1u);
     }
     else
     {
-        _301 = 0.0;
+        _447 = 0.0;
     }
-    float roughness = _301;
+    float roughness = _447;
     float2 uv = (((float2(coord.xy) + float2(0.5)) / float2(size)) * 2.0) - float2(1.0);
     uint param = uint(coord.z);
     float2 param_1 = uv;
-    float3 R = cubeFaceDir(param, param_1);
+    float3 R = wired_sky_cube_direction(param, param_1);
     float3 N = R;
     float3 V = R;
     if (roughness <= 0.0)
     {
-        float3 c = spvDescriptorSet0.srcTex.sample(spvDescriptorSet0.srcSamp, R, level(0.0)).xyz;
+        float3 param_2 = R;
+        float3 c = sampleSource(param_2, spvDescriptorSet0.srcTex, spvDescriptorSet0.srcSamp);
         spvDescriptorSet0.dstRadiance.write(float4(c, 1.0), uint2(coord.xy), uint(coord.z));
         return;
     }
@@ -154,31 +224,33 @@ kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buff
     float totalWeight = 0.0;
     for (uint i = 0u; i < 1024u; i++)
     {
-        uint param_2 = i;
-        uint param_3 = 1024u;
-        float2 xi = hammersley(param_2, param_3);
-        float2 param_4 = xi;
-        float param_5 = roughness;
-        float3 param_6 = N;
-        float3 H = importanceSampleGGX(param_4, param_5, param_6);
+        uint param_3 = i;
+        uint param_4 = 1024u;
+        float2 xi = hammersley(param_3, param_4);
+        float2 param_5 = xi;
+        float param_6 = roughness;
+        float3 param_7 = N;
+        float3 H = importanceSampleGGX(param_5, param_6, param_7);
         float3 L = fast::normalize((H * (2.0 * dot(V, H))) - V);
         float NdotL = fast::max(dot(N, L), 0.0);
         if (NdotL > 0.0)
         {
-            prefiltered += (spvDescriptorSet0.srcTex.sample(spvDescriptorSet0.srcSamp, L, level(0.0)).xyz * NdotL);
+            float3 param_8 = L;
+            prefiltered += (sampleSource(param_8, spvDescriptorSet0.srcTex, spvDescriptorSet0.srcSamp) * NdotL);
             totalWeight += NdotL;
         }
     }
-    float3 _430;
+    float3 _561;
     if (totalWeight > 0.0)
     {
-        _430 = prefiltered / float3(totalWeight);
+        _561 = prefiltered / float3(totalWeight);
     }
     else
     {
-        _430 = spvDescriptorSet0.srcTex.sample(spvDescriptorSet0.srcSamp, R, level(0.0)).xyz;
+        float3 param_9 = R;
+        _561 = sampleSource(param_9, spvDescriptorSet0.srcTex, spvDescriptorSet0.srcSamp);
     }
-    float3 result = _430;
+    float3 result = _561;
     spvDescriptorSet0.dstRadiance.write(float4(result, 1.0), uint2(coord.xy), uint(coord.z));
 }
 

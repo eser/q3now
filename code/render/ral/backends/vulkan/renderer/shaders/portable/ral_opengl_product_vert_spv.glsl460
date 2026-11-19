@@ -1,5 +1,15 @@
 #version 460
 
+layout(binding = 2, std140) uniform ProductMaterialFactors
+{
+    vec4 baseColor;
+    vec4 factors;
+    vec4 beamStartColor;
+    vec4 beamEndColor;
+    vec4 beamScaleOffset;
+    uvec4 beamFlags;
+} productMaterial;
+
 layout(std140, binding = 0) uniform ProductDraw
 {
     vec4 viewOriginDrawSpace;
@@ -10,7 +20,7 @@ layout(std140, binding = 0) uniform ProductDraw
     vec4 viewportAlpha;
     vec4 atmosphereEyeDensity;
     vec4 atmosphereColorVisibility;
-    vec4 atmosphereHeightCloud;
+    vec4 atmosphereHeightSky;
     uvec4 atmosphereFroxelGrid;
     vec4 localSh[4];
     uvec4 staticLighting;
@@ -43,6 +53,21 @@ void main()
     texCoord = in_tex_coord;
     lightmapCoord = in_lightmap_coord;
     color = in_color;
+    bool _118 = productDraw.atmosphereHeightSky.w < 0.5;
+    bool _128;
+    if (_118)
+    {
+        _128 = productMaterial.beamFlags.x != 0u;
+    }
+    else
+    {
+        _128 = _118;
+    }
+    if (_128)
+    {
+        color = mix(productMaterial.beamStartColor, productMaterial.beamEndColor, vec4(in_tex_coord.x));
+        texCoord = (in_tex_coord * productMaterial.beamScaleOffset.xy) + productMaterial.beamScaleOffset.zw;
+    }
     worldPosition = in_position;
     worldNormal = normalize(in_normal);
 }

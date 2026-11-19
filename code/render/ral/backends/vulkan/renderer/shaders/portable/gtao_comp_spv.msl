@@ -35,22 +35,28 @@ struct spvDescriptorSetBuffer0
 };
 
 static inline __attribute__((always_inline))
-float sampleDeviceDepth(thread const float2& uv, texture2d<float> depthTex, sampler depthSampler)
+float sampleViewDepth(thread const float2& uv, thread const float& mip, texture2d<float> depthTex, sampler depthSampler)
 {
-    return depthTex.sample(depthSampler, uv, level(0.0)).x;
+    return depthTex.sample(depthSampler, uv, level(mip)).x;
 }
 
 static inline __attribute__((always_inline))
-float linearizeDepth(thread const float& z, constant GtaoPush& pc)
+float sampleViewDepth0(thread const float2& uv, texture2d<float> depthTex, sampler depthSampler)
 {
-    return (pc.zNear * pc.zFar) / (pc.zNear + (z * (pc.zFar - pc.zNear)));
+    float2 param = uv;
+    float param_1 = 0.0;
+    return sampleViewDepth(param, param_1, depthTex, depthSampler);
 }
 
 static inline __attribute__((always_inline))
-float3 viewPosFromUV(thread const float2& uv, thread const float& deviceZ, constant GtaoPush& pc)
+float skyDepthThreshold(constant GtaoPush& pc)
 {
-    float param = deviceZ;
-    float vz = linearizeDepth(param, pc);
+    return fast::min(pc.zFar, 65000.0) * 0.999000012874603271484375;
+}
+
+static inline __attribute__((always_inline))
+float3 viewPosFromUV(thread const float2& uv, thread const float& vz, constant GtaoPush& pc)
+{
     float2 ndc = (uv * 2.0) - float2(1.0);
     float2 vxy = ((ndc * pc.ndcToViewMul) + pc.ndcToViewAdd) * vz;
     return float3(vxy, vz);
@@ -60,13 +66,13 @@ static inline __attribute__((always_inline))
 float3 normalFromDepth(thread const float2& uv, thread const float3& P, thread const float2& texel, constant GtaoPush& pc, texture2d<float> depthTex, sampler depthSampler)
 {
     float2 param = uv - float2(texel.x, 0.0);
-    float zL = sampleDeviceDepth(param, depthTex, depthSampler);
+    float zL = sampleViewDepth0(param, depthTex, depthSampler);
     float2 param_1 = uv + float2(texel.x, 0.0);
-    float zR = sampleDeviceDepth(param_1, depthTex, depthSampler);
+    float zR = sampleViewDepth0(param_1, depthTex, depthSampler);
     float2 param_2 = uv - float2(0.0, texel.y);
-    float zU = sampleDeviceDepth(param_2, depthTex, depthSampler);
+    float zU = sampleViewDepth0(param_2, depthTex, depthSampler);
     float2 param_3 = uv + float2(0.0, texel.y);
-    float zD = sampleDeviceDepth(param_3, depthTex, depthSampler);
+    float zD = sampleViewDepth0(param_3, depthTex, depthSampler);
     float2 param_4 = uv - float2(texel.x, 0.0);
     float param_5 = zL;
     float3 Pl = viewPosFromUV(param_4, param_5, pc);
@@ -79,38 +85,38 @@ float3 normalFromDepth(thread const float2& uv, thread const float3& P, thread c
     float2 param_10 = uv + float2(0.0, texel.y);
     float param_11 = zD;
     float3 Pd = viewPosFromUV(param_10, param_11, pc);
-    float3 _233;
+    float3 _230;
     if (abs(Pr.z - P.z) < abs(P.z - Pl.z))
     {
-        _233 = Pr - P;
+        _230 = Pr - P;
     }
     else
     {
-        _233 = P - Pl;
+        _230 = P - Pl;
     }
-    float3 dPdx = _233;
-    float3 _258;
+    float3 dPdx = _230;
+    float3 _255;
     if (abs(Pd.z - P.z) < abs(P.z - Pu.z))
     {
-        _258 = Pd - P;
+        _255 = Pd - P;
     }
     else
     {
-        _258 = P - Pu;
+        _255 = P - Pu;
     }
-    float3 dPdy = _258;
+    float3 dPdy = _255;
     float3 n = cross(dPdx, dPdy);
     float len = length(n);
-    float3 _279;
+    float3 _276;
     if (len > 9.9999999392252902907785028219223e-09)
     {
-        _279 = n / float3(len);
+        _276 = n / float3(len);
     }
     else
     {
-        _279 = float3(0.0, 0.0, 1.0);
+        _276 = float3(0.0, 0.0, 1.0);
     }
-    return _279;
+    return _276;
 }
 
 static inline __attribute__((always_inline))
@@ -124,32 +130,32 @@ float fastAcos(thread const float& x)
 {
     float xa = abs(x);
     float r = (((-0.15658299624919891357421875) * xa) + 1.57079637050628662109375) * sqrt(1.0 - xa);
-    float _134;
+    float _131;
     if (x >= 0.0)
     {
-        _134 = r;
+        _131 = r;
     }
     else
     {
-        _134 = 3.1415927410125732421875 - r;
+        _131 = 3.1415927410125732421875 - r;
     }
-    return _134;
+    return _131;
 }
 
 static inline __attribute__((always_inline))
 float sscsContact(thread const float3& P, thread const float2& texel, thread const float& _noise, constant GtaoPush& pc, texture2d<float> depthTex, sampler depthSampler)
 {
-    bool _307 = pc.sscsEnabled == 0;
-    bool _315;
-    if (!_307)
+    bool _304 = pc.sscsEnabled == 0;
+    bool _312;
+    if (!_304)
     {
-        _315 = pc.sscsStrength <= 0.0;
+        _312 = pc.sscsStrength <= 0.0;
     }
     else
     {
-        _315 = _307;
+        _312 = _304;
     }
-    if (_315)
+    if (_312)
     {
         return 1.0;
     }
@@ -166,58 +172,56 @@ float sscsContact(thread const float3& P, thread const float2& texel, thread con
         }
         float2 ndc = ((sp.xy / float2(sp.z)) - pc.ndcToViewAdd) / pc.ndcToViewMul;
         float2 uvS = (ndc * 0.5) + float2(0.5);
-        bool _389 = uvS.x < 0.0;
-        bool _396;
-        if (!_389)
+        bool _386 = uvS.x < 0.0;
+        bool _393;
+        if (!_386)
         {
-            _396 = uvS.x > 1.0;
+            _393 = uvS.x > 1.0;
         }
         else
         {
-            _396 = _389;
+            _393 = _386;
         }
-        bool _403;
-        if (!_396)
+        bool _400;
+        if (!_393)
         {
-            _403 = uvS.y < 0.0;
+            _400 = uvS.y < 0.0;
         }
         else
         {
-            _403 = _396;
+            _400 = _393;
         }
-        bool _410;
-        if (!_403)
+        bool _407;
+        if (!_400)
         {
-            _410 = uvS.y > 1.0;
+            _407 = uvS.y > 1.0;
         }
         else
         {
-            _410 = _403;
+            _407 = _400;
         }
-        if (_410)
+        if (_407)
         {
             break;
         }
         float2 param = uvS;
-        float zScene = sampleDeviceDepth(param, depthTex, depthSampler);
-        if (zScene <= 0.0)
+        float sceneVz = sampleViewDepth0(param, depthTex, depthSampler);
+        if (sceneVz >= skyDepthThreshold(pc))
         {
             continue;
         }
-        float param_1 = zScene;
-        float sceneVz = linearizeDepth(param_1, pc);
         float diff = sp.z - sceneVz;
-        bool _435 = diff > (stepLen * 0.5);
-        bool _442;
-        if (_435)
+        bool _429 = diff > (stepLen * 0.5);
+        bool _436;
+        if (_429)
         {
-            _442 = diff < pc.sscsRadius;
+            _436 = diff < pc.sscsRadius;
         }
         else
         {
-            _442 = _435;
+            _436 = _429;
         }
-        if (_442)
+        if (_436)
         {
             occluded = 1.0;
             break;
@@ -230,25 +234,25 @@ kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buff
 {
     int2 pix = int2(gl_GlobalInvocationID.xy);
     int2 dim = int2(pc.viewportSize);
-    bool _473 = pix.x >= dim.x;
-    bool _482;
-    if (!_473)
+    bool _467 = pix.x >= dim.x;
+    bool _476;
+    if (!_467)
     {
-        _482 = pix.y >= dim.y;
+        _476 = pix.y >= dim.y;
     }
     else
     {
-        _482 = _473;
+        _476 = _467;
     }
-    if (_482)
+    if (_476)
     {
         return;
     }
     float2 texel = float2(1.0) / pc.viewportSize;
     float2 uv = (float2(pix) + float2(0.5)) * texel;
     float2 param = uv;
-    float centerZ = sampleDeviceDepth(param, spvDescriptorSet0.depthTex, spvDescriptorSet0.depthSampler);
-    if (centerZ <= 0.0)
+    float centerZ = sampleViewDepth0(param, spvDescriptorSet0.depthTex, spvDescriptorSet0.depthSampler);
+    if (centerZ >= skyDepthThreshold(pc))
     {
         spvDescriptorSet0.aoImage.write(float4(1.0), uint2(pix));
         return;
@@ -296,18 +300,22 @@ kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buff
             s = powr(s, 2.0);
             s += minS;
             float2 off = (dir * s) * screenRadiusUV;
+            float offPixels = length(off * pc.viewportSize);
+            float mip = fast::clamp(log2(fast::max(offPixels, 1.0)) - 3.2999999523162841796875, 0.0, 4.0);
             float2 uv0 = uv + off;
             float2 uv1 = uv - off;
             float2 param_8 = uv0;
-            float z0 = sampleDeviceDepth(param_8, spvDescriptorSet0.depthTex, spvDescriptorSet0.depthSampler);
-            float2 param_9 = uv1;
-            float z1 = sampleDeviceDepth(param_9, spvDescriptorSet0.depthTex, spvDescriptorSet0.depthSampler);
-            float2 param_10 = uv0;
-            float param_11 = z0;
-            float3 s0 = viewPosFromUV(param_10, param_11, pc);
-            float2 param_12 = uv1;
-            float param_13 = z1;
-            float3 s1 = viewPosFromUV(param_12, param_13, pc);
+            float param_9 = mip;
+            float z0 = sampleViewDepth(param_8, param_9, spvDescriptorSet0.depthTex, spvDescriptorSet0.depthSampler);
+            float2 param_10 = uv1;
+            float param_11 = mip;
+            float z1 = sampleViewDepth(param_10, param_11, spvDescriptorSet0.depthTex, spvDescriptorSet0.depthSampler);
+            float2 param_12 = uv0;
+            float param_13 = z0;
+            float3 s0 = viewPosFromUV(param_12, param_13, pc);
+            float2 param_14 = uv1;
+            float param_15 = z1;
+            float3 s1 = viewPosFromUV(param_14, param_15, pc);
             float3 d0 = s0 - P;
             float3 d1 = s1 - P;
             float dist0 = length(d0);
@@ -318,21 +326,22 @@ kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buff
             w1 = 1.0 - w1;
             float shc0 = dot(d0 / float3(fast::max(dist0, 9.9999997473787516355514526367188e-06)), V);
             float shc1 = dot(d1 / float3(fast::max(dist1, 9.9999997473787516355514526367188e-06)), V);
-            if (z0 <= 0.0)
+            float skyZ = skyDepthThreshold(pc);
+            if (z0 >= skyZ)
             {
                 shc0 = horizonCos0;
             }
-            if (z1 <= 0.0)
+            if (z1 >= skyZ)
             {
                 shc1 = horizonCos1;
             }
             horizonCos0 = fast::max(horizonCos0, mix(horizonCos0, shc0, w0));
             horizonCos1 = fast::max(horizonCos1, mix(horizonCos1, shc1, w1));
         }
-        float param_14 = fast::clamp(horizonCos1, -1.0, 1.0);
-        float h0 = -fastAcos(param_14);
-        float param_15 = fast::clamp(horizonCos0, -1.0, 1.0);
-        float h1 = fastAcos(param_15);
+        float param_16 = fast::clamp(horizonCos1, -1.0, 1.0);
+        float h0 = -fastAcos(param_16);
+        float param_17 = fast::clamp(horizonCos0, -1.0, 1.0);
+        float h1 = fastAcos(param_17);
         float iarc0 = ((cosN + ((2.0 * h0) * sin(n))) - cos((2.0 * h0) - n)) * 0.25;
         float iarc1 = ((cosN + ((2.0 * h1) * sin(n))) - cos((2.0 * h1) - n)) * 0.25;
         visibility += (projLen * (iarc0 + iarc1));
@@ -342,10 +351,10 @@ kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buff
     visibility = powr(visibility, pc.finalPower);
     visibility = mix(1.0, visibility, fast::clamp(pc.intensity, 0.0, 1.0));
     visibility = fast::max(visibility, 0.0);
-    float3 param_16 = P;
-    float2 param_17 = texel;
-    float param_18 = _noise;
-    visibility *= sscsContact(param_16, param_17, param_18, pc, spvDescriptorSet0.depthTex, spvDescriptorSet0.depthSampler);
+    float3 param_18 = P;
+    float2 param_19 = texel;
+    float param_20 = _noise;
+    visibility *= sscsContact(param_18, param_19, param_20, pc, spvDescriptorSet0.depthTex, spvDescriptorSet0.depthSampler);
     spvDescriptorSet0.aoImage.write(float4(visibility), uint2(pix));
 }
 

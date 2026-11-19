@@ -1,0 +1,209 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct Push
+{
+    uint coefficient;
+};
+
+struct SkySH
+{
+    float4 coefficients[9];
+};
+
+constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(1u);
+
+struct spvDescriptorSetBuffer0
+{
+    texture2d_array<float> srcTex [[id(0)]];
+    sampler srcSamp [[id(1)]];
+    device SkySH* dstSH [[id(2)]];
+};
+
+static inline __attribute__((always_inline))
+float3 wired_sky_cube_direction(thread const uint& face, thread const float2& uv)
+{
+    float u = uv.x;
+    float v = uv.y;
+    float3 dir;
+    if (face == 0u)
+    {
+        dir = float3(1.0, -v, -u);
+    }
+    else
+    {
+        if (face == 1u)
+        {
+            dir = float3(-1.0, -v, u);
+        }
+        else
+        {
+            if (face == 2u)
+            {
+                dir = float3(u, 1.0, v);
+            }
+            else
+            {
+                if (face == 3u)
+                {
+                    dir = float3(u, -1.0, -v);
+                }
+                else
+                {
+                    if (face == 4u)
+                    {
+                        dir = float3(u, -v, 1.0);
+                    }
+                    else
+                    {
+                        dir = float3(-u, -v, -1.0);
+                    }
+                }
+            }
+        }
+    }
+    return fast::normalize(dir);
+}
+
+static inline __attribute__((always_inline))
+float3 wired_sky_cube_uv_layer(thread const float3& dir)
+{
+    float3 a = abs(dir);
+    bool _107 = a.x >= a.y;
+    bool _115;
+    if (_107)
+    {
+        _115 = a.x >= a.z;
+    }
+    else
+    {
+        _115 = _107;
+    }
+    uint face;
+    float2 uv;
+    if (_115)
+    {
+        if (dir.x >= 0.0)
+        {
+            face = 0u;
+            uv = float2(-dir.z, -dir.y) / float2(a.x);
+        }
+        else
+        {
+            face = 1u;
+            uv = float2(dir.z, -dir.y) / float2(a.x);
+        }
+    }
+    else
+    {
+        if (a.y >= a.z)
+        {
+            if (dir.y >= 0.0)
+            {
+                face = 2u;
+                uv = float2(dir.x, dir.z) / float2(a.y);
+            }
+            else
+            {
+                face = 3u;
+                uv = float2(dir.x, -dir.z) / float2(a.y);
+            }
+        }
+        else
+        {
+            if (dir.z >= 0.0)
+            {
+                face = 4u;
+                uv = float2(dir.x, -dir.y) / float2(a.z);
+            }
+            else
+            {
+                face = 5u;
+                uv = float2(-dir.x, -dir.y) / float2(a.z);
+            }
+        }
+    }
+    return float3((uv * 0.5) + float2(0.5), float(face));
+}
+
+static inline __attribute__((always_inline))
+float3 sampleSource(thread const float3& dir, texture2d_array<float> srcTex, sampler srcSamp)
+{
+    float3 param = dir;
+    float3 _234 = wired_sky_cube_uv_layer(param);
+    return srcTex.sample(srcSamp, _234.xy, uint(rint(_234.z)), level(0.0)).xyz;
+}
+
+static inline __attribute__((always_inline))
+float shBasis(thread const uint& index, thread const float3& d)
+{
+    if (index == 0u)
+    {
+        return 0.2820948064327239990234375;
+    }
+    if (index == 1u)
+    {
+        return 0.48860251903533935546875 * d.y;
+    }
+    if (index == 2u)
+    {
+        return 0.48860251903533935546875 * d.z;
+    }
+    if (index == 3u)
+    {
+        return 0.48860251903533935546875 * d.x;
+    }
+    if (index == 4u)
+    {
+        return (1.09254848957061767578125 * d.x) * d.y;
+    }
+    if (index == 5u)
+    {
+        return (1.09254848957061767578125 * d.y) * d.z;
+    }
+    if (index == 6u)
+    {
+        return 0.3153915703296661376953125 * (((3.0 * d.z) * d.z) - 1.0);
+    }
+    if (index == 7u)
+    {
+        return (1.09254848957061767578125 * d.x) * d.z;
+    }
+    return 0.546274244785308837890625 * ((d.x * d.x) - (d.y * d.y));
+}
+
+kernel void main0(device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], constant Push& _339 [[buffer(1)]])
+{
+    if (_339.coefficient >= 9u)
+    {
+        return;
+    }
+    float3 sum = float3(0.0);
+    float weightSum = 0.0;
+    for (uint face = 0u; face < 6u; face++)
+    {
+        for (uint y = 0u; y < 16u; y++)
+        {
+            for (uint x = 0u; x < 16u; x++)
+            {
+                float2 uv = (((float2(float(x), float(y)) + float2(0.5)) / float2(16.0)) * 2.0) - float2(1.0);
+                uint param = face;
+                float2 param_1 = uv;
+                float3 dir = wired_sky_cube_direction(param, param_1);
+                float q = 1.0 + dot(uv, uv);
+                float weight = 1.0 / (q * sqrt(q));
+                float3 param_2 = dir;
+                uint param_3 = _339.coefficient;
+                float3 param_4 = dir;
+                sum += ((sampleSource(param_2, spvDescriptorSet0.srcTex, spvDescriptorSet0.srcSamp) * shBasis(param_3, param_4)) * weight);
+                weightSum += weight;
+            }
+        }
+    }
+    (*spvDescriptorSet0.dstSH).coefficients[_339.coefficient] = float4(sum * (12.56637096405029296875 / fast::max(weightSum, 9.9999999747524270787835121154785e-07)), 0.0);
+}
+

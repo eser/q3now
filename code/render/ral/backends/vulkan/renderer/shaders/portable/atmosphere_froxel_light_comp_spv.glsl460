@@ -39,7 +39,7 @@ layout(binding = 2, std430) readonly buffer Lights
 layout(binding = 3, std430) writeonly buffer LitMedia
 {
     vec4 radianceExtinction[];
-} _279;
+} _311;
 
 void main()
 {
@@ -77,11 +77,20 @@ void main()
         l.colorInvRadius2 = _234.light[lightIndex].colorInvRadius2;
         l.endpointLinear = _234.light[lightIndex].endpointLinear;
         vec3 delta = l.positionRadius.xyz - world;
+        if (l.endpointLinear.w > 0.5)
+        {
+            vec3 segment = l.endpointLinear.xyz - l.positionRadius.xyz;
+            float lengthSquared = dot(segment, segment);
+            if (lengthSquared > 0.0)
+            {
+                delta += (segment * clamp((-dot(delta, segment)) / lengthSquared, 0.0, 1.0));
+            }
+        }
         float radius = max(l.positionRadius.w, 0.001000000047497451305389404296875);
         float attenuation = max(1.0 - (length(delta) / radius), 0.0);
         attenuation *= attenuation;
         illumination += (l.colorInvRadius2.xyz * attenuation);
     }
-    _279.radianceExtinction[index] = vec4(medium.xyz * illumination, medium.w);
+    _311.radianceExtinction[index] = vec4(medium.xyz * illumination, medium.w);
 }
 

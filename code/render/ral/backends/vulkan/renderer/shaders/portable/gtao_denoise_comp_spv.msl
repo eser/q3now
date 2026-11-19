@@ -1,9 +1,48 @@
 #pragma clang diagnostic ignored "-Wmissing-prototypes"
+#pragma clang diagnostic ignored "-Wmissing-braces"
 
 #include <metal_stdlib>
 #include <simd/simd.h>
 
 using namespace metal;
+
+template<typename T, size_t Num>
+struct spvUnsafeArray
+{
+    T elements[Num ? Num : 1];
+    
+    thread T& operator [] (size_t pos) thread
+    {
+        return elements[pos];
+    }
+    constexpr const thread T& operator [] (size_t pos) const thread
+    {
+        return elements[pos];
+    }
+    
+    device T& operator [] (size_t pos) device
+    {
+        return elements[pos];
+    }
+    constexpr const device T& operator [] (size_t pos) const device
+    {
+        return elements[pos];
+    }
+    
+    constexpr const constant T& operator [] (size_t pos) const constant
+    {
+        return elements[pos];
+    }
+    
+    threadgroup T& operator [] (size_t pos) threadgroup
+    {
+        return elements[pos];
+    }
+    constexpr const threadgroup T& operator [] (size_t pos) const threadgroup
+    {
+        return elements[pos];
+    }
+};
 
 struct DenoisePush
 {
@@ -36,26 +75,36 @@ float linearAt(thread const int2& p, constant DenoisePush& pc, texture2d<float> 
     return linearizeDepth(param, pc);
 }
 
-kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], constant DenoisePush& pc [[buffer(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], constant DenoisePush& pc [[buffer(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]], uint3 gl_WorkGroupID [[threadgroup_position_in_grid]], uint gl_LocalInvocationIndex [[thread_index_in_threadgroup]], uint3 gl_LocalInvocationID [[thread_position_in_threadgroup]])
 {
+    threadgroup spvUnsafeArray<float2, 144> tile;
     int2 pix = int2(gl_GlobalInvocationID.xy);
     int2 dim = int2(pc.viewportSize);
-    bool _95 = pix.x >= dim.x;
-    bool _105;
-    if (!_95)
+    int2 origin = (int2(gl_WorkGroupID.xy) * int2(8)) - int2(2);
+    for (uint i = gl_LocalInvocationIndex; i < 144u; i += 64u)
     {
-        _105 = pix.y >= dim.y;
+        int2 q = clamp(origin + int2(int(i % 12u), int(i / 12u)), int2(0), dim - int2(1));
+        int2 param = q;
+        tile[i] = float2(spvDescriptorSet0.aoIn.read(uint2(q)).x, linearAt(param, pc, spvDescriptorSet0.depthTex, spvDescriptorSet0.depthSampler));
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    bool _156 = pix.x >= dim.x;
+    bool _166;
+    if (!_156)
+    {
+        _166 = pix.y >= dim.y;
     }
     else
     {
-        _105 = _95;
+        _166 = _156;
     }
-    if (_105)
+    if (_166)
     {
         return;
     }
-    int2 param = pix;
-    float centerLin = linearAt(param, pc, spvDescriptorSet0.depthTex, spvDescriptorSet0.depthSampler);
+    int2 local = int2(gl_LocalInvocationID.xy) + int2(2);
+    int center = (local.y * 12) + local.x;
+    float centerLin = ((threadgroup float*)&tile[center])[1u];
     float depthScale = 1.0 / fast::max(centerLin * 0.0500000007450580596923828125, 0.001000000047497451305389404296875);
     float sum = 0.0;
     float wsum = 0.0;
@@ -63,10 +112,9 @@ kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buff
     {
         for (int dx = -2; dx <= 2; dx++)
         {
-            int2 q = clamp(pix + int2(dx, dy), int2(0), dim - int2(1));
-            float ao = spvDescriptorSet0.aoIn.read(uint2(q)).x;
-            int2 param_1 = q;
-            float dl = linearAt(param_1, pc, spvDescriptorSet0.depthTex, spvDescriptorSet0.depthSampler);
+            float2 sampleValue = tile[(center + (dy * 12)) + dx];
+            float ao = sampleValue.x;
+            float dl = sampleValue.y;
             float wd = exp((-float((dx * dx) + (dy * dy))) * 0.5);
             float ddiff = abs(dl - centerLin) * depthScale;
             float we = exp((-ddiff) * ddiff);
@@ -75,16 +123,16 @@ kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buff
             wsum += w;
         }
     }
-    float _208;
+    float _276;
     if (wsum > 9.9999997473787516355514526367188e-06)
     {
-        _208 = sum / wsum;
+        _276 = sum / wsum;
     }
     else
     {
-        _208 = spvDescriptorSet0.aoIn.read(uint2(pix)).x;
+        _276 = ((threadgroup float*)&tile[center])[0u];
     }
-    float result = _208;
+    float result = _276;
     spvDescriptorSet0.aoOut.write(float4(result), uint2(pix));
 }
 

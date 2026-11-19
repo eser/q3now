@@ -7,7 +7,7 @@ struct LensSource
     vec4 colorVis;
 };
 
-const vec2 _132[9] = vec2[](vec2(0.0), vec2(1.0, 0.0), vec2(-1.0, 0.0), vec2(0.0, 1.0), vec2(0.0, -1.0), vec2(0.699999988079071044921875), vec2(-0.699999988079071044921875, 0.699999988079071044921875), vec2(0.699999988079071044921875, -0.699999988079071044921875), vec2(-0.699999988079071044921875));
+const vec2 _154[9] = vec2[](vec2(0.0), vec2(1.0, 0.0), vec2(-1.0, 0.0), vec2(0.0, 1.0), vec2(0.0, -1.0), vec2(0.699999988079071044921875), vec2(-0.699999988079071044921875, 0.699999988079071044921875), vec2(0.699999988079071044921875, -0.699999988079071044921875), vec2(-0.699999988079071044921875));
 
 layout(binding = 0, std430) buffer LensSources
 {
@@ -19,15 +19,15 @@ layout(std140, binding = 3) uniform LensPush
     vec2 viewport;
     int count;
     float radiusPx;
-} _22;
+    vec4 depthConvention;
+} _23;
 
-layout(binding = 0) uniform texture2D depthTex;
-layout(binding = 0) uniform sampler depthSampler;
+layout(binding = 0) uniform sampler2D depthTex;
 
 void main()
 {
     uint idx = gl_GlobalInvocationID.x;
-    if (idx >= uint(_22.count))
+    if (idx >= uint(_23.count))
     {
         return;
     }
@@ -66,26 +66,46 @@ void main()
         _40.lensSources[idx].colorVis.w = 0.0;
         return;
     }
-    vec2 _92;
-    if (_22.viewport.x > 0.0)
+    float _94;
+    if (_23.depthConvention.z > 0.5)
     {
-        _92 = vec2(_22.radiusPx) / _22.viewport;
+        _94 = _40.lensSources[idx].screenPosDepth.w;
     }
     else
     {
-        _92 = vec2(0.0);
+        _94 = _23.radiusPx;
     }
-    vec2 texel = _92;
+    float radius = _94;
+    bool _108 = _23.viewport.x > 0.0;
+    bool _114;
+    if (_108)
+    {
+        _114 = _23.viewport.y > 0.0;
+    }
+    else
+    {
+        _114 = _108;
+    }
+    vec2 _115;
+    if (_114)
+    {
+        _115 = vec2(max(radius, 0.0)) / _23.viewport;
+    }
+    else
+    {
+        _115 = vec2(0.0);
+    }
+    vec2 texel = _115;
     int visible = 0;
     for (int t = 0; t < 9; t++)
     {
-        vec2 suv = clamp(uv + (_132[t] * texel), vec2(0.0), vec2(1.0));
-        float scene = textureLod(sampler2D(depthTex, depthSampler), suv, 0.0).x;
-        if (scene <= (compareZ + 0.0007999999797903001308441162109375))
+        vec2 suv = clamp(uv + (_154[t] * texel), vec2(0.0), vec2(1.0));
+        float scene = textureLod(depthTex, suv, 0.0).x;
+        if (((scene - compareZ) * _23.depthConvention.x) <= _23.depthConvention.y)
         {
             visible++;
         }
     }
-    _40.lensSources[idx].colorVis.w = float(visible) / 9.0;
+    _40.lensSources[idx].colorVis.w = (float(visible) / 9.0) * clamp(_40.lensSources[idx].colorVis.x, 0.0, 1.0);
 }
 

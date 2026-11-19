@@ -36,6 +36,8 @@ struct UBO
     float4 advancedFogColorDensity;
     float4 advancedFogTypeFarEnabled;
     float4 emissionRadiance;
+    float4 materialBaseColor;
+    float4 materialFactors;
 };
 
 constant int tex_domain_tmp [[function_constant(4)]];
@@ -44,27 +46,27 @@ constant int lightmap_slot_tmp [[function_constant(26)]];
 constant int lightmap_slot = is_function_constant_defined(lightmap_slot_tmp) ? lightmap_slot_tmp : 0;
 constant int tex_mode_tmp [[function_constant(6)]];
 constant int tex_mode = is_function_constant_defined(tex_mode_tmp) ? tex_mode_tmp : 0;
-constant bool _337 = (tex_mode == 1);
-constant bool _338 = (tex_mode == 2);
-constant bool _339 = (_337 || _338);
-constant bool _382 = (tex_mode == 3);
-constant bool _435 = (tex_mode == 4);
-constant bool _491 = (tex_mode == 5);
-constant bool _523 = (tex_mode == 6);
-constant bool _555 = (tex_mode == 7);
-constant bool _627 = (lightmap_slot != 0);
+constant bool _353 = (tex_mode == 1);
+constant bool _354 = (tex_mode == 2);
+constant bool _355 = (_353 || _354);
+constant bool _388 = (tex_mode == 3);
+constant bool _433 = (tex_mode == 4);
+constant bool _481 = (tex_mode == 5);
+constant bool _505 = (tex_mode == 6);
+constant bool _529 = (tex_mode == 7);
+constant bool _585 = (lightmap_slot != 0);
 constant int acff_tmp [[function_constant(10)]];
 constant int acff = is_function_constant_defined(acff_tmp) ? acff_tmp : 0;
-constant bool _702 = (acff == 1);
-constant bool _717 = (acff == 2);
-constant bool _725 = (acff == 3);
-constant bool _750 = (acff == 1);
-constant bool _766 = (acff == 2);
-constant bool _775 = (acff == 3);
+constant bool _671 = (acff == 1);
+constant bool _686 = (acff == 2);
+constant bool _694 = (acff == 3);
+constant bool _719 = (acff == 1);
+constant bool _735 = (acff == 2);
+constant bool _744 = (acff == 3);
 constant int discard_mode_tmp [[function_constant(7)]];
 constant int discard_mode = is_function_constant_defined(discard_mode_tmp) ? discard_mode_tmp : 0;
-constant bool _796 = (discard_mode == 1);
-constant bool _806 = (discard_mode == 2);
+constant bool _765 = (discard_mode == 1);
+constant bool _775 = (discard_mode == 2);
 constant int alpha_to_coverage_tmp [[function_constant(3)]];
 constant int alpha_to_coverage = is_function_constant_defined(alpha_to_coverage_tmp) ? alpha_to_coverage_tmp : 0;
 
@@ -195,32 +197,29 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
     uint param_3 = 0u;
     float2 param_4 = in.frag_tex_coord0;
     int param_5 = 0;
-    float4 color0 = wired_bl_sample_domain(param_3, param_4, param_5, (*spvDescriptorSet0.m_45), wired_bindless_images, wired_bindless_samplers) * frag_color0;
+    float4 sampledColor0 = wired_bl_sample_domain(param_3, param_4, param_5, (*spvDescriptorSet0.m_45), wired_bindless_images, wired_bindless_samplers);
+    uint param_6 = 1u;
+    float2 param_7 = in.frag_tex_coord1;
+    int param_8 = 1;
+    float4 sampledColor1 = wired_bl_sample_domain(param_6, param_7, param_8, (*spvDescriptorSet0.m_45), wired_bindless_images, wired_bindless_samplers);
+    uint param_9 = 2u;
+    float2 param_10 = in.frag_tex_coord2;
+    int param_11 = 2;
+    float4 sampledColor2 = wired_bl_sample_domain(param_9, param_10, param_11, (*spvDescriptorSet0.m_45), wired_bindless_images, wired_bindless_samplers);
+    float4 color0 = sampledColor0 * frag_color0;
     float4 base;
-    if (_339)
+    if (_355)
     {
-        uint param_6 = 1u;
-        float2 param_7 = in.frag_tex_coord1;
-        int param_8 = 1;
-        float4 color1 = wired_bl_sample_domain(param_6, param_7, param_8, (*spvDescriptorSet0.m_45), wired_bindless_images, wired_bindless_samplers) * frag_color1;
-        uint param_9 = 2u;
-        float2 param_10 = in.frag_tex_coord2;
-        int param_11 = 2;
-        float4 color2 = wired_bl_sample_domain(param_9, param_10, param_11, (*spvDescriptorSet0.m_45), wired_bindless_images, wired_bindless_samplers) * frag_color2;
+        float4 color1 = sampledColor1 * frag_color1;
+        float4 color2 = sampledColor2 * frag_color2;
         base = float4((color0.xyz + color1.xyz) + color2.xyz, (color0.w * color1.w) * color2.w);
     }
     else
     {
-        if (_382)
+        if (_388)
         {
-            uint param_12 = 1u;
-            float2 param_13 = in.frag_tex_coord1;
-            int param_14 = 1;
-            float4 color1_1 = wired_bl_sample_domain(param_12, param_13, param_14, (*spvDescriptorSet0.m_45), wired_bindless_images, wired_bindless_samplers) * frag_color1;
-            uint param_15 = 2u;
-            float2 param_16 = in.frag_tex_coord2;
-            int param_17 = 2;
-            float4 color2_1 = wired_bl_sample_domain(param_15, param_16, param_17, (*spvDescriptorSet0.m_45), wired_bindless_images, wired_bindless_samplers) * frag_color2;
+            float4 color1_1 = sampledColor1 * frag_color1;
+            float4 color2_1 = sampledColor2 * frag_color2;
             color0 *= color0.w;
             color1_1 *= color1_1.w;
             color2_1 *= color2_1.w;
@@ -228,16 +227,10 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
         }
         else
         {
-            if (_435)
+            if (_433)
             {
-                uint param_18 = 1u;
-                float2 param_19 = in.frag_tex_coord1;
-                int param_20 = 1;
-                float4 color1_2 = wired_bl_sample_domain(param_18, param_19, param_20, (*spvDescriptorSet0.m_45), wired_bindless_images, wired_bindless_samplers) * frag_color1;
-                uint param_21 = 2u;
-                float2 param_22 = in.frag_tex_coord2;
-                int param_23 = 2;
-                float4 color2_2 = wired_bl_sample_domain(param_21, param_22, param_23, (*spvDescriptorSet0.m_45), wired_bindless_images, wired_bindless_samplers) * frag_color2;
+                float4 color1_2 = sampledColor1 * frag_color1;
+                float4 color2_2 = sampledColor2 * frag_color2;
                 color0 *= (1.0 - color0.w);
                 color1_2 *= (1.0 - color1_2.w);
                 color2_2 *= (1.0 - color2_2.w);
@@ -245,60 +238,36 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
             }
             else
             {
-                if (_491)
+                if (_481)
                 {
-                    uint param_24 = 1u;
-                    float2 param_25 = in.frag_tex_coord1;
-                    int param_26 = 1;
-                    float4 color1_3 = wired_bl_sample_domain(param_24, param_25, param_26, (*spvDescriptorSet0.m_45), wired_bindless_images, wired_bindless_samplers) * frag_color1;
-                    uint param_27 = 2u;
-                    float2 param_28 = in.frag_tex_coord2;
-                    int param_29 = 2;
-                    float4 color2_3 = wired_bl_sample_domain(param_27, param_28, param_29, (*spvDescriptorSet0.m_45), wired_bindless_images, wired_bindless_samplers) * frag_color2;
+                    float4 color1_3 = sampledColor1 * frag_color1;
+                    float4 color2_3 = sampledColor2 * frag_color2;
                     base = mix(mix(color0, color1_3, float4(color1_3.w)), color2_3, float4(color2_3.w));
                 }
                 else
                 {
-                    if (_523)
+                    if (_505)
                     {
-                        uint param_30 = 1u;
-                        float2 param_31 = in.frag_tex_coord1;
-                        int param_32 = 1;
-                        float4 color1_4 = wired_bl_sample_domain(param_30, param_31, param_32, (*spvDescriptorSet0.m_45), wired_bindless_images, wired_bindless_samplers) * frag_color1;
-                        uint param_33 = 2u;
-                        float2 param_34 = in.frag_tex_coord2;
-                        int param_35 = 2;
-                        float4 color2_4 = wired_bl_sample_domain(param_33, param_34, param_35, (*spvDescriptorSet0.m_45), wired_bindless_images, wired_bindless_samplers) * frag_color2;
+                        float4 color1_4 = sampledColor1 * frag_color1;
+                        float4 color2_4 = sampledColor2 * frag_color2;
                         base = mix(color2_4, mix(color1_4, color0, float4(color1_4.w)), float4(color2_4.w));
                     }
                     else
                     {
-                        if (_555)
+                        if (_529)
                         {
-                            uint param_36 = 1u;
-                            float2 param_37 = in.frag_tex_coord1;
-                            int param_38 = 1;
-                            float4 color1_5 = wired_bl_sample_domain(param_36, param_37, param_38, (*spvDescriptorSet0.m_45), wired_bindless_images, wired_bindless_samplers) * frag_color1;
-                            uint param_39 = 2u;
-                            float2 param_40 = in.frag_tex_coord2;
-                            int param_41 = 2;
-                            float4 color2_5 = wired_bl_sample_domain(param_39, param_40, param_41, (*spvDescriptorSet0.m_45), wired_bindless_images, wired_bindless_samplers) * frag_color2;
+                            float4 color1_5 = sampledColor1 * frag_color1;
+                            float4 color2_5 = sampledColor2 * frag_color2;
                             base = ((color2_5 + float4(color2_5.w)) * (color1_5 + float4(color1_5.w))) * color0;
                         }
                         else
                         {
-                            uint param_42 = 1u;
-                            float2 param_43 = in.frag_tex_coord1;
-                            int param_44 = 1;
-                            float4 color1_6 = wired_bl_sample_domain(param_42, param_43, param_44, (*spvDescriptorSet0.m_45), wired_bindless_images, wired_bindless_samplers) * frag_color1;
-                            uint param_45 = 2u;
-                            float2 param_46 = in.frag_tex_coord2;
-                            int param_47 = 2;
-                            float4 color2_6 = wired_bl_sample_domain(param_45, param_46, param_47, (*spvDescriptorSet0.m_45), wired_bindless_images, wired_bindless_samplers) * frag_color2;
-                            float3 _611 = (color0.xyz * color1_6.xyz) * color2_6.xyz;
-                            base.x = _611.x;
-                            base.y = _611.y;
-                            base.z = _611.z;
+                            float4 color1_6 = sampledColor1 * frag_color1;
+                            float4 color2_6 = sampledColor2 * frag_color2;
+                            float3 _569 = (color0.xyz * color1_6.xyz) * color2_6.xyz;
+                            base.x = _569.x;
+                            base.y = _569.y;
+                            base.z = _569.z;
                             base.w = (color0.w * color1_6.w) * color2_6.w;
                         }
                     }
@@ -306,80 +275,84 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
             }
         }
     }
-    if (_627)
+    if (_585)
     {
         float wetness = fast::clamp((*spvDescriptorSet0.m_45).worldLightParams.y, 0.0, 1.0);
         float frost = fast::clamp((*spvDescriptorSet0.m_45).worldLightParams.z, 0.0, 1.0);
         float luminance = dot(base.xyz, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
-        float4 _649 = base;
-        float3 _651 = _649.xyz * mix(1.0, 0.819999992847442626953125, wetness);
-        base.x = _651.x;
-        base.y = _651.y;
-        base.z = _651.z;
-        float4 _658 = base;
-        float3 _672 = mix(_658.xyz, float3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), float3(frost * 0.550000011920928955078125));
-        base.x = _672.x;
-        base.y = _672.y;
-        base.z = _672.z;
+        float4 _607 = base;
+        float3 _609 = _607.xyz * mix(1.0, 0.819999992847442626953125, wetness);
+        base.x = _609.x;
+        base.y = _609.y;
+        base.z = _609.z;
+        float4 _616 = base;
+        float3 _630 = mix(_616.xyz, float3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), float3(frost * 0.550000011920928955078125));
+        base.x = _630.x;
+        base.y = _630.y;
+        base.z = _630.z;
     }
-    float4 _687 = base;
-    float3 _689 = _687.xyz + (color0.xyz * (*spvDescriptorSet0.m_45).emissionRadiance.xyz);
-    base.x = _689.x;
-    base.y = _689.y;
-    base.z = _689.z;
+    if ((*spvDescriptorSet0.m_45).materialFactors.x >= 0.0)
+    {
+        base *= (*spvDescriptorSet0.m_45).materialBaseColor;
+    }
+    float4 _656 = base;
+    float3 _658 = _656.xyz + (color0.xyz * (*spvDescriptorSet0.m_45).emissionRadiance.xyz);
+    base.x = _658.x;
+    base.y = _658.y;
+    base.z = _658.z;
     if (wired_advanced_fog_enabled((*spvDescriptorSet0.m_45)))
     {
         float fogAmount = wired_advanced_fog_amount((*spvDescriptorSet0.m_45), gl_FragCoord);
-        if (_702)
+        if (_671)
         {
-            float4 _707 = base;
-            float3 _709 = _707.xyz * (1.0 - fogAmount);
-            base.x = _709.x;
-            base.y = _709.y;
-            base.z = _709.z;
+            float4 _676 = base;
+            float3 _678 = _676.xyz * (1.0 - fogAmount);
+            base.x = _678.x;
+            base.y = _678.y;
+            base.z = _678.z;
         }
         else
         {
-            if (_717)
+            if (_686)
             {
                 base *= (1.0 - fogAmount);
             }
             else
             {
-                if (_725)
+                if (_694)
                 {
                     base.w *= (1.0 - fogAmount);
                 }
                 else
                 {
-                    float4 _735 = base;
-                    float3 _742 = mix(_735.xyz, (*spvDescriptorSet0.m_45).advancedFogColorDensity.xyz, float3(fogAmount));
-                    base.x = _742.x;
-                    base.y = _742.y;
-                    base.z = _742.z;
+                    float4 _704 = base;
+                    float3 _711 = mix(_704.xyz, (*spvDescriptorSet0.m_45).advancedFogColorDensity.xyz, float3(fogAmount));
+                    base.x = _711.x;
+                    base.y = _711.y;
+                    base.z = _711.z;
                 }
             }
         }
     }
     else
     {
-        if (_750)
+        if (_719)
         {
-            float4 _753 = base;
-            float3 _758 = _753.xyz * (1.0 - fog.w);
-            base.x = _758.x;
-            base.y = _758.y;
-            base.z = _758.z;
+            float4 _722 = base;
+            float3 _727 = _722.xyz * (1.0 - fog.w);
+            base.x = _727.x;
+            base.y = _727.y;
+            base.z = _727.z;
         }
         else
         {
-            if (_766)
+            if (_735)
             {
                 base *= (1.0 - fog.w);
             }
             else
             {
-                if (_775)
+                if (_744)
                 {
                     base.w *= (1.0 - fog.w);
                 }
@@ -390,7 +363,7 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
             }
         }
     }
-    if (_796)
+    if (_765)
     {
         if (base.w == 0.0)
         {
@@ -399,7 +372,7 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
     }
     else
     {
-        if (_806)
+        if (_775)
         {
             if (dot(base.xyz, base.xyz) == 0.0)
             {

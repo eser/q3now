@@ -2,6 +2,7 @@ struct LensPush {
     viewport: vec2<f32>,
     count: i32,
     radiusPx: f32,
+    depthConvention: vec4<f32>,
 }
 
 struct LensSource {
@@ -27,8 +28,10 @@ fn main_1() {
     var idx: u32;
     var uv: vec2<f32>;
     var compareZ: f32;
+    var radius: f32;
+    var local: f32;
     var texel: vec2<f32>;
-    var local: vec2<f32>;
+    var local_1: vec2<f32>;
     var visible: i32;
     var t: i32;
     var suv: vec2<f32>;
@@ -37,87 +40,110 @@ fn main_1() {
     var phi_65_: bool;
     var phi_73_: bool;
     var phi_80_: bool;
+    var phi_114_: bool;
 
-    let _e45 = gl_GlobalInvocationID_1[0u];
-    idx = _e45;
-    let _e46 = idx;
-    let _e48 = unnamed.count;
-    if (_e46 >= bitcast<u32>(_e48)) {
+    let _e48 = gl_GlobalInvocationID_1[0u];
+    idx = _e48;
+    let _e49 = idx;
+    let _e51 = unnamed.count;
+    if (_e49 >= bitcast<u32>(_e51)) {
         return;
     }
-    let _e51 = idx;
-    let _e55 = unnamed_1.lensSources[_e51].screenPosDepth;
-    uv = _e55.xy;
-    let _e57 = idx;
-    let _e62 = unnamed_1.lensSources[_e57].screenPosDepth[2u];
-    compareZ = _e62;
-    let _e64 = uv[0u];
-    let _e65 = (_e64 < 0f);
-    phi_65_ = _e65;
-    if !(_e65) {
-        let _e68 = uv[0u];
-        phi_65_ = (_e68 > 1f);
+    let _e54 = idx;
+    let _e58 = unnamed_1.lensSources[_e54].screenPosDepth;
+    uv = _e58.xy;
+    let _e60 = idx;
+    let _e65 = unnamed_1.lensSources[_e60].screenPosDepth[2u];
+    compareZ = _e65;
+    let _e67 = uv[0u];
+    let _e68 = (_e67 < 0f);
+    phi_65_ = _e68;
+    if !(_e68) {
+        let _e71 = uv[0u];
+        phi_65_ = (_e71 > 1f);
     }
-    let _e71 = phi_65_;
-    phi_73_ = _e71;
-    if !(_e71) {
-        let _e74 = uv[1u];
-        phi_73_ = (_e74 < 0f);
+    let _e74 = phi_65_;
+    phi_73_ = _e74;
+    if !(_e74) {
+        let _e77 = uv[1u];
+        phi_73_ = (_e77 < 0f);
     }
-    let _e77 = phi_73_;
-    phi_80_ = _e77;
-    if !(_e77) {
-        let _e80 = uv[1u];
-        phi_80_ = (_e80 > 1f);
+    let _e80 = phi_73_;
+    phi_80_ = _e80;
+    if !(_e80) {
+        let _e83 = uv[1u];
+        phi_80_ = (_e83 > 1f);
     }
-    let _e83 = phi_80_;
-    if _e83 {
-        let _e84 = idx;
-        unnamed_1.lensSources[_e84].colorVis[3u] = 0f;
+    let _e86 = phi_80_;
+    if _e86 {
+        let _e87 = idx;
+        unnamed_1.lensSources[_e87].colorVis[3u] = 0f;
         return;
     }
-    let _e91 = unnamed.viewport[0u];
-    if (_e91 > 0f) {
-        let _e94 = unnamed.radiusPx;
-        let _e96 = unnamed.viewport;
-        local = (vec2(_e94) / _e96);
+    let _e94 = unnamed.depthConvention[2u];
+    if (_e94 > 0.5f) {
+        let _e96 = idx;
+        let _e101 = unnamed_1.lensSources[_e96].screenPosDepth[3u];
+        local = _e101;
     } else {
-        local = vec2<f32>(0f, 0f);
+        let _e103 = unnamed.radiusPx;
+        local = _e103;
     }
-    let _e99 = local;
-    texel = _e99;
+    let _e104 = local;
+    radius = _e104;
+    let _e107 = unnamed.viewport[0u];
+    let _e108 = (_e107 > 0f);
+    phi_114_ = _e108;
+    if _e108 {
+        let _e111 = unnamed.viewport[1u];
+        phi_114_ = (_e111 > 0f);
+    }
+    let _e114 = phi_114_;
+    if _e114 {
+        let _e115 = radius;
+        let _e118 = unnamed.viewport;
+        local_1 = (vec2(max(_e115, 0f)) / _e118);
+    } else {
+        local_1 = vec2<f32>(0f, 0f);
+    }
+    let _e121 = local_1;
+    texel = _e121;
     visible = 0i;
     t = 0i;
     loop {
-        let _e100 = t;
-        if (_e100 < 9i) {
-            let _e102 = uv;
-            let _e103 = t;
+        let _e122 = t;
+        if (_e122 < 9i) {
+            let _e124 = uv;
+            let _e125 = t;
             indexable = array<vec2<f32>, 9>(vec2<f32>(0f, 0f), vec2<f32>(1f, 0f), vec2<f32>(-1f, 0f), vec2<f32>(0f, 1f), vec2<f32>(0f, -1f), vec2<f32>(0.7f, 0.7f), vec2<f32>(-0.7f, 0.7f), vec2<f32>(0.7f, -0.7f), vec2<f32>(-0.7f, -0.7f));
-            let _e105 = indexable[_e103];
-            let _e106 = texel;
-            suv = clamp((_e102 + (_e105 * _e106)), vec2<f32>(0f, 0f), vec2<f32>(1f, 1f));
-            let _e110 = suv;
-            let _e111 = textureSampleLevel(depthTex, depthSampler, _e110, 0f);
-            scene = _e111.x;
-            let _e113 = scene;
-            let _e114 = compareZ;
-            if (_e113 <= (_e114 + 0.0008f)) {
-                let _e117 = visible;
-                visible = (_e117 + 1i);
+            let _e127 = indexable[_e125];
+            let _e128 = texel;
+            suv = clamp((_e124 + (_e127 * _e128)), vec2<f32>(0f, 0f), vec2<f32>(1f, 1f));
+            let _e132 = suv;
+            let _e133 = textureSampleLevel(depthTex, depthSampler, _e132, 0f);
+            scene = _e133.x;
+            let _e135 = scene;
+            let _e136 = compareZ;
+            let _e140 = unnamed.depthConvention[0u];
+            let _e144 = unnamed.depthConvention[1u];
+            if (((_e135 - _e136) * _e140) <= _e144) {
+                let _e146 = visible;
+                visible = (_e146 + 1i);
             }
             continue;
         } else {
             break;
         }
         continuing {
-            let _e119 = t;
-            t = (_e119 + 1i);
+            let _e148 = t;
+            t = (_e148 + 1i);
         }
     }
-    let _e121 = idx;
-    let _e122 = visible;
-    unnamed_1.lensSources[_e121].colorVis[3u] = (f32(_e122) / 9f);
+    let _e150 = idx;
+    let _e151 = visible;
+    let _e154 = idx;
+    let _e159 = unnamed_1.lensSources[_e154].colorVis[0u];
+    unnamed_1.lensSources[_e150].colorVis[3u] = ((f32(_e151) / 9f) * clamp(_e159, 0f, 1f));
     return;
 }
 

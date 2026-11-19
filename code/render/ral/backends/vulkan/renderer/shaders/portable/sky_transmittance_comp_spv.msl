@@ -1,0 +1,46 @@
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct SkyParams
+{
+    float4 sunDirectionAngularRadius;
+    float4 sunRadiance;
+    float4 moonDirectionAngularRadius;
+    float4 moonRadiance;
+    float4 atmosphereRadii;
+    float4 scatteringScale;
+    float4 groundExposure;
+};
+
+constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(8u, 8u, 1u);
+
+struct spvDescriptorSetBuffer0
+{
+    texture2d<float, access::write> transmittanceLut [[id(0)]];
+    constant SkyParams* sky [[id(1)]];
+};
+
+kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+{
+    int2 coord = int2(gl_GlobalInvocationID.xy);
+    int2 extent = int2(spvDescriptorSet0.transmittanceLut.get_width(), spvDescriptorSet0.transmittanceLut.get_height());
+    if (any(coord >= extent))
+    {
+        return;
+    }
+    float2 uv = (float2(coord) + float2(0.5)) / float2(extent);
+    float altitude = uv.y;
+    float mu = (uv.x * 2.0) - 1.0;
+    float horizon = sqrt(fast::max(1.0 - (mu * mu), 0.0));
+    float airMass = mix(32.0, 1.0, fast::clamp((mu * 0.5) + 0.5, 0.0, 1.0));
+    airMass *= mix(1.0, 0.0350000001490116119384765625, altitude);
+    airMass *= mix(1.0, 1.7999999523162841796875, horizon);
+    float3 rayleigh = float3(0.00580199994146823883056640625, 0.0135580003261566162109375, 0.033100001513957977294921875) * fast::max((*spvDescriptorSet0.sky).scatteringScale.x, 0.001000000047497451305389404296875);
+    float3 mie = float3(0.0039960001595318317413330078125) * fast::max((*spvDescriptorSet0.sky).scatteringScale.y, 0.001000000047497451305389404296875);
+    float3 absorption = float3(0.0006500000017695128917694091796875, 0.001881000003777444362640380859375, 8.4999999671708792448043823242188e-05) * fast::max((*spvDescriptorSet0.sky).scatteringScale.z, 0.001000000047497451305389404296875);
+    float3 transmittance = exp((-((rayleigh + mie) + absorption)) * airMass);
+    spvDescriptorSet0.transmittanceLut.write(float4(fast::clamp(transmittance, float3(0.0), float3(1.0)), airMass), uint2(coord));
+}
+

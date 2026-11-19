@@ -2,15 +2,17 @@
 
 layout(constant_id = 4) const int tex_domain = 0;
 layout(constant_id = 26) const int lightmap_slot = 0;
+const bool _339 = (lightmap_slot == 1);
 layout(constant_id = 6) const int tex_mode = 0;
-const bool _327 = (tex_mode == 1);
-const bool _366 = (tex_mode == 2);
-const bool _441 = (lightmap_slot != 0);
+const bool _354 = (tex_mode == 1);
+const bool _383 = (tex_mode == 2);
+const bool _442 = (lightmap_slot != 0);
 layout(constant_id = 14) const int ibl_enabled = 0;
-const bool _541 = (ibl_enabled != 0);
+const bool _553 = (ibl_enabled != 0);
+const bool _557 = (ibl_enabled == 1);
 layout(constant_id = 7) const int discard_mode = 0;
-const bool _701 = (discard_mode == 1);
-const bool _711 = (discard_mode == 2);
+const bool _760 = (discard_mode == 1);
+const bool _770 = (discard_mode == 2);
 layout(constant_id = 3) const int alpha_to_coverage = 0;
 
 layout(binding = 0, std140) uniform UBO
@@ -29,14 +31,16 @@ layout(binding = 0, std140) uniform UBO
     vec4 advancedFogColorDensity;
     vec4 advancedFogTypeFarEnabled;
     vec4 emissionRadiance;
+    vec4 materialBaseColor;
+    vec4 materialFactors;
 } _52;
 
 layout(binding = 0) uniform texture2D wired_bindless_images[64];
 layout(binding = 0) uniform sampler wired_bindless_samplers[32];
-layout(binding = 3) uniform samplerCube radianceCube;
+layout(binding = 2) uniform samplerCube radianceCube;
+layout(binding = 4) uniform samplerCube previousRadianceCube;
 layout(binding = 1) uniform sampler2D brdfLut;
-layout(binding = 4) uniform sampler2D gtaoMap;
-layout(binding = 2) uniform samplerCube irradianceCube;
+layout(binding = 3) uniform sampler2D gtaoMap;
 
 layout(location = 0) in vec4 frag_color0In;
 layout(location = 1) centroid in vec2 frag_tex_coord0;
@@ -136,118 +140,135 @@ void main()
     uint param_1 = 0u;
     vec2 param_2 = frag_tex_coord0;
     int param_3 = 0;
-    vec4 color0 = wired_bl_sample_domain(param_1, param_2, param_3) * frag_color0;
-    vec4 base;
-    if (_327)
+    vec4 sampledColor0 = wired_bl_sample_domain(param_1, param_2, param_3);
+    uint param_4 = 1u;
+    vec2 param_5 = frag_tex_coord1;
+    int param_6 = 1;
+    vec4 sampledColor1 = wired_bl_sample_domain(param_4, param_5, param_6);
+    uint param_7 = 2u;
+    vec2 param_8 = frag_tex_coord2;
+    int param_9 = 2;
+    vec4 sampledColor2 = wired_bl_sample_domain(param_7, param_8, param_9);
+    vec3 _340;
+    if (_339)
     {
-        uint param_4 = 1u;
-        vec2 param_5 = frag_tex_coord1;
-        int param_6 = 1;
-        vec4 color1 = wired_bl_sample_domain(param_4, param_5, param_6);
-        uint param_7 = 2u;
-        vec2 param_8 = frag_tex_coord2;
-        int param_9 = 2;
-        vec4 color2 = wired_bl_sample_domain(param_7, param_8, param_9);
+        _340 = sampledColor1.xyz;
+    }
+    else
+    {
+        _340 = sampledColor0.xyz;
+    }
+    vec3 materialAlbedo = _340;
+    vec4 color0 = sampledColor0 * frag_color0;
+    vec4 base;
+    if (_354)
+    {
+        vec4 color1 = sampledColor1;
+        vec4 color2 = sampledColor2;
         base = vec4((color0.xyz + color1.xyz) + color2.xyz, (color0.w * color1.w) * color2.w);
     }
     else
     {
-        if (_366)
+        if (_383)
         {
-            uint param_10 = 1u;
-            vec2 param_11 = frag_tex_coord1;
-            int param_12 = 1;
-            vec4 color1_1 = wired_bl_sample_domain(param_10, param_11, param_12) * frag_color0;
-            uint param_13 = 2u;
-            vec2 param_14 = frag_tex_coord2;
-            int param_15 = 2;
-            vec4 color2_1 = wired_bl_sample_domain(param_13, param_14, param_15) * frag_color0;
+            vec4 color1_1 = sampledColor1 * frag_color0;
+            vec4 color2_1 = sampledColor2 * frag_color0;
             base = vec4((color0.xyz + color1_1.xyz) + color2_1.xyz, (color0.w * color1_1.w) * color2_1.w);
         }
         else
         {
-            uint param_16 = 1u;
-            vec2 param_17 = frag_tex_coord1;
-            int param_18 = 1;
-            vec4 color1_2 = wired_bl_sample_domain(param_16, param_17, param_18);
-            uint param_19 = 2u;
-            vec2 param_20 = frag_tex_coord2;
-            int param_21 = 2;
-            vec4 color2_2 = wired_bl_sample_domain(param_19, param_20, param_21);
-            vec3 _425 = (color0.xyz * color1_2.xyz) * color2_2.xyz;
-            base.x = _425.x;
-            base.y = _425.y;
-            base.z = _425.z;
+            vec4 color1_2 = sampledColor1;
+            vec4 color2_2 = sampledColor2;
+            vec3 _426 = (color0.xyz * color1_2.xyz) * color2_2.xyz;
+            base.x = _426.x;
+            base.y = _426.y;
+            base.z = _426.z;
             base.w = (color0.w * color1_2.w) * color2_2.w;
         }
     }
-    if (_441)
+    if (_442)
     {
         float wetness = clamp(_52.worldLightParams.y, 0.0, 1.0);
         float frost = clamp(_52.worldLightParams.z, 0.0, 1.0);
         float luminance = dot(base.xyz, vec3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
-        vec4 _463 = base;
-        vec3 _465 = _463.xyz * mix(1.0, 0.819999992847442626953125, wetness);
-        base.x = _465.x;
-        base.y = _465.y;
-        base.z = _465.z;
-        vec4 _472 = base;
-        vec3 _486 = mix(_472.xyz, vec3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), vec3(frost * 0.550000011920928955078125));
-        base.x = _486.x;
-        base.y = _486.y;
-        base.z = _486.z;
+        vec4 _464 = base;
+        vec3 _466 = _464.xyz * mix(1.0, 0.819999992847442626953125, wetness);
+        base.x = _466.x;
+        base.y = _466.y;
+        base.z = _466.z;
+        vec4 _473 = base;
+        vec3 _487 = mix(_473.xyz, vec3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), vec3(frost * 0.550000011920928955078125));
+        base.x = _487.x;
+        base.y = _487.y;
+        base.z = _487.z;
         float upward = smoothstep(0.3499999940395355224609375, 0.85000002384185791015625, normalize(ibl_N).z);
         float snowCoverage = clamp(_52.worldLightParams.w, 0.0, 1.0) * upward;
-        vec4 _508 = base;
-        vec3 _516 = mix(_508.xyz, vec3(0.819999992847442626953125, 0.86000001430511474609375, 0.89999997615814208984375), vec3(snowCoverage * 0.819999992847442626953125));
-        base.x = _516.x;
-        base.y = _516.y;
-        base.z = _516.z;
+        vec4 _509 = base;
+        vec3 _517 = mix(_509.xyz, vec3(0.819999992847442626953125, 0.86000001430511474609375, 0.89999997615814208984375), vec3(snowCoverage * 0.819999992847442626953125));
+        base.x = _517.x;
+        base.y = _517.y;
+        base.z = _517.z;
     }
-    vec4 _531 = base;
-    vec3 _533 = _531.xyz + (color0.xyz * _52.emissionRadiance.xyz);
-    base.x = _533.x;
-    base.y = _533.y;
-    base.z = _533.z;
-    if (_541)
+    if (_52.materialFactors.x >= 0.0)
     {
-        uint _548 = _52.packed_indices[2].x & 4095u;
-        uint _555 = (_52.packed_indices[2].x >> uint(12)) & 255u;
-        vec3 orm = texture(sampler2D(wired_bindless_images[_548], wired_bindless_samplers[_555]), frag_tex_coord0).xyz;
-        float ao = orm.x;
-        float roughness = clamp(((orm.y - (0.3499999940395355224609375 * _52.worldLightParams.y)) + (0.300000011920928955078125 * _52.worldLightParams.z)) + (0.4000000059604644775390625 * _52.worldLightParams.w), 0.039999999105930328369140625, 1.0);
-        float metalness = orm.z;
+        base *= _52.materialBaseColor;
+    }
+    vec4 _543 = base;
+    vec3 _545 = _543.xyz + (color0.xyz * _52.emissionRadiance.xyz);
+    base.x = _545.x;
+    base.y = _545.y;
+    base.z = _545.z;
+    if (_553)
+    {
+        vec3 _558;
+        if (_557)
+        {
+            uint _564 = _52.packed_indices[2].x & 4095u;
+            uint _571 = (_52.packed_indices[2].x >> uint(12)) & 255u;
+            _558 = texture(sampler2D(wired_bindless_images[_564], wired_bindless_samplers[_571]), frag_tex_coord0).xyz;
+        }
+        else
+        {
+            _558 = vec3(1.0);
+        }
+        vec3 orm = _558;
+        float ao = mix(1.0, orm.x, clamp(_52.materialFactors.z, 0.0, 1.0));
+        float roughness = clamp((((orm.y * _52.materialFactors.y) - (0.3499999940395355224609375 * _52.worldLightParams.y)) + (0.300000011920928955078125 * _52.worldLightParams.z)) + (0.4000000059604644775390625 * _52.worldLightParams.w), 0.039999999105930328369140625, 1.0);
+        float metalness = clamp(orm.z * _52.materialFactors.x, 0.0, 1.0);
         vec3 ibl_n = normalize(ibl_N);
         vec3 ibl_v = normalize(ibl_V);
-        vec3 F0 = mix(vec3(0.039999999105930328369140625), base.xyz, vec3(metalness));
+        vec3 F0 = mix(vec3(0.039999999105930328369140625), materialAlbedo * _52.materialBaseColor.xyz, vec3(metalness));
         float NdotV = max(dot(ibl_n, ibl_v), 0.0);
-        float param_22 = NdotV;
-        vec3 param_23 = F0;
-        float param_24 = roughness;
-        vec3 F_amb = fresnelSchlickRoughness(param_22, param_23, param_24);
+        float param_10 = NdotV;
+        vec3 param_11 = F0;
+        float param_12 = roughness;
+        vec3 F_amb = fresnelSchlickRoughness(param_10, param_11, param_12);
         vec3 R = reflect(-ibl_v, ibl_n);
-        vec3 prefiltered = textureLod(radianceCube, R, roughness * 5.0).xyz;
+        float environmentBlend = clamp(_52.materialFactors.w, 0.0, 1.0);
+        vec3 currentPrefiltered = textureLod(radianceCube, R, roughness * float(textureQueryLevels(radianceCube) - 1)).xyz;
+        vec3 previousPrefiltered = textureLod(previousRadianceCube, R, roughness * float(textureQueryLevels(previousRadianceCube) - 1)).xyz;
+        vec3 prefiltered = mix(previousPrefiltered, currentPrefiltered, vec3(environmentBlend));
         vec2 envBRDF = textureLod(brdfLut, vec2(NdotV, roughness), 0.0).xy;
         vec3 specularIBL = (prefiltered * ((F_amb * envBRDF.x) + vec3(envBRDF.y))) * ao;
         vec2 gtaoUV = gl_FragCoord.xy / vec2(textureSize(gtaoMap, 0));
         float gtao_vis = texture(gtaoMap, gtaoUV).x;
         specularIBL *= gtao_vis;
-        vec4 _672 = base;
-        vec3 _674 = _672.xyz + specularIBL;
-        base.x = _674.x;
-        base.y = _674.y;
-        base.z = _674.z;
+        vec4 _731 = base;
+        vec3 _733 = _731.xyz + specularIBL;
+        base.x = _733.x;
+        base.y = _733.y;
+        base.z = _733.z;
     }
     if (wired_advanced_fog_enabled())
     {
         float fogAmount = wired_advanced_fog_amount();
-        vec4 _686 = base;
-        vec3 _693 = mix(_686.xyz, _52.advancedFogColorDensity.xyz, vec3(fogAmount));
-        base.x = _693.x;
-        base.y = _693.y;
-        base.z = _693.z;
+        vec4 _745 = base;
+        vec3 _752 = mix(_745.xyz, _52.advancedFogColorDensity.xyz, vec3(fogAmount));
+        base.x = _752.x;
+        base.y = _752.y;
+        base.z = _752.z;
     }
-    if (_701)
+    if (_760)
     {
         if (base.w == 0.0)
         {
@@ -256,7 +277,7 @@ void main()
     }
     else
     {
-        if (_711)
+        if (_770)
         {
             if (dot(base.xyz, base.xyz) == 0.0)
             {

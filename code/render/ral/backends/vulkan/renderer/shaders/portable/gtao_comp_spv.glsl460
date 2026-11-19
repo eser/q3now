@@ -25,20 +25,25 @@ layout(binding = 0) uniform texture2D depthTex;
 layout(binding = 0) uniform sampler depthSampler;
 layout(binding = 0, r16f) uniform writeonly image2D aoImage;
 
-float sampleDeviceDepth(vec2 uv)
+float sampleViewDepth(vec2 uv, float mip)
 {
-    return textureLod(sampler2D(depthTex, depthSampler), uv, 0.0).x;
+    return textureLod(sampler2D(depthTex, depthSampler), uv, mip).x;
 }
 
-float linearizeDepth(float z)
+float sampleViewDepth0(vec2 uv)
 {
-    return (pc.zNear * pc.zFar) / (pc.zNear + (z * (pc.zFar - pc.zNear)));
+    vec2 param = uv;
+    float param_1 = 0.0;
+    return sampleViewDepth(param, param_1);
 }
 
-vec3 viewPosFromUV(vec2 uv, float deviceZ)
+float skyDepthThreshold()
 {
-    float param = deviceZ;
-    float vz = linearizeDepth(param);
+    return min(pc.zFar, 65000.0) * 0.999000012874603271484375;
+}
+
+vec3 viewPosFromUV(vec2 uv, float vz)
+{
     vec2 ndc = (uv * 2.0) - vec2(1.0);
     vec2 vxy = ((ndc * pc.ndcToViewMul) + pc.ndcToViewAdd) * vz;
     return vec3(vxy, vz);
@@ -47,13 +52,13 @@ vec3 viewPosFromUV(vec2 uv, float deviceZ)
 vec3 normalFromDepth(vec2 uv, vec3 P, vec2 texel)
 {
     vec2 param = uv - vec2(texel.x, 0.0);
-    float zL = sampleDeviceDepth(param);
+    float zL = sampleViewDepth0(param);
     vec2 param_1 = uv + vec2(texel.x, 0.0);
-    float zR = sampleDeviceDepth(param_1);
+    float zR = sampleViewDepth0(param_1);
     vec2 param_2 = uv - vec2(0.0, texel.y);
-    float zU = sampleDeviceDepth(param_2);
+    float zU = sampleViewDepth0(param_2);
     vec2 param_3 = uv + vec2(0.0, texel.y);
-    float zD = sampleDeviceDepth(param_3);
+    float zD = sampleViewDepth0(param_3);
     vec2 param_4 = uv - vec2(texel.x, 0.0);
     float param_5 = zL;
     vec3 Pl = viewPosFromUV(param_4, param_5);
@@ -66,38 +71,38 @@ vec3 normalFromDepth(vec2 uv, vec3 P, vec2 texel)
     vec2 param_10 = uv + vec2(0.0, texel.y);
     float param_11 = zD;
     vec3 Pd = viewPosFromUV(param_10, param_11);
-    vec3 _233;
+    vec3 _230;
     if (abs(Pr.z - P.z) < abs(P.z - Pl.z))
     {
-        _233 = Pr - P;
+        _230 = Pr - P;
     }
     else
     {
-        _233 = P - Pl;
+        _230 = P - Pl;
     }
-    vec3 dPdx = _233;
-    vec3 _258;
+    vec3 dPdx = _230;
+    vec3 _255;
     if (abs(Pd.z - P.z) < abs(P.z - Pu.z))
     {
-        _258 = Pd - P;
+        _255 = Pd - P;
     }
     else
     {
-        _258 = P - Pu;
+        _255 = P - Pu;
     }
-    vec3 dPdy = _258;
+    vec3 dPdy = _255;
     vec3 n = cross(dPdx, dPdy);
     float len = length(n);
-    vec3 _279;
+    vec3 _276;
     if (len > 9.9999999392252902907785028219223e-09)
     {
-        _279 = n / vec3(len);
+        _276 = n / vec3(len);
     }
     else
     {
-        _279 = vec3(0.0, 0.0, 1.0);
+        _276 = vec3(0.0, 0.0, 1.0);
     }
-    return _279;
+    return _276;
 }
 
 float ign(vec2 pix)
@@ -109,31 +114,31 @@ float fastAcos(float x)
 {
     float xa = abs(x);
     float r = (((-0.15658299624919891357421875) * xa) + 1.57079637050628662109375) * sqrt(1.0 - xa);
-    float _134;
+    float _131;
     if (x >= 0.0)
     {
-        _134 = r;
+        _131 = r;
     }
     else
     {
-        _134 = 3.1415927410125732421875 - r;
+        _131 = 3.1415927410125732421875 - r;
     }
-    return _134;
+    return _131;
 }
 
 float sscsContact(vec3 P, vec2 texel, float _noise)
 {
-    bool _307 = pc.sscsEnabled == 0;
-    bool _315;
-    if (!_307)
+    bool _304 = pc.sscsEnabled == 0;
+    bool _312;
+    if (!_304)
     {
-        _315 = pc.sscsStrength <= 0.0;
+        _312 = pc.sscsStrength <= 0.0;
     }
     else
     {
-        _315 = _307;
+        _312 = _304;
     }
-    if (_315)
+    if (_312)
     {
         return 1.0;
     }
@@ -150,58 +155,56 @@ float sscsContact(vec3 P, vec2 texel, float _noise)
         }
         vec2 ndc = ((sp.xy / vec2(sp.z)) - pc.ndcToViewAdd) / pc.ndcToViewMul;
         vec2 uvS = (ndc * 0.5) + vec2(0.5);
-        bool _389 = uvS.x < 0.0;
-        bool _396;
-        if (!_389)
+        bool _386 = uvS.x < 0.0;
+        bool _393;
+        if (!_386)
         {
-            _396 = uvS.x > 1.0;
+            _393 = uvS.x > 1.0;
         }
         else
         {
-            _396 = _389;
+            _393 = _386;
         }
-        bool _403;
-        if (!_396)
+        bool _400;
+        if (!_393)
         {
-            _403 = uvS.y < 0.0;
+            _400 = uvS.y < 0.0;
         }
         else
         {
-            _403 = _396;
+            _400 = _393;
         }
-        bool _410;
-        if (!_403)
+        bool _407;
+        if (!_400)
         {
-            _410 = uvS.y > 1.0;
+            _407 = uvS.y > 1.0;
         }
         else
         {
-            _410 = _403;
+            _407 = _400;
         }
-        if (_410)
+        if (_407)
         {
             break;
         }
         vec2 param = uvS;
-        float zScene = sampleDeviceDepth(param);
-        if (zScene <= 0.0)
+        float sceneVz = sampleViewDepth0(param);
+        if (sceneVz >= skyDepthThreshold())
         {
             continue;
         }
-        float param_1 = zScene;
-        float sceneVz = linearizeDepth(param_1);
         float diff = sp.z - sceneVz;
-        bool _435 = diff > (stepLen * 0.5);
-        bool _442;
-        if (_435)
+        bool _429 = diff > (stepLen * 0.5);
+        bool _436;
+        if (_429)
         {
-            _442 = diff < pc.sscsRadius;
+            _436 = diff < pc.sscsRadius;
         }
         else
         {
-            _442 = _435;
+            _436 = _429;
         }
-        if (_442)
+        if (_436)
         {
             occluded = 1.0;
             break;
@@ -214,25 +217,25 @@ void main()
 {
     ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
     ivec2 dim = ivec2(pc.viewportSize);
-    bool _473 = pix.x >= dim.x;
-    bool _482;
-    if (!_473)
+    bool _467 = pix.x >= dim.x;
+    bool _476;
+    if (!_467)
     {
-        _482 = pix.y >= dim.y;
+        _476 = pix.y >= dim.y;
     }
     else
     {
-        _482 = _473;
+        _476 = _467;
     }
-    if (_482)
+    if (_476)
     {
         return;
     }
     vec2 texel = vec2(1.0) / pc.viewportSize;
     vec2 uv = (vec2(pix) + vec2(0.5)) * texel;
     vec2 param = uv;
-    float centerZ = sampleDeviceDepth(param);
-    if (centerZ <= 0.0)
+    float centerZ = sampleViewDepth0(param);
+    if (centerZ >= skyDepthThreshold())
     {
         imageStore(aoImage, pix, vec4(1.0));
         return;
@@ -280,18 +283,22 @@ void main()
             s = pow(s, 2.0);
             s += minS;
             vec2 off = (dir * s) * screenRadiusUV;
+            float offPixels = length(off * pc.viewportSize);
+            float mip = clamp(log2(max(offPixels, 1.0)) - 3.2999999523162841796875, 0.0, 4.0);
             vec2 uv0 = uv + off;
             vec2 uv1 = uv - off;
             vec2 param_8 = uv0;
-            float z0 = sampleDeviceDepth(param_8);
-            vec2 param_9 = uv1;
-            float z1 = sampleDeviceDepth(param_9);
-            vec2 param_10 = uv0;
-            float param_11 = z0;
-            vec3 s0 = viewPosFromUV(param_10, param_11);
-            vec2 param_12 = uv1;
-            float param_13 = z1;
-            vec3 s1 = viewPosFromUV(param_12, param_13);
+            float param_9 = mip;
+            float z0 = sampleViewDepth(param_8, param_9);
+            vec2 param_10 = uv1;
+            float param_11 = mip;
+            float z1 = sampleViewDepth(param_10, param_11);
+            vec2 param_12 = uv0;
+            float param_13 = z0;
+            vec3 s0 = viewPosFromUV(param_12, param_13);
+            vec2 param_14 = uv1;
+            float param_15 = z1;
+            vec3 s1 = viewPosFromUV(param_14, param_15);
             vec3 d0 = s0 - P;
             vec3 d1 = s1 - P;
             float dist0 = length(d0);
@@ -302,21 +309,22 @@ void main()
             w1 = 1.0 - w1;
             float shc0 = dot(d0 / vec3(max(dist0, 9.9999997473787516355514526367188e-06)), V);
             float shc1 = dot(d1 / vec3(max(dist1, 9.9999997473787516355514526367188e-06)), V);
-            if (z0 <= 0.0)
+            float skyZ = skyDepthThreshold();
+            if (z0 >= skyZ)
             {
                 shc0 = horizonCos0;
             }
-            if (z1 <= 0.0)
+            if (z1 >= skyZ)
             {
                 shc1 = horizonCos1;
             }
             horizonCos0 = max(horizonCos0, mix(horizonCos0, shc0, w0));
             horizonCos1 = max(horizonCos1, mix(horizonCos1, shc1, w1));
         }
-        float param_14 = clamp(horizonCos1, -1.0, 1.0);
-        float h0 = -fastAcos(param_14);
-        float param_15 = clamp(horizonCos0, -1.0, 1.0);
-        float h1 = fastAcos(param_15);
+        float param_16 = clamp(horizonCos1, -1.0, 1.0);
+        float h0 = -fastAcos(param_16);
+        float param_17 = clamp(horizonCos0, -1.0, 1.0);
+        float h1 = fastAcos(param_17);
         float iarc0 = ((cosN + ((2.0 * h0) * sin(n))) - cos((2.0 * h0) - n)) * 0.25;
         float iarc1 = ((cosN + ((2.0 * h1) * sin(n))) - cos((2.0 * h1) - n)) * 0.25;
         visibility += (projLen * (iarc0 + iarc1));
@@ -326,10 +334,10 @@ void main()
     visibility = pow(visibility, pc.finalPower);
     visibility = mix(1.0, visibility, clamp(pc.intensity, 0.0, 1.0));
     visibility = max(visibility, 0.0);
-    vec3 param_16 = P;
-    vec2 param_17 = texel;
-    float param_18 = _noise;
-    visibility *= sscsContact(param_16, param_17, param_18);
+    vec3 param_18 = P;
+    vec2 param_19 = texel;
+    float param_20 = _noise;
+    visibility *= sscsContact(param_18, param_19, param_20);
     imageStore(aoImage, pix, vec4(visibility));
 }
 

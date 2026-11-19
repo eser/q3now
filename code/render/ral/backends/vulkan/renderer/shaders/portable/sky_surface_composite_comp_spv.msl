@@ -1,0 +1,167 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct Params
+{
+    uint4 outputGrid;
+    float4 depthRange;
+    float4x4 invViewProjection;
+    float4 eyeSkyControl;
+    float4 radianceControl;
+    float4 mediaColorDensity;
+    float4 mediaHeight;
+};
+
+constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(8u, 8u, 1u);
+
+struct spvDescriptorSetBuffer0
+{
+    constant Params* p [[id(0)]];
+    texture2d<float> skyViewLut [[id(1)]];
+    sampler skyViewLutSmplr [[id(2)]];
+    texturecube<float> currentSkyRadiance [[id(3)]];
+    sampler currentSkyRadianceSmplr [[id(4)]];
+    texture2d<float> sceneHdr [[id(5)]];
+    sampler sceneHdrSmplr [[id(6)]];
+    texture2d<float> sceneDepth [[id(7)]];
+    sampler sceneDepthSmplr [[id(8)]];
+    texture2d<float, access::write> composedHdr [[id(9)]];
+};
+
+static inline __attribute__((always_inline))
+float3 skyDirection(thread const float2& screenUv, constant Params& p)
+{
+    float4 worldH = p.invViewProjection * float4((screenUv * 2.0) - float2(1.0), 0.0, 1.0);
+    float3 world = worldH.xyz / float3(fast::max(abs(worldH.w), 9.9999999747524270787835121154785e-07));
+    return fast::normalize(world - p.eyeSkyControl.xyz);
+}
+
+static inline __attribute__((always_inline))
+float2 skyViewUv(thread const float3& direction)
+{
+    float azimuth = precise::atan2(direction.y, direction.x);
+    float elevation = asin(fast::clamp(direction.z, -1.0, 1.0));
+    return float2(fract((azimuth / 6.283185482025146484375) + 0.5), fast::clamp((elevation / 3.1415927410125732421875) + 0.5, 0.0, 1.0));
+}
+
+static inline __attribute__((always_inline))
+float3 wiredComposeAuthoredPhysicalSky(thread const float3& authored, thread const float3& physical, thread const float& blend)
+{
+    float authoredEnergy = dot(fast::max(authored, float3(0.0)), float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    float physicalEnergy = dot(fast::max(physical, float3(0.0)), float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    if (authoredEnergy <= 9.9999997473787516355514526367188e-06)
+    {
+        return mix(authored, physical, float3(blend));
+    }
+    float scale = fast::clamp(physicalEnergy / fast::max(authoredEnergy, 0.180000007152557373046875), 0.64999997615814208984375, 1.75);
+    float3 _279;
+    if (physicalEnergy > 9.9999997473787516355514526367188e-06)
+    {
+        _279 = physical / float3(physicalEnergy);
+    }
+    else
+    {
+        _279 = float3(1.0);
+    }
+    float3 physicalTint = _279;
+    float3 relit = ((authored * scale) * mix(float3(1.0), fast::clamp(physicalTint, float3(0.5), float3(2.0)), float3(0.119999997317790985107421875))) + (physical * 0.07999999821186065673828125);
+    return mix(authored, relit, float3(blend));
+}
+
+static inline __attribute__((always_inline))
+float3 wiredAerialInscatter(thread const float3& mediaColor, thread const float3& viewDir, constant Params& p, texture2d<float> skyViewLut, sampler skyViewLutSmplr, texturecube<float> currentSkyRadiance, sampler currentSkyRadianceSmplr)
+{
+    float aerial = fast::clamp(p.mediaHeight.w, 0.0, 1.0);
+    if (aerial <= 0.0)
+    {
+        return mediaColor;
+    }
+    float3 _123;
+    if (p.eyeSkyControl.w > 0.0)
+    {
+        float3 param = viewDir;
+        _123 = skyViewLut.sample(skyViewLutSmplr, skyViewUv(param), level(0.0)).xyz;
+    }
+    else
+    {
+        _123 = currentSkyRadiance.sample(currentSkyRadianceSmplr, viewDir, level(4.0)).xyz;
+    }
+    float3 skyIn = _123;
+    float3 skySum = ((((currentSkyRadiance.sample(currentSkyRadianceSmplr, float3(1.0, 0.0, 0.0), level(7.0)).xyz + currentSkyRadiance.sample(currentSkyRadianceSmplr, float3(-1.0, 0.0, 0.0), level(7.0)).xyz) + currentSkyRadiance.sample(currentSkyRadianceSmplr, float3(0.0, 1.0, 0.0), level(7.0)).xyz) + currentSkyRadiance.sample(currentSkyRadianceSmplr, float3(0.0, -1.0, 0.0), level(7.0)).xyz) + currentSkyRadiance.sample(currentSkyRadianceSmplr, float3(0.0, 0.0, 1.0), level(7.0)).xyz) + currentSkyRadiance.sample(currentSkyRadianceSmplr, float3(0.0, 0.0, -1.0), level(7.0)).xyz;
+    float skyMean = fast::max(dot(skySum / float3(6.0), float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875)), 9.9999997473787516355514526367188e-05);
+    float3 directional = skyIn / float3(skyMean);
+    float3 sunDir = fast::normalize(float3(p.depthRange.w, p.radianceControl.w, p.mediaHeight.z) + float3(9.9999999747524270787835121154785e-07));
+    float cosT = dot(viewDir, sunDir);
+    float hg = 0.6974999904632568359375 / fast::max(powr(1.3025000095367431640625 - (1.10000002384185791015625 * cosT), 1.5), 9.9999997473787516355514526367188e-05);
+    float3 tinted = mediaColor * mix(float3(1.0), fast::clamp(directional, float3(0.3499999940395355224609375), float3(3.0)), float3(aerial));
+    return tinted * mix(1.0, 0.75 + (0.25 * hg), aerial);
+}
+
+kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+{
+    uint2 pixel = gl_GlobalInvocationID.xy;
+    if (any(pixel >= (*spvDescriptorSet0.p).outputGrid.xy))
+    {
+        return;
+    }
+    float2 uv = (float2(pixel) + float2(0.5)) / float2((*spvDescriptorSet0.p).outputGrid.xy);
+    float3 scene = spvDescriptorSet0.sceneHdr.sample(spvDescriptorSet0.sceneHdrSmplr, uv, level(0.0)).xyz;
+    float _351;
+    if ((*spvDescriptorSet0.p).depthRange.z > 0.5)
+    {
+        _351 = spvDescriptorSet0.sceneDepth.sample(spvDescriptorSet0.sceneDepthSmplr, uv, level(0.0)).x;
+    }
+    else
+    {
+        _351 = 1.0;
+    }
+    float depth = _351;
+    if (depth <= 0.0)
+    {
+        float2 param = uv;
+        float3 direction = skyDirection(param, (*spvDescriptorSet0.p));
+        if ((*spvDescriptorSet0.p).eyeSkyControl.w > 0.0)
+        {
+            float3 param_1 = direction;
+            float3 physicalSky = spvDescriptorSet0.skyViewLut.sample(spvDescriptorSet0.skyViewLutSmplr, skyViewUv(param_1), level(0.0)).xyz;
+            float3 param_2 = scene;
+            float3 param_3 = physicalSky;
+            float param_4 = fast::clamp((*spvDescriptorSet0.p).eyeSkyControl.w, 0.0, 1.0);
+            scene = wiredComposeAuthoredPhysicalSky(param_2, param_3, param_4);
+        }
+    }
+    else
+    {
+        bool _393 = (*spvDescriptorSet0.p).depthRange.z > 0.5;
+        bool _400;
+        if (_393)
+        {
+            _400 = (*spvDescriptorSet0.p).mediaColorDensity.w > 0.0;
+        }
+        else
+        {
+            _400 = _393;
+        }
+        if (_400)
+        {
+            float4 worldH = (*spvDescriptorSet0.p).invViewProjection * float4((uv * 2.0) - float2(1.0), depth, 1.0);
+            if (abs(worldH.w) > 9.9999999747524270787835121154785e-07)
+            {
+                float3 world = worldH.xyz / float3(worldH.w);
+                float distanceToEye = length(world - (*spvDescriptorSet0.p).eyeSkyControl.xyz);
+                float heightWeight = exp((-(*spvDescriptorSet0.p).mediaHeight.y) * fast::max(world.z - (*spvDescriptorSet0.p).mediaHeight.x, 0.0));
+                float transmittance = exp(((-(*spvDescriptorSet0.p).mediaColorDensity.w) * heightWeight) * distanceToEye);
+                float3 param_5 = (*spvDescriptorSet0.p).mediaColorDensity.xyz;
+                float3 param_6 = fast::normalize(world - (*spvDescriptorSet0.p).eyeSkyControl.xyz);
+                float3 inscatter = wiredAerialInscatter(param_5, param_6, (*spvDescriptorSet0.p), spvDescriptorSet0.skyViewLut, spvDescriptorSet0.skyViewLutSmplr, spvDescriptorSet0.currentSkyRadiance, spvDescriptorSet0.currentSkyRadianceSmplr);
+                scene = mix(inscatter, scene, float3(fast::clamp(transmittance, 0.0, 1.0)));
+            }
+        }
+    }
+    spvDescriptorSet0.composedHdr.write(float4(scene, 1.0), uint2(int2(pixel)));
+}
+

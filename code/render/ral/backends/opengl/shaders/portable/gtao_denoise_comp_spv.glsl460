@@ -13,6 +13,8 @@ layout(binding = 0) uniform sampler depthSampler;
 layout(binding = 0, r16f) uniform readonly image2D aoIn;
 layout(binding = 1, r16f) uniform writeonly image2D aoOut;
 
+shared vec2 tile[144];
+
 float linearizeDepth(float z)
 {
     return (pc.zNear * pc.zFar) / (pc.zNear + (z * (pc.zFar - pc.zNear)));
@@ -29,22 +31,31 @@ void main()
 {
     ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
     ivec2 dim = ivec2(pc.viewportSize);
-    bool _95 = pix.x >= dim.x;
-    bool _105;
-    if (!_95)
+    ivec2 origin = (ivec2(gl_WorkGroupID.xy) * ivec2(8)) - ivec2(2);
+    for (uint i = gl_LocalInvocationIndex; i < 144u; i += 64u)
     {
-        _105 = pix.y >= dim.y;
+        ivec2 q = clamp(origin + ivec2(int(i % 12u), int(i / 12u)), ivec2(0), dim - ivec2(1));
+        ivec2 param = q;
+        tile[i] = vec2(imageLoad(aoIn, q).x, linearAt(param));
+    }
+    barrier();
+    bool _156 = pix.x >= dim.x;
+    bool _166;
+    if (!_156)
+    {
+        _166 = pix.y >= dim.y;
     }
     else
     {
-        _105 = _95;
+        _166 = _156;
     }
-    if (_105)
+    if (_166)
     {
         return;
     }
-    ivec2 param = pix;
-    float centerLin = linearAt(param);
+    ivec2 local = ivec2(gl_LocalInvocationID.xy) + ivec2(2);
+    int center = (local.y * 12) + local.x;
+    float centerLin = tile[center].y;
     float depthScale = 1.0 / max(centerLin * 0.0500000007450580596923828125, 0.001000000047497451305389404296875);
     float sum = 0.0;
     float wsum = 0.0;
@@ -52,10 +63,9 @@ void main()
     {
         for (int dx = -2; dx <= 2; dx++)
         {
-            ivec2 q = clamp(pix + ivec2(dx, dy), ivec2(0), dim - ivec2(1));
-            float ao = imageLoad(aoIn, q).x;
-            ivec2 param_1 = q;
-            float dl = linearAt(param_1);
+            vec2 sampleValue = tile[(center + (dy * 12)) + dx];
+            float ao = sampleValue.x;
+            float dl = sampleValue.y;
             float wd = exp((-float((dx * dx) + (dy * dy))) * 0.5);
             float ddiff = abs(dl - centerLin) * depthScale;
             float we = exp((-ddiff) * ddiff);
@@ -64,16 +74,16 @@ void main()
             wsum += w;
         }
     }
-    float _208;
+    float _276;
     if (wsum > 9.9999997473787516355514526367188e-06)
     {
-        _208 = sum / wsum;
+        _276 = sum / wsum;
     }
     else
     {
-        _208 = imageLoad(aoIn, pix).x;
+        _276 = tile[center].x;
     }
-    float result = _208;
+    float result = _276;
     imageStore(aoOut, pix, vec4(result));
 }
 

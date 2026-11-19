@@ -1,0 +1,40 @@
+#version 460
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(binding = 0, std140) uniform SkyParams
+{
+    vec4 sunDirectionAngularRadius;
+    vec4 sunRadiance;
+    vec4 moonDirectionAngularRadius;
+    vec4 moonRadiance;
+    vec4 atmosphereRadii;
+    vec4 scatteringScale;
+    vec4 groundExposure;
+} sky;
+
+layout(binding = 0, rgba16f) uniform writeonly image2D multiscatterLut;
+layout(binding = 0) uniform sampler2D transmittanceLut;
+
+void main()
+{
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 extent = imageSize(multiscatterLut);
+    if (any(greaterThanEqual(coord, extent)))
+    {
+        return;
+    }
+    vec2 uv = (vec2(coord) + vec2(0.5)) / vec2(extent);
+    vec3 accumulated = vec3(0.0);
+    for (int i = 0; i < 16; i++)
+    {
+        float u = (float(i) + 0.5) / 16.0;
+        vec2 sampleUv = vec2(fract(u + uv.x), uv.y);
+        vec3 transmittance = textureLod(transmittanceLut, sampleUv, 0.0).xyz;
+        accumulated += ((vec3(1.0) - transmittance) * transmittance);
+    }
+    vec3 energy = accumulated / vec3(16.0);
+    energy *= max(sky.sunRadiance.xyz, vec3(0.001000000047497451305389404296875));
+    energy *= (0.3499999940395355224609375 + (0.64999997615814208984375 * clamp(sky.groundExposure.w, 0.0, 4.0)));
+    imageStore(multiscatterLut, coord, vec4(max(energy, vec3(0.0)), 1.0));
+}
+

@@ -8,9 +8,9 @@ struct AtmParticle
     float flags;
 };
 
-const float _112[6] = float[](-1.0, -1.0, 1.0, 1.0, -1.0, 1.0);
-const float _119[6] = float[](1.0, -1.0, 1.0, 1.0, -1.0, -1.0);
-const vec2 _394[6] = vec2[](vec2(0.0), vec2(0.0, 1.0), vec2(1.0, 0.0), vec2(1.0, 0.0), vec2(0.0, 1.0), vec2(1.0));
+const float _114[6] = float[](-1.0, -1.0, 1.0, 1.0, -1.0, 1.0);
+const float _121[6] = float[](1.0, -1.0, 1.0, 1.0, -1.0, -1.0);
+const vec2 _396[6] = vec2[](vec2(0.0), vec2(0.0, 1.0), vec2(1.0, 0.0), vec2(1.0, 0.0), vec2(0.0, 1.0), vec2(1.0));
 
 layout(binding = 0, std140) uniform AtmFrame
 {
@@ -48,88 +48,90 @@ layout(binding = 0, std140) uniform AtmFrame
     vec4 effectMeta;
     vec4 effectWorkloads[48];
     vec4 renderParams;
-} _46;
+} _49;
 
 layout(binding = 0, std430) readonly buffer Pool
 {
     AtmParticle particles[];
-} _83;
+} _85;
 
 layout(location = 0) out vec2 fragUV;
 layout(location = 1) out vec4 fragColor;
+layout(location = 2) flat out uint fragFamily;
 
 void emitDegenerate()
 {
     gl_Position = vec4(0.0, 0.0, 0.0, 1.0);
     fragUV = vec2(0.0);
     fragColor = vec4(0.0);
+    fragFamily = 0u;
 }
 
 void main()
 {
     uint idx = uint(gl_InstanceIndex);
     uint vertInQuad = uint(gl_VertexIndex) % 6u;
-    bool _51 = idx >= _46.poolSize;
-    bool _70;
-    if (!_51)
+    bool _54 = idx >= _49.poolSize;
+    bool _72;
+    if (!_54)
     {
-        bool _59 = _46.atmType == 0u;
-        bool _69;
-        if (_59)
+        bool _61 = _49.atmType == 0u;
+        bool _71;
+        if (_61)
         {
-            _69 = idx < uint(_46.effectMeta.x);
+            _71 = idx < uint(_49.effectMeta.x);
         }
         else
         {
-            _69 = _59;
+            _71 = _61;
         }
-        _70 = _69;
+        _72 = _71;
     }
     else
     {
-        _70 = _51;
+        _72 = _54;
     }
-    if (_70)
+    if (_72)
     {
         emitDegenerate();
         return;
     }
     AtmParticle p;
-    p.pos = _83.particles[idx].pos;
-    p.seed = _83.particles[idx].seed;
-    p.vel = _83.particles[idx].vel;
-    p.flags = _83.particles[idx].flags;
+    p.pos = _85.particles[idx].pos;
+    p.seed = _85.particles[idx].seed;
+    p.vel = _85.particles[idx].vel;
+    p.flags = _85.particles[idx].flags;
     if (p.flags < 0.5)
     {
         emitDegenerate();
         return;
     }
-    float sx = _112[vertInQuad];
-    float uy = _119[vertInQuad];
+    float sx = _114[vertInQuad];
+    float uy = _121[vertInQuad];
     uint family = uint(p.flags + 0.5);
     vec3 worldPos;
     vec4 color;
     if (family >= 16u)
     {
         uint effect = family - 16u;
-        if (effect >= min(uint(_46.effectMeta.y), 8u))
+        if (effect >= min(uint(_49.effectMeta.y), 8u))
         {
             emitDegenerate();
             return;
         }
         uint base = effect * 6u;
-        float lifetime = max(0.0500000007450580596923828125, _46.effectWorkloads[base + 5u].x + _46.effectWorkloads[base + 5u].y);
+        float lifetime = max(0.0500000007450580596923828125, _49.effectWorkloads[base + 5u].x + _49.effectWorkloads[base + 5u].y);
         float age = 1.0 - clamp(p.seed / lifetime, 0.0, 1.0);
-        float size = mix(_46.effectWorkloads[base + 4u].z, _46.effectWorkloads[base + 4u].w, age);
-        worldPos = (p.pos + (_46.viewLeft.xyz * (sx * size))) + (_46.viewUp.xyz * (uy * size));
-        color = _46.effectWorkloads[base + 2u];
-        color.w *= _46.effectWorkloads[base + 1u].w;
+        float size = mix(_49.effectWorkloads[base + 4u].z, _49.effectWorkloads[base + 4u].w, age);
+        worldPos = (p.pos + (_49.viewLeft.xyz * (sx * size))) + (_49.viewUp.xyz * (uy * size));
+        color = _49.effectWorkloads[base + 2u];
+        color.w *= _49.effectWorkloads[base + 1u].w;
     }
     else
     {
         if ((family == 1u) || (family == 3u))
         {
-            vec3 right = _46.viewLeft.xyz * (sx * 0.60000002384185791015625);
+            vec3 right = _49.viewLeft.xyz * (sx * 0.60000002384185791015625);
             float _length = (family == 1u) ? 18.0 : 9.8999996185302734375;
             vec3 down = (vec3(0.0, 0.0, 1.0) * ((uy * 0.5) - 0.5)) * _length;
             worldPos = (p.pos + right) + down;
@@ -137,41 +139,42 @@ void main()
         }
         else
         {
-            float _273;
+            float _275;
             if (family == 4u)
             {
-                _273 = 0.800000011920928955078125;
+                _275 = 0.800000011920928955078125;
             }
             else
             {
-                _273 = (family == 5u) ? 1.2000000476837158203125 : 1.5;
+                _275 = (family == 5u) ? 1.2000000476837158203125 : 1.5;
             }
-            float size_1 = _273;
-            worldPos = (p.pos + (_46.viewLeft.xyz * (sx * size_1))) + (_46.viewUp.xyz * (uy * size_1));
-            vec4 _303;
+            float size_1 = _275;
+            worldPos = (p.pos + (_49.viewLeft.xyz * (sx * size_1))) + (_49.viewUp.xyz * (uy * size_1));
+            vec4 _305;
             if (family == 4u)
             {
-                _303 = vec4(0.819999992847442626953125, 0.87999999523162841796875, 0.920000016689300537109375, 0.85000002384185791015625);
+                _305 = vec4(0.819999992847442626953125, 0.87999999523162841796875, 0.920000016689300537109375, 0.85000002384185791015625);
             }
             else
             {
-                _303 = mix(vec4(1.0, 1.0, 1.0, 0.800000011920928955078125), vec4(0.4799999892711639404296875, 0.4199999868869781494140625, 0.3400000035762786865234375, 0.449999988079071044921875), bvec4(family == 5u));
+                _305 = mix(vec4(1.0, 1.0, 1.0, 0.800000011920928955078125), vec4(0.4799999892711639404296875, 0.4199999868869781494140625, 0.3400000035762786865234375, 0.449999988079071044921875), bvec4(family == 5u));
             }
-            color = _303;
+            color = _305;
         }
     }
-    float cloudTransmission = 1.0 - clamp(_46.ambientCloud.w * _46.cloudMedia.x, 0.0, 1.0);
-    vec3 weatherLight = ((_46.ambientCloud.xyz + vec3(max(_46.sun.w, 0.0) * cloudTransmission)) + vec3(max(_46.moon.w, 0.0) * 0.20000000298023223876953125)) + vec3(max(_46.cloudMedia.y, 0.0));
+    float cloudTransmission = 1.0 - clamp(_49.ambientCloud.w * _49.cloudMedia.x, 0.0, 1.0);
+    vec3 weatherLight = ((_49.ambientCloud.xyz + vec3(max(_49.sun.w, 0.0) * cloudTransmission)) + vec3(max(_49.moon.w, 0.0) * 0.20000000298023223876953125)) + vec3(max(_49.cloudMedia.y, 0.0));
     if (dot(weatherLight, weatherLight) > 9.9999999392252902907785028219223e-09)
     {
-        vec4 _371 = color;
-        vec3 _373 = _371.xyz * clamp(weatherLight, vec3(0.039999999105930328369140625), vec3(4.0));
-        color.x = _373.x;
-        color.y = _373.y;
-        color.z = _373.z;
+        vec4 _373 = color;
+        vec3 _375 = _373.xyz * clamp(weatherLight, vec3(0.039999999105930328369140625), vec3(4.0));
+        color.x = _375.x;
+        color.y = _375.y;
+        color.z = _375.z;
     }
-    gl_Position = _46.mvp * vec4(worldPos, 1.0);
-    fragUV = _394[vertInQuad];
+    gl_Position = _49.mvp * vec4(worldPos, 1.0);
+    fragUV = _396[vertInQuad];
     fragColor = color;
+    fragFamily = family;
 }
 

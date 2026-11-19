@@ -182,7 +182,29 @@ export function lowerGlsl460(bytes, portableEntry) {
 		if (lowered === source) break;
 		source = lowered;
 	}
+	const computeSampler = {
+		// Exact compute inputs; no substitute texture or fallback shader.
+		lens_occlusion_comp_spv: ['depthTex', 'depthSampler'],
+		hdr_histogram_comp_spv: ['colorImage', 'colorSampler'],
+	}[portableEntry.symbol];
+	if (computeSampler) {
+		const [textureName, samplerName] = computeSampler;
+		const texture = `layout(binding = 0) uniform texture2D ${textureName};`;
+		const sampler = `layout(binding = 0) uniform sampler ${samplerName};`;
+		const pair = `sampler2D(${textureName}, ${samplerName})`;
+		if (!source.includes(texture) || !source.includes(sampler) || !source.includes(pair))
+			throw new Error(`GLSL compute combined-sampler lowering failed: ${portableEntry.symbol}`);
+		source = source.replace(texture, `layout(binding = 0) uniform sampler2D ${textureName};`)
+			.replace(`${sampler}\n`, '').replaceAll(pair, textureName);
+	}
 	if (portableEntry.symbol === 'ral_opengl_product_frag_spv') {
+		const skyHelperSignature =
+			'vec3 wired_sample_sky_radiance(texture2DArray skyTexture, sampler skySampler, vec3 direction, float lod)';
+		if (source.includes(skyHelperSignature)) {
+			source = source.replace(skyHelperSignature,
+				'vec3 wired_sample_sky_radiance(sampler2DArray skyTexture, vec3 direction, float lod)')
+				.replaceAll('sampler2DArray(skyTexture, skySampler)', 'skyTexture');
+		}
 		for (const [texture, sampler, binding, textureType, samplerType] of [
 			['baseTexture', 'baseSampler', 0, 'texture2D', 'sampler2D'],
 			['lightmapTexture', 'lightmapSampler', 1, 'texture2D', 'sampler2D'],
@@ -192,18 +214,46 @@ export function lowerGlsl460(bytes, portableEntry) {
 				'texture2DArray', 'sampler2DArray'],
 			['staticVisibilityTexture', 'staticVisibilitySampler', 4,
 				'texture2DArray', 'sampler2DArray'],
+			['physicalSkyTexture', 'physicalSkySampler', 5,
+				'texture2D', 'sampler2D'],
+			['currentSkyRadianceTexture', 'currentSkyRadianceSampler', 6,
+				'texture2DArray', 'sampler2DArray'],
+			['previousSkyRadianceTexture', 'previousSkyRadianceSampler', 7,
+				'texture2DArray', 'sampler2DArray'],
 		]) {
 			const textureDecl = `layout(binding = ${binding}) uniform ${textureType} ${texture};`;
 			const samplerDecl = `layout(binding = ${binding}) uniform sampler ${sampler};`;
 			const constructor = `${samplerType}(${texture}, ${sampler})`;
+			const pairedArgument = `${texture}, ${sampler}`;
 			if (!source.includes(textureDecl) || !source.includes(samplerDecl)
-					|| !source.includes(constructor))
+					|| (!source.includes(constructor) && !source.includes(pairedArgument)))
 				throw new Error(`GLSL product combined-sampler lowering failed: ${texture}`);
 			source = source.replace(textureDecl,
 				`layout(binding = ${binding}) uniform ${samplerType} ${texture};`)
 				.replace(`${samplerDecl}\n`, '')
-				.replaceAll(constructor, texture);
+				.replaceAll(constructor, texture)
+				.replaceAll(pairedArgument, texture);
 		}
+	}
+	if (portableEntry.symbol === 'ral_sky_material_frag_spv') {
+		const pairs = [...Array.from({length: 8}, (_, i) => [`stageImage${i}`, `stageSampler${i}`]),
+			['outerImage', 'outerSampler'], ['physicalImage', 'physicalSampler']];
+		for (const [binding, [texture, sampler]] of pairs.entries()) {
+			const textureDecl = `layout(binding = ${binding}) uniform texture2D ${texture};`;
+			const samplerDecl = `layout(binding = ${binding}) uniform sampler ${sampler};`;
+			const pair = `sampler2D(${texture}, ${sampler})`;
+			if (!source.includes(textureDecl) || !source.includes(samplerDecl) || !source.includes(pair))
+				throw new Error(`GLSL sky combined-sampler lowering failed: ${texture}`);
+			source = source.replace(textureDecl, `layout(binding = ${binding}) uniform sampler2D ${texture};`)
+				.replace(`${samplerDecl}\n`, '').replaceAll(pair, texture);
+		}
+	}
+	if (portableEntry.symbol === 'gamma_vert_spv')
+		source = source.replaceAll('gl_VertexIndex', 'gl_VertexID');
+	if (portableEntry.symbol === 'tonemap_tonemap_frag_spv') {
+		// Desktop GLSL specializes at program creation, not via Vulkan constant IDs.
+		source = source.replace(/layout\(constant_id = (\d+)\) const (float|int) (\w+) = ([^;]+);/g,
+			(_match, id, type, name, value) => `#ifndef WIRED_SPEC_${id}\n#define WIRED_SPEC_${id} ${value}\n#endif\nconst ${type} ${name} = WIRED_SPEC_${id};`);
 	}
 	if (/layout\([^)]*set\s*=|push_constant|nonuniformEXT|GL_EXT_nonuniform_qualifier/.test(source))
 		throw new Error('GLSL 4.60 lowering left Vulkan-only syntax');
@@ -304,7 +354,7 @@ export function runCorpus(options) {
 		const translated = items.map((item) => {
 			let portableEntry = portable.manifest.entries[item.ordinal];
 			if (bootstrapReflection
-					&& (portableEntry.spirv.byteCount !== item.byteCount
+					&& (!portableEntry || portableEntry.spirv.byteCount !== item.byteCount
 						|| portableEntry.spirv.digest.lane0 !== item.artifactDigest.lane0
 						|| portableEntry.spirv.digest.lane1 !== item.artifactDigest.lane1)) {
 				const fresh = bootstrapReflection.entries[item.ordinal];
@@ -313,18 +363,46 @@ export function runCorpus(options) {
 						|| fresh.spirv.digest.lane0 !== item.artifactDigest.lane0
 						|| fresh.spirv.digest.lane1 !== item.artifactDigest.lane1)
 					throw new Error(`bootstrap reflection identity mismatch: ${item.symbol}`);
+				if (!portableEntry) {
+					// A newly appended shader has no previous resolved manifest row.  MSL/WGSL
+					// bootstrap translation needs only its fresh reflection; the portable
+					// manifest compiler resolves combined samplers and other lowering from
+					// that WGSL before the canonical all-target translation pass.
+					portableEntry = fresh;
+					return {
+						...item, artifacts: runTranslator(options.translator, item,
+							portableEntry, workDir, options.targets, options.requireWgsl),
+					};
+				}
 				// Preserve the already-ratified portability lowering (combined-sampler
 				// splits, runtime-array counts, sampler kinds and dynamic offsets) while
 				// refreshing numeric buffer sizes from the new reflection. Replacing the
 				// resolved row with raw reflection here reintroduced *_UNRESOLVED classes
 				// and made the documented write-mode bootstrap impossible.
 				const reflection = structuredClone(portableEntry.reflection);
-				for (const binding of reflection.bindings) {
-					const updated = fresh.reflection.bindings.find((item) =>
-						item.set === binding.set && item.binding === binding.binding);
-					if (updated && updated.minBufferBindingSize > 0)
-						binding.minBufferBindingSize = updated.minBufferBindingSize;
-				}
+				const previousBindings = new Map(reflection.bindings.map((binding) =>
+					[`${binding.set}:${binding.binding}`, binding]));
+				reflection.bindings = fresh.reflection.bindings.map((updated) => {
+					const previous = previousBindings.get(`${updated.set}:${updated.binding}`);
+					if (!previous) {
+						// MSL/WGSL translation does not consume portableEntry.  Permit a
+						// changed shader to introduce unresolved bindings during that
+						// bootstrap pass; compile_portable_manifest resolves them from the
+						// freshly translated WGSL before the canonical all-target pass.
+						// GLSL lowering does consume this reflection, so it remains strict.
+						if ((String(updated.bindingClass).includes('UNRESOLVED')
+								&& options.targets.includes('glsl460'))
+								|| !Number.isInteger(updated.arrayCount) || updated.arrayCount <= 0)
+							throw new Error(`new binding needs explicit portability lowering: ${item.symbol}:${updated.set}:${updated.binding}`);
+						return structuredClone(updated);
+					}
+					return {
+						...structuredClone(updated),
+						bindingClass: previous.bindingClass,
+						arrayCount: previous.arrayCount,
+						dynamicOffset: previous.dynamicOffset,
+					};
+				});
 				reflection.inlineData.byteSize = fresh.reflection.inlineData.byteSize;
 				reflection.inlineData.stageFlags = fresh.reflection.inlineData.stageFlags;
 				portableEntry = { ...fresh, reflection };

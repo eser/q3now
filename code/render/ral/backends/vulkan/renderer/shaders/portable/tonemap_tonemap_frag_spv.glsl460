@@ -1,21 +1,54 @@
 #version 460
 
-layout(constant_id = 28) const float lottes_contrast = 1.60000002384185791015625;
-layout(constant_id = 29) const float lottes_shoulder = 0.9769999980926513671875;
-layout(constant_id = 32) const float lottes_hdr_max = 8.0;
-layout(constant_id = 30) const float lottes_mid_in = 0.180000007152557373046875;
-layout(constant_id = 31) const float lottes_mid_out = 0.2669999897480010986328125;
-layout(constant_id = 18) const float tonemap_exposure = 1.0;
-layout(constant_id = 17) const int tonemap_mode = 1;
+#ifndef WIRED_SPEC_28
+#define WIRED_SPEC_28 1.60000002384185791015625
+#endif
+const float lottes_contrast = WIRED_SPEC_28;
+#ifndef WIRED_SPEC_29
+#define WIRED_SPEC_29 0.9769999980926513671875
+#endif
+const float lottes_shoulder = WIRED_SPEC_29;
+#ifndef WIRED_SPEC_32
+#define WIRED_SPEC_32 8.0
+#endif
+const float lottes_hdr_max = WIRED_SPEC_32;
+#ifndef WIRED_SPEC_30
+#define WIRED_SPEC_30 0.180000007152557373046875
+#endif
+const float lottes_mid_in = WIRED_SPEC_30;
+#ifndef WIRED_SPEC_31
+#define WIRED_SPEC_31 0.2669999897480010986328125
+#endif
+const float lottes_mid_out = WIRED_SPEC_31;
+#ifndef WIRED_SPEC_18
+#define WIRED_SPEC_18 1.0
+#endif
+const float tonemap_exposure = WIRED_SPEC_18;
+#ifndef WIRED_SPEC_17
+#define WIRED_SPEC_17 1
+#endif
+const int tonemap_mode = WIRED_SPEC_17;
 const bool _414 = (tonemap_mode == 1);
-layout(constant_id = 12) const int hdr_mode = 0;
+#ifndef WIRED_SPEC_12
+#define WIRED_SPEC_12 0
+#endif
+const int hdr_mode = WIRED_SPEC_12;
 const bool _418 = (hdr_mode == 1);
-layout(constant_id = 13) const float hdr_peak_norm = 10.0;
+#ifndef WIRED_SPEC_13
+#define WIRED_SPEC_13 10.0
+#endif
+const float hdr_peak_norm = WIRED_SPEC_13;
 const bool _435 = (tonemap_mode == 2);
 const bool _444 = (tonemap_mode == 3);
 const bool _453 = (tonemap_mode == 4);
-layout(constant_id = 24) const float chromatic_strength = 0.0;
-layout(constant_id = 2) const float saturation = 1.0;
+#ifndef WIRED_SPEC_24
+#define WIRED_SPEC_24 0.0
+#endif
+const float chromatic_strength = WIRED_SPEC_24;
+#ifndef WIRED_SPEC_2
+#define WIRED_SPEC_2 1.0
+#endif
+const float saturation = WIRED_SPEC_2;
 
 layout(binding = 0, std140) uniform ExposureBlock
 {

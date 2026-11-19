@@ -1,3 +1,5 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
 #include <metal_stdlib>
 #include <simd/simd.h>
 
@@ -7,6 +9,8 @@ struct Params
 {
     uint4 outputGrid;
     float4 depthRange;
+    float4x4 invViewProjection;
+    float4 eyeSkyControl;
 };
 
 struct Integrated
@@ -21,11 +25,47 @@ struct spvDescriptorSetBuffer0
     constant Params* p [[id(0)]];
     texture2d<float> sceneDepth [[id(1)]];
     sampler sceneDepthSmplr [[id(2)]];
-    const device Integrated* m_134 [[id(3)]];
+    const device Integrated* m_317 [[id(3)]];
     texture2d<float> sceneHdr [[id(4)]];
     sampler sceneHdrSmplr [[id(5)]];
-    texture2d<float, access::write> composedHdr [[id(6)]];
+    texture2d<float> skyViewLut [[id(6)]];
+    sampler skyViewLutSmplr [[id(7)]];
+    texture2d<float, access::write> composedHdr [[id(8)]];
 };
+
+static inline __attribute__((always_inline))
+float2 skyViewUv(thread const float2& screenUv, constant Params& p)
+{
+    float4 worldH = p.invViewProjection * float4((screenUv * 2.0) - float2(1.0), 0.0, 1.0);
+    float3 direction = fast::normalize(worldH.xyz - (p.eyeSkyControl.xyz * worldH.w));
+    float azimuth = precise::atan2(direction.y, direction.x);
+    float elevation = asin(fast::clamp(direction.z, -1.0, 1.0));
+    return float2(fract((azimuth / 6.283185482025146484375) + 0.5), fast::clamp((elevation / 3.1415927410125732421875) + 0.5, 0.0, 1.0));
+}
+
+static inline __attribute__((always_inline))
+float3 wiredComposeAuthoredPhysicalSky(thread const float3& authored, thread const float3& physical, thread const float& blend)
+{
+    float authoredEnergy = dot(fast::max(authored, float3(0.0)), float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    float physicalEnergy = dot(fast::max(physical, float3(0.0)), float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    if (authoredEnergy <= 9.9999997473787516355514526367188e-06)
+    {
+        return mix(authored, physical, float3(blend));
+    }
+    float scale = fast::clamp(physicalEnergy / fast::max(authoredEnergy, 0.180000007152557373046875), 0.64999997615814208984375, 1.75);
+    float3 _127;
+    if (physicalEnergy > 9.9999997473787516355514526367188e-06)
+    {
+        _127 = physical / float3(physicalEnergy);
+    }
+    else
+    {
+        _127 = float3(1.0);
+    }
+    float3 physicalTint = _127;
+    float3 relit = ((authored * scale) * mix(float3(1.0), fast::clamp(physicalTint, float3(0.5), float3(2.0)), float3(0.119999997317790985107421875))) + (physical * 0.07999999821186065673828125);
+    return mix(authored, relit, float3(blend));
+}
 
 kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
 {
@@ -35,32 +75,56 @@ kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buff
         return;
     }
     float2 uv = (float2(pixel) + float2(0.5)) / float2((*spvDescriptorSet0.p).outputGrid.xy);
-    float _56;
+    float _196;
     if ((*spvDescriptorSet0.p).depthRange.z > 0.5)
     {
-        _56 = spvDescriptorSet0.sceneDepth.sample(spvDescriptorSet0.sceneDepthSmplr, uv, level(0.0)).x;
+        _196 = spvDescriptorSet0.sceneDepth.sample(spvDescriptorSet0.sceneDepthSmplr, uv, level(0.0)).x;
     }
     else
     {
-        _56 = 0.0;
+        _196 = 0.0;
     }
-    float depth = _56;
-    float _74;
+    float depth = _196;
+    float nearZ = fast::max((*spvDescriptorSet0.p).depthRange.x, 0.00999999977648258209228515625);
+    float farZ = fast::max((*spvDescriptorSet0.p).depthRange.y, nearZ + 0.00999999977648258209228515625);
+    float4 inverseW = float4((*spvDescriptorSet0.p).invViewProjection[0].w, (*spvDescriptorSet0.p).invViewProjection[1].w, (*spvDescriptorSet0.p).invViewProjection[2].w, (*spvDescriptorSet0.p).invViewProjection[3].w);
+    float reciprocalDistance = dot(inverseW, float4((uv * 2.0) - float2(1.0), depth, 1.0));
+    float _244;
     if (depth <= 0.0)
     {
-        _74 = 1.0;
+        _244 = farZ;
     }
     else
     {
-        _74 = fast::clamp(1.0 - depth, 0.0, 1.0);
+        _244 = fast::clamp(1.0 / fast::max(reciprocalDistance, 1.0 / farZ), nearZ, farZ);
     }
-    float linearFraction = _74;
+    float distanceZ = _244;
+    float sliceFraction = fast::clamp(log(distanceZ / nearZ) / log(farZ / nearZ), 0.0, 1.0);
     uint2 froxelXY = min(uint2(uv * float2((*spvDescriptorSet0.p).outputGrid.zw)), ((*spvDescriptorSet0.p).outputGrid.zw - uint2(1u)));
     uint slices = uint(fast::max((*spvDescriptorSet0.p).depthRange.w, 1.0));
-    uint z = min(uint(linearFraction * float(slices)), (slices - 1u));
+    uint z = min(uint(sliceFraction * float(slices)), (slices - 1u));
     uint index = (((z * (*spvDescriptorSet0.p).outputGrid.w) + froxelXY.y) * (*spvDescriptorSet0.p).outputGrid.z) + froxelXY.x;
-    float4 atmosphere = (*spvDescriptorSet0.m_134).media[index];
+    float4 atmosphere = (*spvDescriptorSet0.m_317).media[index];
     float3 scene = spvDescriptorSet0.sceneHdr.sample(spvDescriptorSet0.sceneHdrSmplr, uv, level(0.0)).xyz;
+    bool _328 = depth <= 0.0;
+    bool _334;
+    if (_328)
+    {
+        _334 = (*spvDescriptorSet0.p).eyeSkyControl.w > 0.0;
+    }
+    else
+    {
+        _334 = _328;
+    }
+    if (_334)
+    {
+        float2 param = uv;
+        float3 physicalSky = spvDescriptorSet0.skyViewLut.sample(spvDescriptorSet0.skyViewLutSmplr, skyViewUv(param, (*spvDescriptorSet0.p)), level(0.0)).xyz;
+        float3 param_1 = scene;
+        float3 param_2 = physicalSky;
+        float param_3 = fast::clamp((*spvDescriptorSet0.p).eyeSkyControl.w, 0.0, 1.0);
+        scene = wiredComposeAuthoredPhysicalSky(param_1, param_2, param_3);
+    }
     spvDescriptorSet0.composedHdr.write(float4((scene * atmosphere.w) + atmosphere.xyz, 1.0), uint2(int2(pixel)));
 }
 

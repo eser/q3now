@@ -3,19 +3,19 @@
 layout(constant_id = 4) const int tex_domain = 0;
 layout(constant_id = 26) const int lightmap_slot = 0;
 layout(constant_id = 6) const int tex_mode = 0;
-const bool _322 = (tex_mode == 1);
-const bool _348 = (tex_mode == 2);
-const bool _397 = (lightmap_slot != 0);
+const bool _331 = (tex_mode == 1);
+const bool _352 = (tex_mode == 2);
+const bool _393 = (lightmap_slot != 0);
 layout(constant_id = 10) const int acff = 0;
-const bool _472 = (acff == 1);
-const bool _487 = (acff == 2);
-const bool _495 = (acff == 3);
-const bool _520 = (acff == 1);
-const bool _536 = (acff == 2);
-const bool _545 = (acff == 3);
+const bool _479 = (acff == 1);
+const bool _494 = (acff == 2);
+const bool _502 = (acff == 3);
+const bool _527 = (acff == 1);
+const bool _543 = (acff == 2);
+const bool _552 = (acff == 3);
 layout(constant_id = 7) const int discard_mode = 0;
-const bool _567 = (discard_mode == 1);
-const bool _577 = (discard_mode == 2);
+const bool _574 = (discard_mode == 1);
+const bool _584 = (discard_mode == 2);
 layout(constant_id = 3) const int alpha_to_coverage = 0;
 
 layout(binding = 0, std140) uniform UBO
@@ -34,6 +34,8 @@ layout(binding = 0, std140) uniform UBO
     vec4 advancedFogColorDensity;
     vec4 advancedFogTypeFarEnabled;
     vec4 emissionRadiance;
+    vec4 materialBaseColor;
+    vec4 materialFactors;
 } _56;
 
 layout(binding = 0) uniform texture2D wired_bindless_images[64];
@@ -141,113 +143,113 @@ void main()
     uint param_1 = 0u;
     vec2 param_2 = frag_tex_coord0;
     int param_3 = 0;
-    vec4 color0 = wired_bl_sample_domain(param_1, param_2, param_3) * frag_color0;
+    vec4 sampledColor0 = wired_bl_sample_domain(param_1, param_2, param_3);
+    uint param_4 = 1u;
+    vec2 param_5 = frag_tex_coord1;
+    int param_6 = 1;
+    vec4 sampledColor1 = wired_bl_sample_domain(param_4, param_5, param_6);
+    vec4 color0 = sampledColor0 * frag_color0;
     vec4 base;
-    if (_322)
+    if (_331)
     {
-        uint param_4 = 1u;
-        vec2 param_5 = frag_tex_coord1;
-        int param_6 = 1;
-        vec4 color1 = wired_bl_sample_domain(param_4, param_5, param_6);
+        vec4 color1 = sampledColor1;
         base = vec4(color0.xyz + color1.xyz, color0.w * color1.w);
     }
     else
     {
-        if (_348)
+        if (_352)
         {
-            uint param_7 = 1u;
-            vec2 param_8 = frag_tex_coord1;
-            int param_9 = 1;
-            vec4 color1_1 = wired_bl_sample_domain(param_7, param_8, param_9) * frag_color0;
+            vec4 color1_1 = sampledColor1 * frag_color0;
             base = vec4(color0.xyz + color1_1.xyz, color0.w * color1_1.w);
         }
         else
         {
-            uint param_10 = 1u;
-            vec2 param_11 = frag_tex_coord1;
-            int param_12 = 1;
-            vec4 color1_2 = wired_bl_sample_domain(param_10, param_11, param_12);
-            vec3 _384 = color0.xyz * color1_2.xyz;
-            base.x = _384.x;
-            base.y = _384.y;
-            base.z = _384.z;
+            vec4 color1_2 = sampledColor1;
+            vec3 _380 = color0.xyz * color1_2.xyz;
+            base.x = _380.x;
+            base.y = _380.y;
+            base.z = _380.z;
             base.w = color0.w * color1_2.w;
         }
     }
-    if (_397)
+    if (_393)
     {
         float wetness = clamp(_56.worldLightParams.y, 0.0, 1.0);
         float frost = clamp(_56.worldLightParams.z, 0.0, 1.0);
         float luminance = dot(base.xyz, vec3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
-        vec4 _419 = base;
-        vec3 _421 = _419.xyz * mix(1.0, 0.819999992847442626953125, wetness);
-        base.x = _421.x;
-        base.y = _421.y;
-        base.z = _421.z;
-        vec4 _428 = base;
-        vec3 _442 = mix(_428.xyz, vec3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), vec3(frost * 0.550000011920928955078125));
-        base.x = _442.x;
-        base.y = _442.y;
-        base.z = _442.z;
+        vec4 _415 = base;
+        vec3 _417 = _415.xyz * mix(1.0, 0.819999992847442626953125, wetness);
+        base.x = _417.x;
+        base.y = _417.y;
+        base.z = _417.z;
+        vec4 _424 = base;
+        vec3 _438 = mix(_424.xyz, vec3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), vec3(frost * 0.550000011920928955078125));
+        base.x = _438.x;
+        base.y = _438.y;
+        base.z = _438.z;
     }
-    vec4 _457 = base;
-    vec3 _459 = _457.xyz + (color0.xyz * _56.emissionRadiance.xyz);
-    base.x = _459.x;
-    base.y = _459.y;
-    base.z = _459.z;
+    if (_56.materialFactors.x >= 0.0)
+    {
+        base *= _56.materialBaseColor;
+    }
+    vec4 _464 = base;
+    vec3 _466 = _464.xyz + (color0.xyz * _56.emissionRadiance.xyz);
+    base.x = _466.x;
+    base.y = _466.y;
+    base.z = _466.z;
     if (wired_advanced_fog_enabled())
     {
         float fogAmount = wired_advanced_fog_amount();
-        if (_472)
+        if (_479)
         {
-            vec4 _477 = base;
-            vec3 _479 = _477.xyz * (1.0 - fogAmount);
-            base.x = _479.x;
-            base.y = _479.y;
-            base.z = _479.z;
+            vec4 _484 = base;
+            vec3 _486 = _484.xyz * (1.0 - fogAmount);
+            base.x = _486.x;
+            base.y = _486.y;
+            base.z = _486.z;
         }
         else
         {
-            if (_487)
+            if (_494)
             {
                 base *= (1.0 - fogAmount);
             }
             else
             {
-                if (_495)
+                if (_502)
                 {
                     base.w *= (1.0 - fogAmount);
                 }
                 else
                 {
-                    vec4 _505 = base;
-                    vec3 _512 = mix(_505.xyz, _56.advancedFogColorDensity.xyz, vec3(fogAmount));
-                    base.x = _512.x;
-                    base.y = _512.y;
-                    base.z = _512.z;
+                    vec4 _512 = base;
+                    vec3 _519 = mix(_512.xyz, _56.advancedFogColorDensity.xyz, vec3(fogAmount));
+                    base.x = _519.x;
+                    base.y = _519.y;
+                    base.z = _519.z;
                 }
             }
         }
     }
     else
     {
-        if (_520)
+        if (_527)
         {
-            vec4 _523 = base;
-            vec3 _528 = _523.xyz * (1.0 - fog.w);
-            base.x = _528.x;
-            base.y = _528.y;
-            base.z = _528.z;
+            vec4 _530 = base;
+            vec3 _535 = _530.xyz * (1.0 - fog.w);
+            base.x = _535.x;
+            base.y = _535.y;
+            base.z = _535.z;
         }
         else
         {
-            if (_536)
+            if (_543)
             {
                 base *= (1.0 - fog.w);
             }
             else
             {
-                if (_545)
+                if (_552)
                 {
                     base.w *= (1.0 - fog.w);
                 }
@@ -258,7 +260,7 @@ void main()
             }
         }
     }
-    if (_567)
+    if (_574)
     {
         if (base.w == 0.0)
         {
@@ -267,7 +269,7 @@ void main()
     }
     else
     {
-        if (_577)
+        if (_584)
         {
             if (dot(base.xyz, base.xyz) == 0.0)
             {
@@ -276,7 +278,7 @@ void main()
         }
     }
     out_color = base;
-    float param_13 = 1.0;
-    wiredTemporalWriteAux(param_13);
+    float param_7 = 1.0;
+    wiredTemporalWriteAux(param_7);
 }
 

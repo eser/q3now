@@ -1,0 +1,93 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct SkyParams
+{
+    float4 sunDirectionAngularRadius;
+    float4 sunRadiance;
+    float4 moonDirectionAngularRadius;
+    float4 moonRadiance;
+    float4 atmosphereRadii;
+    float4 scatteringScale;
+    float4 groundExposure;
+};
+
+constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(8u, 8u, 1u);
+
+struct spvDescriptorSetBuffer0
+{
+    texture2d<float, access::write> skyViewLut [[id(0)]];
+    constant SkyParams* sky [[id(1)]];
+    texture2d<float> transmittanceLut [[id(2)]];
+    sampler transmittanceLutSmplr [[id(3)]];
+    texture2d<float> multiscatterLut [[id(4)]];
+    sampler multiscatterLutSmplr [[id(5)]];
+};
+
+static inline __attribute__((always_inline))
+float rayleighPhase(thread const float& cosTheta)
+{
+    return (3.0 * (1.0 + (cosTheta * cosTheta))) / 50.265483856201171875;
+}
+
+static inline __attribute__((always_inline))
+float miePhase(thread const float& cosTheta, thread const float& g)
+{
+    float g2 = g * g;
+    float denom = fast::max((1.0 + g2) - ((2.0 * g) * cosTheta), 0.001000000047497451305389404296875);
+    return (1.0 - g2) / ((12.56637096405029296875 * denom) * sqrt(denom));
+}
+
+kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+{
+    int2 coord = int2(gl_GlobalInvocationID.xy);
+    int2 extent = int2(spvDescriptorSet0.skyViewLut.get_width(), spvDescriptorSet0.skyViewLut.get_height());
+    if (any(coord >= extent))
+    {
+        return;
+    }
+    float2 uv = (float2(coord) + float2(0.5)) / float2(extent);
+    float azimuth = ((uv.x * 2.0) - 1.0) * 3.1415927410125732421875;
+    float elevation = (uv.y - 0.5) * 3.1415927410125732421875;
+    float3 viewDir = fast::normalize(float3(cos(elevation) * cos(azimuth), cos(elevation) * sin(azimuth), sin(elevation)));
+    float3 sunDir = fast::normalize((*spvDescriptorSet0.sky).sunDirectionAngularRadius.xyz);
+    float cosTheta = fast::clamp(dot(viewDir, sunDir), -1.0, 1.0);
+    float2 transUv = float2((viewDir.z * 0.5) + 0.5, fast::clamp((*spvDescriptorSet0.sky).atmosphereRadii.z, 0.0, 1.0));
+    float3 transmittance = spvDescriptorSet0.transmittanceLut.sample(spvDescriptorSet0.transmittanceLutSmplr, transUv, level(0.0)).xyz;
+    float3 multi = spvDescriptorSet0.multiscatterLut.sample(spvDescriptorSet0.multiscatterLutSmplr, float2((cosTheta * 0.5) + 0.5, transUv.y), level(0.0)).xyz;
+    float param = cosTheta;
+    float3 betaRayleigh = float3(0.180000007152557373046875, 0.3400000035762786865234375, 0.7200000286102294921875) * rayleighPhase(param);
+    float param_1 = cosTheta;
+    float param_2 = fast::clamp((*spvDescriptorSet0.sky).scatteringScale.w, 0.0, 0.949999988079071044921875);
+    float3 betaMie = float3(0.4199999868869781494140625, 0.3400000035762786865234375, 0.23999999463558197021484375) * miePhase(param_1, param_2);
+    float sunHeight = fast::clamp((sunDir.z * 0.5) + 0.5, 0.0, 1.0);
+    float twilight = 1.0 - smoothstep(0.4199999868869781494140625, 0.62000000476837158203125, sunHeight);
+    float aboveHorizon = smoothstep(-0.07999999821186065673828125, 0.039999999105930328369140625, viewDir.z);
+    float elevationMix = powr(fast::clamp(viewDir.z, 0.0, 1.0), 0.3499999940395355224609375);
+    float3 zenithTint = mix(float3(0.02500000037252902984619140625, 0.0350000001490116119384765625, 0.100000001490116119384765625), float3(0.0350000001490116119384765625, 0.1599999964237213134765625, 0.4600000083446502685546875), float3(sunHeight));
+    float3 horizonTint = mix(float3(0.300000011920928955078125, 0.519999980926513671875, 0.75), float3(0.949999988079071044921875, 0.23999999463558197021484375, 0.054999999701976776123046875), float3(twilight));
+    float3 groundTint = fast::max((*spvDescriptorSet0.sky).groundExposure.xyz, float3(0.014999999664723873138427734375)) * 0.2199999988079071044921875;
+    float3 directionalSky = mix(horizonTint, zenithTint, float3(elevationMix));
+    directionalSky = mix(groundTint, directionalSky, float3(aboveHorizon));
+    float sunEnergy = dot((*spvDescriptorSet0.sky).sunRadiance.xyz, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    float3 radiance = directionalSky * (0.2199999988079071044921875 + (0.4799999892711639404296875 * fast::max(sunEnergy, 0.0)));
+    radiance += ((((*spvDescriptorSet0.sky).sunRadiance.xyz * (betaRayleigh + betaMie)) * (float3(1.0) - transmittance)) * 0.449999988079071044921875);
+    radiance += (multi * 0.119999997317790985107421875);
+    float angularRadius = fast::max((*spvDescriptorSet0.sky).sunDirectionAngularRadius.w, 9.9999997473787516355514526367188e-05);
+    float resolvedRadius = fast::max(angularRadius, 0.006000000052154064178466796875);
+    float sunDisk = smoothstep(cos(resolvedRadius * 1.7999999523162841796875), cos(resolvedRadius), cosTheta);
+    float sunCorona = (powr(fast::max(cosTheta, 0.0), 256.0) * 0.550000011920928955078125) + (powr(fast::max(cosTheta, 0.0), 24.0) * 0.0599999986588954925537109375);
+    radiance += (((*spvDescriptorSet0.sky).sunRadiance.xyz * transmittance) * ((sunDisk * 7.0) + sunCorona));
+    float3 moonDir = fast::normalize((*spvDescriptorSet0.sky).moonDirectionAngularRadius.xyz);
+    float moonTheta = fast::clamp(dot(viewDir, moonDir), -1.0, 1.0);
+    float moonRadius = fast::max((*spvDescriptorSet0.sky).moonDirectionAngularRadius.w, 0.0089999996125698089599609375);
+    float moonDisk = smoothstep(cos(moonRadius * 1.60000002384185791015625), cos(moonRadius), moonTheta);
+    radiance += ((*spvDescriptorSet0.sky).moonRadiance.xyz * ((moonDisk * 3.0) + (powr(fast::max(moonTheta, 0.0), 96.0) * 0.100000001490116119384765625)));
+    radiance *= fast::max((*spvDescriptorSet0.sky).groundExposure.w, 0.0);
+    spvDescriptorSet0.skyViewLut.write(float4(fast::max(radiance, float3(0.0)), 1.0), uint2(coord));
+}
+

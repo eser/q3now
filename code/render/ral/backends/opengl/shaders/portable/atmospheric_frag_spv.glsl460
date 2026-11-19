@@ -36,21 +36,23 @@ layout(binding = 0, std140) uniform AtmFrame
     vec4 effectMeta;
     vec4 effectWorkloads[48];
     vec4 renderParams;
-} _67;
+} _74;
 
 layout(binding = 0) uniform sampler2D sceneDepthTex;
+layout(binding = 1) uniform sampler2D effectTextures[8];
 
 layout(location = 0) in vec2 fragUV;
 layout(location = 1) in vec4 fragColor;
+layout(location = 2) flat in uint fragFamily;
 layout(location = 0) out vec4 outColor;
 
 float softParticleFade()
 {
-    if (_67.renderParams.z < 0.5)
+    if (_74.renderParams.z < 0.5)
     {
         return 1.0;
     }
-    vec2 screenUV = gl_FragCoord.xy * _67.renderParams.xy;
+    vec2 screenUV = gl_FragCoord.xy * _74.renderParams.xy;
     float sceneDepth = texture(sceneDepthTex, screenUV).x;
     if (sceneDepth <= 0.0)
     {
@@ -71,33 +73,72 @@ vec3 sRGBToLinear(inout vec3 c)
 
 vec3 displayVisibility(vec3 sceneColor)
 {
-    vec3 exposed = max(sceneColor, vec3(0.0)) * _67.viewLeft.w;
+    vec3 exposed = max(sceneColor, vec3(0.0)) * _74.viewLeft.w;
     float luminance = dot(exposed, vec3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
-    bool _84 = luminance > 0.0;
-    bool _92;
-    if (_84)
-    {
-        _92 = luminance < _67.eyeWorld.w;
-    }
-    else
-    {
-        _92 = _84;
-    }
+    bool _91 = luminance > 0.0;
     bool _99;
-    if (_92)
+    if (_91)
     {
-        _99 = _67.viewUp.w != 1.0;
+        _99 = luminance < _74.eyeWorld.w;
     }
     else
     {
-        _99 = _92;
+        _99 = _91;
     }
+    bool _106;
     if (_99)
     {
-        float curved = pow(luminance / _67.eyeWorld.w, _67.viewUp.w) * _67.eyeWorld.w;
+        _106 = _74.viewUp.w != 1.0;
+    }
+    else
+    {
+        _106 = _99;
+    }
+    if (_106)
+    {
+        float curved = pow(luminance / _74.eyeWorld.w, _74.viewUp.w) * _74.eyeWorld.w;
         exposed *= (curved / luminance);
     }
     return exposed;
+}
+
+vec4 effectTexel(uint effect, vec2 uv)
+{
+    switch (effect)
+    {
+        case 0u:
+        {
+            return texture(effectTextures[0], uv);
+        }
+        case 1u:
+        {
+            return texture(effectTextures[1], uv);
+        }
+        case 2u:
+        {
+            return texture(effectTextures[2], uv);
+        }
+        case 3u:
+        {
+            return texture(effectTextures[3], uv);
+        }
+        case 4u:
+        {
+            return texture(effectTextures[4], uv);
+        }
+        case 5u:
+        {
+            return texture(effectTextures[5], uv);
+        }
+        case 6u:
+        {
+            return texture(effectTextures[6], uv);
+        }
+        default:
+        {
+            return texture(effectTextures[7], uv);
+        }
+    }
 }
 
 void main()
@@ -105,9 +146,17 @@ void main()
     float edge = 1.0 - smoothstep(0.0, 0.5, abs(fragUV.x - 0.5));
     float alpha = (fragColor.w * edge) * softParticleFade();
     vec3 param = fragColor.xyz;
-    vec3 _188 = sRGBToLinear(param);
-    vec3 param_1 = _188;
+    vec3 _255 = sRGBToLinear(param);
+    vec3 param_1 = _255;
     vec3 rgb = displayVisibility(param_1);
+    if (fragFamily >= 16u)
+    {
+        uint param_2 = fragFamily - 16u;
+        vec2 param_3 = fragUV;
+        vec4 texel = effectTexel(param_2, param_3);
+        rgb *= texel.xyz;
+        alpha = (fragColor.w * softParticleFade()) * texel.w;
+    }
     outColor = vec4(rgb, alpha);
 }
 

@@ -72,7 +72,7 @@ vertex main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBu
     float4x4 mvp = _16;
     out.gl_Position = mvp * float4(in.in_position, 1.0);
     out.ibl_N = in.in_normal;
-    out.ibl_V = fast::normalize((*spvDescriptorSet0.ubo).eyePos.xyz - in.in_position);
+    out.ibl_V = (*spvDescriptorSet0.ubo).eyePos.xyz - in.in_position;
     out.frag_color0 = in.in_color0;
     out.frag_color1 = in.in_color1;
     out.frag_color2 = in.in_color2;

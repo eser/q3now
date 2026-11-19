@@ -49,6 +49,7 @@ struct LensPush
     float2 viewport;
     int count;
     float radiusPx;
+    float4 depthConvention;
 };
 
 struct LensSource
@@ -71,12 +72,12 @@ struct spvDescriptorSetBuffer0
     sampler depthSampler [[id(2)]];
 };
 
-constant spvUnsafeArray<float2, 9> _132 = spvUnsafeArray<float2, 9>({ float2(0.0), float2(1.0, 0.0), float2(-1.0, 0.0), float2(0.0, 1.0), float2(0.0, -1.0), float2(0.699999988079071044921875), float2(-0.699999988079071044921875, 0.699999988079071044921875), float2(0.699999988079071044921875, -0.699999988079071044921875), float2(-0.699999988079071044921875) });
+constant spvUnsafeArray<float2, 9> _154 = spvUnsafeArray<float2, 9>({ float2(0.0), float2(1.0, 0.0), float2(-1.0, 0.0), float2(0.0, 1.0), float2(0.0, -1.0), float2(0.699999988079071044921875), float2(-0.699999988079071044921875, 0.699999988079071044921875), float2(0.699999988079071044921875, -0.699999988079071044921875), float2(-0.699999988079071044921875) });
 
-kernel void main0(device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], constant LensPush& _22 [[buffer(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+kernel void main0(device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], constant LensPush& _23 [[buffer(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
 {
     uint idx = gl_GlobalInvocationID.x;
-    if (idx >= uint(_22.count))
+    if (idx >= uint(_23.count))
     {
         return;
     }
@@ -115,26 +116,46 @@ kernel void main0(device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]
         ((device float*)&(*spvDescriptorSet0.m_40).lensSources[idx].colorVis)[3u] = 0.0;
         return;
     }
-    float2 _92;
-    if (_22.viewport.x > 0.0)
+    float _94;
+    if (_23.depthConvention.z > 0.5)
     {
-        _92 = float2(_22.radiusPx) / _22.viewport;
+        _94 = ((device float*)&(*spvDescriptorSet0.m_40).lensSources[idx].screenPosDepth)[3u];
     }
     else
     {
-        _92 = float2(0.0);
+        _94 = _23.radiusPx;
     }
-    float2 texel = _92;
+    float radius = _94;
+    bool _108 = _23.viewport.x > 0.0;
+    bool _114;
+    if (_108)
+    {
+        _114 = _23.viewport.y > 0.0;
+    }
+    else
+    {
+        _114 = _108;
+    }
+    float2 _115;
+    if (_114)
+    {
+        _115 = float2(fast::max(radius, 0.0)) / _23.viewport;
+    }
+    else
+    {
+        _115 = float2(0.0);
+    }
+    float2 texel = _115;
     int visible = 0;
     for (int t = 0; t < 9; t++)
     {
-        float2 suv = fast::clamp(uv + (_132[t] * texel), float2(0.0), float2(1.0));
+        float2 suv = fast::clamp(uv + (_154[t] * texel), float2(0.0), float2(1.0));
         float scene = spvDescriptorSet0.depthTex.sample(spvDescriptorSet0.depthSampler, suv, level(0.0)).x;
-        if (scene <= (compareZ + 0.0007999999797903001308441162109375))
+        if (((scene - compareZ) * _23.depthConvention.x) <= _23.depthConvention.y)
         {
             visible++;
         }
     }
-    ((device float*)&(*spvDescriptorSet0.m_40).lensSources[idx].colorVis)[3u] = float(visible) / 9.0;
+    ((device float*)&(*spvDescriptorSet0.m_40).lensSources[idx].colorVis)[3u] = (float(visible) / 9.0) * fast::clamp(((device float*)&(*spvDescriptorSet0.m_40).lensSources[idx].colorVis)[0u], 0.0, 1.0);
 }
 

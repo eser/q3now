@@ -7,7 +7,7 @@ layout(location = 0) out vec2 frag_tex_coord;
 
 void main()
 {
-    gl_Position = vec4(_23[gl_VertexIndex], 0.0, 1.0);
-    frag_tex_coord = _43[gl_VertexIndex];
+    gl_Position = vec4(_23[gl_VertexID], 0.0, 1.0);
+    frag_tex_coord = _43[gl_VertexID];
 }
 

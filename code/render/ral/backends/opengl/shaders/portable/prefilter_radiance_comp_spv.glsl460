@@ -5,13 +5,13 @@ layout(std140, binding = 3) uniform Push
 {
     uint roughnessIdx;
     uint roughnessMips;
-} _295;
+} _441;
 
-layout(binding = 0, rgba16f) uniform writeonly image2DArray dstRadiance;
-layout(binding = 0) uniform textureCube srcTex;
+layout(binding = 0) uniform texture2DArray srcTex;
 layout(binding = 0) uniform sampler srcSamp;
+layout(binding = 0, rgba16f) uniform writeonly image2DArray dstRadiance;
 
-vec3 cubeFaceDir(uint face, vec2 uv)
+vec3 wired_sky_cube_direction(uint face, vec2 uv)
 {
     float u = uv.x;
     float v = uv.y;
@@ -55,6 +55,72 @@ vec3 cubeFaceDir(uint face, vec2 uv)
     return normalize(dir);
 }
 
+vec3 wired_sky_cube_uv_layer(vec3 dir)
+{
+    vec3 a = abs(dir);
+    bool _117 = a.x >= a.y;
+    bool _125;
+    if (_117)
+    {
+        _125 = a.x >= a.z;
+    }
+    else
+    {
+        _125 = _117;
+    }
+    uint face;
+    vec2 uv;
+    if (_125)
+    {
+        if (dir.x >= 0.0)
+        {
+            face = 0u;
+            uv = vec2(-dir.z, -dir.y) / vec2(a.x);
+        }
+        else
+        {
+            face = 1u;
+            uv = vec2(dir.z, -dir.y) / vec2(a.x);
+        }
+    }
+    else
+    {
+        if (a.y >= a.z)
+        {
+            if (dir.y >= 0.0)
+            {
+                face = 2u;
+                uv = vec2(dir.x, dir.z) / vec2(a.y);
+            }
+            else
+            {
+                face = 3u;
+                uv = vec2(dir.x, -dir.z) / vec2(a.y);
+            }
+        }
+        else
+        {
+            if (dir.z >= 0.0)
+            {
+                face = 4u;
+                uv = vec2(dir.x, -dir.y) / vec2(a.z);
+            }
+            else
+            {
+                face = 5u;
+                uv = vec2(-dir.x, -dir.y) / vec2(a.z);
+            }
+        }
+    }
+    return vec3((uv * 0.5) + vec2(0.5), float(face));
+}
+
+vec3 sampleSource(vec3 dir)
+{
+    vec3 param = dir;
+    return textureLod(sampler2DArray(srcTex, srcSamp), wired_sky_cube_uv_layer(param), 0.0).xyz;
+}
+
 float radicalInverse_VdC(inout uint bits)
 {
     bits = (bits << 16u) | (bits >> 16u);
@@ -68,8 +134,8 @@ float radicalInverse_VdC(inout uint bits)
 vec2 hammersley(uint i, uint n)
 {
     uint param = i;
-    float _93 = radicalInverse_VdC(param);
-    return vec2(float(i) / float(n), _93);
+    float _288 = radicalInverse_VdC(param);
+    return vec2(float(i) / float(n), _288);
 }
 
 vec3 importanceSampleGGX(vec2 xi, float roughness, vec3 N)
@@ -92,48 +158,49 @@ void main()
 {
     uvec2 size = uvec2(imageSize(dstRadiance).xy);
     ivec3 coord = ivec3(gl_GlobalInvocationID);
-    bool _269 = uint(coord.x) >= size.x;
-    bool _279;
-    if (!_269)
+    bool _415 = uint(coord.x) >= size.x;
+    bool _425;
+    if (!_415)
     {
-        _279 = uint(coord.y) >= size.y;
+        _425 = uint(coord.y) >= size.y;
     }
     else
     {
-        _279 = _269;
+        _425 = _415;
     }
-    bool _288;
-    if (!_279)
+    bool _434;
+    if (!_425)
     {
-        _288 = uint(coord.z) >= 6u;
+        _434 = uint(coord.z) >= 6u;
     }
     else
     {
-        _288 = _279;
+        _434 = _425;
     }
-    if (_288)
+    if (_434)
     {
         return;
     }
-    float _301;
-    if (_295.roughnessMips > 1u)
+    float _447;
+    if (_441.roughnessMips > 1u)
     {
-        _301 = float(_295.roughnessIdx) / float(_295.roughnessMips - 1u);
+        _447 = float(_441.roughnessIdx) / float(_441.roughnessMips - 1u);
     }
     else
     {
-        _301 = 0.0;
+        _447 = 0.0;
     }
-    float roughness = _301;
+    float roughness = _447;
     vec2 uv = (((vec2(coord.xy) + vec2(0.5)) / vec2(size)) * 2.0) - vec2(1.0);
     uint param = uint(coord.z);
     vec2 param_1 = uv;
-    vec3 R = cubeFaceDir(param, param_1);
+    vec3 R = wired_sky_cube_direction(param, param_1);
     vec3 N = R;
     vec3 V = R;
     if (roughness <= 0.0)
     {
-        vec3 c = textureLod(samplerCube(srcTex, srcSamp), R, 0.0).xyz;
+        vec3 param_2 = R;
+        vec3 c = sampleSource(param_2);
         imageStore(dstRadiance, coord, vec4(c, 1.0));
         return;
     }
@@ -141,31 +208,33 @@ void main()
     float totalWeight = 0.0;
     for (uint i = 0u; i < 1024u; i++)
     {
-        uint param_2 = i;
-        uint param_3 = 1024u;
-        vec2 xi = hammersley(param_2, param_3);
-        vec2 param_4 = xi;
-        float param_5 = roughness;
-        vec3 param_6 = N;
-        vec3 H = importanceSampleGGX(param_4, param_5, param_6);
+        uint param_3 = i;
+        uint param_4 = 1024u;
+        vec2 xi = hammersley(param_3, param_4);
+        vec2 param_5 = xi;
+        float param_6 = roughness;
+        vec3 param_7 = N;
+        vec3 H = importanceSampleGGX(param_5, param_6, param_7);
         vec3 L = normalize((H * (2.0 * dot(V, H))) - V);
         float NdotL = max(dot(N, L), 0.0);
         if (NdotL > 0.0)
         {
-            prefiltered += (textureLod(samplerCube(srcTex, srcSamp), L, 0.0).xyz * NdotL);
+            vec3 param_8 = L;
+            prefiltered += (sampleSource(param_8) * NdotL);
             totalWeight += NdotL;
         }
     }
-    vec3 _430;
+    vec3 _561;
     if (totalWeight > 0.0)
     {
-        _430 = prefiltered / vec3(totalWeight);
+        _561 = prefiltered / vec3(totalWeight);
     }
     else
     {
-        _430 = textureLod(samplerCube(srcTex, srcSamp), R, 0.0).xyz;
+        vec3 param_9 = R;
+        _561 = sampleSource(param_9);
     }
-    vec3 result = _430;
+    vec3 result = _561;
     imageStore(dstRadiance, coord, vec4(result, 1.0));
 }
 

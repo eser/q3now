@@ -1,0 +1,79 @@
+#version 460
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(binding = 0, std140) uniform SkyParams
+{
+    vec4 sunDirectionAngularRadius;
+    vec4 sunRadiance;
+    vec4 moonDirectionAngularRadius;
+    vec4 moonRadiance;
+    vec4 atmosphereRadii;
+    vec4 scatteringScale;
+    vec4 groundExposure;
+} sky;
+
+layout(binding = 0, rgba16f) uniform writeonly image2D skyViewLut;
+layout(binding = 0) uniform sampler2D transmittanceLut;
+layout(binding = 1) uniform sampler2D multiscatterLut;
+
+float rayleighPhase(float cosTheta)
+{
+    return (3.0 * (1.0 + (cosTheta * cosTheta))) / 50.265483856201171875;
+}
+
+float miePhase(float cosTheta, float g)
+{
+    float g2 = g * g;
+    float denom = max((1.0 + g2) - ((2.0 * g) * cosTheta), 0.001000000047497451305389404296875);
+    return (1.0 - g2) / ((12.56637096405029296875 * denom) * sqrt(denom));
+}
+
+void main()
+{
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 extent = imageSize(skyViewLut);
+    if (any(greaterThanEqual(coord, extent)))
+    {
+        return;
+    }
+    vec2 uv = (vec2(coord) + vec2(0.5)) / vec2(extent);
+    float azimuth = ((uv.x * 2.0) - 1.0) * 3.1415927410125732421875;
+    float elevation = (uv.y - 0.5) * 3.1415927410125732421875;
+    vec3 viewDir = normalize(vec3(cos(elevation) * cos(azimuth), cos(elevation) * sin(azimuth), sin(elevation)));
+    vec3 sunDir = normalize(sky.sunDirectionAngularRadius.xyz);
+    float cosTheta = clamp(dot(viewDir, sunDir), -1.0, 1.0);
+    vec2 transUv = vec2((viewDir.z * 0.5) + 0.5, clamp(sky.atmosphereRadii.z, 0.0, 1.0));
+    vec3 transmittance = textureLod(transmittanceLut, transUv, 0.0).xyz;
+    vec3 multi = textureLod(multiscatterLut, vec2((cosTheta * 0.5) + 0.5, transUv.y), 0.0).xyz;
+    float param = cosTheta;
+    vec3 betaRayleigh = vec3(0.180000007152557373046875, 0.3400000035762786865234375, 0.7200000286102294921875) * rayleighPhase(param);
+    float param_1 = cosTheta;
+    float param_2 = clamp(sky.scatteringScale.w, 0.0, 0.949999988079071044921875);
+    vec3 betaMie = vec3(0.4199999868869781494140625, 0.3400000035762786865234375, 0.23999999463558197021484375) * miePhase(param_1, param_2);
+    float sunHeight = clamp((sunDir.z * 0.5) + 0.5, 0.0, 1.0);
+    float twilight = 1.0 - smoothstep(0.4199999868869781494140625, 0.62000000476837158203125, sunHeight);
+    float aboveHorizon = smoothstep(-0.07999999821186065673828125, 0.039999999105930328369140625, viewDir.z);
+    float elevationMix = pow(clamp(viewDir.z, 0.0, 1.0), 0.3499999940395355224609375);
+    vec3 zenithTint = mix(vec3(0.02500000037252902984619140625, 0.0350000001490116119384765625, 0.100000001490116119384765625), vec3(0.0350000001490116119384765625, 0.1599999964237213134765625, 0.4600000083446502685546875), vec3(sunHeight));
+    vec3 horizonTint = mix(vec3(0.300000011920928955078125, 0.519999980926513671875, 0.75), vec3(0.949999988079071044921875, 0.23999999463558197021484375, 0.054999999701976776123046875), vec3(twilight));
+    vec3 groundTint = max(sky.groundExposure.xyz, vec3(0.014999999664723873138427734375)) * 0.2199999988079071044921875;
+    vec3 directionalSky = mix(horizonTint, zenithTint, vec3(elevationMix));
+    directionalSky = mix(groundTint, directionalSky, vec3(aboveHorizon));
+    float sunEnergy = dot(sky.sunRadiance.xyz, vec3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    vec3 radiance = directionalSky * (0.2199999988079071044921875 + (0.4799999892711639404296875 * max(sunEnergy, 0.0)));
+    radiance += (((sky.sunRadiance.xyz * (betaRayleigh + betaMie)) * (vec3(1.0) - transmittance)) * 0.449999988079071044921875);
+    radiance += (multi * 0.119999997317790985107421875);
+    float angularRadius = max(sky.sunDirectionAngularRadius.w, 9.9999997473787516355514526367188e-05);
+    float resolvedRadius = max(angularRadius, 0.006000000052154064178466796875);
+    float sunDisk = smoothstep(cos(resolvedRadius * 1.7999999523162841796875), cos(resolvedRadius), cosTheta);
+    float sunCorona = (pow(max(cosTheta, 0.0), 256.0) * 0.550000011920928955078125) + (pow(max(cosTheta, 0.0), 24.0) * 0.0599999986588954925537109375);
+    radiance += ((sky.sunRadiance.xyz * transmittance) * ((sunDisk * 7.0) + sunCorona));
+    vec3 moonDir = normalize(sky.moonDirectionAngularRadius.xyz);
+    float moonTheta = clamp(dot(viewDir, moonDir), -1.0, 1.0);
+    float moonRadius = max(sky.moonDirectionAngularRadius.w, 0.0089999996125698089599609375);
+    float moonDisk = smoothstep(cos(moonRadius * 1.60000002384185791015625), cos(moonRadius), moonTheta);
+    radiance += (sky.moonRadiance.xyz * ((moonDisk * 3.0) + (pow(max(moonTheta, 0.0), 96.0) * 0.100000001490116119384765625)));
+    radiance *= max(sky.groundExposure.w, 0.0);
+    imageStore(skyViewLut, coord, vec4(max(radiance, vec3(0.0)), 1.0));
+}
+

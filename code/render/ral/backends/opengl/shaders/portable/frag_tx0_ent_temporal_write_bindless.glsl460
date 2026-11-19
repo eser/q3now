@@ -7,13 +7,13 @@ const bool _208 = (alpha_test_func == 2);
 const bool _219 = (alpha_test_func == 3);
 layout(constant_id = 4) const int tex_domain = 0;
 layout(constant_id = 26) const int lightmap_slot = 0;
-const bool _468 = (alpha_test_func == 1);
-const bool _478 = (alpha_test_func == 2);
-const bool _488 = (alpha_test_func == 3);
-const bool _498 = (lightmap_slot != 0);
+const bool _470 = (alpha_test_func == 1);
+const bool _480 = (alpha_test_func == 2);
+const bool _490 = (alpha_test_func == 3);
+const bool _500 = (lightmap_slot != 0);
 layout(constant_id = 7) const int discard_mode = 0;
-const bool _586 = (discard_mode == 1);
-const bool _596 = (discard_mode == 2);
+const bool _599 = (discard_mode == 1);
+const bool _609 = (discard_mode == 2);
 layout(constant_id = 3) const int alpha_to_coverage = 0;
 
 layout(binding = 0, std140) uniform UBO
@@ -32,6 +32,8 @@ layout(binding = 0, std140) uniform UBO
     vec4 advancedFogColorDensity;
     vec4 advancedFogTypeFarEnabled;
     vec4 emissionRadiance;
+    vec4 materialBaseColor;
+    vec4 materialFactors;
 } _239;
 
 layout(binding = 0) uniform texture2D wired_bindless_images[64];
@@ -258,9 +260,10 @@ void main()
     uint param = 0u;
     vec2 param_1 = frag_tex_coord0;
     int param_2 = 0;
-    vec4 color0 = wired_bl_sample_domain(param, param_1, param_2) * _239.ent_color0;
+    vec4 sampledColor0 = wired_bl_sample_domain(param, param_1, param_2);
+    vec4 color0 = sampledColor0 * _239.ent_color0;
     vec4 base = color0;
-    if (_468)
+    if (_470)
     {
         if (color0.w == alpha_test_value)
         {
@@ -269,7 +272,7 @@ void main()
     }
     else
     {
-        if (_478)
+        if (_480)
         {
             if (color0.w >= alpha_test_value)
             {
@@ -278,7 +281,7 @@ void main()
         }
         else
         {
-            if (_488)
+            if (_490)
             {
                 if (color0.w < alpha_test_value)
                 {
@@ -288,37 +291,41 @@ void main()
         }
     }
     base = color0;
-    if (_498)
+    if (_500)
     {
         float wetness = clamp(_239.worldLightParams.y, 0.0, 1.0);
         float frost = clamp(_239.worldLightParams.z, 0.0, 1.0);
         float luminance = dot(base.xyz, vec3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
-        vec4 _520 = base;
-        vec3 _522 = _520.xyz * mix(1.0, 0.819999992847442626953125, wetness);
-        base.x = _522.x;
-        base.y = _522.y;
-        base.z = _522.z;
-        vec4 _529 = base;
-        vec3 _543 = mix(_529.xyz, vec3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), vec3(frost * 0.550000011920928955078125));
-        base.x = _543.x;
-        base.y = _543.y;
-        base.z = _543.z;
+        vec4 _522 = base;
+        vec3 _524 = _522.xyz * mix(1.0, 0.819999992847442626953125, wetness);
+        base.x = _524.x;
+        base.y = _524.y;
+        base.z = _524.z;
+        vec4 _531 = base;
+        vec3 _545 = mix(_531.xyz, vec3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), vec3(frost * 0.550000011920928955078125));
+        base.x = _545.x;
+        base.y = _545.y;
+        base.z = _545.z;
     }
-    vec4 _557 = base;
-    vec3 _559 = _557.xyz + (color0.xyz * _239.emissionRadiance.xyz);
-    base.x = _559.x;
-    base.y = _559.y;
-    base.z = _559.z;
+    if (_239.materialFactors.x >= 0.0)
+    {
+        base *= _239.materialBaseColor;
+    }
+    vec4 _570 = base;
+    vec3 _572 = _570.xyz + (color0.xyz * _239.emissionRadiance.xyz);
+    base.x = _572.x;
+    base.y = _572.y;
+    base.z = _572.z;
     if (wired_advanced_fog_enabled())
     {
         float fogAmount = wired_advanced_fog_amount();
-        vec4 _571 = base;
-        vec3 _578 = mix(_571.xyz, _239.advancedFogColorDensity.xyz, vec3(fogAmount));
-        base.x = _578.x;
-        base.y = _578.y;
-        base.z = _578.z;
+        vec4 _584 = base;
+        vec3 _591 = mix(_584.xyz, _239.advancedFogColorDensity.xyz, vec3(fogAmount));
+        base.x = _591.x;
+        base.y = _591.y;
+        base.z = _591.z;
     }
-    if (_586)
+    if (_599)
     {
         if (base.w == 0.0)
         {
@@ -327,7 +334,7 @@ void main()
     }
     else
     {
-        if (_596)
+        if (_609)
         {
             if (dot(base.xyz, base.xyz) == 0.0)
             {

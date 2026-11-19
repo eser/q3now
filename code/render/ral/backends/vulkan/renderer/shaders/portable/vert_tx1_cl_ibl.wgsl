@@ -68,15 +68,15 @@ fn main_1() {
     ibl_N = _e41;
     let _e43 = ubo.eyePos;
     let _e45 = in_position_1;
-    ibl_V = normalize((_e43.xyz - _e45));
-    let _e48 = in_color0_1;
-    frag_color0_ = _e48;
-    let _e49 = in_color1_1;
-    frag_color1_ = _e49;
-    let _e50 = in_tex_coord0_1;
-    frag_tex_coord0_ = _e50;
-    let _e51 = in_tex_coord1_1;
-    frag_tex_coord1_ = _e51;
+    ibl_V = (_e43.xyz - _e45);
+    let _e47 = in_color0_1;
+    frag_color0_ = _e47;
+    let _e48 = in_color1_1;
+    frag_color1_ = _e48;
+    let _e49 = in_tex_coord0_1;
+    frag_tex_coord0_ = _e49;
+    let _e50 = in_tex_coord1_1;
+    frag_tex_coord1_ = _e50;
     return;
 }
 

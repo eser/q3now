@@ -58,7 +58,7 @@ struct spvDescriptorSetBuffer0
     device Media* m_60 [[id(1)]];
     device TileLights* m_194 [[id(2)]];
     device Lights* m_234 [[id(3)]];
-    device LitMedia* m_279 [[id(4)]];
+    device LitMedia* m_311 [[id(4)]];
 };
 
 kernel void main0(device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
@@ -97,11 +97,20 @@ kernel void main0(device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]
         l.colorInvRadius2 = (*spvDescriptorSet0.m_234).light[lightIndex].colorInvRadius2;
         l.endpointLinear = (*spvDescriptorSet0.m_234).light[lightIndex].endpointLinear;
         float3 delta = l.positionRadius.xyz - world;
+        if (l.endpointLinear.w > 0.5)
+        {
+            float3 segment = l.endpointLinear.xyz - l.positionRadius.xyz;
+            float lengthSquared = dot(segment, segment);
+            if (lengthSquared > 0.0)
+            {
+                delta += (segment * fast::clamp((-dot(delta, segment)) / lengthSquared, 0.0, 1.0));
+            }
+        }
         float radius = fast::max(l.positionRadius.w, 0.001000000047497451305389404296875);
         float attenuation = fast::max(1.0 - (length(delta) / radius), 0.0);
         attenuation *= attenuation;
         illumination += (l.colorInvRadius2.xyz * attenuation);
     }
-    (*spvDescriptorSet0.m_279).radianceExtinction[index] = float4(medium.xyz * illumination, medium.w);
+    (*spvDescriptorSet0.m_311).radianceExtinction[index] = float4(medium.xyz * illumination, medium.w);
 }
 

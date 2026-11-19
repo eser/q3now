@@ -49,7 +49,7 @@ void main()
     mat4 mvp = _16;
     gl_Position = mvp * vec4(in_position, 1.0);
     ibl_N = in_normal;
-    ibl_V = normalize(ubo.eyePos.xyz - in_position);
+    ibl_V = ubo.eyePos.xyz - in_position;
     frag_color0 = in_color0;
     frag_color1 = in_color1;
     frag_color2 = in_color2;

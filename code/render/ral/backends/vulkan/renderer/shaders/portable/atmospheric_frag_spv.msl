@@ -45,9 +45,11 @@ struct AtmFrame
 
 struct spvDescriptorSetBuffer0
 {
-    constant AtmFrame* m_67 [[id(0)]];
+    constant AtmFrame* m_74 [[id(0)]];
     texture2d<float> sceneDepthTex [[id(1)]];
     sampler sceneDepthTexSmplr [[id(2)]];
+    array<texture2d<float>, 8> effectTextures [[id(3)]];
+    array<sampler, 8> effectTexturesSmplr [[id(11)]];
 };
 
 struct main0_out
@@ -59,16 +61,17 @@ struct main0_in
 {
     float2 fragUV [[user(locn0)]];
     float4 fragColor [[user(locn1)]];
+    uint fragFamily [[user(locn2)]];
 };
 
 static inline __attribute__((always_inline))
-float softParticleFade(constant AtmFrame& _67, thread float4& gl_FragCoord, texture2d<float> sceneDepthTex, sampler sceneDepthTexSmplr)
+float softParticleFade(constant AtmFrame& _74, thread float4& gl_FragCoord, texture2d<float> sceneDepthTex, sampler sceneDepthTexSmplr)
 {
-    if (_67.renderParams.z < 0.5)
+    if (_74.renderParams.z < 0.5)
     {
         return 1.0;
     }
-    float2 screenUV = gl_FragCoord.xy * _67.renderParams.xy;
+    float2 screenUV = gl_FragCoord.xy * _74.renderParams.xy;
     float sceneDepth = sceneDepthTex.sample(sceneDepthTexSmplr, screenUV).x;
     if (sceneDepth <= 0.0)
     {
@@ -89,46 +92,94 @@ float3 sRGBToLinear(thread float3& c)
 }
 
 static inline __attribute__((always_inline))
-float3 displayVisibility(thread const float3& sceneColor, constant AtmFrame& _67)
+float3 displayVisibility(thread const float3& sceneColor, constant AtmFrame& _74)
 {
-    float3 exposed = fast::max(sceneColor, float3(0.0)) * _67.viewLeft.w;
+    float3 exposed = fast::max(sceneColor, float3(0.0)) * _74.viewLeft.w;
     float luminance = dot(exposed, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
-    bool _84 = luminance > 0.0;
-    bool _92;
-    if (_84)
-    {
-        _92 = luminance < _67.eyeWorld.w;
-    }
-    else
-    {
-        _92 = _84;
-    }
+    bool _91 = luminance > 0.0;
     bool _99;
-    if (_92)
+    if (_91)
     {
-        _99 = _67.viewUp.w != 1.0;
+        _99 = luminance < _74.eyeWorld.w;
     }
     else
     {
-        _99 = _92;
+        _99 = _91;
     }
+    bool _106;
     if (_99)
     {
-        float curved = powr(luminance / _67.eyeWorld.w, _67.viewUp.w) * _67.eyeWorld.w;
+        _106 = _74.viewUp.w != 1.0;
+    }
+    else
+    {
+        _106 = _99;
+    }
+    if (_106)
+    {
+        float curved = powr(luminance / _74.eyeWorld.w, _74.viewUp.w) * _74.eyeWorld.w;
         exposed *= (curved / luminance);
     }
     return exposed;
+}
+
+static inline __attribute__((always_inline))
+float4 effectTexel(thread const uint& effect, thread const float2& uv, const device array<texture2d<float>, 8>& effectTextures, const device array<sampler, 8>& effectTexturesSmplr)
+{
+    switch (effect)
+    {
+        case 0u:
+        {
+            return effectTextures[0].sample(effectTexturesSmplr[0], uv);
+        }
+        case 1u:
+        {
+            return effectTextures[1].sample(effectTexturesSmplr[1], uv);
+        }
+        case 2u:
+        {
+            return effectTextures[2].sample(effectTexturesSmplr[2], uv);
+        }
+        case 3u:
+        {
+            return effectTextures[3].sample(effectTexturesSmplr[3], uv);
+        }
+        case 4u:
+        {
+            return effectTextures[4].sample(effectTexturesSmplr[4], uv);
+        }
+        case 5u:
+        {
+            return effectTextures[5].sample(effectTexturesSmplr[5], uv);
+        }
+        case 6u:
+        {
+            return effectTextures[6].sample(effectTexturesSmplr[6], uv);
+        }
+        default:
+        {
+            return effectTextures[7].sample(effectTexturesSmplr[7], uv);
+        }
+    }
 }
 
 fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], float4 gl_FragCoord [[position]])
 {
     main0_out out = {};
     float edge = 1.0 - smoothstep(0.0, 0.5, abs(in.fragUV.x - 0.5));
-    float alpha = (in.fragColor.w * edge) * softParticleFade((*spvDescriptorSet0.m_67), gl_FragCoord, spvDescriptorSet0.sceneDepthTex, spvDescriptorSet0.sceneDepthTexSmplr);
+    float alpha = (in.fragColor.w * edge) * softParticleFade((*spvDescriptorSet0.m_74), gl_FragCoord, spvDescriptorSet0.sceneDepthTex, spvDescriptorSet0.sceneDepthTexSmplr);
     float3 param = in.fragColor.xyz;
-    float3 _188 = sRGBToLinear(param);
-    float3 param_1 = _188;
-    float3 rgb = displayVisibility(param_1, (*spvDescriptorSet0.m_67));
+    float3 _255 = sRGBToLinear(param);
+    float3 param_1 = _255;
+    float3 rgb = displayVisibility(param_1, (*spvDescriptorSet0.m_74));
+    if (in.fragFamily >= 16u)
+    {
+        uint param_2 = in.fragFamily - 16u;
+        float2 param_3 = in.fragUV;
+        float4 texel = effectTexel(param_2, param_3, spvDescriptorSet0.effectTextures, spvDescriptorSet0.effectTexturesSmplr);
+        rgb *= texel.xyz;
+        alpha = (in.fragColor.w * softParticleFade((*spvDescriptorSet0.m_74), gl_FragCoord, spvDescriptorSet0.sceneDepthTex, spvDescriptorSet0.sceneDepthTexSmplr)) * texel.w;
+    }
     out.outColor = float4(rgb, alpha);
     return out;
 }

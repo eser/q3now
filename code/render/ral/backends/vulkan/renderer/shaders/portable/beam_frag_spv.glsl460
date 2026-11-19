@@ -6,15 +6,15 @@ layout(binding = 0, std140) uniform EffectsUBO
     vec4 eyeWorld;
     vec4 frameParams;
     vec4 stageParams;
-} _147;
+} _151;
 
 layout(binding = 0) uniform texture2D shaderImages[64];
 layout(binding = 0) uniform sampler shaderImageSampler;
 
 layout(location = 3) flat in uint fragImageSlot;
 layout(location = 0) in vec2 fragUV;
-layout(location = 0) out vec4 outColor;
 layout(location = 1) in vec4 fragColor;
+layout(location = 0) out vec4 outColor;
 layout(location = 2) flat in uint fragShaderHandle;
 
 vec3 sRGBToLinear(inout vec3 c)
@@ -49,8 +49,9 @@ void main()
     uint param_1 = domain;
     vec4 _121 = decodeColorTexel(param, param_1);
     vec4 texel = _121;
+    float coverage = texel.w * fragColor.w;
     vec3 param_2 = fragColor.xyz;
-    vec3 _131 = sRGBToLinear(param_2);
-    outColor = vec4(texel.xyz * _131, texel.w * fragColor.w);
+    vec3 _139 = sRGBToLinear(param_2);
+    outColor = vec4((texel.xyz * _139) * coverage, coverage);
 }
 

@@ -13,11 +13,26 @@ struct ProductDraw
     float4 viewportAlpha;
     float4 atmosphereEyeDensity;
     float4 atmosphereColorVisibility;
-    float4 atmosphereHeightCloud;
+    float4 atmosphereHeightSky;
     uint4 atmosphereFroxelGrid;
     float4 localSh[4];
     uint4 staticLighting;
     float4 emissiveRadiance;
+};
+
+struct ProductMaterialFactors
+{
+    float4 baseColor;
+    float4 factors;
+    float4 beamStartColor;
+    float4 beamEndColor;
+    float4 beamScaleOffset;
+    uint4 beamFlags;
+};
+
+struct spvDescriptorSetBuffer2
+{
+    constant ProductMaterialFactors* productMaterial [[id(0)]];
 };
 
 struct main0_out
@@ -39,7 +54,7 @@ struct main0_in
     float3 in_normal [[attribute(4)]];
 };
 
-vertex main0_out main0(main0_in in [[stage_in]], constant ProductDraw& productDraw [[buffer(0)]])
+vertex main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer2& spvDescriptorSet2 [[buffer(2)]], constant ProductDraw& productDraw [[buffer(3)]])
 {
     main0_out out = {};
     if (productDraw.viewOriginDrawSpace.w >= 0.5)
@@ -55,6 +70,21 @@ vertex main0_out main0(main0_in in [[stage_in]], constant ProductDraw& productDr
     out.texCoord = in.in_tex_coord;
     out.lightmapCoord = in.in_lightmap_coord;
     out.color = in.in_color;
+    bool _118 = productDraw.atmosphereHeightSky.w < 0.5;
+    bool _128;
+    if (_118)
+    {
+        _128 = (*spvDescriptorSet2.productMaterial).beamFlags.x != 0u;
+    }
+    else
+    {
+        _128 = _118;
+    }
+    if (_128)
+    {
+        out.color = mix((*spvDescriptorSet2.productMaterial).beamStartColor, (*spvDescriptorSet2.productMaterial).beamEndColor, float4(in.in_tex_coord.x));
+        out.texCoord = (in.in_tex_coord * (*spvDescriptorSet2.productMaterial).beamScaleOffset.xy) + (*spvDescriptorSet2.productMaterial).beamScaleOffset.zw;
+    }
     out.worldPosition = in.in_position;
     out.worldNormal = fast::normalize(in.in_normal);
     return out;

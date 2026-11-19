@@ -66,9 +66,10 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
     uint param_1 = domain;
     float4 _121 = decodeColorTexel(param, param_1);
     float4 texel = _121;
+    float coverage = texel.w * in.fragColor.w;
     float3 param_2 = in.fragColor.xyz;
-    float3 _131 = sRGBToLinear(param_2);
-    out.outColor = float4(texel.xyz * _131, texel.w * in.fragColor.w);
+    float3 _139 = sRGBToLinear(param_2);
+    out.outColor = float4((texel.xyz * _139) * coverage, coverage);
     return out;
 }
 

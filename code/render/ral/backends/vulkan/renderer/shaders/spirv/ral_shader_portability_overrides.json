@@ -5,8 +5,8 @@
     {
       "symbol": "atmosphere_composite_comp_spv",
       "spirvDigest": {
-        "lane0": "f4f6d74637001237",
-        "lane1": "16b6dfbc46bdb737"
+        "lane0": "e32af2df13b8e232",
+        "lane1": "f3595777ea6fb4b3"
       },
       "combinedSamplers": [
         {
@@ -21,6 +21,13 @@
           "binding": 2,
           "samplerSet": 0,
           "samplerBinding": 34,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 0,
+          "binding": 5,
+          "samplerSet": 0,
+          "samplerBinding": 37,
           "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
         }
       ]
@@ -49,15 +56,15 @@
     {
       "symbol": "atmosphere_froxel_light_comp_spv",
       "spirvDigest": {
-        "lane0": "49a9b4dee2aca8df",
-        "lane1": "1d1bc17113528222"
+        "lane0": "7b226aac4d88a3b7",
+        "lane1": "123c46bf64976bed"
       }
     },
     {
       "symbol": "atmospheric_frag_spv",
       "spirvDigest": {
-        "lane0": "303804370eadb45b",
-        "lane1": "26814686de4980a7"
+        "lane0": "ab471d0061cb2523",
+        "lane1": "de7c43bf53c06346"
       },
       "combinedSamplers": [
         {
@@ -65,6 +72,13 @@
           "binding": 2,
           "samplerSet": 0,
           "samplerBinding": 34,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 0,
+          "binding": 3,
+          "samplerSet": 0,
+          "samplerBinding": 35,
           "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
         }
       ]
@@ -88,15 +102,15 @@
     {
       "symbol": "atmospheric_vert_spv",
       "spirvDigest": {
-        "lane0": "5e5f70814b5e857c",
-        "lane1": "5a44c17b73192c1b"
+        "lane0": "baa8751280936d8f",
+        "lane1": "3bf3ebc1f476e0f4"
       }
     },
     {
       "symbol": "beam_frag_spv",
       "spirvDigest": {
-        "lane0": "7b8f54fc982432d0",
-        "lane1": "3b43286fdc2b5188"
+        "lane0": "207328d38fbeea52",
+        "lane1": "2b69f8ab26099cf2"
       },
       "samplerKinds": [
         {
@@ -187,8 +201,8 @@
     {
       "symbol": "convolve_irradiance_comp_spv",
       "spirvDigest": {
-        "lane0": "2cb4878a0322d733",
-        "lane1": "aaa70cf595de0ae3"
+        "lane0": "7e92f82781decf12",
+        "lane1": "680539ce966b56c8"
       },
       "samplerKinds": [
         {
@@ -845,8 +859,8 @@
     {
       "symbol": "frag_tx0_bindless",
       "spirvDigest": {
-        "lane0": "fb087a207a4c4fbc",
-        "lane1": "b597d9af89832f74"
+        "lane0": "e5f2337881836a7b",
+        "lane1": "02540949ff3ad074"
       },
       "samplerKinds": [
         {
@@ -871,8 +885,8 @@
     {
       "symbol": "frag_tx0_df_bindless",
       "spirvDigest": {
-        "lane0": "c1b8d5df5d736d4c",
-        "lane1": "5b680b66ab4f6d6d"
+        "lane0": "c52f84fa111e6e55",
+        "lane1": "f4c12eb32428a0ef"
       },
       "samplerKinds": [
         {
@@ -897,8 +911,8 @@
     {
       "symbol": "frag_tx0_dfade_bindless",
       "spirvDigest": {
-        "lane0": "94220c342a8c3fc7",
-        "lane1": "12fb4c58c59fb424"
+        "lane0": "57ef3eda2e615bdf",
+        "lane1": "42319c8644df7ea1"
       },
       "samplerKinds": [
         {
@@ -923,8 +937,8 @@
     {
       "symbol": "frag_tx0_dfade_fog_bindless",
       "spirvDigest": {
-        "lane0": "738f7c5e2d809a84",
-        "lane1": "78e02a8c9d2d19f5"
+        "lane0": "23590b2c70c7c4b7",
+        "lane1": "63d7b65c58c58b37"
       },
       "samplerKinds": [
         {
@@ -949,8 +963,8 @@
     {
       "symbol": "frag_tx0_ent_bindless",
       "spirvDigest": {
-        "lane0": "da186031dc98c1e4",
-        "lane1": "9cd97db9d8ae67d1"
+        "lane0": "e057e3403d493d8f",
+        "lane1": "d3d9538414c660a8"
       },
       "samplerKinds": [
         {
@@ -975,8 +989,8 @@
     {
       "symbol": "frag_tx0_ent_dfade_bindless",
       "spirvDigest": {
-        "lane0": "03c23bec0771e286",
-        "lane1": "733ac57e45327fa5"
+        "lane0": "dfb29b417c21e4f7",
+        "lane1": "0f4ec2e94a76522a"
       },
       "samplerKinds": [
         {
@@ -1001,8 +1015,8 @@
     {
       "symbol": "frag_tx0_ent_dfade_fog_bindless",
       "spirvDigest": {
-        "lane0": "8df4c3508bc322f6",
-        "lane1": "a3f0b1c850ffd7ff"
+        "lane0": "9ade56263fcebbc7",
+        "lane1": "587ff5b376c42a89"
       },
       "samplerKinds": [
         {
@@ -1027,8 +1041,8 @@
     {
       "symbol": "frag_tx0_ent_fog_bindless",
       "spirvDigest": {
-        "lane0": "4606b1c94c148334",
-        "lane1": "80cdac17bc2ad9ee"
+        "lane0": "b103492f2711e29b",
+        "lane1": "3389e3ad2387f270"
       },
       "samplerKinds": [
         {
@@ -1053,8 +1067,8 @@
     {
       "symbol": "frag_tx0_ent_fog_temporal_invalidate_bindless",
       "spirvDigest": {
-        "lane0": "89804d45c9479ea6",
-        "lane1": "4df230c23692883f"
+        "lane0": "172dd7a463937a18",
+        "lane1": "d9eef23c6c4519af"
       },
       "samplerKinds": [
         {
@@ -1079,8 +1093,8 @@
     {
       "symbol": "frag_tx0_ent_fog_temporal_write_bindless",
       "spirvDigest": {
-        "lane0": "eada080814a20a3b",
-        "lane1": "d9b2d8ea13ddbf30"
+        "lane0": "009708b564b85190",
+        "lane1": "5fe1b2c0cc1e65ff"
       },
       "samplerKinds": [
         {
@@ -1105,8 +1119,8 @@
     {
       "symbol": "frag_tx0_ent_temporal_invalidate_bindless",
       "spirvDigest": {
-        "lane0": "0d645ea00aacf874",
-        "lane1": "ac4cab4f448ae918"
+        "lane0": "87b3e4d51f72a826",
+        "lane1": "b6bde708b3fc2337"
       },
       "samplerKinds": [
         {
@@ -1131,8 +1145,8 @@
     {
       "symbol": "frag_tx0_ent_temporal_write_bindless",
       "spirvDigest": {
-        "lane0": "c65b07c307ad4068",
-        "lane1": "5ce32d14ea806af0"
+        "lane0": "dc960136a6d1a581",
+        "lane1": "c5e1b499b6370115"
       },
       "samplerKinds": [
         {
@@ -1157,8 +1171,8 @@
     {
       "symbol": "frag_tx0_fixed_bindless",
       "spirvDigest": {
-        "lane0": "32b8882ee475595d",
-        "lane1": "8b54a93074833538"
+        "lane0": "c3b9cab9317e291b",
+        "lane1": "10a994f2bc456653"
       },
       "samplerKinds": [
         {
@@ -1183,8 +1197,8 @@
     {
       "symbol": "frag_tx0_fixed_dfade_bindless",
       "spirvDigest": {
-        "lane0": "a30933db01eb9041",
-        "lane1": "32707337eafbb7ca"
+        "lane0": "56fc34b0dc67221a",
+        "lane1": "ca0521ea897044cc"
       },
       "samplerKinds": [
         {
@@ -1209,8 +1223,8 @@
     {
       "symbol": "frag_tx0_fixed_dfade_fog_bindless",
       "spirvDigest": {
-        "lane0": "4d06ed3cd4f3913c",
-        "lane1": "2fac3b2b779e6060"
+        "lane0": "5c23327da3d91add",
+        "lane1": "94e5062cd5b3026a"
       },
       "samplerKinds": [
         {
@@ -1235,8 +1249,8 @@
     {
       "symbol": "frag_tx0_fixed_fog_bindless",
       "spirvDigest": {
-        "lane0": "542a713f6ec5a014",
-        "lane1": "b5397c29c5d8f067"
+        "lane0": "f054ff54c252db3d",
+        "lane1": "2dd3725967060eaf"
       },
       "samplerKinds": [
         {
@@ -1261,8 +1275,8 @@
     {
       "symbol": "frag_tx0_fixed_fog_temporal_invalidate_bindless",
       "spirvDigest": {
-        "lane0": "2e06db289473e701",
-        "lane1": "4fa384bc88b2fc72"
+        "lane0": "50732c0b902e0a34",
+        "lane1": "47aad8fd34ed368f"
       },
       "samplerKinds": [
         {
@@ -1287,8 +1301,8 @@
     {
       "symbol": "frag_tx0_fixed_fog_temporal_write_bindless",
       "spirvDigest": {
-        "lane0": "303f03c29179b766",
-        "lane1": "5b955e4bbed98467"
+        "lane0": "2ce8ac2e89c07822",
+        "lane1": "a7d1e2ce92311957"
       },
       "samplerKinds": [
         {
@@ -1313,8 +1327,8 @@
     {
       "symbol": "frag_tx0_fixed_shadow_bindless",
       "spirvDigest": {
-        "lane0": "04510aca27be6ff0",
-        "lane1": "a513d5ee6821dcbc"
+        "lane0": "39de9092dc1e4263",
+        "lane1": "072a9d5d4d58bcbd"
       },
       "samplerKinds": [
         {
@@ -1348,8 +1362,8 @@
     {
       "symbol": "frag_tx0_fixed_shadow_fog_bindless",
       "spirvDigest": {
-        "lane0": "3272b93b6b674d06",
-        "lane1": "85b468cc16d19953"
+        "lane0": "389280795514617c",
+        "lane1": "7144dd47e4199760"
       },
       "samplerKinds": [
         {
@@ -1383,8 +1397,8 @@
     {
       "symbol": "frag_tx0_fixed_temporal_invalidate_bindless",
       "spirvDigest": {
-        "lane0": "5d766d2626588347",
-        "lane1": "5a7e61ce9ab570ea"
+        "lane0": "dfb09e76272f5ae2",
+        "lane1": "551e0bd93494b5b9"
       },
       "samplerKinds": [
         {
@@ -1409,8 +1423,8 @@
     {
       "symbol": "frag_tx0_fixed_temporal_write_bindless",
       "spirvDigest": {
-        "lane0": "39bbd4d1ff977670",
-        "lane1": "fa455b9c69a97152"
+        "lane0": "e9b824e68290c79e",
+        "lane1": "7c02b4ef79d89b4f"
       },
       "samplerKinds": [
         {
@@ -1435,8 +1449,8 @@
     {
       "symbol": "frag_tx0_fog_bindless",
       "spirvDigest": {
-        "lane0": "9935710435eb6b7d",
-        "lane1": "726e98f099da9212"
+        "lane0": "6a29f764bd135d8c",
+        "lane1": "787240bd91fb12ac"
       },
       "samplerKinds": [
         {
@@ -1461,8 +1475,8 @@
     {
       "symbol": "frag_tx0_fog_temporal_invalidate_bindless",
       "spirvDigest": {
-        "lane0": "05c8ddfbab64de7a",
-        "lane1": "a3a7e733413b00fa"
+        "lane0": "33967d8d62b26558",
+        "lane1": "5457ab74deb520c6"
       },
       "samplerKinds": [
         {
@@ -1487,8 +1501,8 @@
     {
       "symbol": "frag_tx0_fog_temporal_write_bindless",
       "spirvDigest": {
-        "lane0": "2f30ce07a49b4a6c",
-        "lane1": "5666e4bf1cd6a7b1"
+        "lane0": "bffb69cfa6617513",
+        "lane1": "a151239b4ce6abb5"
       },
       "samplerKinds": [
         {
@@ -1513,8 +1527,8 @@
     {
       "symbol": "frag_tx0_ident1_bindless",
       "spirvDigest": {
-        "lane0": "7089590ba0e34563",
-        "lane1": "e3664db179ea8798"
+        "lane0": "be72b23a1cbc7739",
+        "lane1": "4912effa4674b9b1"
       },
       "samplerKinds": [
         {
@@ -1539,8 +1553,8 @@
     {
       "symbol": "frag_tx0_ident1_dfade_bindless",
       "spirvDigest": {
-        "lane0": "6b48d0d0070ffefb",
-        "lane1": "12be8ad6a19ec7e8"
+        "lane0": "bb1624f2e60e1c00",
+        "lane1": "1a2ebbdbef1578a9"
       },
       "samplerKinds": [
         {
@@ -1565,8 +1579,8 @@
     {
       "symbol": "frag_tx0_ident1_dfade_fog_bindless",
       "spirvDigest": {
-        "lane0": "64aefc59b4d80574",
-        "lane1": "c13ae6a60ae46bee"
+        "lane0": "80c29525867a6279",
+        "lane1": "e218c993b242fa19"
       },
       "samplerKinds": [
         {
@@ -1591,8 +1605,8 @@
     {
       "symbol": "frag_tx0_ident1_fog_bindless",
       "spirvDigest": {
-        "lane0": "da1238f692ae7904",
-        "lane1": "0028419b37dd9dbf"
+        "lane0": "4e572992cd842472",
+        "lane1": "0cf1aa45575c3407"
       },
       "samplerKinds": [
         {
@@ -1617,8 +1631,8 @@
     {
       "symbol": "frag_tx0_ident1_fog_temporal_invalidate_bindless",
       "spirvDigest": {
-        "lane0": "3c27679b78133bcf",
-        "lane1": "0ef7551d6179fde2"
+        "lane0": "12a687b30823d3e5",
+        "lane1": "057024073440c1ac"
       },
       "samplerKinds": [
         {
@@ -1643,8 +1657,8 @@
     {
       "symbol": "frag_tx0_ident1_fog_temporal_write_bindless",
       "spirvDigest": {
-        "lane0": "ab6e1881808c9407",
-        "lane1": "dce894377957ccd4"
+        "lane0": "d1bd2ba0f921aa07",
+        "lane1": "b88dcdb3e2449fc1"
       },
       "samplerKinds": [
         {
@@ -1669,8 +1683,8 @@
     {
       "symbol": "frag_tx0_ident1_shadow_bindless",
       "spirvDigest": {
-        "lane0": "8fbc010948fa8f13",
-        "lane1": "bed367730d03c2d7"
+        "lane0": "359b8c87b59da1f0",
+        "lane1": "714202c0b4e47c18"
       },
       "samplerKinds": [
         {
@@ -1704,8 +1718,8 @@
     {
       "symbol": "frag_tx0_ident1_shadow_fog_bindless",
       "spirvDigest": {
-        "lane0": "e7fd914c3bc590b5",
-        "lane1": "de4632f39e207274"
+        "lane0": "4e828a8d8dd2854d",
+        "lane1": "ffb5e75df794fd2a"
       },
       "samplerKinds": [
         {
@@ -1739,8 +1753,8 @@
     {
       "symbol": "frag_tx0_ident1_temporal_invalidate_bindless",
       "spirvDigest": {
-        "lane0": "439cc467a4c41ec7",
-        "lane1": "c4baf59093f3a19c"
+        "lane0": "14c11f61230b1af3",
+        "lane1": "fd2b53d66a579727"
       },
       "samplerKinds": [
         {
@@ -1765,8 +1779,8 @@
     {
       "symbol": "frag_tx0_ident1_temporal_write_bindless",
       "spirvDigest": {
-        "lane0": "f869814f1626b298",
-        "lane1": "aa1dac1baed9de2b"
+        "lane0": "19705e625d274641",
+        "lane1": "bfcceb8203de494e"
       },
       "samplerKinds": [
         {
@@ -1791,8 +1805,8 @@
     {
       "symbol": "frag_tx0_shadow_bindless",
       "spirvDigest": {
-        "lane0": "28f996e49b578ab6",
-        "lane1": "fb8f4b86d71c49c0"
+        "lane0": "9385e98cbb89bdc9",
+        "lane1": "d213cc43d97f8e3e"
       },
       "samplerKinds": [
         {
@@ -1826,8 +1840,8 @@
     {
       "symbol": "frag_tx0_shadow_fog_bindless",
       "spirvDigest": {
-        "lane0": "a2a1b57d662378ee",
-        "lane1": "3e7b1583e12d33d8"
+        "lane0": "e87953e4a82adfb0",
+        "lane1": "b7d6d7f8988c27fe"
       },
       "samplerKinds": [
         {
@@ -1861,8 +1875,8 @@
     {
       "symbol": "frag_tx0_temporal_invalidate_bindless",
       "spirvDigest": {
-        "lane0": "94a86e7183a86306",
-        "lane1": "ca35598bfa0a5b7f"
+        "lane0": "f82c480b084d95c4",
+        "lane1": "481ea30f23b51749"
       },
       "samplerKinds": [
         {
@@ -1887,8 +1901,8 @@
     {
       "symbol": "frag_tx0_temporal_write_bindless",
       "spirvDigest": {
-        "lane0": "9369f32da5f52cdb",
-        "lane1": "20de875b542ac380"
+        "lane0": "157fd76219cb5583",
+        "lane1": "a2b4a5744fd3a979"
       },
       "samplerKinds": [
         {
@@ -1913,8 +1927,8 @@
     {
       "symbol": "frag_tx1_bindless",
       "spirvDigest": {
-        "lane0": "aa293a0df0fcf50d",
-        "lane1": "0cfb4be32b31d4da"
+        "lane0": "3cceef0a0c885bae",
+        "lane1": "f8ad12d71c390f4a"
       },
       "samplerKinds": [
         {
@@ -1939,8 +1953,8 @@
     {
       "symbol": "frag_tx1_cl_bindless",
       "spirvDigest": {
-        "lane0": "39f5ba0d1768911c",
-        "lane1": "be957b7213b02f26"
+        "lane0": "8c5a9c548ac476bd",
+        "lane1": "1fe45b713b7d2c52"
       },
       "samplerKinds": [
         {
@@ -1965,8 +1979,8 @@
     {
       "symbol": "frag_tx1_cl_fog_bindless",
       "spirvDigest": {
-        "lane0": "c0d9f2e735d91591",
-        "lane1": "7d5b464f2cfbff23"
+        "lane0": "af79c0054be506ec",
+        "lane1": "4ad27dde077981a2"
       },
       "samplerKinds": [
         {
@@ -1991,8 +2005,8 @@
     {
       "symbol": "frag_tx1_cl_fog_temporal_invalidate_bindless",
       "spirvDigest": {
-        "lane0": "c64cc8622f1bfba9",
-        "lane1": "cf783baf8e321986"
+        "lane0": "ce56dda05a47585e",
+        "lane1": "3cacb7a53c4e899e"
       },
       "samplerKinds": [
         {
@@ -2017,8 +2031,8 @@
     {
       "symbol": "frag_tx1_cl_fog_temporal_write_bindless",
       "spirvDigest": {
-        "lane0": "a5dbcb94d67a327e",
-        "lane1": "e731056889c9d2e9"
+        "lane0": "a630a77da6299327",
+        "lane1": "4946471ee27b99d7"
       },
       "samplerKinds": [
         {
@@ -2043,8 +2057,8 @@
     {
       "symbol": "frag_tx1_cl_ibl_bindless",
       "spirvDigest": {
-        "lane0": "200002ea60f8fb76",
-        "lane1": "9d77b49c8aac09e3"
+        "lane0": "744a38a8a1532544",
+        "lane1": "0c0341973993d64b"
       },
       "samplerKinds": [
         {
@@ -2075,13 +2089,6 @@
         },
         {
           "set": 2,
-          "binding": 2,
-          "samplerSet": 2,
-          "samplerBinding": 34,
-          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
-        },
-        {
-          "set": 2,
           "binding": 3,
           "samplerSet": 2,
           "samplerBinding": 35,
@@ -2092,6 +2099,13 @@
           "binding": 4,
           "samplerSet": 2,
           "samplerBinding": 36,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 2,
+          "binding": 6,
+          "samplerSet": 2,
+          "samplerBinding": 38,
           "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
         }
       ]
@@ -2099,8 +2113,8 @@
     {
       "symbol": "frag_tx1_cl_ibl_fog_bindless",
       "spirvDigest": {
-        "lane0": "5e2fb0408aaf93ea",
-        "lane1": "6fb65eb778a51c1a"
+        "lane0": "308b939fd82de737",
+        "lane1": "f2a509eed9dddc08"
       },
       "samplerKinds": [
         {
@@ -2131,13 +2145,6 @@
         },
         {
           "set": 2,
-          "binding": 2,
-          "samplerSet": 2,
-          "samplerBinding": 34,
-          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
-        },
-        {
-          "set": 2,
           "binding": 3,
           "samplerSet": 2,
           "samplerBinding": 35,
@@ -2149,14 +2156,21 @@
           "samplerSet": 2,
           "samplerBinding": 36,
           "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 2,
+          "binding": 6,
+          "samplerSet": 2,
+          "samplerBinding": 38,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
         }
       ]
     },
     {
       "symbol": "frag_tx1_cl_shadow_bindless",
       "spirvDigest": {
-        "lane0": "722e66722f16ea86",
-        "lane1": "e62836076bbea2b5"
+        "lane0": "2f486055ffb1bf5f",
+        "lane1": "bc4e51771d1213ef"
       },
       "samplerKinds": [
         {
@@ -2190,8 +2204,8 @@
     {
       "symbol": "frag_tx1_cl_shadow_fog_bindless",
       "spirvDigest": {
-        "lane0": "f3bbc57d323c4071",
-        "lane1": "3a98f8682406c08d"
+        "lane0": "3407f1b35f82e092",
+        "lane1": "1219e8bf8dfd13d1"
       },
       "samplerKinds": [
         {
@@ -2225,8 +2239,8 @@
     {
       "symbol": "frag_tx1_cl_temporal_invalidate_bindless",
       "spirvDigest": {
-        "lane0": "d21c71ca4b95b5f4",
-        "lane1": "3fb341a920660871"
+        "lane0": "1f05f50b01ecf7b7",
+        "lane1": "c7de6093f5c3441a"
       },
       "samplerKinds": [
         {
@@ -2251,8 +2265,8 @@
     {
       "symbol": "frag_tx1_cl_temporal_write_bindless",
       "spirvDigest": {
-        "lane0": "60ffac700b31885c",
-        "lane1": "89fde322a88fe10c"
+        "lane0": "d58f3a0bc12935ea",
+        "lane1": "a8997da2211eb8a7"
       },
       "samplerKinds": [
         {
@@ -2277,8 +2291,8 @@
     {
       "symbol": "frag_tx1_fixed_bindless",
       "spirvDigest": {
-        "lane0": "1f621ee6ac998eb1",
-        "lane1": "5db84e054a6f0dd8"
+        "lane0": "7d7d34d215c0ea93",
+        "lane1": "a8a9c330f6ce2079"
       },
       "samplerKinds": [
         {
@@ -2303,8 +2317,8 @@
     {
       "symbol": "frag_tx1_fixed_fog_bindless",
       "spirvDigest": {
-        "lane0": "60626065e7aa2aa4",
-        "lane1": "0abf76c276c963a9"
+        "lane0": "a90f69808af5b588",
+        "lane1": "c484288445c7dd12"
       },
       "samplerKinds": [
         {
@@ -2329,8 +2343,8 @@
     {
       "symbol": "frag_tx1_fixed_fog_temporal_invalidate_bindless",
       "spirvDigest": {
-        "lane0": "88f1181af4aff886",
-        "lane1": "75820b08f1754b1d"
+        "lane0": "44ec49660f4dd0da",
+        "lane1": "9d87d18a48f0419b"
       },
       "samplerKinds": [
         {
@@ -2355,8 +2369,8 @@
     {
       "symbol": "frag_tx1_fixed_fog_temporal_write_bindless",
       "spirvDigest": {
-        "lane0": "0bc8683a267ea0f8",
-        "lane1": "6fddda073d9aac88"
+        "lane0": "1eea85802a277954",
+        "lane1": "3b09e2ebdd4f964f"
       },
       "samplerKinds": [
         {
@@ -2379,10 +2393,122 @@
       ]
     },
     {
+      "symbol": "frag_tx1_fixed_ibl_bindless",
+      "spirvDigest": {
+        "lane0": "718329340f72b546",
+        "lane1": "2a5042ae9f6e68ae"
+      },
+      "samplerKinds": [
+        {
+          "set": 1,
+          "binding": 1,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        }
+      ],
+      "arrayCounts": [
+        {
+          "set": 1,
+          "binding": 0,
+          "arrayCount": 4096
+        },
+        {
+          "set": 1,
+          "binding": 1,
+          "arrayCount": 32
+        }
+      ],
+      "combinedSamplers": [
+        {
+          "set": 2,
+          "binding": 1,
+          "samplerSet": 2,
+          "samplerBinding": 33,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 2,
+          "binding": 3,
+          "samplerSet": 2,
+          "samplerBinding": 35,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 2,
+          "binding": 4,
+          "samplerSet": 2,
+          "samplerBinding": 36,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 2,
+          "binding": 6,
+          "samplerSet": 2,
+          "samplerBinding": 38,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        }
+      ]
+    },
+    {
+      "symbol": "frag_tx1_fixed_ibl_fog_bindless",
+      "spirvDigest": {
+        "lane0": "48632d8bfda0c1aa",
+        "lane1": "db8d08d3c7456021"
+      },
+      "samplerKinds": [
+        {
+          "set": 1,
+          "binding": 1,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        }
+      ],
+      "arrayCounts": [
+        {
+          "set": 1,
+          "binding": 0,
+          "arrayCount": 4096
+        },
+        {
+          "set": 1,
+          "binding": 1,
+          "arrayCount": 32
+        }
+      ],
+      "combinedSamplers": [
+        {
+          "set": 2,
+          "binding": 1,
+          "samplerSet": 2,
+          "samplerBinding": 33,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 2,
+          "binding": 3,
+          "samplerSet": 2,
+          "samplerBinding": 35,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 2,
+          "binding": 4,
+          "samplerSet": 2,
+          "samplerBinding": 36,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 2,
+          "binding": 6,
+          "samplerSet": 2,
+          "samplerBinding": 38,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        }
+      ]
+    },
+    {
       "symbol": "frag_tx1_fixed_shadow_bindless",
       "spirvDigest": {
-        "lane0": "e30f7389174a8e6b",
-        "lane1": "36e951eb6acdbf8b"
+        "lane0": "f4b506897d18021f",
+        "lane1": "5b2a0e08c2ae80c2"
       },
       "samplerKinds": [
         {
@@ -2416,8 +2542,8 @@
     {
       "symbol": "frag_tx1_fixed_shadow_fog_bindless",
       "spirvDigest": {
-        "lane0": "a284a08bf72ab2b8",
-        "lane1": "890ee2ee70f913ca"
+        "lane0": "724175e214c4cc0a",
+        "lane1": "6340ac9ec631aeeb"
       },
       "samplerKinds": [
         {
@@ -2451,8 +2577,8 @@
     {
       "symbol": "frag_tx1_fixed_temporal_invalidate_bindless",
       "spirvDigest": {
-        "lane0": "e34c0624f66a0e65",
-        "lane1": "82a2168df6396618"
+        "lane0": "e5552b58aa35796b",
+        "lane1": "bcf7d9e3b0a206e8"
       },
       "samplerKinds": [
         {
@@ -2477,8 +2603,8 @@
     {
       "symbol": "frag_tx1_fixed_temporal_write_bindless",
       "spirvDigest": {
-        "lane0": "da210650f14e9ffd",
-        "lane1": "f4df7f2455bf2eb6"
+        "lane0": "fef75d345069facc",
+        "lane1": "d736448d59207fed"
       },
       "samplerKinds": [
         {
@@ -2503,8 +2629,8 @@
     {
       "symbol": "frag_tx1_fog_bindless",
       "spirvDigest": {
-        "lane0": "6d542df05a77acd5",
-        "lane1": "2badca4ec694ea80"
+        "lane0": "36437c35b2a95d8f",
+        "lane1": "4ee16df42e44153a"
       },
       "samplerKinds": [
         {
@@ -2529,8 +2655,8 @@
     {
       "symbol": "frag_tx1_fog_temporal_invalidate_bindless",
       "spirvDigest": {
-        "lane0": "e457aba599746d18",
-        "lane1": "c131ef6792b02888"
+        "lane0": "521b20e32887f728",
+        "lane1": "ec3e41c56435a98a"
       },
       "samplerKinds": [
         {
@@ -2555,8 +2681,8 @@
     {
       "symbol": "frag_tx1_fog_temporal_write_bindless",
       "spirvDigest": {
-        "lane0": "59a6392425162a41",
-        "lane1": "ef22192ae9c258a4"
+        "lane0": "27dcec6eccf5716f",
+        "lane1": "d71b62c700a730fe"
       },
       "samplerKinds": [
         {
@@ -2581,8 +2707,8 @@
     {
       "symbol": "frag_tx1_ibl_bindless",
       "spirvDigest": {
-        "lane0": "4232a855dc69b469",
-        "lane1": "1892db817977cd49"
+        "lane0": "8a069af125d997bb",
+        "lane1": "9ae30980dee36335"
       },
       "samplerKinds": [
         {
@@ -2613,13 +2739,6 @@
         },
         {
           "set": 2,
-          "binding": 2,
-          "samplerSet": 2,
-          "samplerBinding": 34,
-          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
-        },
-        {
-          "set": 2,
           "binding": 3,
           "samplerSet": 2,
           "samplerBinding": 35,
@@ -2630,6 +2749,13 @@
           "binding": 4,
           "samplerSet": 2,
           "samplerBinding": 36,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 2,
+          "binding": 6,
+          "samplerSet": 2,
+          "samplerBinding": 38,
           "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
         }
       ]
@@ -2637,8 +2763,8 @@
     {
       "symbol": "frag_tx1_ibl_fog_bindless",
       "spirvDigest": {
-        "lane0": "a25be3ba4834d936",
-        "lane1": "ce27aab3e5513fd1"
+        "lane0": "315ff235835cf3d1",
+        "lane1": "cc17085e7776fa3d"
       },
       "samplerKinds": [
         {
@@ -2669,13 +2795,6 @@
         },
         {
           "set": 2,
-          "binding": 2,
-          "samplerSet": 2,
-          "samplerBinding": 34,
-          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
-        },
-        {
-          "set": 2,
           "binding": 3,
           "samplerSet": 2,
           "samplerBinding": 35,
@@ -2687,14 +2806,21 @@
           "samplerSet": 2,
           "samplerBinding": 36,
           "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 2,
+          "binding": 6,
+          "samplerSet": 2,
+          "samplerBinding": 38,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
         }
       ]
     },
     {
       "symbol": "frag_tx1_ident1_bindless",
       "spirvDigest": {
-        "lane0": "88073db4f42c1d8c",
-        "lane1": "9452fd0e6573f45f"
+        "lane0": "0a642cd66c34c508",
+        "lane1": "8e9e4b081b58e065"
       },
       "samplerKinds": [
         {
@@ -2719,8 +2845,8 @@
     {
       "symbol": "frag_tx1_ident1_fog_bindless",
       "spirvDigest": {
-        "lane0": "8e6335a4b42ee435",
-        "lane1": "8b884da95bd4c88f"
+        "lane0": "3ce2bcf2e4afb16e",
+        "lane1": "7d8fc24c7858153d"
       },
       "samplerKinds": [
         {
@@ -2745,8 +2871,8 @@
     {
       "symbol": "frag_tx1_ident1_fog_temporal_invalidate_bindless",
       "spirvDigest": {
-        "lane0": "e6e247ced708bff7",
-        "lane1": "4c41c1e3a25d8373"
+        "lane0": "3b89c884a2f74c07",
+        "lane1": "89a4323f729d8a96"
       },
       "samplerKinds": [
         {
@@ -2771,8 +2897,8 @@
     {
       "symbol": "frag_tx1_ident1_fog_temporal_write_bindless",
       "spirvDigest": {
-        "lane0": "1dab51282a947b06",
-        "lane1": "0555867ce9bf5bf9"
+        "lane0": "eb0161729a834196",
+        "lane1": "fd235cb9a25bba32"
       },
       "samplerKinds": [
         {
@@ -2795,10 +2921,122 @@
       ]
     },
     {
+      "symbol": "frag_tx1_ident1_ibl_bindless",
+      "spirvDigest": {
+        "lane0": "b70af5a1435572da",
+        "lane1": "e519e2b42910e4a8"
+      },
+      "samplerKinds": [
+        {
+          "set": 1,
+          "binding": 1,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        }
+      ],
+      "arrayCounts": [
+        {
+          "set": 1,
+          "binding": 0,
+          "arrayCount": 4096
+        },
+        {
+          "set": 1,
+          "binding": 1,
+          "arrayCount": 32
+        }
+      ],
+      "combinedSamplers": [
+        {
+          "set": 2,
+          "binding": 1,
+          "samplerSet": 2,
+          "samplerBinding": 33,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 2,
+          "binding": 3,
+          "samplerSet": 2,
+          "samplerBinding": 35,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 2,
+          "binding": 4,
+          "samplerSet": 2,
+          "samplerBinding": 36,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 2,
+          "binding": 6,
+          "samplerSet": 2,
+          "samplerBinding": 38,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        }
+      ]
+    },
+    {
+      "symbol": "frag_tx1_ident1_ibl_fog_bindless",
+      "spirvDigest": {
+        "lane0": "a59b7f26ff4aa22f",
+        "lane1": "a7b9fb22c21487ff"
+      },
+      "samplerKinds": [
+        {
+          "set": 1,
+          "binding": 1,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        }
+      ],
+      "arrayCounts": [
+        {
+          "set": 1,
+          "binding": 0,
+          "arrayCount": 4096
+        },
+        {
+          "set": 1,
+          "binding": 1,
+          "arrayCount": 32
+        }
+      ],
+      "combinedSamplers": [
+        {
+          "set": 2,
+          "binding": 1,
+          "samplerSet": 2,
+          "samplerBinding": 33,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 2,
+          "binding": 3,
+          "samplerSet": 2,
+          "samplerBinding": 35,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 2,
+          "binding": 4,
+          "samplerSet": 2,
+          "samplerBinding": 36,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 2,
+          "binding": 6,
+          "samplerSet": 2,
+          "samplerBinding": 38,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        }
+      ]
+    },
+    {
       "symbol": "frag_tx1_ident1_shadow_bindless",
       "spirvDigest": {
-        "lane0": "92939ef62ccde830",
-        "lane1": "a3c5dd775a938e0b"
+        "lane0": "5c52b13ae290ca27",
+        "lane1": "eba949480e0b0d69"
       },
       "samplerKinds": [
         {
@@ -2832,8 +3070,8 @@
     {
       "symbol": "frag_tx1_ident1_shadow_fog_bindless",
       "spirvDigest": {
-        "lane0": "897d52fc7e1f46b7",
-        "lane1": "8ac2565d8cfcd2df"
+        "lane0": "834016b5f1c457ee",
+        "lane1": "9fae18537fa0f7be"
       },
       "samplerKinds": [
         {
@@ -2867,8 +3105,8 @@
     {
       "symbol": "frag_tx1_ident1_temporal_invalidate_bindless",
       "spirvDigest": {
-        "lane0": "8892c1b971e8e833",
-        "lane1": "71720de5cdaa4390"
+        "lane0": "48b244abbd431be9",
+        "lane1": "0ec460ce04cff279"
       },
       "samplerKinds": [
         {
@@ -2893,8 +3131,8 @@
     {
       "symbol": "frag_tx1_ident1_temporal_write_bindless",
       "spirvDigest": {
-        "lane0": "9e7fa42c15b4eafe",
-        "lane1": "5983d4fa25bc0ab2"
+        "lane0": "069bc1428fc37c72",
+        "lane1": "65998bb0a0f92339"
       },
       "samplerKinds": [
         {
@@ -2919,8 +3157,8 @@
     {
       "symbol": "frag_tx1_shadow_bindless",
       "spirvDigest": {
-        "lane0": "4574e61885bc7445",
-        "lane1": "72e7c29c74ebca83"
+        "lane0": "06cc5d163d4cefd0",
+        "lane1": "4b56c09ffe5fa4ea"
       },
       "samplerKinds": [
         {
@@ -2954,8 +3192,8 @@
     {
       "symbol": "frag_tx1_shadow_fog_bindless",
       "spirvDigest": {
-        "lane0": "240bdca568c37f91",
-        "lane1": "3c6bb36e2c462241"
+        "lane0": "070db4fc71670248",
+        "lane1": "6a3c308dade77022"
       },
       "samplerKinds": [
         {
@@ -2989,8 +3227,8 @@
     {
       "symbol": "frag_tx1_temporal_invalidate_bindless",
       "spirvDigest": {
-        "lane0": "08700e4b3584421b",
-        "lane1": "9fea734e853ee9f5"
+        "lane0": "de986b2372cd23b2",
+        "lane1": "365a42d0c8bc44fe"
       },
       "samplerKinds": [
         {
@@ -3015,8 +3253,8 @@
     {
       "symbol": "frag_tx1_temporal_write_bindless",
       "spirvDigest": {
-        "lane0": "2eba81ff8fd8518b",
-        "lane1": "40fb0f6aee3dbcd5"
+        "lane0": "5811017938e7524b",
+        "lane1": "7da5ac76465196b5"
       },
       "samplerKinds": [
         {
@@ -3041,8 +3279,8 @@
     {
       "symbol": "frag_tx2_bindless",
       "spirvDigest": {
-        "lane0": "cb58a9d1f271b102",
-        "lane1": "85f5d0fd6f1ff8f7"
+        "lane0": "f3afe04c53ffefec",
+        "lane1": "073a8963453a7bd1"
       },
       "samplerKinds": [
         {
@@ -3067,8 +3305,8 @@
     {
       "symbol": "frag_tx2_cl_bindless",
       "spirvDigest": {
-        "lane0": "6c7d972e9b9aaaf5",
-        "lane1": "1281b2664a456013"
+        "lane0": "7d14273bcc18752f",
+        "lane1": "9d3e0e761900dd9f"
       },
       "samplerKinds": [
         {
@@ -3093,8 +3331,8 @@
     {
       "symbol": "frag_tx2_cl_fog_bindless",
       "spirvDigest": {
-        "lane0": "86d9c19a2a3ee4e3",
-        "lane1": "2523413eca230d00"
+        "lane0": "968eb148f0781b11",
+        "lane1": "3c1145f8889c1cc1"
       },
       "samplerKinds": [
         {
@@ -3119,8 +3357,8 @@
     {
       "symbol": "frag_tx2_cl_fog_temporal_invalidate_bindless",
       "spirvDigest": {
-        "lane0": "71f30f474d884ea0",
-        "lane1": "b7e96a54874559ab"
+        "lane0": "a819ef47dd445c1b",
+        "lane1": "df7bbabbe6d0a850"
       },
       "samplerKinds": [
         {
@@ -3145,8 +3383,8 @@
     {
       "symbol": "frag_tx2_cl_fog_temporal_write_bindless",
       "spirvDigest": {
-        "lane0": "da5bdd7fd6471cbc",
-        "lane1": "9af95043770feba8"
+        "lane0": "8e9e3b52d8e5795a",
+        "lane1": "9be8eb318e9b32e7"
       },
       "samplerKinds": [
         {
@@ -3171,8 +3409,8 @@
     {
       "symbol": "frag_tx2_cl_ibl_bindless",
       "spirvDigest": {
-        "lane0": "bcf0b17a9039e920",
-        "lane1": "3e21b4de48884d7d"
+        "lane0": "b5bbc2fbd7c6aab5",
+        "lane1": "346ce5dc59b2440a"
       },
       "samplerKinds": [
         {
@@ -3203,13 +3441,6 @@
         },
         {
           "set": 2,
-          "binding": 2,
-          "samplerSet": 2,
-          "samplerBinding": 34,
-          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
-        },
-        {
-          "set": 2,
           "binding": 3,
           "samplerSet": 2,
           "samplerBinding": 35,
@@ -3220,6 +3451,13 @@
           "binding": 4,
           "samplerSet": 2,
           "samplerBinding": 36,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 2,
+          "binding": 6,
+          "samplerSet": 2,
+          "samplerBinding": 38,
           "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
         }
       ]
@@ -3227,8 +3465,8 @@
     {
       "symbol": "frag_tx2_cl_ibl_fog_bindless",
       "spirvDigest": {
-        "lane0": "0e2feb4aa2a2c91c",
-        "lane1": "ea36f2f2f94107a0"
+        "lane0": "804ac99d135a62c4",
+        "lane1": "0f395539a0e2368c"
       },
       "samplerKinds": [
         {
@@ -3259,13 +3497,6 @@
         },
         {
           "set": 2,
-          "binding": 2,
-          "samplerSet": 2,
-          "samplerBinding": 34,
-          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
-        },
-        {
-          "set": 2,
           "binding": 3,
           "samplerSet": 2,
           "samplerBinding": 35,
@@ -3277,14 +3508,21 @@
           "samplerSet": 2,
           "samplerBinding": 36,
           "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 2,
+          "binding": 6,
+          "samplerSet": 2,
+          "samplerBinding": 38,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
         }
       ]
     },
     {
       "symbol": "frag_tx2_cl_shadow_bindless",
       "spirvDigest": {
-        "lane0": "7c362948b29acb59",
-        "lane1": "bce79ee331e9cfe9"
+        "lane0": "ba1309651076bfeb",
+        "lane1": "7e7c673e7ad7e74a"
       },
       "samplerKinds": [
         {
@@ -3318,8 +3556,8 @@
     {
       "symbol": "frag_tx2_cl_shadow_fog_bindless",
       "spirvDigest": {
-        "lane0": "91b8ee550e990784",
-        "lane1": "4b748000823fac02"
+        "lane0": "1a037952cffec771",
+        "lane1": "83a2ac9038d6a0d5"
       },
       "samplerKinds": [
         {
@@ -3353,8 +3591,8 @@
     {
       "symbol": "frag_tx2_cl_temporal_invalidate_bindless",
       "spirvDigest": {
-        "lane0": "49c3bc5239f9afd2",
-        "lane1": "c0463bf625ef2902"
+        "lane0": "2dea2eb1b035cc1e",
+        "lane1": "efda0b18457aa67e"
       },
       "samplerKinds": [
         {
@@ -3379,8 +3617,8 @@
     {
       "symbol": "frag_tx2_cl_temporal_write_bindless",
       "spirvDigest": {
-        "lane0": "73cb4fe8ee3cd4ef",
-        "lane1": "d0c541190f4c658c"
+        "lane0": "8c9f9209c78c51b4",
+        "lane1": "ae95993a5fcf3015"
       },
       "samplerKinds": [
         {
@@ -3405,8 +3643,8 @@
     {
       "symbol": "frag_tx2_fog_bindless",
       "spirvDigest": {
-        "lane0": "9eb8ee6a7d6a36ae",
-        "lane1": "30c521b18faa186b"
+        "lane0": "b873b6381c90a27e",
+        "lane1": "a609923b85303ce3"
       },
       "samplerKinds": [
         {
@@ -3431,8 +3669,8 @@
     {
       "symbol": "frag_tx2_fog_temporal_invalidate_bindless",
       "spirvDigest": {
-        "lane0": "e8346213c5ac50a6",
-        "lane1": "de1898d816393806"
+        "lane0": "244c7c04ad735818",
+        "lane1": "8d3b46633500c5cd"
       },
       "samplerKinds": [
         {
@@ -3457,8 +3695,8 @@
     {
       "symbol": "frag_tx2_fog_temporal_write_bindless",
       "spirvDigest": {
-        "lane0": "e9b525bd470be069",
-        "lane1": "9eab5d881b72597a"
+        "lane0": "031f58126cc2e7d6",
+        "lane1": "643bad597eee050f"
       },
       "samplerKinds": [
         {
@@ -3483,8 +3721,8 @@
     {
       "symbol": "frag_tx2_ibl_bindless",
       "spirvDigest": {
-        "lane0": "b477225691f24f42",
-        "lane1": "f24987e9e7fe72d1"
+        "lane0": "cc550f778e887a21",
+        "lane1": "0ef554974c80ed91"
       },
       "samplerKinds": [
         {
@@ -3515,13 +3753,6 @@
         },
         {
           "set": 2,
-          "binding": 2,
-          "samplerSet": 2,
-          "samplerBinding": 34,
-          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
-        },
-        {
-          "set": 2,
           "binding": 3,
           "samplerSet": 2,
           "samplerBinding": 35,
@@ -3532,6 +3763,13 @@
           "binding": 4,
           "samplerSet": 2,
           "samplerBinding": 36,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 2,
+          "binding": 6,
+          "samplerSet": 2,
+          "samplerBinding": 38,
           "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
         }
       ]
@@ -3539,8 +3777,8 @@
     {
       "symbol": "frag_tx2_ibl_fog_bindless",
       "spirvDigest": {
-        "lane0": "7071aa77a77aaddf",
-        "lane1": "ebc606135186e630"
+        "lane0": "0cfacad19ff7952d",
+        "lane1": "b33992809e170b3c"
       },
       "samplerKinds": [
         {
@@ -3571,13 +3809,6 @@
         },
         {
           "set": 2,
-          "binding": 2,
-          "samplerSet": 2,
-          "samplerBinding": 34,
-          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
-        },
-        {
-          "set": 2,
           "binding": 3,
           "samplerSet": 2,
           "samplerBinding": 35,
@@ -3589,14 +3820,21 @@
           "samplerSet": 2,
           "samplerBinding": 36,
           "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 2,
+          "binding": 6,
+          "samplerSet": 2,
+          "samplerBinding": 38,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
         }
       ]
     },
     {
       "symbol": "frag_tx2_shadow_bindless",
       "spirvDigest": {
-        "lane0": "f4b809d19b7679b3",
-        "lane1": "4519a5758fb0c5e1"
+        "lane0": "b5ad217c02b80149",
+        "lane1": "0c7f3a7c25fb2720"
       },
       "samplerKinds": [
         {
@@ -3630,8 +3868,8 @@
     {
       "symbol": "frag_tx2_shadow_fog_bindless",
       "spirvDigest": {
-        "lane0": "1e95a7e946cc563f",
-        "lane1": "2872dbbd6e2a4c98"
+        "lane0": "6cd5e8f7145c31b5",
+        "lane1": "4d7df82e0051f216"
       },
       "samplerKinds": [
         {
@@ -3665,8 +3903,8 @@
     {
       "symbol": "frag_tx2_temporal_invalidate_bindless",
       "spirvDigest": {
-        "lane0": "2d9aa8ce3e66a7a0",
-        "lane1": "b997ba6a07224fb5"
+        "lane0": "0ba539bc6dcb7ac1",
+        "lane1": "702bbb980332c28f"
       },
       "samplerKinds": [
         {
@@ -3691,8 +3929,8 @@
     {
       "symbol": "frag_tx2_temporal_write_bindless",
       "spirvDigest": {
-        "lane0": "a628d27830649961",
-        "lane1": "7d9890ed30c038f4"
+        "lane0": "205f1f21658ada47",
+        "lane1": "2cb0aa6b71078e91"
       },
       "samplerKinds": [
         {
@@ -3747,8 +3985,8 @@
     {
       "symbol": "gtao_comp_spv",
       "spirvDigest": {
-        "lane0": "2ee8f0941ce52331",
-        "lane1": "780392b593688e91"
+        "lane0": "a3ce8b7b2d35a779",
+        "lane1": "e79078bf0ecac78b"
       },
       "samplerKinds": [
         {
@@ -3765,8 +4003,8 @@
     {
       "symbol": "gtao_denoise_comp_spv",
       "spirvDigest": {
-        "lane0": "273c7ac3a1b9a9c4",
-        "lane1": "e302d06fe100a79a"
+        "lane0": "760da356cab47a81",
+        "lane1": "dbbbeefa7b2c59e9"
       },
       "samplerKinds": [
         {
@@ -3778,6 +4016,24 @@
       "inlineUniform": {
         "set": 0,
         "binding": 4
+      }
+    },
+    {
+      "symbol": "gtao_prefilter_comp_spv",
+      "spirvDigest": {
+        "lane0": "8468636603599e5e",
+        "lane1": "c2fc1339944d275f"
+      },
+      "samplerKinds": [
+        {
+          "set": 0,
+          "binding": 1,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        }
+      ],
+      "inlineUniform": {
+        "set": 0,
+        "binding": 7
       }
     },
     {
@@ -3959,8 +4215,8 @@
     {
       "symbol": "lens_occlusion_comp_spv",
       "spirvDigest": {
-        "lane0": "8eae9d97dda28aed",
-        "lane1": "eb5ea1ee2b9855f7"
+        "lane0": "ccd4b0a77e0b350e",
+        "lane1": "3cc51caf223575ae"
       },
       "samplerKinds": [
         {
@@ -4068,8 +4324,8 @@
     {
       "symbol": "particle_frag_spv",
       "spirvDigest": {
-        "lane0": "90b8d1d2b9f1c4c4",
-        "lane1": "e700ce4077f8104f"
+        "lane0": "e572249a70876744",
+        "lane1": "dfaddb165bf55fc5"
       },
       "combinedSamplers": [
         {
@@ -4114,8 +4370,26 @@
     {
       "symbol": "prefilter_radiance_comp_spv",
       "spirvDigest": {
-        "lane0": "1b67fdf9ca5e51d4",
-        "lane1": "84f2bae909ad52f9"
+        "lane0": "42043605920f2832",
+        "lane1": "69c7e7d2b9f9889a"
+      },
+      "samplerKinds": [
+        {
+          "set": 0,
+          "binding": 1,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        }
+      ],
+      "inlineUniform": {
+        "set": 0,
+        "binding": 3
+      }
+    },
+    {
+      "symbol": "project_sky_sh_comp_spv",
+      "spirvDigest": {
+        "lane0": "d96e524b8104f2e7",
+        "lane1": "fa0e80b7d6b6d097"
       },
       "samplerKinds": [
         {
@@ -4210,13 +4484,28 @@
     {
       "symbol": "ral_opengl_product_frag_spv",
       "spirvDigest": {
-        "lane0": "e0523bd9e055dc67",
-        "lane1": "1f0cb813318eb827"
+        "lane0": "d022d12ef7a52896",
+        "lane1": "ef91998510813adf"
       },
       "samplerKinds": [
         {
           "set": 1,
           "binding": 1,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 1,
+          "binding": 11,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 1,
+          "binding": 13,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 1,
+          "binding": 15,
           "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
         },
         {
@@ -4248,8 +4537,8 @@
     {
       "symbol": "ral_opengl_product_vert_spv",
       "spirvDigest": {
-        "lane0": "f782b1c717c10bab",
-        "lane1": "d119879f8d46fb42"
+        "lane0": "b71da126dd41ab7d",
+        "lane1": "deaee916be852d25"
       },
       "vertexFormats": [
         {
@@ -4271,6 +4560,132 @@
         {
           "location": 4,
           "format": "RAL_FORMAT_R32G32B32_SFLOAT"
+        }
+      ],
+      "inlineUniform": {
+        "set": 0,
+        "binding": 0
+      }
+    },
+    {
+      "symbol": "ral_sky_capture_frag_spv",
+      "spirvDigest": {
+        "lane0": "f775948eddb6aa7f",
+        "lane1": "7f3ffde13a4f3177"
+      },
+      "samplerKinds": [
+        {
+          "set": 0,
+          "binding": 6,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 0,
+          "binding": 8,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 1,
+          "binding": 1,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 1,
+          "binding": 11,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 1,
+          "binding": 13,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 1,
+          "binding": 15,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 1,
+          "binding": 3,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 1,
+          "binding": 5,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 1,
+          "binding": 7,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 1,
+          "binding": 9,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        }
+      ],
+      "inlineUniform": {
+        "set": 0,
+        "binding": 9
+      }
+    },
+    {
+      "symbol": "ral_sky_material_frag_spv",
+      "spirvDigest": {
+        "lane0": "e7e548c90dac4104",
+        "lane1": "486a4f9fe82990d4"
+      },
+      "samplerKinds": [
+        {
+          "set": 1,
+          "binding": 1,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 1,
+          "binding": 11,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 1,
+          "binding": 13,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 1,
+          "binding": 15,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 1,
+          "binding": 17,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 1,
+          "binding": 19,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 1,
+          "binding": 3,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 1,
+          "binding": 5,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 1,
+          "binding": 7,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 1,
+          "binding": 9,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
         }
       ],
       "inlineUniform": {
@@ -4425,6 +4840,96 @@
       ]
     },
     {
+      "symbol": "sky_multiscatter_comp_spv",
+      "spirvDigest": {
+        "lane0": "63064915d2c66edc",
+        "lane1": "9bfd7729b303c8f0"
+      },
+      "combinedSamplers": [
+        {
+          "set": 0,
+          "binding": 1,
+          "samplerSet": 0,
+          "samplerBinding": 33,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        }
+      ]
+    },
+    {
+      "symbol": "sky_surface_composite_comp_spv",
+      "spirvDigest": {
+        "lane0": "bea101c017928d71",
+        "lane1": "4a6d8ba92a49a555"
+      },
+      "combinedSamplers": [
+        {
+          "set": 0,
+          "binding": 1,
+          "samplerSet": 0,
+          "samplerBinding": 33,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 0,
+          "binding": 2,
+          "samplerSet": 0,
+          "samplerBinding": 34,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 0,
+          "binding": 5,
+          "samplerSet": 0,
+          "samplerBinding": 37,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 0,
+          "binding": 6,
+          "samplerSet": 0,
+          "samplerBinding": 38,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 0,
+          "binding": 7,
+          "samplerSet": 0,
+          "samplerBinding": 39,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        }
+      ]
+    },
+    {
+      "symbol": "sky_transmittance_comp_spv",
+      "spirvDigest": {
+        "lane0": "f4b1ef5ae7acb642",
+        "lane1": "655883d120b97b56"
+      }
+    },
+    {
+      "symbol": "sky_view_comp_spv",
+      "spirvDigest": {
+        "lane0": "013ac878ccc564aa",
+        "lane1": "b14c4ee290cba6e1"
+      },
+      "combinedSamplers": [
+        {
+          "set": 0,
+          "binding": 1,
+          "samplerSet": 0,
+          "samplerBinding": 33,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 0,
+          "binding": 2,
+          "samplerSet": 0,
+          "samplerBinding": 34,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        }
+      ]
+    },
+    {
       "symbol": "smaa_blend_frag_spv",
       "spirvDigest": {
         "lane0": "3ed6931678eb1e61",
@@ -4517,8 +5022,19 @@
     {
       "symbol": "source_sky_comp_spv",
       "spirvDigest": {
-        "lane0": "bff688542beb6e9f",
-        "lane1": "d154a8b7854e2af7"
+        "lane0": "82bc9f20e69ae3f2",
+        "lane1": "222ddd476e934820"
+      },
+      "samplerKinds": [
+        {
+          "set": 0,
+          "binding": 7,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        }
+      ],
+      "inlineUniform": {
+        "set": 0,
+        "binding": 8
       }
     },
     {
@@ -5703,8 +6219,8 @@
     {
       "symbol": "vert_tx1_cl_ibl",
       "spirvDigest": {
-        "lane0": "a1e7adf8fbd96c28",
-        "lane1": "42cf6714971909cf"
+        "lane0": "0417eafb40ee0a23",
+        "lane1": "7b628dc765c32f3a"
       },
       "vertexFormats": [
         {
@@ -5736,8 +6252,8 @@
     {
       "symbol": "vert_tx1_cl_ibl_fog",
       "spirvDigest": {
-        "lane0": "d521c5bda508bfeb",
-        "lane1": "7ebecd3acf800af9"
+        "lane0": "ab84872ebed8ebf9",
+        "lane1": "dc76e9be133d9c52"
       },
       "vertexFormats": [
         {
@@ -6101,6 +6617,56 @@
       ]
     },
     {
+      "symbol": "vert_tx1_fixed_ibl",
+      "spirvDigest": {
+        "lane0": "d3e8ad4d0cb47c8f",
+        "lane1": "dada067012125fe1"
+      },
+      "vertexFormats": [
+        {
+          "location": 0,
+          "format": "RAL_FORMAT_R32G32B32A32_SFLOAT"
+        },
+        {
+          "location": 2,
+          "format": "RAL_FORMAT_R32G32_SFLOAT"
+        },
+        {
+          "location": 3,
+          "format": "RAL_FORMAT_R32G32_SFLOAT"
+        },
+        {
+          "location": 5,
+          "format": "RAL_FORMAT_R32G32B32A32_SFLOAT"
+        }
+      ]
+    },
+    {
+      "symbol": "vert_tx1_fixed_ibl_fog",
+      "spirvDigest": {
+        "lane0": "f2a0d48723cb2bc5",
+        "lane1": "f18ee3654ff41a1e"
+      },
+      "vertexFormats": [
+        {
+          "location": 0,
+          "format": "RAL_FORMAT_R32G32B32A32_SFLOAT"
+        },
+        {
+          "location": 2,
+          "format": "RAL_FORMAT_R32G32_SFLOAT"
+        },
+        {
+          "location": 3,
+          "format": "RAL_FORMAT_R32G32_SFLOAT"
+        },
+        {
+          "location": 5,
+          "format": "RAL_FORMAT_R32G32B32A32_SFLOAT"
+        }
+      ]
+    },
+    {
       "symbol": "vert_tx1_fixed_shadow",
       "spirvDigest": {
         "lane0": "552725a9bccae290",
@@ -6216,8 +6782,8 @@
     {
       "symbol": "vert_tx1_ibl",
       "spirvDigest": {
-        "lane0": "1093e3ebf5096792",
-        "lane1": "b7738f71ab0e9a35"
+        "lane0": "57750ada3484de56",
+        "lane1": "ffae58da879b0636"
       },
       "vertexFormats": [
         {
@@ -6245,8 +6811,8 @@
     {
       "symbol": "vert_tx1_ibl_fog",
       "spirvDigest": {
-        "lane0": "b3740b1bd1d9d09e",
-        "lane1": "072b6ac09bb28c6b"
+        "lane0": "3aff489dc8003b89",
+        "lane1": "684fa86417c5e836"
       },
       "vertexFormats": [
         {
@@ -6415,6 +6981,56 @@
         {
           "location": 3,
           "format": "RAL_FORMAT_R32G32_SFLOAT"
+        }
+      ]
+    },
+    {
+      "symbol": "vert_tx1_ident1_ibl",
+      "spirvDigest": {
+        "lane0": "d3e8ad4d0cb47c8f",
+        "lane1": "dada067012125fe1"
+      },
+      "vertexFormats": [
+        {
+          "location": 0,
+          "format": "RAL_FORMAT_R32G32B32A32_SFLOAT"
+        },
+        {
+          "location": 2,
+          "format": "RAL_FORMAT_R32G32_SFLOAT"
+        },
+        {
+          "location": 3,
+          "format": "RAL_FORMAT_R32G32_SFLOAT"
+        },
+        {
+          "location": 5,
+          "format": "RAL_FORMAT_R32G32B32A32_SFLOAT"
+        }
+      ]
+    },
+    {
+      "symbol": "vert_tx1_ident1_ibl_fog",
+      "spirvDigest": {
+        "lane0": "f2a0d48723cb2bc5",
+        "lane1": "f18ee3654ff41a1e"
+      },
+      "vertexFormats": [
+        {
+          "location": 0,
+          "format": "RAL_FORMAT_R32G32B32A32_SFLOAT"
+        },
+        {
+          "location": 2,
+          "format": "RAL_FORMAT_R32G32_SFLOAT"
+        },
+        {
+          "location": 3,
+          "format": "RAL_FORMAT_R32G32_SFLOAT"
+        },
+        {
+          "location": 5,
+          "format": "RAL_FORMAT_R32G32B32A32_SFLOAT"
         }
       ]
     },
@@ -6847,8 +7463,8 @@
     {
       "symbol": "vert_tx2_cl_ibl",
       "spirvDigest": {
-        "lane0": "543900db3453bd40",
-        "lane1": "77a04e78e859c19c"
+        "lane0": "4402cebc7eb343b3",
+        "lane1": "7105bea6cf699789"
       },
       "vertexFormats": [
         {
@@ -6888,8 +7504,8 @@
     {
       "symbol": "vert_tx2_cl_ibl_fog",
       "spirvDigest": {
-        "lane0": "dde6653e6c252847",
-        "lane1": "b3a43012e0d4a5a2"
+        "lane0": "241c64b78b7b699d",
+        "lane1": "9cad7a5097d01d7a"
       },
       "vertexFormats": [
         {
@@ -7214,8 +7830,8 @@
     {
       "symbol": "vert_tx2_ibl",
       "spirvDigest": {
-        "lane0": "0e94eb08eb91459b",
-        "lane1": "31b132ad4be43a24"
+        "lane0": "ad8babfe93f16390",
+        "lane1": "76a70817ebf65baa"
       },
       "vertexFormats": [
         {
@@ -7247,8 +7863,8 @@
     {
       "symbol": "vert_tx2_ibl_fog",
       "spirvDigest": {
-        "lane0": "084a45bd97c17f1e",
-        "lane1": "2b3551f427e3ffd4"
+        "lane0": "47402237ce5b2c3c",
+        "lane1": "0d7487fa725d90c7"
       },
       "vertexFormats": [
         {

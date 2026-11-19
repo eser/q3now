@@ -36,6 +36,8 @@ struct UBO
     float4 advancedFogColorDensity;
     float4 advancedFogTypeFarEnabled;
     float4 emissionRadiance;
+    float4 materialBaseColor;
+    float4 materialFactors;
 };
 
 constant int tex_domain_tmp [[function_constant(4)]];
@@ -44,27 +46,27 @@ constant int lightmap_slot_tmp [[function_constant(26)]];
 constant int lightmap_slot = is_function_constant_defined(lightmap_slot_tmp) ? lightmap_slot_tmp : 0;
 constant int tex_mode_tmp [[function_constant(6)]];
 constant int tex_mode = is_function_constant_defined(tex_mode_tmp) ? tex_mode_tmp : 0;
-constant bool _325 = (tex_mode == 1);
-constant bool _326 = (tex_mode == 2);
-constant bool _327 = (_325 || _326);
-constant bool _355 = (tex_mode == 3);
+constant bool _334 = (tex_mode == 1);
+constant bool _335 = (tex_mode == 2);
+constant bool _336 = (_334 || _335);
+constant bool _359 = (tex_mode == 3);
 constant bool _390 = (tex_mode == 4);
-constant bool _427 = (tex_mode == 5);
-constant bool _446 = (tex_mode == 6);
-constant bool _465 = (tex_mode == 7);
-constant bool _509 = (lightmap_slot != 0);
+constant bool _423 = (tex_mode == 5);
+constant bool _438 = (tex_mode == 6);
+constant bool _453 = (tex_mode == 7);
+constant bool _489 = (lightmap_slot != 0);
 constant int acff_tmp [[function_constant(10)]];
 constant int acff = is_function_constant_defined(acff_tmp) ? acff_tmp : 0;
-constant bool _584 = (acff == 1);
-constant bool _599 = (acff == 2);
-constant bool _607 = (acff == 3);
-constant bool _632 = (acff == 1);
-constant bool _648 = (acff == 2);
-constant bool _657 = (acff == 3);
+constant bool _575 = (acff == 1);
+constant bool _590 = (acff == 2);
+constant bool _598 = (acff == 3);
+constant bool _623 = (acff == 1);
+constant bool _639 = (acff == 2);
+constant bool _648 = (acff == 3);
 constant int discard_mode_tmp [[function_constant(7)]];
 constant int discard_mode = is_function_constant_defined(discard_mode_tmp) ? discard_mode_tmp : 0;
-constant bool _678 = (discard_mode == 1);
-constant bool _688 = (discard_mode == 2);
+constant bool _669 = (discard_mode == 1);
+constant bool _679 = (discard_mode == 2);
 constant int alpha_to_coverage_tmp [[function_constant(3)]];
 constant int alpha_to_coverage = is_function_constant_defined(alpha_to_coverage_tmp) ? alpha_to_coverage_tmp : 0;
 
@@ -190,24 +192,23 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
     uint param_2 = 0u;
     float2 param_3 = in.frag_tex_coord0;
     int param_4 = 0;
-    float4 color0 = wired_bl_sample_domain(param_2, param_3, param_4, (*spvDescriptorSet0.m_45), wired_bindless_images, wired_bindless_samplers) * frag_color0;
+    float4 sampledColor0 = wired_bl_sample_domain(param_2, param_3, param_4, (*spvDescriptorSet0.m_45), wired_bindless_images, wired_bindless_samplers);
+    uint param_5 = 1u;
+    float2 param_6 = in.frag_tex_coord1;
+    int param_7 = 1;
+    float4 sampledColor1 = wired_bl_sample_domain(param_5, param_6, param_7, (*spvDescriptorSet0.m_45), wired_bindless_images, wired_bindless_samplers);
+    float4 color0 = sampledColor0 * frag_color0;
     float4 base;
-    if (_327)
+    if (_336)
     {
-        uint param_5 = 1u;
-        float2 param_6 = in.frag_tex_coord1;
-        int param_7 = 1;
-        float4 color1 = wired_bl_sample_domain(param_5, param_6, param_7, (*spvDescriptorSet0.m_45), wired_bindless_images, wired_bindless_samplers) * frag_color1;
+        float4 color1 = sampledColor1 * frag_color1;
         base = float4(color0.xyz + color1.xyz, color0.w * color1.w);
     }
     else
     {
-        if (_355)
+        if (_359)
         {
-            uint param_8 = 1u;
-            float2 param_9 = in.frag_tex_coord1;
-            int param_10 = 1;
-            float4 color1_1 = wired_bl_sample_domain(param_8, param_9, param_10, (*spvDescriptorSet0.m_45), wired_bindless_images, wired_bindless_samplers) * frag_color1;
+            float4 color1_1 = sampledColor1 * frag_color1;
             color0 *= color0.w;
             color1_1 *= color1_1.w;
             base = float4(color0.xyz + color1_1.xyz, color0.w * color1_1.w);
@@ -216,54 +217,39 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
         {
             if (_390)
             {
-                uint param_11 = 1u;
-                float2 param_12 = in.frag_tex_coord1;
-                int param_13 = 1;
-                float4 color1_2 = wired_bl_sample_domain(param_11, param_12, param_13, (*spvDescriptorSet0.m_45), wired_bindless_images, wired_bindless_samplers) * frag_color1;
+                float4 color1_2 = sampledColor1 * frag_color1;
                 color0 *= (1.0 - color0.w);
                 color1_2 *= (1.0 - color1_2.w);
                 base = float4(color0.xyz + color1_2.xyz, color0.w * color1_2.w);
             }
             else
             {
-                if (_427)
+                if (_423)
                 {
-                    uint param_14 = 1u;
-                    float2 param_15 = in.frag_tex_coord1;
-                    int param_16 = 1;
-                    float4 color1_3 = wired_bl_sample_domain(param_14, param_15, param_16, (*spvDescriptorSet0.m_45), wired_bindless_images, wired_bindless_samplers) * frag_color1;
+                    float4 color1_3 = sampledColor1 * frag_color1;
                     base = mix(color0, color1_3, float4(color1_3.w));
                 }
                 else
                 {
-                    if (_446)
+                    if (_438)
                     {
-                        uint param_17 = 1u;
-                        float2 param_18 = in.frag_tex_coord1;
-                        int param_19 = 1;
-                        float4 color1_4 = wired_bl_sample_domain(param_17, param_18, param_19, (*spvDescriptorSet0.m_45), wired_bindless_images, wired_bindless_samplers) * frag_color1;
+                        float4 color1_4 = sampledColor1 * frag_color1;
                         base = mix(color1_4, color0, float4(color1_4.w));
                     }
                     else
                     {
-                        if (_465)
+                        if (_453)
                         {
-                            uint param_20 = 1u;
-                            float2 param_21 = in.frag_tex_coord1;
-                            int param_22 = 1;
-                            float4 color1_5 = wired_bl_sample_domain(param_20, param_21, param_22, (*spvDescriptorSet0.m_45), wired_bindless_images, wired_bindless_samplers) * frag_color1;
+                            float4 color1_5 = sampledColor1 * frag_color1;
                             base = (color1_5 + float4(color1_5.w)) * color0;
                         }
                         else
                         {
-                            uint param_23 = 1u;
-                            float2 param_24 = in.frag_tex_coord1;
-                            int param_25 = 1;
-                            float4 color1_6 = wired_bl_sample_domain(param_23, param_24, param_25, (*spvDescriptorSet0.m_45), wired_bindless_images, wired_bindless_samplers) * frag_color1;
-                            float3 _496 = color0.xyz * color1_6.xyz;
-                            base.x = _496.x;
-                            base.y = _496.y;
-                            base.z = _496.z;
+                            float4 color1_6 = sampledColor1 * frag_color1;
+                            float3 _476 = color0.xyz * color1_6.xyz;
+                            base.x = _476.x;
+                            base.y = _476.y;
+                            base.z = _476.z;
                             base.w = color0.w * color1_6.w;
                         }
                     }
@@ -271,80 +257,84 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
             }
         }
     }
-    if (_509)
+    if (_489)
     {
         float wetness = fast::clamp((*spvDescriptorSet0.m_45).worldLightParams.y, 0.0, 1.0);
         float frost = fast::clamp((*spvDescriptorSet0.m_45).worldLightParams.z, 0.0, 1.0);
         float luminance = dot(base.xyz, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
-        float4 _531 = base;
-        float3 _533 = _531.xyz * mix(1.0, 0.819999992847442626953125, wetness);
-        base.x = _533.x;
-        base.y = _533.y;
-        base.z = _533.z;
-        float4 _540 = base;
-        float3 _554 = mix(_540.xyz, float3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), float3(frost * 0.550000011920928955078125));
-        base.x = _554.x;
-        base.y = _554.y;
-        base.z = _554.z;
+        float4 _511 = base;
+        float3 _513 = _511.xyz * mix(1.0, 0.819999992847442626953125, wetness);
+        base.x = _513.x;
+        base.y = _513.y;
+        base.z = _513.z;
+        float4 _520 = base;
+        float3 _534 = mix(_520.xyz, float3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), float3(frost * 0.550000011920928955078125));
+        base.x = _534.x;
+        base.y = _534.y;
+        base.z = _534.z;
     }
-    float4 _569 = base;
-    float3 _571 = _569.xyz + (color0.xyz * (*spvDescriptorSet0.m_45).emissionRadiance.xyz);
-    base.x = _571.x;
-    base.y = _571.y;
-    base.z = _571.z;
+    if ((*spvDescriptorSet0.m_45).materialFactors.x >= 0.0)
+    {
+        base *= (*spvDescriptorSet0.m_45).materialBaseColor;
+    }
+    float4 _560 = base;
+    float3 _562 = _560.xyz + (color0.xyz * (*spvDescriptorSet0.m_45).emissionRadiance.xyz);
+    base.x = _562.x;
+    base.y = _562.y;
+    base.z = _562.z;
     if (wired_advanced_fog_enabled((*spvDescriptorSet0.m_45)))
     {
         float fogAmount = wired_advanced_fog_amount((*spvDescriptorSet0.m_45), gl_FragCoord);
-        if (_584)
+        if (_575)
         {
-            float4 _589 = base;
-            float3 _591 = _589.xyz * (1.0 - fogAmount);
-            base.x = _591.x;
-            base.y = _591.y;
-            base.z = _591.z;
+            float4 _580 = base;
+            float3 _582 = _580.xyz * (1.0 - fogAmount);
+            base.x = _582.x;
+            base.y = _582.y;
+            base.z = _582.z;
         }
         else
         {
-            if (_599)
+            if (_590)
             {
                 base *= (1.0 - fogAmount);
             }
             else
             {
-                if (_607)
+                if (_598)
                 {
                     base.w *= (1.0 - fogAmount);
                 }
                 else
                 {
-                    float4 _617 = base;
-                    float3 _624 = mix(_617.xyz, (*spvDescriptorSet0.m_45).advancedFogColorDensity.xyz, float3(fogAmount));
-                    base.x = _624.x;
-                    base.y = _624.y;
-                    base.z = _624.z;
+                    float4 _608 = base;
+                    float3 _615 = mix(_608.xyz, (*spvDescriptorSet0.m_45).advancedFogColorDensity.xyz, float3(fogAmount));
+                    base.x = _615.x;
+                    base.y = _615.y;
+                    base.z = _615.z;
                 }
             }
         }
     }
     else
     {
-        if (_632)
+        if (_623)
         {
-            float4 _635 = base;
-            float3 _640 = _635.xyz * (1.0 - fog.w);
-            base.x = _640.x;
-            base.y = _640.y;
-            base.z = _640.z;
+            float4 _626 = base;
+            float3 _631 = _626.xyz * (1.0 - fog.w);
+            base.x = _631.x;
+            base.y = _631.y;
+            base.z = _631.z;
         }
         else
         {
-            if (_648)
+            if (_639)
             {
                 base *= (1.0 - fog.w);
             }
             else
             {
-                if (_657)
+                if (_648)
                 {
                     base.w *= (1.0 - fog.w);
                 }
@@ -355,7 +345,7 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
             }
         }
     }
-    if (_678)
+    if (_669)
     {
         if (base.w == 0.0)
         {
@@ -364,7 +354,7 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
     }
     else
     {
-        if (_688)
+        if (_679)
         {
             if (dot(base.xyz, base.xyz) == 0.0)
             {

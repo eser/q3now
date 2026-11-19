@@ -1,0 +1,309 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+#pragma clang diagnostic ignored "-Wmissing-braces"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+template<typename T, size_t Num>
+struct spvUnsafeArray
+{
+    T elements[Num ? Num : 1];
+    
+    thread T& operator [] (size_t pos) thread
+    {
+        return elements[pos];
+    }
+    constexpr const thread T& operator [] (size_t pos) const thread
+    {
+        return elements[pos];
+    }
+    
+    device T& operator [] (size_t pos) device
+    {
+        return elements[pos];
+    }
+    constexpr const device T& operator [] (size_t pos) const device
+    {
+        return elements[pos];
+    }
+    
+    constexpr const constant T& operator [] (size_t pos) const constant
+    {
+        return elements[pos];
+    }
+    
+    threadgroup T& operator [] (size_t pos) threadgroup
+    {
+        return elements[pos];
+    }
+    constexpr const threadgroup T& operator [] (size_t pos) const threadgroup
+    {
+        return elements[pos];
+    }
+};
+
+struct PrefilterPush
+{
+    float2 viewportSize;
+    float zNear;
+    float zFar;
+    float effectRadius;
+    float falloffRange;
+};
+
+constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(8u, 8u, 1u);
+
+struct spvDescriptorSetBuffer0
+{
+    texture2d<float> depthTex [[id(0)]];
+    sampler depthSampler [[id(1)]];
+    texture2d<float, access::write> depthMip0 [[id(2)]];
+    texture2d<float, access::write> depthMip1 [[id(3)]];
+    texture2d<float, access::write> depthMip2 [[id(4)]];
+    texture2d<float, access::write> depthMip3 [[id(5)]];
+    texture2d<float, access::write> depthMip4 [[id(6)]];
+};
+
+static inline __attribute__((always_inline))
+float fetchDeviceDepth(thread int2& p, constant PrefilterPush& pc, texture2d<float> depthTex, sampler depthSampler)
+{
+    int2 dim = int2(pc.viewportSize);
+    p = clamp(p, int2(0), dim - int2(1));
+    return depthTex.read(uint2(p), 0).x;
+}
+
+static inline __attribute__((always_inline))
+float linearizeDepth(thread const float& z, constant PrefilterPush& pc)
+{
+    float vz = (pc.zNear * pc.zFar) / (pc.zNear + (z * (pc.zFar - pc.zNear)));
+    return fast::min(vz, 65000.0);
+}
+
+static inline __attribute__((always_inline))
+float depthMipFilter(thread const float& d0, thread const float& d1, thread const float& d2, thread const float& d3, constant PrefilterPush& pc)
+{
+    float maxDepth = fast::max(fast::max(d0, d1), fast::max(d2, d3));
+    float effectRadius = 0.75 * pc.effectRadius;
+    float falloffRange = pc.falloffRange * effectRadius;
+    float falloffFrom = effectRadius * (1.0 - pc.falloffRange);
+    float falloffMul = (-1.0) / fast::max(falloffRange, 9.9999997473787516355514526367188e-05);
+    float falloffAdd = (falloffFrom / fast::max(falloffRange, 9.9999997473787516355514526367188e-05)) + 1.0;
+    float w0 = fast::clamp(((maxDepth - d0) * falloffMul) + falloffAdd, 0.0, 1.0);
+    float w1 = fast::clamp(((maxDepth - d1) * falloffMul) + falloffAdd, 0.0, 1.0);
+    float w2 = fast::clamp(((maxDepth - d2) * falloffMul) + falloffAdd, 0.0, 1.0);
+    float w3 = fast::clamp(((maxDepth - d3) * falloffMul) + falloffAdd, 0.0, 1.0);
+    float weightSum = ((w0 + w1) + w2) + w3;
+    return ((((w0 * d0) + (w1 * d1)) + (w2 * d2)) + (w3 * d3)) / weightSum;
+}
+
+kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], constant PrefilterPush& pc [[buffer(1)]], uint3 gl_LocalInvocationID [[thread_position_in_threadgroup]], uint3 gl_WorkGroupID [[threadgroup_position_in_grid]])
+{
+    threadgroup spvUnsafeArray<spvUnsafeArray<float, 8>, 8> s_mip1;
+    threadgroup spvUnsafeArray<spvUnsafeArray<float, 4>, 4> s_mip2;
+    threadgroup spvUnsafeArray<spvUnsafeArray<float, 2>, 2> s_mip3;
+    int2 dim = int2(pc.viewportSize);
+    int2 local = int2(gl_LocalInvocationID.xy);
+    int2 base = (int2(gl_WorkGroupID.xy) * int2(16)) + (local * int2(2));
+    int2 param = base + int2(0);
+    float _217 = fetchDeviceDepth(param, pc, spvDescriptorSet0.depthTex, spvDescriptorSet0.depthSampler);
+    float param_1 = _217;
+    float d00 = linearizeDepth(param_1, pc);
+    int2 param_2 = base + int2(1, 0);
+    float _225 = fetchDeviceDepth(param_2, pc, spvDescriptorSet0.depthTex, spvDescriptorSet0.depthSampler);
+    float param_3 = _225;
+    float d10 = linearizeDepth(param_3, pc);
+    int2 param_4 = base + int2(0, 1);
+    float _233 = fetchDeviceDepth(param_4, pc, spvDescriptorSet0.depthTex, spvDescriptorSet0.depthSampler);
+    float param_5 = _233;
+    float d01 = linearizeDepth(param_5, pc);
+    int2 param_6 = base + int2(1);
+    float _241 = fetchDeviceDepth(param_6, pc, spvDescriptorSet0.depthTex, spvDescriptorSet0.depthSampler);
+    float param_7 = _241;
+    float d11 = linearizeDepth(param_7, pc);
+    bool _250 = base.x < dim.x;
+    bool _259;
+    if (_250)
+    {
+        _259 = base.y < dim.y;
+    }
+    else
+    {
+        _259 = _250;
+    }
+    if (_259)
+    {
+        spvDescriptorSet0.depthMip0.write(float4(d00), uint2((base + int2(0))));
+    }
+    bool _275 = (base.x + 1) < dim.x;
+    bool _283;
+    if (_275)
+    {
+        _283 = base.y < dim.y;
+    }
+    else
+    {
+        _283 = _275;
+    }
+    if (_283)
+    {
+        spvDescriptorSet0.depthMip0.write(float4(d10), uint2((base + int2(1, 0))));
+    }
+    bool _295 = base.x < dim.x;
+    bool _304;
+    if (_295)
+    {
+        _304 = (base.y + 1) < dim.y;
+    }
+    else
+    {
+        _304 = _295;
+    }
+    if (_304)
+    {
+        spvDescriptorSet0.depthMip0.write(float4(d01), uint2((base + int2(0, 1))));
+    }
+    bool _317 = (base.x + 1) < dim.x;
+    bool _326;
+    if (_317)
+    {
+        _326 = (base.y + 1) < dim.y;
+    }
+    else
+    {
+        _326 = _317;
+    }
+    if (_326)
+    {
+        spvDescriptorSet0.depthMip0.write(float4(d11), uint2((base + int2(1))));
+    }
+    float param_8 = d00;
+    float param_9 = d10;
+    float param_10 = d01;
+    float param_11 = d11;
+    float m1 = depthMipFilter(param_8, param_9, param_10, param_11, pc);
+    int2 p1 = (int2(gl_WorkGroupID.xy) * int2(8)) + local;
+    bool _359 = p1.x < ((dim.x + 1) / 2);
+    bool _369;
+    if (_359)
+    {
+        _369 = p1.y < ((dim.y + 1) / 2);
+    }
+    else
+    {
+        _369 = _359;
+    }
+    if (_369)
+    {
+        spvDescriptorSet0.depthMip1.write(float4(m1), uint2(p1));
+    }
+    s_mip1[local.y][local.x] = m1;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    bool _393 = local.x < 4;
+    bool _399;
+    if (_393)
+    {
+        _399 = local.y < 4;
+    }
+    else
+    {
+        _399 = _393;
+    }
+    if (_399)
+    {
+        int2 q = local * int2(2);
+        float param_12 = s_mip1[q.y][q.x];
+        float param_13 = s_mip1[q.y][q.x + 1];
+        float param_14 = s_mip1[q.y + 1][q.x];
+        float param_15 = s_mip1[q.y + 1][q.x + 1];
+        float m2 = depthMipFilter(param_12, param_13, param_14, param_15, pc);
+        int2 p2 = (int2(gl_WorkGroupID.xy) * int2(4)) + local;
+        bool _454 = p2.x < ((dim.x + 3) / 4);
+        bool _464;
+        if (_454)
+        {
+            _464 = p2.y < ((dim.y + 3) / 4);
+        }
+        else
+        {
+            _464 = _454;
+        }
+        if (_464)
+        {
+            spvDescriptorSet0.depthMip2.write(float4(m2), uint2(p2));
+        }
+        s_mip2[local.y][local.x] = m2;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    bool _485 = local.x < 2;
+    bool _491;
+    if (_485)
+    {
+        _491 = local.y < 2;
+    }
+    else
+    {
+        _491 = _485;
+    }
+    if (_491)
+    {
+        int2 q_1 = local * int2(2);
+        float param_16 = s_mip2[q_1.y][q_1.x];
+        float param_17 = s_mip2[q_1.y][q_1.x + 1];
+        float param_18 = s_mip2[q_1.y + 1][q_1.x];
+        float param_19 = s_mip2[q_1.y + 1][q_1.x + 1];
+        float m3 = depthMipFilter(param_16, param_17, param_18, param_19, pc);
+        int2 p3 = (int2(gl_WorkGroupID.xy) * int2(2)) + local;
+        bool _547 = p3.x < ((dim.x + 7) / 8);
+        bool _557;
+        if (_547)
+        {
+            _557 = p3.y < ((dim.y + 7) / 8);
+        }
+        else
+        {
+            _557 = _547;
+        }
+        if (_557)
+        {
+            spvDescriptorSet0.depthMip3.write(float4(m3), uint2(p3));
+        }
+        s_mip3[local.y][local.x] = m3;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    bool _577 = local.x == 0;
+    bool _583;
+    if (_577)
+    {
+        _583 = local.y == 0;
+    }
+    else
+    {
+        _583 = _577;
+    }
+    if (_583)
+    {
+        float param_20 = s_mip3[0][0];
+        float param_21 = s_mip3[0][1];
+        float param_22 = s_mip3[1][0];
+        float param_23 = s_mip3[1][1];
+        float m4 = depthMipFilter(param_20, param_21, param_22, param_23, pc);
+        int2 p4 = int2(gl_WorkGroupID.xy);
+        bool _611 = p4.x < ((dim.x + 15) / 16);
+        bool _621;
+        if (_611)
+        {
+            _621 = p4.y < ((dim.y + 15) / 16);
+        }
+        else
+        {
+            _621 = _611;
+        }
+        if (_621)
+        {
+            spvDescriptorSet0.depthMip4.write(float4(m4), uint2(p4));
+        }
+    }
+}
+

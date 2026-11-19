@@ -1,0 +1,194 @@
+#version 460
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+layout(binding = 0, std430) writeonly buffer SkySH
+{
+    vec4 coefficients[9];
+} dstSH;
+
+layout(std140, binding = 3) uniform Push
+{
+    uint coefficient;
+} _339;
+
+layout(binding = 0) uniform texture2DArray srcTex;
+layout(binding = 0) uniform sampler srcSamp;
+
+vec3 wired_sky_cube_direction(uint face, vec2 uv)
+{
+    float u = uv.x;
+    float v = uv.y;
+    vec3 dir;
+    if (face == 0u)
+    {
+        dir = vec3(1.0, -v, -u);
+    }
+    else
+    {
+        if (face == 1u)
+        {
+            dir = vec3(-1.0, -v, u);
+        }
+        else
+        {
+            if (face == 2u)
+            {
+                dir = vec3(u, 1.0, v);
+            }
+            else
+            {
+                if (face == 3u)
+                {
+                    dir = vec3(u, -1.0, -v);
+                }
+                else
+                {
+                    if (face == 4u)
+                    {
+                        dir = vec3(u, -v, 1.0);
+                    }
+                    else
+                    {
+                        dir = vec3(-u, -v, -1.0);
+                    }
+                }
+            }
+        }
+    }
+    return normalize(dir);
+}
+
+vec3 wired_sky_cube_uv_layer(vec3 dir)
+{
+    vec3 a = abs(dir);
+    bool _107 = a.x >= a.y;
+    bool _115;
+    if (_107)
+    {
+        _115 = a.x >= a.z;
+    }
+    else
+    {
+        _115 = _107;
+    }
+    uint face;
+    vec2 uv;
+    if (_115)
+    {
+        if (dir.x >= 0.0)
+        {
+            face = 0u;
+            uv = vec2(-dir.z, -dir.y) / vec2(a.x);
+        }
+        else
+        {
+            face = 1u;
+            uv = vec2(dir.z, -dir.y) / vec2(a.x);
+        }
+    }
+    else
+    {
+        if (a.y >= a.z)
+        {
+            if (dir.y >= 0.0)
+            {
+                face = 2u;
+                uv = vec2(dir.x, dir.z) / vec2(a.y);
+            }
+            else
+            {
+                face = 3u;
+                uv = vec2(dir.x, -dir.z) / vec2(a.y);
+            }
+        }
+        else
+        {
+            if (dir.z >= 0.0)
+            {
+                face = 4u;
+                uv = vec2(dir.x, -dir.y) / vec2(a.z);
+            }
+            else
+            {
+                face = 5u;
+                uv = vec2(-dir.x, -dir.y) / vec2(a.z);
+            }
+        }
+    }
+    return vec3((uv * 0.5) + vec2(0.5), float(face));
+}
+
+vec3 sampleSource(vec3 dir)
+{
+    vec3 param = dir;
+    return textureLod(sampler2DArray(srcTex, srcSamp), wired_sky_cube_uv_layer(param), 0.0).xyz;
+}
+
+float shBasis(uint index, vec3 d)
+{
+    if (index == 0u)
+    {
+        return 0.2820948064327239990234375;
+    }
+    if (index == 1u)
+    {
+        return 0.48860251903533935546875 * d.y;
+    }
+    if (index == 2u)
+    {
+        return 0.48860251903533935546875 * d.z;
+    }
+    if (index == 3u)
+    {
+        return 0.48860251903533935546875 * d.x;
+    }
+    if (index == 4u)
+    {
+        return (1.09254848957061767578125 * d.x) * d.y;
+    }
+    if (index == 5u)
+    {
+        return (1.09254848957061767578125 * d.y) * d.z;
+    }
+    if (index == 6u)
+    {
+        return 0.3153915703296661376953125 * (((3.0 * d.z) * d.z) - 1.0);
+    }
+    if (index == 7u)
+    {
+        return (1.09254848957061767578125 * d.x) * d.z;
+    }
+    return 0.546274244785308837890625 * ((d.x * d.x) - (d.y * d.y));
+}
+
+void main()
+{
+    if (_339.coefficient >= 9u)
+    {
+        return;
+    }
+    vec3 sum = vec3(0.0);
+    float weightSum = 0.0;
+    for (uint face = 0u; face < 6u; face++)
+    {
+        for (uint y = 0u; y < 16u; y++)
+        {
+            for (uint x = 0u; x < 16u; x++)
+            {
+                vec2 uv = (((vec2(float(x), float(y)) + vec2(0.5)) / vec2(16.0)) * 2.0) - vec2(1.0);
+                uint param = face;
+                vec2 param_1 = uv;
+                vec3 dir = wired_sky_cube_direction(param, param_1);
+                float q = 1.0 + dot(uv, uv);
+                float weight = 1.0 / (q * sqrt(q));
+                vec3 param_2 = dir;
+                uint param_3 = _339.coefficient;
+                vec3 param_4 = dir;
+                sum += ((sampleSource(param_2) * shBasis(param_3, param_4)) * weight);
+                weightSum += weight;
+            }
+        }
+    }
+    dstSH.coefficients[_339.coefficient] = vec4(sum * (12.56637096405029296875 / max(weightSum, 9.9999999747524270787835121154785e-07)), 0.0);
+}
+

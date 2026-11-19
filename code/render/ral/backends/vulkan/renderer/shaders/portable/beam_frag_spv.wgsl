@@ -13,8 +13,8 @@ var shaderImages: binding_array<texture_2d<f32>, 64>;
 @group(0) @binding(4)
 var shaderImageSampler: sampler;
 var<private> fragUV_1: vec2<f32>;
-var<private> outColor: vec4<f32>;
 var<private> fragColor_1: vec4<f32>;
+var<private> outColor: vec4<f32>;
 @group(1) @binding(0)
 var<uniform> unnamed: EffectsUBO;
 var<private> fragShaderHandle_1: u32;
@@ -63,31 +63,35 @@ fn main_1() {
     var texel: vec4<f32>;
     var param_1: vec4<f32>;
     var param_2: u32;
+    var coverage: f32;
     var param_3: vec3<f32>;
 
-    let _e34 = fragImageSlot_1;
-    domain_1 = (_e34 >> bitcast<u32>(31u));
-    let _e37 = fragImageSlot_1;
-    handle = (_e37 & 2147483647u);
-    let _e39 = handle;
-    let _e41 = handle;
-    slot = select(0u, _e41, (_e39 < 64u));
-    let _e43 = slot;
-    let _e45 = fragUV_1;
-    let _e46 = textureSample(shaderImages[_e43], shaderImageSampler, _e45);
-    param_1 = _e46;
-    let _e47 = domain_1;
-    param_2 = _e47;
-    let _e48 = decodeColorTexel_u0028_vf4_u003b_u1_u003b((&param_1), (&param_2));
-    texel = _e48;
-    let _e49 = texel;
-    let _e51 = fragColor_1;
-    param_3 = _e51.xyz;
-    let _e53 = sRGBToLinear_u0028_vf3_u003b((&param_3));
-    let _e54 = (_e49.xyz * _e53);
-    let _e56 = texel[3u];
-    let _e58 = fragColor_1[3u];
-    outColor = vec4<f32>(_e54.x, _e54.y, _e54.z, (_e56 * _e58));
+    let _e35 = fragImageSlot_1;
+    domain_1 = (_e35 >> bitcast<u32>(31u));
+    let _e38 = fragImageSlot_1;
+    handle = (_e38 & 2147483647u);
+    let _e40 = handle;
+    let _e42 = handle;
+    slot = select(0u, _e42, (_e40 < 64u));
+    let _e44 = slot;
+    let _e46 = fragUV_1;
+    let _e47 = textureSample(shaderImages[_e44], shaderImageSampler, _e46);
+    param_1 = _e47;
+    let _e48 = domain_1;
+    param_2 = _e48;
+    let _e49 = decodeColorTexel_u0028_vf4_u003b_u1_u003b((&param_1), (&param_2));
+    texel = _e49;
+    let _e51 = texel[3u];
+    let _e53 = fragColor_1[3u];
+    coverage = (_e51 * _e53);
+    let _e55 = texel;
+    let _e57 = fragColor_1;
+    param_3 = _e57.xyz;
+    let _e59 = sRGBToLinear_u0028_vf3_u003b((&param_3));
+    let _e61 = coverage;
+    let _e62 = ((_e55.xyz * _e59) * _e61);
+    let _e63 = coverage;
+    outColor = vec4<f32>(_e62.x, _e62.y, _e62.z, _e63);
     return;
 }
 

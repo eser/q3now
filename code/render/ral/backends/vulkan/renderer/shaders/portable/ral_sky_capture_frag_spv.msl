@@ -1,0 +1,1018 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+#pragma clang diagnostic ignored "-Wmissing-braces"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+template<typename T, size_t Num>
+struct spvUnsafeArray
+{
+    T elements[Num ? Num : 1];
+    
+    thread T& operator [] (size_t pos) thread
+    {
+        return elements[pos];
+    }
+    constexpr const thread T& operator [] (size_t pos) const thread
+    {
+        return elements[pos];
+    }
+    
+    device T& operator [] (size_t pos) device
+    {
+        return elements[pos];
+    }
+    constexpr const device T& operator [] (size_t pos) const device
+    {
+        return elements[pos];
+    }
+    
+    constexpr const constant T& operator [] (size_t pos) const constant
+    {
+        return elements[pos];
+    }
+    
+    threadgroup T& operator [] (size_t pos) threadgroup
+    {
+        return elements[pos];
+    }
+    constexpr const threadgroup T& operator [] (size_t pos) const threadgroup
+    {
+        return elements[pos];
+    }
+};
+
+struct MaterialTcMod
+{
+    uint type;
+    float p0;
+    float p1;
+    float p2;
+    float p3;
+    float p4;
+    float p5;
+    uint reserved;
+};
+
+struct MaterialStageParams
+{
+    uint4 meta;
+    uint4 generators;
+    float4 params;
+    float4 scaleScroll;
+    float4 turbulence;
+    float4 stretch;
+    float4 constantColor;
+    float4 rgbWave;
+    float4 alphaWave;
+    float4 tcGenVectorS;
+    float4 tcGenVectorT;
+    uint4 tcModMeta;
+    spvUnsafeArray<MaterialTcMod, 8> tcMods;
+};
+
+struct ProductDraw
+{
+    float4 viewOriginDrawSpace;
+    float4 viewForward;
+    float4 viewLeft;
+    float4 viewUp;
+    float4 projectionLightmap;
+    float4 viewportAlpha;
+    float4 atmosphereEyeDensity;
+    float4 atmosphereColorVisibility;
+    float4 atmosphereHeightSky;
+    uint4 atmosphereFroxelGrid;
+    float4 localSh[4];
+    uint4 staticLighting;
+    float4 emissiveRadiance;
+};
+
+struct MaterialTcMod_1
+{
+    uint type;
+    float p0;
+    float p1;
+    float p2;
+    float p3;
+    float p4;
+    float p5;
+    uint reserved;
+};
+
+struct MaterialStageParams_1
+{
+    uint4 meta;
+    uint4 generators;
+    float4 params;
+    float4 scaleScroll;
+    float4 turbulence;
+    float4 stretch;
+    float4 constantColor;
+    float4 rgbWave;
+    float4 alphaWave;
+    float4 tcGenVectorS;
+    float4 tcGenVectorT;
+    uint4 tcModMeta;
+    MaterialTcMod_1 tcMods[8];
+};
+
+struct SkyMaterial
+{
+    uint4 meta;
+    float4 timeHeight;
+    MaterialStageParams_1 stages[8];
+};
+
+struct spvDescriptorSetBuffer0
+{
+    texture2d<float> outerRt [[id(0)]];
+    sampler outerSampler [[id(1)]];
+    texture2d<float> outerBk [[id(2)]];
+    texture2d<float> outerLf [[id(3)]];
+    texture2d<float> outerFt [[id(4)]];
+    texture2d<float> outerUp [[id(5)]];
+    texture2d<float> outerDn [[id(6)]];
+    texture2d<float> physicalImage [[id(7)]];
+    sampler physicalSampler [[id(8)]];
+};
+
+struct spvDescriptorSetBuffer1
+{
+    texture2d<float> stageImage0 [[id(0)]];
+    sampler stageSampler0 [[id(1)]];
+    texture2d<float> stageImage1 [[id(2)]];
+    sampler stageSampler1 [[id(3)]];
+    texture2d<float> stageImage2 [[id(4)]];
+    sampler stageSampler2 [[id(5)]];
+    texture2d<float> stageImage3 [[id(6)]];
+    sampler stageSampler3 [[id(7)]];
+    texture2d<float> stageImage4 [[id(8)]];
+    sampler stageSampler4 [[id(9)]];
+    texture2d<float> stageImage5 [[id(10)]];
+    sampler stageSampler5 [[id(11)]];
+    texture2d<float> stageImage6 [[id(12)]];
+    sampler stageSampler6 [[id(13)]];
+    texture2d<float> stageImage7 [[id(14)]];
+    sampler stageSampler7 [[id(15)]];
+};
+
+struct spvDescriptorSetBuffer2
+{
+    constant SkyMaterial* skyMaterial [[id(0)]];
+};
+
+constant spvUnsafeArray<uint, 256> _442 = spvUnsafeArray<uint, 256>({ 18u, 42u, 224u, 18u, 127u, 202u, 208u, 24u, 70u, 254u, 54u, 61u, 200u, 211u, 205u, 144u, 254u, 100u, 134u, 97u, 96u, 130u, 241u, 133u, 221u, 203u, 90u, 77u, 213u, 58u, 234u, 220u, 0u, 158u, 246u, 141u, 157u, 3u, 238u, 146u, 168u, 162u, 43u, 113u, 73u, 133u, 254u, 103u, 137u, 108u, 231u, 93u, 14u, 104u, 164u, 75u, 225u, 179u, 249u, 27u, 131u, 250u, 17u, 93u, 101u, 177u, 30u, 133u, 92u, 155u, 93u, 97u, 253u, 2u, 131u, 9u, 70u, 98u, 208u, 22u, 63u, 231u, 183u, 196u, 206u, 251u, 169u, 33u, 209u, 18u, 13u, 170u, 240u, 196u, 181u, 236u, 93u, 149u, 75u, 253u, 126u, 14u, 125u, 250u, 195u, 117u, 124u, 15u, 248u, 143u, 153u, 77u, 142u, 193u, 14u, 204u, 142u, 42u, 250u, 246u, 7u, 17u, 183u, 101u, 210u, 38u, 134u, 52u, 38u, 76u, 172u, 16u, 127u, 119u, 94u, 61u, 160u, 103u, 11u, 134u, 240u, 122u, 247u, 105u, 47u, 120u, 125u, 36u, 112u, 9u, 99u, 101u, 206u, 228u, 212u, 1u, 55u, 170u, 41u, 16u, 217u, 127u, 134u, 51u, 114u, 170u, 36u, 202u, 133u, 185u, 143u, 195u, 100u, 18u, 124u, 76u, 131u, 73u, 17u, 189u, 195u, 61u, 38u, 140u, 245u, 123u, 135u, 255u, 191u, 241u, 205u, 244u, 111u, 129u, 227u, 23u, 90u, 200u, 136u, 9u, 87u, 102u, 183u, 173u, 22u, 253u, 147u, 248u, 0u, 55u, 241u, 95u, 57u, 69u, 221u, 111u, 175u, 80u, 227u, 117u, 47u, 120u, 20u, 165u, 15u, 200u, 191u, 192u, 182u, 62u, 28u, 42u, 208u, 122u, 132u, 249u, 58u, 236u, 143u, 112u, 3u, 250u, 146u, 57u, 127u, 74u, 34u, 215u, 148u, 148u, 86u, 223u, 57u, 243u, 124u, 5u });
+constant spvUnsafeArray<float, 256> _708 = spvUnsafeArray<float, 256>({ 0.8469030857086181640625, 0.47616636753082275390625, 0.21855819225311279296875, -0.396153271198272705078125, 0.39833247661590576171875, -0.230921566486358642578125, 0.01673376560211181640625, 0.32460081577301025390625, 0.8264300823211669921875, 0.71418631076812744140625, 0.54239666461944580078125, -0.257590472698211669921875, 0.37415635585784912109375, -0.316696226596832275390625, -0.299389779567718505859375, -0.68850934505462646484375, 0.2933294773101806640625, -0.049880921840667724609375, 0.71274125576019287109375, -0.257785737514495849609375, 0.10357749462127685546875, -0.413244783878326416015625, 0.8515670299530029296875, -0.044953405857086181640625, -0.295745790004730224609375, 0.167867183685302734375, 0.15998744964599609375, -0.863781452178955078125, 0.0539615154266357421875, 0.66703903675079345703125, 0.9344952106475830078125, 0.27439820766448974609375, 0.880026340484619140625, 0.97768962383270263671875, 0.994328975677490234375, 0.12602078914642333984375, 0.4346306324005126953125, -0.042842924594879150390625, 0.9703552722930908203125, -0.61084926128387451171875, -0.7722699642181396484375, -0.69855749607086181640625, 0.80355942249298095703125, -0.269962131977081298828125, -0.5726540088653564453125, 0.66179168224334716796875, -0.5263469219207763671875, 0.51061570644378662109375, 0.6724851131439208984375, 0.2037639617919921875, -0.89799797534942626953125, -0.351128637790679931640625, -0.6254122257232666015625, 0.21080362796783447265625, 0.4063794612884521484375, -0.125944554805755615234375, 0.7685201168060302734375, 0.00587785243988037109375, 0.10742557048797607421875, -0.357102692127227783203125, 0.73269999027252197265625, -0.138526737689971923828125, -0.494826138019561767578125, -0.86434471607208251953125, 0.30382311344146728515625, -0.230773985385894775390625, 0.61683642864227294921875, 0.2162811756134033203125, 0.9399373531341552734375, -0.350999176502227783203125, -0.155249655246734619140625, -0.021139681339263916015625, 0.09912431240081787109375, -0.407654702663421630859375, 0.386093616485595703125, 0.258214473724365234375, 0.04623162746429443359375, 0.80988967418670654296875, -0.377499759197235107421875, 0.98880708217620849609375, -0.630347728729248046875, -0.268142879009246826171875, -0.311839878559112548828125, 0.15625178813934326171875, -0.77960622310638427734375, 0.0984280109405517578125, -0.050729811191558837890625, 0.582808017730712890625, 0.813443660736083984375, 0.14925205707550048828125, -0.9560601711273193359375, 0.61637413501739501953125, -0.092731535434722900390625, -0.69543731212615966796875, 0.80922472476959228515625, 0.53243649005889892578125, -0.6154181957244873046875, -0.291614830493927001953125, -0.70310366153717041015625, 0.21504116058349609375, -0.70220077037811279296875, 0.93773829936981201171875, 0.9770548343658447265625, 0.0387747287750244140625, -0.6947896480560302734375, 0.389844417572021484375, 0.61482822895050048828125, -0.5761134624481201171875, 0.91212594509124755859375, 0.74049484729766845703125, 0.7025620937347412109375, 0.33950710296630859375, 0.7444622516632080078125, 0.94713306427001953125, -0.67959725856781005859375, 0.12088334560394287109375, 0.1699550151824951171875, -0.5482242107391357421875, 0.9798915386199951171875, -0.480221927165985107421875, -0.376049816608428955078125, 0.7015845775604248046875, -0.320083081722259521484375, -0.415270984172821044921875, 0.69499647617340087890625, 0.99238574504852294921875, -0.468437135219573974609375, -0.92288625240325927734375, 0.9688832759857177734375, 0.15485095977783203125, 0.106920719146728515625, -0.353896915912628173828125, 0.001748561859130859375, -0.094688713550567626953125, 0.562055110931396484375, -0.85204827785491943359375, -0.283089816570281982421875, -0.493053615093231201171875, -0.6841394901275634765625, -0.481864511966705322265625, -0.7125608921051025390625, 0.1356260776519775390625, 0.1270716190338134765625, -0.324044048786163330078125, -0.92844307422637939453125, 0.89342439174652099609375, -0.56457602977752685546875, 0.8527281284332275390625, -0.256940066814422607421875, -0.9705679416656494140625, 0.47224366664886474609375, 0.25234520435333251953125, 0.64299738407135009765625, -0.285944521427154541015625, 0.65291082859039306640625, -0.407992064952850341796875, 0.753365039825439453125, -0.94669282436370849609375, -0.84182965755462646484375, -0.265086472034454345703125, 0.57661378383636474609375, 0.60028374195098876953125, 0.51994144916534423828125, -0.235795438289642333984375, -0.083741247653961181640625, -0.333569347858428955078125, -0.309880554676055908203125, 0.5323293209075927734375, -0.996716022491455078125, -0.55436146259307861328125, 0.266551494598388671875, -0.978625774383544921875, 0.50795853137969970703125, 0.7976849079132080078125, -0.109530150890350341796875, -0.446172416210174560546875, 0.84044420719146728515625, 0.60429656505584716796875, -0.074054777622222900390625, 0.784249782562255859375, 0.6980860233306884765625, -0.377836883068084716796875, -0.000743448734283447265625, -0.54248249530792236328125, -0.6844158172607421875, 0.921529293060302734375, -0.372323453426361083984375, 0.14719069004058837890625, -0.7439844608306884765625, 0.2165706157684326171875, -0.120758712291717529296875, 0.88769686222076416015625, -0.321798145771026611328125, -0.028252065181732177734375, 0.63584506511688232421875, 0.7028634548187255859375, -0.085974156856536865234375, 0.65325915813446044921875, -0.149722993373870849609375, 0.54867231845855712890625, -0.080776631832122802734375, -0.852013111114501953125, 0.69526278972625732421875, 0.74621975421905517578125, -0.91708338260650634765625, 0.41728579998016357421875, 0.9593274593353271484375, 0.2251040935516357421875, -0.59962666034698486328125, 0.5296766757965087890625, -0.60249745845794677734375, 0.78490340709686279296875, -0.96840941905975341796875, -0.83013737201690673828125, 0.3747932910919189453125, -0.73390483856201171875, -0.71786344051361083984375, -0.71185696125030517578125, 0.4871861934661865234375, 0.45765078067779541015625, -0.94725704193115234375, -0.253587663173675537109375, 0.5551624298095703125, -0.54417216777801513671875, -0.420922100543975830078125, 0.29355347156524658203125, 0.9026410579681396484375, 0.06958067417144775390625, -0.318010866641998291015625, -0.7033421993255615234375, 0.602237224578857421875, 0.94433319568634033203125, 0.43932247161865234375, -0.74707520008087158203125, -0.86122906208038330078125, -0.148539841175079345703125, -0.215957701206207275390625, 0.28032398223876953125, -0.66258275508880615234375, 0.924317836761474609375, 0.8218250274658203125, 0.83680820465087890625, 0.097364902496337890625, -0.132401287555694580078125, -0.820997714996337890625, -0.90698063373565673828125, 0.971389293670654296875, -0.262073814868927001953125, 0.82479250431060791015625, -0.52827227115631103515625, 0.147744655609130859375, 0.07994925975799560546875, 0.63386023044586181640625, -0.485085427761077880859375, 0.4387166500091552734375, 0.69499409198760986328125 });
+
+struct main0_out
+{
+    float4 outColor [[color(0)]];
+};
+
+struct main0_in
+{
+    float2 lightmapCoord [[user(locn1)]];
+    float4 color [[user(locn2)]];
+    float3 worldPosition [[user(locn3)]];
+    float3 worldNormal [[user(locn4)]];
+};
+
+static inline __attribute__((always_inline))
+float2 wired_sky_cloud_uv(thread const float3& direction, thread const float& height)
+{
+    float cloudHeight = fast::max(height, 1.0);
+    float rayDistance = ((-direction.z) * 4096.0) + sqrt(((((direction.z * direction.z) * 4096.0) * 4096.0) + (8192.0 * cloudHeight)) + (cloudHeight * cloudHeight));
+    float3 cloudDirection = fast::normalize((direction * rayDistance) + float3(0.0, 0.0, 4096.0));
+    return acos(fast::clamp(cloudDirection.xy, float2(-1.0), float2(1.0)));
+}
+
+static inline __attribute__((always_inline))
+float2 wired_sky_authored_atlas_uv_inset(thread const float3& direction, thread const float2& inset)
+{
+    float3 ad = abs(direction);
+    bool _1084 = ad.x >= ad.y;
+    bool _1092;
+    if (_1084)
+    {
+        _1092 = ad.x >= ad.z;
+    }
+    else
+    {
+        _1092 = _1084;
+    }
+    uint face;
+    float2 faceUv;
+    if (_1092)
+    {
+        if (direction.x >= 0.0)
+        {
+            face = 0u;
+            faceUv = float2(-direction.y, -direction.z) / float2(ad.x);
+        }
+        else
+        {
+            face = 2u;
+            faceUv = float2(direction.y, -direction.z) / float2(ad.x);
+        }
+    }
+    else
+    {
+        if (ad.y >= ad.z)
+        {
+            if (direction.y >= 0.0)
+            {
+                face = 1u;
+                faceUv = float2(direction.x, -direction.z) / float2(ad.y);
+            }
+            else
+            {
+                face = 3u;
+                faceUv = float2(-direction.x, -direction.z) / float2(ad.y);
+            }
+        }
+        else
+        {
+            if (direction.z >= 0.0)
+            {
+                face = 4u;
+                faceUv = float2(-direction.y, direction.x) / float2(ad.z);
+            }
+            else
+            {
+                face = 5u;
+                faceUv = float2(-direction.y, -direction.x) / float2(ad.z);
+            }
+        }
+    }
+    faceUv = fast::clamp((faceUv * 0.5) + float2(0.5), inset, float2(1.0) - inset);
+    return (faceUv + float2(float(face % 3u), float(face / 3u))) / float2(3.0, 2.0);
+}
+
+static inline __attribute__((always_inline))
+float2 wired_sky_authored_atlas_uv(thread const float3& direction)
+{
+    float3 param = direction;
+    float2 param_1 = float2(0.001000000047497451305389404296875);
+    return wired_sky_authored_atlas_uv_inset(param, param_1);
+}
+
+static inline __attribute__((always_inline))
+float4 wired_sky_outer_sample(thread const float3& direction, texture2d<float> outerRt, sampler outerSampler, texture2d<float> outerBk, texture2d<float> outerLf, texture2d<float> outerFt, texture2d<float> outerUp, texture2d<float> outerDn)
+{
+    float3 param = direction;
+    float2 atlasUv = wired_sky_authored_atlas_uv(param);
+    float2 cellUv = atlasUv * float2(3.0, 2.0);
+    uint face = (uint(floor(cellUv.y)) * 3u) + uint(floor(cellUv.x));
+    float2 uv = fract(cellUv);
+    switch (face)
+    {
+        case 0u:
+        {
+            return outerRt.sample(outerSampler, uv);
+        }
+        case 1u:
+        {
+            return outerBk.sample(outerSampler, uv);
+        }
+        case 2u:
+        {
+            return outerLf.sample(outerSampler, uv);
+        }
+        case 3u:
+        {
+            return outerFt.sample(outerSampler, uv);
+        }
+        case 4u:
+        {
+            return outerUp.sample(outerSampler, uv);
+        }
+        default:
+        {
+            return outerDn.sample(outerSampler, uv);
+        }
+    }
+}
+
+static inline __attribute__((always_inline))
+float wired_stage_remainder(thread const float& x, thread const float& y)
+{
+    return x - (trunc(x / y) * y);
+}
+
+static inline __attribute__((always_inline))
+uint wired_material_table_index(thread const float& phase)
+{
+    float param = phase;
+    float param_1 = 1.0;
+    return uint(int(wired_stage_remainder(param, param_1) * 1024.0)) & 1023u;
+}
+
+static inline __attribute__((always_inline))
+float wired_material_table_sine(thread const uint& index)
+{
+    return sin((float(index & 1023u) * 0.0061359233222901821136474609375) + 9.9999997473787516355514526367188e-05);
+}
+
+static inline __attribute__((always_inline))
+float wired_material_noise_sample(thread const uint& cell)
+{
+    uint index = cell & 255u;
+    for (uint axis = 0u; axis < 4u; axis++)
+    {
+        index = _442[index];
+    }
+    return _708[index];
+}
+
+static inline __attribute__((always_inline))
+float wired_material_wave(thread const uint& function, thread const float4& wave, thread const float& time)
+{
+    if (function == 6u)
+    {
+        float position = (time + wave.z) * wave.w;
+        float param = position;
+        float param_1 = 256.0;
+        float wrapped = wired_stage_remainder(param, param_1);
+        uint cell = uint(int(floor(wrapped))) & 255u;
+        uint param_2 = cell;
+        float a = wired_material_noise_sample(param_2);
+        uint param_3 = cell + 1u;
+        float b = wired_material_noise_sample(param_3);
+        return wave.x + (wave.y * (a + ((b - a) * fract(wrapped))));
+    }
+    float phase = wave.z + (time * wave.w);
+    float param_4 = phase;
+    uint index = wired_material_table_index(param_4);
+    float cycle = float(index) / 1024.0;
+    float value;
+    if (function == 1u)
+    {
+        uint param_5 = index;
+        value = wired_material_table_sine(param_5);
+    }
+    else
+    {
+        if (function == 2u)
+        {
+            value = (index < 512u) ? 1.0 : (-1.0);
+        }
+        else
+        {
+            if (function == 3u)
+            {
+                uint halfIndex = index & 511u;
+                uint quarterIndex = halfIndex & 255u;
+                float _812;
+                if (quarterIndex == 0u)
+                {
+                    _812 = 9.9999999747524270787835121154785e-07;
+                }
+                else
+                {
+                    _812 = float(quarterIndex) / 256.0;
+                }
+                value = _812;
+                if (halfIndex >= 256u)
+                {
+                    value = 1.0 - value;
+                }
+                if (index >= 512u)
+                {
+                    value = -value;
+                }
+            }
+            else
+            {
+                if (function == 4u)
+                {
+                    value = (index == 0u) ? 9.9999999747524270787835121154785e-07 : cycle;
+                }
+                else
+                {
+                    if (function == 5u)
+                    {
+                        value = 1.0 - ((index == 0u) ? 9.9999999747524270787835121154785e-07 : cycle);
+                    }
+                    else
+                    {
+                        value = 0.0;
+                    }
+                }
+            }
+        }
+    }
+    return wave.x + (wave.y * value);
+}
+
+static inline __attribute__((always_inline))
+float wired_stage_copy_sign(thread const float& magnitude, thread const float& signSource)
+{
+    return as_type<float>((as_type<uint>(magnitude) & 2147483647u) | (as_type<uint>(signSource) & 2147483648u));
+}
+
+static inline __attribute__((always_inline))
+float2 wired_material_stage_uv(thread const float2& authoredUv, thread const MaterialStageParams& stage, thread const float& time, thread const float3& position)
+{
+    if (stage.tcModMeta.x > 0u)
+    {
+        float2 uv = authoredUv;
+        for (uint i = 0u; i < min(stage.tcModMeta.x, 8u); i++)
+        {
+            MaterialTcMod op = stage.tcMods[i];
+            if (op.type == 1u)
+            {
+                uv *= float2(op.p0, op.p1);
+            }
+            else
+            {
+                if (op.type == 2u)
+                {
+                    uv += fract(float2(op.p0, op.p1) * time);
+                }
+                else
+                {
+                    if (op.type == 3u)
+                    {
+                        float param = ((-op.p0) * time) / 360.0;
+                        uint index = wired_material_table_index(param);
+                        uint param_1 = index;
+                        float sine = wired_material_table_sine(param_1);
+                        uint param_2 = index + 256u;
+                        float cosine = wired_material_table_sine(param_2);
+                        float2 centered = uv - float2(0.5);
+                        uv = float2((centered.x * cosine) - (centered.y * sine), (centered.x * sine) + (centered.y * cosine)) + float2(0.5);
+                    }
+                    else
+                    {
+                        if (op.type == 4u)
+                        {
+                            float phase = op.p2 + (time * op.p3);
+                            float2 coordinate = (float2(position.x + position.z, position.y) / float2(1024.0)) + float2(phase);
+                            float param_3 = coordinate.x;
+                            uint param_4 = wired_material_table_index(param_3);
+                            float param_5 = coordinate.y;
+                            uint param_6 = wired_material_table_index(param_5);
+                            uv += (float2(wired_material_table_sine(param_4), wired_material_table_sine(param_6)) * op.p1);
+                        }
+                        else
+                        {
+                            if (op.type == 5u)
+                            {
+                                uint param_7 = uint(op.p0);
+                                float4 param_8 = float4(op.p1, op.p2, op.p3, op.p4);
+                                float param_9 = time;
+                                float wave = wired_material_wave(param_7, param_8, param_9);
+                                float param_10 = fast::max(abs(wave), 9.9999997473787516355514526367188e-05);
+                                float param_11 = wave;
+                                wave = wired_stage_copy_sign(param_10, param_11);
+                                uv = ((uv - float2(0.5)) / float2(wave)) + float2(0.5);
+                            }
+                            else
+                            {
+                                if (op.type == 6u)
+                                {
+                                    uv = float2(((uv.x * op.p0) + (uv.y * op.p2)) + op.p4, ((uv.x * op.p1) + (uv.y * op.p3)) + op.p5);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return uv;
+    }
+    float2 uv_1 = (authoredUv * stage.scaleScroll.xy) + (stage.scaleScroll.zw * time);
+    if (stage.params.w > 0.5)
+    {
+        float wave_1 = stage.stretch.x + (stage.stretch.y * sin((stage.stretch.z + (time * stage.stretch.w)) * 6.283185482025146484375));
+        uv_1 = ((uv_1 - float2(0.5)) / float2(fast::max(abs(wave_1), 9.9999997473787516355514526367188e-05))) + float2(0.5);
+    }
+    if (abs(stage.params.y) > 9.9999997473787516355514526367188e-05)
+    {
+        float angle = (stage.params.y * time) * 0.01745329238474369049072265625;
+        float sine_1 = sin(angle);
+        float cosine_1 = cos(angle);
+        float2 centered_1 = uv_1 - float2(0.5);
+        uv_1 = float2((centered_1.x * cosine_1) - (centered_1.y * sine_1), (centered_1.x * sine_1) + (centered_1.y * cosine_1)) + float2(0.5);
+    }
+    if (stage.params.z > 0.5)
+    {
+        float phase_1 = stage.turbulence.z + (time * stage.turbulence.w);
+        float offset = stage.turbulence.x + (stage.turbulence.y * sin(((uv_1.x + uv_1.y) + phase_1) * 6.283185482025146484375));
+        uv_1 += float2(offset);
+    }
+    return uv_1;
+}
+
+static inline __attribute__((always_inline))
+float4 wired_sky_stage_sample(thread const uint& slot, thread const float2& uv, texture2d<float> stageImage0, sampler stageSampler0, texture2d<float> stageImage1, sampler stageSampler1, texture2d<float> stageImage2, sampler stageSampler2, texture2d<float> stageImage3, sampler stageSampler3, texture2d<float> stageImage4, sampler stageSampler4, texture2d<float> stageImage5, sampler stageSampler5, texture2d<float> stageImage6, sampler stageSampler6, texture2d<float> stageImage7, sampler stageSampler7)
+{
+    switch (slot)
+    {
+        case 0u:
+        {
+            return stageImage0.sample(stageSampler0, uv);
+        }
+        case 1u:
+        {
+            return stageImage1.sample(stageSampler1, uv);
+        }
+        case 2u:
+        {
+            return stageImage2.sample(stageSampler2, uv);
+        }
+        case 3u:
+        {
+            return stageImage3.sample(stageSampler3, uv);
+        }
+        case 4u:
+        {
+            return stageImage4.sample(stageSampler4, uv);
+        }
+        case 5u:
+        {
+            return stageImage5.sample(stageSampler5, uv);
+        }
+        case 6u:
+        {
+            return stageImage6.sample(stageSampler6, uv);
+        }
+        default:
+        {
+            return stageImage7.sample(stageSampler7, uv);
+        }
+    }
+}
+
+static inline __attribute__((always_inline))
+float3 wired_stage_srgb_to_linear(thread float3& value)
+{
+    value = fast::max(value, float3(0.0));
+    float3 low = value / float3(12.9200000762939453125);
+    float3 high = powr((value + float3(0.054999999701976776123046875)) / float3(1.05499994754791259765625), float3(2.400000095367431640625));
+    return select(high, low, value <= float3(0.040449999272823333740234375));
+}
+
+static inline __attribute__((always_inline))
+float4 wired_material_stage_generators(thread float4& source, thread const MaterialStageParams& stage, thread const float4& vertexColor, thread const float4& entityColor, thread const float3& diffuseLighting, thread const float& vertexAlpha, thread const float& time)
+{
+    uint rgbGen = stage.generators.x;
+    uint alphaGen = stage.generators.y;
+    float3 rgb = float3(1.0);
+    float alpha = 1.0;
+    if ((rgbGen == 3u) || (rgbGen == 4u))
+    {
+        float3 _880;
+        if (rgbGen == 3u)
+        {
+            _880 = entityColor.xyz;
+        }
+        else
+        {
+            _880 = float3(1.0) - entityColor.xyz;
+        }
+        rgb = _880;
+        float _893;
+        if (rgbGen == 3u)
+        {
+            _893 = entityColor.w;
+        }
+        else
+        {
+            _893 = 1.0 - entityColor.w;
+        }
+        alpha = _893;
+    }
+    else
+    {
+        if ((rgbGen == 5u) || (rgbGen == 6u))
+        {
+            rgb = vertexColor.xyz;
+            alpha = vertexColor.w;
+        }
+        else
+        {
+            if (rgbGen == 7u)
+            {
+                rgb = float3(1.0) - vertexColor.xyz;
+            }
+            else
+            {
+                if (rgbGen == 8u)
+                {
+                    uint param = stage.generators.z;
+                    float4 param_1 = stage.rgbWave;
+                    float param_2 = time;
+                    rgb = float3(floor(fast::clamp(wired_material_wave(param, param_1, param_2), 0.0, 1.0) * 255.0) / 255.0);
+                }
+                else
+                {
+                    if (rgbGen == 9u)
+                    {
+                        rgb = diffuseLighting;
+                    }
+                    else
+                    {
+                        if (rgbGen == 11u)
+                        {
+                            float4 color = floor(fast::clamp(stage.constantColor, float4(0.0), float4(1.0)) * 255.0) / float4(255.0);
+                            rgb = color.xyz;
+                            alpha = color.w;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (rgbGen != 9u)
+    {
+        float3 param_3 = rgb;
+        float3 _977 = wired_stage_srgb_to_linear(param_3);
+        rgb = _977;
+    }
+    if ((alphaGen == 0u) && (rgbGen != 6u))
+    {
+        alpha = 1.0;
+    }
+    else
+    {
+        if ((alphaGen == 2u) || (alphaGen == 3u))
+        {
+            float _995;
+            if (alphaGen == 2u)
+            {
+                _995 = entityColor.w;
+            }
+            else
+            {
+                _995 = 1.0 - entityColor.w;
+            }
+            alpha = _995;
+        }
+        else
+        {
+            if (alphaGen == 4u)
+            {
+                alpha = vertexColor.w;
+            }
+            else
+            {
+                if (alphaGen == 5u)
+                {
+                    alpha = 1.0 - vertexColor.w;
+                }
+                else
+                {
+                    if (alphaGen == 7u)
+                    {
+                        uint param_4 = stage.generators.w;
+                        float4 param_5 = stage.alphaWave;
+                        float param_6 = time;
+                        alpha = floor(fast::clamp(wired_material_wave(param_4, param_5, param_6), 0.0, 1.0) * 255.0) / 255.0;
+                    }
+                    else
+                    {
+                        if ((alphaGen == 6u) || (alphaGen == 8u))
+                        {
+                            alpha = vertexAlpha;
+                        }
+                        else
+                        {
+                            if (alphaGen == 9u)
+                            {
+                                alpha = floor(fast::clamp(stage.constantColor.w, 0.0, 1.0) * 255.0) / 255.0;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    float4 _1060 = source;
+    float3 _1062 = _1060.xyz * rgb;
+    source.x = _1062.x;
+    source.y = _1062.y;
+    source.z = _1062.z;
+    source.w *= alpha;
+    return source;
+}
+
+static inline __attribute__((always_inline))
+float4 wired_material_blend_factor(thread const uint& factor, thread const float4& source, thread const float4& destination)
+{
+    if (factor == 0u)
+    {
+        return float4(0.0);
+    }
+    if (factor == 1u)
+    {
+        return float4(1.0);
+    }
+    if (factor == 2u)
+    {
+        return source;
+    }
+    if (factor == 3u)
+    {
+        return float4(1.0) - source;
+    }
+    if (factor == 4u)
+    {
+        return destination;
+    }
+    if (factor == 5u)
+    {
+        return float4(1.0) - destination;
+    }
+    if (factor == 6u)
+    {
+        return float4(source.w);
+    }
+    if (factor == 7u)
+    {
+        return float4(1.0 - source.w);
+    }
+    if (factor == 8u)
+    {
+        return float4(destination.w);
+    }
+    if (factor == 9u)
+    {
+        return float4(1.0 - destination.w);
+    }
+    return float4(fast::min(source.w, 1.0 - destination.w));
+}
+
+static inline __attribute__((always_inline))
+float3 wired_compose_authored_physical_sky(thread const float3& authored, thread const float3& physical, thread const float& blend)
+{
+    float authoredEnergy = dot(fast::max(authored, float3(0.0)), float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    float physicalEnergy = dot(fast::max(physical, float3(0.0)), float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    if (authoredEnergy <= 9.9999997473787516355514526367188e-06)
+    {
+        return mix(authored, physical, float3(blend));
+    }
+    float scale = fast::clamp(physicalEnergy / fast::max(authoredEnergy, 0.180000007152557373046875), 0.64999997615814208984375, 1.75);
+    float3 _1702;
+    if (physicalEnergy > 9.9999997473787516355514526367188e-06)
+    {
+        _1702 = physical / float3(physicalEnergy);
+    }
+    else
+    {
+        _1702 = float3(1.0);
+    }
+    float3 physicalTint = _1702;
+    float3 relit = ((authored * scale) * mix(float3(1.0), fast::clamp(physicalTint, float3(0.5), float3(2.0)), float3(0.119999997317790985107421875))) + (physical * 0.07999999821186065673828125);
+    return mix(authored, relit, float3(blend));
+}
+
+static inline __attribute__((always_inline))
+float3 wired_display_visibility(thread const float3& sceneColor, constant ProductDraw& productDraw)
+{
+    float3 exposed = fast::max(sceneColor, float3(0.0)) * productDraw.viewForward.w;
+    float luminance = dot(exposed, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    bool _1636 = luminance > 0.0;
+    bool _1643;
+    if (_1636)
+    {
+        _1643 = luminance < productDraw.viewUp.w;
+    }
+    else
+    {
+        _1643 = _1636;
+    }
+    bool _1649;
+    if (_1643)
+    {
+        _1649 = productDraw.viewLeft.w != 1.0;
+    }
+    else
+    {
+        _1649 = _1643;
+    }
+    if (_1649)
+    {
+        float curved = powr(luminance / productDraw.viewUp.w, productDraw.viewLeft.w) * productDraw.viewUp.w;
+        exposed *= (curved / luminance);
+    }
+    return exposed;
+}
+
+fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], const device spvDescriptorSetBuffer1& spvDescriptorSet1 [[buffer(1)]], const device spvDescriptorSetBuffer2& spvDescriptorSet2 [[buffer(2)]], constant ProductDraw& productDraw [[buffer(3)]])
+{
+    main0_out out = {};
+    float3 direction = fast::normalize(in.worldPosition - productDraw.atmosphereEyeDensity.xyz);
+    float3 param = direction;
+    float param_1 = (*spvDescriptorSet2.skyMaterial).timeHeight.y;
+    float2 cloudUv = wired_sky_cloud_uv(param, param_1);
+    float4 accumulated = float4(0.0);
+    if ((*spvDescriptorSet2.skyMaterial).meta.y != 0u)
+    {
+        float3 param_2 = direction;
+        accumulated = wired_sky_outer_sample(param_2, spvDescriptorSet0.outerRt, spvDescriptorSet0.outerSampler, spvDescriptorSet0.outerBk, spvDescriptorSet0.outerLf, spvDescriptorSet0.outerFt, spvDescriptorSet0.outerUp, spvDescriptorSet0.outerDn);
+    }
+    MaterialStageParams stage;
+    float4 _2183;
+    for (uint i = 0u; i < min((*spvDescriptorSet2.skyMaterial).meta.x, 8u); i++)
+    {
+        stage.meta = (*spvDescriptorSet2.skyMaterial).stages[i].meta;
+        stage.generators = (*spvDescriptorSet2.skyMaterial).stages[i].generators;
+        stage.params = (*spvDescriptorSet2.skyMaterial).stages[i].params;
+        stage.scaleScroll = (*spvDescriptorSet2.skyMaterial).stages[i].scaleScroll;
+        stage.turbulence = (*spvDescriptorSet2.skyMaterial).stages[i].turbulence;
+        stage.stretch = (*spvDescriptorSet2.skyMaterial).stages[i].stretch;
+        stage.constantColor = (*spvDescriptorSet2.skyMaterial).stages[i].constantColor;
+        stage.rgbWave = (*spvDescriptorSet2.skyMaterial).stages[i].rgbWave;
+        stage.alphaWave = (*spvDescriptorSet2.skyMaterial).stages[i].alphaWave;
+        stage.tcGenVectorS = (*spvDescriptorSet2.skyMaterial).stages[i].tcGenVectorS;
+        stage.tcGenVectorT = (*spvDescriptorSet2.skyMaterial).stages[i].tcGenVectorT;
+        stage.tcModMeta = (*spvDescriptorSet2.skyMaterial).stages[i].tcModMeta;
+        stage.tcMods[0].type = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[0].type;
+        stage.tcMods[0].p0 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[0].p0;
+        stage.tcMods[0].p1 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[0].p1;
+        stage.tcMods[0].p2 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[0].p2;
+        stage.tcMods[0].p3 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[0].p3;
+        stage.tcMods[0].p4 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[0].p4;
+        stage.tcMods[0].p5 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[0].p5;
+        stage.tcMods[0].reserved = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[0].reserved;
+        stage.tcMods[1].type = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[1].type;
+        stage.tcMods[1].p0 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[1].p0;
+        stage.tcMods[1].p1 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[1].p1;
+        stage.tcMods[1].p2 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[1].p2;
+        stage.tcMods[1].p3 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[1].p3;
+        stage.tcMods[1].p4 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[1].p4;
+        stage.tcMods[1].p5 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[1].p5;
+        stage.tcMods[1].reserved = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[1].reserved;
+        stage.tcMods[2].type = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[2].type;
+        stage.tcMods[2].p0 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[2].p0;
+        stage.tcMods[2].p1 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[2].p1;
+        stage.tcMods[2].p2 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[2].p2;
+        stage.tcMods[2].p3 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[2].p3;
+        stage.tcMods[2].p4 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[2].p4;
+        stage.tcMods[2].p5 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[2].p5;
+        stage.tcMods[2].reserved = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[2].reserved;
+        stage.tcMods[3].type = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[3].type;
+        stage.tcMods[3].p0 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[3].p0;
+        stage.tcMods[3].p1 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[3].p1;
+        stage.tcMods[3].p2 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[3].p2;
+        stage.tcMods[3].p3 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[3].p3;
+        stage.tcMods[3].p4 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[3].p4;
+        stage.tcMods[3].p5 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[3].p5;
+        stage.tcMods[3].reserved = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[3].reserved;
+        stage.tcMods[4].type = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[4].type;
+        stage.tcMods[4].p0 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[4].p0;
+        stage.tcMods[4].p1 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[4].p1;
+        stage.tcMods[4].p2 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[4].p2;
+        stage.tcMods[4].p3 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[4].p3;
+        stage.tcMods[4].p4 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[4].p4;
+        stage.tcMods[4].p5 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[4].p5;
+        stage.tcMods[4].reserved = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[4].reserved;
+        stage.tcMods[5].type = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[5].type;
+        stage.tcMods[5].p0 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[5].p0;
+        stage.tcMods[5].p1 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[5].p1;
+        stage.tcMods[5].p2 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[5].p2;
+        stage.tcMods[5].p3 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[5].p3;
+        stage.tcMods[5].p4 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[5].p4;
+        stage.tcMods[5].p5 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[5].p5;
+        stage.tcMods[5].reserved = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[5].reserved;
+        stage.tcMods[6].type = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[6].type;
+        stage.tcMods[6].p0 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[6].p0;
+        stage.tcMods[6].p1 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[6].p1;
+        stage.tcMods[6].p2 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[6].p2;
+        stage.tcMods[6].p3 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[6].p3;
+        stage.tcMods[6].p4 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[6].p4;
+        stage.tcMods[6].p5 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[6].p5;
+        stage.tcMods[6].reserved = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[6].reserved;
+        stage.tcMods[7].type = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[7].type;
+        stage.tcMods[7].p0 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[7].p0;
+        stage.tcMods[7].p1 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[7].p1;
+        stage.tcMods[7].p2 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[7].p2;
+        stage.tcMods[7].p3 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[7].p3;
+        stage.tcMods[7].p4 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[7].p4;
+        stage.tcMods[7].p5 = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[7].p5;
+        stage.tcMods[7].reserved = (*spvDescriptorSet2.skyMaterial).stages[i].tcMods[7].reserved;
+        uint imageSource = stage.meta.z & 255u;
+        uint tcGen = stage.meta.z >> 8u;
+        float2 uv = select(cloudUv, in.lightmapCoord, bool2((imageSource == 1u) || (tcGen == 1u)));
+        if (tcGen == 2u)
+        {
+            float3 reflected = reflect(direction, fast::normalize(in.worldNormal));
+            uv = float2(0.5 + (reflected.y * 0.5), 0.5 - (reflected.z * 0.5));
+        }
+        else
+        {
+            if (tcGen == 3u)
+            {
+                uv = float2(dot(in.worldPosition, stage.tcGenVectorS.xyz), dot(in.worldPosition, stage.tcGenVectorT.xyz));
+            }
+        }
+        float2 param_3 = uv;
+        MaterialStageParams param_4 = stage;
+        float param_5 = (*spvDescriptorSet2.skyMaterial).timeHeight.x;
+        float3 param_6 = in.worldPosition;
+        uv = wired_material_stage_uv(param_3, param_4, param_5, param_6);
+        if (imageSource == 2u)
+        {
+            _2183 = float4(1.0);
+        }
+        else
+        {
+            uint param_7 = i;
+            float2 param_8 = uv;
+            _2183 = wired_sky_stage_sample(param_7, param_8, spvDescriptorSet1.stageImage0, spvDescriptorSet1.stageSampler0, spvDescriptorSet1.stageImage1, spvDescriptorSet1.stageSampler1, spvDescriptorSet1.stageImage2, spvDescriptorSet1.stageSampler2, spvDescriptorSet1.stageImage3, spvDescriptorSet1.stageSampler3, spvDescriptorSet1.stageImage4, spvDescriptorSet1.stageSampler4, spvDescriptorSet1.stageImage5, spvDescriptorSet1.stageSampler5, spvDescriptorSet1.stageImage6, spvDescriptorSet1.stageSampler6, spvDescriptorSet1.stageImage7, spvDescriptorSet1.stageSampler7);
+        }
+        float4 source = _2183;
+        float vertexAlpha = in.color.w;
+        if (stage.generators.y == 8u)
+        {
+            vertexAlpha = floor(fast::clamp(length(in.worldPosition - productDraw.atmosphereEyeDensity.xyz) / fast::max(stage.tcGenVectorS.w, 0.001000000047497451305389404296875), 0.0, 1.0) * 255.0) / 255.0;
+        }
+        float4 param_9 = source;
+        MaterialStageParams param_10 = stage;
+        float4 param_11 = in.color;
+        float4 param_12 = float4(1.0);
+        float3 param_13 = float3(1.0);
+        float param_14 = vertexAlpha;
+        float param_15 = (*spvDescriptorSet2.skyMaterial).timeHeight.x;
+        float4 _2231 = wired_material_stage_generators(param_9, param_10, param_11, param_12, param_13, param_14, param_15);
+        source = _2231;
+        bool _2236 = stage.meta.w == 1u;
+        bool _2242;
+        if (_2236)
+        {
+            _2242 = source.w == 0.0;
+        }
+        else
+        {
+            _2242 = _2236;
+        }
+        bool _2257;
+        if (!_2242)
+        {
+            bool _2248 = stage.meta.w == 2u;
+            bool _2256;
+            if (_2248)
+            {
+                _2256 = source.w >= stage.params.x;
+            }
+            else
+            {
+                _2256 = _2248;
+            }
+            _2257 = _2256;
+        }
+        else
+        {
+            _2257 = _2242;
+        }
+        bool _2272;
+        if (!_2257)
+        {
+            bool _2263 = stage.meta.w == 3u;
+            bool _2271;
+            if (_2263)
+            {
+                _2271 = source.w < stage.params.x;
+            }
+            else
+            {
+                _2271 = _2263;
+            }
+            _2272 = _2271;
+        }
+        else
+        {
+            _2272 = _2257;
+        }
+        bool rejected = _2272;
+        if (!rejected)
+        {
+            uint param_16 = stage.meta.x;
+            float4 param_17 = source;
+            float4 param_18 = accumulated;
+            uint param_19 = stage.meta.y;
+            float4 param_20 = source;
+            float4 param_21 = accumulated;
+            accumulated = (source * wired_material_blend_factor(param_16, param_17, param_18)) + (accumulated * wired_material_blend_factor(param_19, param_20, param_21));
+        }
+    }
+    if (productDraw.atmosphereHeightSky.z > 0.0)
+    {
+        float2 uv_1 = float2((precise::atan2(direction.y, direction.x) / 6.283185482025146484375) + 0.5, (asin(fast::clamp(direction.z, -1.0, 1.0)) / 3.1415927410125732421875) + 0.5);
+        float3 param_22 = accumulated.xyz;
+        float3 param_23 = spvDescriptorSet0.physicalImage.sample(spvDescriptorSet0.physicalSampler, uv_1).xyz;
+        float param_24 = fast::clamp(productDraw.atmosphereHeightSky.z, 0.0, 1.0);
+        float3 _2337 = wired_compose_authored_physical_sky(param_22, param_23, param_24);
+        accumulated.x = _2337.x;
+        accumulated.y = _2337.y;
+        accumulated.z = _2337.z;
+    }
+    float3 param_25 = accumulated.xyz;
+    out.outColor = float4(wired_display_visibility(param_25, productDraw), 1.0);
+    return out;
+}
+

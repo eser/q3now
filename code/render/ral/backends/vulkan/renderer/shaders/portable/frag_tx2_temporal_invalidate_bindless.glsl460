@@ -3,12 +3,12 @@
 layout(constant_id = 4) const int tex_domain = 0;
 layout(constant_id = 26) const int lightmap_slot = 0;
 layout(constant_id = 6) const int tex_mode = 0;
-const bool _304 = (tex_mode == 1);
-const bool _343 = (tex_mode == 2);
-const bool _418 = (lightmap_slot != 0);
+const bool _320 = (tex_mode == 1);
+const bool _349 = (tex_mode == 2);
+const bool _408 = (lightmap_slot != 0);
 layout(constant_id = 7) const int discard_mode = 0;
-const bool _507 = (discard_mode == 1);
-const bool _517 = (discard_mode == 2);
+const bool _508 = (discard_mode == 1);
+const bool _518 = (discard_mode == 2);
 layout(constant_id = 3) const int alpha_to_coverage = 0;
 
 layout(binding = 0, std140) uniform UBO
@@ -27,6 +27,8 @@ layout(binding = 0, std140) uniform UBO
     vec4 advancedFogColorDensity;
     vec4 advancedFogTypeFarEnabled;
     vec4 emissionRadiance;
+    vec4 materialBaseColor;
+    vec4 materialFactors;
 } _56;
 
 layout(binding = 0) uniform texture2D wired_bindless_images[64];
@@ -131,82 +133,77 @@ void main()
     uint param_1 = 0u;
     vec2 param_2 = frag_tex_coord0;
     int param_3 = 0;
-    vec4 color0 = wired_bl_sample_domain(param_1, param_2, param_3) * frag_color0;
+    vec4 sampledColor0 = wired_bl_sample_domain(param_1, param_2, param_3);
+    uint param_4 = 1u;
+    vec2 param_5 = frag_tex_coord1;
+    int param_6 = 1;
+    vec4 sampledColor1 = wired_bl_sample_domain(param_4, param_5, param_6);
+    uint param_7 = 2u;
+    vec2 param_8 = frag_tex_coord2;
+    int param_9 = 2;
+    vec4 sampledColor2 = wired_bl_sample_domain(param_7, param_8, param_9);
+    vec4 color0 = sampledColor0 * frag_color0;
     vec4 base;
-    if (_304)
+    if (_320)
     {
-        uint param_4 = 1u;
-        vec2 param_5 = frag_tex_coord1;
-        int param_6 = 1;
-        vec4 color1 = wired_bl_sample_domain(param_4, param_5, param_6);
-        uint param_7 = 2u;
-        vec2 param_8 = frag_tex_coord2;
-        int param_9 = 2;
-        vec4 color2 = wired_bl_sample_domain(param_7, param_8, param_9);
+        vec4 color1 = sampledColor1;
+        vec4 color2 = sampledColor2;
         base = vec4((color0.xyz + color1.xyz) + color2.xyz, (color0.w * color1.w) * color2.w);
     }
     else
     {
-        if (_343)
+        if (_349)
         {
-            uint param_10 = 1u;
-            vec2 param_11 = frag_tex_coord1;
-            int param_12 = 1;
-            vec4 color1_1 = wired_bl_sample_domain(param_10, param_11, param_12) * frag_color0;
-            uint param_13 = 2u;
-            vec2 param_14 = frag_tex_coord2;
-            int param_15 = 2;
-            vec4 color2_1 = wired_bl_sample_domain(param_13, param_14, param_15) * frag_color0;
+            vec4 color1_1 = sampledColor1 * frag_color0;
+            vec4 color2_1 = sampledColor2 * frag_color0;
             base = vec4((color0.xyz + color1_1.xyz) + color2_1.xyz, (color0.w * color1_1.w) * color2_1.w);
         }
         else
         {
-            uint param_16 = 1u;
-            vec2 param_17 = frag_tex_coord1;
-            int param_18 = 1;
-            vec4 color1_2 = wired_bl_sample_domain(param_16, param_17, param_18);
-            uint param_19 = 2u;
-            vec2 param_20 = frag_tex_coord2;
-            int param_21 = 2;
-            vec4 color2_2 = wired_bl_sample_domain(param_19, param_20, param_21);
-            vec3 _402 = (color0.xyz * color1_2.xyz) * color2_2.xyz;
-            base.x = _402.x;
-            base.y = _402.y;
-            base.z = _402.z;
+            vec4 color1_2 = sampledColor1;
+            vec4 color2_2 = sampledColor2;
+            vec3 _392 = (color0.xyz * color1_2.xyz) * color2_2.xyz;
+            base.x = _392.x;
+            base.y = _392.y;
+            base.z = _392.z;
             base.w = (color0.w * color1_2.w) * color2_2.w;
         }
     }
-    if (_418)
+    if (_408)
     {
         float wetness = clamp(_56.worldLightParams.y, 0.0, 1.0);
         float frost = clamp(_56.worldLightParams.z, 0.0, 1.0);
         float luminance = dot(base.xyz, vec3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
-        vec4 _440 = base;
-        vec3 _442 = _440.xyz * mix(1.0, 0.819999992847442626953125, wetness);
-        base.x = _442.x;
-        base.y = _442.y;
-        base.z = _442.z;
-        vec4 _449 = base;
-        vec3 _463 = mix(_449.xyz, vec3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), vec3(frost * 0.550000011920928955078125));
-        base.x = _463.x;
-        base.y = _463.y;
-        base.z = _463.z;
+        vec4 _430 = base;
+        vec3 _432 = _430.xyz * mix(1.0, 0.819999992847442626953125, wetness);
+        base.x = _432.x;
+        base.y = _432.y;
+        base.z = _432.z;
+        vec4 _439 = base;
+        vec3 _453 = mix(_439.xyz, vec3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), vec3(frost * 0.550000011920928955078125));
+        base.x = _453.x;
+        base.y = _453.y;
+        base.z = _453.z;
     }
-    vec4 _478 = base;
-    vec3 _480 = _478.xyz + (color0.xyz * _56.emissionRadiance.xyz);
-    base.x = _480.x;
-    base.y = _480.y;
-    base.z = _480.z;
+    if (_56.materialFactors.x >= 0.0)
+    {
+        base *= _56.materialBaseColor;
+    }
+    vec4 _479 = base;
+    vec3 _481 = _479.xyz + (color0.xyz * _56.emissionRadiance.xyz);
+    base.x = _481.x;
+    base.y = _481.y;
+    base.z = _481.z;
     if (wired_advanced_fog_enabled())
     {
         float fogAmount = wired_advanced_fog_amount();
-        vec4 _492 = base;
-        vec3 _499 = mix(_492.xyz, _56.advancedFogColorDensity.xyz, vec3(fogAmount));
-        base.x = _499.x;
-        base.y = _499.y;
-        base.z = _499.z;
+        vec4 _493 = base;
+        vec3 _500 = mix(_493.xyz, _56.advancedFogColorDensity.xyz, vec3(fogAmount));
+        base.x = _500.x;
+        base.y = _500.y;
+        base.z = _500.z;
     }
-    if (_507)
+    if (_508)
     {
         if (base.w == 0.0)
         {
@@ -215,7 +212,7 @@ void main()
     }
     else
     {
-        if (_517)
+        if (_518)
         {
             if (dot(base.xyz, base.xyz) == 0.0)
             {
@@ -224,7 +221,7 @@ void main()
         }
     }
     out_color = base;
-    float param_22 = 1.0;
-    wiredTemporalWriteAux(param_22);
+    float param_10 = 1.0;
+    wiredTemporalWriteAux(param_10);
 }
 

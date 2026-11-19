@@ -15,7 +15,7 @@ struct ProductDraw
     float4 viewportAlpha;
     float4 atmosphereEyeDensity;
     float4 atmosphereColorVisibility;
-    float4 atmosphereHeightCloud;
+    float4 atmosphereHeightSky;
     uint4 atmosphereFroxelGrid;
     float4 localSh[4];
     uint4 staticLighting;
@@ -27,23 +27,40 @@ struct AtmosphereFroxels
     float4 values[1];
 };
 
+struct ProductMaterialFactors
+{
+    float4 baseColor;
+    float4 factors;
+    float4 beamStartColor;
+    float4 beamEndColor;
+    float4 beamScaleOffset;
+    uint4 beamFlags;
+};
+
 struct spvDescriptorSetBuffer1
 {
-    texture2d<float> baseTexture [[id(0)]];
-    sampler baseSampler [[id(1)]];
-    texture2d_array<float> staticRadianceTexture [[id(2)]];
-    sampler staticRadianceSampler [[id(3)]];
-    texture2d_array<float> staticDirectionTexture [[id(4)]];
-    sampler staticDirectionSampler [[id(5)]];
-    texture2d_array<float> staticVisibilityTexture [[id(6)]];
-    sampler staticVisibilitySampler [[id(7)]];
-    texture2d<float> lightmapTexture [[id(8)]];
-    sampler lightmapSampler [[id(9)]];
+    texture2d<float> physicalSkyTexture [[id(0)]];
+    sampler physicalSkySampler [[id(1)]];
+    texture2d_array<float> currentSkyRadianceTexture [[id(2)]];
+    sampler currentSkyRadianceSampler [[id(3)]];
+    texture2d<float> baseTexture [[id(4)]];
+    sampler baseSampler [[id(5)]];
+    texture2d_array<float> previousSkyRadianceTexture [[id(6)]];
+    sampler previousSkyRadianceSampler [[id(7)]];
+    texture2d_array<float> staticRadianceTexture [[id(8)]];
+    sampler staticRadianceSampler [[id(9)]];
+    texture2d_array<float> staticDirectionTexture [[id(10)]];
+    sampler staticDirectionSampler [[id(11)]];
+    texture2d_array<float> staticVisibilityTexture [[id(12)]];
+    sampler staticVisibilitySampler [[id(13)]];
+    texture2d<float> lightmapTexture [[id(14)]];
+    sampler lightmapSampler [[id(15)]];
 };
 
 struct spvDescriptorSetBuffer2
 {
     const device AtmosphereFroxels* atmosphereFroxels [[id(0)]];
+    constant ProductMaterialFactors* productMaterial [[id(1)]];
 };
 
 struct main0_out
@@ -59,6 +76,206 @@ struct main0_in
     float3 worldPosition [[user(locn3)]];
     float3 worldNormal [[user(locn4)]];
 };
+
+static inline __attribute__((always_inline))
+float3 wired_sky_cube_uv_layer(thread const float3& dir)
+{
+    float3 a = abs(dir);
+    bool _127 = a.x >= a.y;
+    bool _135;
+    if (_127)
+    {
+        _135 = a.x >= a.z;
+    }
+    else
+    {
+        _135 = _127;
+    }
+    uint face;
+    float2 uv;
+    if (_135)
+    {
+        if (dir.x >= 0.0)
+        {
+            face = 0u;
+            uv = float2(-dir.z, -dir.y) / float2(a.x);
+        }
+        else
+        {
+            face = 1u;
+            uv = float2(dir.z, -dir.y) / float2(a.x);
+        }
+    }
+    else
+    {
+        if (a.y >= a.z)
+        {
+            if (dir.y >= 0.0)
+            {
+                face = 2u;
+                uv = float2(dir.x, dir.z) / float2(a.y);
+            }
+            else
+            {
+                face = 3u;
+                uv = float2(dir.x, -dir.z) / float2(a.y);
+            }
+        }
+        else
+        {
+            if (dir.z >= 0.0)
+            {
+                face = 4u;
+                uv = float2(dir.x, -dir.y) / float2(a.z);
+            }
+            else
+            {
+                face = 5u;
+                uv = float2(-dir.x, -dir.y) / float2(a.z);
+            }
+        }
+    }
+    return float3((uv * 0.5) + float2(0.5), float(face));
+}
+
+static inline __attribute__((always_inline))
+float3 wired_sample_sky_radiance(texture2d_array<float> skyTexture, sampler skySampler, thread const float3& direction, thread const float& lod)
+{
+    float3 param = direction;
+    float3 _373 = wired_sky_cube_uv_layer(param);
+    return skyTexture.sample(skySampler, _373.xy, uint(rint(_373.z)), level(lod)).xyz;
+}
+
+static inline __attribute__((always_inline))
+float3 wired_aerial_inscatter(thread const float3& mediaColor, thread const float3& viewDir, constant ProductDraw& productDraw, texture2d<float> physicalSkyTexture, sampler physicalSkySampler, texture2d_array<float> currentSkyRadianceTexture, sampler currentSkyRadianceSampler)
+{
+    uint packedHaze = productDraw.atmosphereFroxelGrid.w;
+    float aerial = float(packedHaze >> 24u) / 255.0;
+    if (aerial <= 0.0)
+    {
+        return mediaColor;
+    }
+    float3 skyIn;
+    if (productDraw.atmosphereHeightSky.z > 0.0)
+    {
+        float2 skyViewUv = float2(fract((precise::atan2(viewDir.y, viewDir.x) / 6.283185482025146484375) + 0.5), fast::clamp((asin(fast::clamp(viewDir.z, -1.0, 1.0)) / 3.1415927410125732421875) + 0.5, 0.0, 1.0));
+        skyIn = physicalSkyTexture.sample(physicalSkySampler, skyViewUv, level(0.0)).xyz;
+    }
+    else
+    {
+        float3 param = viewDir;
+        float param_1 = 4.0;
+        skyIn = wired_sample_sky_radiance(currentSkyRadianceTexture, currentSkyRadianceSampler, param, param_1);
+    }
+    float3 skySum = float3(0.0);
+    for (int face = 0; face < 6; face++)
+    {
+        float3 axis = float3(0.0);
+        axis[face / 2] = ((face & 1) != 0) ? (-1.0) : 1.0;
+        float3 param_2 = axis;
+        float param_3 = 7.0;
+        skySum += wired_sample_sky_radiance(currentSkyRadianceTexture, currentSkyRadianceSampler, param_2, param_3);
+    }
+    float skyMean = fast::max(dot(skySum / float3(6.0), float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875)), 9.9999997473787516355514526367188e-05);
+    float3 directional = skyIn / float3(skyMean);
+    float3 sunDir = fast::normalize(unpack_snorm4x8_to_float(packedHaze).xyz + float3(9.9999999747524270787835121154785e-07));
+    float cosT = dot(viewDir, sunDir);
+    float hg = 0.6974999904632568359375 / fast::max(powr(1.3025000095367431640625 - (1.10000002384185791015625 * cosT), 1.5), 9.9999997473787516355514526367188e-05);
+    float3 tinted = mediaColor * mix(float3(1.0), fast::clamp(directional, float3(0.3499999940395355224609375), float3(3.0)), float3(aerial));
+    return tinted * mix(1.0, 0.75 + (0.25 * hg), aerial);
+}
+
+static inline __attribute__((always_inline))
+float4 wired_atmosphere_sample(constant ProductDraw& productDraw, texture2d<float> physicalSkyTexture, sampler physicalSkySampler, texture2d_array<float> currentSkyRadianceTexture, sampler currentSkyRadianceSampler, thread float4& gl_FragCoord, thread float3& worldPosition, const device AtmosphereFroxels& atmosphereFroxels)
+{
+    if (productDraw.viewOriginDrawSpace.w >= 0.5)
+    {
+        return float4(0.0, 0.0, 0.0, 1.0);
+    }
+    if (productDraw.atmosphereFroxelGrid.z > 0u)
+    {
+        uint3 grid = productDraw.atmosphereFroxelGrid.xyz;
+        uint x = min((uint(gl_FragCoord.x) / 16u), (grid.x - 1u));
+        uint y = min((uint(gl_FragCoord.y) / 16u), (grid.y - 1u));
+        float farDistance = fast::max(productDraw.atmosphereColorVisibility.w, 4.0100002288818359375);
+        float viewDistance = dot(worldPosition - productDraw.atmosphereEyeDensity.xyz, productDraw.viewForward.xyz);
+        float slice = fast::clamp(log(fast::max(viewDistance, 4.0) / 4.0) / log(farDistance / 4.0), 0.0, 0.99989998340606689453125);
+        uint z = min(uint(slice * float(grid.z)), (grid.z - 1u));
+        return atmosphereFroxels.values[(productDraw.atmosphereFroxelGrid.w + (((z * grid.y) + y) * grid.x)) + x];
+    }
+    float density = productDraw.atmosphereEyeDensity.w;
+    if (productDraw.atmosphereColorVisibility.w > 0.0)
+    {
+        density = fast::max(density, 3.912023067474365234375 / productDraw.atmosphereColorVisibility.w);
+    }
+    if (density <= 0.0)
+    {
+        return float4(0.0, 0.0, 0.0, 1.0);
+    }
+    float distanceToEye = length(worldPosition - productDraw.atmosphereEyeDensity.xyz);
+    float heightWeight = exp((-productDraw.atmosphereHeightSky.y) * fast::max(worldPosition.z - productDraw.atmosphereHeightSky.x, 0.0));
+    float transmittance = fast::clamp(exp(((-density) * heightWeight) * distanceToEye), 0.0, 1.0);
+    float3 param = productDraw.atmosphereColorVisibility.xyz;
+    float3 param_1 = fast::normalize(worldPosition - productDraw.atmosphereEyeDensity.xyz);
+    float3 inscatter = wired_aerial_inscatter(param, param_1, productDraw, physicalSkyTexture, physicalSkySampler, currentSkyRadianceTexture, currentSkyRadianceSampler);
+    return float4(inscatter * (1.0 - transmittance), transmittance);
+}
+
+static inline __attribute__((always_inline))
+float3 wired_compose_authored_physical_sky(thread const float3& authored, thread const float3& physical, thread const float& blend)
+{
+    float authoredEnergy = dot(fast::max(authored, float3(0.0)), float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    float physicalEnergy = dot(fast::max(physical, float3(0.0)), float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    if (authoredEnergy <= 9.9999997473787516355514526367188e-06)
+    {
+        return mix(authored, physical, float3(blend));
+    }
+    float scale = fast::clamp(physicalEnergy / fast::max(authoredEnergy, 0.180000007152557373046875), 0.64999997615814208984375, 1.75);
+    float3 _334;
+    if (physicalEnergy > 9.9999997473787516355514526367188e-06)
+    {
+        _334 = physical / float3(physicalEnergy);
+    }
+    else
+    {
+        _334 = float3(1.0);
+    }
+    float3 physicalTint = _334;
+    float3 relit = ((authored * scale) * mix(float3(1.0), fast::clamp(physicalTint, float3(0.5), float3(2.0)), float3(0.119999997317790985107421875))) + (physical * 0.07999999821186065673828125);
+    return mix(authored, relit, float3(blend));
+}
+
+static inline __attribute__((always_inline))
+float3 wired_display_visibility(thread const float3& sceneColor, constant ProductDraw& productDraw)
+{
+    float3 exposed = fast::max(sceneColor, float3(0.0)) * productDraw.viewForward.w;
+    float luminance = dot(exposed, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    bool _266 = luminance > 0.0;
+    bool _274;
+    if (_266)
+    {
+        _274 = luminance < productDraw.viewUp.w;
+    }
+    else
+    {
+        _274 = _266;
+    }
+    bool _281;
+    if (_274)
+    {
+        _281 = productDraw.viewLeft.w != 1.0;
+    }
+    else
+    {
+        _281 = _274;
+    }
+    if (_281)
+    {
+        float curved = powr(luminance / productDraw.viewUp.w, productDraw.viewLeft.w) * productDraw.viewUp.w;
+        exposed *= (curved / luminance);
+    }
+    return exposed;
+}
 
 static inline __attribute__((always_inline))
 float3 wired_lighting_decode_oct(thread const float2& encoded)
@@ -82,54 +299,88 @@ float3 wired_lighting_directional_static_indirect(thread const float3& radiance,
     return fast::max(radiance, float3(0.0)) * fast::max(dot(fast::normalize(materialNormal), dominantDirection), 0.0);
 }
 
-static inline __attribute__((always_inline))
-float3 wired_display_visibility(thread const float3& sceneColor, constant ProductDraw& productDraw)
-{
-    float3 exposed = fast::max(sceneColor, float3(0.0)) * productDraw.viewForward.w;
-    float luminance = dot(exposed, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
-    bool _116 = luminance > 0.0;
-    bool _124;
-    if (_116)
-    {
-        _124 = luminance < productDraw.viewUp.w;
-    }
-    else
-    {
-        _124 = _116;
-    }
-    bool _131;
-    if (_124)
-    {
-        _131 = productDraw.viewLeft.w != 1.0;
-    }
-    else
-    {
-        _131 = _124;
-    }
-    if (_131)
-    {
-        float curved = powr(luminance / productDraw.viewUp.w, productDraw.viewLeft.w) * productDraw.viewUp.w;
-        exposed *= (curved / luminance);
-    }
-    return exposed;
-}
-
 fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer1& spvDescriptorSet1 [[buffer(1)]], const device spvDescriptorSetBuffer2& spvDescriptorSet2 [[buffer(2)]], constant ProductDraw& productDraw [[buffer(3)]], float4 gl_FragCoord [[position]])
 {
     main0_out out = {};
     float4 base = spvDescriptorSet1.baseTexture.sample(spvDescriptorSet1.baseSampler, in.texCoord);
-    int alphaMode = int(productDraw.viewportAlpha.z + 0.5);
-    bool _178 = alphaMode == 1;
-    bool _186;
-    if (_178)
+    if ((*spvDescriptorSet2.productMaterial).beamFlags.x != 0u)
     {
-        _186 = base.w < productDraw.viewportAlpha.w;
+        float3 linearColor = select(powr((in.color.xyz + float3(0.054999999701976776123046875)) / float3(1.05499994754791259765625), float3(2.400000095367431640625)), in.color.xyz / float3(12.9200000762939453125), in.color.xyz <= float3(0.040449999272823333740234375));
+        out.outColor = float4((base.xyz * linearColor) * wired_atmosphere_sample(productDraw, spvDescriptorSet1.physicalSkyTexture, spvDescriptorSet1.physicalSkySampler, spvDescriptorSet1.currentSkyRadianceTexture, spvDescriptorSet1.currentSkyRadianceSampler, gl_FragCoord, in.worldPosition, (*spvDescriptorSet2.atmosphereFroxels)).w, base.w * in.color.w);
+        return out;
+    }
+    bool _773 = productDraw.atmosphereHeightSky.w > 0.5;
+    bool _780;
+    if (_773)
+    {
+        _780 = productDraw.emissiveRadiance.w >= 0.0;
     }
     else
     {
-        _186 = _178;
+        _780 = _773;
     }
-    if (_186)
+    if (_780)
+    {
+        float3 direction = fast::normalize(in.worldPosition - productDraw.atmosphereEyeDensity.xyz);
+        float3 param = direction;
+        float param_1 = 0.0;
+        float3 current = wired_sample_sky_radiance(spvDescriptorSet1.currentSkyRadianceTexture, spvDescriptorSet1.currentSkyRadianceSampler, param, param_1);
+        float3 param_2 = direction;
+        float param_3 = 0.0;
+        float3 previous = wired_sample_sky_radiance(spvDescriptorSet1.previousSkyRadianceTexture, spvDescriptorSet1.previousSkyRadianceSampler, param_2, param_3);
+        base = float4(mix(previous, current, float3(fast::clamp(productDraw.emissiveRadiance.w, 0.0, 1.0))), 1.0);
+    }
+    bool _815 = productDraw.atmosphereHeightSky.w > 0.5;
+    bool _821;
+    if (_815)
+    {
+        _821 = productDraw.atmosphereHeightSky.z > 0.0;
+    }
+    else
+    {
+        _821 = _815;
+    }
+    if (_821)
+    {
+        float3 direction_1 = fast::normalize(in.worldPosition - productDraw.atmosphereEyeDensity.xyz);
+        float2 physicalUv = float2((precise::atan2(direction_1.y, direction_1.x) / 6.283185482025146484375) + 0.5, (asin(fast::clamp(direction_1.z, -1.0, 1.0)) / 3.1415927410125732421875) + 0.5);
+        float3 physical = spvDescriptorSet1.physicalSkyTexture.sample(spvDescriptorSet1.physicalSkySampler, physicalUv).xyz;
+        float3 param_4 = base.xyz;
+        float3 param_5 = physical;
+        float param_6 = fast::clamp(productDraw.atmosphereHeightSky.z, 0.0, 1.0);
+        float3 param_7 = wired_compose_authored_physical_sky(param_4, param_5, param_6);
+        out.outColor = float4(wired_display_visibility(param_7, productDraw), 1.0);
+        return out;
+    }
+    bool _872 = productDraw.atmosphereHeightSky.w > 0.5;
+    bool _878;
+    if (_872)
+    {
+        _878 = productDraw.emissiveRadiance.w >= 0.0;
+    }
+    else
+    {
+        _878 = _872;
+    }
+    if (_878)
+    {
+        float3 param_8 = base.xyz;
+        out.outColor = float4(wired_display_visibility(param_8, productDraw), 1.0);
+        return out;
+    }
+    int alphaMode = int(productDraw.viewportAlpha.z + 0.5);
+    base *= (*spvDescriptorSet2.productMaterial).baseColor;
+    bool _900 = alphaMode == 1;
+    bool _908;
+    if (_900)
+    {
+        _908 = base.w < productDraw.viewportAlpha.w;
+    }
+    else
+    {
+        _908 = _900;
+    }
+    if (_908)
     {
         discard_fragment();
     }
@@ -144,10 +395,10 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
         {
             encodedDirection = (encodedDirection * 0.5) + float2(0.5);
         }
-        float3 param = radiance;
-        float2 param_1 = encodedDirection;
-        float3 param_2 = in.worldNormal;
-        lighting = wired_lighting_directional_static_indirect(param, param_1, param_2);
+        float3 param_9 = radiance;
+        float2 param_10 = encodedDirection;
+        float3 param_11 = in.worldNormal;
+        lighting = wired_lighting_directional_static_indirect(param_9, param_10, param_11);
         if (productDraw.staticLighting.w != 0u)
         {
             lighting *= spvDescriptorSet1.staticVisibilityTexture.sample(spvDescriptorSet1.staticVisibilitySampler, address.xy, uint(rint(address.z))).x;
@@ -155,17 +406,17 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
     }
     else
     {
-        bool _294 = productDraw.staticLighting.x == 1u;
-        bool _302;
-        if (!_294)
+        bool _1008 = productDraw.staticLighting.x == 1u;
+        bool _1016;
+        if (!_1008)
         {
-            _302 = productDraw.projectionLightmap.w >= 0.5;
+            _1016 = productDraw.projectionLightmap.w >= 0.5;
         }
         else
         {
-            _302 = _294;
+            _1016 = _1008;
         }
-        if (_302)
+        if (_1016)
         {
             lighting = fast::min(spvDescriptorSet1.lightmapTexture.sample(spvDescriptorSet1.lightmapSampler, in.lightmapCoord).xyz * 2.0, float3(1.0));
         }
@@ -175,46 +426,42 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
         }
     }
     float3 lit = ((base.xyz * lighting) * in.color.xyz) + (base.xyz * productDraw.emissiveRadiance.xyz);
-    bool _344 = productDraw.viewOriginDrawSpace.w < 0.5;
-    bool _351;
-    if (_344)
+    if ((*spvDescriptorSet2.productMaterial).factors.x >= 0.0)
     {
-        _351 = productDraw.atmosphereFroxelGrid.z > 0u;
+        float metallic = fast::clamp((*spvDescriptorSet2.productMaterial).factors.x, 0.0, 1.0);
+        float roughness = fast::clamp((*spvDescriptorSet2.productMaterial).factors.y, 0.0, 1.0);
+        float occlusion = fast::clamp((*spvDescriptorSet2.productMaterial).factors.z, 0.0, 1.0);
+        float environmentBlend = fast::clamp((*spvDescriptorSet2.productMaterial).factors.w, 0.0, 1.0);
+        float3 normal = fast::normalize(in.worldNormal);
+        float3 viewDirection = fast::normalize(productDraw.atmosphereEyeDensity.xyz - in.worldPosition);
+        float3 reflected = reflect(-viewDirection, normal);
+        float3 param_12 = reflected;
+        float param_13 = roughness * float(int(spvDescriptorSet1.currentSkyRadianceTexture.get_num_mip_levels()) - 1);
+        float3 currentSpecular = wired_sample_sky_radiance(spvDescriptorSet1.currentSkyRadianceTexture, spvDescriptorSet1.currentSkyRadianceSampler, param_12, param_13);
+        float3 param_14 = reflected;
+        float param_15 = roughness * float(int(spvDescriptorSet1.previousSkyRadianceTexture.get_num_mip_levels()) - 1);
+        float3 previousSpecular = wired_sample_sky_radiance(spvDescriptorSet1.previousSkyRadianceTexture, spvDescriptorSet1.previousSkyRadianceSampler, param_14, param_15);
+        float3 f0 = mix(float3(0.039999999105930328369140625), base.xyz, float3(metallic));
+        float nDotV = fast::max(dot(normal, viewDirection), 0.0);
+        float3 fresnel = f0 + ((float3(1.0) - f0) * powr(1.0 - nDotV, 5.0));
+        float3 specularIbl = mix(previousSpecular, currentSpecular, float3(environmentBlend)) * fresnel;
+        lit += (specularIbl * occlusion);
+    }
+    float4 media = wired_atmosphere_sample(productDraw, spvDescriptorSet1.physicalSkyTexture, spvDescriptorSet1.physicalSkySampler, spvDescriptorSet1.currentSkyRadianceTexture, spvDescriptorSet1.currentSkyRadianceSampler, gl_FragCoord, in.worldPosition, (*spvDescriptorSet2.atmosphereFroxels));
+    float3 _1164;
+    if ((alphaMode == 3) || (alphaMode == 4))
+    {
+        _1164 = float3(0.0);
     }
     else
     {
-        _351 = _344;
+        _1164 = media.xyz;
     }
-    if (_351)
-    {
-        uint3 grid = productDraw.atmosphereFroxelGrid.xyz;
-        uint x = min((uint(gl_FragCoord.x) / 16u), (grid.x - 1u));
-        uint y = min((uint(gl_FragCoord.y) / 16u), (grid.y - 1u));
-        float farDistance = fast::max(productDraw.atmosphereColorVisibility.w, 4.0100002288818359375);
-        float viewDistance = length(in.worldPosition - productDraw.atmosphereEyeDensity.xyz);
-        float slice = fast::clamp(log(fast::max(viewDistance, 4.0) / 4.0) / log(farDistance / 4.0), 0.0, 0.99989998340606689453125);
-        uint z = min(uint(slice * float(grid.z)), (grid.z - 1u));
-        float4 media = (*spvDescriptorSet2.atmosphereFroxels).values[(productDraw.atmosphereFroxelGrid.w + (((z * grid.y) + y) * grid.x)) + x];
-        float3 param_3 = (lit * media.w) + media.xyz;
-        out.outColor = float4(wired_display_visibility(param_3, productDraw), base.w * in.color.w);
-        return out;
-    }
-    float density = productDraw.atmosphereEyeDensity.w;
-    if (productDraw.atmosphereColorVisibility.w > 0.0)
-    {
-        density = fast::max(density, 3.912023067474365234375 / productDraw.atmosphereColorVisibility.w);
-    }
-    if ((productDraw.viewOriginDrawSpace.w < 0.5) && (density > 0.0))
-    {
-        float distanceToEye = length(in.worldPosition - productDraw.atmosphereEyeDensity.xyz);
-        float heightWeight = exp((-productDraw.atmosphereHeightCloud.y) * fast::max(in.worldPosition.z - productDraw.atmosphereHeightCloud.x, 0.0));
-        float transmittance = exp(((-density) * heightWeight) * distanceToEye);
-        lit = mix(productDraw.atmosphereColorVisibility.xyz, lit, float3(fast::clamp(transmittance, 0.0, 1.0)));
-    }
+    lit = (lit * media.w) + _1164;
     if (productDraw.viewOriginDrawSpace.w < 0.5)
     {
-        float3 param_4 = lit;
-        lit = wired_display_visibility(param_4, productDraw);
+        float3 param_16 = lit;
+        lit = wired_display_visibility(param_16, productDraw);
     }
     out.outColor = float4(lit, base.w * in.color.w);
     return out;
