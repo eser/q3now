@@ -83,7 +83,7 @@ void Ral_DestroyBuffer( ralBuffer_t *buffer ) {
 	}
 }
 
-ralFence_t *Ral_BufferUploadAsync( ralBuffer_t *buffer, uint64_t offset,
+ralFence_t *Ral_BufferUploadBlocking( ralBuffer_t *buffer, uint64_t offset,
 		const void *data, uint64_t size ) {
 	static struct ralFence_s fence = { 1 };
 	int call = ++uploadCalls;

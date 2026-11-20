@@ -389,8 +389,8 @@ fail:
 // VK_NULL_HANDLE (fence creation failed) → reports signaled.
 //
 // Set ownsFence=qtrue. Both
-// callers (Ral_BufferUploadAsync at line 403, Ral_TextureUploadAsync at
-// line 719) pass a VkFence that was just created by
+// callers (Ral_BufferUploadBlocking, Ral_TextureUploadAsync) pass a VkFence
+// that was just created by
 // ralVk_SubmitUploadCmdAndWait's CreateFence call + handed back via the
 // keepFence out-param. Without ownsFence=qtrue, Ral_DestroyFence's
 // ownership gate at sync.c:38 skipped the underlying VkFence destroy,
@@ -652,7 +652,7 @@ static qboolean ralVk_WriteStagingBuffer( ralBuffer_t *buffer,
 	return Ral_BufferMapUnmap( buffer, &ticket ) == ralSuccess ? qtrue : qfalse;
 }
 
-ralFence_t *Ral_BufferUploadAsync( ralBuffer_t *buf, uint64_t offset, const void *data, uint64_t size ) {
+ralFence_t *Ral_BufferUploadBlocking( ralBuffer_t *buf, uint64_t offset, const void *data, uint64_t size ) {
 	ralBackend_t        *b;
 	ralBufferCreateInfo_t sci;
 	ralBuffer_t          *staging;
@@ -663,7 +663,7 @@ ralFence_t *Ral_BufferUploadAsync( ralBuffer_t *buf, uint64_t offset, const void
 	if ( !buf || !data || size == 0 ) return NULL;
 	b = buf->backend;
 	q = ralVk_UploadQueue( b );
-	RAL_NOTE_ONCE( "Ral_BufferUploadAsync runs on the transfer queue when available but still waits internally before returning -- async streaming (no internal wait) is Phase 7.15\n" );
+	RAL_NOTE_ONCE( "Ral_BufferUploadBlocking runs on the transfer queue when available and waits for completion before returning (the caller's thread stalls); use the ticketed Ral_BufferUploadBegin path for non-blocking uploads\n" );
 
 	RAL_ZERO( sci ); sci.size = size; sci.usage = RAL_BUFFER_TRANSFER_SRC | RAL_BUFFER_MAP_WRITE; sci.memory = RAL_MEMORY_HOST_COHERENT; sci.debugName = "ral-staging-buf-upload";
 	staging = Ral_CreateBuffer( b, &sci );

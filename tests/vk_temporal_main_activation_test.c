@@ -20,7 +20,7 @@ ralBindGroup_t *Ral_CreateBindGroup( ralBackend_t *b,
 		const ralBindGroupCreateInfo_t *ci ){(void)b;(void)ci;return NULL;}
 void Ral_DestroyBindGroup( ralBindGroup_t *g ){(void)g;}
 struct ralFence_s { int id; };
-ralFence_t *Ral_BufferUploadAsync( ralBuffer_t *b, uint64_t o,
+ralFence_t *Ral_BufferUploadBlocking( ralBuffer_t *b, uint64_t o,
 		const void *d, uint64_t s ){(void)b;(void)o;(void)d;(void)s;return NULL;}
 void Ral_WaitFence( ralFence_t *f, uint64_t t ){(void)f;(void)t;}
 void Ral_DestroyFence( ralFence_t *f ){(void)f;}

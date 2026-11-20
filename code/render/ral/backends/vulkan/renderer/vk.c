@@ -7933,7 +7933,7 @@ void vk_init_particle( void )
 			bci.memory = RAL_MEMORY_DEVICE_LOCAL; bci.debugName = "wired-particle-atmosphere-zero";
 			vk.particle.ral_atmosphere_zero = Ral_CreateBuffer( vk_ral_get_backend(), &bci );
 			upload = vk.particle.ral_atmosphere_zero
-				? Ral_BufferUploadAsync( vk.particle.ral_atmosphere_zero, 0, zeros, sizeof( zeros ) ) : NULL;
+				? Ral_BufferUploadBlocking( vk.particle.ral_atmosphere_zero, 0, zeros, sizeof( zeros ) ) : NULL;
 			if ( upload ) { Ral_WaitFence( upload, ~(uint64_t)0 ); Ral_DestroyFence( upload ); }
 		}
 		if ( !vk.particle.ral_media_zero ) {
@@ -7942,7 +7942,7 @@ void vk_init_particle( void )
 			bci.memory = RAL_MEMORY_DEVICE_LOCAL; bci.debugName = "wired-particle-media-zero";
 			vk.particle.ral_media_zero = Ral_CreateBuffer( vk_ral_get_backend(), &bci );
 			upload = vk.particle.ral_media_zero
-				? Ral_BufferUploadAsync( vk.particle.ral_media_zero, 0, zeros, 16u ) : NULL;
+				? Ral_BufferUploadBlocking( vk.particle.ral_media_zero, 0, zeros, 16u ) : NULL;
 			if ( upload ) { Ral_WaitFence( upload, ~(uint64_t)0 ); Ral_DestroyFence( upload ); }
 		}
 		if ( !vk.particle.ral_atmosphere_zero || !vk.particle.ral_media_zero ) {
@@ -18974,7 +18974,7 @@ void vk_lens_dispatch( struct ralCommandBuffer_s *cb )
 		for ( i = 0; i < LENS_TOTAL_SOURCES; ++i ) shadow[(size_t)i * 8u + 7u] = completed[(size_t)i * 8u + 7u];
 		if ( Ral_BufferMapUnmap( vk.ral_lens_readback[slot], &mapTicket ) != ralSuccess ) return;
 	}
-	upload = Ral_BufferUploadAsync( vk.ral_lens_sources[slot], 0, shadow, lensBytes );
+	upload = Ral_BufferUploadBlocking( vk.ral_lens_sources[slot], 0, shadow, lensBytes );
 	if ( !upload ) return;
 	Ral_WaitFence( upload, ~(uint64_t)0 );
 	Ral_DestroyFence( upload );
@@ -19495,7 +19495,7 @@ void vk_cull_build_world_aabbs( const msurface_t *surfaces, int numSurfaces, int
 	for ( i = 0; i < numSurfaces; i++ )
 		vk_cull_surf_record( &surfaces[i], &records[i] );
 	{
-		ralFence_t *upload = Ral_BufferUploadAsync( vk.ral_cull_aabb, 0, records, recSize );
+		ralFence_t *upload = Ral_BufferUploadBlocking( vk.ral_cull_aabb, 0, records, recSize );
 		if ( !upload ) {
 			free( records );
 			Ral_DestroyBuffer( vk.ral_cull_aabb ); vk.ral_cull_aabb = NULL;
@@ -21473,7 +21473,7 @@ void vk_forwardplus_dispatch( void )
 	}
 	{
 		const uint64_t lightsBytes = (uint64_t)FP_MAX_LIGHTS * FP_LIGHT_VEC4S * 4u * sizeof( float );
-		ralFence_t *upload = Ral_BufferUploadAsync( vk.ral_fp_lights[ vk.cmd_index ], 0,
+		ralFence_t *upload = Ral_BufferUploadBlocking( vk.ral_fp_lights[ vk.cmd_index ], 0,
 		                                             lp, lightsBytes );
 		if ( !upload ) return;
 		Ral_WaitFence( upload, ~(uint64_t)0 );
@@ -21761,7 +21761,7 @@ void vk_forwardplus_lit_init( ralBackend_t *backend )
 		bci.debugName = "wired-fp-cluster-fallback";
 		vk.ral_fp_clusterfallback = Ral_CreateBuffer( backend, &bci );
 		if ( vk.ral_fp_clusterfallback ) {
-			upload = Ral_BufferUploadAsync( vk.ral_fp_clusterfallback, 0, empty, sizeof( empty ) );
+			upload = Ral_BufferUploadBlocking( vk.ral_fp_clusterfallback, 0, empty, sizeof( empty ) );
 			if ( upload ) { Ral_WaitFence( upload, ~(uint64_t)0 ); Ral_DestroyFence( upload ); }
 			else { Ral_DestroyBuffer( vk.ral_fp_clusterfallback ); vk.ral_fp_clusterfallback = NULL; }
 		}
@@ -21985,7 +21985,7 @@ void vk_forwardplus_build_clusters( void )
 			R_LOG( rch_ral, SEV_WARN, "forward+: cluster grid SSBO alloc failed — static lights disabled\n" );
 			return;
 		}
-		upload = Ral_BufferUploadAsync( vk.ral_fp_clustergrid, 0, w->clusterFlat, bci.size );
+		upload = Ral_BufferUploadBlocking( vk.ral_fp_clustergrid, 0, w->clusterFlat, bci.size );
 		if ( !upload ) {
 			Ral_DestroyBuffer( vk.ral_fp_clustergrid ); vk.ral_fp_clustergrid = NULL;
 			R_LOG( rch_ral, SEV_WARN, "forward+: cluster grid upload failed — static lights disabled\n" );

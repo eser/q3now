@@ -273,7 +273,7 @@ qboolean R_TemporalMotionPayloadAppendAt(
 	candidate.outcome = (uint32_t)outcome;
 	offset = (uint64_t)absoluteEntMatSlot
 		* (uint64_t)sizeof( temporalMotionGpuPayload_t );
-	upload = Ral_BufferUploadAsync( frame->buffer, offset,
+	upload = Ral_BufferUploadBlocking( frame->buffer, offset,
 		&candidate, sizeof( candidate ) );
 	if ( !upload ) return qfalse;
 	Ral_WaitFence( upload, ~(uint64_t)0 );

@@ -27,7 +27,7 @@ struct ralFence_s { int id; };
 static struct ralFence_s s_uploadFence = { 1 };
 static int s_uploadCalls, s_waitCalls, s_destroyFenceCalls;
 static qboolean s_failUpload;
-ralFence_t *Ral_BufferUploadAsync( ralBuffer_t *buffer, uint64_t offset,
+ralFence_t *Ral_BufferUploadBlocking( ralBuffer_t *buffer, uint64_t offset,
 		const void *data, uint64_t size ) {
 	(void)buffer;
 	CHECK( offset == 0 && data == s_payload

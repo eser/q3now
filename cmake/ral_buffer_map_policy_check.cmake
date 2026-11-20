@@ -168,7 +168,7 @@ endforeach()
 foreach(REQUIRED IN ITEMS
 	"vk.cullAabbCpu = records"
 	"recs = (const vkCullSurf_t *)vk.cullAabbCpu"
-	"Ral_BufferUploadAsync( vk.ral_cull_aabb"
+	"Ral_BufferUploadBlocking( vk.ral_cull_aabb"
 	"bci.memory    = RAL_MEMORY_HOST_COHERENT"
 	"Ral_BufferWriteImmediate( vk.ral_cull_reached[ vk.cmd_index ]")
 	string(FIND "${PRODUCT_VK}" "${REQUIRED}" POSITION)
@@ -220,7 +220,7 @@ endforeach()
 foreach(REQUIRED IN ITEMS
 	"ral_lens_sources[NUM_COMMAND_BUFFERS]"
 	"ral_lens_readback[NUM_COMMAND_BUFFERS]"
-	"Ral_BufferUploadAsync( vk.ral_lens_sources[slot]"
+	"Ral_BufferUploadBlocking( vk.ral_lens_sources[slot]"
 	"Ral_BufferMapBegin( vk.ral_lens_readback[slot]"
 	"Ral_CmdCopyBuffer( cb, vk.ral_lens_sources[slot], vk.ral_lens_readback[slot]"
 	"transition.after.usage = RAL_RESOURCE_USAGE_HOST_READ")
@@ -236,9 +236,9 @@ endforeach()
 
 foreach(REQUIRED IN ITEMS
 	"vk.fpLightsPtr[i] = calloc"
-	"Ral_BufferUploadAsync( vk.ral_fp_lights[ vk.cmd_index ]"
-	"Ral_BufferUploadAsync( vk.ral_fp_clusterfallback"
-	"Ral_BufferUploadAsync( vk.ral_fp_clustergrid")
+	"Ral_BufferUploadBlocking( vk.ral_fp_lights[ vk.cmd_index ]"
+	"Ral_BufferUploadBlocking( vk.ral_fp_clusterfallback"
+	"Ral_BufferUploadBlocking( vk.ral_fp_clustergrid")
 	string(FIND "${PRODUCT_VK}" "${REQUIRED}" POSITION)
 	if(POSITION EQUAL -1)
 		message(FATAL_ERROR "WebGPU-valid Forward+ upload migration lost seam: ${REQUIRED}")

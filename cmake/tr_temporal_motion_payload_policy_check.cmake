@@ -59,7 +59,7 @@ require_text(PAYLOAD_C "case TEMPORAL_MOTION_INVALIDATE_OPAQUE:" "opaque invalid
 require_text(PAYLOAD_C "if ( matrices ) return qfalse;" "canonical zero invalidation input")
 require_count(PAYLOAD_C "isfinite\\(" 2 "both matrix streams finite")
 require_text(PAYLOAD_C "absoluteEntMatSlot <= frame->lastSlot" "strict monotonic absolute slots")
-require_text(PAYLOAD_C "Ral_BufferUploadAsync( frame->buffer, offset,\n\t\t&candidate, sizeof( candidate ) )" "exact written-range staging upload")
+require_text(PAYLOAD_C "Ral_BufferUploadBlocking( frame->buffer, offset,\n\t\t&candidate, sizeof( candidate ) )" "exact written-range staging upload")
 require_text(PAYLOAD_C "Ral_WaitFence( upload, ~(uint64_t)0 );" "upload completion before draw-visible publication")
 require_text(PAYLOAD_C "memcpy( frame->cpuShadow + offset, &candidate, sizeof( candidate ) );" "CPU shadow publication after upload")
 require_text(PAYLOAD_C "free( owner->frames[i].cpuShadow );" "CPU shadow teardown")

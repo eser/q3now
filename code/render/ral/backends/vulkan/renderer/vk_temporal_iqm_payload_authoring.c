@@ -204,7 +204,7 @@ qboolean VK_TemporalIqmPayloadAuthorSeal(
 		if ( author && author->active == qtrue ) author->poisoned = qtrue;
 		return qfalse;
 	}
-	upload = Ral_BufferUploadAsync( author->payload.buffer, 0,
+	upload = Ral_BufferUploadBlocking( author->payload.buffer, 0,
 		author->payload.cpuShadowIdentity,
 		(uint64_t)author->sequence.entityCount * TEMPORAL_IQM_RECORD_SIZE );
 	if ( !upload ) { author->poisoned = qtrue; return qfalse; }

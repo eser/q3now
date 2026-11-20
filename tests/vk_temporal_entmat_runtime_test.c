@@ -49,7 +49,7 @@ void Ral_DestroyBuffer( ralBuffer_t *buffer ) {
 	if ( !b->adopted ) { free( b->bytes ); b->bytes = NULL; }
 }
 void Ral_FlushBuffer( ralBuffer_t *buffer, uint64_t offset, uint64_t size ) { (void)buffer; (void)offset; (void)size; }
-ralFence_t *Ral_BufferUploadAsync( ralBuffer_t *buffer, uint64_t offset,
+ralFence_t *Ral_BufferUploadBlocking( ralBuffer_t *buffer, uint64_t offset,
 		const void *data, uint64_t size ) {
 	struct ralBuffer_s *b = (struct ralBuffer_s *)buffer;
 	if ( !b || !data || !size || offset > b->size || size > b->size - offset )

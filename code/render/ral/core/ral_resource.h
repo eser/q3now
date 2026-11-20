@@ -70,11 +70,15 @@ ralResult_t Ral_BufferMapUnmap( ralBuffer_t *buf,
 ralResult_t Ral_BufferMapCancel( ralBuffer_t *buf,
 	                             const ralBufferMapTicket_t *pendingTicket );
 
-// Async upload — first-class in v1. Submits to the transfer queue (§10);
-// returns a fence the caller can wait on / poll. The renderer never writes
-// the staging-buffer / submit / fence dance itself.
-ralFence_t *Ral_BufferUploadAsync( ralBuffer_t *buf, uint64_t offset,
-                                   const void *data, uint64_t size );
+// Blocking upload. Builds a staging buffer, submits the copy to the transfer
+// queue (§10) and WAITS for it before returning, so the caller's thread
+// stalls until the GPU has drained everything queued ahead of the copy. The
+// returned fence is already signaled; the caller still owns and destroys it.
+// Never call this from a per-frame or per-draw path: use the ticketed
+// Ral_BufferUploadBegin path or a host-coherent buffer write instead. (This
+// was named Ral_BufferUploadAsync, which it never was.)
+ralFence_t *Ral_BufferUploadBlocking( ralBuffer_t *buf, uint64_t offset,
+                                      const void *data, uint64_t size );
 
 // Generation-bound buffer upload transaction. The caller owns fence and
 // readySemaphore and destroys them after completion/graphics acquire. A

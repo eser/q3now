@@ -1637,13 +1637,13 @@ void ralVk_RunAsyncTest( ralBackend_t *b ) {
 			RAL_VK_LOG( SEV_WARN, "  async buffer upload: malloc(%u) failed — skipping\n", BIG );
 		} else {
 		for ( i = 0; i < BIG; i++ ) data[i] = (byte)( i & 0xFF );
-		uf = Ral_BufferUploadAsync( buf, 0, data, BIG );
+		uf = Ral_BufferUploadBlocking( buf, 0, data, BIG );
 		if ( uf ) {
-			RAL_VK_LOG( SEV_INFO, "  Ral_BufferUploadAsync: 1 MiB on %s queue; fence signaled=%s (synchronous internal wait — async streaming is Phase 7.15)\n",
+			RAL_VK_LOG( SEV_INFO, "  Ral_BufferUploadBlocking: 1 MiB on %s queue; fence signaled=%s (synchronous internal wait — async streaming is Phase 7.15)\n",
 			        b->caps.asyncTransfer ? "transfer" : "graphics", Ral_FenceSignaled( uf ) ? "yes" : "no" );
 			Ral_WaitFence( uf, ~0ull );
 			Ral_DestroyFence( uf );
-		} else RAL_VK_LOG( SEV_WARN, "  Ral_BufferUploadAsync failed\n" );
+		} else RAL_VK_LOG( SEV_WARN, "  Ral_BufferUploadBlocking failed\n" );
 		free( data );
 		}
 	}
