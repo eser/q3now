@@ -17,7 +17,6 @@ struct ralFence_s { int id; };
 static struct ralBuffer_s buffers[32], adopted[16];
 static struct ralBindGroupLayout_s layouts[8];
 static struct ralBindGroup_s groups[32];
-static struct ralFence_s uploadFence;
 static ralBackend_t *lastBackend;
 static int creates, adopts, groupsCreated, layoutsCreated;
 static int bufferDestroys, groupDestroys, layoutDestroys;
@@ -49,19 +48,15 @@ void Ral_DestroyBuffer( ralBuffer_t *buffer ) {
 	if ( !b->adopted ) { free( b->bytes ); b->bytes = NULL; }
 }
 void Ral_FlushBuffer( ralBuffer_t *buffer, uint64_t offset, uint64_t size ) { (void)buffer; (void)offset; (void)size; }
-ralFence_t *Ral_BufferUploadBlocking( ralBuffer_t *buffer, uint64_t offset,
-		const void *data, uint64_t size ) {
+qboolean Ral_BufferWriteImmediate( ralBuffer_t *buffer, uint64_t offset,
+		const void *data, uint64_t size, ralBufferUploadReceipt_t *outReceipt ) {
 	struct ralBuffer_s *b = (struct ralBuffer_s *)buffer;
-	if ( !b || !data || !size || offset > b->size || size > b->size - offset )
-		return NULL;
+	if ( !b || !data || !size || !outReceipt || offset > b->size
+			|| size > b->size - offset ) return qfalse;
 	memcpy( b->bytes + offset, data, (size_t)size );
-	uploadFence.id++;
-	return &uploadFence;
+	memset( outReceipt, 0, sizeof( *outReceipt ) );
+	return qtrue;
 }
-void Ral_WaitFence( ralFence_t *fence, uint64_t timeoutNs ) {
-	(void)fence; (void)timeoutNs;
-}
-void Ral_DestroyFence( ralFence_t *fence ) { (void)fence; }
 ralBindGroupLayout_t *Ral_CreateBindGroupLayout( ralBackend_t *backend,
 		const ralBindGroupLayoutCreateInfo_t *ci ) {
 	int call = ++layoutsCreated; lastBackend = backend;

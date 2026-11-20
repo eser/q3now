@@ -83,15 +83,15 @@ void Ral_DestroyBuffer( ralBuffer_t *buffer ) {
 	}
 }
 
-ralFence_t *Ral_BufferUploadBlocking( ralBuffer_t *buffer, uint64_t offset,
-		const void *data, uint64_t size ) {
-	static struct ralFence_s fence = { 1 };
+qboolean Ral_BufferWriteImmediate( ralBuffer_t *buffer, uint64_t offset,
+		const void *data, uint64_t size, ralBufferUploadReceipt_t *outReceipt ) {
 	int call = ++uploadCalls;
-	if ( call == failUploadAt || !buffer || !data || !size
-			|| offset > buffer->size || size > buffer->size - offset ) return NULL;
+	if ( call == failUploadAt || !buffer || !data || !size || !outReceipt
+			|| offset > buffer->size || size > buffer->size - offset ) return qfalse;
 	memcpy( buffer->bytes + offset, data, (size_t)size );
+	memset( outReceipt, 0, sizeof( *outReceipt ) );
 	uploadOffset = offset; uploadSize = size;
-	return &fence;
+	return qtrue;
 }
 void Ral_WaitFence( ralFence_t *fence, uint64_t timeoutNs ) {
 	if ( fence && timeoutNs ) fenceWaits++;
@@ -188,7 +188,7 @@ int main( void ) {
 		&& capturedEntries[1].stageFlags == RAL_STAGE_VERTEX );
 	CHECK( bufferInfos[1].size == 4u * sizeof( temporalMotionGpuPayload_t )
 		&& bufferInfos[1].usage == ( RAL_BUFFER_STORAGE | RAL_BUFFER_TRANSFER_DST )
-		&& bufferInfos[1].memory == RAL_MEMORY_DEVICE_LOCAL );
+		&& bufferInfos[1].memory == RAL_MEMORY_HOST_COHERENT );
 	CHECK( groupValues[1][0].binding == 0
 		&& groupValues[1][0].buffer == &entityA
 		&& groupValues[1][0].type == RAL_BIND_STORAGE_BUFFER );
@@ -253,7 +253,7 @@ int main( void ) {
 	CHECK( out == 1 && memcmp( &matrices, &matrixBefore, sizeof( matrices ) ) == 0 );
 	CHECK( uploadCalls == 1 && uploadOffset == sizeof( temporalMotionGpuPayload_t )
 		&& uploadSize == sizeof( temporalMotionGpuPayload_t )
-		&& fenceWaits == 1 && fenceDestroys == 1 );
+		&& fenceWaits == 0 && fenceDestroys == 0 );
 	records = (temporalMotionGpuPayload_t *)owner.frames[0].cpuShadow;
 	CHECK( memcmp( records[1].currentMvp, matrices.currentMvp, 64 ) == 0
 		&& memcmp( records[1].previousMvp, matrices.previousMvp, 64 ) == 0

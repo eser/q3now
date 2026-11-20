@@ -2,7 +2,6 @@
 // SPDX-FileCopyrightText: 2026 Wired Engine contributors
 
 #include "tr_temporal_motion_payload.h"
-#include "../../../core/ral_sync.h"
 
 #include <math.h>
 #include <stdint.h>
@@ -120,7 +119,7 @@ qboolean R_TemporalMotionPayloadEnsure( temporalMotionPayloadOwner_t *owner,
 		memset( &bci, 0, sizeof( bci ) );
 		bci.size = bytes;
 		bci.usage = RAL_BUFFER_STORAGE | RAL_BUFFER_TRANSFER_DST;
-		bci.memory = RAL_MEMORY_DEVICE_LOCAL;
+		bci.memory = RAL_MEMORY_HOST_COHERENT;
 		bci.debugName = "wired-temporal-motion-payload";
 		candidateBuffer = Ral_CreateBuffer( backend, &bci );
 		if ( !candidateBuffer ) goto fail;
@@ -246,7 +245,7 @@ qboolean R_TemporalMotionPayloadAppendAt(
 	temporalMotionPayloadFrame_t *frame;
 	temporalMotionGpuPayload_t candidate;
 	uint64_t offset;
-	ralFence_t *upload;
+	ralBufferUploadReceipt_t writeReceipt;
 	if ( !owner || !owner->ready || !outSlot || frameIndex >= owner->frameCount )
 		return qfalse;
 	frame = &owner->frames[frameIndex];
@@ -273,11 +272,12 @@ qboolean R_TemporalMotionPayloadAppendAt(
 	candidate.outcome = (uint32_t)outcome;
 	offset = (uint64_t)absoluteEntMatSlot
 		* (uint64_t)sizeof( temporalMotionGpuPayload_t );
-	upload = Ral_BufferUploadBlocking( frame->buffer, offset,
-		&candidate, sizeof( candidate ) );
-	if ( !upload ) return qfalse;
-	Ral_WaitFence( upload, ~(uint64_t)0 );
-	Ral_DestroyFence( upload );
+	// One bounded host write into the host-coherent payload buffer. The caller
+	// reached this frame through the completed-fence seam, so the GPU is not
+	// reading it; a queue-submit then makes the write visible. No GPU round
+	// trip: this runs once per draw and must never wait on the device.
+	if ( !Ral_BufferWriteImmediate( frame->buffer, offset,
+			&candidate, sizeof( candidate ), &writeReceipt ) ) return qfalse;
 	memcpy( frame->cpuShadow + offset, &candidate, sizeof( candidate ) );
 	frame->lastSlot = absoluteEntMatSlot;
 	frame->hasAppends = qtrue;
