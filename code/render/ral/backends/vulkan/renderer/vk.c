@@ -18852,7 +18852,10 @@ void vk_lens_init( ralBackend_t *backend )
 		memset( &bci, 0, sizeof( bci ) );
 		bci.size = lensBytes;
 		bci.usage = RAL_BUFFER_STORAGE | RAL_BUFFER_TRANSFER_SRC | RAL_BUFFER_TRANSFER_DST;
-		bci.memory = RAL_MEMORY_DEVICE_LOCAL;
+		// Host coherent: vk_lens_dispatch writes the per-frame sources with
+		// Ral_BufferWriteImmediate instead of a staging upload that waits on the
+		// GPU. The buffer is about 19 KB, so GPU access cost is irrelevant.
+		bci.memory = RAL_MEMORY_HOST_COHERENT;
 		bci.debugName = "wired-lens-sources";
 		vk.ral_lens_sources[i] = Ral_CreateBuffer( backend, &bci );
 		if ( !vk.ral_lens_sources[i] ) { vk_lens_shutdown(); return; }
@@ -18946,7 +18949,9 @@ void vk_lens_dispatch( struct ralCommandBuffer_s *cb )
 	ralBufferTransition_t transition;
 	ralResourceTransitionBatch_t batch;
 	ralBufferCopy_t copy;
-	ralFence_t *upload;
+	ralBufferTransition_t sourceTransition;
+	ralResourceTransitionBatch_t sourceBatch;
+	ralBufferUploadReceipt_t writeReceipt;
 	float *shadow = (float *)vk.lensSourcesPtr;
 	uint32_t i;
 
@@ -18974,10 +18979,11 @@ void vk_lens_dispatch( struct ralCommandBuffer_s *cb )
 		for ( i = 0; i < LENS_TOTAL_SOURCES; ++i ) shadow[(size_t)i * 8u + 7u] = completed[(size_t)i * 8u + 7u];
 		if ( Ral_BufferMapUnmap( vk.ral_lens_readback[slot], &mapTicket ) != ralSuccess ) return;
 	}
-	upload = Ral_BufferUploadBlocking( vk.ral_lens_sources[slot], 0, shadow, lensBytes );
-	if ( !upload ) return;
-	Ral_WaitFence( upload, ~(uint64_t)0 );
-	Ral_DestroyFence( upload );
+	// One bounded host write; the slot's fence was waited above so the GPU is not
+	// reading this buffer, and queue submission publishes the write. No GPU round
+	// trip on the per-frame path.
+	if ( !Ral_BufferWriteImmediate( vk.ral_lens_sources[slot], 0, shadow, lensBytes,
+			&writeReceipt ) ) return;
 
 	push.viewport[0] = (float)glConfig.vidWidth;
 	push.viewport[1] = (float)glConfig.vidHeight;
@@ -18998,12 +19004,29 @@ void vk_lens_dispatch( struct ralCommandBuffer_s *cb )
 	if ( Ral_CmdTransitionResources( cb, &batch ) != ralSuccess ) return;
 
 	Ral_CmdBindBindGroup( cb, 0, vk.ral_lens_descriptor[slot] );
+	// The sources buffer carries the host write into the dispatch (HOST_WRITE to
+	// compute read/write) and then into the readback copy as COPY_SOURCE. Ending
+	// in COPY_SOURCE keeps the tracked state known, which the next frame's host
+	// write on this slot requires.
+	memset( &sourceTransition, 0, sizeof( sourceTransition ) );
+	sourceTransition.buffer = vk.ral_lens_sources[slot]; sourceTransition.size = lensBytes;
+	sourceTransition.before.usage = RAL_RESOURCE_USAGE_HOST_WRITE;
+	sourceTransition.after.usage = RAL_RESOURCE_USAGE_STORAGE_READ_WRITE;
+	sourceTransition.after.shaderStages = RAL_STAGE_COMPUTE;
+	sourceTransition.sourceQueue = sourceTransition.destinationQueue = RAL_QUEUE_GRAPHICS;
+	memset( &sourceBatch, 0, sizeof( sourceBatch ) );
+	sourceBatch.bufferTransitions = &sourceTransition; sourceBatch.bufferTransitionCount = 1u;
+	if ( Ral_CmdTransitionResources( cb, &sourceBatch ) != ralSuccess ) return;
+
 	Ral_CmdPushConstants( cb, RAL_STAGE_COMPUTE, 0, sizeof( push ), &push );
 	Ral_CmdDispatch( cb, ( (uint32_t)vk.lensSourceCount + 63u ) / 64u, 1, 1 );
 
 	// Copy GPU output into the slot-owned readback, then publish HOST_READ for
 	// the next fence-complete reuse of this command slot.
-	Ral_CmdPipelineBarrier( cb, RAL_BARRIER_COMPUTE_TO_TRANSFER );
+	sourceTransition.before = sourceTransition.after;
+	memset( &sourceTransition.after, 0, sizeof( sourceTransition.after ) );
+	sourceTransition.after.usage = RAL_RESOURCE_USAGE_COPY_SOURCE;
+	if ( Ral_CmdTransitionResources( cb, &sourceBatch ) != ralSuccess ) return;
 	memset( &copy, 0, sizeof( copy ) ); copy.size = lensBytes;
 	Ral_CmdCopyBuffer( cb, vk.ral_lens_sources[slot], vk.ral_lens_readback[slot], &copy );
 	transition.before = transition.after; transition.after.usage = RAL_RESOURCE_USAGE_HOST_READ;

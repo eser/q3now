@@ -220,7 +220,10 @@ endforeach()
 foreach(REQUIRED IN ITEMS
 	"ral_lens_sources[NUM_COMMAND_BUFFERS]"
 	"ral_lens_readback[NUM_COMMAND_BUFFERS]"
-	"Ral_BufferUploadBlocking( vk.ral_lens_sources[slot]"
+	"Ral_BufferWriteImmediate( vk.ral_lens_sources[slot], 0, shadow, lensBytes,"
+	"sourceTransition.before.usage = RAL_RESOURCE_USAGE_HOST_WRITE;"
+	"sourceTransition.after.usage = RAL_RESOURCE_USAGE_STORAGE_READ_WRITE;"
+	"sourceTransition.after.usage = RAL_RESOURCE_USAGE_COPY_SOURCE;"
 	"Ral_BufferMapBegin( vk.ral_lens_readback[slot]"
 	"Ral_CmdCopyBuffer( cb, vk.ral_lens_sources[slot], vk.ral_lens_readback[slot]"
 	"transition.after.usage = RAL_RESOURCE_USAGE_HOST_READ")
@@ -231,6 +234,18 @@ foreach(REQUIRED IN ITEMS
 	endif()
 	if(POSITION EQUAL -1)
 		message(FATAL_ERROR "WebGPU-valid lens split/readback migration lost seam: ${REQUIRED}")
+	endif()
+endforeach()
+
+# vk_lens_dispatch runs every frame. A staging upload plus fence wait there
+# stalled the main thread for the whole queue depth, so the per-frame source
+# write must stay a bounded host write.
+foreach(FORBIDDEN IN ITEMS
+	"Ral_BufferUploadBlocking( vk.ral_lens_sources"
+	"Ral_BufferUploadAsync( vk.ral_lens_sources")
+	string(FIND "${PRODUCT_VK}" "${FORBIDDEN}" POSITION)
+	if(NOT POSITION EQUAL -1)
+		message(FATAL_ERROR "per-frame lens source write regressed to a blocking GPU upload: ${FORBIDDEN}")
 	endif()
 endforeach()
 
