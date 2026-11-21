@@ -258,6 +258,9 @@ static renderSubmissionState_t	 s_frontendSubmission;
 static const mapFile_t			*s_frontendLoadedWorld;
 static const mapFile_t             *s_frontendLoadedWorlds[MAX_RENDER_WORLDS];
 static int                          s_frontendActiveWorldIndex = -1;
+/* Per world slot and material index: the cooked material came from a PBR or glTF
+ * source rather than a classic Q3 shader. Filled with the factor publication. */
+static uint8_t s_frontendPbrAuthored[MAX_RENDER_WORLDS][RENDER_SUBMISSION_MAX_MATERIALS];
 static renderMaterialScriptCatalog_t s_frontendMaterialScripts;
 static renderMaterialRuntimeOwner_t s_frontendMaterialRuntimeOwner;
 static renderLightingSidecarReceipt_t s_frontendLightingSidecar;
@@ -3873,6 +3876,7 @@ static void FrontendSyncLegacyWorldMaterialState( void )
 		Vector4Set( legacy->materialBaseColor, 1.0f, 1.0f, 1.0f, 1.0f );
 		Vector4Set( legacy->materialFactors, -1.0f, 1.0f, 1.0f, 1.0f );
 		legacy->materialFactorsReady = qfalse;
+		legacy->materialPbrAuthored = qfalse;
 		if ( batch->baseMaterial <= 0 ) continue;
 		material = RenderSubmission_MaterialSnapshotView( &s_frontendSubmission,
 			batch->baseMaterial );
@@ -3891,6 +3895,14 @@ static void FrontendSyncLegacyWorldMaterialState( void )
 				material->factors.factors.occlusionStrength;
 			legacy->materialFactors[3] = 1.0f;
 			legacy->materialFactorsReady = qtrue;
+			if ( s_frontendActiveWorldIndex >= 0 ) {
+				uint32_t materialIndex;
+				if ( RenderSubmission_MaterialIndex( &s_frontendSubmission,
+						batch->baseMaterial, &materialIndex ) )
+					legacy->materialPbrAuthored =
+						s_frontendPbrAuthored[s_frontendActiveWorldIndex][materialIndex]
+						? qtrue : qfalse;
+			}
 		}
 	}
 }
@@ -4015,11 +4027,21 @@ static qboolean FrontendSelectWorld( int worldIndex )
 			return qtrue;
 		}
 		published->valid = qfalse;
+		memset( s_frontendPbrAuthored[worldIndex], 0,
+			sizeof( s_frontendPbrAuthored[worldIndex] ) );
 		for ( uint32_t entry = 0u; entry < catalog->entryCount; ++entry ) {
 			qhandle_t handle = RenderSubmission_MaterialHandle(
 				&s_frontendSubmission, catalog->entries[entry].semanticName );
 			if ( handle <= 0 || count >= RENDER_SUBMISSION_MAX_MATERIALS )
 				return qfalse;
+			{
+				uint32_t materialIndex;
+				if ( catalog->entries[entry].plan.material.material.source
+						!= RAL_MATERIAL_SOURCE_Q3
+						&& RenderSubmission_MaterialIndex( &s_frontendSubmission,
+							handle, &materialIndex ) )
+					s_frontendPbrAuthored[worldIndex][materialIndex] = 1u;
+			}
 			entries[count].material = handle;
 			entries[count++].factors =
 				catalog->entries[entry].plan.material.material.factors;

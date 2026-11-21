@@ -1114,17 +1114,20 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 
 #if FEAT_PBR
 		// Base-pass IBL ambient swap. For a WORLDSPAWN lightmap-modulate surface
-		// carrying a pbrMap under r_pbr, route the draw through the USE_IBL gen
+		// carrying a pbrMap, or a cooked material authored as PBR (Lua or glTF
+		// source, factors only), under r_pbr, route the draw through the USE_IBL gen
 		// variant: it adds the light-independent analytic-sky environment ambient
 		// (the probe cubes + split-sum LUT on set 2) on top of the baked lightmap.
 		// Mirrors the sun-shadow swap idiom directly below. Tightly gated so the
-		// hot base pass is byte-identical on every non-pbrMap / r_pbr-0 / entity
-		// surface. Entities are excluded (worldspawn-only — they keep the
+		// hot base pass is byte-identical on every classic Q3 material (which all
+		// carry default factors, so the factors flag alone must not admit them), on
+		// r_pbr 0 and on entity surfaces. Entities are excluded (worldspawn-only — they keep the
 		// lightgrid path); the IBL needs the world normal, so TESS_NNN is OR'd in.
 		if ( r_pbr->integer && vk.atm.skyRadianceConsumer.ready
 			 && vk.probeCurrentProductValid
 			 && ( pStage->bundle[3].image[0] != NULL
-				|| tess.shader->materialFactorsReady )
+				|| ( tess.shader->materialFactorsReady
+					&& tess.shader->materialPbrAuthored ) )
 		     && backEnd.currentEntity == &tr.worldEntity ) {
 			Vk_Pipeline_Def idef;
 			Vk_Shader_Type  ibase;

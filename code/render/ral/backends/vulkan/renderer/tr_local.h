@@ -491,6 +491,10 @@ typedef struct shader_s {
 	vec4_t		materialBaseColor;
 	vec4_t		materialFactors;
 	qboolean	materialFactorsReady;
+	// The cooked material was authored as PBR (Lua or glTF source), not synthesised
+	// from a classic Q3 shader. Only these take the base-pass IBL factors-only route;
+	// every classic Q3 material also has materialFactorsReady with default factors.
+	qboolean	materialPbrAuthored;
 
 	cullType_t	cullType;				// CT_FRONT_SIDED, CT_BACK_SIDED, or CT_TWO_SIDED
 	qboolean	polygonOffset;			// set for decals and other items that must be offset
