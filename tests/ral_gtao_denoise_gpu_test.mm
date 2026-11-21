@@ -115,7 +115,7 @@ int main(int argc, const char **argv) {
 			++checked;
 		}
 	}
-	printf("canonical GTAO denoise GPU: 24 cases, %u pixels, worst error %.8f PASS\n", checked, worst);
+	printf("canonical AO denoise GPU: 24 cases, %u pixels, worst error %.8f PASS\n", checked, worst);
  }
 	return 0;
 }

@@ -182,21 +182,21 @@ cvar_t *r_depthFadeScale;
 #if FEAT_PARALLAX_MAPPING
 cvar_t *r_parallaxMapping;
 #endif
-#if FEAT_SSAO
-cvar_t *r_ssao;
-cvar_t *r_ssaoRadius;
+#if FEAT_AO
+cvar_t *r_ao;
+cvar_t *r_aoRadius;
 cvar_t	*r_atmosphereAerialHaze;
 cvar_t	*r_skyPhysicalBlend; // physical sky relight strength of the authored composition (TASK-239, user-approved 0.6 on 2026-09-13)
 cvar_t	*r_vkSplitPresent;
-cvar_t *r_ssaoQuality;
-cvar_t *r_ssaoIntensity;
+cvar_t *r_aoQuality;
+cvar_t *r_aoIntensity;
 cvar_t *r_showAO;
-// SSCS (directional screen-space contact shadow) — folded into the GTAO pass,
+// SSCS (directional screen-space contact shadow) — folded into the AO pass,
 // gated on r_shadows (cast) + a real map sun. Tuning only; the on/off is r_shadows.
 cvar_t *r_sscsRadius;
 cvar_t *r_sscsStrength;
 #endif
-cvar_t *r_asyncCompute;		  // async-compute: GTAO on the dedicated compute queue
+cvar_t *r_asyncCompute;		  // async-compute: AO on the dedicated compute queue
 cvar_t *r_asyncTextureUpload; // async-transfer: pipeline texture uploads on the dedicated transfer queue
 #if FEAT_TONEMAP
 cvar_t *r_tonemap;
@@ -220,6 +220,7 @@ cvar_t *r_drawSunRays;
 cvar_t *r_sunRayIntensity;
 cvar_t *r_sunRayDecay;
 #endif
+cvar_t *r_aa;
 cvar_t *r_smaa;
 cvar_t *r_smaa_threshold;
 cvar_t *r_lerpLightstyles;
@@ -1648,6 +1649,59 @@ qboolean R_ShadowDlightActive( void )
 
 /*
 ===============
+R_AntialiasingPlan
+
+Resolves r_aa / r_smaa / r_temporalInputTest / the entity-matrix path into one
+plan (tr_antialiasing.c).  Called per frame from the SMAA gate and per primary
+view from the temporal prepare, so it only reads four cached cvar values.
+Reports a refused TAA mode once per transition, not once per frame.
+===============
+*/
+void R_AntialiasingPlan( rAntialiasingPlan_t *outPlan )
+{
+	static int s_lastRefused = 0;
+	rAntialiasingInput_t input;
+	rAntialiasingPlan_t plan;
+
+	input.mode = r_aa ? r_aa->integer : R_AA_MODE_OFF;
+	input.smaaPreset = r_smaa ? r_smaa->integer : 0;
+	input.temporalDiagnostic = r_temporalInputTest && r_temporalInputTest->integer ? 1 : 0;
+#ifdef USE_VULKAN
+	input.entityMatrixPath = vk_entmat_active() ? 1 : 0;
+#else
+	input.entityMatrixPath = 0;
+#endif
+	R_AntialiasingResolve( &input, &plan );
+
+	if ( plan.temporalRefused != s_lastRefused ) {
+		s_lastRefused = plan.temporalRefused;
+		if ( plan.temporalRefused ) {
+			R_LOG( rch_init, SEV_WARN,
+				"r_aa 2 (TAA) is not available: it needs the entity-matrix path. "
+				"Set r_entitySSBO 1 and run vid_restart; temporal anti-aliasing stays off.\n" );
+		}
+	}
+	if ( outPlan ) {
+		*outPlan = plan;
+	}
+}
+
+int R_AntialiasingSmaaQuality( void )
+{
+	rAntialiasingPlan_t plan;
+	R_AntialiasingPlan( &plan );
+	return plan.smaaQuality;
+}
+
+int R_AntialiasingTemporalRequested( void )
+{
+	rAntialiasingPlan_t plan;
+	R_AntialiasingPlan( &plan );
+	return plan.temporalRequested;
+}
+
+/*
+===============
 R_Register
 ===============
 */
@@ -2106,10 +2160,12 @@ static void R_Register( void )
 	r_temporalInputTest = ri.Cvar_Get( "r_temporalInputTest", "0", CVAR_CHEAT );
 	ri.Cvar_CheckRange( r_temporalInputTest, "0", "2", CV_INTEGER );
 	ri.Cvar_SetDescription( r_temporalInputTest,
-							"Default-off Phase 7.10 projection-jitter diagnostic. This is not a TAA resolve.\n"
-							" 0: canonical unjittered renderer path (default)\n"
-							" 1: primary world views consume the backend-neutral temporal sequence\n"
+							"Developer diagnostic that forces the temporal (TAA) path on regardless of r_aa.\n"
+							"Players should use r_aa 2 instead.\n"
+							" 0: temporal path follows r_aa (default)\n"
+							" 1: primary world views run the temporal path (jitter, history and resolve)\n"
 							" 2: same temporal path, but force-defer ATEST draws as a measurement baseline\n"
+							"Needs r_entitySSBO 1; with it off the path reports enabled but commits nothing.\n"
 							"Use `ral_dump live temporal` for the latest committed receipt." );
 	r_vkDebugTiming = ri.Cvar_Get( "r_vkDebugTiming", "0", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_vkDebugTiming, "Print Vulkan host-side timing averages every 200 frames.\n 0: off\n 1: "
@@ -2512,15 +2568,15 @@ static void R_Register( void )
 											   " Height data from normalmap alpha channel." );
 #endif
 
-#if FEAT_SSAO
-	// Default 1 — GTAO is on by default. Still toggleable: CVAR_ARCHIVE|LATCH means
-	// a player can set \r_ssao 0 (applies on vid_restart).
-	r_ssao = ri.Cvar_Get( "r_ssao", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
-	ri.Cvar_CheckRange( r_ssao, "0", "1", CV_INTEGER );
-	ri.Cvar_SetDescription( r_ssao, "Ground-truth ambient occlusion (GTAO).\n"
+#if FEAT_AO
+	// Default 1 — AO is on by default. Still toggleable: CVAR_ARCHIVE|LATCH means
+	// a player can set \r_ao 0 (applies on vid_restart).
+	r_ao = ri.Cvar_Get( "r_ao", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
+	ri.Cvar_CheckRange( r_ao, "0", "1", CV_INTEGER );
+	ri.Cvar_SetDescription( r_ao, "Ambient occlusion (XeGTAO).\n"
 									" Requires \\r_fbo 1. Default on; set 0 to disable." );
-	// Live-tunable GTAO knobs (no vid_restart — read each frame by the dispatch).
-	r_ssaoRadius = ri.Cvar_Get( "r_ssaoRadius", "12", CVAR_ARCHIVE );
+	// Live-tunable AO knobs (no vid_restart — read each frame by the dispatch).
+	r_aoRadius = ri.Cvar_Get( "r_aoRadius", "12", CVAR_ARCHIVE );
 	// Aerial-perspective haze for the analytic media composite (TASK-239, user-approved 2026-09-12 at weight 1.0); 0 = legacy flat media colour.
 	r_atmosphereAerialHaze = ri.Cvar_Get( "r_atmosphereAerialHaze", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_SetDescription( r_atmosphereAerialHaze, "0..1: tint analytic haze in-scatter by directional sky radiance and a forward sun phase; 0 = flat media colour." );
@@ -2532,21 +2588,21 @@ static void R_Register( void )
 	ri.Cvar_CheckRange( r_vkSplitPresent, "0", "2", CV_INTEGER );
 	ri.Cvar_SetDescription( r_vkSplitPresent, "Vulkan split-present: 0 off, 1 scene submitted before the swapchain acquire with the shared slot fence (default), 2 reserved for the separate present fence (currently behaves as 1)." );
 	ri.Cvar_SetDescription( r_vkSplitPresent, "1: submit the offscreen scene without waiting on the swapchain image; only the present blit waits (Vulkan)." );
-	ri.Cvar_CheckRange( r_ssaoRadius, "1", "512", CV_FLOAT );
-	ri.Cvar_SetDescription( r_ssaoRadius, "GTAO world-space sample radius (units)." );
-	r_ssaoQuality = ri.Cvar_Get( "r_ssaoQuality", "2", CVAR_ARCHIVE );
-	ri.Cvar_CheckRange( r_ssaoQuality, "0", "3", CV_INTEGER );
-	ri.Cvar_SetDescription( r_ssaoQuality, "GTAO quality tier: 0 low, 1 medium, 2 high, 3 ultra (slices/steps)." );
-	r_ssaoIntensity = ri.Cvar_Get( "r_ssaoIntensity", "1", CVAR_ARCHIVE );
-	ri.Cvar_CheckRange( r_ssaoIntensity, "0", "1", CV_FLOAT );
-	ri.Cvar_SetDescription( r_ssaoIntensity, "GTAO strength: 0 off (no darkening), 1 full." );
+	ri.Cvar_CheckRange( r_aoRadius, "1", "512", CV_FLOAT );
+	ri.Cvar_SetDescription( r_aoRadius, "XeGTAO world-space sample radius (units)." );
+	r_aoQuality = ri.Cvar_Get( "r_aoQuality", "2", CVAR_ARCHIVE );
+	ri.Cvar_CheckRange( r_aoQuality, "0", "3", CV_INTEGER );
+	ri.Cvar_SetDescription( r_aoQuality, "XeGTAO quality tier: 0 low, 1 medium, 2 high, 3 ultra (slices/steps)." );
+	r_aoIntensity = ri.Cvar_Get( "r_aoIntensity", "1", CVAR_ARCHIVE );
+	ri.Cvar_CheckRange( r_aoIntensity, "0", "1", CV_FLOAT );
+	ri.Cvar_SetDescription( r_aoIntensity, "XeGTAO strength: 0 off (no darkening), 1 full." );
 	// SSCS directional contact-shadow tuning (the on/off is r_shadows ≥ cast +
 	// a real map sun; these only shape it). Live-tunable, read each frame.
 	r_sscsRadius = ri.Cvar_Get( "r_sscsRadius", "6", CVAR_ARCHIVE );
 	ri.Cvar_CheckRange( r_sscsRadius, "0", "64", CV_FLOAT );
 	ri.Cvar_SetDescription( r_sscsRadius,
 							"Directional contact-shadow (SSCS) march length in world units — the fine model-on-ground "
-							"contact scale toward the sun. Folded into GTAO; active only when \\r_shadows casts and "
+							"contact scale toward the sun. Folded into XeGTAO; active only when \\r_shadows casts and "
 							"the map has a real sun. 0 disables the contact fold." );
 	r_sscsStrength = ri.Cvar_Get( "r_sscsStrength", "0.6", CVAR_ARCHIVE );
 	ri.Cvar_CheckRange( r_sscsStrength, "0", "1", CV_FLOAT );
@@ -2554,27 +2610,27 @@ static void R_Register( void )
 											"hits a near occluder. 0 off, 1 fully dark." );
 	// Debug-visibility view (NOT a developer cvar): output the denoised AO buffer as
 	// grayscale instead of compositing it, so the visual gate can capture + assert the
-	// AO field directly. Default 0 (normal composite). LATCH (baked into the SSAO
+	// AO field directly. Default 0 (normal composite). LATCH (baked into the AO
 	// tonemap variant spec const). Registered whenever the current build enables
-	// FEAT_SSAO (the product default; USE_SSAO=OFF is the explicit permutation).
+	// FEAT_AO (the product default; USE_AO=OFF is the explicit permutation).
 	r_showAO = ri.Cvar_Get( "r_showAO", "0", CVAR_CHEAT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_showAO, "0", "1", CV_INTEGER );
-	ri.Cvar_SetDescription( r_showAO, "Debug: show the GTAO AO buffer grayscale (visual-gate isolation view)." );
+	ri.Cvar_SetDescription( r_showAO, "Debug: show the XeAO buffer grayscale (visual-gate isolation view)." );
 #endif
 
-	// Async-compute: DEFAULT 1 now that GTAO is default-on. When the device exposes a
-	// dedicated compute queue family, GTAO runs on RAL_QUEUE_COMPUTE reading the
+	// Async-compute: DEFAULT 1 now that AO is default-on. When the device exposes a
+	// dedicated compute queue family, AO runs on RAL_QUEUE_COMPUTE reading the
 	// previous frame's depth snapshot (1-frame-lag), overlapping the
 	// frame's graphics (+24% measured). When the queue aliases graphics (WebGPU/
 	// MoltenVK/no-dedicated-family), vk_gtao_async_begin returns early on
-	// !caps->asyncCompute → the serial graphics-queue GTAO runs instead, BYTE-IDENTICAL
+	// !caps->asyncCompute → the serial graphics-queue AO runs instead, BYTE-IDENTICAL
 	// (verified). So default-on is safe on every HW: dedicated-queue GPUs get the
 	// overlap, single-queue GPUs get the identical serial result. LATCH: the per-frame
 	// compute command buffers + semaphores are allocated at init. Set 0 to force serial.
 	r_asyncCompute = ri.Cvar_Get( "r_asyncCompute", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_asyncCompute, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( r_asyncCompute,
-							"Run eligible compute (GTAO) on the dedicated async-compute queue,\n"
+							"Run eligible compute (XeGTAO) on the dedicated async-compute queue,\n"
 							" overlapping graphics. Default on; falls back to serial (byte-identical) on\n"
 							" GPUs without a separate compute queue. Set 0 to force serial." );
 
@@ -2753,7 +2809,7 @@ static void R_Register( void )
 	// (vk_find_pipeline_ext) naturally selects PBR vs non-PBR variants
 	// per draw based on the live r_pbr value, so no rebuild is
 	// triggered, just a different cached pipeline gets bound.
-	r_pbr = ri.Cvar_Get( "r_pbr", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	r_pbr = ri.Cvar_Get( "r_pbr", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_pbr, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( r_pbr, "Physically based rendering on surfaces with pbrMap textures.\n"
 								   " pbrMap follows glTF 2.0 ORM packing:\n"
@@ -2885,13 +2941,15 @@ static void R_Register( void )
 	// pixels — this is the portable-binding surface (a clone of the shadow depth
 	// pass), not a draw-count or speed change. Latched: the shader read site is
 	// selected at pipeline build, so the value cannot change mid-frame.
-	r_entitySSBO = ri.Cvar_Get( "r_entitySSBO", "0", CVAR_ARCHIVE | CVAR_LATCH | CVAR_NODEFAULT );
-	ri.Cvar_CheckRange( ri.Cvar_Get( "r_entitySSBO", "0", 0 ), "0", "1", CV_INTEGER );
-	ri.Cvar_SetDescription( ri.Cvar_Get( "r_entitySSBO", "0", 0 ),
+	// Default 1 (2026-11-20): TAA (r_aa 2) needs this path, and paired A/B runs
+	// (8 rounds, default vs 1) showed no measurable CPU/GPU cost from it.
+	r_entitySSBO = ri.Cvar_Get( "r_entitySSBO", "1", CVAR_ARCHIVE | CVAR_LATCH | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( ri.Cvar_Get( "r_entitySSBO", "1", 0 ), "0", "1", CV_INTEGER );
+	ri.Cvar_SetDescription( ri.Cvar_Get( "r_entitySSBO", "1", 0 ),
 							"Deliver per-entity matrices via a frame-wide storage buffer indexed by\n"
-							" instance, instead of the per-draw uniform ring. Render-identical; a\n"
-							" portable-binding surface. Latched: takes effect on vid_restart." );
-	ri.Cvar_SetGroup( ri.Cvar_Get( "r_entitySSBO", "0", 0 ), CVG_RENDERER );
+							" instance, instead of the per-draw uniform ring. Render-identical.\n"
+							" Required by TAA (r_aa 2). Latched: takes effect on vid_restart." );
+	ri.Cvar_SetGroup( ri.Cvar_Get( "r_entitySSBO", "1", 0 ), CVG_RENDERER );
 	ri.Cvar_Get( "r_shadowPCF", "5", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( ri.Cvar_Get( "r_shadowPCF", "5", 0 ), "1", "9", CV_INTEGER );
 	ri.Cvar_Get( "r_shadowMapSize", "2048", CVAR_ARCHIVE | CVAR_NODEFAULT );
@@ -2946,7 +3004,7 @@ static void R_Register( void )
 #if FEAT_SUNRAYS
 	// Live-toggle (no latch): a change is picked up by the CVG_RENDERER group, which
 	// rebuilds the tonemap variant pipeline (vk_update_post_process_pipelines). When a
-	// depth-fade consumer (r_ssao) is already on, depthFade is already set up so only the
+	// depth-fade consumer (r_ao) is already on, depthFade is already set up so only the
 	// variant swaps; when sun-rays are the sole consumer, vk_tonemap requests a deferred
 	// depth-fade rebuild at the next safe frame boundary.
 	r_drawSunRays = ri.Cvar_Get( "r_drawSunRays", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
@@ -3002,6 +3060,24 @@ static void R_Register( void )
 									"the HUD stays sharp. Requires r_fbo 1. Live: takes effect on next\n"
 									"frame via the renderer post-process pipeline group." );
 	ri.Cvar_SetGroup( r_smaa, CVG_RENDERER );
+
+	// r_aa — the user-facing anti-aliasing technique. Default 0 keeps the
+	// behaviour that existed before this cvar: r_smaa and the
+	// r_temporalInputTest diagnostic stay developer overrides. The decision
+	// logic lives in tr_antialiasing.c; every SMAA / temporal enable check
+	// reads R_AntialiasingPlan() rather than these cvars. In CVG_RENDERER so a
+	// change re-runs vk_update_post_process_pipelines like r_smaa does.
+	r_aa = ri.Cvar_Get( "r_aa", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( r_aa, "0", "2", CV_INTEGER );
+	ri.Cvar_SetDescription( r_aa, "Anti-aliasing technique:\n"
+								  " 0 - off (default). r_smaa, if set, still applies as a developer override\n"
+								  " 1 - SMAA, using the r_smaa preset, or preset 3 (high) when r_smaa is 0\n"
+								  " 2 - TAA (temporal). Needs r_entitySSBO 1 (the default; latched: set it, then\n"
+								  "     vid_restart); without it TAA is refused with a log message and stays off.\n"
+								  "     SMAA is off while TAA is active.\n"
+								  "Requires r_fbo 1. Vulkan renderer only. Live: takes effect on next frame via the\n"
+								  "renderer post-process pipeline group." );
+	ri.Cvar_SetGroup( r_aa, CVG_RENDERER );
 
 	// r_smaa_threshold — Overrides the quality preset
 	// edge threshold when > 0; default 0 means "use r_smaa preset".
@@ -3788,7 +3864,7 @@ static void FrontendSyncLegacyWorldMaterialState( void )
 	if ( !tr.world || !world->ready || !world->batches ) return;
 	for ( uint32_t i = 0u; i < world->batchCount; ++i ) {
 		const renderWorldBatch_t *batch = &world->batches[i];
-		renderMaterialSnapshot_t material;
+		const renderMaterialSnapshot_t *material;
 		shader_t *legacy;
 		if ( batch->sourceSurfaceIndex >= (uint32_t)tr.world->numsurfaces ) continue;
 		legacy = tr.world->surfaces[batch->sourceSurfaceIndex].shader;
@@ -3797,21 +3873,22 @@ static void FrontendSyncLegacyWorldMaterialState( void )
 		Vector4Set( legacy->materialBaseColor, 1.0f, 1.0f, 1.0f, 1.0f );
 		Vector4Set( legacy->materialFactors, -1.0f, 1.0f, 1.0f, 1.0f );
 		legacy->materialFactorsReady = qfalse;
-		if ( batch->baseMaterial <= 0
-				|| !RenderSubmission_MaterialSnapshot( &s_frontendSubmission,
-					batch->baseMaterial, &material ) ) continue;
-		if ( material.lighting.ready == qtrue )
+		if ( batch->baseMaterial <= 0 ) continue;
+		material = RenderSubmission_MaterialSnapshotView( &s_frontendSubmission,
+			batch->baseMaterial );
+		if ( !material ) continue;
+		if ( material->lighting.ready == qtrue )
 			for ( uint32_t channel = 0u; channel < 3u; ++channel )
 				legacy->emissionRadiance[channel] =
-					(float)material.lighting.emissionRadianceQ16[channel]
+					(float)material->lighting.emissionRadianceQ16[channel]
 					/ (float)RENDER_MATERIAL_LIGHTING_Q16_ONE;
-		if ( material.factors.ready == qtrue ) {
-			Vector4Copy( material.factors.factors.baseColor,
+		if ( material->factors.ready == qtrue ) {
+			Vector4Copy( material->factors.factors.baseColor,
 				legacy->materialBaseColor );
-			legacy->materialFactors[0] = material.factors.factors.metallic;
-			legacy->materialFactors[1] = material.factors.factors.roughness;
+			legacy->materialFactors[0] = material->factors.factors.metallic;
+			legacy->materialFactors[1] = material->factors.factors.roughness;
 			legacy->materialFactors[2] =
-				material.factors.factors.occlusionStrength;
+				material->factors.factors.occlusionStrength;
 			legacy->materialFactors[3] = 1.0f;
 			legacy->materialFactorsReady = qtrue;
 		}
@@ -3893,6 +3970,22 @@ static void FrontendLoadWorld( const mapFile_t *bsp, int worldIndex )
 	}
 }
 
+/* The factor publication below is idempotent: it writes nothing and advances no
+ * generation unless a factor changed. Re-running it every frame for an unchanged
+ * catalog only repeats a name lookup per entry, so remember what the last
+ * successful publication saw, per world slot, and skip it while every input is
+ * the same. Any registration or publication that touches the material catalog
+ * moves materialCount or nextMaterialGeneration and therefore re-publishes. */
+typedef struct {
+	const renderMaterialRuntimeCatalog_t *catalog;
+	uint64_t runtimeGeneration;
+	uint32_t entryCount;
+	uint32_t materialCount;
+	uint64_t nextMaterialGeneration;
+	qboolean valid;
+} frontendFactorPublishKey_t;
+static frontendFactorPublishKey_t s_frontendFactorPublished[MAX_RENDER_WORLDS];
+
 static qboolean FrontendSelectWorld( int worldIndex )
 {
 	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS
@@ -3908,7 +4001,20 @@ static qboolean FrontendSelectWorld( int worldIndex )
 		renderMaterialFactorPublicationEntry_t entries[
 			RENDER_SUBMISSION_MAX_MATERIALS];
 		uint32_t count = 0u;
+		frontendFactorPublishKey_t *published =
+			&s_frontendFactorPublished[worldIndex];
 		if ( !catalog ) return qfalse;
+		if ( published->valid && published->catalog == catalog
+				&& published->runtimeGeneration == catalog->runtimeGeneration
+				&& published->entryCount == catalog->entryCount
+				&& published->materialCount == s_frontendSubmission.materialCount
+				&& published->nextMaterialGeneration
+					== s_frontendSubmission.nextMaterialGeneration ) {
+			s_frontendLoadedWorld = s_frontendLoadedWorlds[worldIndex];
+			s_frontendActiveWorldIndex = worldIndex;
+			return qtrue;
+		}
+		published->valid = qfalse;
 		for ( uint32_t entry = 0u; entry < catalog->entryCount; ++entry ) {
 			qhandle_t handle = RenderSubmission_MaterialHandle(
 				&s_frontendSubmission, catalog->entries[entry].semanticName );
@@ -3920,6 +4026,13 @@ static qboolean FrontendSelectWorld( int worldIndex )
 		}
 		if ( !RenderSubmission_PublishMaterialFactors( &s_frontendSubmission,
 				catalog->runtimeGeneration, entries, count ) ) return qfalse;
+		published->catalog = catalog;
+		published->runtimeGeneration = catalog->runtimeGeneration;
+		published->entryCount = catalog->entryCount;
+		published->materialCount = s_frontendSubmission.materialCount;
+		published->nextMaterialGeneration =
+			s_frontendSubmission.nextMaterialGeneration;
+		published->valid = qtrue;
 	}
 	#endif
 	s_frontendLoadedWorld = s_frontendLoadedWorlds[worldIndex];

@@ -118,6 +118,7 @@ uint64_t R_TemporalProjectionPrepare( viewParms_t *view ) {
 	ralTemporalState_t *state;
 	uint64_t frameId;
 	int worldIndex;
+	int temporalRequested;
 
 	if ( !view || !( tr.refdef.rdflags & RDF_TEMPORAL_PRIMARY )
 			|| view->portalView != PV_NONE
@@ -133,8 +134,8 @@ uint64_t R_TemporalProjectionPrepare( viewParms_t *view ) {
 		return 0;
 	}
 	state = &s_temporalStates[ worldIndex ];
-	if ( ( !r_temporalInputTest || !r_temporalInputTest->integer )
-			&& !state->active ) {
+	temporalRequested = R_AntialiasingTemporalRequested();
+	if ( !temporalRequested && !state->active ) {
 		return 0;
 	}
 
@@ -150,7 +151,7 @@ uint64_t R_TemporalProjectionPrepare( viewParms_t *view ) {
 	input.height = (uint32_t)view->viewportHeight;
 	input.viewId = (uint32_t)worldIndex + 1u;
 	input.topologyEpoch = s_temporalTopologyEpochs[ worldIndex ];
-	input.enabled = (uint8_t)( r_temporalInputTest && r_temporalInputTest->integer );
+	input.enabled = (uint8_t)( temporalRequested ? 1 : 0 );
 	input.cameraCut = (uint8_t)s_temporalCameraCutPending[worldIndex];
 	if ( !Ral_TemporalBeginFrame( state, &input, &plan ) ) {
 		return 0;

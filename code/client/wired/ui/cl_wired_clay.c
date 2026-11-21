@@ -766,10 +766,43 @@ static qboolean wui_layer_active( wuiLayer_t layer )
  * holds). */
 static int wui_emit_anon_counter = 0;
 
+/* Bounded appenders for wui_clay_id_for_item: write at path[len], keep a NUL
+ * terminator, return the new length. */
+static size_t wui_path_put( char *path, size_t cap, size_t len, const char *text )
+{
+	while ( *text && len + 1 < cap ) path[ len++ ] = *text++;
+	path[ len ] = '\0';
+	return len;
+}
+
+static size_t wui_path_put_hex( char *path, size_t cap, size_t len, uintptr_t value )
+{
+	char   digits[ 2 * sizeof( uintptr_t ) + 1 ];
+	size_t n = 0;
+	do { digits[ n++ ] = "0123456789abcdef"[ value & 0xfu ]; value >>= 4; } while ( value );
+	len = wui_path_put( path, cap, len, "0x" );
+	while ( n && len + 1 < cap ) path[ len++ ] = digits[ --n ];
+	path[ len ] = '\0';
+	return len;
+}
+
+static size_t wui_path_put_dec( char *path, size_t cap, size_t len, int value )
+{
+	char         digits[ 12 ];
+	size_t       n = 0;
+	unsigned int u = value < 0 ? 0u - (unsigned int) value : (unsigned int) value;
+	do { digits[ n++ ] = (char)( '0' + u % 10u ); u /= 10u; } while ( u );
+	if ( value < 0 && len + 1 < cap ) path[ len++ ] = '-';
+	while ( n && len + 1 < cap ) path[ len++ ] = digits[ --n ];
+	path[ len ] = '\0';
+	return len;
+}
+
 static uint32_t wui_clay_id_for_item( const wiredMenuDef_t *panel,
                                        const wiredItemDef_t *item )
 {
 	char        path[ 196 ];
+	size_t      len;
 	Clay_String s;
 
 	if ( !panel || !item ) return 0;
@@ -781,15 +814,23 @@ static uint32_t wui_clay_id_for_item( const wiredMenuDef_t *panel,
 	 * "element with this ID was already previously declared" check every
 	 * frame. wiredItemDef_t pointers are arena-allocated at parse time
 	 * and never moved, so the pointer hashes stably across frames. */
+	/* Hand-formatted: this runs once per UI item per frame, and Com_sprintf's
+	 * printf machinery was a measurable share of the emit walk. The string only
+	 * has to be unique per item and identical from frame to frame. Overlong
+	 * names are truncated at the buffer end, as Com_sprintf would. */
+	len = wui_path_put( path, sizeof( path ), 0, panel->name );
+	len = wui_path_put( path, sizeof( path ), len, "/" );
 	if ( item->name[0] ) {
-		Com_sprintf( path, sizeof( path ), "%s/%s@%p",
-			panel->name, item->name, (const void *) item );
+		len = wui_path_put( path, sizeof( path ), len, item->name );
+		len = wui_path_put( path, sizeof( path ), len, "@" );
+		len = wui_path_put_hex( path, sizeof( path ), len, (uintptr_t) item );
 	} else {
-		Com_sprintf( path, sizeof( path ), "%s/i%d", panel->name, wui_emit_anon_counter++ );
+		len = wui_path_put( path, sizeof( path ), len, "i" );
+		len = wui_path_put_dec( path, sizeof( path ), len, wui_emit_anon_counter++ );
 	}
 
 	s.isStaticallyAllocated = qfalse;
-	s.length                = (int32_t) strlen( path );
+	s.length                = (int32_t) len;
 	s.chars                 = path;
 	return Clay_GetElementId( s ).id;
 }

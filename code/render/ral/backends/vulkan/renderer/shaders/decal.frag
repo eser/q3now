@@ -52,7 +52,7 @@ layout(set = 0, binding = 0) uniform DecalFrame {
 };
 
 layout(set = 0, binding = 2) uniform sampler2D decalTextures[64];
-// The shared scene-depth copy (vk.sceneDepth), same resource the GTAO/lens/
+// The shared scene-depth copy (vk.sceneDepth), same resource the AO/lens/
 // tonemap consumers sample. Used to reconstruct the surface beneath the decal.
 layout(set = 0, binding = 3) uniform sampler2D sceneDepthTex;
 

@@ -16,7 +16,7 @@ static int pbrInvalid;
 static qboolean rejectPbr;
 static cvar_t *PbrGet( const char *name, const char *value, int flags ) {
 	++pbrGets;
-	pbrInvalid |= strcmp(name, "r_pbr") || strcmp(value, "0")
+	pbrInvalid |= strcmp(name, "r_pbr") || strcmp(value, "1")
 		|| flags != (CVAR_ARCHIVE | CVAR_NODEFAULT);
 	return rejectPbr ? NULL : &pbrControl;
 }

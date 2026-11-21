@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ============================================================================
 # visual-render-features.sh — automated, ZERO-human-in-the-loop visual gate for
-# the GTAO and Forward+ render features. Extends the smoke-map-transition golden
+# the AO and Forward+ render features. Extends the smoke-map-transition golden
 # infrastructure (same png2raw decode, same 8x8-tile block-mean differ, same
 # 3-capture noise-bound, same SMOKE_UPDATE_GOLDEN re-bless) to two render paths
 # the default golden gate does NOT cover (it never isolates the AO field and
@@ -13,7 +13,7 @@
 # re-verifies — all autonomous. Eser is terminal-only; nothing routes to an eye.
 #
 # Usage:
-#   visual-render-features.sh --mode gtao    --engine <wired.x64>   # FEAT_SSAO=1 build
+#   visual-render-features.sh --mode gtao    --engine <wired.x64>   # FEAT_AO=1 build
 #   visual-render-features.sh --mode fwdplus --engine <wired.x64>   # ship build
 #   SMOKE_UPDATE_GOLDEN=1 ... --mode gtao    # bless the golden set (after assertions)
 #
@@ -139,7 +139,7 @@ SAMPLE_ROWS=720
 # cameras via the real-teleport recipe in capture() (+cmd noclip + +cmd setviewpos
 # + r_pinFrameTime). A bare +setviewpos is a no-op, so before this these were all the
 # same spawn frame; now each frames distinct geometry (cross-diff 89-302 BGR; the
-# GTAO AO goldens cross-differ 149-369). E_low = (488 200 200 0) on arena17, a
+# AO goldens cross-differ 149-369). E_low = (488 200 200 0) on arena17, a
 # genuinely different camera from D_spawn (was 488 1096 200 -90 = same x,y,yaw).
 VPS=(
     "arena1  1052 1432 50  135   A_spawn"
@@ -220,7 +220,7 @@ capture() {
         echo >&2 "  capture($tag): FAIL — never reached CA_ACTIVE (see $logfile)"
         return 1
     fi
-    # validation-error gate (exclude the documented pre-existing ssao pipeline-layout
+    # validation-error gate (exclude the documented pre-existing ao pipeline-layout
     # teardown leak which is unrelated to these features).
     local vuid
     vuid="$(grep -E 'VUID|Validation Error' "$logfile" | grep -vc 'vkDestroyDevice-device-05137' || true)"
@@ -251,11 +251,11 @@ capture() {
 #     time-driven animation freezes and a same-camera lit frame is byte-stable
 #     run-to-run (measured: identical-origin captures diff by ≤1 LSB). The animation
 #     ~36 residual is GONE; what remains is a cold RESOURCE-load state (not time-
-#     driven, 0.4-30 across fresh runs, mostly ≤6) plus, under the ship config (r_ssao 1),
-#     GTAO's bounded per-launch compute jitter (per-tile max ~23 at the viewport camera).
+#     driven, 0.4-30 across fresh runs, mostly ≤6) plus, under the ship config (r_ao 1),
+#     AO's bounded per-launch compute jitter (per-tile max ~23 at the viewport camera).
 #     The viewport gate bounds both with a per-tile noise-bound (see that mode), so a
 #     SMALL placement shift (5px ⇒ ~64 signal on a calm tile) clears the floor and is
-#     caught while the GTAO jitter stays under it.
+#     caught while the AO jitter stays under it.
 #     (timescale 0 was REMOVED — r_pinFrameTime freezes animation properly, and
 #     "timescale 0 stalls the +waitForMap gate" per the smoke harness, causing
 #     intermittent capture hangs/timeouts.)
@@ -276,10 +276,10 @@ capture_fixed_cam() {
         +set sv_cheats 1 +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 \
         +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set r_fullscreen 0 \
         +log renderer.ral info \
-        +set r_ssao 0 \
+        +set r_ao 0 \
         +set r_pinShaderTime 1.0 +set r_pinFrameTime 1.0 +set con_notifytime 0 \
         +set com_automated 1 \
-        "$@" `# extra +set tokens; a later +set r_ssao 1 here overrides the default-off above (last-wins)` \
+        "$@" `# extra +set tokens; a later +set r_ao 1 here overrides the default-off above (last-wins)` \
         +map "$map" +waitForMap +wait 80 \
         +cmd noclip +wait 20 +cmd setviewpos $pos \
         ${CAP_POST_CMD:+ +$CAP_POST_CMD} \
@@ -352,7 +352,7 @@ capture_scene() {
         +set sv_cheats 1 +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 \
         +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set r_fullscreen 0 \
         +log renderer.ral info \
-        +set r_ssao 0 \
+        +set r_ao 0 \
         +set r_pinShaderTime 1.0 +set r_pinFrameTime 1.0 +set con_notifytime 0 \
         +set fixedtime 1 \
         +set com_automated 1 \
@@ -609,7 +609,7 @@ ao_isolation_assert() {
     echo "$v"; [ "$v" = "OK" ]
 }
 
-# Authoritative route marker inventory. Exactly one denoised-GTAO decision and
+# Authoritative route marker inventory. Exactly one denoised-AO decision and
 # zero other r_showAO semantic rows are required.
 ao_route_assert() {
     local routed="$1" refused="$2" v="OK"
@@ -709,7 +709,7 @@ echo "    golden dir: $GOLDEN_DIR   update-golden: $SMOKE_UPDATE_GOLDEN"
 # ════════════════════════════════════════════════════════════════════════════
 case "$MODE" in
 gtao)
-    # The current FEAT_SSAO=1 build's no-AO path (r_ssao 0) is compared with the
+    # The current FEAT_AO=1 build's no-AO path (r_ao 0) is compared with the
     # established base golden. AO thresholds
     # (AO_OPEN_MIN/DARK_MAX/SPREAD_MIN) + ao_assert() are defined at shared scope above.
     GTAO_OFF_TILE_FLOOR="${GTAO_OFF_TILE_FLOOR:-60.0}"   # same band as the smoke gate
@@ -717,20 +717,20 @@ gtao)
     # Cache-warmup (see smoke-map-transition.sh): the first capture in a fresh home
     # is cold (~90 BGR one-shot vs warm); one throwaway warms the pipeline cache so
     # every gated capture below — and the blessed golden — is warm and deterministic.
-    set -- ${VPS[0]}; capture "$1" "$2" "$3" "$4" "$5" "warmup" +set r_ssao 0 +set r_showAO 0 >/dev/null 2>&1 || true
+    set -- ${VPS[0]}; capture "$1" "$2" "$3" "$4" "$5" "warmup" +set r_ao 0 +set r_showAO 0 >/dev/null 2>&1 || true
     detect_sample_dimensions "$SHOTDIR/vrf_warmup.png" || exit 1
 
     # ── AO route/isolation authority (one deterministic fixed camera) ─────────
     # Intensity=0 produces the authored flat-white AO negative and must differ
     # from the dynamic field. This is stronger and more deterministic than a
-    # cross-process dlight comparison (known GTAO launch jitter can exceed a tiny
+    # cross-process dlight comparison (known AO launch jitter can exceed a tiny
     # dlight-invariance ceiling). HUD/gun are hidden so neither can counterfeit
     # grayscale or the normal-vs-isolated comparison. Shadows are pinned equally
-    # in dynamic and flat captures; only r_ssaoIntensity changes.
+    # in dynamic and flat captures; only r_aoIntensity changes.
     set -- ${VPS[0]}; iso_map="$1"; iso_pos="$2 $3 $4 $5"
-    iso_normal="$(capture_fixed_cam "$iso_map" "$iso_pos" "gtao_iso_normal" +set r_ssao 1 +set r_showAO 0 +set r_shadows 0 +set cg_draw2D 0 +set cg_drawGun 0)" || FAIL=1
-    iso_ao="$(capture_fixed_cam "$iso_map" "$iso_pos" "gtao_iso_ao" +set r_ssao 1 +set r_showAO 1 +set r_ssaoIntensity 1 +set r_shadows 0 +set cg_draw2D 0 +set cg_drawGun 0)" || FAIL=1
-    iso_flat="$(capture_fixed_cam "$iso_map" "$iso_pos" "gtao_iso_flat" +set r_ssao 1 +set r_showAO 1 +set r_ssaoIntensity 0 +set r_shadows 0 +set cg_draw2D 0 +set cg_drawGun 0)" || FAIL=1
+    iso_normal="$(capture_fixed_cam "$iso_map" "$iso_pos" "gtao_iso_normal" +set r_ao 1 +set r_showAO 0 +set r_shadows 0 +set cg_draw2D 0 +set cg_drawGun 0)" || FAIL=1
+    iso_ao="$(capture_fixed_cam "$iso_map" "$iso_pos" "gtao_iso_ao" +set r_ao 1 +set r_showAO 1 +set r_aoIntensity 1 +set r_shadows 0 +set cg_draw2D 0 +set cg_drawGun 0)" || FAIL=1
+    iso_flat="$(capture_fixed_cam "$iso_map" "$iso_pos" "gtao_iso_flat" +set r_ao 1 +set r_showAO 1 +set r_aoIntensity 0 +set r_shadows 0 +set cg_draw2D 0 +set cg_drawGun 0)" || FAIL=1
     if [ "$FAIL" = 0 ]; then
         iso_gray="$(max_channel_delta "$iso_ao")"
         iso_scene_diff="$(worst_tile_diff "$iso_ao" "$iso_normal")"
@@ -749,14 +749,14 @@ gtao)
     for entry in "${VPS[@]}"; do
         set -- $entry; map="$1" x="$2" y="$3" z="$4" yaw="$5" id="$6"
 
-        # (1) r_ssao 0 — INFORMATIONAL: the current no-AO runtime path vs the existing
+        # (1) r_ao 0 — INFORMATIONAL: the current no-AO runtime path vs the existing
         # base golden. This is the same cross-launch comparison the
         # smoke gate handles with its full noise-bound + per-tile exclusion machinery (the
         # base goldens are from a different process; tile 14 mode-flips by design — see the
         # smoke gate's TILE_EXCLUDE). A raw single-capture worst-tile-diff here lacks that
         # machinery, so it is reported but NOT gated. The RIGOROUS "no-AO path unchanged"
-        # check is `make smoke-map-transition` run against the same FEAT_SSAO=1 DLL (the full gate).
-        off_shot="$(capture "$map" "$x" "$y" "$z" "$yaw" "gtao_off_$id" +set r_ssao 0 +set r_showAO 0)" || { FAIL=1; continue; }
+        # check is `make smoke-map-transition` run against the same FEAT_AO=1 DLL (the full gate).
+        off_shot="$(capture "$map" "$x" "$y" "$z" "$yaw" "gtao_off_$id" +set r_ao 0 +set r_showAO 0)" || { FAIL=1; continue; }
         base_golden="$GOLDEN_DIR/${id}.png"
         if [ -s "$base_golden" ]; then
             d="$(worst_tile_diff "$off_shot" "$base_golden")"
@@ -765,10 +765,10 @@ gtao)
             printf "  %-8s gtao-off vs base golden [informational]: worst tile-diff=%6s %s\n" "$id" "$d" "$note"
         fi
 
-        # (2) r_ssao 1 final-frame golden.
-        on_shot="$(capture "$map" "$x" "$y" "$z" "$yaw" "gtao_on_$id" +set r_ssao 1 +set r_showAO 0 +set cg_draw2D 0 +set cg_drawGun 0)" || { FAIL=1; continue; }
+        # (2) r_ao 1 final-frame golden.
+        on_shot="$(capture "$map" "$x" "$y" "$z" "$yaw" "gtao_on_$id" +set r_ao 1 +set r_showAO 0 +set cg_draw2D 0 +set cg_drawGun 0)" || { FAIL=1; continue; }
         # (3) r_showAO 1 isolated AO buffer.
-        ao_shot="$(capture "$map" "$x" "$y" "$z" "$yaw" "gtao_ao_$id" +set r_ssao 1 +set r_showAO 1 +set cg_draw2D 0 +set cg_drawGun 0)" || { FAIL=1; continue; }
+        ao_shot="$(capture "$map" "$x" "$y" "$z" "$yaw" "gtao_ao_$id" +set r_ao 1 +set r_showAO 1 +set cg_draw2D 0 +set cg_drawGun 0)" || { FAIL=1; continue; }
 
         # ── COMPUTED AO assertion (the direct gate — no image-to-eyeball) ──
         stats="$(tile_means "$ao_shot" | awk '
@@ -804,8 +804,8 @@ gtao)
         # exposure_bias = r_brightness = 1.0, so the only on-vs-off difference is the AO
         # composite itself. (The blessed gtao_on golden still uses the default config via
         # on_shot above; these are dedicated measurement captures.)
-        lb_off="$(capture "$map" "$x" "$y" "$z" "$yaw" "gtao_lb_off_$id" +set r_ssao 0 +set r_showAO 0 +set r_hdrAutoExposure 0)" || { FAIL=1; continue; }
-        lb_on="$( capture "$map" "$x" "$y" "$z" "$yaw" "gtao_lb_on_$id"  +set r_ssao 1 +set r_showAO 0 +set r_hdrAutoExposure 0)" || { FAIL=1; continue; }
+        lb_off="$(capture "$map" "$x" "$y" "$z" "$yaw" "gtao_lb_off_$id" +set r_ao 0 +set r_showAO 0 +set r_hdrAutoExposure 0)" || { FAIL=1; continue; }
+        lb_on="$( capture "$map" "$x" "$y" "$z" "$yaw" "gtao_lb_on_$id"  +set r_ao 1 +set r_showAO 0 +set r_hdrAutoExposure 0)" || { FAIL=1; continue; }
         lum_on="$(frame_mean_lum "$lb_on")"
         lum_off="$(frame_mean_lum "$lb_off")"
         lum_out="$(lum_budget_assert "$lum_on" "$lum_off")"; lum_rc=$?
@@ -823,8 +823,8 @@ gtao)
         # pinned off here too: otherwise a different exposure_bias between the off and on
         # launches shifts EVERY tile uniformly, and even the direct-lit tiles would show a
         # large delta — a false invariant failure unrelated to the AO composite.
-        dl_off="$(capture "$map" "$x" "$y" "$z" "$yaw" "gtao_dl_off_$id" +set r_ssao 0 +set r_showAO 0 +set r_hdrAutoExposure 0 +set r_dlightShadowTest 300)" || { FAIL=1; continue; }
-        dl_on="$( capture "$map" "$x" "$y" "$z" "$yaw" "gtao_dl_on_$id"  +set r_ssao 1 +set r_showAO 0 +set r_hdrAutoExposure 0 +set r_dlightShadowTest 300)" || { FAIL=1; continue; }
+        dl_off="$(capture "$map" "$x" "$y" "$z" "$yaw" "gtao_dl_off_$id" +set r_ao 0 +set r_showAO 0 +set r_hdrAutoExposure 0 +set r_dlightShadowTest 300)" || { FAIL=1; continue; }
+        dl_on="$( capture "$map" "$x" "$y" "$z" "$yaw" "gtao_dl_on_$id"  +set r_ao 1 +set r_showAO 0 +set r_hdrAutoExposure 0 +set r_dlightShadowTest 300)" || { FAIL=1; continue; }
         inv_out="$(paste -d ' ' <(tile_lums "$dl_off") <(tile_lums "$dl_on") \
             | awk '{print $1, $2, $4}' | ambient_invariant_assert)"; inv_rc=$?
         [ "$inv_rc" -eq 0 ] || FAIL=1
@@ -998,7 +998,7 @@ fwdplus)
     ;;
 
 viewport)
-    # ── VIEWPORT-PLACEMENT gate, run at the SHIP config (r_ssao 1 / GTAO on) ──
+    # ── VIEWPORT-PLACEMENT gate, run at the SHIP config (r_ao 1 / AO on) ──
     # Catches a frame that frames the WRONG viewport (camera/viewport math wrong →
     # geometry rendered at the wrong screen location, even if per-pixel VALUES are
     # plausible). The value-regression gates (gtao/fwdplus/smoke) cannot catch this.
@@ -1009,54 +1009,54 @@ viewport)
     # camera ORIGIN is deterministic (noclip removes the gravity settle); the residual
     # is bounded animation/cold-launch noise.
     #
-    # GTAO IS ON here (r_ssao 1, the mandatory ship default), so the gate tests what
-    # players ship. GTAO carries a per-launch compute variance the time pins can't pin
+    # AO IS ON here (r_ao 1, the mandatory ship default), so the gate tests what
+    # players ship. AO carries a per-launch compute variance the time pins can't pin
     # (the horizon-search/denoise settles to slightly different states across separate
     # cold processes — not animation). Rather than disable AO (which would make the gate
     # test a config nobody ships), we BOUND that variance the same way the fwdplus gate
-    # bounds animation drift: capture r_ssao 1 several times to measure each tile's
-    # same-config run-to-run spread (the GTAO noise), and fail a tile only when its
+    # bounds animation drift: capture r_ao 1 several times to measure each tile's
+    # same-config run-to-run spread (the AO noise), and fail a tile only when its
     # fresh-vs-golden diff (the placement signal) exceeds that tile's noise-scaled
-    # threshold. At this fixed time-pinned placement camera the GTAO noise is modest and
+    # threshold. At this fixed time-pinned placement camera the AO noise is modest and
     # BOUNDED (measured 8 runs / 28 pairwise: per-tile max ~23 BGR, p95 ~13, one tile
     # >20, none >35 — the grounding's ~76-101 spikes are a SPAWN-viewpoint phenomenon
-    # that compounds GTAO jitter with spawn-area animation; the placement camera carries
-    # neither). For reference the GTAO-off cold-load floor is ~1/5 mean/max — so most of
-    # the threshold headroom is GTAO compute settling, accepted here by design (it is the
+    # that compounds AO jitter with spawn-area animation; the placement camera carries
+    # neither). For reference the AO-off cold-load floor is ~1/5 mean/max — so most of
+    # the threshold headroom is AO compute settling, accepted here by design (it is the
     # feature's inherent non-determinism, not a regression). A real placement shift moves
     # many tiles COHERENTLY and spikes a calm tile (a 5px shift measures ~64 BGR on a
-    # noise≈1 tile), clearing the floor while the GTAO jitter stays under it.
+    # noise≈1 tile), clearing the floor while the AO jitter stays under it.
     #
     # Thresholds mirror the fwdplus/smoke noise-bound: noise*RATIO + MARGIN, floored, with
-    # a per-tile NOISE CEILING excluding any tile too jittery to gate. The measured GTAO
+    # a per-tile NOISE CEILING excluding any tile too jittery to gate. The measured AO
     # noise (max ~23) sits below the ceiling, so nothing is excluded at this camera; the
-    # ceiling guards a future spike tile. The floor (60) is above the GTAO noise band and
-    # below the placement-shift signal (~64), so a clean r_ssao 1 frame PASSes and a 5px
+    # ceiling guards a future spike tile. The floor (60) is above the AO noise band and
+    # below the placement-shift signal (~64), so a clean r_ao 1 frame PASSes and a 5px
     # shift FAILs — proven in --mode selftest test 3 (png-perturb --shift, deterministic).
-    # GTAO's OWN correctness stays gated by --mode gtao (AO-isolation assertion); this gate
+    # AO's OWN correctness stays gated by --mode gtao (AO-isolation assertion); this gate
     # is purely placement, now at ship config.
     VPP_MAP="${VPP_MAP:-arena1}"             # a real q3now map (q3dm1 does NOT exist in the paks)
     VPP_POS="${VPP_POS:-1052 1432 100 90}"   # fixed camera (noclip-held; lit geometry in frame)
     VPP_RATIO="${VPP_RATIO:-1.5}"; VPP_MARGIN="${VPP_MARGIN:-5.0}"   # fwdplus noise-bound shape
-    VPP_FLOOR="${VPP_FLOOR:-60.0}"           # above the GTAO noise band (~23), below a 5px shift (~64)
-    VPP_CEIL="${VPP_CEIL:-35.0}"             # exclude a tile too GTAO-jittery to gate (none at this camera)
+    VPP_FLOOR="${VPP_FLOOR:-60.0}"           # above the AO noise band (~23), below a 5px shift (~64)
+    VPP_CEIL="${VPP_CEIL:-35.0}"             # exclude a tile too AO-jittery to gate (none at this camera)
     golden="$GOLDEN_DIR/viewport_${VPP_MAP}.png"
-    # r_ssao 1 overrides capture_fixed_cam's default-off (last-wins). cg_draw2D 0 +
+    # r_ao 1 overrides capture_fixed_cam's default-off (last-wins). cg_draw2D 0 +
     # cg_drawGun 0 match what --mode gtao already captures with, and they are not
     # cosmetic here: this gate measures WHERE THE WORLD IS FRAMED, so every 2D layer
     # drawn on top is noise it must not be sensitive to. The golden this replaced was
     # captured before the WiredUI render-frame unification landed, so it predates the
     # HUD being drawn at all — leaving 2D on would have pinned health/armor/ammo/fps
     # readouts into a placement reference and made every HUD edit fail this gate.
-    SSHIP="+set r_ssao 1 +set cg_draw2D 0 +set cg_drawGun 0"
+    SSHIP="+set r_ao 1 +set cg_draw2D 0 +set cg_drawGun 0"
 
     # Cache-warmup throwaway: the FIRST capture in a fresh home renders a marginally
-    # different frame (cold lighting/resource state + GTAO pipeline compile), independent
+    # different frame (cold lighting/resource state + AO pipeline compile), independent
     # of the time pins. One discard warms the gated captures. Non-fatal (just priming).
     capture_fixed_cam "$VPP_MAP" "$VPP_POS" "viewport_warmup" $SSHIP >/dev/null 2>&1 || true
 
-    # Three r_ssao 1 captures: the first is the gated/blessable frame, all three bound the
-    # per-tile GTAO same-config noise. (Three matches the fwdplus/smoke per-config count.)
+    # Three r_ao 1 captures: the first is the gated/blessable frame, all three bound the
+    # per-tile AO same-config noise. (Three matches the fwdplus/smoke per-config count.)
     va="$(capture_fixed_cam "$VPP_MAP" "$VPP_POS" "viewport_${VPP_MAP}_a" $SSHIP)" || FAIL=1
     vb="$(capture_fixed_cam "$VPP_MAP" "$VPP_POS" "viewport_${VPP_MAP}_b" $SSHIP)" || FAIL=1
     vc="$(capture_fixed_cam "$VPP_MAP" "$VPP_POS" "viewport_${VPP_MAP}_c" $SSHIP)" || FAIL=1
@@ -1083,18 +1083,18 @@ viewport)
         if [ "$SMOKE_UPDATE_GOLDEN" = "1" ]; then
             # bless-if-sane: only bless a frame that rendered real geometry (max pixel
             # well above black) — a black/void frame can't gate placement. The blessed
-            # golden is the SHIP-config (GTAO-on) frame.
+            # golden is the SHIP-config (AO-on) frame.
             mx="$(max_pixel_value "$va")"
             if [ "${mx:-0}" -ge 64 ]; then
                 cp "$va" "$golden"
-                echo "  blessed viewport golden (r_ssao 1, ship config): $golden (max-pixel=$mx — real geometry)"
+                echo "  blessed viewport golden (r_ao 1, ship config): $golden (max-pixel=$mx — real geometry)"
             else
                 echo "  NOT blessed: frame too dark (max-pixel=$mx) — pick a lit VPP_POS"; FAIL=1
             fi
         elif [ -s "$golden" ]; then
-            # per-tile GTAO noise = max over the same-config pairwise diffs; placement
+            # per-tile AO noise = max over the same-config pairwise diffs; placement
             # signal = the fresh frame (va) vs the golden. A tile FAILs only when its
-            # signal clears its own noise-scaled threshold (so GTAO jitter is bounded out,
+            # signal clears its own noise-scaled threshold (so AO jitter is bounded out,
             # a coherent placement shift on a calm tile is caught).
             nfile="$VRF_TMP/vrf-vpnoise.txt"; sfile="$VRF_TMP/vrf-vpsig.txt"
             { tiled_diff "$va" "$vb"; tiled_diff "$va" "$vc"; tiled_diff "$vb" "$vc"; } \
@@ -1110,9 +1110,9 @@ viewport)
             over="$(echo "$summary" | sed -nE 's/.*over=([+-][0-9.]+).*/\1/p')"
             v=$(awk -v o="$over" 'BEGIN{print (o>0)?"FAIL":"OK"}')
             [ "$v" = "FAIL" ] && FAIL=1
-            printf "  viewport-placement (%s fixed-camera [%s], r_ssao 1 GTAO-on, noise-bound): %s -> %s\n" "$VPP_MAP" "$VPP_POS" "$summary" "$v"
-            [ "$v" = "FAIL" ] && echo "    a tile whose fresh-vs-golden signal clears its GTAO-noise-scaled threshold = the frame frames the wrong viewport (placement bug)"
-            echo "    NOTE: GTAO's per-launch compute jitter is bounded out (noise-scaled threshold, ceil-excluded); GTAO correctness is gated by --mode gtao. Gate-logic teeth proven by --mode selftest test 3 (png-perturb --shift)."
+            printf "  viewport-placement (%s fixed-camera [%s], r_ao 1 AO-on, noise-bound): %s -> %s\n" "$VPP_MAP" "$VPP_POS" "$summary" "$v"
+            [ "$v" = "FAIL" ] && echo "    a tile whose fresh-vs-golden signal clears its AO-noise-scaled threshold = the frame frames the wrong viewport (placement bug)"
+            echo "    NOTE: AO's per-launch compute jitter is bounded out (noise-scaled threshold, ceil-excluded); AO correctness is gated by --mode gtao. Gate-logic teeth proven by --mode selftest test 3 (png-perturb --shift)."
         else
             echo "  FAIL: missing viewport golden $golden (bless: SMOKE_UPDATE_GOLDEN=1 ... --mode viewport)"; FAIL=1
         fi
@@ -1141,7 +1141,7 @@ shadow_atest)
     # actually fires on real geometry. (A golden of either frame is not viable -- both
     # jitter ~30 launch-to-launch at any arena1 camera with the shadows in view -- so the
     # live gate is a relative holed-vs-solid comparison, not a golden, mirroring how the
-    # GTAO gate gates on a computed assertion rather than a flaky per-viewpoint golden.)
+    # AO gate gates on a computed assertion rather than a flaky per-viewpoint golden.)
     ATEST_MIN="${ATEST_MIN:-10.0}"   # the cut-out reshapes the shadow by tens of BGR when it fires
     ATEST_POS="${ATEST_POS:-1052 1432 50 90}"   # horizontal witness camera; the casters' shadows fill this view
 
@@ -1169,8 +1169,8 @@ shadow_atest)
         # but it intermittently collapses to ~0 in a reused CI home: the forced-solid mode
         # depends on r_shadowAtestTest reaching vk_shadow_atest_packed BEFORE the per-map
         # caster buffer is built, and that ordering is sensitive to accumulated home/cache
-        # state (the same CSM cascade-fit / cold-cache "spawn-drift wall" the GTAO gate
-        # documents for its per-viewpoint goldens). So, like the GTAO gate, the live pixel
+        # state (the same CSM cascade-fit / cold-cache "spawn-drift wall" the AO gate
+        # documents for its per-viewpoint goldens). So, like the AO gate, the live pixel
         # number is reported but NOT failed on; the DISCARD-CORRECTNESS teeth are gated
         # deterministically by --mode selftest (atest_assert FAILs a holed==solid frame),
         # and 0-VUID + build-green cover the rest.
@@ -1221,7 +1221,7 @@ dlight-shadow|dlight-shadow-lifecycle)
     # measured at this camera/radius: tiles 16, 56, 57 darken 10-12 luma, the rest stay
     # within ±2. The gate asserts (a) the shadow tiles darken past a floor, and (b) the
     # non-shadow tiles stay within a same-config noise-bound (3 shadow-on captures bound
-    # the per-tile jitter, like the GTAO/fwdplus gates) — so a real cast shadow in the
+    # the per-tile jitter, like the AO/fwdplus gates) — so a real cast shadow in the
     # right place passes, while a frame that just rendered (no shadow) or globally dimmed
     # fails. The shadow-on frame is blessed as a regression golden after the assertion.
     DLS_RADIUS="${DLS_RADIUS:-800}"
@@ -1303,7 +1303,7 @@ dlight-shadow|dlight-shadow-lifecycle)
             +log renderer.ral info \
             +set r_forwardPlus 1 +set r_pbr 0 +set r_parallaxMapping 0 \
             +set r_dlightShadows 1 +set r_dlightShadowK "${DLS_K:-1}" \
-            +set r_ssao 0 +set r_pinShaderTime 1.0 +set r_pinFrameTime 1.0 \
+            +set r_ao 0 +set r_pinShaderTime 1.0 +set r_pinFrameTime 1.0 \
             +set con_notifytime 0 +set com_automated 1 \
             +exec dlight-shadow-gate.cfg >"$logfile" 2>&1 || true )
         reap_engine
@@ -1635,7 +1635,7 @@ chromatic)
 
 selftest)
     # Prove this gate's verdict primitives have TEETH, with no engine launch:
-    #   (1)  ao_assert              — the GTAO physical-correctness predicate. A correct
+    #   (1)  ao_assert              — the AO physical-correctness predicate. A correct
     #        AO frame (open ~1.0, corners <1.0, real spread) PASSes; a flat / over-
     #        occluded / no-occlusion frame FAILs.
     #   (1b) lum_budget_assert      — the final-composite brightness predicate. The
@@ -1649,7 +1649,7 @@ selftest)
     echo "==> visual-render-features SELF-TEST (gate-has-teeth)"
     rc=0
 
-    echo "  -- (1) GTAO AO-assertion teeth --"
+    echo "  -- (1) AO-assertion teeth --"
     # clean: open 250, dark 150 → spread 100 (real AO dynamic range) → expect OK
     v="$(ao_assert 250 150 100)"; [ "$v" = "OK" ] && echo "    clean AO (open250/dark150/spread100): $v" \
         || { echo "    clean AO: $v (BUG: gate rejects a correct AO frame)"; rc=1; }
@@ -1667,7 +1667,7 @@ selftest)
         *) echo "    coloured substitute: $v (BUG: grayscale tooth absent)"; rc=1;; esac
     v="$(ao_isolation_assert 0 0.2)"; case "$v" in FAIL*) echo "    grayscale final-scene substitute (diff0.2): $v  FAIL-as-expected";;
         *) echo "    same-as-normal substitute: $v (BUG: isolation tooth absent)"; rc=1;; esac
-    v="$(ao_route_assert 1 0)"; [ "$v" = "OK" ] && echo "    one RAL denoised-GTAO route, no refusal: $v" \
+    v="$(ao_route_assert 1 0)"; [ "$v" = "OK" ] && echo "    one RAL denoised-AO route, no refusal: $v" \
         || { echo "    clean route inventory: $v (BUG)"; rc=1; }
     v="$(ao_route_assert 0 0)"; case "$v" in FAIL*) echo "    missing route marker: $v  FAIL-as-expected";; *) echo "    missing route: $v (BUG)"; rc=1;; esac
     v="$(ao_route_assert 1 1)"; case "$v" in FAIL*) echo "    route plus refusal: $v  FAIL-as-expected";; *) echo "    route+refusal: $v (BUG)"; rc=1;; esac
@@ -1684,7 +1684,7 @@ selftest)
     if ao_route_log_assert self-route >/dev/null; then echo "    additive route: OK (BUG: family cardinality tooth absent)"; rc=1
     else echo "    additive alternative route: FAIL-as-expected"; fi
     rm -f "$route_test_log"
-    # r_ssaoIntensity=0 is the authored flat-white negative. Its shape tuple
+    # r_aoIntensity=0 is the authored flat-white negative. Its shape tuple
     # (open255/dark255/spread0) must be rejected by the same AO predicate.
     v="$(ao_assert 255 255 0)"; case "$v" in FAIL*) echo "    flat-white intensity=0 negative: $v  FAIL-as-expected";;
         *) echo "    flat-white negative: $v (BUG: dynamic-AO predicate is vacuous)"; rc=1;; esac
@@ -1857,12 +1857,12 @@ selftest)
     echo "  -- (3) VIEWPORT-PLACEMENT teeth — SUBTLE shift caught above the noise-bound floor --"
     # A viewport-placement bug = geometry framed at the wrong screen location. We
     # synthesize that defect DETERMINISTICALLY with png-perturb --shift (translate the
-    # golden by N px). The live gate runs at the ship config (r_ssao 1) and bounds GTAO's
+    # golden by N px). The live gate runs at the ship config (r_ao 1) and bounds AO's
     # per-launch compute jitter with the fwdplus noise-bound (noise*ratio+margin, floored).
-    # On a calm tile (the static golden carries zero GTAO noise here) the threshold reduces
+    # On a calm tile (the static golden carries zero AO noise here) the threshold reduces
     # to VPP_FLOOR, so a 5px shift — which spikes a calm high-contrast tile to ~64 BGR,
-    # well above the GTAO noise band (~23) — clears the floor and FAILs, while the bounded
-    # GTAO jitter stays under it. Fully deterministic (static PNGs, no engine).
+    # well above the AO noise band (~23) — clears the floor and FAILs, while the bounded
+    # AO jitter stays under it. Fully deterministic (static PNGs, no engine).
     VPP_FLOOR_ST="${VPP_FLOOR:-60.0}"
     gv="$GOLDEN_DIR/viewport_arena1.png"; [ -s "$gv" ] || gv="$GOLDEN_DIR/A_spawn.png"
     if [ ! -s "$gv" ]; then
@@ -1878,7 +1878,7 @@ selftest)
         echo "    golden vs SUBTLE 5px shift: worst tile-diff=$vshift  (expect > $VPP_FLOOR_ST floor, FAIL)"
         awk -v s="$vself" 'BEGIN{exit !(s<1.0)}' || { echo "    BUG: golden vs itself not ~0"; rc=1; }
         awk -v p="$vshift" -v t="$VPP_FLOOR_ST" 'BEGIN{exit !(p>t)}' || { echo "    BUG: a SUBTLE 5px shift does NOT exceed the noise-bound floor — subtle placement still blind"; rc=1; }
-        [ "$(awk -v s="$vself" 'BEGIN{print (s<1.0)?1:0}')" = 1 ] && [ "$(awk -v p="$vshift" -v t="$VPP_FLOOR_ST" 'BEGIN{print (p>t)?1:0}')" = 1 ] && echo "    viewport-placement teeth: clean PASS + SUBTLE shift FAIL-as-expected (above the GTAO-on noise-bound floor)"
+        [ "$(awk -v s="$vself" 'BEGIN{print (s<1.0)?1:0}')" = 1 ] && [ "$(awk -v p="$vshift" -v t="$VPP_FLOOR_ST" 'BEGIN{print (p>t)?1:0}')" = 1 ] && echo "    viewport-placement teeth: clean PASS + SUBTLE shift FAIL-as-expected (above the AO-on noise-bound floor)"
     fi
 
     if [ "$rc" -eq 0 ]; then echo "==> SELF-TEST PASS: AO shape + grayscale/isolation/route + flat-white negative + luminance-budget + ambient-invariant + chromatic-edge-concentration (synthetic + numeric) + dlight-shadow-darken (numeric + shift) + value tiled_diff + viewport-placement all have teeth"; else echo "==> SELF-TEST FAIL"; fi

@@ -7,7 +7,7 @@
 // gamma.frag — thin display-encoding pass.
 //
 // Reads vk.tonemapped_image (LDR linear), writes the swapchain
-// image. All scene-radiance work (exposure, tonemap, SSAO, sunrays,
+// image. All scene-radiance work (exposure, tonemap, AO, sunrays,
 // colour grading, saturation) moved to tonemap.frag. This pass only does:
 //   * gamma encoding (linear -> sRGB) via r_gamma
 //   * framebuffer-bit-depth dither (r_dither)

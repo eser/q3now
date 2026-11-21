@@ -244,7 +244,7 @@ if(IMAGE_FILTER_RELEASE EQUAL -1 OR IMAGE_FILTER_DESTROY EQUAL -1
 	message(FATAL_ERROR "texture filter reload lost group -> sampler -> all-group order")
 endif()
 
-# The renderer-global set 2 cohort (shadow array, sparse IBL views and GTAO
+# The renderer-global set 2 cohort (shadow array, sparse IBL views and AO
 # visibility) is also a direct arena child. The native set is a mirror; neither
 # attachment refresh nor the boot adoption sweep may allocate, update or adopt
 # an independent VkDescriptorSet.
@@ -392,7 +392,7 @@ if(ENGINE_INTERNAL_RELEASE EQUAL -1 OR ENGINE_BRDF_PARENT EQUAL -1
 		OR NOT ENGINE_INTERNAL_RELEASE LESS ENGINE_BRDF_PARENT
 		OR NOT ENGINE_INTERNAL_RELEASE LESS ENGINE_IBL_PARENT
 		OR NOT ENGINE_INTERNAL_RELEASE LESS ENGINE_GTAO_PARENT)
-	message(FATAL_ERROR "engine-resources group outlives an IBL/GTAO parent")
+	message(FATAL_ERROR "engine-resources group outlives an IBL/AO parent")
 endif()
 foreach(NEEDLE IN ITEMS
 	"receipt->generation != 0u && receipt->generation != UINT64_MAX"

@@ -2250,15 +2250,15 @@ else
 		"$(BUILD_DIR)/$(CMAKE_APP_NAME)$(BINEXT)$(EXEEXT)"
 endif
 
-# ── render-feature visual gates (GTAO + Forward+) ────────────────────────────
+# ── render-feature visual gates (AO + Forward+) ────────────────────────────
 # Fully-automated, ZERO-human-in-the-loop pixel gates for two render features the
 # default golden gate does NOT cover (it never isolates the AO field and never pixel-
 # equivalence-gates r_forwardPlus). Each target runs end-to-end: (build →) capture →
 # COMPUTED sanity assertions → bless-if-sane → cold re-verify → pass/fail. No eyeball.
 #
-#   visual-gtao    : builds a dedicated FEAT_SSAO=1 verify DLL (USE_SSAO=ON, separate
-#                    build/ssao-verify dir), swaps it into the run dir, captures 5 viewpoints
-#                    x {r_ssao 0 (==base golden), r_ssao 1, r_showAO 1 (AO-isolated)},
+#   visual-gtao    : builds a dedicated FEAT_AO=1 verify DLL (USE_AO=ON, separate
+#                    build/ao-verify dir), swaps it into the run dir, captures 5 viewpoints
+#                    x {r_ao 0 (==base golden), r_ao 1, r_showAO 1 (AO-isolated)},
 #                    and ASSERTS the AO field directly (open-surface ~1.0, corners <1.0
 #                    by threshold, real spread). Restores the ship DLL on exit.
 #   visual-fwdplus : ship build. r_forwardPlus 0 (PMLIGHT) vs 1 (tiled) equivalence at
@@ -2267,11 +2267,11 @@ endif
 #                    byte-identical.
 visual-gtao: $(_RUN_GAME_DEP) $(PNG2RAW_BIN)
 	@bash tests/visual-feature-bless-verify.sh gtao \
-		"$(BUILD_DIR)" build/ssao-verify
+		"$(BUILD_DIR)" build/ao-verify
 
 visual-fwdplus: $(_RUN_GAME_DEP) $(PNG2RAW_BIN)
 	@bash tests/visual-feature-bless-verify.sh fwdplus \
-		"$(BUILD_DIR)" build/ssao-verify
+		"$(BUILD_DIR)" build/ao-verify
 
 #   visual-viewport : ship build. VIEWPORT-PLACEMENT gate — a fixed camera (noclip +
 #                     cmd setviewpos + timescale 0) on arena1, golden-blessed, gated by
@@ -2282,10 +2282,10 @@ visual-fwdplus: $(_RUN_GAME_DEP) $(PNG2RAW_BIN)
 #                     caveat (value regressions were covered; placement was not).
 visual-viewport: $(_RUN_GAME_DEP) $(PNG2RAW_BIN) $(PNG_PERTURB_BIN)
 	@bash tests/visual-feature-bless-verify.sh viewport \
-		"$(BUILD_DIR)" build/ssao-verify
+		"$(BUILD_DIR)" build/ao-verify
 
 #   visual-selftest : NO engine — proves every visual-render-features verdict primitive
-#                     has teeth (GTAO AO-assert, value tiled_diff, viewport-placement),
+#                     has teeth (AO-assert, value tiled_diff, viewport-placement),
 #                     each clean-PASS + defect-FAIL. Fast, deterministic, CI-friendly.
 visual-selftest: $(PNG2RAW_BIN) $(PNG_PERTURB_BIN)
 	@bash tests/visual-render-features.sh --mode selftest

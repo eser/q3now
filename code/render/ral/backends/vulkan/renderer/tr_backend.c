@@ -1450,7 +1450,7 @@ static void RB_TransitionToUI( void )
 	if ( r_bloom->integer )
 		vk_bloom();
 	vk_tonemap();
-	if ( r_smaa->integer > 0 )
+	if ( R_AntialiasingSmaaQuality() > 0 )
 		vk_smaa();
 	vk_open_ui_pass( qfalse );
 	backEnd.doneUIPass = qtrue;

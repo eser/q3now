@@ -68,7 +68,7 @@ OPTION(WIRED_RENDERER_FIXTURES "Compile the renderer test fixtures (default-off 
 IF(NOT WIRED_RENDERER_FIXTURES)
 	ADD_COMPILE_DEFINITIONS(WIRED_RENDERER_FIXTURES=0)
 ENDIF()
-OPTION(USE_SSAO "Compile the GTAO/SSAO renderer path (current product default ON; OFF is an explicit compiled-out permutation)" ON)
+OPTION(USE_AO "Compile the XeAO renderer path (current product default ON; OFF is an explicit compiled-out permutation)" ON)
 OPTION(WIRED_BUILD_IMGUI_TOOLS "Build tool-only Dear ImGui profiling/editor adapters" OFF)
 
 # RAL is a mandatory part of the Vulkan renderer, not an optional feature.
@@ -179,16 +179,16 @@ IF(NOT USE_WASM)
 	ADD_COMPILE_DEFINITIONS(FEAT_WASM=0)
 ENDIF()
 
-# CMake is the build-policy authority for GTAO.  Define the macro in both
-# branches so USE_SSAO=OFF is a real compiled-out permutation rather than being
+# CMake is the build-policy authority for AO.  Define the macro in both
+# branches so USE_AO=OFF is a real compiled-out permutation rather than being
 # silently overridden by q_feats.h's product default.  Default ON preserves the
 # current assembled product behavior.
-IF(USE_SSAO)
-	ADD_COMPILE_DEFINITIONS(FEAT_SSAO=1)
-	SET(WIRED_SSAO_COMPILE_VALUE 1)
+IF(USE_AO)
+	ADD_COMPILE_DEFINITIONS(FEAT_AO=1)
+	SET(WIRED_AO_COMPILE_VALUE 1)
 ELSE()
-	ADD_COMPILE_DEFINITIONS(FEAT_SSAO=0)
-	SET(WIRED_SSAO_COMPILE_VALUE 0)
+	ADD_COMPILE_DEFINITIONS(FEAT_AO=0)
+	SET(WIRED_AO_COMPILE_VALUE 0)
 ENDIF()
 
 # MinGW: picoquic + picotls use bare `#ifdef _WINDOWS` (MSVC-only auto-define)
@@ -814,15 +814,15 @@ SET_TESTS_PROPERTIES(sdl_display_catalog_source_policy_contract PROPERTIES
 	TIMEOUT 30
 )
 
-ADD_TEST(NAME ssao_feature_policy_contract
+ADD_TEST(NAME ao_feature_policy_contract
 	COMMAND ${CMAKE_COMMAND}
 		-DSOURCE_ROOT=${CMAKE_SOURCE_DIR}
 		-DCOMPILE_COMMANDS=${CMAKE_BINARY_DIR}/compile_commands.json
-		-DEXPECTED_SSAO=${WIRED_SSAO_COMPILE_VALUE}
-		-P ${CMAKE_SOURCE_DIR}/cmake/ssao_feature_policy_check.cmake
+		-DEXPECTED_AO=${WIRED_AO_COMPILE_VALUE}
+		-P ${CMAKE_SOURCE_DIR}/cmake/ao_feature_policy_check.cmake
 )
-SET_TESTS_PROPERTIES(ssao_feature_policy_contract PROPERTIES
-	LABELS "host-only;infrastructure;owner.ral;failure.contract;feature.ssao"
+SET_TESTS_PROPERTIES(ao_feature_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;failure.contract;feature.ao"
 	TIMEOUT 30
 )
 
@@ -4854,6 +4854,20 @@ SET_TESTS_PROPERTIES(ral_temporal_contract PROPERTIES
 )
 WIRED_CONFIGURE_HOST_TEST(ral_temporal_test ral_temporal_contract)
 
+ADD_EXECUTABLE(tr_antialiasing_test
+	tests/tr_antialiasing_test.c
+	code/render/ral/backends/vulkan/renderer/tr_antialiasing.c
+)
+TARGET_INCLUDE_DIRECTORIES(tr_antialiasing_test PRIVATE
+	code/render/ral/backends/vulkan/renderer
+)
+ADD_TEST(NAME tr_antialiasing_contract COMMAND tr_antialiasing_test)
+SET_TESTS_PROPERTIES(tr_antialiasing_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;failure.contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(tr_antialiasing_test tr_antialiasing_contract)
+
 ADD_EXECUTABLE(tr_temporal_motion_targets_test
 	tests/tr_temporal_motion_targets_test.c
 	code/render/ral/backends/vulkan/renderer/tr_temporal_motion_targets.c
@@ -8428,7 +8442,7 @@ IF(WIRED_EMCC_EXECUTABLE)
 			-Wno-unused-parameter -Wno-unused-function -Wno-unused-variable
 			-Wno-sign-compare -D_GNU_SOURCE -DWASM_MODULE
 			-DFEAT_WASM=0 -DFEAT_SENTRY_CRASH=0 -DFEAT_RECAST_NAVMESH=0
-			-DFEAT_SSAO=1 -DFEAT_WIRED_UI=1 -DWIRED_WEB_UI_NATIVE=1 -DBOTLIB
+			-DFEAT_AO=1 -DFEAT_WIRED_UI=1 -DWIRED_WEB_UI_NATIVE=1 -DBOTLIB
 			-DOPUS_BUILD -DUSE_ALLOCA -DFLOATING_POINT -DHAVE_LRINTF
 			-DPRODUCT_NAME=\"q3now\" -DCHANNEL_SUFFIX=\"-preview\"
 			-include ${CMAKE_CURRENT_SOURCE_DIR}/code/web/web_ui_compat.h

@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # visual-feature-bless-verify.sh — fully-automated, ZERO-human-in-the-loop
-# bless+verify for a render-feature visual gate (GTAO or Forward+).
+# bless+verify for a render-feature visual gate (AO or Forward+).
 #
 # Two-step (mirrors tests/rebless-and-verify.sh): (1) capture → run the COMPUTED
 # sanity assertions → bless the golden ONLY when the assertions pass; (2) cold
 # re-run to verify the current build matches the just-blessed golden. The "is it
 # sane?" decision is the computed assertion inside visual-render-features.sh
-# (AO open≈1.0 / corners<1.0 / spread for GTAO; tile-equivalence for Forward+),
+# (AO open≈1.0 / corners<1.0 / spread for AO; tile-equivalence for Forward+),
 # NEVER a human look. Eser is terminal-only.
 #
-# For mode=gtao this builds a dedicated FEAT_SSAO=1 verify DLL (USE_SSAO=ON)
+# For mode=gtao this builds a dedicated FEAT_AO=1 verify DLL (USE_AO=ON)
 # into a separate build dir and swaps it into the run dir, so the current
 # product renderer is never clobbered; it restores that renderer on exit.
 # mode=fwdplus uses the current product build.
@@ -19,7 +19,7 @@ set -u
 
 MODE="${1:?mode (gtao|fwdplus) required}"
 RUN_DIR="${2:?run build dir required}"
-SSAO_DIR="${3:-build/ssao-verify}"
+AO_DIR="${3:-build/ao-verify}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
@@ -37,14 +37,14 @@ cleanup() {
 trap cleanup EXIT
 
 if [ "$MODE" = "gtao" ]; then
-    echo "==== build the FEAT_SSAO=1 verify renderer DLL (USE_SSAO=ON) ===="
-    cmake -S . -B "$SSAO_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Debug -DUSE_SSAO=ON -DUSE_RENDERER_DLOPEN=ON >/dev/null 2>&1
-    ninja -C "$SSAO_DIR" wired_vulkan_x86_64 || { echo "FAIL: FEAT_SSAO=1 DLL build failed"; exit 1; }
-    # swap the dedicated FEAT_SSAO=1 DLL into the run dir (only the renderer DLL needs SSAO;
-    # the engine + game are FEAT_SSAO-agnostic, so the proven run-dir engine is reused).
-    cp "$SHIP_DLL" "$DLL_BAK" && cp "$SSAO_DIR/wired_vulkan_x86_64.dll" "$SHIP_DLL"
+    echo "==== build the FEAT_AO=1 verify renderer DLL (USE_AO=ON) ===="
+    cmake -S . -B "$AO_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Debug -DUSE_AO=ON -DUSE_RENDERER_DLOPEN=ON >/dev/null 2>&1
+    ninja -C "$AO_DIR" wired_vulkan_x86_64 || { echo "FAIL: FEAT_AO=1 DLL build failed"; exit 1; }
+    # swap the dedicated FEAT_AO=1 DLL into the run dir (only the renderer DLL needs AO;
+    # the engine + game are FEAT_AO-agnostic, so the proven run-dir engine is reused).
+    cp "$SHIP_DLL" "$DLL_BAK" && cp "$AO_DIR/wired_vulkan_x86_64.dll" "$SHIP_DLL"
     RESTORE_DLL=1
-    echo "    swapped dedicated FEAT_SSAO=1 DLL into $RUN_DIR (product DLL backed up)"
+    echo "    swapped dedicated FEAT_AO=1 DLL into $RUN_DIR (product DLL backed up)"
 fi
 
 echo

@@ -1832,7 +1832,7 @@ static HMONITOR vk_hmonitor = NULL;
 static int vk_diag_fence_ms, vk_diag_submit_ms, vk_diag_present_ms, vk_diag_acquire_ms, vk_diag_frames;
 static uint64_t vk_diag_slot_wait_us;
 static uint32_t vk_diag_pacing_bucket;
-static int vk_diag_drawcalls, vk_diag_pipebinds, vk_diag_msdf_draws, vk_diag_msdf_binds;
+static int vk_diag_drawcalls, vk_diag_pipebinds, vk_diag_msdf_draws, vk_diag_msdf_binds, vk_diag_ibl_draws;
 static qboolean vk_diag_msdf_active;
 
 typedef struct {
@@ -1897,8 +1897,8 @@ typedef struct {
 
 static const sceneDepthConsumer_t s_sceneDepthConsumers[] = {
 	{ "depthFade", &r_depthFade,   qtrue  },   // dfade sorts < SS_FOG
-#if FEAT_SSAO
-	{ "ssao",      &r_ssao,        qfalse },
+#if FEAT_AO
+	{ "ao",      &r_ao,        qfalse },
 #endif
 #if FEAT_SUNRAYS
 	{ "sunrays",   &r_drawSunRays, qfalse },
@@ -4909,7 +4909,7 @@ void vk_update_attachment_descriptors( void ) {
 		}
 		else
 		{
-			// Falling edge (active→inactive, e.g. r_depthFade off and SSAO/sunrays
+			// Falling edge (active→inactive, e.g. r_depthFade off and AO/sunrays
 			// also off): the depth view is gone, so drop the bindless reference and
 			// disable the role-4 override (its gate). NULL is a documented no-op
 			// write that leaves the slot stale-but-unsampled.
@@ -4942,9 +4942,9 @@ void vk_update_attachment_descriptors( void ) {
 		// rebuilt as a complete four-binding cohort above.
 		// Binding 3 borrows this same vk.sceneDepth view/sampler pair (no second copy).
 
-		// The renderer-global shadow/IBL/GTAO cohort is one generation-bound RAL
+		// The renderer-global shadow/IBL/AO cohort is one generation-bound RAL
 		// group. Its native descriptor is a compatibility mirror only; sparse IBL
-		// availability and the white GTAO fallback are authored by the helper.
+		// availability and the white AO fallback are authored by the helper.
 		if ( !vk_ral_refresh_engine_resources_bindgroup() )
 			R_LOG( rch_ral, SEV_WARN,
 				"engine-resources: attachment refresh declined\n" );
@@ -5181,7 +5181,7 @@ void vk_init_descriptors( void )
 			ralBindingValue_t           expValue;
 			ralBindGroupCreateInfo_t    expCreate;
 			// std140-rounded ExposureBlock size (vec4 multiple covering the
-			// 9 floats + 1 int + the 4 folded-in sunray floats + the 2 SSAO
+			// 9 floats + 1 int + the 4 folded-in sunray floats + the 2 AO
 			// near/far floats = 16 fields = 64 B, already a vec4 multiple).
 			const VkDeviceSize          expBytes = 64;
 			ralBufferUsage_t            expUsage =
@@ -5362,7 +5362,7 @@ void vk_init_descriptors( void )
 
 		// Engine-resources set 2 is a direct child of the current RAL arena.
 		// At this early point a sparse/empty group is valid; the attachment sweep
-		// below republishes it after shadow, IBL and GTAO views become available.
+		// below republishes it after shadow, IBL and AO views become available.
 		if ( !vk_ral_refresh_engine_resources_bindgroup() )
 			R_LOG( rch_ral, SEV_WARN,
 				"engine-resources: initial RAL bind-group refresh declined\n" );
@@ -8697,7 +8697,7 @@ void vk_init_decal( void )
 	// binding 3  IMAGE_SAMPLER — the shared scene-depth copy (vk.sceneDepth),
 	//            sampled in the fragment shader to reconstruct the surface world
 	//            position and box-project the decal onto it. Same resource and the
-	//            same per-set combined-sampler convention the GTAO/lens/tonemap
+	//            same per-set combined-sampler convention the AO/lens/tonemap
 	//            consumers use (NOT a second copy). The complete immutable group
 	//            is published by vk_init_decal_textures after this view exists.
 	// binding 4  STORAGE — sorted 256-entry surface-climate table; fragment-stage
@@ -14072,11 +14072,11 @@ static void vk_create_shader_modules( void )
 	// variant shaders moved from gamma.frag to tonemap.frag.
 	// Bit layout (TONEMAP_VAR_*) preserved; shader source/output names changed.
 	memset( vk.tonemap_variant_fs, 0, sizeof( vk.tonemap_variant_fs ) );
-	// Reserved bit 0 is now the diagnostic-only GTAO isolation view. It samples
-	// the denoised RAL GTAO texture directly; it does not restore the retired
-	// per-pixel tonemap SSAO composite.
-#if FEAT_SSAO
-	vk.tonemap_variant_fs[ TONEMAP_VAR_SSAO ] = SHADER_MODULE( tonemap_ao_frag_spv );
+	// Reserved bit 0 is now the diagnostic-only AO isolation view. It samples
+	// the denoised RAL AO texture directly; it does not restore the retired
+	// per-pixel tonemap AO composite.
+#if FEAT_AO
+	vk.tonemap_variant_fs[ TONEMAP_VAR_AO ] = SHADER_MODULE( tonemap_ao_frag_spv );
 #endif
 	// Normal scene variants remain BASE / CG / SUNRAYS combinations only.
 #if FEAT_TONEMAP
@@ -14431,10 +14431,10 @@ static void vk_create_smaa_pipelines( void )
 	static const int searchStepsDiag[] = { 0, 0, 0, 8, 16 };
 	static const int cornerRounding[] = { 0, 0, 0, 25, 25 };
 
-	// r_smaa is live (CVG_RENDERER), so re-read it at every
-	// rebuild instead of reusing the init-time cache. vk.smaa.quality
-	// stays in sync for the SEV_INFO log path elsewhere.
-	int q = r_smaa->integer;
+	// The effective SMAA preset (r_aa / r_smaa) is live (CVG_RENDERER), so
+	// re-read it at every rebuild instead of reusing the init-time cache.
+	// vk.smaa.quality stays in sync for the SEV_INFO log path elsewhere.
+	int q = R_AntialiasingSmaaQuality();
 	vk.smaa.quality = q;
 
 	float edge_threshold;
@@ -15632,12 +15632,12 @@ static void vk_rebuild_for_fbo_change( void )
 
 static qboolean vk_show_ao_source_ready( void )
 {
-#if FEAT_SSAO
-	return ( r_ssao && r_ssao->integer
+#if FEAT_AO
+	return ( r_ao && r_ao->integer
 	      && vk.ral_gtao_main_pipeline
 	      && vk.ral_gtao_denoise_pipeline
 	      && vk.ral_gtao_composite_descriptor
-	      && vk.ral_tonemap_variants[ TONEMAP_VAR_SSAO ] ) ? qtrue : qfalse;
+	      && vk.ral_tonemap_variants[ TONEMAP_VAR_AO ] ) ? qtrue : qfalse;
 #else
 	return qfalse;
 #endif
@@ -15714,9 +15714,9 @@ void vk_update_post_process_pipelines( void )
 		s_r_hdr_value = r_hdr->integer;
 		// Reseed the r_smaa cache too: vk_create_attachments inside
 		// the rebuild already called vk_smaa_alloc_resources iff
-		// (vk.fboActive && r_smaa > 0), so smaa.active is now in
-		// agreement with r_smaa for whatever fbo state we landed in.
-		s_r_smaa_value = r_smaa->integer;
+		// (vk.fboActive && effective SMAA preset > 0), so smaa.active is now in
+		// agreement with the effective preset for whatever fbo state we landed in.
+		s_r_smaa_value = R_AntialiasingSmaaQuality();
 		// Reseed r_hdrDisplay too — the rebuild re-ran vk_select_surface_
 		// format, which re-negotiated the swapchain colorspace.
 		s_r_hdrDisplay_value = r_hdrDisplay->integer;
@@ -15735,7 +15735,7 @@ void vk_update_post_process_pipelines( void )
 		vk_rebuild_for_fbo_change();
 		s_r_hdrDisplay_value = r_hdrDisplay->integer;
 		s_r_hdr_value  = r_hdr->integer;   // reseed — rebuilt against current r_hdr
-		s_r_smaa_value = r_smaa->integer;  // reseed
+		s_r_smaa_value = R_AntialiasingSmaaQuality();  // reseed
 	}
 
 	if ( vk.fboActive ) {
@@ -15770,11 +15770,12 @@ void vk_update_post_process_pipelines( void )
 	// don't change resource lifetime — only pipeline-side spec constants
 	// react, which the existing vk_create_smaa_pipelines path handles.
 	if ( vk.fboActive ) {
+		const int smaaQuality = R_AntialiasingSmaaQuality();
 		if ( s_r_smaa_value == -1 ) {
-			s_r_smaa_value = r_smaa->integer;
-		} else if ( ( s_r_smaa_value == 0 ) != ( r_smaa->integer == 0 ) ) {
+			s_r_smaa_value = smaaQuality;
+		} else if ( ( s_r_smaa_value == 0 ) != ( smaaQuality == 0 ) ) {
 			vk_wait_idle();
-			if ( r_smaa->integer == 0 ) {
+			if ( smaaQuality == 0 ) {
 				vk_smaa_release_resources();
 				R_LOG( rch_fbo, SEV_INFO, "r_smaa live: 0, released SMAA resources\n" );
 			} else {
@@ -15784,11 +15785,11 @@ void vk_update_post_process_pipelines( void )
 				// across release/realloc cycles (allocated eagerly in
 				// vk_init_descriptors when vk.fboActive).
 				vk_update_attachment_descriptors();
-				R_LOG( rch_fbo, SEV_INFO, "r_smaa live: %d, allocated SMAA resources\n", r_smaa->integer );
+				R_LOG( rch_fbo, SEV_INFO, "r_smaa live: %d, allocated SMAA resources\n", smaaQuality );
 			}
-			s_r_smaa_value = r_smaa->integer;
+			s_r_smaa_value = smaaQuality;
 		} else {
-			s_r_smaa_value = r_smaa->integer;
+			s_r_smaa_value = smaaQuality;
 		}
 	}
 
@@ -15873,7 +15874,7 @@ void vk_update_post_process_pipelines( void )
 		}
 		// Tear down any previously-active tonemap variant RAL siblings.
 		// Variant slots in vk.ral_tonemap_variants[] are indexed by varIdx
-		// bitmask; toggling a feature cvar (r_tonemap, r_ssao, etc.)
+		// bitmask; toggling a feature cvar (r_tonemap, r_ao, etc.)
 		// changes the active index, so the previous slot's pipeline
 		// must be explicitly freed. The per-create destroy guard inside
 		// vk_create_post_process_pipeline only checks the CURRENT slot,
@@ -15898,13 +15899,13 @@ void vk_update_post_process_pipelines( void )
 		{
 			int varIdx = 0;
 			// r_showAO overrides the scene-radiance variants: its dedicated module
-			// reads the denoised GTAO field directly, so final colour cannot stand in
+			// reads the denoised AO field directly, so final colour cannot stand in
 			// for AO-isolation evidence.
-#if FEAT_SSAO
-			// Build the diagnostic pipeline from the cvar request alone. GTAO
+#if FEAT_AO
+			// Build the diagnostic pipeline from the cvar request alone. AO
 			// resources are adopted later in some startup orders; runtime route
 			// selection is where their complete readiness is required.
-			if ( r_showAO && r_showAO->integer ) varIdx = TONEMAP_VAR_SSAO;
+			if ( r_showAO && r_showAO->integer ) varIdx = TONEMAP_VAR_AO;
 			else
 #endif
 			{
@@ -17602,7 +17603,7 @@ static void vk_create_attachments( void )
 	// on and the user wants SMAA; the helper is idempotent so calling
 	// it twice (e.g. cold start + r_fbo rebuild while already allocated)
 	// is safe.
-	if ( vk.fboActive && r_smaa->integer > 0 ) {
+	if ( vk.fboActive && R_AntialiasingSmaaQuality() > 0 ) {
 		vk_smaa_alloc_resources();
 	}
 }
@@ -17626,8 +17627,8 @@ static void vk_create_sync_primitives( void ) {
 			va( "image_acquired semaphore %i", i ),
 			&vk.tess[i].image_acquired );
 
-#if FEAT_SSAO
-		// per-frame binary semaphore the async-GTAO compute
+#if FEAT_AO
+		// per-frame binary semaphore the async-AO compute
 		// submit signals and the graphics submit waits (created regardless of
 		// r_asyncCompute; only used when async actually runs — cheap when idle).
 		vk.ral_gtao_async_done[i] = Ral_CreateSemaphore( vk_ral_get_backend(), RAL_SEMAPHORE_BINARY );
@@ -17688,8 +17689,8 @@ static void vk_destroy_sync_primitives( void  ) {
 		if ( vk.tess[i].ral_image_acquired ) { Ral_DestroySemaphore( vk.tess[i].ral_image_acquired ); vk.tess[i].ral_image_acquired = NULL; }
 		vk.tess[i].image_acquired = VK_NULL_HANDLE;
 
-#if FEAT_SSAO
-		// async-compute teardown: free the per-frame async-GTAO cmd buffer
+#if FEAT_AO
+		// async-compute teardown: free the per-frame async-AO cmd buffer
 		// (if one is still outstanding for this slot) + its completion semaphore. The
 		// device is idle by here (vk_shutdown waits), so the cmd buffer is retired.
 		if ( vk.ral_gtao_async_cmd[i] )  { Ral_DestroyCommandBuffer( vk.ral_gtao_async_cmd[i] ); vk.ral_gtao_async_cmd[i] = NULL; }
@@ -18135,7 +18136,7 @@ void vk_hdr_histogram_init( ralBackend_t *backend )
 	}
 }
 
-// GTAO: tear down the ground-truth-AO compute resources (idempotent). Frees the
+// AO: tear down the ground-truth-AO compute resources (idempotent). Frees the
 // two AO storage textures + views, the depth sampling view, the sampler, both
 // bind-group layouts/descriptors, both pipelines, and the composite descriptor.
 // Called at the top of vk_gtao_init (re-mints the depth view over the re-adopted
@@ -18147,6 +18148,11 @@ void vk_hdr_histogram_init( ralBackend_t *backend )
 
 void vk_gtao_shutdown( void )
 {
+	// The AO textures are destroyed below; the next init starts unwritten again.
+	vk.gtaoSeeded = qfalse;
+	vk.gtaoActive = qfalse;
+	vk.iblDrawsFrame = 0;
+	vk.gtaoHoldFrames = 0;
 	if ( vk.ral_gtao_main_pipeline )       { Ral_DestroyPipeline( vk.ral_gtao_main_pipeline ); vk.ral_gtao_main_pipeline = NULL; }
 	if ( vk.ral_gtao_denoise_pipeline )    { Ral_DestroyPipeline( vk.ral_gtao_denoise_pipeline ); vk.ral_gtao_denoise_pipeline = NULL; }
 	if ( vk.ral_gtao_main_descriptor )     { Ral_DestroyBindGroup( vk.ral_gtao_main_descriptor ); vk.ral_gtao_main_descriptor = NULL; }
@@ -18175,15 +18181,15 @@ void vk_gtao_shutdown( void )
 	vk.gtaoLayoutGeneral = qfalse;
 }
 
-// GTAO: bring up the ground-truth ambient-occlusion compute resources. Two RAL
+// AO: bring up the ground-truth ambient-occlusion compute resources. Two RAL
 // compute passes (main horizon-search + depth-aware denoise) writing R16F storage
 // textures, dispatched per frame in the vk_tonemap compute seam. Inputs are the
 // RAL-owned device depth copy reconstructed in-shader to view-space
 // position + normal — no normal G-buffer needed. Gated on the depth copy
-// existing: the copy is allocated only when depthFade is active (r_ssao on), and
-// since r_ssao is CVAR_LATCH the toggle goes through vid_restart, which re-runs
-// this whole adopt sweep — so when SSAO turns on, this init sees the depth copy.
-// With SSAO off, sceneDepth.ral_image is NULL and this no-ops (NULL pipeline ->
+// existing: the copy is allocated only when depthFade is active (r_ao on), and
+// since r_ao is CVAR_LATCH the toggle goes through vid_restart, which re-runs
+// this whole adopt sweep — so when AO turns on, this init sees the depth copy.
+// With AO off, sceneDepth.ral_image is NULL and this no-ops (NULL pipeline ->
 // dispatch skipped), exactly like the histogram's NULL-pipeline-disables guard.
 // Idempotent: any prior cycle's handles are freed first.
 void vk_gtao_init( ralBackend_t *backend )
@@ -18203,8 +18209,8 @@ void vk_gtao_init( ralBackend_t *backend )
 	vk_gtao_shutdown();
 
 	// No depth copy -> no source for AO. sceneDepth.ral_image is created only when
-	// depthFade is active (r_ssao / r_drawSunRays / r_depthFade). Leave everything NULL
-	// so the dispatch + composite are skipped; a later vid_restart with SSAO on
+	// depthFade is active (r_ao / r_drawSunRays / r_depthFade). Leave everything NULL
+	// so the dispatch + composite are skipped; a later vid_restart with AO on
 	// re-runs this with a valid depth copy.
 	if ( !backend || !vk.sceneDepth.ral_image )
 		return;
@@ -18225,7 +18231,7 @@ void vk_gtao_init( ralBackend_t *backend )
 	tci.sampleCount        = 1;
 	tci.usage              = RAL_TEXTURE_USAGE_STORAGE | RAL_TEXTURE_USAGE_SAMPLED;
 	tci.memory             = RAL_MEMORY_DEVICE_LOCAL;
-	// under r_asyncCompute the GTAO compute pass (compute
+	// under r_asyncCompute the AO compute pass (compute
 	// queue) writes these and the tonemap fragment (graphics queue) samples the
 	// denoised one — concurrent sharing avoids per-frame queue-ownership transfer.
 	// No-op (EXCLUSIVE) when the device has no dedicated compute family.
@@ -18235,7 +18241,7 @@ void vk_gtao_init( ralBackend_t *backend )
 	tci.debugName          = "wired-gtao-ao-denoised";
 	vk.ral_gtao_denoised_image = Ral_CreateTexture( backend, &tci );
 	if ( !vk.ral_gtao_ao_image || !vk.ral_gtao_denoised_image ) {
-		R_LOG( rch_ral, SEV_WARN, "gtao: AO texture create failed; SSAO disabled\n" );
+		R_LOG( rch_ral, SEV_WARN, "gtao: AO texture create failed; AO disabled\n" );
 		vk_gtao_shutdown();
 		return;
 	}
@@ -18285,7 +18291,7 @@ void vk_gtao_init( ralBackend_t *backend )
 	tci.debugName          = "wired-gtao-depth-pyramid";
 	vk.ral_gtao_depth_pyramid = Ral_CreateTexture( backend, &tci );
 	if ( !vk.ral_gtao_depth_pyramid ) {
-		R_LOG( rch_ral, SEV_WARN, "gtao: depth pyramid create failed; SSAO disabled\n" );
+		R_LOG( rch_ral, SEV_WARN, "gtao: depth pyramid create failed; AO disabled\n" );
 		vk_gtao_shutdown();
 		return;
 	}
@@ -18457,16 +18463,57 @@ void vk_gtao_init( ralBackend_t *backend )
 	if ( vk.ral_gtao_prefilter_pipeline && vk.ral_gtao_main_pipeline && vk.ral_gtao_denoise_pipeline && vk.ral_gtao_composite_descriptor ) {
 		R_LOG( rch_ral, SEV_INFO, "gtao: RAL compute AO ready (%dx%d, R16F, depth pyramid R32F x%u)\n", glConfig.vidWidth, glConfig.vidHeight, (unsigned)RAL_GTAO_DEPTH_MIP_LEVELS );
 	} else {
-		R_LOG( rch_ral, SEV_WARN, "gtao: compute setup incomplete; SSAO disabled\n" );
+		R_LOG( rch_ral, SEV_WARN, "gtao: compute setup incomplete; AO disabled\n" );
 		vk_gtao_shutdown();
 	}
 }
 
-// Per-frame GTAO dispatch. Reconstructs the projection-derived constants from
+// Decide once per frame whether the AO passes have to run. The AO texture is
+// read by exactly two things: the r_showAO isolation view (tonemap) and the
+// USE_IBL specular term of world base-pass draws. The second is counted where it
+// actually happens: tr_shade.c bumps vk.iblDrawsFrame each time a base-pass draw
+// is routed to the IBL variant. The previous frame's count decides this frame,
+// because the async kick-off runs at frame start, before any draw of this frame
+// exists; a short hold keeps AO running across a few frames without an IBL draw
+// so a surface at the edge of view does not toggle it. The first IBL draw after
+// a quiet spell therefore reads the previous AO texture (a couple of frames old
+// at worst) instead of a fresh one; the term it modulates is the runtime IBL
+// specular only. The first dispatch always runs to seed the texture: a reader
+// that appears later must find written texels, not an undefined image. The
+// answer is latched here once so the dispatch, the async kick-off and the
+// tonemap sync agree on it.
+#define VK_GTAO_HOLD_FRAMES 8
+static void vk_gtao_decide_frame( void )
+{
+#if FEAT_AO
+	qboolean consumer = qfalse;
+	const int prevIblDraws = vk.iblDrawsFrame;
+
+	vk.iblDrawsFrame = 0;
+	vk_diag_ibl_draws += prevIblDraws;
+	if ( prevIblDraws > 0 )
+		vk.gtaoHoldFrames = VK_GTAO_HOLD_FRAMES;
+	else if ( vk.gtaoHoldFrames > 0 )
+		vk.gtaoHoldFrames--;
+
+	vk.gtaoActive = qfalse;
+	if ( !r_ao || !r_ao->integer )
+		return;
+	if ( r_showAO && r_showAO->integer )
+		consumer = qtrue;
+	if ( vk.gtaoHoldFrames > 0 )
+		consumer = qtrue;
+	vk.gtaoActive = ( consumer || !vk.gtaoSeeded ) ? qtrue : qfalse;
+#else
+	vk.gtaoActive = qfalse;
+#endif
+}
+
+// Per-frame AO dispatch. Reconstructs the projection-derived constants from
 // backEnd.viewParms, pushes them, runs the main horizon-search pass into the AO
 // image, barriers, runs the depth-aware denoise into the denoised image, then
 // lands the denoised image in SHADER_READ_ONLY for the tonemap composite sample.
-// No-op unless SSAO is on and the pipelines + composite descriptor are up.
+// No-op unless AO is on and the pipelines + composite descriptor are up.
 //
 // `cb` is the command buffer to record into: the graphics cmd buffer
 // (vk.cmd->ral_cmd) for the serialized fallback, or a RAL_QUEUE_COMPUTE cmd buffer
@@ -18512,13 +18559,13 @@ void vk_gtao_dispatch( struct ralCommandBuffer_s *cb )
 	uint32_t groupsX, groupsY;
 	int steps;
 
-#if FEAT_SSAO
-	if ( !vk.fboActive || !r_ssao->integer )
+#if FEAT_AO
+	if ( !vk.fboActive || !vk.gtaoActive )
 		return;
 	if ( !vk.ral_gtao_prefilter_pipeline || !vk.ral_gtao_main_pipeline || !vk.ral_gtao_denoise_pipeline )
 		return;
 	if ( !vk.sceneDepth.ral_image || !vk.sceneDepth.copied )
-		return;   // no valid depth this frame (the tonemap force-copy guarantees it when SSAO is on)
+		return;   // no valid depth this frame (the tonemap force-copy guarantees it when AO is on)
 
 	p = backEnd.viewParms.projectionMatrix;
 	// q3 projection (column-major): proj[0] = 1/tanHalfFovX, proj[5] = 1/tanHalfFovY.
@@ -18533,18 +18580,18 @@ void vk_gtao_dispatch( struct ralCommandBuffer_s *cb )
 	push.ndcToViewAdd[1] =  tanHalfFovY;
 	push.zNear        = r_znear->value;
 	push.zFar         = backEnd.viewParms.zFar;
-	push.effectRadius = r_ssaoRadius->value;
+	push.effectRadius = r_aoRadius->value;
 	push.falloffRange = 0.75f;
-	// Quality tier (r_ssaoQuality 0..3 -> Low/Med/High/Ultra): more slices/steps.
+	// Quality tier (r_aoQuality 0..3 -> Low/Med/High/Ultra): more slices/steps.
 	{
-		int q = r_ssaoQuality->integer;
+		int q = r_aoQuality->integer;
 		if ( q < 0 ) q = 0; if ( q > 3 ) q = 3;
 		push.sliceCount = ( q <= 0 ) ? 2 : ( q == 1 ? 3 : ( q == 2 ? 4 : 6 ) );
 		steps           = ( q <= 0 ) ? 2 : ( q == 1 ? 3 : ( q == 2 ? 4 : 5 ) );
 	}
 	push.stepsPerSlice = steps;
 	push.finalPower    = 1.0f;   // XeGTAO's 2.2 over-darkens our raw visibility; keep linear
-	push.intensity     = r_ssaoIntensity->value;
+	push.intensity     = r_aoIntensity->value;
 
 	// ── SSCS directional contact fold ──
 	// Gate: a real map sun (tr.sunHasSource — sunless maps have no meaningful
@@ -18557,7 +18604,7 @@ void vk_gtao_dispatch( struct ralCommandBuffer_s *cb )
 	push.sscsStrength = ( r_sscsStrength ? r_sscsStrength->value : 0.0f );
 	push.sscsEnabled  = 0;
 	if ( tr.sunHasSource && r_shadows->integer && push.sscsRadius > 0.0f && push.sscsStrength > 0.0f ) {
-		// View-space direction TOWARD the sun. The GTAO position reconstruction
+		// View-space direction TOWARD the sun. The AO position reconstruction
 		// works in a +x=right / +y=up / +z=forward(into screen) view frame; project
 		// the world sun direction onto that basis. q3 axis: [0]=forward, [1]=left,
 		// [2]=up → right = -left.
@@ -18642,6 +18689,7 @@ void vk_gtao_dispatch( struct ralCommandBuffer_s *cb )
 	Ral_CmdTransitionTexture( cb, vk.ral_gtao_denoised_image,
 		RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT, RAL_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
 		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+	vk.gtaoSeeded = qtrue;
 
 	// The compute pipeline bind dirtied the GRAPHICS bound-pipeline trackers; clear
 	// them so the tonemap pipeline re-binds cleanly (mirrors the histogram dispatch
@@ -18656,26 +18704,26 @@ void vk_gtao_dispatch( struct ralCommandBuffer_s *cb )
 }
 
 // the synchronization point reached just before tonemap
-// samples the GTAO AO. GTAO itself was dispatched earlier (vk_scene_depth_copy's
+// samples the AO. AO itself was dispatched earlier (vk_scene_depth_copy's
 // snapshot point) so its compute could overlap the transparent + bloom graphics.
 // Here we make its result visible to the tonemap fragment read.
 //   - Graphics-queue path (default / single-queue / aliased-compute fallback):
-//     GTAO recorded on vk.cmd->ral_cmd, so a same-queue COMPUTE_TO_GRAPHICS
+//     AO recorded on vk.cmd->ral_cmd, so a same-queue COMPUTE_TO_GRAPHICS
 //     barrier is all that's needed (identical to the pre-relocation barrier).
 //   - Async path (dedicated compute family): waits the timeline semaphore
 //     the compute submit signals + acquires AO image ownership compute->graphics.
-// No-op unless r_ssao is on (mirrors vk_gtao_dispatch's guard).
+// No-op unless r_ao is on (mirrors vk_gtao_dispatch's guard).
 void vk_gtao_sync_before_tonemap( void )
 {
-#if FEAT_SSAO
-	if ( !vk.fboActive || !r_ssao->integer )
+#if FEAT_AO
+	if ( !vk.fboActive || !vk.gtaoActive )
 		return;
 	if ( !vk.ral_gtao_main_pipeline || !vk.ral_gtao_denoise_pipeline )
 		return;
 	if ( !vk.sceneDepth.ral_image || !vk.sceneDepth.copied )
 		return;
 
-	// Async path: GTAO ran on the compute queue this frame; the denoised AO is
+	// Async path: AO ran on the compute queue this frame; the denoised AO is
 	// concurrent-shared, so its visibility to the tonemap fragment comes from the
 	// graphics submit WAITING the compute semaphore (vk_gtao_async_wait_sem, added
 	// at the per-frame Ral_Submit), not from a same-queue barrier. Nothing to do here.
@@ -18690,7 +18738,7 @@ void vk_gtao_sync_before_tonemap( void )
 #endif
 }
 
-// returns whether the async GTAO ran this frame.
+// returns whether the async AO ran this frame.
 qboolean vk_gtao_async_is_active( void )
 {
 	return vk.gtaoAsyncActive;
@@ -18700,18 +18748,18 @@ qboolean vk_gtao_async_is_active( void )
 // on so tonemap doesn't sample a half-written AO. NULL when async didn't run.
 struct ralSemaphore_s *vk_gtao_async_wait_sem( void )
 {
-#if FEAT_SSAO
+#if FEAT_AO
 	if ( vk.gtaoAsyncActive )
 		return vk.ral_gtao_async_done[ vk.cmd_index ];
 #endif
 	return NULL;
 }
 
-// at the frame-start seam, decide whether to run GTAO on
+// at the frame-start seam, decide whether to run AO on
 // the dedicated compute queue this frame. Eligible iff r_asyncCompute is set, the
-// device exposes a dedicated compute family, SSAO is on with its pipelines up, and
+// device exposes a dedicated compute family, AO is on with its pipelines up, and
 // a depth snapshot from a PRIOR frame exists (cross-frame, 1-frame-lag source).
-// Records GTAO into a RAL_QUEUE_COMPUTE command buffer reading that snapshot and
+// Records AO into a RAL_QUEUE_COMPUTE command buffer reading that snapshot and
 // submits it, signalling the per-frame semaphore the graphics submit later waits.
 // Sets vk.gtaoAsyncActive so (a) the graphics submit waits the sem and (b) the
 // serial snapshot-point dispatch is skipped. No-op (leaves gtaoAsyncActive false →
@@ -18720,7 +18768,7 @@ void vk_gtao_async_begin( void )
 {
 	vk.gtaoAsyncActive = qfalse;
 
-#if FEAT_SSAO
+#if FEAT_AO
 	{
 	struct ralBackend_s *rb = vk_ral_get_backend();
 	const ralCaps_t     *caps = rb ? Ral_GetCaps( rb ) : NULL;
@@ -18732,7 +18780,7 @@ void vk_gtao_async_begin( void )
 		return;                                   // opt-in off → serial fallback
 	if ( !caps || !caps->asyncCompute )
 		return;                                   // no dedicated compute queue → serial fallback (byte-identical)
-	if ( !vk.fboActive || !r_ssao->integer )
+	if ( !vk.fboActive || !vk.gtaoActive )
 		return;
 	if ( !vk.ral_gtao_main_pipeline || !vk.ral_gtao_denoise_pipeline )
 		return;
@@ -18763,7 +18811,7 @@ void vk_gtao_async_begin( void )
 		return;                                   // acquire failed → serial fallback
 	vk.ral_gtao_async_cmd[ vk.cmd_index ] = ccb;
 
-	// Record GTAO into the compute command buffer. The shared images (depth
+	// Record AO into the compute command buffer. The shared images (depth
 	// snapshot + AO) are concurrent graphics/compute, so no queue-ownership
 	// transfer is needed — only this submit's semaphore orders the AO write before
 	// the graphics submit's tonemap read.
@@ -18783,7 +18831,7 @@ void vk_gtao_async_begin( void )
 // ── Lens-glow occlusion oracle ───────────────────────────────────────────────
 // One unified visibility authority for lens sources (halo/surface flares first).
 // A per-frame host-coherent SSBO holds one record per registered source; a compute
-// pass dispatched in the GTAO seam (depth copy SHADER_READ_ONLY, render pass closed)
+// pass dispatched in the AO seam (depth copy SHADER_READ_ONLY, render pass closed)
 // samples vk.sceneDepth with an N-tap disc per source and writes visibility 0..1 back
 // into the record. Replaces halo's private 1-vertex dot-probe (the last VS-MVP push
 // consumer) with a batched, depth-sampling, multi-backend-clean pass.
@@ -18928,7 +18976,7 @@ void vk_lens_init( ralBackend_t *backend )
 		R_LOG( rch_ral, SEV_INFO, "lens: RAL occlusion oracle ready (%d-tap, %d max)\n", LENS_TAP_COUNT, LENS_MAX_SOURCES );
 }
 
-// Per-frame oracle dispatch. Runs in the GTAO seam (vk_scene_depth_copy): depth copy
+// Per-frame oracle dispatch. Runs in the AO seam (vk_scene_depth_copy): depth copy
 // is SHADER_READ_ONLY, render pass closed — the legal compute window. For each of the
 // lensSourceCount records (host-written this/last frame), samples the depth copy with
 // an N-tap disc and writes visibility 0..1 into the record. The visibility is consumed
@@ -18948,10 +18996,10 @@ void vk_lens_dispatch( struct ralCommandBuffer_s *cb )
 	ralBufferMapTicket_t mapTicket;
 	ralBufferTransition_t transition;
 	ralResourceTransitionBatch_t batch;
-	ralBufferCopy_t copy;
 	ralBufferTransition_t sourceTransition;
 	ralResourceTransitionBatch_t sourceBatch;
 	ralBufferUploadReceipt_t writeReceipt;
+	ralBufferCopy_t copy;
 	float *shadow = (float *)vk.lensSourcesPtr;
 	uint32_t i;
 
@@ -19003,7 +19051,6 @@ void vk_lens_dispatch( struct ralCommandBuffer_s *cb )
 	memset( &batch, 0, sizeof( batch ) ); batch.bufferTransitions = &transition; batch.bufferTransitionCount = 1u;
 	if ( Ral_CmdTransitionResources( cb, &batch ) != ralSuccess ) return;
 
-	Ral_CmdBindBindGroup( cb, 0, vk.ral_lens_descriptor[slot] );
 	// The sources buffer carries the host write into the dispatch (HOST_WRITE to
 	// compute read/write) and then into the readback copy as COPY_SOURCE. Ending
 	// in COPY_SOURCE keeps the tracked state known, which the next frame's host
@@ -19018,6 +19065,7 @@ void vk_lens_dispatch( struct ralCommandBuffer_s *cb )
 	sourceBatch.bufferTransitions = &sourceTransition; sourceBatch.bufferTransitionCount = 1u;
 	if ( Ral_CmdTransitionResources( cb, &sourceBatch ) != ralSuccess ) return;
 
+	Ral_CmdBindBindGroup( cb, 0, vk.ral_lens_descriptor[slot] );
 	Ral_CmdPushConstants( cb, RAL_STAGE_COMPUTE, 0, sizeof( push ), &push );
 	Ral_CmdDispatch( cb, ( (uint32_t)vk.lensSourceCount + 63u ) / 64u, 1, 1 );
 
@@ -22935,7 +22983,7 @@ qboolean vk_initialize( void )
 	// (render_pass.main 3-attachment-with-resolve variant, vk.msaa_image
 	// allocation, etc.) are deleted alongside this retire.
 
-	// The scene-depth copy needs the FBO; the consumer set (depth fade, SSAO,
+	// The scene-depth copy needs the FBO; the consumer set (depth fade, AO,
 	// god rays, lens occlusion) lives in s_sceneDepthConsumers.
 	vk_scene_depth_recompute_active();
 	s_sceneDepthConsumerState = vk.sceneDepth.active ? 1 : 0;
@@ -22957,8 +23005,8 @@ qboolean vk_initialize( void )
 	// at boot has vk_create_attachments call alloc, which flips .active
 	// to qtrue. Live toggling routes through vk_update_post_process_pipelines.
 	vk.smaa.active = qfalse;
-	vk.smaa.quality = r_smaa->integer;
-	if ( vk.fboActive && r_smaa->integer > 0 ) {
+	vk.smaa.quality = R_AntialiasingSmaaQuality();
+	if ( vk.fboActive && vk.smaa.quality > 0 ) {
 		const char *names[] = { "", "Low", "Medium", "High", "Ultra" };
 		R_LOG( rch_vk, SEV_INFO, "...SMAA: %s quality\n", names[vk.smaa.quality] );
 	}
@@ -23172,7 +23220,7 @@ qboolean vk_initialize( void )
 		                             + 1 /* vk.sceneDepth.descriptor — RAL-owned depth-fade sampler */
 		                             + VK_NUM_BLOOM_PASSES * 2 /* vk.bloom_image_descriptor[i] — ping-pong per pass */
 			                             + 5 /* direct RAL SMAA sampler groups: edges/blend/input/area/search */
-		                             + 5 /* direct RAL engine-resources group: shadowMap + BRDF-LUT + irradiance + radiance + GTAO */
+		                             + 5 /* direct RAL engine-resources group: shadowMap + BRDF-LUT + irradiance + radiance + AO */
 		                             + 12 /* atmosphere heightgrid + scene-depth + particle collision-heightgrid allocations */
 		                             // Particle render owns two ping-pong groups per
 		                             // command slot; each group carries the full
@@ -23328,13 +23376,13 @@ qboolean vk_initialize( void )
 	// not sampled in vertex.
 	{
 		// 7 COMBINED_IMAGE_SAMPLER bindings, FRAGMENT stage: 0=CSM shadow 2DArray,
-		// 1=BRDF LUT (2D), 2=irradiance cube, 3=radiance cube, 4=screen-space GTAO,
+		// 1=BRDF LUT (2D), 2=irradiance cube, 3=radiance cube, 4=screen-space AO,
 		// 5=previous irradiance cube, 6=previous radiance cube.
 		// visibility (R16F). All are GLOBAL scene resources (not per-draw) so they share
 		// this set, mirroring the shadowMap. The layout is born with all 7 bindings here
 		// on the init path BEFORE any pipeline is created against it, so every pipeline
 		// is 7-binding-compatible — this is not a live layout mutation. binding 4 is
-		// always written with a valid view (denoised GTAO, or tr.whiteImage as a 1.0
+		// always written with a valid view (denoised AO, or tr.whiteImage as a 1.0
 		// fallback) so no pipeline reads an unbound descriptor.
 		ralBindEntry_t binds[ 7 ];
 		ralBindGroupLayoutCreateInfo_t desc;
@@ -23495,7 +23543,7 @@ qboolean vk_initialize( void )
 		// — bloom-extract, blur, capture, gamma, tonemap variants — stays
 		// layout-compatible when set 1 is bound at draw time).
 		// All three post-process layouts share the same set shape: set 0 = scene
-		// sampler, set 1 = a second sampler (the depth sampler in the SSAO /
+		// sampler, set 1 = a second sampler (the depth sampler in the AO /
 		// SUNRAYS variants; an unused sampler slot in the default layout), set 2
 		// = the per-frame scene-exposure UBO. Keeping exposure at set 2 (free in
 		// every variant) lets one exposure buffer bind on all of them.
@@ -23520,29 +23568,29 @@ qboolean vk_initialize( void )
 			"wired-pl-post-process", &vk.ral_pipeline_layout_post_process,
 			&vk.pipeline_layout_post_process );
 
-#if FEAT_SSAO
-		// SSAO pipeline layout: set 0 color, set 1 depth (unused by GTAO but kept
-		// for layout symmetry with sunrays), set 2 exposure, set 3 the GTAO AO
-		// sampler (the denoised visibility texture the SSAO variant samples).
+#if FEAT_AO
+		// AO pipeline layout: set 0 color, set 1 depth (unused by AO but kept
+		// for layout symmetry with sunrays), set 2 exposure, set 3 the AO
+		// sampler (the denoised visibility texture the AO variant samples).
 		set_layouts[2] = vk.exposureSetLayout;
 		set_layouts[3] = vk.set_layout_sampler;
 		desc.setLayoutCount = 4;
 		desc.pushConstantRangeCount = 0;
 		desc.pPushConstantRanges = NULL;
 		vk_create_direct_pipeline_layout( ral_layouts, 4u, 0u, 0u,
-			"wired-pl-ssao", &vk.ral_pipeline_layout_ssao,
-			&vk.pipeline_layout_ssao );
+			"wired-pl-ao", &vk.ral_pipeline_layout_ao,
+			&vk.pipeline_layout_ao );
 		set_layouts[2] = vk.set_layout_sampler;
 #endif
 
 #if FEAT_SUNRAYS
 		{
 			// Sunrays pipeline layout: set 0 color, set 1 depth, set 2 exposure, set 3
-			// the GTAO AO sampler. The sun-screen params ride in the set-2 ExposureBlock
+			// the AO sampler. The sun-screen params ride in the set-2 ExposureBlock
 			// UBO (written per-frame in vk_tonemap), so there are ZERO push ranges. Set 3
-			// is included so this layout is a superset of the SSAO layout: the combined
-			// SSAO+SUNRAYS variant uses this layout (sunrays wins the layout selection)
-			// yet still samples the GTAO set-3 descriptor from its SSAO half — without
+			// is included so this layout is a superset of the AO layout: the combined
+			// AO+SUNRAYS variant uses this layout (sunrays wins the layout selection)
+			// yet still samples the AO set-3 descriptor from its AO half — without
 			// set 3 here that bind would be out of range. sunray-only variants leave
 			// set 3 unbound, which is valid.
 			set_layouts[2] = vk.exposureSetLayout;
@@ -24201,9 +24249,9 @@ void vk_shutdown( refShutdownCode_t code )
 #endif
 	vk.pipeline_layout_post_process = VK_NULL_HANDLE;
 	vk.pipeline_layout_smaa = VK_NULL_HANDLE;
-#if FEAT_SSAO
+#if FEAT_AO
 	// The direct RAL owner was released by the centralized core-layout sweep.
-	vk.pipeline_layout_ssao = VK_NULL_HANDLE;
+	vk.pipeline_layout_ao = VK_NULL_HANDLE;
 #endif
 #if FEAT_SUNRAYS
 	// The direct RAL owner was released by the centralized core-layout sweep.
@@ -25470,8 +25518,8 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 			int varIdx = 0;
 			// AO isolation is a dedicated override, never combined with final-colour
 			// grading/tonemap/sunrays variants.
-#if FEAT_SSAO
-			if ( r_showAO && r_showAO->integer ) varIdx = TONEMAP_VAR_SSAO;
+#if FEAT_AO
+			if ( r_showAO && r_showAO->integer ) varIdx = TONEMAP_VAR_AO;
 			else
 #endif
 			{
@@ -25513,8 +25561,8 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 			// module is unbuilt), like the legacy array.
 			ralTarget = &vk.ral_tonemap_variants[ varIdx ];
 			ralRpfmt  = RPFMT_TONEMAP;
-			if ( varIdx & TONEMAP_VAR_SSAO ) {
-				ralLayout = vk.ral_pipeline_layout_ssao;
+			if ( varIdx & TONEMAP_VAR_AO ) {
+				ralLayout = vk.ral_pipeline_layout_ao;
 				optionalBindGroupMask = 1u << 1;
 			} else if ( varIdx & TONEMAP_VAR_SUNRAYS ) {
 				ralLayout = vk.ral_pipeline_layout_sunrays;
@@ -25754,7 +25802,7 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	spec_entries[25].size = sizeof(frag_spec_data.chromatic_strength);
 
 	// Reserved id-25 ABI slot. No post-process module declares it; the dedicated
-	// AO module is selected by TONEMAP_VAR_SSAO and consumes set 3 instead.
+	// AO module is selected by TONEMAP_VAR_AO and consumes set 3 instead.
 	spec_entries[26].constantID = 25;
 	spec_entries[26].offset = offsetof(struct FragSpecData, show_ao);
 	spec_entries[26].size = sizeof(frag_spec_data.show_ao);
@@ -27437,7 +27485,7 @@ static void create_pipeline( const Vk_Pipeline_Def *def,
 
 	// depth fade: swap fragment module for single-texture blended surfaces.
 	// Gated on the depth-fade FEATURE (r_depthFade), not vk.sceneDepth.active: that
-	// flag is the shared depth-COPY trigger (also raised by r_ssao / r_drawSunRays /
+	// flag is the shared depth-COPY trigger (also raised by r_ao / r_drawSunRays /
 	// r_forwardPlus, which all need the depth snapshot), so gating the soft-particle
 	// fade on it would fade every blended single-texture world surface toward black
 	// whenever those features are on — a blended surface that IS the scene depth has
@@ -29373,7 +29421,7 @@ static qboolean vk_bind_descriptor_sets( void )
 		// (WIRED_ENGINE_RES_SET=2). Stable handles across the frame, but the
 		// per-draw fold is needed because Vulkan's pipeline-layout-compat
 		// rule disturbs both sets across MSDF↔main-path switches. Other
-		// layouts (storage / post-process / SMAA / SSAO / sunrays / particle
+		// layouts (storage / post-process / SMAA / AO / sunrays / particle
 		// compute) don't declare these sets, so their bind range never
 		// extends into them — no VUID-08600 / 07988 fall-through risk.
 		// (Previously these were sets 7 and 8 respectively, and the
@@ -30929,7 +30977,7 @@ vk_tonemap  (Block 8 / Delta 2 — UI-agnostic)
 
 Scene-radiance post-process pass. Reads vk.color_image (img 264 — HDR
 scene + bloom composition), writes vk.tonemapped_image (img 265 — LDR,
-still linear-light). Variant selection (SSAO, tonemap operator, colour
+still linear-light). Variant selection (AO, tonemap operator, colour
 grading, sunrays) happens at draw time.
 
 This is now purely the tonemap step: it ends whatever scene pass is open
@@ -30949,7 +30997,7 @@ void vk_tonemap( void )
 {
 	const vkHdrPostprocessSource_t *postRoute = vk_temporal_postprocess_route();
 	int varIdx = 0;
-#if FEAT_SSAO
+#if FEAT_AO
 	static qboolean s_showAoRouteLogged = qfalse;
 #endif
 
@@ -30958,13 +31006,13 @@ void vk_tonemap( void )
 	if ( !vk.fboActive )
 		return;
 
-	// r_showAO is a diagnostic override: select the dedicated denoised-GTAO
+	// r_showAO is a diagnostic override: select the dedicated denoised-AO
 	// isolation module only when its real descriptor exists. A missing descriptor
 	// cannot be substituted with final colour; the visual gate's grayscale and
 	// isolation-difference teeth will fail the run.
-#if FEAT_SSAO
+#if FEAT_AO
 	if ( r_showAO && r_showAO->integer && vk_show_ao_source_ready() )
-		varIdx = TONEMAP_VAR_SSAO;
+		varIdx = TONEMAP_VAR_AO;
 	else
 #endif
 	{
@@ -30999,19 +31047,19 @@ void vk_tonemap( void )
 
 	// One authoritative route decision per process. The diagnostic gate consumes
 	// this marker in addition to pixels: it proves the fullscreen pass selected
-	// the RAL-native denoised GTAO binding rather than substituting scene colour.
-#if FEAT_SSAO
+	// the RAL-native denoised AO binding rather than substituting scene colour.
+#if FEAT_AO
 	if ( r_showAO && r_showAO->integer && !s_showAoRouteLogged ) {
-		if ( varIdx == TONEMAP_VAR_SSAO ) {
+		if ( varIdx == TONEMAP_VAR_AO ) {
 			R_LOG( rch_ral, SEV_INFO, "r_showAO: route=denoised-gtao source=wired-gtao-ao-denoised layout=shader-read-only set=3\n" );
 		} else {
 			R_LOG( rch_ral, SEV_WARN,
-				"r_showAO: refused reason=gtao-unavailable r_ssao=%d main=%d denoise=%d descriptor=%d pipeline=%d\n",
-				( r_ssao && r_ssao->integer ) ? 1 : 0,
+				"r_showAO: refused reason=gtao-unavailable r_ao=%d main=%d denoise=%d descriptor=%d pipeline=%d\n",
+				( r_ao && r_ao->integer ) ? 1 : 0,
 				vk.ral_gtao_main_pipeline ? 1 : 0,
 				vk.ral_gtao_denoise_pipeline ? 1 : 0,
 				vk.ral_gtao_composite_descriptor ? 1 : 0,
-				vk.ral_tonemap_variants[ TONEMAP_VAR_SSAO ] ? 1 : 0 );
+				vk.ral_tonemap_variants[ TONEMAP_VAR_AO ] ? 1 : 0 );
 		}
 		s_showAoRouteLogged = qtrue;
 	}
@@ -31021,9 +31069,9 @@ void vk_tonemap( void )
 	// That copy is normally produced at the opaque->transparent sort boundary in
 	// RB_RenderDrawSurfList — but a frame with no transparent surfaces never
 	// crosses that boundary, so the copy would be stale/undefined while the
-	// fullscreen consumers (SSAO/sunrays/lens) still run. Force it here whenever a
+	// fullscreen consumers (AO/sunrays/lens) still run. Force it here whenever a
 	// consumer is active and the copy has not happened this frame. This covers the
-	// cases the old SSAO/SUNRAYS-only mask missed (an r_lens-only or r_depthFade-only
+	// cases the old AO/SUNRAYS-only mask missed (an r_lens-only or r_depthFade-only
 	// frame with no transparent surface). vk_scene_depth_copy self-guards on
 	// vk.sceneDepth.copied (idempotent — a no-op if the sort boundary or the early
 	// pre-SS_FOG produce already took it) and runs from the same precondition as the
@@ -31096,8 +31144,8 @@ void vk_tonemap( void )
 		eb->brightness    = visibilityPlan.exposureScale;
 		eb->shadowExponent = visibilityPlan.shadowExponent;
 		eb->shadowPivot    = visibilityPlan.shadowPivot;
-		// (The legacy SSAO ssaoZNear/ssaoZFar depth-linearisation fields were
-		// removed with the retired per-pixel tonemap SSAO path — GTAO is the sole
+		// (The legacy AO aoZNear/aoZFar depth-linearisation fields were
+		// removed with the retired per-pixel tonemap AO path — AO is the sole
 		// AO path and does its own depth reconstruction in the compute pass.)
 #if FEAT_SUNRAYS
 		// Sun-ray sun-screen params for computeSunRays (read only under USE_SUNRAYS).
@@ -31454,13 +31502,13 @@ void vk_tonemap( void )
 		vk.cmd->last_ral_pipeline = NULL;
 	}
 
-	// GTAO ambient occlusion: the dispatch was RELOCATED
+	// AO ambient occlusion: the dispatch was RELOCATED
 	// to vk_scene_depth_copy() (the depth-snapshot point at the SS_FOG opaque->
 	// transparent boundary, or the force-copy fallback for no-transparent frames),
 	// so its compute can overlap the transparent + bloom graphics that follow. By
 	// the time control reaches here the denoised AO is already in SHADER_READ_ONLY
 	// (graphics-queue path) or made visible via the cross-queue semaphore (async
-	// path). The tonemap SSAO variant samples it below. No-op unless r_ssao is on.
+	// path). The tonemap AO variant samples it below. No-op unless r_ao is on.
 	vk_gtao_sync_before_tonemap();
 
 	if ( ralTone ) {
@@ -31506,11 +31554,11 @@ void vk_tonemap( void )
 		// layout does not declare is a VUID. The depth copy was produced above
 		// (forced when no transparent surface triggered the sort-boundary copy); the
 		// descriptor samples vk.sceneDepth.ral_image in SHADER_READ_ONLY.
-		// AO isolation does not use set 1; its denoised GTAO input is set 3.
+		// AO isolation does not use set 1; its denoised AO input is set 3.
 		if ( varIdx & TONEMAP_VAR_SUNRAYS )
 			Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 1, vk.sceneDepth.ral_descriptor );
 		Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 2, vk.exposure.ral_descriptor[ vk.cmd_index ] );
-		if ( varIdx & TONEMAP_VAR_SSAO )
+		if ( varIdx & TONEMAP_VAR_AO )
 			Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 3, vk.ral_gtao_composite_descriptor );
 		Ral_CmdDraw( vk.cmd->ral_cmd, 4, 1, 0, 0 );
 
@@ -31816,9 +31864,9 @@ static void vk_scene_depth_copy_internal( qboolean forceFinal,
 	if ( !forceFinal ) vk_gpu_ts_write( "depth_transfer" );
 
 	// The snapshot is now valid (SHADER_READ_ONLY) and the render pass is closed —
-	// the legal window for a compute dispatch. SERIAL FALLBACK: when async GTAO did
+	// the legal window for a compute dispatch. SERIAL FALLBACK: when async AO did
 	// NOT run this frame (no dedicated compute queue, r_asyncCompute off, or the
-	// async path was skipped), record GTAO on the graphics queue HERE reading THIS
+	// async path was skipped), record AO on the graphics queue HERE reading THIS
 	// frame's snapshot (byte-identical to the historical placement). The async path
 	// (vk_gtao_async_begin at frame start) already handled it from the PREVIOUS
 	// frame's snapshot, so skip to avoid a double dispatch.
@@ -32169,13 +32217,13 @@ void vk_smaa( void )
 	float rtMetrics[4];
 
 	// vk.smaa.active is the resource-alloc gate. Dispatch
-	// also requires r_smaa->integer > 0 AND the live pipelines to be
+	// also requires an effective SMAA preset > 0 (r_aa / r_smaa) AND the live pipelines to be
 	// built (vk_create_smaa_pipelines tears them down when r_smaa hits
 	// 0). The caller (the transition gameplay branch) is itself once-
 	// guarded by backEnd.doneUIPass, so this runs at most once per frame;
 	// this defensive guard handles r_smaa = 0 and the live-toggle /
 	// acquire-failed corner cases.
-	if ( !vk.smaa.active || r_smaa->integer == 0
+	if ( !vk.smaa.active || R_AntialiasingSmaaQuality() == 0
 			|| !vk.ral_tonemapped_image || !vk.smaa.ral_input_image
 			|| !vk.smaa.ral_edges_image || !vk.smaa.ral_blend_image
 			|| !vk.smaa.ral_input_descriptor
@@ -32999,7 +33047,7 @@ static void vk_diag_drop_epoch( void )
 	vk_diag_pacing_bucket = 0;
 	vk_diag_fence_ms = vk_diag_submit_ms = vk_diag_present_ms = vk_diag_acquire_ms = vk_diag_frames = 0;
 	vk_diag_slot_wait_us = 0;
-	vk_diag_drawcalls = vk_diag_pipebinds = vk_diag_msdf_draws = vk_diag_msdf_binds = 0;
+	vk_diag_drawcalls = vk_diag_pipebinds = vk_diag_msdf_draws = vk_diag_msdf_binds = vk_diag_ibl_draws = 0;
 }
 
 static qboolean vk_diag_identity_equal( const vk_diag_swapchain_identity_t *a,
@@ -33075,11 +33123,11 @@ static void vk_diag_attempt_finish( qboolean presented )
 			Q_strncpyz( image_hits, "none", sizeof( image_hits ) );
 
 		if ( r_vkDebugTiming && r_vkDebugTiming->integer ) {
-			R_LOG( rch_timing, SEV_DEBUG, "vk timing (200f avg): fence=%dms/f  ft_fence=%dms/f  acquire=%dms/f  submit=%dms/f  present=%dms/f  draws=%d/f(msdf=%d)  pipebinds=%d/f(msdf=%d)\n",
+			R_LOG( rch_timing, SEV_DEBUG, "vk timing (200f avg): fence=%dms/f  ft_fence=%dms/f  acquire=%dms/f  submit=%dms/f  present=%dms/f  draws=%d/f(msdf=%d)  pipebinds=%d/f(msdf=%d)  ibl_draws=%d/f(total=%d)\n",
 				vk_diag_fence_ms / 200, (int)( ( worker_wait_us + worker_reset_us ) / 1000 / 200 ),
 				vk_diag_acquire_ms / 200, vk_diag_submit_ms / 200, vk_diag_present_ms / 200,
 				vk_diag_drawcalls / 200, vk_diag_msdf_draws / 200,
-				vk_diag_pipebinds / 200, vk_diag_msdf_binds / 200 );
+				vk_diag_pipebinds / 200, vk_diag_msdf_binds / 200, vk_diag_ibl_draws / 200, vk_diag_ibl_draws );
 			R_LOG( rch_timing, SEV_DEBUG, "vk pacing (200f avg): bucket=%u slots=%u main_slot_wait=%lluus/f worker_queue=%lluus/work worker_fence=%lluus/work worker_count=%u max_queue=%u\n",
 				vk_diag_pacing_bucket, (unsigned)NUM_COMMAND_BUFFERS,
 				(unsigned long long)( vk_diag_slot_wait_us / 200 ),
@@ -33117,7 +33165,7 @@ static void vk_diag_attempt_finish( qboolean presented )
 		memset( &vk_diag_v2, 0, sizeof( vk_diag_v2 ) );
 		vk_diag_fence_ms = vk_diag_submit_ms = vk_diag_present_ms = vk_diag_acquire_ms = vk_diag_frames = 0;
 		vk_diag_slot_wait_us = 0;
-		vk_diag_drawcalls = vk_diag_pipebinds = vk_diag_msdf_draws = vk_diag_msdf_binds = 0;
+		vk_diag_drawcalls = vk_diag_pipebinds = vk_diag_msdf_draws = vk_diag_msdf_binds = vk_diag_ibl_draws = 0;
 	}
 }
 
@@ -34393,6 +34441,7 @@ _retry:
 
 	backEnd.screenMapDone = qfalse;
 	vk.sceneDepth.copied = qfalse;
+	vk_gtao_decide_frame();
 
 	// Particle compute pass — runs OUTSIDE any render pass, before the
 	// main / screenmap pass begins this frame. vkCmdDispatch is
@@ -34819,7 +34868,7 @@ _retry:
 	// on the default OFF path, so the lit path stays PMLIGHT byte-identical.
 	vk_forwardplus_dispatch();
 
-	// kick off GTAO on the dedicated compute queue here, at
+	// kick off AO on the dedicated compute queue here, at
 	// frame start, reading the PREVIOUS frame's depth snapshot (1-frame-lag) so it
 	// overlaps this frame's graphics. No-op (serial fallback at the snapshot point)
 	// when r_asyncCompute is off, there's no dedicated compute family, or no prior
@@ -35017,7 +35066,7 @@ void vk_end_frame( void )
 	// ATTACHMENT_OUTPUT / FRAGMENT_SHADER masks but semantically valid given
 	// the renderer's actual barrier coverage, which inserts explicit pipeline
 	// barriers around every read of the swapchain image / staging-upload data).
-	ralSemaphore_t     *ralWaits  [3];   // swapchain-acquire (+upload-queue) [+1 async-GTAO]
+	ralSemaphore_t     *ralWaits  [3];   // swapchain-acquire (+upload-queue) [+1 async-AO]
 	ralSemaphore_t     *ralSignals[2];
 	ralSubmitInfo_t     ralSubmit;
 	ralCommandBuffer_t *ralCbs[1];
@@ -35534,7 +35583,7 @@ void vk_end_frame( void )
 	   carries the signalFence so the per-frame fence-wait at vk_begin_frame
 	   sees a signaled fence. */
 
-	// if GTAO ran on the compute queue this frame, the
+	// if AO ran on the compute queue this frame, the
 	// graphics submit must WAIT its completion semaphore so the tonemap fragment (in
 	// this submit) doesn't sample a half-written AO. Append to whatever wait list the
 	// branches above built (ralWaits has a spare 3rd slot). Only when we actually set

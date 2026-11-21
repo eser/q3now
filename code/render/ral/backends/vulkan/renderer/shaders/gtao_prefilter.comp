@@ -4,10 +4,10 @@
 #version 450
 
 /*
-gtao_prefilter.comp — GTAO depth prefilter (XeGTAO PrefilterDepths16x16).
+gtao_prefilter.comp — XeGTAO depth prefilter (XeGTAO PrefilterDepths16x16).
 
 Converts the reversed-Z device depth copy into a view-space linear depth
-pyramid (R16F, 5 mip levels) that the GTAO horizon search samples instead of
+pyramid (R16F, 5 mip levels) that the XeGTAO horizon search samples instead of
 the full-resolution device depth. Far horizon taps read coarser mips, which
 turns the wide, incoherent depth reads of the horizon loop into cache-friendly
 ones without changing slice/step counts or the AO resolution (Intel XeGTAO

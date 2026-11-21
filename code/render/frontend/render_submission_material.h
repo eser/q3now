@@ -249,6 +249,12 @@ qboolean RenderSubmission_MaterialIndex(
 qboolean RenderSubmission_MaterialSnapshot(
 	const renderSubmissionState_t *state, qhandle_t handle,
 	renderMaterialSnapshot_t *outSnapshot );
+/* Borrowed, read-only view of the catalog record; null when the handle is
+ * unknown. Valid until the next registration changes the catalog. Per-frame
+ * readers use this instead of RenderSubmission_MaterialSnapshot, which copies
+ * the whole record. */
+const renderMaterialSnapshot_t *RenderSubmission_MaterialSnapshotView(
+	const renderSubmissionState_t *state, qhandle_t handle );
 qhandle_t RenderSubmission_MaterialHandle( const renderSubmissionState_t *state,
 	const char *name );
 qboolean RenderSubmission_TextureSnapshot(

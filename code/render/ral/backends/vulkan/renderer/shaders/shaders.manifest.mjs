@@ -142,11 +142,11 @@ export default [
 	// ── Tonemap post-process variants ─────────────────────────
 	// scene-radiance effects (tonemap operator, colour grading, sunrays) live on
 	// tonemap.frag now. gamma.frag is the thin display-encoding pass.
-	// The dedicated USE_SHOW_AO module reads the denoised GTAO texture directly;
-	// it is a diagnostic isolation view, not the retired per-pixel SSAO composite.
+	// The dedicated USE_SHOW_AO module reads the denoised AO texture directly;
+	// it is a diagnostic isolation view, not the retired per-pixel AO composite.
 	{ stage: 'frag', source: 'tonemap.frag', defines: ['USE_SHOW_AO'], output: 'tonemap_ao_frag_spv' },
-	// Legacy USE_SSAO combinatorials stay retired: GTAO is the sole AO path.
-	// TONEMAP_VAR_SSAO's standalone slot is now only the USE_SHOW_AO diagnostic;
+	// Legacy USE_AO combinatorials stay retired: AO is the sole AO path.
+	// TONEMAP_VAR_AO's standalone slot is now only the USE_SHOW_AO diagnostic;
 	// normal scene variants remain BASE / CG / SUNRAYS combinations.
 	{ stage: 'frag', source: 'tonemap.frag', defines: ['USE_TONEMAP'],                                             output: 'tonemap_tonemap_frag_spv'        },
 	{ stage: 'frag', source: 'tonemap.frag', defines: ['USE_COLOR_GRADING'],                                       output: 'tonemap_colorgrade_frag_spv'     },

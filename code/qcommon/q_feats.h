@@ -103,8 +103,8 @@
 #define FEAT_DEPTH_CLAMP                  1   // disable near-plane vertex clipping at high FOV
 #define FEAT_DEPTH_FADE                   1   // soft particle edges (explosions, smoke, blood)
 #define FEAT_PARALLAX_MAPPING             0   // steep parallax mapping with normalmap (height in alpha)
-#ifndef FEAT_SSAO
-#define FEAT_SSAO                         1   // ground-truth ambient occlusion (GTAO); CMake explicitly owns ON/OFF.
+#ifndef FEAT_AO
+#define FEAT_AO                           1   // ambient occlusion (XeGTAO); CMake explicitly owns ON/OFF.
 #endif
 #define FEAT_TONEMAP                      1   // HDR tone mapping (Reinhard/ACES/Uncharted2)
 #define FEAT_COLOR_GRADING                0   // color tint, saturation, contrast

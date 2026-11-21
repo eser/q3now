@@ -61,7 +61,7 @@ python3 "$WATCHDOG" --timeout 120 --kill-after 15 --cwd "$(dirname "$ENGINE")" -
   +set sv_pure 0 +set sv_cheats 1 +set vm_game 0 +set vm_cgame 0 \
   +set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 \
   +set r_renderScale 1 +set r_pinFrameTime 1.0 +set r_hdrAutoExposure 0 \
-  +set r_bloom 0 +set r_ssao 1 +set r_showAO 0 +set r_smaa 0 +set r_forwardPlus 1 \
+  +set r_bloom 0 +set r_ao 1 +set r_showAO 0 +set r_smaa 0 +set r_forwardPlus 1 \
   +set con_notifytime 0 +set cg_draw2D 0 +exec lava-sanctum-lighting.cfg
 
 capture() { printf '%s' "$home/base/screenshots/$1.png"; }

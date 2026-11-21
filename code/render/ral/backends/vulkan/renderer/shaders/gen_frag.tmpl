@@ -127,11 +127,11 @@ layout (constant_id = 29) const float shadow_bias = 0.005;
 // layout-clean. An optional pbrMap (ORM) rides the bindless 2D table at role 8.
 layout(set = 2, binding = 1) uniform sampler2D   brdfLut;        // split-sum env-BRDF LUT (RG)
 layout(set = 2, binding = 3) uniform samplerCube radianceCube;   // prefiltered specular env (mips)
-// The denoised screen-space GTAO visibility buffer (R8, 1 = open .. 0 = occluded),
+// The denoised screen-space AO visibility buffer (R8, 1 = open .. 0 = occluded),
 // sampled by screen-space UV to occlude the additive indirect IBL-specular term.
-// binding 4 of the engine-resources set; written with GTAO's own sampler. When GTAO
+// binding 4 of the engine-resources set; written with AO's own sampler. When AO
 // is off the AO image is cleared to 1.0 (no effect).
-layout(set = 2, binding = 4) uniform sampler2D   gtaoMap;        // screen-space GTAO visibility (R8)
+layout(set = 2, binding = 4) uniform sampler2D   gtaoMap;        // screen-space AO visibility (R8)
 layout(set = 2, binding = 6) uniform samplerCube previousRadianceCube;
 #define WIRED_BINDLESS_PBRMAP_ROLE 8u
 // World-space normal + view vector from gen_vert.
@@ -990,13 +990,13 @@ frag_color.w = identity_alpha;
 			environmentBlend );
 		vec2  envBRDF     = textureLod( brdfLut, vec2( NdotV, roughness ), 0.0 ).rg;
 		vec3  specularIBL = prefiltered * ( F_amb * envBRDF.x + envBRDF.y ) * ao;
-		// Screen-space GTAO modulates ONLY this additive indirect (IBL-specular)
+		// Screen-space AO modulates ONLY this additive indirect (IBL-specular)
 		// term — never the lightmap-baked diffuse-ambient (which carries its own
 		// occlusion) and never direct light (the per-light passes are ambient-free).
 		// The `ao` above is the texture-space ORM.r contact-AO; gtao_vis is the
 		// larger-scale screen-space occlusion, an additional multiply. Screen UV from
 		// gl_FragCoord; plain textureSize since gtaoMap is a real set-2 sampler2D, not
-		// bindless. When GTAO is off the buffer is 1.0 (identity).
+		// bindless. When AO is off the buffer is 1.0 (identity).
 		vec2  gtaoUV      = gl_FragCoord.xy / vec2( textureSize( gtaoMap, 0 ) );
 		float gtao_vis    = texture( gtaoMap, gtaoUV ).r;
 		specularIBL      *= gtao_vis;

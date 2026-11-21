@@ -161,14 +161,14 @@ for case in off k1 k2 k3 k4;do
  cfg="$home/base/dlight-gpu.cfg"
  {
   printf 'log renderer.timing debug\n'
-  printf 'set r_gpuSpeeds 0\nset r_forwardPlus 1\nset r_pbr 0\nset r_parallaxMapping 0\nset r_ssao 0\n'
+  printf 'set r_gpuSpeeds 0\nset r_forwardPlus 1\nset r_pbr 0\nset r_parallaxMapping 0\nset r_ao 0\n'
   printf 'set r_dlightShadows %s\nset r_dlightShadowK %s\n' "$enabled" "$k"
   printf 'set r_dlightShadowTest 800\nset r_dlightShadowTestN 4\nset r_dlightShadowCount 0\nset r_dlightShadowProfile 1\n'
   printf 'map arena1\nwaitForMap\nwait 120\ncmd noclip\nwait 20\ncmd setviewpos 900 1432 50 96\nwait 120\n'
   printf 'set r_gpuSpeeds 1\necho DLS_GPU_%s_BEGIN\nwait 650\necho DLS_GPU_%s_COMPLETE\nquit\n' "$(printf '%s' "$case"|tr '[:lower:]' '[:upper:]')" "$(printf '%s' "$case"|tr '[:lower:]' '[:upper:]')"
  } >"$cfg"
  stdout="$ROOT/$case/stdout.log"
- (cd "$ENGINE_DIR" && timeout -s KILL -k 10 120 "$ENGINE" +set fs_homepath "$home" +set sv_cheats 1 +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set r_fullscreen 0 +set con_notifytime 0 +set com_automated 1 +log renderer.ral info +set r_forwardPlus 1 +set r_ssao 0 +set r_dlightShadows "$enabled" +set r_dlightShadowK "$k" +set r_gpuSpeeds 0 +exec dlight-gpu.cfg >"$stdout" 2>&1) &
+ (cd "$ENGINE_DIR" && timeout -s KILL -k 10 120 "$ENGINE" +set fs_homepath "$home" +set sv_cheats 1 +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set r_fullscreen 0 +set con_notifytime 0 +set com_automated 1 +log renderer.ral info +set r_forwardPlus 1 +set r_ao 0 +set r_dlightShadows "$enabled" +set r_dlightShadowK "$k" +set r_gpuSpeeds 0 +exec dlight-gpu.cfg >"$stdout" 2>&1) &
  pid=$!;PIDS[$case]=$pid;wait "$pid";rc=$?;RCS[$case]=$rc
  [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ] && TIMEOUT=1
  [ "$rc" -eq 137 ] && FORCED=1

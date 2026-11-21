@@ -4,13 +4,13 @@
 #version 450
 
 /*
-gtao_denoise.comp — depth-aware spatial denoise for the GTAO visibility texture.
+gtao_denoise.comp — depth-aware spatial denoise for the XeGTAO visibility texture.
 
-GTAO's horizon search is noisy (few slices/steps + per-pixel jitter), so the raw
+XeGTAO's horizon search is noisy (few slices/steps + per-pixel jitter), so the raw
 visibility needs a blur. This is a single-frame depth-aware (bilateral) blur — a
 small spatial kernel weighted down across depth discontinuities so the AO does
 not bleed across silhouette edges. Deliberately NO temporal accumulation: it
-keeps GTAO independent of TAA/history (the spatial-only XeGTAO configuration),
+keeps XeGTAO independent of TAA/history (the spatial-only XeGTAO configuration),
 so it does not block on motion-vector / history infrastructure.
 
 Reads the raw AO (set 0, binding 0) + the device depth (binding 1/2) for the

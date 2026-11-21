@@ -39,6 +39,13 @@ qboolean RenderSubmission_MaterialSnapshot(
 	return qtrue;
 }
 
+const renderMaterialSnapshot_t *RenderSubmission_MaterialSnapshotView(
+		const renderSubmissionState_t *state, qhandle_t handle ) {
+	uint32_t index;
+	if ( !RenderSubmission_MaterialIndex( state, handle, &index ) ) return NULL;
+	return &state->materials[index].snapshot;
+}
+
 qhandle_t RenderSubmission_MaterialHandle( const renderSubmissionState_t *state,
 		const char *name ) {
 	uint32_t i;

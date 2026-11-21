@@ -8,7 +8,7 @@ gtao.comp — wired-render ground-truth ambient occlusion.
 
 A single-pass screen-space AO compute pass. Reconstructs view-space position +
 normal from the scene depth copy (no normal G-buffer — this is a forward
-renderer), runs the GTAO horizon-search visibility integral (Jimenez et al.
+renderer), runs the XeGTAO horizon-search visibility integral (Jimenez et al.
 2016, "Practical Realtime Strategies for Accurate Indirect Occlusion"; the
 Intel XeGTAO formulation), and writes a single-channel visibility texture
 (1 = unoccluded, 0 = fully occluded). A separate depth-aware blur denoises it;
@@ -56,14 +56,14 @@ layout(push_constant) uniform GtaoPush {
 	float zFar;             // reversed-Z far  (device z = 0 at far)
 	float effectRadius;     // world-space AO radius (units)
 	float falloffRange;     // [0,1] fraction of radius over which falloff ramps
-	int   sliceCount;       // GTAO directional slices (quality tier)
+	int   sliceCount;       // XeGTAO directional slices (quality tier)
 	int   stepsPerSlice;    // horizon steps per slice (quality tier)
 	float finalPower;       // visibility^finalPower (contrast)
 	float intensity;        // 0..1 user strength (lerp toward no-AO)
 	// ── SSCS (screen-space contact shadow) directional fold ──────────────
 	// A short screen-space ray-march toward the sun that sharpens the fine
 	// model-on-ground contact the CSM shadow-map resolution misses. Folded into
-	// the GTAO visibility (a contact-darken multiply) rather than a 2nd pass.
+	// the XeGTAO visibility (a contact-darken multiply) rather than a 2nd pass.
 	// sscsEnabled is set host-side only on sun maps (tr.sunHasSource) when
 	// r_shadows is at the cast level — sunless maps have no meaningful sun
 	// direction, so it is structurally a no-op there (grounding §1).
@@ -280,7 +280,7 @@ void main() {
 			horizonCos1 = max( horizonCos1, mix( horizonCos1, shc1, w1 ) );
 		}
 
-		// GTAO per-slice horizon-arc integral (Jimenez 2016):
+		// XeGTAO per-slice horizon-arc integral (Jimenez 2016):
 		//   iarc = (cosN + 2*h*sin(n) - cos(2h - n)) / 4
 		float h0 = -fastAcos( clamp( horizonCos1, -1.0, 1.0 ) );
 		float h1 =  fastAcos( clamp( horizonCos0, -1.0, 1.0 ) );
@@ -299,7 +299,7 @@ void main() {
 	// SSCS directional contact fold: darken the visibility where a short march
 	// toward the sun hits a near occluder (the crisp model-ground contact line).
 	// A multiply keeps it a darken-only refinement — it never brightens, so it
-	// cannot regress the GTAO term; the host gates it to sun maps only.
+	// cannot regress the XeGTAO term; the host gates it to sun maps only.
 	visibility *= sscsContact( P, texel, noise );
 
 	imageStore( aoImage, pix, vec4( visibility ) );

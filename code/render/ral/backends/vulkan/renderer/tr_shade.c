@@ -1141,6 +1141,7 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 			}
 			if ( idef.shader_type != ibase ) {
 				idef.ibl_enabled = pStage->bundle[3].image[0] != NULL ? 1 : 2;
+				vk.iblDrawsFrame++;   // the AO texture has a reader this frame
 				pipeline = vk_find_pipeline_ext( 0, &idef, qtrue );
 				// pbrMap (ORM) at bindless role 8 — distinct from the light-pass
 				// pbrMap (role 3); the base pass and PMLIGHT pass reset bindless

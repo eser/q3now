@@ -85,7 +85,7 @@ qboolean vk_publish_menubg_shadow( uint32_t commandSlot );
 // Width of the shared set_layouts[] scratch array used to build every
 // pipeline layout in the vk_initialize pipeline-layout block. It must be
 // >= the largest setLayoutCount of any layout built there. The widest
-// layouts are 4-set: the entity-matrices (main), MSDF, SSAO, sunrays, and
+// layouts are 4-set: the entity-matrices (main), MSDF, AO, sunrays, and
 // SMAA layouts (set 0..3). 4 covers them; bump this if a wider layout is
 // ever added. (The retired bloom-blend layout was also 4 sets, but its
 // removal did not lower this — the layouts above still need 4.)
@@ -201,7 +201,7 @@ qboolean vk_publish_menubg_shadow( uint32_t commandSlot );
 #define WIRED_ENGINE_RES_BIND_BRDF_LUT       1   // 2D RG16F split-sum BRDF LUT
 #define WIRED_ENGINE_RES_BIND_IRRADIANCE     2   // diffuse irradiance cube
 #define WIRED_ENGINE_RES_BIND_RADIANCE       3   // prefiltered radiance cube
-#define WIRED_ENGINE_RES_BIND_GTAO           4   // denoised screen-space GTAO visibility (R8); gen_frag modulates the IBL-specular term by it
+#define WIRED_ENGINE_RES_BIND_GTAO           4   // denoised screen-space AO visibility (R8); gen_frag modulates the IBL-specular term by it
 #define WIRED_ENGINE_RES_BIND_PREV_IRRADIANCE 5  // previous diffuse irradiance during sky crossfade
 #define WIRED_ENGINE_RES_BIND_PREV_RADIANCE   6  // previous prefiltered radiance during sky crossfade
 // Per-entity model/MVP matrices for the main opaque path live on their own
@@ -638,37 +638,37 @@ void vk_hdr_exposure_reduce_shutdown( void );
 void vk_brdf_lut_init( struct ralBackend_s *backend );
 void vk_brdf_lut_shutdown( void );
 
-// GTAO ambient-occlusion compute bring-up/teardown. Two compute passes (horizon
+// AO ambient-occlusion compute bring-up/teardown. Two compute passes (horizon
 // search + depth-aware denoise) writing R8 storage textures the tonemap pass
 // samples. Depth-dependent, so gated on the depth copy existing (depthFade
-// active = r_ssao on); rides the same adopt/destroy sweep. Idempotent.
+// active = r_ao on); rides the same adopt/destroy sweep. Idempotent.
 void vk_gtao_init( struct ralBackend_s *backend );
 void vk_gtao_shutdown( void );
-// Per-frame GTAO dispatch (main + denoise). Records into `cb`: the graphics cmd
+// Per-frame AO dispatch (main + denoise). Records into `cb`: the graphics cmd
 // buffer (vk.cmd->ral_cmd) for the serialized fallback, or a RAL_QUEUE_COMPUTE cmd
-// buffer for the async path. No-op unless r_ssao is on, the pipelines
+// buffer for the async path. No-op unless r_ao is on, the pipelines
 // are up, and depth is available.
 void vk_gtao_dispatch( struct ralCommandBuffer_s *cb );
 // Async-compute: at the frame-start seam, if r_asyncCompute is set, the
 // device has a dedicated compute queue, and a prior-frame depth snapshot exists,
-// record GTAO into a RAL_QUEUE_COMPUTE cmd buffer reading that snapshot and submit
+// record AO into a RAL_QUEUE_COMPUTE cmd buffer reading that snapshot and submit
 // it (sets vk.gtaoAsyncActive so the graphics submit waits its semaphore + the
 // snapshot-point serial dispatch is skipped). No-op otherwise — the serialized
-// graphics-queue GTAO at the snapshot point runs instead (byte-identical fallback).
+// graphics-queue AO at the snapshot point runs instead (byte-identical fallback).
 void vk_gtao_async_begin( void );
-// Whether the async GTAO ran this frame (the graphics submit must wait its sem).
+// Whether the async AO ran this frame (the graphics submit must wait its sem).
 qboolean vk_gtao_async_is_active( void );
-// The per-frame async-GTAO semaphore the graphics submit waits on (NULL if none).
+// The per-frame async-AO semaphore the graphics submit waits on (NULL if none).
 struct ralSemaphore_s *vk_gtao_async_wait_sem( void );
 // The sync point just before tonemap samples the AO (graphics-queue barrier on the
 // serial path; the async path's visibility comes from the graphics-submit sem wait).
 void vk_gtao_sync_before_tonemap( void );
 
 // Lens-glow occlusion oracle bring-up/teardown + per-frame dispatch. Mirrors the
-// GTAO lifecycle: vk_lens_init mints a NEAREST sampling view over the depth copy +
+// AO lifecycle: vk_lens_init mints a NEAREST sampling view over the depth copy +
 // per-frame lens SSBOs + the N-tap compute pipeline (no-op when the flare system is
 // off or no depth copy); vk_lens_shutdown frees them; vk_lens_dispatch records the
-// per-source visibility compute into `cb` in the GTAO seam. No-op unless r_lens is on
+// per-source visibility compute into `cb` in the AO seam. No-op unless r_lens is on
 // and there are lens sources this frame.
 void vk_lens_init( struct ralBackend_s *backend );
 void vk_lens_shutdown( void );
@@ -1625,7 +1625,7 @@ typedef struct {
 	// vk_tess_t.entMatDesc is only its native mirror and is bound once per frame.
 	VkDescriptorSetLayout set_layout_entmat;
 	// Engine-resources set 2: shadow array + BRDF/irradiance/radiance IBL +
-	// GTAO combined samplers. The screenmap binding moved to the central
+	// AO combined samplers. The screenmap binding moved to the central
 	// bindless table. RAL owns the arena group; descriptor is only its mirror.
 	VkDescriptorSetLayout set_layout_engine_resources;
 	struct {
@@ -2221,7 +2221,7 @@ typedef struct {
 	// into exposure.ptr[cmd_index] before the tonemap draw; a future GPU
 	// producer can write the same buffer in place. exposureSetLayout is set 2
 	// of every post-process pipeline layout (set 0 = scene sampler, set 1 = the
-	// depth sampler in the SSAO/SUNRAYS variants), so one buffer reaches all
+	// depth sampler in the AO/SUNRAYS variants), so one buffer reaches all
 	// variants. One buffer + descriptor per in-flight frame. Lifecycle follows
 	// color_image (created/destroyed in vk_init_descriptors under fboActive).
 	VkDescriptorSetLayout exposureSetLayout;
@@ -2353,14 +2353,14 @@ typedef struct {
 	struct ralBuffer_s         *ral_exposure_readback[NUM_COMMAND_BUFFERS];
 	qboolean                    exposureReadbackReady[NUM_COMMAND_BUFFERS];
 
-	// Ground-truth ambient occlusion (GTAO). Two RAL compute passes dispatched in
+	// Ground-truth ambient occlusion (AO). Two RAL compute passes dispatched in
 	// the no-render-pass seam in vk_tonemap (the histogram pattern): the main pass
 	// reconstructs view-space position + normal from the depth copy and runs the
 	// horizon-search visibility integral into ral_gtao_ao_image; the denoise pass
 	// depth-aware-blurs it into ral_gtao_denoised_image, which the tonemap pass
 	// samples to modulate scene radiance. Both single-channel R8. Depth-dependent,
 	// so the whole set is created only when the depth copy exists (depthFade
-	// active = r_ssao on); a NULL pipeline disables the dispatch, like histogram.
+	// active = r_ao on); a NULL pipeline disables the dispatch, like histogram.
 	struct ralTexture_s         *ral_gtao_ao_image;        // R8 raw AO (storage)
 	struct ralTextureView_s     *ral_gtao_ao_view;         // storage+sampled view
 	struct ralTexture_s         *ral_gtao_denoised_image;  // R8 denoised AO (storage)
@@ -2386,18 +2386,22 @@ typedef struct {
 	struct ralBindGroup_s       *ral_gtao_composite_descriptor; // sampled denoised-AO set for tonemap
 	qboolean                     gtaoLayoutGeneral;        // AO images already moved UNDEFINED→GENERAL once
 
-	// Async-compute: cross-frame async GTAO. When r_asyncCompute is set
+	// Async-compute: cross-frame async AO. When r_asyncCompute is set
 	// AND the device exposes a dedicated compute queue family (caps.asyncCompute),
-	// GTAO runs on RAL_QUEUE_COMPUTE at frame start, reading the PREVIOUS frame's
+	// AO runs on RAL_QUEUE_COMPUTE at frame start, reading the PREVIOUS frame's
 	// depth snapshot (1-frame-lag, Eser-ratified), overlapping this frame's graphics.
 	// A per-frame binary semaphore the compute submit signals + the graphics submit
 	// waits ensures the denoised AO is visible before tonemap samples it. On the
 	// no-dedicated-queue / r_asyncCompute-off path, gtaoAsyncActive stays false and
-	// GTAO runs serialized on the graphics queue at the snapshot point (byte-identical).
+	// AO runs serialized on the graphics queue at the snapshot point (byte-identical).
 	struct ralSemaphore_s       *ral_gtao_async_done[ NUM_COMMAND_BUFFERS ]; // compute→graphics handoff, per frame slot
 	struct ralCommandBuffer_s   *ral_gtao_async_cmd[ NUM_COMMAND_BUFFERS ];  // compute cmd buffer per frame slot
-	qboolean                     gtaoAsyncActive;          // this frame: async GTAO submitted, graphics must wait the sem
+	qboolean                     gtaoAsyncActive;          // this frame: async AO submitted, graphics must wait the sem
 	qboolean                     gtaoSnapshotValid;        // a depth snapshot from a PRIOR frame exists (cross-frame source)
+	qboolean                     gtaoSeeded;               // the AO texture has been written at least once, so a consumer enabled later never samples undefined texels
+	qboolean                     gtaoActive;               // this frame: the AO texture has a reader (or still needs its first write); decided once at frame start
+	int                          iblDrawsFrame;            // base-pass draws that actually took the USE_IBL variant so far this frame (reset at frame start)
+	int                          gtaoHoldFrames;           // frames left to keep AO running after the last IBL draw, so a surface that flickers in and out of view does not toggle it
 
 	// HDR auto-exposure reduce: a second compute pass reads the histogram, reduces
 	// it to a target exposure (percentile-clipped weighted average → middle-grey
@@ -2524,12 +2528,12 @@ typedef struct {
 	// Lens-glow occlusion oracle — the unified visibility backbone (halo is the
 	// first consumer). A per-frame host-coherent SSBO holds one record per registered
 	// lens source (screen position + reversed-Z compare depth + a visibility output
-	// slot); a compute pass dispatched in the GTAO seam (depth copy SHADER_READ_ONLY,
+	// slot); a compute pass dispatched in the AO seam (depth copy SHADER_READ_ONLY,
 	// render pass closed) samples vk.sceneDepth with an N-tap disc per source and writes
 	// visibility 0..1 back into the record. The registry mirrors the fp-lights SSBO
 	// lifecycle (create/map/bind/destroy/reset); the oracle compute mirrors the gtao
 	// bind-group idiom (its OWN bgl sampling vk.sceneDepth.ral_image — never touches the
-	// graphics set-1 the SSAO/sunray tonemap variants depend on). Multi-backend: a
+	// graphics set-1 the AO/sunray tonemap variants depend on). Multi-backend: a
 	// depth-sample + SSBO write-back, no readback, no queries, no VS push.
 // Lens registry record geometry (shared host/shader; must match lens_occlusion.comp).
 // Slot map (disjoint ranges, never alias): [0..255] flares (slot = flare index),
@@ -2715,7 +2719,7 @@ typedef struct {
 
 	// Scene-depth copy: a sampled snapshot of the opaque-scene depth, shared by
 	// every consumer that needs to read depth in a later pass — soft-particle
-	// depth fade (r_depthFade), SSAO/GTAO, sunrays, and the lens-occlusion oracle.
+	// depth fade (r_depthFade), AO, sunrays, and the lens-occlusion oracle.
 	struct {
 		VkSampler       sampler;
 		struct ralSampler_s *ral_sampler;
@@ -3025,7 +3029,7 @@ typedef struct {
 		VkShaderModule forwardplus_lit_fs;
 
 		// Scene-radiance post-process pass. tonemap.frag
-		// owns exposure bias, SSAO, sunrays, tonemap operator, colour
+		// owns exposure bias, AO, sunrays, tonemap operator, colour
 		// grading, saturation. Reuses gamma_vs (generic fullscreen
 		// quad) — no separate tonemap_vs.
 		VkShaderModule tonemap_fs;
@@ -3169,11 +3173,11 @@ typedef struct {
 	// reflect that the variant bits gate features in tonemap.frag, not
 	// gamma.frag. GAMMA_VAR_TONEMAP became TONEMAP_VAR_BASE per the
 	// rename spec (represents the base USE_TONEMAP variant).
-	// Bit 0 = SSAO (RETIRED), Bit 1 = TONEMAP (BASE), Bit 2 = COLOR_GRADING, Bit 3 = SUNRAYS.
-	// Bit 0 is reserved for the diagnostic-only denoised-GTAO isolation view. It
-	// does not restore the retired per-pixel tonemap SSAO path and is never combined
+	// Bit 0 = AO (RETIRED), Bit 1 = TONEMAP (BASE), Bit 2 = COLOR_GRADING, Bit 3 = SUNRAYS.
+	// Bit 0 is reserved for the diagnostic-only denoised-AO isolation view. It
+	// does not restore the retired per-pixel tonemap AO path and is never combined
 	// with normal scene-radiance variants.
-#define TONEMAP_VAR_SSAO    1
+#define TONEMAP_VAR_AO    1
 #define TONEMAP_VAR_BASE    2
 #define TONEMAP_VAR_CG      4
 #define TONEMAP_VAR_SUNRAYS 8
@@ -3189,7 +3193,7 @@ typedef struct {
 	// stays in sync. The bind path uses these instead of the legacy VkPipeline.
 	struct ralPipeline_s *ral_tonemap_pipeline;        // varIdx == 0 sibling
 	// Dynamic-rendering sibling per built tonemap variant, indexed by the FEAT
-	// bitmask (SSAO|BASE|CG|SUNRAYS). Built in lockstep with tonemap_variants[]
+	// bitmask (AO|BASE|CG|SUNRAYS). Built in lockstep with tonemap_variants[]
 	// behind the same FEAT fences; NULL for any combo whose FEAT is off (never
 	// selected, mirroring the legacy array). The render path binds these.
 	struct ralPipeline_s *ral_tonemap_variants[TONEMAP_VAR_COUNT];
@@ -3207,10 +3211,10 @@ typedef struct {
 	// Final dual-filtering composite: top bloom mip -> scene (POST_BLOOM format,
 	// ONE/ONE additive), intensity baked from r_bloomIntensity.
 	struct ralPipeline_s *ral_bloom_dual_composite_pipeline;
-	VkPipelineLayout pipeline_layout_ssao;    // 2 samplers: color + depth (SSAO without sunrays)
+	VkPipelineLayout pipeline_layout_ao;    // 2 samplers: color + depth (AO without sunrays)
 	VkPipelineLayout pipeline_layout_sunrays; // color + depth samplers + set-2 exposure UBO (sun-screen params folded into ExposureBlock — 0 push)
 	// typed RAL siblings.
-	struct ralPipelineLayout_s *ral_pipeline_layout_ssao;
+	struct ralPipelineLayout_s *ral_pipeline_layout_ao;
 	struct ralPipelineLayout_s *ral_pipeline_layout_sunrays;
 	// capture / bloom_extract / blur / bloom_blend are dynamic-rendering only (ral_* siblings).
 

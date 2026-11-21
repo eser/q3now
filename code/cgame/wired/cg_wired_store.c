@@ -24,16 +24,35 @@ LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 static wuiStagedEntry_t wui_stage[WUI_STAGE_MAX_ENTRIES];
 static int              wui_stageCount = 0;
 
+/* Open-addressing index over the staged keys (slot value = entry index + 1, 0 =
+ * empty), so a lookup does not scan every staged entry. The table is twice the
+ * entry capacity, so it is never full; it is emptied whenever the buffer is. */
+#define WUI_STAGE_HASH_SIZE ( WUI_STAGE_MAX_ENTRIES * 2 )
+static unsigned short   wui_stageHash[WUI_STAGE_HASH_SIZE];
+
+static unsigned WUI_Stage_HashKey( const char *key ) {
+	unsigned h = 2166136261u;
+	for ( ; *key; key++ ) {
+		unsigned c = (unsigned char)*key;
+		if ( c >= 'A' && c <= 'Z' ) c += 'a' - 'A';   /* ASCII fold, as Q_stricmp does */
+		h ^= c;
+		h *= 16777619u;
+	}
+	return h;
+}
+
 /* ---- internal: find or allocate a staged slot for key ---------------- */
 
 static wuiStagedEntry_t *WUI_Stage_Find( const char *key ) {
-	int i;
+	unsigned slot = WUI_Stage_HashKey( key ) & ( WUI_STAGE_HASH_SIZE - 1 );
 
-	/* deduplication: check if we already have this key staged */
-	for ( i = 0; i < wui_stageCount; i++ ) {
-		if ( !Q_stricmp( wui_stage[i].key, key ) ) {
-			return &wui_stage[i];
+	/* deduplication: the key may already be staged (case-insensitive) */
+	while ( wui_stageHash[slot] ) {
+		wuiStagedEntry_t *e = &wui_stage[wui_stageHash[slot] - 1];
+		if ( !Q_stricmp( e->key, key ) ) {
+			return e;
 		}
+		slot = ( slot + 1 ) & ( WUI_STAGE_HASH_SIZE - 1 );
 	}
 
 	/* allocate new slot */
@@ -45,6 +64,7 @@ static wuiStagedEntry_t *WUI_Stage_Find( const char *key ) {
 
 	memset( &wui_stage[wui_stageCount], 0, sizeof( wuiStagedEntry_t ) );
 	Q_strncpyz( wui_stage[wui_stageCount].key, key, sizeof( wui_stage[0].key ) );
+	wui_stageHash[slot] = (unsigned short)( wui_stageCount + 1 );
 	return &wui_stage[wui_stageCount++];
 }
 
@@ -102,12 +122,14 @@ void WUI_Stage_Flush( void ) {
 	}
 	trap_WiredStore_PushBatch( wui_stage, wui_stageCount );
 	wui_stageCount = 0;
+	memset( wui_stageHash, 0, sizeof( wui_stageHash ) );
 }
 
 /* ---- clear buffer without flushing ----------------------------------- */
 
 void WUI_Stage_Clear( void ) {
 	wui_stageCount = 0;
+	memset( wui_stageHash, 0, sizeof( wui_stageHash ) );
 }
 
 /* ---- world-anchored marker-list staging (WA-2a) ---------------------- */

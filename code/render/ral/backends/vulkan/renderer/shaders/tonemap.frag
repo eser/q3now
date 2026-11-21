@@ -9,7 +9,7 @@
 // All scene-radiance work concentrates here (effects that
 // operate on the colour values themselves — not display encoding):
 //   * exposure_bias (r_brightness)
-//   * SSAO (depth-aware darken)
+//   * AO (depth-aware darken)
 //   * sunrays (depth-aware additive)
 //   * tonemap operator (PBR Neutral / AgX / Lottes / Reinhard)
 //   * colour grading (tint / saturation / contrast)
@@ -21,7 +21,7 @@
 
 layout(set = 0, binding = 0) uniform sampler2D texture0;
 #ifdef USE_SHOW_AO
-// Diagnostic-only GTAO isolation input. This is the denoised visibility field
+// Diagnostic-only AO isolation input. This is the denoised visibility field
 // produced by the RAL compute pass, not the final scene colour.
 layout(set = 3, binding = 0) uniform sampler2D aoMap;
 #endif
@@ -101,7 +101,7 @@ layout(constant_id = 23) const float cg_contrast = 1.0;
 #endif
 // USE_FXAA removed (SMAA replaces it). Spec id 24 is reclaimed from
 // the retired FXAA range for chromatic aberration (below); id 25
-// (show_ao, a FEAT_SSAO debug slot) stays free — no post-process
+// (show_ao, a FEAT_AO debug slot) stays free — no post-process
 // variant declares it, so the host's spec entry is ignored.
 //
 // Chromatic aberration (lens fringe) strength, wired from
@@ -421,15 +421,15 @@ void main() {
 		base *= curved / shadowLuma;
 	}
 
-	// Legacy per-pixel SSAO fully retired: the modern GTAO (gen_frag.tmpl,
+	// Legacy per-pixel AO fully retired: the modern AO (gen_frag.tmpl,
 	// screen-space visibility applied to the IBL-specular indirect term) is the
-	// sole AO path. The old computeSSAO() here multiplied the ENTIRE base by an
+	// sole AO path. The old computeAO() here multiplied the ENTIRE base by an
 	// 8-sample depth-delta kernel that hit exactly 0.0 at full occlusion, stamping
 	// pure-black speckles across the frame (per-pixel hash rotation + per-frame
 	// zFar → intermittent grain). The call was removed to kill the grain and the
-	// double-AO; the dead scaffolding (computeSSAO/linearDepth, the ssao_intensity
-	// spec constant, the ssaoZNear/ssaoZFar UBO fields, and the USE_SSAO tonemap
-	// variants) is now removed too, completing the SSAO→GTAO migration.
+	// double-AO; the dead scaffolding (computeAO/linearDepth, the ao_intensity
+	// spec constant, the aoZNear/aoZFar UBO fields, and the USE_AO tonemap
+	// variants) is now removed too, completing the legacy-AO→XeGTAO migration.
 
 #ifdef USE_SUNRAYS
 	base += computeSunRays();

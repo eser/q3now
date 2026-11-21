@@ -30,6 +30,7 @@
 #include "../../../../../qcommon/q_shared.h"
 #include "tr_temporal_batch_request.h"
 #include "tr_temporal_history.h"
+#include "tr_antialiasing.h"
 #include "../../../../../qcommon/qfiles.h"
 #include "../../../../../qcommon/qcommon.h"
 #include "../../../../frontend/tr_public.h"
@@ -1719,22 +1720,22 @@ extern cvar_t	*r_depthFadeScale;
 #if FEAT_PARALLAX_MAPPING
 extern cvar_t	*r_parallaxMapping;
 #endif
-#if FEAT_SSAO
-extern cvar_t	*r_ssao;
-extern cvar_t	*r_ssaoRadius;
+#if FEAT_AO
+extern cvar_t	*r_ao;
+extern cvar_t	*r_aoRadius;
 extern cvar_t	*r_atmosphereAerialHaze;
 extern cvar_t	*r_skyPhysicalBlend;
 extern cvar_t	*r_vkSplitPresent;
-extern cvar_t	*r_ssaoQuality;
-extern cvar_t	*r_ssaoIntensity;
+extern cvar_t	*r_aoQuality;
+extern cvar_t	*r_aoIntensity;
 extern cvar_t	*r_showAO;
 extern cvar_t	*r_sscsRadius;
 extern cvar_t	*r_sscsStrength;
 #endif
-// async-compute: not FEAT_SSAO-gated — the depthFade snapshot's concurrent
-// graphics/compute sharing reads it even when SSAO is compiled out (the image is
+// async-compute: not FEAT_AO-gated — the depthFade snapshot's concurrent
+// graphics/compute sharing reads it even when AO is compiled out (the image is
 // shared for bloom/depth-fade too), and it is a general engine flag.
-extern cvar_t	*r_asyncCompute;   // run eligible compute (GTAO) on the dedicated compute queue
+extern cvar_t	*r_asyncCompute;   // run eligible compute (AO) on the dedicated compute queue
 extern cvar_t	*r_asyncTextureUpload;   // pipeline texture uploads on the dedicated transfer queue
 #if FEAT_TONEMAP
 extern cvar_t	*r_tonemap;
@@ -1758,6 +1759,7 @@ extern cvar_t	*r_drawSunRays;
 extern cvar_t	*r_sunRayIntensity;
 extern cvar_t	*r_sunRayDecay;
 #endif
+extern cvar_t	*r_aa;
 extern cvar_t	*r_smaa;
 extern cvar_t	*r_smaa_threshold;
 extern cvar_t	*r_lerpLightstyles;		// 0=10Hz stepped, 1=smooth lerp between pattern chars
@@ -1870,6 +1872,13 @@ void R_SwapBuffers( int );
 
 void R_RenderView( const viewParms_t *parms );
 uint64_t R_TemporalProjectionPrepare( viewParms_t *view );
+
+// Anti-aliasing decisions (r_aa, r_smaa, r_temporalInputTest, entity-matrix
+// path) resolved by tr_antialiasing.c.  Every SMAA and temporal enable check in
+// the renderer reads these instead of the cvars.
+void R_AntialiasingPlan( rAntialiasingPlan_t *outPlan );
+int  R_AntialiasingSmaaQuality( void );
+int  R_AntialiasingTemporalRequested( void );
 void R_TemporalProjectionFinish( int worldIndex, uint64_t frameId, qboolean queued );
 void R_TemporalBackendRecorded( int worldIndex, uint64_t frameId );
 void R_TemporalBackendRequestDelivered(

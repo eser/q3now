@@ -1883,7 +1883,7 @@ void vk_ral_adopt_static_pipeline_layouts( void )
 	VERIFY_PL( vk.pipeline_layout_post_process, vk.ral_pipeline_layout_post_process );
 	VERIFY_PL( vk.pipeline_layout_smaa, vk.ral_pipeline_layout_smaa );
 	VERIFY_PL( vk.pipeline_layout_msdf, vk.ral_pipeline_layout_msdf );
-	VERIFY_PL( vk.pipeline_layout_ssao, vk.ral_pipeline_layout_ssao );
+	VERIFY_PL( vk.pipeline_layout_ao, vk.ral_pipeline_layout_ao );
 	VERIFY_PL( vk.pipeline_layout_sunrays, vk.ral_pipeline_layout_sunrays );
 	#undef VERIFY_PL
 	s_ral_pipeline_layouts_verified = direct;
@@ -1924,13 +1924,13 @@ void vk_ral_refresh_internal_texture_dependents( void )
 	// is recorded in vk_begin_frame. Inert this phase (nothing samples the probes).
 	vk_ibl_probes_init( s_ral_backend );
 
-	// GTAO ambient occlusion. Depends on the RAL-owned depth copy
+	// AO ambient occlusion. Depends on the RAL-owned depth copy
 	// (sceneDepth.ral_image), created with the attachments before this sweep. No-ops
-	// when SSAO is off (no depth copy); a vid_restart with r_ssao on re-runs this
+	// when AO is off (no depth copy); a vid_restart with r_ao on re-runs this
 	// with the depth copy present. Idempotent across vid_restart.
 	vk_gtao_init( s_ral_backend );
 
-	// Lens-glow occlusion oracle. Like GTAO, depends on the depth copy
+	// Lens-glow occlusion oracle. Like AO, depends on the depth copy
 	// (sceneDepth.ral_image); the sampling view + the
 	// per-frame lens SSBOs + the N-tap compute pipeline come up here. No-ops when the
 	// flare system is off (no fragmentStores) or the depth copy is absent; a vid_restart
@@ -1991,13 +1991,13 @@ void vk_ral_release_internal_texture_dependents( void )
 	// no view/image outlives the device.
 	vk_ibl_probes_shutdown();
 
-	// GTAO AO textures + the sampling view over the depth copy are RAL-owned; free
+	// AO textures + the sampling view over the depth copy are RAL-owned; free
 	// them here (before the depth copy below — the view must not outlive its image).
 	vk_gtao_shutdown();
 
 	// Lens-glow oracle: the sampling view over the depth copy + the lens SSBOs +
 	// pipeline are RAL-owned; free them here (before the depth copy below — the view
-	// must not outlive its image), symmetric with the GTAO teardown.
+	// must not outlive its image), symmetric with the AO teardown.
 	vk_lens_shutdown();
 
 	// Forward+ tile-classification compute resources are RAL-owned; free them with
@@ -2016,7 +2016,7 @@ static void vk_ral_destroy_adopted_pipeline_layouts( void )
 	KILL_PL( vk.ral_pipeline_layout_post_process );
 	KILL_PL( vk.ral_pipeline_layout_smaa );
 	KILL_PL( vk.ral_pipeline_layout_msdf );
-	KILL_PL( vk.ral_pipeline_layout_ssao );
+	KILL_PL( vk.ral_pipeline_layout_ao );
 	KILL_PL( vk.ral_pipeline_layout_sunrays );
 #if FEAT_SHADOW_MAPPING
 	KILL_PL( vk.shadowMap.ral_depthLayout );

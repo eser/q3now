@@ -346,7 +346,7 @@ python3 "$TIMEOUT_RUNNER" --timeout 90 --kill-after 15 --cwd "$RUN" --stdout "$S
 	+set com_automated 1 +set com_noHardReboot 1 +set s_initsound 0 \
 	+set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 \
 	+set r_hdrDisplay "$HDR_REQUEST" +set r_tonemap "$TONEMAP_OPERATOR" \
-	+set r_vkValidate 1 +set r_bloom 0 +set r_ssao 0 +set r_smaa 0 \
+	+set r_vkValidate 1 +set r_bloom 0 +set r_ao 0 +set r_smaa 0 \
 	+set r_forwardPlus 0 +set r_drawSunRays 0 +set r_shadows 0 \
 	+set log_severity DEBUG +set log_file_severity DEBUG +set log_file_mode overwrite_synced \
 	+exec ral-readback-runtime.cfg
