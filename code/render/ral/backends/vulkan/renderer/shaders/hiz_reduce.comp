@@ -1,0 +1,60 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
+#version 450
+
+/*
+hiz_reduce.comp — one level of the Hi-Z depth pyramid.
+
+Every level is a 2x2 reduction of the level before it; level 0 reads the scene depth
+copy (sampled), so mip 0 of the pyramid is half the depth resolution. Device depth is reversed-Z
+(near = 1, far = 0), so the CONSERVATIVE reduction for occlusion is the MINIMUM: a
+texel keeps the farthest of the nearest surfaces it covers, and an object is hidden
+only if even that farthest surface is in front of it.
+
+Sizes may be odd. The destination size is floor(source / 2) (never below 1), the size
+graphics APIs give a mip chain, so when a source dimension is odd the last destination
+texel also folds in the one extra row/column (a 3-wide footprint) and no source texel is
+left out of the reduction.
+
+Bindings (set 0): 0 = scene depth copy (texture2D, level 0 only), 1 = sampler (only to form
+the combined sampler2D; no filtering is used), 2 = previous pyramid level (r32f storage
+image, read with imageLoad, every level after the first), 3 = destination level (r32f
+storage image). The pyramid image stays in one layout for the whole chain, so a level is
+read as a storage image rather than a sampled one; a full compute barrier separates levels.
+Push: uvec4 sizes = (srcW, srcH, dstW, dstH), uvec4 mode = (srcIsDepth, 0, 0, 0).
+*/
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform texture2D srcDepth;
+layout(set = 0, binding = 1) uniform sampler   srcSampler;
+layout(set = 0, binding = 2, r32f) uniform readonly  image2D prevLevel;
+layout(set = 0, binding = 3, r32f) uniform writeonly image2D dstLevel;
+
+layout(push_constant) uniform Push {
+	uvec4 sizes;   // x = srcW, y = srcH, z = dstW, w = dstH
+	uvec4 mode;    // x = 1: read the depth texture; 0: read the previous level
+};
+
+void main() {
+	uvec2 id = gl_GlobalInvocationID.xy;
+	if (id.x >= sizes.z || id.y >= sizes.w) return;
+
+	ivec2 hi = ivec2(int(sizes.x) - 1, int(sizes.y) - 1);
+	ivec2 base = ivec2(id) * 2;
+	int nx = (id.x == sizes.z - 1u && (sizes.x & 1u) != 0u) ? 3 : 2;
+	int ny = (id.y == sizes.w - 1u && (sizes.y & 1u) != 0u) ? 3 : 2;
+
+	float d = 1.0;   // reversed-Z: start at the nearest, keep the farthest
+	for (int y = 0; y < ny; y++) {
+		for (int x = 0; x < nx; x++) {
+			ivec2 t = min(base + ivec2(x, y), hi);
+			float v = (mode.x != 0u) ? texelFetch(sampler2D(srcDepth, srcSampler), t, 0).r
+			                         : imageLoad(prevLevel, t).r;
+			d = min(d, v);
+		}
+	}
+
+	imageStore(dstLevel, ivec2(id), vec4(d, 0.0, 0.0, 0.0));
+}

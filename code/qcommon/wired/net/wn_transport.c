@@ -612,6 +612,26 @@ qboolean WN_QueuePendingReady( wn_game_conn_t *gc ) {
 	return qtrue;
 }
 
+/* Heap storage of a game connection's queues (see wn_game_conn_t). Returns qfalse
+ * (nothing allocated) when memory is short, so the caller can refuse the connection. */
+static qboolean WN_GameConnAllocQueues( wn_game_conn_t *gc )
+{
+	gc->recv_queue   = (wn_game_pkt_t *)calloc( WN_GAME_QUEUE_SIZE, sizeof( *gc->recv_queue ) );
+	gc->rel_queue    = (wn_rel_msg_t *)calloc( WN_REL_QUEUE_SIZE, sizeof( *gc->rel_queue ) );
+	gc->rel_partials = (wn_rel_partial_t *)calloc( WN_REL_PARTIAL_CAP, sizeof( *gc->rel_partials ) );
+	if ( gc->recv_queue && gc->rel_queue && gc->rel_partials )
+		return qtrue;
+	free( gc->recv_queue ); free( gc->rel_queue ); free( gc->rel_partials );
+	gc->recv_queue = NULL; gc->rel_queue = NULL; gc->rel_partials = NULL;
+	return qfalse;
+}
+
+static void WN_GameConnFreeQueues( wn_game_conn_t *gc )
+{
+	free( gc->recv_queue ); free( gc->rel_queue ); free( gc->rel_partials );
+	gc->recv_queue = NULL; gc->rel_queue = NULL; gc->rel_partials = NULL;
+}
+
 wn_game_conn_t *WN_GameAllocConn( wn_connection_t *conn )
 {
 	int i;
@@ -629,6 +649,10 @@ wn_game_conn_t *WN_GameAllocConn( wn_connection_t *conn )
 		wn_game_conn_t *gc = &wn.game_conns[i];
 		if ( !gc->active ) {
 			Q_SecureZeroMemory( gc, sizeof( *gc ) );
+			if ( !WN_GameConnAllocQueues( gc ) ) {
+				COM_WARN( LOG_CH(ch_network), "QUIC game: out of memory for connection queues, refusing\n" );
+				return NULL;
+			}
 			gc->active   = qtrue;
 			gc->allocation_id = WN_NextGameConnAllocationId();
 			gc->conn     = conn;
@@ -675,6 +699,7 @@ void WN_GameFreeConn( wn_game_conn_t *gc )
 				sizeof( wn.pending_ready[i] ) );
 	}
 	Com_Log( SEV_DEBUG, LOG_CH(ch_network), "WiredNet game: freed conn slot %td\n", gc - wn.game_conns );
+	WN_GameConnFreeQueues( gc );
 	Q_SecureZeroMemory( gc, sizeof( *gc ) );
 	if ( wn.num_game_conns > 0 )
 		wn.num_game_conns--;
@@ -706,6 +731,10 @@ wn_game_conn_t *WN_GameAllocConnApp( int app_slot )
 		wn_game_conn_t *gc = &wn.game_conns[i];
 		if ( !gc->active ) {
 			Q_SecureZeroMemory( gc, sizeof( *gc ) );
+			if ( !WN_GameConnAllocQueues( gc ) ) {
+				COM_WARN( LOG_CH(ch_network), "in-mem game: out of memory for connection queues, refusing\n" );
+				return NULL;
+			}
 			gc->active     = qtrue;
 			gc->allocation_id = WN_NextGameConnAllocationId();
 			gc->conn       = NULL;   /* in-process: no owning picoquic connection */

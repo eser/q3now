@@ -2,11 +2,14 @@
 // SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
-#include "tr_local.h"
+#include "vk_local.h"
 #include "../../../../frontend/r_log.h"   // rilog-channel-mechanism Turn B — renderer.vk
 #include "vk.h"
+#include "vk_ral_textures.h"        // vk_ral_get_backend
+#include "../../../core/ral.h"          // Ral_GetCaps / Ral_CmdDrawIndexedIndirect / Ral_BufferWriteImmediate
 
 R_LOG_DECLARE_CHANNEL( rch_vk, "renderer.vk" );
+R_LOG_DECLARE_CHANNEL( rch_ral, "renderer.ral" );
 
 #ifdef USE_VBO
 
@@ -1146,6 +1149,128 @@ static void VBO_AddItemRangeToIBOBuffer( int offset, int length )
 }
 
 
+// ── World indirect draw (TASK-88 stage B) ───────────────────────────────────────────────
+//
+// A batch's merged index runs are normally drawn with one Ral_CmdDrawIndexed each. With
+// r_worldIndirect 1 the same runs are written as indexed-indirect commands (host-coherent
+// buffer, one ring per frame slot) and submitted with a single multi-draw call. Nothing is
+// culled: every run is submitted, so the image must be identical to the direct path. This
+// stage exists to measure what the indirect submission itself costs, separately from any
+// culling gain, before a GPU pass is allowed to write those commands.
+typedef struct {
+	uint32_t indexCount;
+	uint32_t instanceCount;
+	uint32_t firstIndex;
+	int32_t  vertexOffset;
+	uint32_t firstInstance;
+} worldIndirectCmd_t;                      // the indexed-indirect command layout
+
+#define WORLD_INDIRECT_CAPACITY 16384u     // commands per frame slot (20 bytes each)
+#define WORLD_INDIRECT_CHUNK    256u
+
+static struct ralBuffer_s *s_wiBuf[NUM_COMMAND_BUFFERS];
+static uint32_t            s_wiUsed[NUM_COMMAND_BUFFERS];
+static qboolean            s_wiFailed;
+static qboolean            s_wiLogged;
+static uint32_t            s_wiBatches, s_wiCommands, s_wiFallbackBatches, s_wiFrames, s_wiInstanceNonZero, s_wiSoftItems, s_wiRunItems;
+
+void vk_world_indirect_begin_frame( void )
+{
+	if ( vk.cmd_index < NUM_COMMAND_BUFFERS ) s_wiUsed[vk.cmd_index] = 0u;
+	// Proof of use, and the cost side of the stage-B measurement: batches and commands per
+	// frame over a 600-frame window (only while the path is on and has drawn something).
+	if ( s_wiBatches && ++s_wiFrames >= 600u ) {
+		R_LOG( rch_ral, SEV_INFO, "world indirect (%u frames): %.1f batches/frame, %.1f commands/frame (%.1f per batch), %u batches fell back to direct draws, %u with firstInstance != 0\n",
+			s_wiFrames, (double)s_wiBatches / s_wiFrames, (double)s_wiCommands / s_wiFrames,
+			(double)s_wiCommands / s_wiBatches, s_wiFallbackBatches, s_wiInstanceNonZero );
+		s_wiBatches = s_wiCommands = s_wiFallbackBatches = s_wiFrames = s_wiInstanceNonZero = 0u;
+	}
+}
+
+void vk_world_indirect_shutdown( void )
+{
+	int i;
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		if ( s_wiBuf[i] ) { Ral_DestroyBuffer( s_wiBuf[i] ); s_wiBuf[i] = NULL; }
+		s_wiUsed[i] = 0u;
+	}
+	s_wiFailed = qfalse;
+	s_wiLogged = qfalse;
+}
+
+// Submit `n` runs through the indirect buffer. Returns qfalse (nothing drawn) whenever the
+// path is off, unsupported or out of room, so the caller falls back to the direct draws.
+static qboolean vk_world_indirect_draw( const ibo_item_t *runs, int n, uint32_t firstInstance )
+{
+	const ralCaps_t *caps;
+	worldIndirectCmd_t cmds[WORLD_INDIRECT_CHUNK];
+	const uint32_t ci = vk.cmd_index;
+	int done = 0;
+
+	if ( !r_worldIndirect || !r_worldIndirect->integer || s_wiFailed || n <= 0 || ci >= NUM_COMMAND_BUFFERS )
+		return qfalse;
+	caps = Ral_GetCaps( vk_ral_get_backend() );
+	if ( !caps || !caps->multiDrawIndirect || !caps->drawIndirectFirstInstance ) {
+		if ( !s_wiLogged ) {
+			s_wiLogged = qtrue;
+			R_LOG( rch_ral, SEV_INFO, "world indirect: not available on this device (multiDrawIndirect=%d drawIndirectFirstInstance=%d); direct draws stay in use\n",
+				caps ? (int)caps->multiDrawIndirect : 0, caps ? (int)caps->drawIndirectFirstInstance : 0 );
+		}
+		return qfalse;
+	}
+	if ( !s_wiBuf[ci] ) {
+		ralBufferCreateInfo_t bci;
+		memset( &bci, 0, sizeof( bci ) );
+		bci.size      = (uint64_t)WORLD_INDIRECT_CAPACITY * sizeof( worldIndirectCmd_t );
+		bci.usage     = RAL_BUFFER_INDIRECT | RAL_BUFFER_TRANSFER_DST;
+		bci.memory    = RAL_MEMORY_HOST_COHERENT;
+		bci.debugName = "wired-world-indirect";
+		s_wiBuf[ci] = Ral_CreateBuffer( vk_ral_get_backend(), &bci );
+		if ( !s_wiBuf[ci] ) {
+			s_wiFailed = qtrue;
+			R_LOG( rch_ral, SEV_WARN, "world indirect: buffer create failed; the direct draw path stays in use\n" );
+			return qfalse;
+		}
+		if ( !s_wiLogged ) {
+			s_wiLogged = qtrue;
+			R_LOG( rch_ral, SEV_INFO, "world indirect: on (multiDrawIndirect + drawIndirectFirstInstance, %u commands per frame slot)\n", WORLD_INDIRECT_CAPACITY );
+		}
+	}
+	if ( s_wiUsed[ci] + (uint32_t)n > WORLD_INDIRECT_CAPACITY ) {
+		s_wiFallbackBatches++;
+		return qfalse;   // out of room this frame: the whole batch draws directly
+	}
+	s_wiBatches++;
+	s_wiCommands += (uint32_t)n;
+	if ( firstInstance != 0u ) s_wiInstanceNonZero++;
+
+	while ( done < n ) {
+		const int chunk = ( n - done > (int)WORLD_INDIRECT_CHUNK ) ? (int)WORLD_INDIRECT_CHUNK : ( n - done );
+		ralBufferUploadReceipt_t upload;
+		int k;
+		for ( k = 0; k < chunk; k++ ) {
+			cmds[k].indexCount    = (uint32_t)runs[done + k].length;
+			cmds[k].instanceCount = 1u;
+			cmds[k].firstIndex    = (uint32_t)runs[done + k].offset;
+			cmds[k].vertexOffset  = 0;
+			cmds[k].firstInstance = firstInstance;
+		}
+		if ( !Ral_BufferWriteImmediate( s_wiBuf[ci], (uint64_t)s_wiUsed[ci] * sizeof( worldIndirectCmd_t ),
+				cmds, (uint64_t)chunk * sizeof( worldIndirectCmd_t ), &upload ) ) {
+			// Earlier chunks of this batch are already drawn; draw only the rest directly.
+			for ( k = done; k < n; k++ )
+				vk_draw_indexed( runs[k].length, runs[k].offset, firstInstance );
+			return qtrue;
+		}
+		Ral_CmdDrawIndexedIndirect( vk.cmd->ral_cmd, s_wiBuf[ci],
+			(uint64_t)s_wiUsed[ci] * sizeof( worldIndirectCmd_t ), (uint32_t)chunk, (uint32_t)sizeof( worldIndirectCmd_t ) );
+		s_wiUsed[ci] += (uint32_t)chunk;
+		done += chunk;
+	}
+	return qtrue;
+}
+
+
 void VBO_RenderIBOItems( uint32_t firstInstance )
 {
 	// firstInstance selects the per-entity matrix storage-buffer slot on the
@@ -1185,9 +1310,12 @@ void VBO_RenderIBOItems( uint32_t firstInstance )
 	{
 		vk_bind_index_buffer( vk.vbo.ral_vertex_buffer, tess.shader->iboOffset );
 
-		for ( int i = 0; i < bl->runCount; i++ )
+		if ( !vk_world_indirect_draw( bl->runs, bl->runCount, firstInstance ) )
 		{
-			vk_draw_indexed( bl->runs[ i ].length, bl->runs[ i ].offset, firstInstance );
+			for ( int i = 0; i < bl->runCount; i++ )
+			{
+				vk_draw_indexed( bl->runs[ i ].length, bl->runs[ i ].offset, firstInstance );
+			}
 		}
 	}
 

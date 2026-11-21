@@ -9,11 +9,11 @@ SET(_command_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/ral_vulkan_com
 SET(_bridge_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/ral_vulkan_bridge.h")
 SET(_test_path "${SOURCE_ROOT}/tests/ral_vulkan_dynamic_bind_test.c")
 SET(_adopt_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_textures.c")
-SET(_scene_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/tr_scene.c")
-SET(_init_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/tr_init.c")
-SET(_fixtures_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/tr_fixtures.c")
-SET(_fixtures_h_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/tr_fixtures.h")
-SET(_backend_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/tr_backend.c")
+SET(_scene_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk_scene.c")
+SET(_init_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk_init.c")
+SET(_fixtures_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk_fixtures.c")
+SET(_fixtures_h_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk_fixtures.h")
+SET(_backend_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk_backend.c")
 SET(_smoke_path "${SOURCE_ROOT}/tests/ral-effects-dynamic-bind-smoke.sh")
 FOREACH(_path IN ITEMS "${_vk_path}" "${_vk_h_path}" "${_ral_path}"
 		"${_command_path}" "${_bridge_path}" "${_test_path}" "${_adopt_path}"

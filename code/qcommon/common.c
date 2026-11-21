@@ -8,6 +8,8 @@
 #include "wired/core/logging/log.h"
 #include "wired/stalltrace.h"
 #include "wired/frame_interval_stats.h"
+#include "wired/workload_stats.h"
+#include "wired/tasks/wired_tasks_engine.h"
 #include "wired/wired_build_stamp.h"
 #include "maps/meta.h"
 #include "crash.h"
@@ -2928,6 +2930,8 @@ void Com_Init( char *commandLine ) {
 	// after Cvar_Init so the bracket flag is live before the first window/audio
 	// init and before any focus event.
 	stalltrace_register();
+	wired_workload_register();
+	WiredTasks_Register();
 
 	// Global log gate: registered immediately after Cvar_Init so its
 	// onChange callback (wired in Log_InitChannels) can re-resolve every
@@ -3615,6 +3619,11 @@ void Com_Frame( qboolean noDelay ) {
 	// mess with msec if needed
 	int msec = Com_ModifyMsec( realMsec );
 
+	// Per-workload telemetry: bind the recording thread, apply the cvar. Whole
+	// frames are either measured or not.
+	wired_workload_frame_begin();
+	CM_BindStatsOwner();
+
 	//
 	// server side
 	//
@@ -3873,6 +3882,8 @@ void Com_Frame( qboolean noDelay ) {
 		diagActive = qfalse;
 	}
 
+	wired_workload_frame_end( 200u );
+
 	//
 	// trace optimization tracking
 	//
@@ -3902,6 +3913,9 @@ Com_Shutdown
 */
 void Com_Shutdown( void ) {
 	AssetLog_Flush( NULL );
+
+	// Workers stop before the zone allocator they were created from goes away.
+	WiredTasks_Shutdown();
 
 	// Orderly shutdown flush of the playtest ring. Must precede the
 	// filesystem teardown below — the artefact is written through the VFS,

@@ -1,0 +1,137 @@
+#pragma clang diagnostic ignored "-Wunused-variable"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+#include <metal_atomic>
+
+using namespace metal;
+
+struct Push
+{
+    float4x4 invViewProj;
+    float4 params;
+    float4 tune;
+};
+
+struct Counters
+{
+    uint counters[16];
+};
+
+struct Reached
+{
+    uint reached[1];
+};
+
+struct SurfAABB
+{
+    float4 mins;
+    float4 maxs;
+    float4 plane;
+    uint4 meta;
+};
+
+struct Aabb
+{
+    SurfAABB surfaces[1];
+};
+
+struct OccludedBits
+{
+    uint occluded[1];
+};
+
+constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(8u, 8u, 1u);
+
+struct spvDescriptorSetBuffer0
+{
+    texture2d<float> sceneDepth [[id(0)]];
+    sampler depthSampler [[id(1)]];
+    device Counters* m_99 [[id(2)]];
+    device Reached* m_165 [[id(3)]];
+    device Aabb* m_186 [[id(4)]];
+    device OccludedBits* m_222 [[id(5)]];
+};
+
+kernel void main0(device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], constant Push& _14 [[buffer(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+{
+    uint stride = uint(_14.params.w);
+    int2 px = (int2(gl_GlobalInvocationID.xy) * int2(int(stride))) + int2(int(stride / 2u));
+    float2 size = float2(_14.params.y, _14.params.z);
+    bool _60 = px.x >= int(size.x);
+    bool _70;
+    if (!_60)
+    {
+        _70 = px.y >= int(size.y);
+    }
+    else
+    {
+        _70 = _60;
+    }
+    if (_70)
+    {
+        return;
+    }
+    float d = spvDescriptorSet0.sceneDepth.read(uint2(px), 0).x;
+    if (d <= 0.0)
+    {
+        uint _103 = atomic_fetch_add_explicit((device atomic_uint*)&(*spvDescriptorSet0.m_99).counters[12], 1u, memory_order_relaxed);
+        return;
+    }
+    uint _107 = atomic_fetch_add_explicit((device atomic_uint*)&(*spvDescriptorSet0.m_99).counters[8], 1u, memory_order_relaxed);
+    float2 uv = (float2(px) + float2(0.5)) / size;
+    float4 w = _14.invViewProj * float4((uv * 2.0) - float2(1.0), d, 1.0);
+    float3 p = w.xyz / float3(w.w);
+    float eps = _14.tune.x;
+    bool inKept = false;
+    bool inDiscarded = false;
+    uint count = uint(_14.params.x);
+    for (uint i = 0u; i < count; i++)
+    {
+        if (((*spvDescriptorSet0.m_165).reached[i >> 5u] & (1u << (i & 31u))) == 0u)
+        {
+            continue;
+        }
+        float3 mn = (*spvDescriptorSet0.m_186).surfaces[i].mins.xyz - float3(eps);
+        float3 mx = (*spvDescriptorSet0.m_186).surfaces[i].maxs.xyz + float3(eps);
+        bool _207 = any(p < mn);
+        bool _215;
+        if (!_207)
+        {
+            _215 = any(p > mx);
+        }
+        else
+        {
+            _215 = _207;
+        }
+        if (_215)
+        {
+            continue;
+        }
+        if (((*spvDescriptorSet0.m_222).occluded[i >> 5u] & (1u << (i & 31u))) != 0u)
+        {
+            inDiscarded = true;
+        }
+        else
+        {
+            inKept = true;
+            break;
+        }
+    }
+    if (inKept)
+    {
+        uint _244 = atomic_fetch_add_explicit((device atomic_uint*)&(*spvDescriptorSet0.m_99).counters[9], 1u, memory_order_relaxed);
+    }
+    else
+    {
+        if (inDiscarded)
+        {
+            uint _251 = atomic_fetch_add_explicit((device atomic_uint*)&(*spvDescriptorSet0.m_99).counters[10], 1u, memory_order_relaxed);
+        }
+        else
+        {
+            uint _255 = atomic_fetch_add_explicit((device atomic_uint*)&(*spvDescriptorSet0.m_99).counters[11], 1u, memory_order_relaxed);
+        }
+    }
+}
+

@@ -6,7 +6,7 @@ if(NOT DEFINED ROOT)
 endif()
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_iqm_payload.c" CORE)
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_iqm_payload.h" ABI)
-file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_temporal_iqm_motion.h" IQM_ABI)
+file(READ "${ROOT}/code/render/renderer/tr_temporal_iqm_motion.h" IQM_ABI)
 
 function(require_text haystack needle label)
 	string(FIND "${haystack}" "${needle}" pos)

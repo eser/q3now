@@ -113,7 +113,7 @@ endif()
 
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" PRODUCT_VK)
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.h" PRODUCT_VK_HEADER)
-file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_shade.c" PRODUCT_SHADE)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_shade.c" PRODUCT_SHADE)
 foreach(FORBIDDEN IN ITEMS
 	"vk_create_persistent_mapped_buffer"
 	"vk_destroy_persistent_mapped_buffer"

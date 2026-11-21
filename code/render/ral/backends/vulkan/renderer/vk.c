@@ -2,8 +2,8 @@
 // SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
-#include "tr_local.h"
-#include "tr_fixtures.h"
+#include "vk_local.h"
+#include "vk_fixtures.h"
 #include "vk.h"
 #include "vk_ral_attachment_translate.h"
 #include "vk_ral_pool_render.h"
@@ -33,7 +33,7 @@
 #include "vk_temporal_resolved_hdr.h"
 #include "vk_temporal_resolve.h"
 #include "vk_temporal_resolve_readback.h"
-#include "tr_temporal_history.h"
+#include "../../../../renderer/tr_temporal_history.h"
 #include "../../../../frontend/r_log.h"  // R_LOG / R_LOG_DECLARE_CHANNEL
 #include "../../../../frontend/render_submission_effects.h"
 #include "vk_ral_textures.h"   // parallel-paths RAL texture migration lifecycle
@@ -16521,6 +16521,15 @@ static qboolean vk_shadow_refresh_ral_buffer_group(
 	return qtrue;
 }
 
+// Translucent-caster shader modules. They must outlive the pipelines' build: the blob table
+// (vk_shader_blob_record) appends a handle -> SPIR-V record per module and never removes
+// one, so destroying a module right after its pipeline was built lets the next
+// SHADER_MODULE reuse the freed address and vk_shader_blob_lookup return the OLD record
+// (a vertex shader's bytes for a fragment stage: "Entry point does not exist" in MoltenVK).
+// Created once, destroyed with the other renderer modules at teardown. Held as plain
+// pointers so the Vulkan-adapter vocabulary budget does not grow.
+static void *vk_shadow_dither_mods[3];   // static VS, skinned VS, shared FS
+
 static qboolean vk_shadow_register_pipeline_layout_abis( void )
 {
 	ralBindGroupLayout_t *staticLayouts[2];
@@ -16528,6 +16537,9 @@ static qboolean vk_shadow_register_pipeline_layout_abis( void )
 	ralBindGroupLayout_t *atestLayouts[3];
 	staticLayouts[0] = vk.shadowMap.ral_bgl_entmat;
 	staticLayouts[1] = vk.shadowMap.ral_bgl_cascademvp;
+	if ( vk.shadowMap.ral_depthPipelineDither
+			&& !Ral_RegisterExternalPipelineBindGroupLayouts(
+				vk.shadowMap.ral_depthPipelineDither, 2u, staticLayouts ) ) return qfalse;
 	if ( vk.shadowMap.ral_depthPipeline
 			&& !Ral_RegisterExternalPipelineBindGroupLayouts(
 				vk.shadowMap.ral_depthPipeline, 2u, staticLayouts ) ) return qfalse;
@@ -16537,6 +16549,9 @@ static qboolean vk_shadow_register_pipeline_layout_abis( void )
 	if ( vk.shadowMap.ral_depthPipelineSkinned
 			&& !Ral_RegisterExternalPipelineBindGroupLayouts(
 				vk.shadowMap.ral_depthPipelineSkinned, 3u, skinnedLayouts ) ) return qfalse;
+	if ( vk.shadowMap.ral_depthPipelineSkinnedDither
+			&& !Ral_RegisterExternalPipelineBindGroupLayouts(
+				vk.shadowMap.ral_depthPipelineSkinnedDither, 3u, skinnedLayouts ) ) return qfalse;
 	atestLayouts[0] = staticLayouts[0];
 	atestLayouts[1] = staticLayouts[1];
 	atestLayouts[2] = vk_ral_get_bindless_layout();
@@ -16817,6 +16832,25 @@ static void vk_shadow_alloc_resources( void )
 			// objects above and the unchecked-but-trusted RAL builds on the world path.
 			if ( vk.shadowMap.ral_depthPipeline == NULL )
 				ri.Terminate( TERM_UNRECOVERABLE, "Vulkan: shadow RAL depth pipeline adoption failed (vk_ral_create_pipeline_from_gpinfo returned NULL)" );
+
+			// Translucent-caster sibling: identical state and layout, different modules
+			// (the VS carries the opacity out of the entity matrix, the FS hash-discards).
+			// Optional: a NULL pipeline only disables dithered shadows, never the pass.
+			if ( vk.shadowMap.ral_depthPipelineDither ) {
+				Ral_DestroyPipeline( vk.shadowMap.ral_depthPipelineDither );
+				vk.shadowMap.ral_depthPipelineDither = NULL;
+			}
+			if ( !vk_shadow_dither_mods[0] ) vk_shadow_dither_mods[0] = (void *)SHADER_MODULE( shadow_depth_dither_vert_spv );
+			if ( !vk_shadow_dither_mods[2] ) vk_shadow_dither_mods[2] = (void *)SHADER_MODULE( shadow_depth_dither_frag_spv );
+			stages[0].module = (__typeof__( stages[0].module ))vk_shadow_dither_mods[0];
+			stages[1].module = (__typeof__( stages[1].module ))vk_shadow_dither_mods[2];
+			vk.shadowMap.ral_depthPipelineDither = vk_ral_create_pipeline_from_gpinfo(
+				&gp, vk.shadowMap.ral_depthLayout,
+				RAL_FORMAT_UNDEFINED /* depth-only, no color */,
+				vk_attachment_format_to_ral( vk.depth_format ),
+				"ral-shadow-depth-dither" );
+			if ( vk.shadowMap.ral_depthPipelineDither == NULL )
+				R_LOG( rch_vk, SEV_WARN, "shadow: translucent caster pipeline unavailable; translucent shadows disabled\n" );
 		}
 
 		// ── GPU-skinned IQM caster pipeline ──────────────────────────────────
@@ -16985,6 +17019,24 @@ static void vk_shadow_alloc_resources( void )
 					"ral-shadow-depth-skinned" );
 				if ( vk.shadowMap.ral_depthPipelineSkinned == NULL )
 					ri.Terminate( TERM_UNRECOVERABLE, "Vulkan: skinned shadow RAL depth pipeline adoption failed" );
+
+				// Translucent sibling: same skinned state and layout; the VS also forwards the
+				// opacity carried in the entity matrix, the FS is the shared dither FS. Optional.
+				if ( vk.shadowMap.ral_depthPipelineSkinnedDither ) {
+					Ral_DestroyPipeline( vk.shadowMap.ral_depthPipelineSkinnedDither );
+					vk.shadowMap.ral_depthPipelineSkinnedDither = NULL;
+				}
+				if ( !vk_shadow_dither_mods[1] ) vk_shadow_dither_mods[1] = (void *)SHADER_MODULE( shadow_depth_skinned_dither_vert_spv );
+				if ( !vk_shadow_dither_mods[2] ) vk_shadow_dither_mods[2] = (void *)SHADER_MODULE( shadow_depth_dither_frag_spv );
+				sstages[0].module = (__typeof__( sstages[0].module ))vk_shadow_dither_mods[1];
+				sstages[1].module = (__typeof__( sstages[1].module ))vk_shadow_dither_mods[2];
+				vk.shadowMap.ral_depthPipelineSkinnedDither = vk_ral_create_pipeline_from_gpinfo(
+					&igp, vk.shadowMap.ral_depthLayoutSkinned,
+					RAL_FORMAT_UNDEFINED /* depth-only, no color */,
+					vk_attachment_format_to_ral( vk.depth_format ),
+					"ral-shadow-depth-skinned-dither" );
+				if ( vk.shadowMap.ral_depthPipelineSkinnedDither == NULL )
+					R_LOG( rch_vk, SEV_WARN, "shadow: translucent skinned caster pipeline unavailable; translucent player parts keep the opaque shadow\n" );
 			}
 		}
 
@@ -17167,6 +17219,8 @@ static void vk_shadow_release_resources( void )
 		if ( vk.shadowMap.ral_depthPipeline ) { Ral_DestroyPipeline( vk.shadowMap.ral_depthPipeline ); vk.shadowMap.ral_depthPipeline = NULL; }
 		if ( vk.shadowMap.ral_depthPipelineSkinned ) { Ral_DestroyPipeline( vk.shadowMap.ral_depthPipelineSkinned ); vk.shadowMap.ral_depthPipelineSkinned = NULL; }
 		if ( vk.shadowMap.ral_depthPipelineAtest ) { Ral_DestroyPipeline( vk.shadowMap.ral_depthPipelineAtest ); vk.shadowMap.ral_depthPipelineAtest = NULL; }
+		if ( vk.shadowMap.ral_depthPipelineDither ) { Ral_DestroyPipeline( vk.shadowMap.ral_depthPipelineDither ); vk.shadowMap.ral_depthPipelineDither = NULL; }
+		if ( vk.shadowMap.ral_depthPipelineSkinnedDither ) { Ral_DestroyPipeline( vk.shadowMap.ral_depthPipelineSkinnedDither ); vk.shadowMap.ral_depthPipelineSkinnedDither = NULL; }
 		if ( vk.shadowMap.ral_depthLayout ) { Ral_DestroyPipelineLayout( vk.shadowMap.ral_depthLayout ); vk.shadowMap.ral_depthLayout = NULL; vk.shadowMap.depthLayout = VK_NULL_HANDLE; }
 		if ( vk.shadowMap.ral_depthLayoutSkinned ) { Ral_DestroyPipelineLayout( vk.shadowMap.ral_depthLayoutSkinned ); vk.shadowMap.ral_depthLayoutSkinned = NULL; vk.shadowMap.depthLayoutSkinned = VK_NULL_HANDLE; }
 		if ( vk.shadowMap.ral_depthLayoutAtest ) { Ral_DestroyPipelineLayout( vk.shadowMap.ral_depthLayoutAtest ); vk.shadowMap.ral_depthLayoutAtest = NULL; vk.shadowMap.depthLayoutAtest = VK_NULL_HANDLE; }
@@ -17207,6 +17261,8 @@ static void vk_shadow_release_resources( void )
 		vk.shadowMap.sampler          = VK_NULL_HANDLE;
 		vk.shadowMap.depthLayout      = VK_NULL_HANDLE;
 		vk.shadowMap.ral_depthPipeline = NULL;
+		vk.shadowMap.ral_depthPipelineDither = NULL;
+		vk.shadowMap.ral_depthPipelineSkinnedDither = NULL;
 		vk.shadowMap.ral_image        = NULL;
 		vk.shadowMap.size             = 0;
 		vk.shadowMap.ral_casterBuf    = NULL;
@@ -19185,7 +19241,7 @@ typedef struct vkCullSurf_s {
 	float    mins[4];   // xyz world-space min
 	float    maxs[4];   // xyz world-space max
 	float    plane[4];  // xyz normal, w dist  (SF_FACE)
-	uint32_t meta[4];   // x cullType, y surfaceType, z/w reserved
+	uint32_t meta[4];   // x cullType, y surfaceType, z index count (Hi-Z verification), w reserved
 } vkCullSurf_t;
 
 // Per-frame capture (front-end snapshot consumed by the backend dispatch).
@@ -19196,6 +19252,7 @@ typedef struct vkCullFrame_s {
 	uint32_t doFacePlaneCull;
 	uint32_t doFrustumCull;
 	int      surfaceCount;
+	int      frameNo;        // tr.frameCount of the capture
 } vkCullFrame_t;
 
 static vkCullFrame_t vk_cull_frame;
@@ -19249,7 +19306,7 @@ static void vk_cull_capture_world_slot( int worldIndex )
 	vk_cull_active_world = worldIndex;
 }
 
-void vk_cull_select_world( int worldIndex )
+static void vk_cull_select_world_impl( int worldIndex )
 {
 	vkCullWorldSlot_t *slot;
 	vk_cull_clear_active();
@@ -19266,6 +19323,18 @@ void vk_cull_select_world( int worldIndex )
 	memcpy( vk.ral_cull_descriptor, slot->descriptor, sizeof( slot->descriptor ) );
 	vk.ral_cull_pipeline = slot->pipeline;
 	vk_cull_active_world = worldIndex;
+}
+
+// R_SetWorldSlot re-selects the (unchanged) active world for every scene render, including
+// the UI scenes drawn after the 3D one. Re-selecting the same world must not discard the
+// main view's capture for this frame, or nothing captured by the front end would survive
+// until the backend consumes it.
+void vk_cull_select_world( int worldIndex )
+{
+	const qboolean keepFrame = ( worldIndex >= 0 && worldIndex == vk_cull_active_world && vk_cull_frame.valid ) ? qtrue : qfalse;
+	vk_cull_select_world_impl( worldIndex );
+	if ( keepFrame && vk_cull_active_world == worldIndex )
+		vk_cull_frame.valid = qtrue;
 }
 
 void vk_cull_unload_world( int worldIndex )
@@ -19340,18 +19409,21 @@ static qboolean vk_cull_surf_record( const msurface_t *sf, vkCullSurf_t *out )
 		out->plane[2] = face->plane.normal[2];
 		out->plane[3] = face->plane.dist;
 		out->meta[0]  = (uint32_t)sf->shader->cullType;
+		out->meta[2]  = (uint32_t)face->numIndices;   // index count, for the Hi-Z verification's geometry weighting
 		return qtrue;
 	}
 	if ( st == SF_TRIANGLES ) {
 		const srfTriangles_t *tris = (const srfTriangles_t *)sf->data;
 		VectorCopy( tris->bounds[0], out->mins );
 		VectorCopy( tris->bounds[1], out->maxs );
+		out->meta[2] = (uint32_t)tris->numIndexes;
 		return qtrue;
 	}
 	if ( st == SF_GRID ) {
 		const srfGridMesh_t *grid = (const srfGridMesh_t *)sf->data;
 		VectorCopy( grid->meshBounds[0], out->mins );
 		VectorCopy( grid->meshBounds[1], out->maxs );
+		out->meta[2] = ( grid->width >= 2 && grid->height >= 2 ) ? (uint32_t)( ( grid->width - 1 ) * ( grid->height - 1 ) * 6 ) : 0u;
 		return qtrue;
 	}
 	// SF_FLARE / SF_BAD / unsupported: degenerate inverted AABB → frustum culls it
@@ -19610,7 +19682,9 @@ void vk_cull_capture_world( const void *viewParmsPtr, const void *worldPtr, int 
 
 	if ( vk.cullSurfaceCount <= 0 || !vk.ral_cull_pipeline )
 		return;
-	if ( vk_cull_frame.valid )
+	// Release never dispatches the cull pass, so `valid` used to stay set forever after
+	// the first capture. With the Hi-Z verification on, recapture each new frame.
+	if ( vk_cull_frame.valid && !( r_hizVerify && r_hizVerify->integer && vk_cull_frame.frameNo != tr.frameCount ) )
 		return;   // already captured this frame (main view wins)
 	if ( !world || world->numsurfaces != vk.cullSurfaceCount )
 		return;   // world changed without a rebuild — skip rather than mismatch
@@ -19628,6 +19702,7 @@ void vk_cull_capture_world( const void *viewParmsPtr, const void *worldPtr, int 
 	vk_cull_frame.doFacePlaneCull = r_facePlaneCull->integer ? 1u : 0u;
 	vk_cull_frame.doFrustumCull    = r_nocull->integer ? 0u : 1u;
 	vk_cull_frame.surfaceCount     = vk.cullSurfaceCount;
+	vk_cull_frame.frameNo          = tr.frameCount;
 
 	// Write the PVS-reached bitset into this frame's host-visible buffer.
 	reachedBits = vk.cullReachedCpu;
@@ -19695,6 +19770,508 @@ void vk_cull_dispatch( void )
 	Ral_CmdDispatch( vk.cmd->ral_cmd, groups, 1, 1 );
 
 	// One capture per frame; reset for the next.
+	vk_cull_frame.valid = qfalse;
+}
+
+// ── Hi-Z verification (TASK-88 stage A) ─────────────────────────────────────
+//
+// Measures how much of the PVS-visible world surface set a conservative depth pyramid
+// would discard, without changing what is drawn. At the scene-depth-copy seam (opaque
+// world and entities are in the depth buffer, no render pass is open) it builds a
+// MIN-reduced (reversed-Z: farthest) pyramid of that frame's own depth, then
+// runs hiz_test.comp over the surfaces the front end reached this frame. Testing a frame
+// against its own final depth gives the upper bound of what an occlusion pass could
+// save, which is the number that decides the cvar default of the real culling later.
+// The result counters are copied out by a readback owner and logged a few frames later.
+
+static struct {
+	ralReadbackOwner_t *owner;   // in-flight copy of the counters buffer
+	uint64_t            sum[16];
+	uint32_t            samples;
+	// Why a frame was NOT measured (the "visible" fallback: nothing is ever culled on these):
+	//   [0] no capture of this frame (front end skipped the world, or the capture is stale)
+	//   [1] the depth copy belongs to another view (a portal/mirror view was drawn in between)
+	//   [2] no usable scene-depth copy
+	//   [3] singular view-projection
+	//   [4] measured
+	uint32_t            reason[5];
+} vk_hiz_stats;
+
+void vk_hiz_shutdown( void )
+{
+	int i;
+	if ( vk_hiz_stats.owner ) {
+		// A copy still in flight cannot be retired; wait for it first, otherwise its staging
+		// buffer and fence outlive the device (VUID-vkDestroyDevice-device-05137).
+		Ral_ReadbackWait( vk_hiz_stats.owner );
+		Ral_ReadbackRelease( &vk_hiz_stats.owner );
+	}
+	memset( &vk_hiz_stats, 0, sizeof( vk_hiz_stats ) );
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		if ( vk.ral_hiz_test_bg[i] ) { Ral_DestroyBindGroup( vk.ral_hiz_test_bg[i] ); vk.ral_hiz_test_bg[i] = NULL; }
+		vk.ral_hiz_test_bg_aabb[i] = NULL;
+		vk.ral_hiz_test_bg_reached[i] = NULL;
+		if ( vk.ral_hiz_audit_bg[i] ) { Ral_DestroyBindGroup( vk.ral_hiz_audit_bg[i] ); vk.ral_hiz_audit_bg[i] = NULL; }
+	}
+	for ( i = 0; i < RAL_HIZ_MAX_MIPS; i++ ) {
+		if ( vk.ral_hiz_reduce_bg[i] ) { Ral_DestroyBindGroup( vk.ral_hiz_reduce_bg[i] ); vk.ral_hiz_reduce_bg[i] = NULL; }
+	}
+	if ( vk.ral_hiz_audit_pipeline )  { Ral_DestroyPipeline( vk.ral_hiz_audit_pipeline ); vk.ral_hiz_audit_pipeline = NULL; }
+	if ( vk.ral_hiz_test_pipeline )   { Ral_DestroyPipeline( vk.ral_hiz_test_pipeline ); vk.ral_hiz_test_pipeline = NULL; }
+	if ( vk.ral_hiz_reduce_pipeline ) { Ral_DestroyPipeline( vk.ral_hiz_reduce_pipeline ); vk.ral_hiz_reduce_pipeline = NULL; }
+	if ( vk.ral_hiz_audit_bgl )       { Ral_DestroyBindGroupLayout( vk.ral_hiz_audit_bgl ); vk.ral_hiz_audit_bgl = NULL; }
+	if ( vk.ral_hiz_test_bgl )        { Ral_DestroyBindGroupLayout( vk.ral_hiz_test_bgl ); vk.ral_hiz_test_bgl = NULL; }
+	if ( vk.ral_hiz_reduce_bgl )      { Ral_DestroyBindGroupLayout( vk.ral_hiz_reduce_bgl ); vk.ral_hiz_reduce_bgl = NULL; }
+	for ( i = 0; i < RAL_HIZ_MAX_MIPS; i++ ) {
+		if ( vk.ral_hiz_mip_view[i] ) { Ral_DestroyTextureView( vk.ral_hiz_mip_view[i] ); vk.ral_hiz_mip_view[i] = NULL; }
+	}
+	if ( vk.ral_hiz_full_view )  { Ral_DestroyTextureView( vk.ral_hiz_full_view ); vk.ral_hiz_full_view = NULL; }
+	if ( vk.ral_hiz_depth_view ) { Ral_DestroyTextureView( vk.ral_hiz_depth_view ); vk.ral_hiz_depth_view = NULL; }
+	if ( vk.ral_hiz_sampler )    { Ral_DestroySampler( vk.ral_hiz_sampler ); vk.ral_hiz_sampler = NULL; }
+	if ( vk.ral_hiz_pyramid )    { Ral_DestroyTexture( vk.ral_hiz_pyramid ); vk.ral_hiz_pyramid = NULL; }
+	if ( vk.ral_hiz_counters )   { Ral_DestroyBuffer( vk.ral_hiz_counters ); vk.ral_hiz_counters = NULL; }
+	if ( vk.ral_hiz_flags )      { Ral_DestroyBuffer( vk.ral_hiz_flags ); vk.ral_hiz_flags = NULL; }
+	vk.hizFlagsWords = 0;
+	vk.hizMipCount = 0;
+	vk.hizBaseW = vk.hizBaseH = 0;
+	vk.hizSeeded = qfalse;
+	vk.hizFailed = qfalse;
+}
+
+// Size of pyramid level `level` (level 0 is half the depth resolution; every level halves, rounding down).
+static void vk_hiz_level_size( uint32_t level, uint32_t *w, uint32_t *h )
+{
+	uint32_t lw = (uint32_t)glConfig.vidWidth  / 2u; if ( lw < 1u ) lw = 1u;
+	uint32_t lh = (uint32_t)glConfig.vidHeight / 2u; if ( lh < 1u ) lh = 1u;
+	while ( level-- > 0u ) {
+		lw /= 2u; if ( lw < 1u ) lw = 1u;
+		lh /= 2u; if ( lh < 1u ) lh = 1u;
+	}
+	*w = lw; *h = lh;
+}
+
+static qboolean vk_hiz_ensure( void )
+{
+	ralBackend_t                  *backend = vk_ral_get_backend();
+	ralTextureCreateInfo_t         tci;
+	ralTextureViewCreateInfo_t     vci;
+	ralSamplerCreateInfo_t         sci;
+	ralBindEntry_t                 bgle[6];
+	ralBindGroupLayoutCreateInfo_t bglci;
+	ralBindingValue_t              bv[6];
+	ralBindGroupCreateInfo_t       bgci;
+	ralComputePipelineCreateInfo_t cpci;
+	ralBufferCreateInfo_t          bci;
+	const ralBindGroupLayout_t    *layouts[1];
+	uint32_t                       k, w, h;
+	qboolean                       ok = qtrue;
+
+	if ( vk.ral_hiz_pyramid ) return qtrue;
+	if ( vk.hizFailed || !backend || !vk.sceneDepth.ral_image ) return qfalse;
+
+	vk_hiz_level_size( 0u, &vk.hizBaseW, &vk.hizBaseH );
+	vk.hizMipCount = 1u;
+	w = vk.hizBaseW; h = vk.hizBaseH;
+	while ( ( w > 1u || h > 1u ) && vk.hizMipCount < RAL_HIZ_MAX_MIPS ) {
+		w /= 2u; if ( w < 1u ) w = 1u;
+		h /= 2u; if ( h < 1u ) h = 1u;
+		vk.hizMipCount++;
+	}
+
+	memset( &tci, 0, sizeof( tci ) );
+	tci.type = RAL_TEXTURE_2D;
+	tci.format = RAL_FORMAT_R32_SFLOAT;
+	tci.width = vk.hizBaseW; tci.height = vk.hizBaseH;
+	tci.depthOrArrayLayers = 1; tci.mipLevels = vk.hizMipCount; tci.sampleCount = 1;
+	tci.usage = RAL_TEXTURE_USAGE_STORAGE | RAL_TEXTURE_USAGE_SAMPLED;
+	tci.memory = RAL_MEMORY_DEVICE_LOCAL;
+	tci.debugName = "wired-hiz-pyramid";
+	vk.ral_hiz_pyramid = Ral_CreateTexture( backend, &tci );
+	if ( !vk.ral_hiz_pyramid ) ok = qfalse;
+
+	if ( ok ) {
+		memset( &vci, 0, sizeof( vci ) );
+		vci.texture = vk.sceneDepth.ral_image; vci.viewType = RAL_TEXTURE_2D; vci.format = RAL_FORMAT_UNDEFINED;
+		vci.aspect = RAL_TEXTURE_VIEW_ASPECT_DEPTH_ONLY;
+		vk.ral_hiz_depth_view = Ral_CreateTextureView( backend, &vci );
+		memset( &vci, 0, sizeof( vci ) );
+		vci.texture = vk.ral_hiz_pyramid; vci.viewType = RAL_TEXTURE_2D; vci.format = RAL_FORMAT_UNDEFINED;
+		vci.baseMipLevel = 0; vci.mipLevelCount = vk.hizMipCount;
+		vk.ral_hiz_full_view = Ral_CreateTextureView( backend, &vci );
+		if ( !vk.ral_hiz_depth_view || !vk.ral_hiz_full_view ) ok = qfalse;
+		for ( k = 0; ok && k < vk.hizMipCount; k++ ) {
+			memset( &vci, 0, sizeof( vci ) );
+			vci.texture = vk.ral_hiz_pyramid; vci.viewType = RAL_TEXTURE_2D; vci.format = RAL_FORMAT_UNDEFINED;
+			vci.baseMipLevel = k; vci.mipLevelCount = 1;
+			vk.ral_hiz_mip_view[k] = Ral_CreateTextureView( backend, &vci );
+			if ( !vk.ral_hiz_mip_view[k] ) ok = qfalse;
+		}
+	}
+
+	if ( ok ) {
+		memset( &sci, 0, sizeof( sci ) );
+		sci.minFilter = RAL_FILTER_NEAREST; sci.magFilter = RAL_FILTER_NEAREST; sci.mipmapMode = RAL_MIPMAP_NEAREST;
+		sci.addressU = sci.addressV = sci.addressW = RAL_ADDRESS_CLAMP_TO_EDGE;
+		sci.maxAnisotropy = 1.0f; sci.maxLod = (float)RAL_HIZ_MAX_MIPS;
+		sci.debugName = "wired-hiz-sampler";
+		vk.ral_hiz_sampler = Ral_CreateSampler( backend, &sci );
+		memset( &bci, 0, sizeof( bci ) );
+		bci.size = 16u * sizeof( uint32_t );
+		bci.usage = RAL_BUFFER_STORAGE | RAL_BUFFER_TRANSFER_SRC | RAL_BUFFER_TRANSFER_DST;
+		bci.memory = RAL_MEMORY_DEVICE_LOCAL;
+		bci.debugName = "wired-hiz-counters";
+		vk.ral_hiz_counters = Ral_CreateBuffer( backend, &bci );
+		if ( !vk.ral_hiz_sampler || !vk.ral_hiz_counters ) ok = qfalse;
+	}
+
+	// reduce: set 0 = source level (0), sampler (1), destination mip storage (2)
+	if ( ok ) {
+		memset( bgle, 0, sizeof( bgle ) );
+		bgle[0].binding = 0; bgle[0].type = RAL_BIND_SAMPLED_TEXTURE; bgle[0].count = 1; bgle[0].stageFlags = RAL_STAGE_COMPUTE;
+		bgle[1].binding = 1; bgle[1].type = RAL_BIND_SAMPLER;         bgle[1].count = 1; bgle[1].stageFlags = RAL_STAGE_COMPUTE;
+		bgle[2].binding = 2; bgle[2].type = RAL_BIND_STORAGE_TEXTURE; bgle[2].count = 1; bgle[2].stageFlags = RAL_STAGE_COMPUTE;
+		bgle[3].binding = 3; bgle[3].type = RAL_BIND_STORAGE_TEXTURE; bgle[3].count = 1; bgle[3].stageFlags = RAL_STAGE_COMPUTE;
+		memset( &bglci, 0, sizeof( bglci ) );
+		bglci.entries = bgle; bglci.numEntries = 4; bglci.debugName = "wired-hiz-reduce-bgl";
+		vk.ral_hiz_reduce_bgl = Ral_CreateBindGroupLayout( backend, &bglci );
+		if ( !vk.ral_hiz_reduce_bgl ) ok = qfalse;
+	}
+	for ( k = 0; ok && k < vk.hizMipCount; k++ ) {
+		memset( bv, 0, sizeof( bv ) );
+		bv[0].binding = 0; bv[0].type = RAL_BIND_SAMPLED_TEXTURE; bv[0].textureView = vk.ral_hiz_depth_view;
+		bv[1].binding = 1; bv[1].type = RAL_BIND_SAMPLER;         bv[1].sampler     = vk.ral_hiz_sampler;
+		// previous level; level 0 never reads it, so bind some other mip to avoid aliasing the output
+		bv[2].binding = 2; bv[2].type = RAL_BIND_STORAGE_TEXTURE; bv[2].textureView = vk.ral_hiz_mip_view[ ( k == 0u ) ? ( vk.hizMipCount > 1u ? 1u : 0u ) : ( k - 1u ) ];
+		bv[3].binding = 3; bv[3].type = RAL_BIND_STORAGE_TEXTURE; bv[3].textureView = vk.ral_hiz_mip_view[k];
+		memset( &bgci, 0, sizeof( bgci ) );
+		bgci.layout = vk.ral_hiz_reduce_bgl; bgci.values = bv; bgci.numValues = 4; bgci.debugName = "wired-hiz-reduce-bg";
+		vk.ral_hiz_reduce_bg[k] = Ral_CreateBindGroup( backend, &bgci );
+		if ( !vk.ral_hiz_reduce_bg[k] ) ok = qfalse;
+	}
+	if ( ok ) {
+		layouts[0] = vk.ral_hiz_reduce_bgl;
+		memset( &cpci, 0, sizeof( cpci ) );
+		cpci.computeSpirv = (const uint32_t *)hiz_reduce_comp_spv; cpci.computeSpirvSize = sizeof( hiz_reduce_comp_spv );
+		cpci.bindGroupLayouts = layouts; cpci.numBindGroupLayouts = 1;
+		cpci.pushConstantSize = 8u * sizeof( uint32_t );   // uvec4 sizes + uvec4 mode
+		cpci.debugName = "wired-hiz-reduce-cs";
+		vk.ral_hiz_reduce_pipeline = Ral_CreateComputePipeline( backend, &cpci );
+		if ( !vk.ral_hiz_reduce_pipeline ) ok = qfalse;
+	}
+
+	// test: set 0 = aabb (0), reached (1), pyramid (2), sampler (3), counters (4)
+	if ( ok ) {
+		memset( bgle, 0, sizeof( bgle ) );
+		bgle[0].binding = 0; bgle[0].type = RAL_BIND_STORAGE_BUFFER;  bgle[0].count = 1; bgle[0].stageFlags = RAL_STAGE_COMPUTE;
+		bgle[1].binding = 1; bgle[1].type = RAL_BIND_STORAGE_BUFFER;  bgle[1].count = 1; bgle[1].stageFlags = RAL_STAGE_COMPUTE;
+		bgle[2].binding = 2; bgle[2].type = RAL_BIND_SAMPLED_TEXTURE; bgle[2].count = 1; bgle[2].stageFlags = RAL_STAGE_COMPUTE;
+		bgle[3].binding = 3; bgle[3].type = RAL_BIND_SAMPLER;         bgle[3].count = 1; bgle[3].stageFlags = RAL_STAGE_COMPUTE;
+		bgle[4].binding = 4; bgle[4].type = RAL_BIND_STORAGE_BUFFER;  bgle[4].count = 1; bgle[4].stageFlags = RAL_STAGE_COMPUTE;
+		bgle[5].binding = 5; bgle[5].type = RAL_BIND_STORAGE_BUFFER;  bgle[5].count = 1; bgle[5].stageFlags = RAL_STAGE_COMPUTE;
+		memset( &bglci, 0, sizeof( bglci ) );
+		bglci.entries = bgle; bglci.numEntries = 6; bglci.debugName = "wired-hiz-test-bgl";
+		vk.ral_hiz_test_bgl = Ral_CreateBindGroupLayout( backend, &bglci );
+		if ( !vk.ral_hiz_test_bgl ) ok = qfalse;
+	}
+	if ( ok ) {
+		layouts[0] = vk.ral_hiz_test_bgl;
+		memset( &cpci, 0, sizeof( cpci ) );
+		cpci.computeSpirv = (const uint32_t *)hiz_test_comp_spv; cpci.computeSpirvSize = sizeof( hiz_test_comp_spv );
+		cpci.bindGroupLayouts = layouts; cpci.numBindGroupLayouts = 1;
+		cpci.pushConstantSize = 24u * sizeof( float );   // mat4 + vec4 params + vec4 tune
+		cpci.debugName = "wired-hiz-test-cs";
+		vk.ral_hiz_test_pipeline = Ral_CreateComputePipeline( backend, &cpci );
+		if ( !vk.ral_hiz_test_pipeline ) ok = qfalse;
+	}
+
+	// audit: set 0 = aabb (0), reached (1), occluded bits (2), depth (3), sampler (4), counters (5)
+	if ( ok ) {
+		memset( bgle, 0, sizeof( bgle ) );
+		bgle[0].binding = 0; bgle[0].type = RAL_BIND_STORAGE_BUFFER;  bgle[0].count = 1; bgle[0].stageFlags = RAL_STAGE_COMPUTE;
+		bgle[1].binding = 1; bgle[1].type = RAL_BIND_STORAGE_BUFFER;  bgle[1].count = 1; bgle[1].stageFlags = RAL_STAGE_COMPUTE;
+		bgle[2].binding = 2; bgle[2].type = RAL_BIND_STORAGE_BUFFER;  bgle[2].count = 1; bgle[2].stageFlags = RAL_STAGE_COMPUTE;
+		bgle[3].binding = 3; bgle[3].type = RAL_BIND_SAMPLED_TEXTURE; bgle[3].count = 1; bgle[3].stageFlags = RAL_STAGE_COMPUTE;
+		bgle[4].binding = 4; bgle[4].type = RAL_BIND_SAMPLER;         bgle[4].count = 1; bgle[4].stageFlags = RAL_STAGE_COMPUTE;
+		bgle[5].binding = 5; bgle[5].type = RAL_BIND_STORAGE_BUFFER;  bgle[5].count = 1; bgle[5].stageFlags = RAL_STAGE_COMPUTE;
+		memset( &bglci, 0, sizeof( bglci ) );
+		bglci.entries = bgle; bglci.numEntries = 6; bglci.debugName = "wired-hiz-audit-bgl";
+		vk.ral_hiz_audit_bgl = Ral_CreateBindGroupLayout( backend, &bglci );
+		if ( !vk.ral_hiz_audit_bgl ) ok = qfalse;
+	}
+	if ( ok ) {
+		layouts[0] = vk.ral_hiz_audit_bgl;
+		memset( &cpci, 0, sizeof( cpci ) );
+		cpci.computeSpirv = (const uint32_t *)hiz_audit_comp_spv; cpci.computeSpirvSize = sizeof( hiz_audit_comp_spv );
+		cpci.bindGroupLayouts = layouts; cpci.numBindGroupLayouts = 1;
+		cpci.pushConstantSize = 24u * sizeof( float );   // mat4 + vec4 params + vec4 tune
+		cpci.debugName = "wired-hiz-audit-cs";
+		vk.ral_hiz_audit_pipeline = Ral_CreateComputePipeline( backend, &cpci );
+		if ( !vk.ral_hiz_audit_pipeline ) ok = qfalse;
+	}
+
+	if ( !ok ) {
+		R_LOG( rch_ral, SEV_WARN, "hiz: verification setup failed; r_hizVerify has no effect until vid_restart\n" );
+		vk_hiz_shutdown();
+		vk.hizFailed = qtrue;
+		return qfalse;
+	}
+	R_LOG( rch_ral, SEV_INFO, "hiz: verification ready (pyramid %ux%u R32F, %u levels)\n",
+		vk.hizBaseW, vk.hizBaseH, vk.hizMipCount );
+	return qtrue;
+}
+
+static void vk_hiz_transition( ralCommandBuffer_t *cb, ralResourceUsage_t before, ralResourceUsage_t after )
+{
+	ralTextureTransition_t       t;
+	ralResourceTransitionBatch_t batch;
+	memset( &t, 0, sizeof( t ) );
+	t.texture = vk.ral_hiz_pyramid;
+	t.aspects = RAL_TEXTURE_ASPECT_COLOR;
+	t.baseMipLevel = 0; t.mipLevelCount = vk.hizMipCount;
+	t.baseArrayLayer = 0; t.arrayLayerCount = 1;
+	t.before.usage = before; t.before.shaderStages = ( before == RAL_RESOURCE_USAGE_UNDEFINED ) ? 0u : RAL_STAGE_COMPUTE;
+	t.after.usage  = after;  t.after.shaderStages  = RAL_STAGE_COMPUTE;
+	t.sourceQueue = t.destinationQueue = RAL_QUEUE_GRAPHICS;
+	memset( &batch, 0, sizeof( batch ) );
+	batch.textureTransitions = &t; batch.textureTransitionCount = 1;
+	if ( Ral_CmdTransitionResources( cb, &batch ) != ralSuccess )
+		ri.Terminate( TERM_UNRECOVERABLE, "hiz: pyramid transition rejected (usage %d->%d)", (int)before, (int)after );
+}
+
+// Column-major 4x4 inverse (general; the view-projection is not affine). Returns qfalse
+// when the matrix is singular.
+static qboolean vk_hiz_invert4( const float *m, float *out )
+{
+	double inv[16], det;
+	int i;
+	inv[0]  =  m[5]*m[10]*m[15] - m[5]*m[11]*m[14] - m[9]*m[6]*m[15] + m[9]*m[7]*m[14] + m[13]*m[6]*m[11] - m[13]*m[7]*m[10];
+	inv[4]  = -m[4]*m[10]*m[15] + m[4]*m[11]*m[14] + m[8]*m[6]*m[15] - m[8]*m[7]*m[14] - m[12]*m[6]*m[11] + m[12]*m[7]*m[10];
+	inv[8]  =  m[4]*m[9]*m[15]  - m[4]*m[11]*m[13] - m[8]*m[5]*m[15] + m[8]*m[7]*m[13] + m[12]*m[5]*m[11] - m[12]*m[7]*m[9];
+	inv[12] = -m[4]*m[9]*m[14]  + m[4]*m[10]*m[13] + m[8]*m[5]*m[14] - m[8]*m[6]*m[13] - m[12]*m[5]*m[10] + m[12]*m[6]*m[9];
+	inv[1]  = -m[1]*m[10]*m[15] + m[1]*m[11]*m[14] + m[9]*m[2]*m[15] - m[9]*m[3]*m[14] - m[13]*m[2]*m[11] + m[13]*m[3]*m[10];
+	inv[5]  =  m[0]*m[10]*m[15] - m[0]*m[11]*m[14] - m[8]*m[2]*m[15] + m[8]*m[3]*m[14] + m[12]*m[2]*m[11] - m[12]*m[3]*m[10];
+	inv[9]  = -m[0]*m[9]*m[15]  + m[0]*m[11]*m[13] + m[8]*m[1]*m[15] - m[8]*m[3]*m[13] - m[12]*m[1]*m[11] + m[12]*m[3]*m[9];
+	inv[13] =  m[0]*m[9]*m[14]  - m[0]*m[10]*m[13] - m[8]*m[1]*m[14] + m[8]*m[2]*m[13] + m[12]*m[1]*m[10] - m[12]*m[2]*m[9];
+	inv[2]  =  m[1]*m[6]*m[15]  - m[1]*m[7]*m[14]  - m[5]*m[2]*m[15] + m[5]*m[3]*m[14] + m[13]*m[2]*m[7]  - m[13]*m[3]*m[6];
+	inv[6]  = -m[0]*m[6]*m[15]  + m[0]*m[7]*m[14]  + m[4]*m[2]*m[15] - m[4]*m[3]*m[14] - m[12]*m[2]*m[7]  + m[12]*m[3]*m[6];
+	inv[10] =  m[0]*m[5]*m[15]  - m[0]*m[7]*m[13]  - m[4]*m[1]*m[15] + m[4]*m[3]*m[13] + m[12]*m[1]*m[7]  - m[12]*m[3]*m[5];
+	inv[14] = -m[0]*m[5]*m[14]  + m[0]*m[6]*m[13]  + m[4]*m[1]*m[14] - m[4]*m[2]*m[13] - m[12]*m[1]*m[6]  + m[12]*m[2]*m[5];
+	inv[3]  = -m[1]*m[6]*m[11]  + m[1]*m[7]*m[10]  + m[5]*m[2]*m[11] - m[5]*m[3]*m[10] - m[9]*m[2]*m[7]   + m[9]*m[3]*m[6];
+	inv[7]  =  m[0]*m[6]*m[11]  - m[0]*m[7]*m[10]  - m[4]*m[2]*m[11] + m[4]*m[3]*m[10] + m[8]*m[2]*m[7]   - m[8]*m[3]*m[6];
+	inv[11] = -m[0]*m[5]*m[11]  + m[0]*m[7]*m[9]   + m[4]*m[1]*m[11] - m[4]*m[3]*m[9]  - m[8]*m[1]*m[7]   + m[8]*m[3]*m[5];
+	inv[15] =  m[0]*m[5]*m[10]  - m[0]*m[6]*m[9]   - m[4]*m[1]*m[10] + m[4]*m[2]*m[9]  + m[8]*m[1]*m[6]   - m[8]*m[2]*m[5];
+	det = (double)m[0]*inv[0] + (double)m[1]*inv[4] + (double)m[2]*inv[8] + (double)m[3]*inv[12];
+	if ( det > -1.0e-30 && det < 1.0e-30 ) return qfalse;
+	det = 1.0 / det;
+	for ( i = 0; i < 16; i++ ) out[i] = (float)( inv[i] * det );
+	return qtrue;
+}
+
+// Collect a finished counters readback, fold it into the rolling window and log it, then
+// start the next copy (which sees the previous frame's counters: the copy is queued
+// before this frame's own clear and dispatch).
+static void vk_hiz_harvest( void )
+{
+	if ( vk_hiz_stats.owner ) {
+		ralBufferMapTicket_t ticket, next;
+		const uint32_t *c;
+		int i;
+		if ( !Ral_ReadbackComplete( vk_hiz_stats.owner ) ) return;
+		if ( Ral_ReadbackMapBegin( vk_hiz_stats.owner, &ticket ) != ralSuccess ) {
+			Ral_ReadbackRelease( &vk_hiz_stats.owner );
+			return;
+		}
+		while ( ticket.status == RAL_BUFFER_MAP_PENDING ) {
+			if ( Ral_ReadbackMapPoll( vk_hiz_stats.owner, &ticket, &next ) != ralSuccess ) break;
+			ticket = next;
+		}
+		if ( ticket.status == RAL_BUFFER_MAP_READY && ticket.mappedRange ) {
+			c = (const uint32_t *)ticket.mappedRange;
+			for ( i = 0; i < 16; i++ ) vk_hiz_stats.sum[i] += c[i];
+			vk_hiz_stats.samples++;
+			Ral_ReadbackMapUnmap( vk_hiz_stats.owner, &ticket );
+		}
+		Ral_ReadbackRelease( &vk_hiz_stats.owner );
+
+		if ( vk_hiz_stats.samples > 0u
+				&& ( r_hizVerify->integer >= 2 || vk_hiz_stats.samples >= 30u ) ) {
+			const double n = (double)vk_hiz_stats.samples;
+			const double tested = (double)vk_hiz_stats.sum[0], occl = (double)vk_hiz_stats.sum[1];
+			const double tIdx = (double)vk_hiz_stats.sum[3], oIdx = (double)vk_hiz_stats.sum[4];
+			const double px = (double)vk_hiz_stats.sum[8];
+			R_LOG( rch_ral, SEV_INFO,
+				"hiz verify (%u frames): per frame tested %.0f occluded %.0f (%.1f%%) uncertain %.0f frustum %.0f | "
+				"indices occluded %.1f%% uncertain %.1f%% of %.0f tested | "
+				"audit: %.0f px, explained %.1f%%, ONLY-DISCARDED %.0f (%.2f%%), unexplained %.1f%%\n",
+				vk_hiz_stats.samples, tested / n, occl / n, tested > 0.0 ? 100.0 * occl / tested : 0.0,
+				(double)vk_hiz_stats.sum[2] / n, (double)vk_hiz_stats.sum[6] / n,
+				tIdx > 0.0 ? 100.0 * oIdx / tIdx : 0.0,
+				tIdx > 0.0 ? 100.0 * (double)vk_hiz_stats.sum[5] / tIdx : 0.0, tIdx / n,
+				px / n,
+				px > 0.0 ? 100.0 * (double)vk_hiz_stats.sum[9] / px : 0.0,
+				(double)vk_hiz_stats.sum[10] / n,
+				px > 0.0 ? 100.0 * (double)vk_hiz_stats.sum[10] / px : 0.0,
+				px > 0.0 ? 100.0 * (double)vk_hiz_stats.sum[11] / px : 0.0 );
+			R_LOG( rch_ral, SEV_INFO,
+				"hiz fallback (this window): measured %u, no-capture/stale %u, other-view(portal/mirror) %u, no-depth %u, singular %u\n",
+				vk_hiz_stats.reason[4], vk_hiz_stats.reason[0], vk_hiz_stats.reason[1], vk_hiz_stats.reason[2], vk_hiz_stats.reason[3] );
+			memset( vk_hiz_stats.reason, 0, sizeof( vk_hiz_stats.reason ) );
+			memset( vk_hiz_stats.sum, 0, sizeof( vk_hiz_stats.sum ) );
+			vk_hiz_stats.samples = 0u;
+		}
+	}
+	if ( vk.hizSeeded && !vk_hiz_stats.owner )
+		Ral_BufferReadbackBegin( vk.ral_hiz_counters, 0u, 16u * sizeof( uint32_t ), &vk_hiz_stats.owner );
+}
+
+void vk_hiz_verify_dispatch( void )
+{
+	ralCommandBuffer_t *cb;
+	ralBindingValue_t   bv[6];
+	ralBindGroupCreateInfo_t bgci;
+	struct { float m[16]; float params[4]; float tune[4]; } push;
+	float               invViewProj[16], viewProj[16];
+	const uint32_t      auditStride = 16u;
+	uint32_t            level, ci, sw, sh, dw, dh, groups, flagWords, i;
+
+	if ( !r_hizVerify || !r_hizVerify->integer ) return;
+	if ( !vk_cull_frame.valid || vk_cull_frame.frameNo != tr.frameCount
+			|| vk.cullSurfaceCount <= 0 || !vk.ral_cull_aabb || !vk.ral_cull_reached[vk.cmd_index] ) {
+		vk_hiz_stats.reason[0]++;
+		return;
+	}
+	if ( !vk.sceneDepth.ral_image || !vk.sceneDepth.copied ) { vk_hiz_stats.reason[2]++; return; }
+	if ( !vk_hiz_ensure() ) return;
+	// The projection's z row is only final after the front end has added every surface
+	// (R_SetupProjectionZ derives zFar from them), so at capture time it is still zero.
+	// The backend's copy is the one the world was drawn with; it must belong to the view that
+	// was captured (a portal/mirror view drawn in between has a different origin).
+	if ( fabsf( backEnd.viewParms.or.origin[0] - vk_cull_frame.viewOrigin[0] ) > 0.01f
+			|| fabsf( backEnd.viewParms.or.origin[1] - vk_cull_frame.viewOrigin[1] ) > 0.01f
+			|| fabsf( backEnd.viewParms.or.origin[2] - vk_cull_frame.viewOrigin[2] ) > 0.01f ) {
+		vk_cull_frame.valid = qfalse;
+		vk_hiz_stats.reason[1]++;
+		return;
+	}
+	{
+		float proj[16];
+		memcpy( proj, backEnd.viewParms.projectionMatrix, sizeof( proj ) );
+		proj[5] = -proj[5];   // same Vulkan clip-space y flip every world pass applies
+		myGlMultMatrix( backEnd.viewParms.world.modelMatrix, proj, viewProj );
+	}
+	if ( !vk_hiz_invert4( viewProj, invViewProj ) ) { vk_cull_frame.valid = qfalse; vk_hiz_stats.reason[3]++; return; }
+
+	cb = vk.cmd->ral_cmd;
+	ci = vk.cmd_index;
+	flagWords = ( (uint32_t)vk.cullSurfaceCount + 31u ) / 32u;
+
+	vk_hiz_harvest();
+
+	// The occluded-bit buffer follows the surface count; a bigger world rebuilds it and every
+	// bind group that references it (the GPU may still read the old one, so wait first).
+	if ( !vk.ral_hiz_flags || vk.hizFlagsWords < flagWords ) {
+		ralBufferCreateInfo_t bci;
+		vk_wait_idle();
+		for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+			if ( vk.ral_hiz_test_bg[i] )  { Ral_DestroyBindGroup( vk.ral_hiz_test_bg[i] );  vk.ral_hiz_test_bg[i] = NULL; }
+			if ( vk.ral_hiz_audit_bg[i] ) { Ral_DestroyBindGroup( vk.ral_hiz_audit_bg[i] ); vk.ral_hiz_audit_bg[i] = NULL; }
+		}
+		if ( vk.ral_hiz_flags ) { Ral_DestroyBuffer( vk.ral_hiz_flags ); vk.ral_hiz_flags = NULL; }
+		memset( &bci, 0, sizeof( bci ) );
+		bci.size = (uint64_t)flagWords * sizeof( uint32_t );
+		bci.usage = RAL_BUFFER_STORAGE | RAL_BUFFER_TRANSFER_DST;
+		bci.memory = RAL_MEMORY_DEVICE_LOCAL;
+		bci.debugName = "wired-hiz-occluded-bits";
+		vk.ral_hiz_flags = Ral_CreateBuffer( vk_ral_get_backend(), &bci );
+		if ( !vk.ral_hiz_flags ) return;
+		vk.hizFlagsWords = flagWords;
+	}
+
+	// This frame's bind groups follow the AABB / reached buffers of the active world.
+	if ( !vk.ral_hiz_test_bg[ci] || !vk.ral_hiz_audit_bg[ci] || vk.ral_hiz_test_bg_aabb[ci] != vk.ral_cull_aabb
+			|| vk.ral_hiz_test_bg_reached[ci] != vk.ral_cull_reached[ci] ) {
+		if ( vk.ral_hiz_test_bg[ci] )  { Ral_DestroyBindGroup( vk.ral_hiz_test_bg[ci] );  vk.ral_hiz_test_bg[ci] = NULL; }
+		if ( vk.ral_hiz_audit_bg[ci] ) { Ral_DestroyBindGroup( vk.ral_hiz_audit_bg[ci] ); vk.ral_hiz_audit_bg[ci] = NULL; }
+		memset( bv, 0, sizeof( bv ) );
+		bv[0].binding = 0; bv[0].type = RAL_BIND_STORAGE_BUFFER;  bv[0].buffer      = vk.ral_cull_aabb;
+		bv[1].binding = 1; bv[1].type = RAL_BIND_STORAGE_BUFFER;  bv[1].buffer      = vk.ral_cull_reached[ci];
+		bv[2].binding = 2; bv[2].type = RAL_BIND_SAMPLED_TEXTURE; bv[2].textureView = vk.ral_hiz_full_view;
+		bv[3].binding = 3; bv[3].type = RAL_BIND_SAMPLER;         bv[3].sampler     = vk.ral_hiz_sampler;
+		bv[4].binding = 4; bv[4].type = RAL_BIND_STORAGE_BUFFER;  bv[4].buffer      = vk.ral_hiz_counters;
+		bv[5].binding = 5; bv[5].type = RAL_BIND_STORAGE_BUFFER;  bv[5].buffer      = vk.ral_hiz_flags;
+		memset( &bgci, 0, sizeof( bgci ) );
+		bgci.layout = vk.ral_hiz_test_bgl; bgci.values = bv; bgci.numValues = 6; bgci.debugName = "wired-hiz-test-bg";
+		vk.ral_hiz_test_bg[ci] = Ral_CreateBindGroup( vk_ral_get_backend(), &bgci );
+		memset( bv, 0, sizeof( bv ) );
+		bv[0].binding = 0; bv[0].type = RAL_BIND_STORAGE_BUFFER;  bv[0].buffer      = vk.ral_cull_aabb;
+		bv[1].binding = 1; bv[1].type = RAL_BIND_STORAGE_BUFFER;  bv[1].buffer      = vk.ral_cull_reached[ci];
+		bv[2].binding = 2; bv[2].type = RAL_BIND_STORAGE_BUFFER;  bv[2].buffer      = vk.ral_hiz_flags;
+		bv[3].binding = 3; bv[3].type = RAL_BIND_SAMPLED_TEXTURE; bv[3].textureView = vk.ral_hiz_depth_view;
+		bv[4].binding = 4; bv[4].type = RAL_BIND_SAMPLER;         bv[4].sampler     = vk.ral_hiz_sampler;
+		bv[5].binding = 5; bv[5].type = RAL_BIND_STORAGE_BUFFER;  bv[5].buffer      = vk.ral_hiz_counters;
+		memset( &bgci, 0, sizeof( bgci ) );
+		bgci.layout = vk.ral_hiz_audit_bgl; bgci.values = bv; bgci.numValues = 6; bgci.debugName = "wired-hiz-audit-bg";
+		vk.ral_hiz_audit_bg[ci] = Ral_CreateBindGroup( vk_ral_get_backend(), &bgci );
+		vk.ral_hiz_test_bg_aabb[ci] = vk.ral_cull_aabb;
+		vk.ral_hiz_test_bg_reached[ci] = vk.ral_cull_reached[ci];
+		if ( !vk.ral_hiz_test_bg[ci] || !vk.ral_hiz_audit_bg[ci] ) return;
+	}
+
+	// ── pyramid: the whole image is one storage-read-write resource while the chain runs
+	// (the RAL tracks whole-image state), a full compute barrier separates the levels, and
+	// the finished chain moves to SAMPLED for the test ──
+	vk_hiz_transition( cb, vk.hizSeeded ? RAL_RESOURCE_USAGE_SAMPLED_TEXTURE : RAL_RESOURCE_USAGE_UNDEFINED,
+		RAL_RESOURCE_USAGE_STORAGE_READ_WRITE );
+	Ral_CmdBindPipeline( cb, vk.ral_hiz_reduce_pipeline );
+	sw = (uint32_t)glConfig.vidWidth; sh = (uint32_t)glConfig.vidHeight;
+	for ( level = 0u; level < vk.hizMipCount; level++ ) {
+		uint32_t pc[8];
+		vk_hiz_level_size( level, &dw, &dh );
+		pc[0] = sw; pc[1] = sh; pc[2] = dw; pc[3] = dh;
+		pc[4] = ( level == 0u ) ? 1u : 0u; pc[5] = pc[6] = pc[7] = 0u;
+		Ral_CmdBindBindGroup( cb, 0, vk.ral_hiz_reduce_bg[level] );
+		Ral_CmdPushConstants( cb, RAL_STAGE_COMPUTE, 0, sizeof( pc ), pc );
+		Ral_CmdDispatch( cb, ( dw + 7u ) / 8u, ( dh + 7u ) / 8u, 1u );
+		Ral_CmdPipelineBarrier( cb, RAL_BARRIER_ALL );
+		sw = dw; sh = dh;
+	}
+	vk_hiz_transition( cb, RAL_RESOURCE_USAGE_STORAGE_READ_WRITE, RAL_RESOURCE_USAGE_SAMPLED_TEXTURE );
+
+	// ── test ──
+	Ral_CmdClearStorageBuffer( cb, vk.ral_hiz_counters, 0u, 16u * sizeof( uint32_t ) );
+	Ral_CmdClearStorageBuffer( cb, vk.ral_hiz_flags, 0u, (uint64_t)flagWords * sizeof( uint32_t ) );
+	memcpy( push.m, viewProj, sizeof( push.m ) );
+	push.params[0] = (float)vk_cull_frame.surfaceCount;
+	push.params[1] = (float)vk.hizMipCount;
+	push.params[2] = (float)glConfig.vidWidth;
+	push.params[3] = (float)glConfig.vidHeight;
+	push.tune[0] = 1.0e-6f; push.tune[1] = push.tune[2] = push.tune[3] = 0.0f;
+	groups = ( (uint32_t)vk_cull_frame.surfaceCount + 255u ) / 256u;
+	Ral_CmdBindPipeline( cb, vk.ral_hiz_test_pipeline );
+	Ral_CmdBindBindGroup( cb, 0, vk.ral_hiz_test_bg[ci] );
+	Ral_CmdPushConstants( cb, RAL_STAGE_COMPUTE, 0, sizeof( push ), &push );
+	Ral_CmdDispatch( cb, groups, 1u, 1u );
+	Ral_CmdPipelineBarrier( cb, RAL_BARRIER_ALL );
+
+	// ── audit: rebuild the world point under a grid of pixels and check it against the boxes ──
+	memcpy( push.m, invViewProj, sizeof( push.m ) );
+	push.params[0] = (float)vk_cull_frame.surfaceCount;
+	push.params[1] = (float)glConfig.vidWidth;
+	push.params[2] = (float)glConfig.vidHeight;
+	push.params[3] = (float)auditStride;
+	push.tune[0] = 3.0f;   // world units of slack around each box (depth quantisation, flat faces)
+	groups = ( ( (uint32_t)glConfig.vidWidth  + auditStride - 1u ) / auditStride + 7u ) / 8u;
+	dw = ( ( (uint32_t)glConfig.vidHeight + auditStride - 1u ) / auditStride + 7u ) / 8u;
+	Ral_CmdBindPipeline( cb, vk.ral_hiz_audit_pipeline );
+	Ral_CmdBindBindGroup( cb, 0, vk.ral_hiz_audit_bg[ci] );
+	Ral_CmdPushConstants( cb, RAL_STAGE_COMPUTE, 0, sizeof( push ), &push );
+	Ral_CmdDispatch( cb, groups, dw, 1u );
+	Ral_CmdPipelineBarrier( cb, RAL_BARRIER_ALL );
+	vk.hizSeeded = qtrue;
+	vk_hiz_stats.reason[4]++;
+
+	// The compute pipeline bind dirtied the graphics bound-pipeline tracker (see vk_gtao_dispatch).
+	vk.cmd->last_ral_pipeline = NULL;
 	vk_cull_frame.valid = qfalse;
 }
 
@@ -24455,6 +25032,12 @@ void vk_shutdown( refShutdownCode_t code )
 	// vkDestroyDevice (VUID-vkDestroyDevice-device-05137).
 	DESTROY_SM( vk.modules.shadow_depth_atest_vs );
 	DESTROY_SM( vk.modules.shadow_depth_atest_fs );
+	{
+		int dm;
+		for ( dm = 0; dm < 3; dm++ ) {
+			if ( vk_shadow_dither_mods[dm] ) { vk_destroy_shader_module( vk_shadow_dither_mods[dm] ); vk_shadow_dither_mods[dm] = NULL; }
+		}
+	}
 	for ( i = 0; i < 2; i++ ) {
 		DESTROY_SM( vk.modules.light_shadow[i] );
 		for ( j = 0; j < 2; j++ )
@@ -31873,6 +32456,9 @@ static void vk_scene_depth_copy_internal( qboolean forceFinal,
 	vk.sceneDepth.copied = qtrue;   // set before dispatch: vk_gtao_dispatch's guard reads it
 	if ( dispatchDepthConsumers && !vk.gtaoAsyncActive )
 		vk_gtao_dispatch( vk.cmd->ral_cmd );
+	// Hi-Z verification (r_hizVerify): same seam, same readable depth copy; log only.
+	if ( dispatchDepthConsumers )
+		vk_hiz_verify_dispatch();
 	if ( !forceFinal ) vk_gpu_ts_write( "gtao_denoise" );
 
 	// Lens-glow occlusion oracle — same seam, same SHADER_READ_ONLY depth copy.
@@ -35054,6 +35640,7 @@ static void vk_split_retire_present_slot( void ) {
 		vk_ral_drain_reregisters();
 	}
 	vk.cmd->overlay_vertex_offset = 0u;
+	vk_world_indirect_begin_frame();
 }
 
 void vk_end_frame( void )
@@ -36088,6 +36675,51 @@ void vk_read_pixels( byte *buffer, uint32_t width, uint32_t height )
 	&& ((sh)->stages[0]->stateBits & GLS_ATEST_BITS) \
 	&& !((sh)->stages[0]->stateBits & (GLS_SRCBLEND_BITS | GLS_DSTBLEND_BITS)) )
 
+// Class 0 = not a translucent caster, 1 = ordinary alpha blend, 2 = any other blend
+// (additive, filter). A translucent caster is a visible, non-sky shader whose first stage
+// is blended; the opaque and alpha-test classes above exclude these, so a glass shell or an
+// energy bubble used to cast nothing. They cast a dithered shadow instead (see
+// shadow_depth_dither.frag): the fraction of fragments kept is the class opacity.
+// Independent of the cvar so the static BSP caster geometry can be built once per map;
+// draw time applies the cvar. Liquids and fog volumes never cast: a sea surface would
+// otherwise shade everything below it in the sun's shadow map.
+static int vk_shadow_blend_class( const shader_t *sh )
+{
+	unsigned int bits;
+	if ( !sh || sh->isSky || ( sh->surfaceFlags & ( SURF_SKY | SURF_NODRAW ) ) || !sh->stages[0] ) return 0;
+	if ( sh->contentFlags & ( CONTENTS_WATER | CONTENTS_LAVA | CONTENTS_SLIME | CONTENTS_FOG ) ) return 0;
+	bits = (unsigned int)sh->stages[0]->stateBits;
+	if ( !( bits & ( GLS_SRCBLEND_BITS | GLS_DSTBLEND_BITS ) ) ) return 0;
+	if ( ( bits & GLS_SRCBLEND_BITS ) == GLS_SRCBLEND_SRC_ALPHA
+			&& ( bits & GLS_DSTBLEND_BITS ) == GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA )
+		return 1;
+	return 2;
+}
+
+// Fraction of fragments a translucent caster of this class writes (0 = off).
+static float vk_shadow_class_opacity( int cls )
+{
+	float base, op;
+	if ( cls <= 0 ) return 0.0f;
+	if ( !r_shadowTranslucent || !r_shadowTranslucent->integer ) return 0.0f;
+	base = r_shadowTranslucentOpacity ? r_shadowTranslucentOpacity->value : 0.4f;
+	op   = ( cls == 1 ) ? base * 1.5f : base;   // an alpha blend hides more light than an additive glow
+	return op > 1.0f ? 1.0f : op;
+}
+
+static float vk_shadow_translucent_opacity( const shader_t *sh )
+{
+	if ( !vk.shadowMap.ral_depthPipelineDither ) return 0.0f;
+	return vk_shadow_class_opacity( vk_shadow_blend_class( sh ) );
+}
+
+// Which BSP caster group a surface belongs to: cls 0 = opaque casters, 1/2 = translucent classes.
+static qboolean vk_shadow_surf_in_class( const shader_t *sh, int cls )
+{
+	return ( cls == 0 ) ? ( SHADOW_CASTER_OK( sh ) ? qtrue : qfalse )
+	                    : ( ( !SHADOW_CASTER_OK( sh ) && vk_shadow_blend_class( sh ) == cls ) ? qtrue : qfalse );
+}
+
 // prev-frame deformed-mesh shadow casters. The main pass
 // deforms each MD3 / MDL-as-MD3 / CPU-skinned-IQM surface into tess.xyz; vk_shadow_
 // capture_mesh() snapshots that (model-space verts + 0-based indices + the entity's
@@ -36102,6 +36734,8 @@ typedef struct {
 	float    modelMatrix[16];// column-major model->world ([axis|origin]; bottom row 0,0,0,1) captured this slice
 	vec3_t   worldCenter;    // world-space bounding-sphere centre (for per-cascade cull)
 	float    worldRadius;    // world-space bounding-sphere radius
+	float    opacity;        // 1 = opaque caster; < 1 = translucent caster, drawn dithered
+	qboolean translucent;    // drawn by the dither pipeline (its opacity rides modelMatrix[3])
 } shadowMeshSlice_t;
 
 static vec4_t            *shadowMeshSnapVerts;     // ri.Malloc'd, lazy-grown (double-on-overflow)
@@ -36128,6 +36762,8 @@ typedef struct {
 	float    modelMatrix[16];     // column-major model->world ([axis|origin]; bottom row 0,0,0,1)
 	vec3_t   worldCenter;         // world-space bounding-sphere centre (for per-cascade cull)
 	float    worldRadius;         // world-space bounding-sphere radius
+	float    opacity;             // 1 = opaque caster; < 1 = translucent (drawn dithered, opacity in modelMatrix[3])
+	qboolean translucent;
 } shadowIqmCaster_t;
 
 static shadowIqmCaster_t *shadowIqmCasters;        // ri.Malloc'd, lazy-grown
@@ -36157,11 +36793,11 @@ static void *vk_shadow_iqm_grow( void *arr, int *cap, int needed, size_t elem ) 
 // Pass 1: accumulate this surface range's opaque caster vertex / index counts
 // into *addVerts / *addIdx. SF_FACE / SF_TRIANGLES / SF_GRID (control net,
 // 2 tris/cell — coarse but conservative). Returns the caster-surface count.
-static int vk_shadow_caster_count( const msurface_t *surfs, int n, uint32_t *addVerts, uint32_t *addIdx ) {
+static int vk_shadow_caster_count( const msurface_t *surfs, int n, int cls, uint32_t *addVerts, uint32_t *addIdx ) {
 	int i, found = 0;
 	for ( i = 0; i < n; i++ ) {
 		const msurface_t *surf = &surfs[i];
-		if ( !surf->data || !SHADOW_CASTER_OK( surf->shader ) ) continue;
+		if ( !surf->data || !vk_shadow_surf_in_class( surf->shader, cls ) ) continue;
 		switch ( *surf->data ) {
 			case SF_FACE:      { const srfSurfaceFace_t *f = (const srfSurfaceFace_t *)surf->data; *addVerts += f->numPoints; *addIdx += f->numIndices; found++; break; }
 			case SF_TRIANGLES: { const srfTriangles_t  *t = (const srfTriangles_t  *)surf->data; *addVerts += t->numVerts;  *addIdx += t->numIndexes; found++; break; }
@@ -36177,12 +36813,12 @@ static int vk_shadow_caster_count( const msurface_t *surfs, int n, uint32_t *add
 // w=1; indices are absolute into verts[] (so a single bind + vertexOffset == 0
 // can draw any sub-range). Mirrors vk_shadow_caster_count's predicate, so the
 // counts pre-computed there match exactly.
-static void vk_shadow_caster_fill( const msurface_t *surfs, int n, vec4_t *verts, uint32_t *vCap, uint32_t *idx, uint32_t *iCap ) {
+static void vk_shadow_caster_fill( const msurface_t *surfs, int n, int cls, vec4_t *verts, uint32_t *vCap, uint32_t *idx, uint32_t *iCap ) {
 	int i, v;
 	for ( i = 0; i < n; i++ ) {
 		const msurface_t *surf = &surfs[i];
 		uint32_t base = *vCap;
-		if ( !surf->data || !SHADOW_CASTER_OK( surf->shader ) ) continue;
+		if ( !surf->data || !vk_shadow_surf_in_class( surf->shader, cls ) ) continue;
 		switch ( *surf->data ) {
 			case SF_FACE: {
 				const srfSurfaceFace_t *f = (const srfSurfaceFace_t *)surf->data;
@@ -36363,8 +36999,11 @@ static void vk_build_bmodel_casters( void ) {
 	numB = w->numBModels;
 
 	// pass 1 — count (bmodels 1..numB-1; bmodel 0 = worldspawn → vk.shadowMap.casterBuf)
-	for ( k = 1; k < numB; k++ )
-		vk_shadow_caster_count( w->bmodels[k].firstSurface, w->bmodels[k].numSurfaces, &numVerts, &numIdx );
+	for ( k = 1; k < numB; k++ ) {
+		int cls;
+		for ( cls = 0; cls < 3; cls++ )   // 0 opaque, 1/2 translucent (dithered) classes
+			vk_shadow_caster_count( w->bmodels[k].firstSurface, w->bmodels[k].numSurfaces, cls, &numVerts, &numIdx );
+	}
 
 	// allocate the slice table unconditionally (cheap; lets vk_render_shadow_map
 	// index it by bmodel index without bounds-vs-NULL gymnastics) — zeroed, so
@@ -36386,9 +37025,17 @@ static void vk_build_bmodel_casters( void ) {
 	// pass 2 — fill, recording each bmodel's index slice into the shared buffer
 	for ( k = 1; k < numB; k++ ) {
 		vk.shadowMap.bmodelRanges[k].firstIndex = iCap;
-		vk_shadow_caster_fill( w->bmodels[k].firstSurface, w->bmodels[k].numSurfaces, verts, &vCap, idx, &iCap );
+		vk_shadow_caster_fill( w->bmodels[k].firstSurface, w->bmodels[k].numSurfaces, 0, verts, &vCap, idx, &iCap );
 		vk.shadowMap.bmodelRanges[k].indexCount = iCap - vk.shadowMap.bmodelRanges[k].firstIndex;
 		if ( vk.shadowMap.bmodelRanges[k].indexCount ) withGeom++;
+		{
+			int cls;
+			for ( cls = 1; cls <= 2; cls++ ) {
+				vk.shadowMap.bmodelRanges[k].transFirst[cls-1] = iCap;
+				vk_shadow_caster_fill( w->bmodels[k].firstSurface, w->bmodels[k].numSurfaces, cls, verts, &vCap, idx, &iCap );
+				vk.shadowMap.bmodelRanges[k].transCount[cls-1] = iCap - vk.shadowMap.bmodelRanges[k].transFirst[cls-1];
+			}
+		}
 	}
 
 	vBytes  = (VkDeviceSize)numVerts * sizeof( vec4_t );
@@ -36477,13 +37124,17 @@ void vk_shadow_capture_mesh( int firstVert, int numVerts, int firstIdx, int numI
 	const trRefEntity_t *ent = backEnd.currentEntity;
 	const orientationr_t *o;
 	shadowMeshSlice_t *sl;
+	float opacity = 1.0f;
 	int v;
 
 	if ( !vk.shadowMap.active ) return;
 	if ( ent == NULL || ent == &tr.worldEntity ) return; // worldspawn → bmodels[0] caster buffer
 	if ( ent->e.reType != RT_MODEL ) return;
 	if ( ent->e.renderfx & ( RF_FIRST_PERSON | RF_DEPTHHACK | RF_NOSHADOW ) ) return;
-	if ( !SHADOW_CASTER_OK( tess.shader ) ) return;
+	if ( !SHADOW_CASTER_OK( tess.shader ) ) {
+		opacity = vk_shadow_translucent_opacity( tess.shader );
+		if ( opacity <= 0.0f ) return;
+	}
 	if ( numVerts <= 0 || numIdx <= 0 ) return;
 	if ( numVerts > 1024*1024 || numIdx > 4*1024*1024 ) return;          // a single absurd surface
 	if ( shadowMeshSnapVertCount + numVerts > 8*1024*1024 ) return;       // ~128 MB of verts — give up gracefully
@@ -36519,7 +37170,11 @@ void vk_shadow_capture_mesh( int firstVert, int numVerts, int firstIdx, int numI
 		sl->modelMatrix[ 0] = o->axis[0][0]; sl->modelMatrix[ 4] = o->axis[1][0]; sl->modelMatrix[ 8] = o->axis[2][0]; sl->modelMatrix[12] = o->origin[0];
 		sl->modelMatrix[ 1] = o->axis[0][1]; sl->modelMatrix[ 5] = o->axis[1][1]; sl->modelMatrix[ 9] = o->axis[2][1]; sl->modelMatrix[13] = o->origin[1];
 		sl->modelMatrix[ 2] = o->axis[0][2]; sl->modelMatrix[ 6] = o->axis[1][2]; sl->modelMatrix[10] = o->axis[2][2]; sl->modelMatrix[14] = o->origin[2];
-		sl->modelMatrix[ 3] = 0.0f;          sl->modelMatrix[ 7] = 0.0f;          sl->modelMatrix[11] = 0.0f;          sl->modelMatrix[15] = 1.0f;
+		sl->opacity      = opacity;
+		sl->translucent  = ( opacity < 1.0f ) ? qtrue : qfalse;
+		// [0][3] of an affine matrix is always 0, so the dither VS reads the opacity here
+		// and clears it before transforming. Opaque slices keep 0.
+		sl->modelMatrix[ 3] = sl->translucent ? opacity : 0.0f;  sl->modelMatrix[ 7] = 0.0f;          sl->modelMatrix[11] = 0.0f;          sl->modelMatrix[15] = 1.0f;
 
 		// world cull sphere: transform the model-space AABB centre by [axis|origin];
 		// radius = half-diagonal × axisLength (covers non-normalized / scaled axes).
@@ -36584,6 +37239,21 @@ void vk_shadow_capture_iqm( ralBuffer_t *vertBuffer, ralBuffer_t *idxBuffer,
 	c->numBones   = numBones;
 	memcpy( c->boneMats, boneMats, (size_t)numBones * 12 * sizeof( float ) );
 	memcpy( c->modelMatrix, modelMatrix, 16 * sizeof( float ) );
+
+	// A blended surface (glass visor, energy shell) casts a dithered shadow instead of a
+	// solid one. The surface being drawn is tess.shader. Opaque and alpha-test surfaces,
+	// and everything when the feature is off or its pipeline is missing, keep the old
+	// solid shadow.
+	c->opacity = 1.0f;
+	c->translucent = qfalse;
+	if ( !SHADOW_CASTER_OK( tess.shader ) && vk.shadowMap.ral_depthPipelineSkinnedDither ) {
+		const float op = vk_shadow_translucent_opacity( tess.shader );
+		if ( op > 0.0f && op < 1.0f ) {
+			c->opacity = op;
+			c->translucent = qtrue;
+			c->modelMatrix[3] = op;   // [0][3] of an affine matrix is 0; the dither VS reads it here
+		}
+	}
 
 	// world cull sphere from the model-space frame bounds (mins[3], maxs[3]):
 	// transform the bounds centre by [axis|origin]; radius = half-diagonal ×
@@ -36705,6 +37375,7 @@ void vk_build_shadow_caster( void ) {
 	vec4_t *verts = NULL;
 	uint32_t *idx = NULL;
 	int numCasterSurfs = 0;
+	uint32_t opaqueIndexCount = 0;
 	const msurface_t *worldSurfs;
 	int worldNumSurfs;
 	VkDeviceSize vBytes, iBytes, bufSize, uploadDone;
@@ -36726,6 +37397,8 @@ void vk_build_shadow_caster( void ) {
 	if ( vk.shadowMap.ral_casterAtestBuf )  { Ral_DestroyBuffer( vk.shadowMap.ral_casterAtestBuf );  vk.shadowMap.ral_casterAtestBuf = NULL; }
 	if ( vk.shadowMap.bmodelRanges )    { ri.Free( vk.shadowMap.bmodelRanges );                              vk.shadowMap.bmodelRanges = NULL; }
 	vk.shadowMap.casterIndexCount = 0;
+	memset( vk.shadowMap.casterTransFirstIndex, 0, sizeof( vk.shadowMap.casterTransFirstIndex ) );
+	memset( vk.shadowMap.casterTransIndexCount, 0, sizeof( vk.shadowMap.casterTransIndexCount ) );
 	vk.shadowMap.casterVtxBytes = 0;
 	vk.shadowMap.casterAtestIndexCount = 0;
 	vk.shadowMap.casterAtestVtxBytes = 0;
@@ -36749,7 +37422,9 @@ void vk_build_shadow_caster( void ) {
 	}
 
 	// pass 1 — count
-	numCasterSurfs = vk_shadow_caster_count( worldSurfs, worldNumSurfs, &numVerts, &numIdx );
+	numCasterSurfs = vk_shadow_caster_count( worldSurfs, worldNumSurfs, 0, &numVerts, &numIdx );
+	vk_shadow_caster_count( worldSurfs, worldNumSurfs, 1, &numVerts, &numIdx );   // translucent classes ride in
+	vk_shadow_caster_count( worldSurfs, worldNumSurfs, 2, &numVerts, &numIdx );   // the same buffer, after the opaque indices
 	if ( numVerts == 0 || numIdx == 0 ) return; // nothing to cast → depth stays cleared
 	if ( numVerts > 4u*1024u*1024u || numIdx > 16u*1024u*1024u ) {
 		R_LOG( rch_vk, SEV_WARN, "shadow caster geometry too large (%u verts / %u idx) — skipping\n", numVerts, numIdx );
@@ -36760,7 +37435,16 @@ void vk_build_shadow_caster( void ) {
 	idx   = ri.Hunk_AllocateTempMemory( numIdx * sizeof( uint32_t ) );
 
 	// pass 2 — fill
-	vk_shadow_caster_fill( worldSurfs, worldNumSurfs, verts, &vCap, idx, &iCap );
+	vk_shadow_caster_fill( worldSurfs, worldNumSurfs, 0, verts, &vCap, idx, &iCap );
+	opaqueIndexCount = iCap;
+	{
+		int cls;
+		for ( cls = 1; cls <= 2; cls++ ) {
+			vk.shadowMap.casterTransFirstIndex[cls-1] = iCap;
+			vk_shadow_caster_fill( worldSurfs, worldNumSurfs, cls, verts, &vCap, idx, &iCap );
+			vk.shadowMap.casterTransIndexCount[cls-1] = iCap - vk.shadowMap.casterTransFirstIndex[cls-1];
+		}
+	}
 	// pass-1 and pass-2 walk the same predicate, so vCap==numVerts && iCap==numIdx
 
 	// device-local buffer: [vec4 verts][uint32 idx]
@@ -36768,7 +37452,7 @@ void vk_build_shadow_caster( void ) {
 	iBytes  = (VkDeviceSize)numIdx   * sizeof( uint32_t );
 	bufSize = vBytes + iBytes;
 	vk.shadowMap.casterVtxBytes   = (uint32_t)vBytes;
-	vk.shadowMap.casterIndexCount = numIdx;
+	vk.shadowMap.casterIndexCount = opaqueIndexCount;   // opaque indices only; translucent classes follow
 
 	vk.shadowMap.ral_casterBuf = vk_create_device_local_buffer( bufSize,
 		(ralBufferUsage_t)( RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_VERTEX
@@ -37012,7 +37696,8 @@ void vk_render_shadow_map( void ) {
 	// worst-case slot count this frame (1 + num_entities + snapSlices). Re-allocs the
 	// descriptor on a grow OR after a pool reset (handle nulled by the reset paths).
 	{
-		int          maxSlots = 1 + backEnd.refdef.num_entities + snapSlices + iqmCasters;
+		// + 2 world translucent classes + up to 2 per entity for translucent brush-model classes
+		int          maxSlots = 1 + backEnd.refdef.num_entities + snapSlices + iqmCasters + 2 + 2 * backEnd.refdef.num_entities;
 		VkDeviceSize need;
 		if ( maxSlots < 1 ) maxSlots = 1;
 		need = (VkDeviceSize)maxSlots * 64u; // 64 B per std430 mat4
@@ -37426,42 +38111,73 @@ void vk_render_shadow_map( void ) {
 			if ( haveSnap ) {
 				VkDeviceSize snapVertOff = 0;
 				VkDeviceSize snapIdxOff  = (VkDeviceSize)snapVerts * sizeof( vec4_t );
-				int si;
+				const int    snapBase    = slot;   // every slice owns slot snapBase+si, whichever pipeline draws it
+				qboolean     anyTranslucent = qfalse;
+				int si, pass;
 				Ral_CmdBindVertexBuffer( vk.cmd->ral_cmd, 0,
 					vk.cmd->ral_shadowSnapBuf, snapVertOff );
 				Ral_CmdBindIndexBuffer( vk.cmd->ral_cmd,
 					vk.cmd->ral_shadowSnapBuf, snapIdxOff, RAL_INDEX_UINT32 );
-				for ( si = 0; si < snapSlices; si++ ) {
-					const shadowMeshSlice_t *sl = &shadowMeshSnapSlices[si];
-					// defensive cap — see the bmodel loop above.
-					if ( (VkDeviceSize)( (size_t)slot + 1 ) * 64u > vk.cmd->shadowEntMatSize ) {
-						R_LOG( rch_vk, SEV_WARN, "shadow entity-matrix SSBO full at slot %d — dropping snap caster\n", slot );
-						continue;
-					}
-					// modelMatrix is already a full 16-float column-major model->world
-					// (vk_shadow_capture_mesh fills [axis|origin] + bottom row {0,0,0,1}).
-					if ( casc == 0 ) {
-						vkRalBufferShadowWriteReceipt_t writeReceipt;
-						memcpy( (byte *)vk.cmd->shadowEntMatMapped + (size_t)slot * 64u, sl->modelMatrix, 64u );
-						if ( !VK_RalBufferShadowMarkWritten( &vk_shadow_entmat_shadows[vk.cmd_index],
-								(uint64_t)slot * 64u, 64u )
-						  || !VK_RalBufferShadowPublish( &vk_shadow_entmat_shadows[vk.cmd_index],
-								(uint64_t)slot * 64u, 64u, &writeReceipt ) ) {
-							Ral_EndRendering( vk.cmd->ral_cmd );
-							return;
+				// pass 0: opaque slices through the bound opaque pipeline.
+				// pass 1: translucent slices through the dither pipeline (its VS reads the
+				//         opacity from the matrix slot, its FS hash-discards to that fraction).
+				for ( pass = 0; pass < 2; pass++ ) {
+					if ( pass == 1 ) {
+						if ( !anyTranslucent || !vk.shadowMap.ral_depthPipelineDither ) break;
+						// Same layout as the opaque pipeline; rebind the two groups after the
+						// pipeline switch so no exact-bind tracking can see a stale set.
+						Ral_CmdBindPipeline( vk.cmd->ral_cmd, vk.shadowMap.ral_depthPipelineDither );
+						Ral_CmdSetDepthBias( vk.cmd->ral_cmd, biasScale * 400.0f, 0.0f, biasScale * 600.0f );
+						{
+							const uint32_t cmvpOff = (uint32_t)( (VkDeviceSize)casc * PAD( 64u, vk.uniform_alignment ) );
+							if ( !Ral_CmdBindBindGroupDynamicExact( vk.cmd->ral_cmd, 0u,
+									vk.cmd->ral_shadowEntMatDesc, NULL, 0u )
+									|| !Ral_CmdBindBindGroupDynamicExact( vk.cmd->ral_cmd, 1u,
+										vk.shadowMap.ral_cascadeMvpDesc[vk.cmd_index],
+										&cmvpOff, 1u ) ) {
+								Ral_EndRendering( vk.cmd->ral_cmd );
+								return;
+							}
 						}
 					}
-					// per-cascade cull (world sphere captured with the slice). slot
-					// always advances; only the draw is skipped on a miss.
-					vk_shadow_draws_considered++;
-					if ( vk_shadow_caster_in_cascade( cullEnabled, centerW, radiusW, sl->worldCenter, sl->worldRadius ) ) {
-						Ral_CmdDrawIndexed( vk.cmd->ral_cmd, sl->indexCount, 1, sl->firstIndex, sl->vertexOffset, slot );
-						vk_shadow_draws_drawn++;
-					} else {
-						vk_shadow_draws_culled++;
+					for ( si = 0; si < snapSlices; si++ ) {
+						const shadowMeshSlice_t *sl = &shadowMeshSnapSlices[si];
+						const int ss = snapBase + si;
+						if ( sl->translucent ) {
+							anyTranslucent = qtrue;
+							if ( pass == 0 ) continue;
+						} else if ( pass == 1 ) {
+							continue;
+						}
+						// defensive cap — see the bmodel loop above.
+						if ( (VkDeviceSize)( (size_t)ss + 1 ) * 64u > vk.cmd->shadowEntMatSize ) {
+							R_LOG( rch_vk, SEV_WARN, "shadow entity-matrix SSBO full at slot %d — dropping snap caster\n", ss );
+							continue;
+						}
+						// modelMatrix is already a full 16-float column-major model->world
+						// (vk_shadow_capture_mesh fills [axis|origin] + bottom row {0,0,0,1}).
+						if ( casc == 0 ) {
+							vkRalBufferShadowWriteReceipt_t writeReceipt;
+							memcpy( (byte *)vk.cmd->shadowEntMatMapped + (size_t)ss * 64u, sl->modelMatrix, 64u );
+							if ( !VK_RalBufferShadowMarkWritten( &vk_shadow_entmat_shadows[vk.cmd_index],
+									(uint64_t)ss * 64u, 64u )
+							  || !VK_RalBufferShadowPublish( &vk_shadow_entmat_shadows[vk.cmd_index],
+									(uint64_t)ss * 64u, 64u, &writeReceipt ) ) {
+								Ral_EndRendering( vk.cmd->ral_cmd );
+								return;
+							}
+						}
+						// per-cascade cull (world sphere captured with the slice).
+						vk_shadow_draws_considered++;
+						if ( vk_shadow_caster_in_cascade( cullEnabled, centerW, radiusW, sl->worldCenter, sl->worldRadius ) ) {
+							Ral_CmdDrawIndexed( vk.cmd->ral_cmd, sl->indexCount, 1, sl->firstIndex, sl->vertexOffset, ss );
+							vk_shadow_draws_drawn++;
+						} else {
+							vk_shadow_draws_culled++;
+						}
 					}
-					slot++;
 				}
+				slot = snapBase + snapSlices;
 			}
 
 			// GPU-skinned IQM casters (players). Each was captured last frame with
@@ -37488,68 +38204,211 @@ void vk_render_shadow_map( void ) {
 					return;
 				}
 
-				for ( ic = 0; ic < iqmCasters; ic++ ) {
-					const shadowIqmCaster_t *c = &shadowIqmCasters[ic];
-					const uint32_t boneOff = (uint32_t)ic * boneItem;
-					// defensive caps — SSBO slot + bone ring capacity.
-					if ( (VkDeviceSize)( (size_t)slot + 1 ) * 64u > vk.cmd->shadowEntMatSize ) {
-						R_LOG( rch_vk, SEV_WARN, "shadow entity-matrix SSBO full at slot %d — dropping IQM caster\n", slot );
-						continue;
-					}
-					if ( boneOff + boneItem > vk.shadowMap.boneRingSize ) {
-						R_LOG( rch_vk, SEV_WARN, "shadow bone ring full at caster %d — dropping IQM caster\n", ic );
-						continue;
-					}
-					if ( casc == 0 ) {
-						vkRalBufferShadowWriteReceipt_t boneReceipt;
-						const uint64_t boneBytes =
-							(uint64_t)c->numBones * 3u * sizeof( vec4_t );
-						// bone matrices → this caster's ring slot (3 vec4 rows/joint).
-						memcpy( (byte *)vk.shadowMap.bonePtr[fi] + boneOff,
-							c->boneMats, (size_t)c->numBones * 3 * sizeof( vec4_t ) );
-						if ( !VK_RalBufferShadowMarkWritten( &vk_shadow_bone_shadows[fi],
-								boneOff, boneBytes )
-						  || !VK_RalBufferShadowPublish( &vk_shadow_bone_shadows[fi],
-								boneOff, boneBytes, &boneReceipt ) ) {
-							Ral_EndRendering( vk.cmd->ral_cmd );
-							return;
-						}
-						// model->world → SSBO slot.
-						memcpy( (byte *)vk.cmd->shadowEntMatMapped + (size_t)slot * 64u, c->modelMatrix, 64u );
-						{
-							vkRalBufferShadowWriteReceipt_t writeReceipt;
-							if ( !VK_RalBufferShadowMarkWritten( &vk_shadow_entmat_shadows[fi],
-									(uint64_t)slot * 64u, 64u )
-							  || !VK_RalBufferShadowPublish( &vk_shadow_entmat_shadows[fi],
-									(uint64_t)slot * 64u, 64u, &writeReceipt ) ) {
+				{
+					const int iqmBase = slot;   // every caster owns slot iqmBase+ic, whichever pipeline draws it
+					qboolean  anyTranslucent = qfalse;
+					int       pass;
+					// pass 0: opaque casters (skinned pipeline, bound above).
+					// pass 1: translucent casters through the skinned dither pipeline.
+					for ( pass = 0; pass < 2; pass++ ) {
+						if ( pass == 1 ) {
+							if ( !anyTranslucent || !vk.shadowMap.ral_depthPipelineSkinnedDither ) break;
+							Ral_CmdBindPipeline( vk.cmd->ral_cmd, vk.shadowMap.ral_depthPipelineSkinnedDither );
+							Ral_CmdSetDepthBias( vk.cmd->ral_cmd, biasScale * 400.0f, 0.0f, biasScale * 600.0f );
+							if ( !Ral_CmdBindBindGroupDynamicExact( vk.cmd->ral_cmd, 0u,
+									vk.cmd->ral_shadowEntMatDesc, NULL, 0u )
+									|| !Ral_CmdBindBindGroupDynamicExact( vk.cmd->ral_cmd, 1u,
+										vk.shadowMap.ral_cascadeMvpDesc[fi], &cmvpOff, 1u ) ) {
 								Ral_EndRendering( vk.cmd->ral_cmd );
 								return;
 							}
 						}
+						for ( ic = 0; ic < iqmCasters; ic++ ) {
+							const shadowIqmCaster_t *c = &shadowIqmCasters[ic];
+							const uint32_t boneOff = (uint32_t)ic * boneItem;
+							const int      ss = iqmBase + ic;
+							if ( c->translucent ) {
+								anyTranslucent = qtrue;
+								if ( pass == 0 ) continue;
+							} else if ( pass == 1 ) {
+								continue;
+							}
+							// defensive caps — SSBO slot + bone ring capacity.
+							if ( (VkDeviceSize)( (size_t)ss + 1 ) * 64u > vk.cmd->shadowEntMatSize ) {
+								R_LOG( rch_vk, SEV_WARN, "shadow entity-matrix SSBO full at slot %d — dropping IQM caster\n", ss );
+								continue;
+							}
+							if ( boneOff + boneItem > vk.shadowMap.boneRingSize ) {
+								R_LOG( rch_vk, SEV_WARN, "shadow bone ring full at caster %d — dropping IQM caster\n", ic );
+								continue;
+							}
+							if ( casc == 0 ) {
+								vkRalBufferShadowWriteReceipt_t boneReceipt;
+								const uint64_t boneBytes =
+									(uint64_t)c->numBones * 3u * sizeof( vec4_t );
+								// bone matrices → this caster's ring slot (3 vec4 rows/joint).
+								memcpy( (byte *)vk.shadowMap.bonePtr[fi] + boneOff,
+									c->boneMats, (size_t)c->numBones * 3 * sizeof( vec4_t ) );
+								if ( !VK_RalBufferShadowMarkWritten( &vk_shadow_bone_shadows[fi],
+										boneOff, boneBytes )
+								  || !VK_RalBufferShadowPublish( &vk_shadow_bone_shadows[fi],
+										boneOff, boneBytes, &boneReceipt ) ) {
+									Ral_EndRendering( vk.cmd->ral_cmd );
+									return;
+								}
+								// model->world (opacity in [0][3] for translucent casters) → SSBO slot.
+								memcpy( (byte *)vk.cmd->shadowEntMatMapped + (size_t)ss * 64u, c->modelMatrix, 64u );
+								{
+									vkRalBufferShadowWriteReceipt_t writeReceipt;
+									if ( !VK_RalBufferShadowMarkWritten( &vk_shadow_entmat_shadows[fi],
+											(uint64_t)ss * 64u, 64u )
+									  || !VK_RalBufferShadowPublish( &vk_shadow_entmat_shadows[fi],
+											(uint64_t)ss * 64u, 64u, &writeReceipt ) ) {
+										Ral_EndRendering( vk.cmd->ral_cmd );
+										return;
+									}
+								}
+							}
+							// per-cascade cull (world sphere captured with the caster). The
+							// casc==0 bone+SSBO writes above always run, so a caster culled from
+							// cascade 0 but visible in cascade 1 still has valid data. Only the
+							// bind+draw is skipped on a miss.
+							vk_shadow_draws_considered++;
+							if ( !vk_shadow_caster_in_cascade( cullEnabled, centerW, radiusW, c->worldCenter, c->worldRadius ) ) {
+								vk_shadow_draws_culled++;
+								continue;
+							}
+							// set 2 = this caster's bones (dynamic offset selects its slot).
+							if ( !Ral_CmdBindBindGroupDynamicExact( vk.cmd->ral_cmd, 2u,
+									vk.shadowMap.ral_boneDesc[fi], &boneOff, 1u ) ) {
+								Ral_EndRendering( vk.cmd->ral_cmd );
+								return;
+							}
+							Ral_CmdBindVertexBuffer( vk.cmd->ral_cmd, 0,
+								c->vertBuffer, 0 );
+							Ral_CmdBindIndexBuffer( vk.cmd->ral_cmd,
+								c->idxBuffer, 0, RAL_INDEX_UINT32 );
+							Ral_CmdDrawIndexed( vk.cmd->ral_cmd, c->numIndexes, 1, c->firstIndex, 0, ss );
+							vk_shadow_draws_drawn++;
+						}
 					}
-					// per-cascade cull (world sphere captured with the caster). slot
-					// always advances; the casc==0 bone+SSBO writes above always run,
-					// so a caster culled from cascade 0 but visible in cascade 1 still
-					// has valid data. Only the bind+draw is skipped on a miss.
-					vk_shadow_draws_considered++;
-					if ( !vk_shadow_caster_in_cascade( cullEnabled, centerW, radiusW, c->worldCenter, c->worldRadius ) ) {
-						vk_shadow_draws_culled++;
-						slot++;
-						continue;
-					}
-					// set 2 = this caster's bones (dynamic offset selects its slot).
-					if ( !Ral_CmdBindBindGroupDynamicExact( vk.cmd->ral_cmd, 2u,
-							vk.shadowMap.ral_boneDesc[fi], &boneOff, 1u ) ) {
+					slot = iqmBase + iqmCasters;
+				}
+			}
+
+			// Translucent (blended) BSP casters: glass brushes, energy fields and the like.
+			// Same dither pipeline as the translucent mesh slices. Each (world | entity) x
+			// class draw owns an SSBO slot whose matrix carries that class's opacity in
+			// [0][3]; slots continue after every group drawn above, so the mapping is
+			// identical in every cascade. Drawn after the opaque groups so the opaque
+			// pipeline binding above is not disturbed (the next group re-binds its own).
+			if ( vk.shadowMap.ral_depthPipelineDither && vk_shadow_class_opacity( 1 ) > 0.0f
+			     && ( haveWorld || haveBmodel ) ) {
+				const qboolean worldTrans  = ( vk.shadowMap.ral_casterBuf != NULL
+					&& ( vk.shadowMap.casterTransIndexCount[0] | vk.shadowMap.casterTransIndexCount[1] ) != 0 ) ? qtrue : qfalse;
+				const qboolean bmodelTrans = ( haveBmodel && backEnd.refdef.num_entities > 0 ) ? qtrue : qfalse;
+				if ( worldTrans || bmodelTrans ) {
+					const uint32_t cmvpOff = (uint32_t)( (size_t)casc * PAD( 64u, vk.uniform_alignment ) );
+					int cls;
+					Ral_CmdBindPipeline( vk.cmd->ral_cmd, vk.shadowMap.ral_depthPipelineDither );
+					Ral_CmdSetDepthBias( vk.cmd->ral_cmd, biasScale * 400.0f, 0.0f, biasScale * 600.0f );
+					if ( !Ral_CmdBindBindGroupDynamicExact( vk.cmd->ral_cmd, 0u,
+							vk.cmd->ral_shadowEntMatDesc, NULL, 0u )
+							|| !Ral_CmdBindBindGroupDynamicExact( vk.cmd->ral_cmd, 1u,
+								vk.shadowMap.ral_cascadeMvpDesc[vk.cmd_index],
+								&cmvpOff, 1u ) ) {
 						Ral_EndRendering( vk.cmd->ral_cmd );
 						return;
 					}
-					Ral_CmdBindVertexBuffer( vk.cmd->ral_cmd, 0,
-						c->vertBuffer, 0 );
-					Ral_CmdBindIndexBuffer( vk.cmd->ral_cmd,
-						c->idxBuffer, 0, RAL_INDEX_UINT32 );
-					Ral_CmdDrawIndexed( vk.cmd->ral_cmd, c->numIndexes, 1, c->firstIndex, 0, slot );
-					vk_shadow_draws_drawn++;
-					slot++;
+
+					if ( worldTrans ) {
+						Ral_CmdBindVertexBuffer( vk.cmd->ral_cmd, 0, vk.shadowMap.ral_casterBuf, 0 );
+						Ral_CmdBindIndexBuffer( vk.cmd->ral_cmd, vk.shadowMap.ral_casterBuf,
+							vk.shadowMap.casterVtxBytes, RAL_INDEX_UINT32 );
+						for ( cls = 1; cls <= 2; cls++ ) {
+							const uint32_t cnt = vk.shadowMap.casterTransIndexCount[cls-1];
+							if ( cnt == 0 ) continue;
+							if ( ( (size_t)slot + 1 ) * 64u > (size_t)vk.cmd->shadowEntMatSize ) {
+								R_LOG( rch_vk, SEV_WARN, "shadow entity-matrix SSBO full at slot %d — dropping translucent world caster\n", slot );
+								continue;
+							}
+							if ( casc == 0 ) {
+								vkRalBufferShadowWriteReceipt_t writeReceipt;
+								memset( mm, 0, sizeof( mm ) ); mm[0] = mm[5] = mm[10] = mm[15] = 1.0f;
+								mm[3] = vk_shadow_class_opacity( cls );
+								memcpy( (byte *)vk.cmd->shadowEntMatMapped + (size_t)slot * 64u, mm, 64u );
+								if ( !VK_RalBufferShadowMarkWritten( &vk_shadow_entmat_shadows[vk.cmd_index],
+										(uint64_t)slot * 64u, 64u )
+								  || !VK_RalBufferShadowPublish( &vk_shadow_entmat_shadows[vk.cmd_index],
+										(uint64_t)slot * 64u, 64u, &writeReceipt ) ) {
+									Ral_EndRendering( vk.cmd->ral_cmd );
+									return;
+								}
+							}
+							Ral_CmdDrawIndexed( vk.cmd->ral_cmd, cnt, 1, vk.shadowMap.casterTransFirstIndex[cls-1], 0, slot );
+							slot++;
+						}
+					}
+
+					if ( bmodelTrans ) {
+						int ei;
+						Ral_CmdBindVertexBuffer( vk.cmd->ral_cmd, 0, vk.shadowMap.ral_casterBmodelBuf, 0 );
+						Ral_CmdBindIndexBuffer( vk.cmd->ral_cmd, vk.shadowMap.ral_casterBmodelBuf,
+							vk.shadowMap.casterBmodelVtxBytes, RAL_INDEX_UINT32 );
+						for ( ei = 0; ei < backEnd.refdef.num_entities; ei++ ) {
+							const trRefEntity_t *ent = &backEnd.refdef.entities[ei];
+							const model_t *mod;
+							const vkBmodelCasterRange_t *rng;
+							int bmIdx;
+							if ( ent->e.reType != RT_MODEL ) continue;
+							if ( ent->e.renderfx & ( RF_FIRST_PERSON | RF_DEPTHHACK | RF_NOSHADOW ) ) continue;
+							mod = R_GetModelByHandle( ent->e.hModel );
+							if ( mod == NULL || mod->type != MOD_BRUSH || mod->bmodel == NULL ) continue;
+							if ( tr.world == NULL || tr.world->bmodels == NULL ) continue;
+							bmIdx = (int)( mod->bmodel - tr.world->bmodels );
+							if ( bmIdx < 1 || bmIdx >= vk.shadowMap.numBmodelRanges ) continue;
+							rng = &vk.shadowMap.bmodelRanges[bmIdx];
+							for ( cls = 1; cls <= 2; cls++ ) {
+								const uint32_t cnt = rng->transCount[cls-1];
+								vec3_t bc, bwc, bhe; float bwr;
+								if ( cnt == 0 ) continue;
+								if ( ( (size_t)slot + 1 ) * 64u > (size_t)vk.cmd->shadowEntMatSize ) {
+									R_LOG( rch_vk, SEV_WARN, "shadow entity-matrix SSBO full at slot %d — dropping translucent bmodel caster\n", slot );
+									continue;
+								}
+								if ( casc == 0 ) {
+									vkRalBufferShadowWriteReceipt_t writeReceipt;
+									mm[0] = ent->e.axis[0][0]; mm[4] = ent->e.axis[1][0]; mm[ 8] = ent->e.axis[2][0]; mm[12] = ent->e.origin[0];
+									mm[1] = ent->e.axis[0][1]; mm[5] = ent->e.axis[1][1]; mm[ 9] = ent->e.axis[2][1]; mm[13] = ent->e.origin[1];
+									mm[2] = ent->e.axis[0][2]; mm[6] = ent->e.axis[1][2]; mm[10] = ent->e.axis[2][2]; mm[14] = ent->e.origin[2];
+									mm[3] = vk_shadow_class_opacity( cls ); mm[7] = 0.0f; mm[11] = 0.0f; mm[15] = 1.0f;
+									memcpy( (byte *)vk.cmd->shadowEntMatMapped + (size_t)slot * 64u, mm, 64u );
+									if ( !VK_RalBufferShadowMarkWritten( &vk_shadow_entmat_shadows[vk.cmd_index],
+											(uint64_t)slot * 64u, 64u )
+									  || !VK_RalBufferShadowPublish( &vk_shadow_entmat_shadows[vk.cmd_index],
+											(uint64_t)slot * 64u, 64u, &writeReceipt ) ) {
+										Ral_EndRendering( vk.cmd->ral_cmd );
+										return;
+									}
+								}
+								VectorAdd( mod->bmodel->bounds[0], mod->bmodel->bounds[1], bc ); VectorScale( bc, 0.5f, bc );
+								VectorSubtract( mod->bmodel->bounds[1], bc, bhe );
+								bwr = VectorLength( bhe );
+								if ( bwr < 1.0f ) bwr = 1.0f;
+								bwc[0] = ent->e.axis[0][0]*bc[0] + ent->e.axis[1][0]*bc[1] + ent->e.axis[2][0]*bc[2] + ent->e.origin[0];
+								bwc[1] = ent->e.axis[0][1]*bc[0] + ent->e.axis[1][1]*bc[1] + ent->e.axis[2][1]*bc[2] + ent->e.origin[1];
+								bwc[2] = ent->e.axis[0][2]*bc[0] + ent->e.axis[1][2]*bc[1] + ent->e.axis[2][2]*bc[2] + ent->e.origin[2];
+								vk_shadow_draws_considered++;
+								if ( vk_shadow_caster_in_cascade( cullEnabled, centerW, radiusW, bwc, bwr ) ) {
+									Ral_CmdDrawIndexed( vk.cmd->ral_cmd, cnt, 1, rng->transFirst[cls-1], 0, slot );
+									vk_shadow_draws_drawn++;
+								} else {
+									vk_shadow_draws_culled++;
+								}
+								slot++;
+							}
+						}
+					}
 				}
 			}
 

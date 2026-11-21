@@ -6,7 +6,7 @@
 
 #include "vk_temporal_motion_recording.h"
 #include "vk_temporal_iqm_exact3_factory.h"
-#include "vk_temporal_iqm_geometry.h"
+#include "../../../../renderer/vk_temporal_iqm_geometry.h"
 #include "vk_temporal_iqm_payload_authoring.h"
 #include "vk_temporal_shader_cohort.h"
 

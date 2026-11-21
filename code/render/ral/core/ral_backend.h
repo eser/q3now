@@ -36,6 +36,7 @@ typedef struct {
 	qboolean wantDescriptorIndexing;         // PAIRED 4-bundle + 2 mirror bits
 	qboolean wantHostQueryReset;
 	qboolean wantDrawIndirectCount;
+	qboolean wantMultiDrawIndirect;          // PAIRED: multiDrawIndirect + drawIndirectFirstInstance
 	qboolean wantVulkanMemoryModel;          // PAIRED: model + Scope
 	qboolean wantBufferDeviceAddress;
 	qboolean want8BitStorage;                // PAIRED: storage + uniformAndStorage
@@ -191,6 +192,8 @@ typedef struct {
 	qboolean debugUtils;                // debug labels / object names available
 	qboolean memoryBudget;              // Ral_QueryMemoryBudget returns real numbers (else estimates)
 	qboolean drawIndirectCount;         // *DrawIndirectCount available (§9.3 GPU-driven)
+	qboolean multiDrawIndirect;         // one indirect call may carry drawCount > 1 (enabled together with drawIndirectFirstInstance)
+	qboolean drawIndirectFirstInstance; // indirect commands may carry a non-zero firstInstance
 
 	// limits
 	uint32_t maxBindlessTextures;       // size of the bindless sampled-texture table

@@ -16,6 +16,7 @@
 #include "render_material_script.h"
 #include "render_texture_sampling.h"
 #include "render_pbr_control.h"
+#include "render_dynamic_light_control.h"
 #include "tr_public.h"
 #include "tr_screenshot.h"
 
@@ -84,6 +85,8 @@ typedef struct {
 	cvar_t *brightness;
 	cvar_t *pbr;
 	cvar_t pbrDefault;
+	cvar_t *dynamicLight;
+	cvar_t dynamicLightDefault;
 	cvar_t *textureMode;
 	cvar_t *anisotropic;
 	cvar_t *maxAnisotropy;
@@ -1025,12 +1028,14 @@ static int NoLight( vec3_t point, vec3_t ambient, vec3_t directed, vec3_t direct
 static void SubmitLight( const vec3_t origin, float intensity,
 		float red, float green, float blue ) {
 	if ( !s_module.frameOpen ) return;
+	if ( s_module.dynamicLight && !s_module.dynamicLight->integer ) return;	// r_dynamiclight 0: a successful no-op, not a submission failure
 	if ( !RenderSubmission_AddLight( &s_module.frontend, origin, NULL,
 			intensity, red, green, blue ) ) MarkFailed( "frontend-light" );
 }
 static void SubmitLinearLight( const vec3_t start, const vec3_t end, float intensity,
 		float red, float green, float blue ) {
 	if ( !s_module.frameOpen ) return;
+	if ( s_module.dynamicLight && !s_module.dynamicLight->integer ) return;
 	if ( !RenderSubmission_AddLight( &s_module.frontend, start, end,
 			intensity, red, green, blue ) ) MarkFailed( "frontend-linear-light" );
 }
@@ -1331,6 +1336,9 @@ static void BeginRegistration( glconfig_t *config ) {
 	if ( !s_module.pbr )
 		s_module.pbr = wired_render_pbr_register( &ri, &s_module.pbrDefault );
 	if ( !s_module.pbr ) { MarkFailed( "pbr-cvar" ); return; }
+	if ( !s_module.dynamicLight )
+		s_module.dynamicLight = wired_render_dynamic_light_register( &ri, &s_module.dynamicLightDefault );
+	if ( !s_module.dynamicLight ) { MarkFailed( "dynamiclight-cvar" ); return; }
 	qboolean initializedNow;
 	if ( !config || !s_module.loaded || s_module.frameOpen ) {
 		MarkFailed( "begin-registration-state" ); return;

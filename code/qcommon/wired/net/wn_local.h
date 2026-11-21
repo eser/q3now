@@ -21,7 +21,7 @@ Shared between wn_*.c files. Not included by engine code — use wn_public.h.
 // QUIC context — singleton, created in WN_Init, destroyed in WN_Shutdown
 // ───────────────────────────────────────────────────────────────────
 
-#define WN_MAX_CLIENTS          8       // sv_wirednetMaxClients default
+#define WN_MAX_CLIENTS          128     // upper bound of QUIC game connections (== MAX_CLIENTS); handles 1..128, so CONN_CLIENT_QUIC is 129
 
 // Per-app local client slots (in-process-queue P1/L1). Mirrors the cgame VM
 // table bound MAX_LOCAL_CGAME_VMS (vm_local.h) — kept as a local constant here
@@ -112,16 +112,20 @@ typedef struct wn_game_conn_s {
 
 	// Single-producer (QUIC callback), single-consumer (NET_Event main loop)
 	// lock-free ring: head written by producer, tail read by consumer
-	wn_game_pkt_t       recv_queue[WN_GAME_QUEUE_SIZE];
+	// The three queues below are about 2.2 MB per connection (16 KB reliable messages x 64
+	// twice, plus the datagram ring), so they are heap-allocated when the connection is
+	// activated (WN_GameConnAllocQueues) and released with it: 128 slots would otherwise be
+	// ~280 MB of static storage. NULL on an inactive slot.
+	wn_game_pkt_t      *recv_queue;
 	volatile int        recv_head;          // next write slot
 	volatile int        recv_tail;          // next read slot
 
 	/* Reliable stream receive queue. QUIC callbacks accumulate bytes per stream
 	 * in rel_partials[] and publish complete messages to rel_queue[]. */
-	wn_rel_msg_t       rel_queue[WN_REL_QUEUE_SIZE];
+	wn_rel_msg_t      *rel_queue;
 	volatile int       rel_head;
 	volatile int       rel_tail;
-	wn_rel_partial_t   rel_partials[WN_REL_PARTIAL_CAP];
+	wn_rel_partial_t  *rel_partials;
 } wn_game_conn_t;
 
 // Connection state — one per QUIC peer

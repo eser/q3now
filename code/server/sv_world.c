@@ -4,6 +4,7 @@
 // world.c -- world query functions
 
 #include "server.h"
+#include "../qcommon/wired/workload_stats.h"
 LOG_DECLARE_CHANNEL( ch_server, "server" );
 
 /*
@@ -463,7 +464,10 @@ SV_ClipMoveToEntities
 */
 static void SV_ClipMoveToEntities( moveclip_t *clip ) {
 	int touchlist[MAX_GENTITIES];
+	const int64_t wlClipT0 = wired_workload_begin( WIRED_WL_SV_CLIP_ENTITIES );
+	const int64_t wlAreaT0 = wired_workload_begin( WIRED_WL_SV_AREA_ENTITIES );
 	int num = SV_AreaEntities( clip->boxmins, clip->boxmaxs, touchlist, MAX_GENTITIES);
+	wired_workload_end( WIRED_WL_SV_AREA_ENTITIES, wlAreaT0, (uint64_t)num );
 
 	int passOwnerNum;
 	if ( clip->passEntityNum != ENTITYNUM_NONE ) {
@@ -477,7 +481,7 @@ static void SV_ClipMoveToEntities( moveclip_t *clip ) {
 
 	for ( int i=0 ; i<num ; i++ ) {
 		if ( clip->trace.allsolid ) {
-			return;
+			break;
 		}
 		sharedEntity_t *touch = SV_GentityNum( touchlist[i] );
 
@@ -534,6 +538,7 @@ static void SV_ClipMoveToEntities( moveclip_t *clip ) {
 			clip->trace.startsolid |= oldStart;
 		}
 	}
+	wired_workload_end( WIRED_WL_SV_CLIP_ENTITIES, wlClipT0, (uint64_t)num );
 }
 
 
@@ -545,7 +550,7 @@ Moves the given mins/maxs volume through the world from start to end.
 passEntityNum and entities owned by passEntityNum are explicitly not checked.
 ==================
 */
-void SV_Trace( trace_t *results, const vec3_t start, const vec3_t mins, const vec3_t maxs, const vec3_t end, int passEntityNum, int contentmask, qboolean capsule ) {
+static void SV_TraceImpl( trace_t *results, const vec3_t start, const vec3_t mins, const vec3_t maxs, const vec3_t end, int passEntityNum, int contentmask, qboolean capsule ) {
 	if ( !mins ) {
 		mins = vec3_origin;
 	}
@@ -561,7 +566,11 @@ void SV_Trace( trace_t *results, const vec3_t start, const vec3_t mins, const ve
 	}
 
 	// clip to world
-	CM_BoxTrace( &clip.trace, start, end, mins, maxs, 0, contentmask, capsule );
+	{
+		const int64_t wlWorldT0 = wired_workload_begin( WIRED_WL_SV_TRACE_WORLD );
+		CM_BoxTrace( &clip.trace, start, end, mins, maxs, 0, contentmask, capsule );
+		wired_workload_end( WIRED_WL_SV_TRACE_WORLD, wlWorldT0, 0u );
+	}
 	clip.trace.entityNum = clip.trace.fraction != 1.0 ? ENTITYNUM_WORLD : ENTITYNUM_NONE;
 	if ( clip.trace.fraction == 0 ) {
 		*results = clip.trace;
@@ -595,6 +604,21 @@ void SV_Trace( trace_t *results, const vec3_t start, const vec3_t mins, const ve
 	SV_ClipMoveToEntities ( &clip );
 
 	*results = clip.trace;
+}
+
+/*
+==================
+SV_Trace
+
+The workload telemetry wraps the trace as a whole, attributed to the server
+phase (bot AI, game tick, queued user commands) that issued it.
+==================
+*/
+void SV_Trace( trace_t *results, const vec3_t start, const vec3_t mins, const vec3_t maxs, const vec3_t end, int passEntityNum, int contentmask, qboolean capsule ) {
+	const wired_workload_slot_t wlSlot = wired_workload_trace_slot();
+	const int64_t wlT0 = wired_workload_begin( wlSlot );
+	SV_TraceImpl( results, start, mins, maxs, end, passEntityNum, contentmask, capsule );
+	wired_workload_end( wlSlot, wlT0, 0u );
 }
 
 

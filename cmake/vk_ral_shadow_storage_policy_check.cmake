@@ -10,7 +10,7 @@ set(TEST_PATH "${SOURCE_ROOT}/tests/vk_ral_shadow_storage_test.c")
 set(CMAKE_PATH "${SOURCE_ROOT}/CMakeLists.txt")
 set(VK_PATH "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk.c")
 set(VK_HEADER_PATH "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk.h")
-set(SCENE_PATH "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/tr_scene.c")
+set(SCENE_PATH "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk_scene.c")
 set(SMOKE_PATH "${SOURCE_ROOT}/tests/ral-effects-dynamic-bind-smoke.sh")
 foreach(PATH IN ITEMS "${CORE_PATH}" "${HEADER_PATH}" "${TEST_PATH}" "${CMAKE_PATH}"
 		"${VK_PATH}" "${VK_HEADER_PATH}" "${SCENE_PATH}" "${SMOKE_PATH}")

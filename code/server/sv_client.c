@@ -1429,6 +1429,23 @@ void SV_SendClientGameState( client_t *client ) {
 		MSG_WriteDeltaEntity( &msg, &nullstate, &svEnt->baseline, qtrue );
 	}
 
+	{
+		/* Size of what a connecting client must hold: the gamestate string pool is
+		 * MAX_GAMESTATE_CHARS and the whole message is MAX_MSGLEN, so these two numbers
+		 * bound how many configstrings (above all CS_PLAYERS) and baselines a level can have. */
+		int totalChars = 0, playerChars = 0, strings = 0, baselines = 0;
+		for ( start = 0; start < MAX_CONFIGSTRINGS; start++ ) {
+			const int len = (int)strlen( sv.configstrings[start] );
+			if ( len == 0 ) continue;
+			++strings;
+			totalChars += len + 1;
+			if ( start >= CS_PLAYERS && start < CS_PLAYERS + MAX_CLIENTS ) playerChars += len + 1;
+		}
+		for ( start = 0; start < MAX_GENTITIES; start++ ) baselines += sv.baselineUsed[start] ? 1 : 0;
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "gamestate: %d configstrings, %d of %d string chars (%d in CS_PLAYERS), %d baselines, message %d of %d bytes\n",
+			strings, totalChars, MAX_GAMESTATE_CHARS, playerChars, baselines, msg.cursize, msg.maxsize );
+	}
+
 	MSG_WriteByte( &msg, svc_EOF );
 
 	MSG_WriteLong( &msg, client - svs.clients );
@@ -2252,6 +2269,18 @@ extern int SV_Strlen( const char *str );
 
 /*
 ==================
+SV_CrowdResync_f
+
+The client saw a gap in its crowd packets (or just connected) and asks for a
+full refresh of what is in its interest radius.
+==================
+*/
+static void SV_CrowdResync_f( client_t *client ) {
+	SV_Crowd_Resync( client );
+}
+
+/*
+==================
 SV_PrintLocations_f
 ==================
 */
@@ -2342,6 +2371,7 @@ static const ucmd_t ucmds[] = {
 	{"stopdl", SV_StopDownload_f},
 	{"donedl", SV_DoneDownload_f},
 	{"locations", SV_PrintLocations_f},
+	{"crowdresync", SV_CrowdResync_f},
 
 	{NULL, NULL}
 };

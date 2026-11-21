@@ -757,6 +757,7 @@ struct ralBackend_s {
 	qboolean          haveSamplerAnisotropy;  // samplerAnisotropy core feature enabled
 	qboolean          haveHostQueryReset;    // hostQueryReset feature enabled → vkResetQueryPool usable
 	qboolean          haveDrawIndirectCount; // drawIndirectCount feature enabled → vkCmdDrawIndexedIndirectCount usable
+	qboolean          haveMultiDrawIndirect; // multiDrawIndirect AND drawIndirectFirstInstance enabled (always together)
 	qboolean          haveFragmentShadingRate; // VK_KHR_fragment_shading_rate enabled AND pipelineFragmentShadingRate feature on → pipeline-static VRS legal
 	qboolean          haveDepthClamp;        // depthClamp core feature enabled → pipeline depthClampEnable legal (read into caps.depthClamp by ralVk_FillCaps, which survives the caps memset)
 	qboolean          haveWideLines;         // wideLines core feature enabled → pipeline lineWidth != 1.0 legal (read into caps.wideLines by ralVk_FillCaps)

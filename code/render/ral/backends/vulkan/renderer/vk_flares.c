@@ -3,7 +3,7 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 // tr_flares.c
 
-#include "tr_local.h"
+#include "vk_local.h"
 
 /*
 =============================================================================

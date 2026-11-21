@@ -4,6 +4,7 @@
 // cl_parse.c  -- parse a message received from the server
 
 #include "client.h"
+#include "../qcommon/wired/workload_stats.h"
 #include "../qcommon/wired/net/wn_public.h"
 LOG_DECLARE_CHANNEL( ch_client, "client" );
 LOG_DECLARE_CHANNEL( ch_network_client, "network.client" );
@@ -20,6 +21,7 @@ static const char *svc_strings[] = {
 	"svc_EOF",
 	"svc_voipSpeex", // ioq3 extension
 	"svc_voipOpus",  // ioq3 extension
+	"svc_crowd",
 };
 
 static void SHOWNET( msg_t *msg, const char *s ) {
@@ -1369,12 +1371,19 @@ void CL_ParseServerMessage( clientApp_t *app, msg_t *msg ) {
 			CL_ParseGamestate( app, msg );
 			break;
 		case svc_snapshot:
-			CL_ParseSnapshot( app, msg );
+			{
+				const int64_t wlT0 = wired_workload_clock();
+				CL_ParseSnapshot( app, msg );
+				wired_workload_end( WIRED_WL_CL_PARSE_SNAPSHOT, wlT0, (uint64_t)app->cl.snap.numEntities );
+			}
 			break;
 		case svc_download:
 			if ( app->clc.demofile != FS_INVALID_HANDLE )
 				return;
 			CL_ParseDownload( app, msg );
+			break;
+		case svc_crowd:
+			CL_Crowd_Parse( app, msg );
 			break;
 		case svc_voipSpeex: // ioq3 extension
 #ifdef USE_VOIP

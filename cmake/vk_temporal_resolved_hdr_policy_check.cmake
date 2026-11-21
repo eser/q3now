@@ -5,8 +5,8 @@ file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_resolved
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_resolved_hdr.c" HDR)
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VKC)
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_textures.c" RAL_TEX)
-file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_backend.c" BACKEND)
-file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_init.c" TR_INIT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_backend.c" BACKEND)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_init.c" TR_INIT)
 file(READ "${ROOT}/tests/vk_temporal_resolved_hdr_test.c" TEST)
 file(READ "${ROOT}/CMakeLists.txt" BUILD)
 

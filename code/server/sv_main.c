@@ -3,6 +3,7 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "server.h"
+#include "../qcommon/wired/workload_stats.h"
 #include "../qcommon/q_feats.h"
 
 #include "../qcommon/wired/net/wn_public.h"
@@ -148,6 +149,22 @@ void SV_AddServerCommand( client_t *client, const char *cmd ) {
 	if ( client->state < CS_PRIMED )
 		return;
 
+	/* Load shedding. A client that has not acknowledged three quarters of the reliable queue
+	 * (a slow frame, a flood of kill messages) must not be sent more low-priority text: the
+	 * state-bearing commands (configstrings, chat, intermission...) still need room, and a
+	 * reliable stream may never lose an unacknowledged command. "print", "cp" (centre print)
+	 * and "scores" (a periodic full refresh) are the shed-able ones; the next scores command
+	 * supersedes the one dropped. */
+	if ( client->reliableSequence - client->reliableAcknowledge >= MAX_RELIABLE_COMMANDS * 3 / 4
+		 && ( !strncmp( cmd, "print ", 6 ) || !strncmp( cmd, "cp ", 3 ) || !strncmp( cmd, "scores ", 7 ) ) ) {
+		static int s_shedLogged;
+		if ( s_shedLogged < 3 ) {
+			++s_shedLogged;
+			Com_Log( SEV_INFO, LOG_CH(ch_server), "server command queue 3/4 full for %s: shedding low-priority commands\n", client->name );
+		}
+		return;
+	}
+
 	client->reliableSequence++;
 	// if we would be losing an old command that hasn't been acknowledged,
 	// we must drop the connection
@@ -161,7 +178,7 @@ void SV_AddServerCommand( client_t *client, const char *cmd ) {
 			 * means acks haven't arrived yet; drop the oldest command to make
 			 * room rather than dropping the connection. */
 			client->reliableAcknowledge++;
-			Com_Log( SEV_DEBUG, LOG_CH(ch_server), "QUIC: server command queue full for %s — dropping oldest\n", client->name );
+			Com_Log( SEV_WARN, LOG_CH(ch_server), "QUIC: server command queue full for %s even after shedding low-priority commands - dropping oldest (the client will see a gap)\n", client->name );
 		} else {
 			Com_Log( SEV_INFO, LOG_CH(ch_server), "===== pending server commands =====\n" );
 			int n = client->reliableSequence - client->reliableAcknowledge;
@@ -1155,7 +1172,13 @@ void SV_Frame( int msec ) {
 
 	// QUIC game drains: safe only when gvm != NULL (SPAWN_IDLE guarantees that).
 	WN_DrainPendingConnects();
-	SV_DrainUsercmds();
+	{
+		const wired_workload_phase_t wlPhase = wired_workload_phase_enter( WIRED_WL_PHASE_USERCMD );
+		const int64_t wlT0 = wired_workload_clock();
+		SV_DrainUsercmds();
+		wired_workload_end( WIRED_WL_SV_USERCMDS, wlT0, 0u );
+		wired_workload_phase_leave( wlPhase );
+	}
 	SV_DrainQUICReliableCommands();
 	WN_DrainPendingReady();
 	/* In-process-queue B4: free in-mem game_conns deferred by wn_inmem_disconnect,
@@ -1257,12 +1280,27 @@ void SV_Frame( int msec ) {
 		startTime = 0;	// quite a compiler warning
 	}
 
+	// Workload telemetry for the simulation part of the frame. The slot (tick or
+	// idle) is chosen at the end, once we know whether a game tick ran, so the
+	// tail of tick frames and of idle frames is reported separately.
+	const int64_t wlFrameT0 = wired_workload_clock();
+	int wlTicks = 0;
+	wired_workload_set_budget_ns( WIRED_WL_SV_FRAME_TICK, (uint64_t)frameMsec * 1000000u );
+	wired_workload_set_budget_ns( WIRED_WL_SV_FRAME_IDLE, (uint64_t)frameMsec * 1000000u );
+	wired_workload_set_budget_ns( WIRED_WL_SV_TICK, (uint64_t)frameMsec * 1000000u );
+
 	WiredCoreEvents_DispatchSimple( WCE_FRAME_START, -1 );
 
 	// update ping based on the all received frames
 	SV_CalcPings();
 
-	SV_BotFrame( sv.time );
+	{
+		const wired_workload_phase_t wlPhase = wired_workload_phase_enter( WIRED_WL_PHASE_BOT );
+		const int64_t wlT0 = wired_workload_clock();
+		SV_BotFrame( sv.time );
+		wired_workload_end( WIRED_WL_SV_BOT_FRAME, wlT0, 0u );
+		wired_workload_phase_leave( wlPhase );
+	}
 
 	// run the game simulation in chunks
 	while ( sv.timeResidual >= frameMsec ) {
@@ -1271,7 +1309,15 @@ void SV_Frame( int msec ) {
 		sv.time += frameMsec;
 
 		// let everything in the world think and move
-		VM_Call( gvm, 1, GAME_RUN_FRAME, sv.time );
+		{
+			const wired_workload_phase_t wlPhase = wired_workload_phase_enter( WIRED_WL_PHASE_TICK );
+			const int64_t wlT0 = wired_workload_clock();
+			VM_Call( gvm, 1, GAME_RUN_FRAME, sv.time );
+			wired_workload_end( WIRED_WL_SV_TICK, wlT0, 1u );
+			wired_workload_phase_leave( wlPhase );
+		}
+		SV_Crowd_Frame( frameMsec );
+		++wlTicks;
 	}
 
 	if ( com_speeds->integer ) {
@@ -1286,7 +1332,11 @@ void SV_Frame( int msec ) {
 	SV_IssueNewSnapshot();
 
 	// send messages back to the clients
-	SV_SendClientMessages();
+	{
+		const int64_t wlT0 = wired_workload_clock();
+		SV_SendClientMessages();
+		wired_workload_end( WIRED_WL_SV_SEND_MESSAGES, wlT0, 0u );
+	}
 
 	// QUIC transport frame processing — after game logic and client messages.
 	// Timer-driven: retransmits, keepalives, idle timeouts.
@@ -1339,8 +1389,31 @@ void SV_Frame( int msec ) {
 	SV_EntityEvents_Drain();
 	WiredCoreEvents_DispatchSimple( WCE_FRAME_END, -1 );
 
+	wired_workload_end( wlTicks ? WIRED_WL_SV_FRAME_TICK : WIRED_WL_SV_FRAME_IDLE,
+		wlFrameT0, (uint64_t)sv.num_entities );
+
 	// send a heartbeat to the master if needed
 	SV_MasterHeartbeat( Cvar_VariableString( "sv_heartbeat" ) );
+}
+
+
+/*
+====================
+SV_WorkloadContext
+
+The load axis of the workload telemetry rows.
+====================
+*/
+void SV_WorkloadContext( int *clients, int *bots, int *entities )
+{
+	*clients = *bots = 0;
+	for ( int i = 0; i < sv.maxclients; i++ ) {
+		const client_t *c = &svs.clients[i];
+		if ( c->state < CS_CONNECTED ) continue;
+		if ( c->netchan.remoteAddress.type == NA_BOT ) ++*bots;
+		else ++*clients;
+	}
+	*entities = sv.num_entities;
 }
 
 

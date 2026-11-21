@@ -12,7 +12,7 @@ FILE(READ "${SOURCE_ROOT}/code/render/ral/backends/vulkan/ral_vulkan_pipeline.c"
 FILE(READ "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VK_SOURCE)
 FILE(READ "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk.h" VK_HEADER)
 FILE(READ "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_textures.c" RAL_TEXTURES)
-FILE(READ "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/tr_model_iqm.c" IQM_MODEL)
+FILE(READ "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk_model_iqm.c" IQM_MODEL)
 FILE(READ "${SOURCE_ROOT}/tests/ral_vulkan_dynamic_bind_test.c" HOST)
 
 FUNCTION(REQUIRE_TEXT BODY NEEDLE MESSAGE_TEXT)

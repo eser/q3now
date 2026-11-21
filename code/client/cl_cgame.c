@@ -4,6 +4,7 @@
 // cl_cgame.c  -- client system interaction with client game
 
 #include "client.h"
+#include "../qcommon/wired/workload_stats.h"
 #include "cl_wired_fx.h"
 #include "wired/ui/cl_wired_ui.h"          /* WiredUI_SetLoadingMenu (state→named-UI) */
 #include "wired/ui/cl_wired_ui_hud_state.h"
@@ -829,7 +830,7 @@ static qboolean CL_GetValue( char* value, int valueSize, const char* key ) {
 static void CL_ForceFixedDlights( void ) {
 	// No-op: this used to force the retired r_dlightMode into its 1..2 (per-pixel)
 	// range to keep clients off the VQ3 'fake' dynamic-light tier. That tier is gone —
-	// r_dynamiclight is per-pixel-only now (0 off / 1 world / 2 world+models) — so there
+	// r_dynamiclight is per-pixel-only now (0 off / 1 on, world + models) — so there
 	// is no fake mode to force away from. The cgame syscall binding is kept so older
 	// cgame modules that still request it resolve harmlessly.
 }
@@ -1667,28 +1668,44 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
 		CL_UnmarshalCgame( &cl_desc_CG_CM_BOXTRACE, args, t );
 		CL_TYPED_PARITY( CG_CM_BOXTRACE, args, t );
-		CM_BoxTrace( t[0].p, t[1].p, t[2].p, t[3].p, t[4].p, (clipHandle_t)t[5].i, (int)t[6].i, /*capsule*/ qfalse );
+		{
+			const int64_t wlT0 = wired_workload_begin( WIRED_WL_CL_TRACE );
+			CM_BoxTrace( t[0].p, t[1].p, t[2].p, t[3].p, t[4].p, (clipHandle_t)t[5].i, (int)t[6].i, /*capsule*/ qfalse );
+			wired_workload_end( WIRED_WL_CL_TRACE, wlT0, 0u );
+		}
 		return 0;
 	}
 	case CG_CM_CAPSULETRACE: {
 		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
 		CL_UnmarshalCgame( &cl_desc_CG_CM_CAPSULETRACE, args, t );
 		CL_TYPED_PARITY( CG_CM_CAPSULETRACE, args, t );
-		CM_BoxTrace( t[0].p, t[1].p, t[2].p, t[3].p, t[4].p, (clipHandle_t)t[5].i, (int)t[6].i, /*capsule*/ qtrue );
+		{
+			const int64_t wlT0 = wired_workload_begin( WIRED_WL_CL_TRACE );
+			CM_BoxTrace( t[0].p, t[1].p, t[2].p, t[3].p, t[4].p, (clipHandle_t)t[5].i, (int)t[6].i, /*capsule*/ qtrue );
+			wired_workload_end( WIRED_WL_CL_TRACE, wlT0, 0u );
+		}
 		return 0;
 	}
 	case CG_CM_TRANSFORMEDBOXTRACE: {
 		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
 		CL_UnmarshalCgame( &cl_desc_CG_CM_TRANSFORMEDBOXTRACE, args, t );
 		CL_TYPED_PARITY( CG_CM_TRANSFORMEDBOXTRACE, args, t );
-		CM_TransformedBoxTrace( t[0].p, t[1].p, t[2].p, t[3].p, t[4].p, (clipHandle_t)t[5].i, (int)t[6].i, t[7].p, t[8].p, /*capsule*/ qfalse );
+		{
+			const int64_t wlT0 = wired_workload_begin( WIRED_WL_CL_TRACE );
+			CM_TransformedBoxTrace( t[0].p, t[1].p, t[2].p, t[3].p, t[4].p, (clipHandle_t)t[5].i, (int)t[6].i, t[7].p, t[8].p, /*capsule*/ qfalse );
+			wired_workload_end( WIRED_WL_CL_TRACE, wlT0, 0u );
+		}
 		return 0;
 	}
 	case CG_CM_TRANSFORMEDCAPSULETRACE: {
 		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
 		CL_UnmarshalCgame( &cl_desc_CG_CM_TRANSFORMEDCAPSULETRACE, args, t );
 		CL_TYPED_PARITY( CG_CM_TRANSFORMEDCAPSULETRACE, args, t );
-		CM_TransformedBoxTrace( t[0].p, t[1].p, t[2].p, t[3].p, t[4].p, (clipHandle_t)t[5].i, (int)t[6].i, t[7].p, t[8].p, /*capsule*/ qtrue );
+		{
+			const int64_t wlT0 = wired_workload_begin( WIRED_WL_CL_TRACE );
+			CM_TransformedBoxTrace( t[0].p, t[1].p, t[2].p, t[3].p, t[4].p, (clipHandle_t)t[5].i, (int)t[6].i, t[7].p, t[8].p, /*capsule*/ qtrue );
+			wired_workload_end( WIRED_WL_CL_TRACE, wlT0, 0u );
+		}
 		return 0;
 	}
 	case CG_CM_MARKFRAGMENTS: {
@@ -2038,6 +2055,7 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		CL_RSND( &cl_desc_CG_R_RENDERSCENE, 1 );
 		refdef_t *fd = t[0].p;
 		if ( fd ) CL_WiredFx_ServiceScene( fd );
+		if ( fd ) CL_Crowd_AddToScene( clientActiveApp, fd );
 		/* Clip the world scene to the viewport's on-screen rect. The cgame
 		 * builds a fullscreen refdef; intersecting it with the current viewport
 		 * rect makes a non-full-screen viewport render only inside its panel.

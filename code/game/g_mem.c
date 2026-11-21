@@ -11,7 +11,7 @@
 LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 
-#define POOLSIZE	(256 * 1024)
+#define POOLSIZE	(6 * 1024 * 1024)	// 128 clients: 128 x bot_state_t (16 KB) + gclient_t array + spawn strings (was 256 KB, enough for ~14 bots)
 
 static char		memoryPool[POOLSIZE];
 static int		allocPoint;

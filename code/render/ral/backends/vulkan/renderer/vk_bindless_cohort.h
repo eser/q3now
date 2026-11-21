@@ -4,7 +4,7 @@
 #ifndef WIRED_VK_BINDLESS_COHORT_H
 #define WIRED_VK_BINDLESS_COHORT_H
 
-#include "vk_bindless_publication.h"
+#include "../../../../renderer/vk_bindless_publication.h"
 
 struct ralBackend_s;
 struct ralBindGroupLayout_s;

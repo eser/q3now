@@ -290,6 +290,10 @@ void Nav_ResetEntityPool( void )
 {
     memset( navEntityPool, 0, sizeof( navEntityPool ) );
     memset( navEntityPoolUsed, 0, sizeof( navEntityPoolUsed ) );
+    /* The world-change ring holds the previous level's mover bounds; drop it so a restarted
+     * level does not re-plan corridors against stale boxes. navWorldGen stays monotonic. */
+    memset( navWorldChanges, 0, sizeof( navWorldChanges ) );
+    navWorldChangeHead = 0;
 }
 
 /*

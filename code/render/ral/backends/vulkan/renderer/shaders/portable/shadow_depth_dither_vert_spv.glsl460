@@ -1,0 +1,23 @@
+#version 460
+
+layout(binding = 0, std430) readonly buffer EntityMatrices
+{
+    mat4 matrices[];
+} _14;
+
+layout(binding = 0, std140) uniform CascadeMVP
+{
+    mat4 cascadeMVP;
+} _37;
+
+layout(location = 0) flat out float out_opacity;
+layout(location = 0) in vec3 in_position;
+
+void main()
+{
+    mat4 m = _14.matrices[gl_InstanceIndex];
+    out_opacity = m[0].w;
+    m[0].w = 0.0;
+    gl_Position = (_37.cascadeMVP * m) * vec4(in_position, 1.0);
+}
+

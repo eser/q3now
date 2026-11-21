@@ -500,6 +500,20 @@ static const vmSyscallDesc_t sv_desc_G_FS_RENAME = {
 static const vmSyscallDesc_t sv_desc_G_ENTITY_EVENT_ENQUEUE = {
 	G_ENTITY_EVENT_ENQUEUE, "G_ENTITY_EVENT_ENQUEUE", 1, { VARG_VMPTR }
 };
+// Crowd promotion hand-off (GAME_API_VERSION 11).
+// G_CROWD_PROMOTABLE( out:crowdAgentRef_t[max], max:int ): out is a counted output array.
+static const vmSyscallDesc_t sv_desc_G_CROWD_PROMOTABLE = {
+	G_CROWD_PROMOTABLE, "G_CROWD_PROMOTABLE", 2, { VARG_VMPTR_COUNTED, VARG_INT },
+	{ [0] = { sizeof( crowdAgentRef_t ), 2 } }   // out: count = args[2] (max)
+};
+// G_CROWD_PROMOTE( userId:int, out:crowdAgentState_t* ) / G_CROWD_DEMOTE( state:const crowdAgentState_t* ):
+// one fixed-size struct each, bounds-checked with VM_CHECKBOUNDS3 like G_ENTITY_EVENT_ENQUEUE.
+static const vmSyscallDesc_t sv_desc_G_CROWD_PROMOTE = {
+	G_CROWD_PROMOTE, "G_CROWD_PROMOTE", 2, { VARG_INT, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_G_CROWD_DEMOTE = {
+	G_CROWD_DEMOTE, "G_CROWD_DEMOTE", 1, { VARG_VMPTR }
+};
 
 // ── collision / spatial-query subsystem ──────────────────────────────────────
 // vec3_t args cross the boundary as VM POINTERS (const vec3_t = const float*,
@@ -1935,6 +1949,27 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 		return SV_Lua_MonsterDecide( args[1], VMA(2), VMA(3), args[4] );
 	case G_MONSTER_LUA_PROFILE_FIELD:
 		return FloatAsInt( SV_Lua_MonsterProfileField( args[1], args[2] ) );
+
+	case G_CROWD_PROMOTION_BUDGET:
+		return SV_Crowd_PromotionBudget();
+	case G_CROWD_PROMOTABLE: {
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		if ( args[2] <= 0 || args[2] > 128 ) return 0;
+		SV_UnmarshalGame( &sv_desc_G_CROWD_PROMOTABLE, args, t );   // count x sizeof bounds inside
+		return SV_Crowd_GamePromotable( (crowdAgentRef_t *)t[0].p, (int)t[1].i );
+	}
+	case G_CROWD_PROMOTE: {
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_CROWD_PROMOTE, args, t );
+		VM_CHECKBOUNDS3( gvm, args[2], 1u, sizeof( crowdAgentState_t ) );
+		return SV_Crowd_GamePromote( (int)t[0].i, (crowdAgentState_t *)t[1].p );
+	}
+	case G_CROWD_DEMOTE: {
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_CROWD_DEMOTE, args, t );
+		VM_CHECKBOUNDS3( gvm, args[1], 1u, sizeof( crowdAgentState_t ) );
+		return SV_Crowd_GameDemote( (const crowdAgentState_t *)t[0].p );
+	}
 
 	case G_WIREDNET_GET_PING:
 		if ( args[1] >= 0 && args[1] < sv_maxclients->integer ) {

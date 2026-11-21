@@ -75,7 +75,7 @@ helpers, etc.
 #define	SHORT2ANGLE(x)	((x)*(360.0/65536))
 
 // per-level limits
-#define	MAX_CLIENTS			64		// absolute limit
+#define	MAX_CLIENTS			128		// absolute limit (was 64; entities 0..127 are the clients, see TASK-246)
 #define MAX_LOCATIONS		64
 
 #define	GENTITYNUM_BITS		10		// don't need to send any more
@@ -99,7 +99,7 @@ helpers, etc.
 #define	CS_SYSTEMINFO		1		// an info string for server system to client system configuration (timescale, etc)
 #define	RESERVED_CONFIGSTRINGS	2	// game can't modify below this, only the system can
 
-#define	MAX_GAMESTATE_CHARS	16000
+#define	MAX_GAMESTATE_CHARS	32000	// 128 CS_PLAYERS strings (~77 chars each) + the rest need ~12 KB; measured 1.7 KB at arena1/1 client
 typedef struct gameState_s {
 	int			stringOffsets[MAX_CONFIGSTRINGS];
 	char		stringData[MAX_GAMESTATE_CHARS];

@@ -1780,13 +1780,19 @@ int BotAISetup( int restart ) {
 	trap_Cvar_Register(&nav_waypoint_tolerance, "nav_waypoint_tolerance", "32", CVAR_CHEAT);
 #endif
 
+	/* Forget every bot-state pointer on EVERY level start, restart included. The bot_state_t
+	 * blocks come from the G_Alloc pool, and G_InitGame resets that pool before this runs;
+	 * keeping the pointers across a restart (the old early return skipped this) left each one
+	 * aimed into memory the new level then hands to other allocations, so the next
+	 * BotAISetupClient for a surviving bot overwrote 16 KB of live game data. Orig. Q3 never saw
+	 * it because its restart recreated the whole VM; here the VM is reused, so the reset must be
+	 * explicit. BotAIShutdown(restart) has already torn every bot down by this point. */
+	memset( botstates, 0, sizeof(botstates) );
+
 	//if the game is restarted for a tournament
 	if (restart) {
 		return qtrue;
 	}
-
-	//initialize the bot states
-	memset( botstates, 0, sizeof(botstates) );
 
 	errnum = BotInitLibrary();
 	if (errnum != BLERR_NOERROR) return qfalse;

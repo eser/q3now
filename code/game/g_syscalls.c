@@ -74,6 +74,20 @@ int trap_VM_ABI_Query( void ) {
 }
 #endif
 
+/* Crowd promotion hand-off (GAME_API_VERSION 11): see G_CROWD_* in g_public.h. */
+int trap_Crowd_PromotionBudget( void ) {
+	return syscall( G_CROWD_PROMOTION_BUDGET );
+}
+int trap_Crowd_Promotable( crowdAgentRef_t *out, int max ) {
+	return syscall( G_CROWD_PROMOTABLE, out, max );
+}
+qboolean trap_Crowd_Promote( int userId, crowdAgentState_t *out ) {
+	return syscall( G_CROWD_PROMOTE, userId, out );
+}
+qboolean trap_Crowd_Demote( const crowdAgentState_t *state ) {
+	return syscall( G_CROWD_DEMOTE, state );
+}
+
 void	trap_Print( const char *text ) {
 	syscall( G_PRINT, text );
 }

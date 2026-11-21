@@ -96,6 +96,7 @@ set(GAME_SOURCES
     ${SOURCE_DIR}/game/g_cmds.c
     ${SOURCE_DIR}/game/g_lightstyle.c
     ${SOURCE_DIR}/game/g_combat.c
+    ${SOURCE_DIR}/game/g_crowd.c
     ${SOURCE_DIR}/game/g_items.c
     ${SOURCE_DIR}/game/g_mem.c
     ${SOURCE_DIR}/game/entities/g_misc_q3.c

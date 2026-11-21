@@ -4,7 +4,7 @@
 #ifndef WIRED_VK_TEMPORAL_IQM_PAYLOAD_H
 #define WIRED_VK_TEMPORAL_IQM_PAYLOAD_H
 
-#include "tr_temporal_iqm_motion.h"
+#include "../../../../renderer/tr_temporal_iqm_motion.h"
 #include "../../../core/ral_resource.h"
 
 #define VK_TEMPORAL_IQM_PAYLOAD_MAX_FRAMES 4u

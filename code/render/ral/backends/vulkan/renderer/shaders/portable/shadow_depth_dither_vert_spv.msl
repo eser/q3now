@@ -1,0 +1,46 @@
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct EntityMatrices
+{
+    float4x4 matrices[1];
+};
+
+struct CascadeMVP
+{
+    float4x4 cascadeMVP;
+};
+
+struct spvDescriptorSetBuffer0
+{
+    const device EntityMatrices* m_14 [[id(0)]];
+};
+
+struct spvDescriptorSetBuffer1
+{
+    constant CascadeMVP* m_37 [[id(0)]];
+};
+
+struct main0_out
+{
+    float out_opacity [[user(locn0)]];
+    float4 gl_Position [[position]];
+};
+
+struct main0_in
+{
+    float3 in_position [[attribute(0)]];
+};
+
+vertex main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], const device spvDescriptorSetBuffer1& spvDescriptorSet1 [[buffer(1)]], uint gl_InstanceIndex [[instance_id]])
+{
+    main0_out out = {};
+    float4x4 m = (*spvDescriptorSet0.m_14).matrices[int(gl_InstanceIndex)];
+    out.out_opacity = m[0].w;
+    m[0].w = 0.0;
+    out.gl_Position = ((*spvDescriptorSet1.m_37).cascadeMVP * m) * float4(in.in_position, 1.0);
+    return out;
+}
+

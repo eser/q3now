@@ -885,6 +885,11 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 				v12enable.hostQueryReset = VK_TRUE;
 			if ( ci->requestFeatures.wantDrawIndirectCount && v12support.drawIndirectCount )
 				v12enable.drawIndirectCount = VK_TRUE;
+			if ( ci->requestFeatures.wantMultiDrawIndirect && f2support.features.multiDrawIndirect
+					&& f2support.features.drawIndirectFirstInstance ) {
+				f2enable.features.multiDrawIndirect = VK_TRUE;
+				f2enable.features.drawIndirectFirstInstance = VK_TRUE;
+			}
 			if ( ci->requestFeatures.wantBufferDeviceAddress && v12support.bufferDeviceAddress )
 				v12enable.bufferDeviceAddress = VK_TRUE;
 
@@ -931,6 +936,8 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 			b->haveSamplerAnisotropy  = ( f2enable.features.samplerAnisotropy == VK_TRUE ) ? qtrue : qfalse;
 			b->haveHostQueryReset     = ( v12enable.hostQueryReset    == VK_TRUE ) ? qtrue : qfalse;
 			b->haveDrawIndirectCount  = ( v12enable.drawIndirectCount == VK_TRUE ) ? qtrue : qfalse;
+			b->haveMultiDrawIndirect  = ( f2enable.features.multiDrawIndirect == VK_TRUE
+			                           && f2enable.features.drawIndirectFirstInstance == VK_TRUE ) ? qtrue : qfalse;
 			b->haveDescriptorIndexing = ( v12enable.shaderSampledImageArrayNonUniformIndexing == VK_TRUE
 			                           && v12enable.runtimeDescriptorArray                    == VK_TRUE
 			                           && v12enable.descriptorBindingPartiallyBound           == VK_TRUE
@@ -1348,6 +1355,12 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 		s2Enable.synchronization2   = VK_TRUE;
 		drEnable.dynamicRendering   = VK_TRUE;
 		if ( b->haveSamplerAnisotropy ) f2enable.features.samplerAnisotropy = VK_TRUE;
+		if ( ci->requestFeatures.wantMultiDrawIndirect && f2query.features.multiDrawIndirect == VK_TRUE
+				&& f2query.features.drawIndirectFirstInstance == VK_TRUE ) {
+			f2enable.features.multiDrawIndirect = VK_TRUE;
+			f2enable.features.drawIndirectFirstInstance = VK_TRUE;
+			b->haveMultiDrawIndirect = qtrue;
+		}
 		if ( ralVk_IndependentBlendEnabled( qtrue, ci->requestFeatures.wantIndependentBlend,
 		                                    f2query.features.independentBlend ) ) {
 			f2enable.features.independentBlend = VK_TRUE;
@@ -1776,6 +1789,7 @@ void Ral_RunDiagnostic( const ralBackendCreateInfo_t *hostCi,
 		RAL_VK_LOG( SEV_INFO, "  debugUtils               : %s\n", c->debugUtils ? "yes" : "no" );
 		RAL_VK_LOG( SEV_INFO, "  memoryBudget             : %s\n", c->memoryBudget ? "yes" : "no" );
 		RAL_VK_LOG( SEV_INFO, "  drawIndirectCount        : %s\n", c->drawIndirectCount ? "yes" : "no" );
+		RAL_VK_LOG( SEV_INFO, "  multiDrawIndirect        : %s (firstInstance %s)\n", c->multiDrawIndirect ? "yes" : "no", c->drawIndirectFirstInstance ? "yes" : "no" );
 		RAL_VK_LOG( SEV_INFO, "  maxColorAttachments      : %u\n", c->maxColorAttachments );
 		RAL_VK_LOG( SEV_INFO, "  maxComputeWorkgroupSize  : %u\n", c->maxComputeWorkgroupSize );
 		RAL_VK_LOG( SEV_INFO, "  maxTextureDimension2D/3D : %u / %u\n", c->maxTextureDimension2D, c->maxTextureDimension3D );

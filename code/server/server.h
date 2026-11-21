@@ -457,6 +457,21 @@ int SV_RemainingGameState( void );
 int	SV_NumForGentity( sharedEntity_t *ent );
 sharedEntity_t *SV_GentityNum( int num );
 playerState_t *SV_GameClientNum( int num );
+
+// sv_crowd.c -- the crowd service (capacity roadmap Phase 3/4)
+void SV_Crowd_Init( void );
+void SV_Snapshot_RegisterCvars( void );
+void SV_Crowd_Clear( void );
+void SV_Crowd_Frame( int frameMsec );
+void SV_Crowd_PrepareClients( const int *clients, int count );
+void SV_Crowd_WriteToClient( client_t *client, msg_t *msg );
+void SV_Crowd_Resync( client_t *client );
+// promotion hand-off (engine half; the game module's syscalls build on these)
+int      SV_Crowd_PromotionBudget( void );
+int      SV_Crowd_GamePromotable( crowdAgentRef_t *out, int max );
+qboolean SV_Crowd_GamePromote( int userId, crowdAgentState_t *out );
+qboolean SV_Crowd_GameDemote( const crowdAgentState_t *state );
+int      SV_Crowd_Promotable( uint32_t *userIds, float (*positions)[3], int max );
 svEntity_t	*SV_SvEntityForGentity( sharedEntity_t *gEnt );
 sharedEntity_t *SV_GEntityForSvEntity( svEntity_t *svEnt );
 void		SV_InitGameProgs ( void );

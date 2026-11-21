@@ -1720,6 +1720,8 @@ void CL_ClearState( clientApp_t *app ) {
 
 //	S_StopAllSounds();
 
+	CL_Crowd_Free( app );   // the view is heap memory that the memset below would orphan
+
 	memset( &app->cl, 0, sizeof( app->cl ) );
 }
 
@@ -5596,6 +5598,7 @@ CL_Init
 */
 void CL_Init( void ) {
 	Com_Log( SEV_INFO, LOG_CH(ch_client), "----- Client Initialization -----\n" );
+	CL_Crowd_Init();
 	CL_ClearServerQueryTransactions();
 	AppMemory_Init( &clientApps[0].memory, "client0", 16u * 1024u * 1024u,
 		128u * 1024u * 1024u );

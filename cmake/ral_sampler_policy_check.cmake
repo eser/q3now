@@ -58,8 +58,8 @@ if(NOT CREATE_COUNT EQUAL 9)
 endif()
 string(REGEX MATCHALL "Ral_DestroySampler[(]" DESTROY_CALLS "${PRODUCT}")
 list(LENGTH DESTROY_CALLS DESTROY_COUNT)
-if(NOT DESTROY_COUNT EQUAL 23)
-	message(FATAL_ERROR "renderer RAL sampler destroy inventory drifted: expected 23 owned/rollback sites including particle/decal owners, the AO point sampler and the atmospheric semantic-effect sampler, got ${DESTROY_COUNT}")
+if(NOT DESTROY_COUNT EQUAL 24)
+	message(FATAL_ERROR "renderer RAL sampler destroy inventory drifted: expected 24 owned/rollback sites including particle/decal owners, the AO point sampler, the Hi-Z verification sampler and the atmospheric semantic-effect sampler, got ${DESTROY_COUNT}")
 endif()
 
 # Fixed FX samplers must not borrow from the r_textureMode-controlled pool.

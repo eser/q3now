@@ -436,4 +436,13 @@ export default [
 	// XeGTAO depth prefilter (view-space linear depth pyramid for gtao.comp).
 	// Appended: the sealed corpus is never reordered.
 	{ stage: 'comp', source: 'gtao_prefilter.comp',      output: 'gtao_prefilter_comp_spv'      },
+	// Translucent shadow casters (dithered coverage). Appended: the sealed corpus is never reordered.
+	{ stage: 'vert', source: 'shadow_depth_dither.vert', output: 'shadow_depth_dither_vert_spv' },
+	{ stage: 'frag', source: 'shadow_depth_dither.frag', output: 'shadow_depth_dither_frag_spv' },
+	{ stage: 'vert', source: 'shadow_depth_skinned_dither.vert', output: 'shadow_depth_skinned_dither_vert_spv' },
+
+	// Hi-Z depth pyramid + occlusion verification (TASK-88). Appended: the sealed corpus is never reordered.
+	{ stage: 'comp', source: 'hiz_reduce.comp', output: 'hiz_reduce_comp_spv' },
+	{ stage: 'comp', source: 'hiz_test.comp',   output: 'hiz_test_comp_spv'   },
+	{ stage: 'comp', source: 'hiz_audit.comp',  output: 'hiz_audit_comp_spv'  },
 ];

@@ -4,7 +4,7 @@ endif()
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_history_consume.c" CONSUMER)
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_history_consume.h" HEADER)
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VKC)
-file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_temporal_input.c" INPUT)
+file(READ "${ROOT}/code/render/renderer/tr_temporal_input.c" INPUT)
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/shaders/temporal_history_consume.comp" SHADER)
 
 foreach(needle

@@ -4,8 +4,8 @@
 #ifndef WIRED_VK_TEMPORAL_MOTION_MATERIALIZATION_H
 #define WIRED_VK_TEMPORAL_MOTION_MATERIALIZATION_H
 
-#include "tr_temporal_motion_payload.h"
-#include "tr_temporal_motion_targets.h"
+#include "../../../../renderer/tr_temporal_motion_payload.h"
+#include "../../../../renderer/tr_temporal_motion_targets.h"
 #include "vk_temporal_pipeline_factory.h"
 
 typedef struct {

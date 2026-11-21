@@ -4,7 +4,7 @@
 #ifndef WIRED_VK_TEMPORAL_RESOLVE_AUTHORITY_H
 #define WIRED_VK_TEMPORAL_RESOLVE_AUTHORITY_H
 
-#include "tr_temporal_history.h"
+#include "../../../../renderer/tr_temporal_history.h"
 #include "vk_temporal_main_activation.h"
 #include "vk_temporal_resolved_hdr.h"
 

@@ -1,0 +1,133 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
+#version 450
+
+/*
+hiz_test.comp — Hi-Z occlusion test over the static world surfaces (VERIFICATION ONLY).
+
+For every surface the front end reached this frame (the PVS-visible set), project its
+world AABB with the main view's view-projection, pick the pyramid level whose texels
+cover the screen rectangle with at most 2x2 fetches, and compare the farthest stored
+depth under that rectangle (the pyramid keeps the minimum, reversed-Z) with the box's
+nearest depth. If the stored depth is nearer than the box everywhere, the surface is
+hidden. Nothing is drawn differently: the outcome is only counted, so the share of
+the PVS-visible set that a depth pyramid would discard can be measured before any
+draw path depends on it.
+
+A box that touches or crosses the near plane (any corner with w <= 0) cannot be
+projected, so it is counted as UNCERTAIN and treated as visible. A box wholly outside
+the view volume is counted as FRUSTUM and is not tested.
+
+Counters (uint, atomic):
+  [0] tested surfaces        [3] tested index count
+  [1] occluded surfaces      [4] occluded index count
+  [2] uncertain surfaces     [5] uncertain index count
+  [6] frustum-rejected       [7] frustum-rejected index count
+Index counts come from meta.z of the AABB record (the host stores the surface's
+index count there), so the result can be weighted by geometry, not just by count.
+
+Bindings (set 0): 0 = AABB SSBO (same layout as cull.comp), 1 = reached bitset,
+2 = depth pyramid (texture2D, whole mip chain), 3 = sampler (combined-sampler
+plumbing only), 4 = counters SSBO (16 words; 8..15 belong to hiz_audit.comp),
+5 = per-surface occluded bitset (cleared by the host each frame; hiz_audit.comp reads it).
+Push: mat4 viewProj (device clip space: y already flipped, reversed-Z),
+      vec4 params = (surfaceCount, mipCount, depthW, depthH),
+      vec4 tune   = (depthBias, 0, 0, 0).
+*/
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+struct SurfAABB {
+	vec4 mins;
+	vec4 maxs;
+	vec4 plane;
+	uvec4 meta;   // x = cullType, y = surfaceType, z = index count
+};
+
+layout(std430, set = 0, binding = 0) readonly buffer Aabb { SurfAABB surfaces[]; };
+layout(std430, set = 0, binding = 1) readonly buffer Reached { uint reached[]; };
+layout(set = 0, binding = 2) uniform texture2D hiz;
+layout(set = 0, binding = 3) uniform sampler   hizSampler;
+layout(std430, set = 0, binding = 4) buffer Counters { uint counters[16]; };
+layout(std430, set = 0, binding = 5) buffer OccludedBits { uint occluded[]; };
+
+layout(push_constant) uniform Push {
+	mat4 viewProj;
+	vec4 params;
+	vec4 tune;
+};
+
+void main() {
+	uint i = gl_GlobalInvocationID.x;
+	uint count = uint(params.x);
+	if (i >= count) return;
+	if ((reached[i >> 5u] & (1u << (i & 31u))) == 0u) return;
+
+	uint idxCount = surfaces[i].meta.z;
+	vec3 mn = surfaces[i].mins.xyz;
+	vec3 mx = surfaces[i].maxs.xyz;
+
+	vec2 ndcMin = vec2(1e30);
+	vec2 ndcMax = vec2(-1e30);
+	float nearest = -1e30;     // reversed-Z: larger = nearer
+	bool crossesNear = false;
+	uint outsideMask = 0x3Fu;  // bit set while ALL corners are outside that plane
+
+	for (int c = 0; c < 8; c++) {
+		vec3 p = vec3((c & 1) != 0 ? mx.x : mn.x, (c & 2) != 0 ? mx.y : mn.y, (c & 4) != 0 ? mx.z : mn.z);
+		vec4 q = viewProj * vec4(p, 1.0);
+		if (q.x >=  -q.w) outsideMask &= ~1u;
+		if (q.x <=   q.w) outsideMask &= ~2u;
+		if (q.y >=  -q.w) outsideMask &= ~4u;
+		if (q.y <=   q.w) outsideMask &= ~8u;
+		if (q.z >=   0.0) outsideMask &= ~16u;     // beyond the far plane when z < 0 (reversed-Z)
+		if (q.z <=   q.w) outsideMask &= ~32u;     // in front of the near plane when z > w
+		if (q.w <= 1e-4) { crossesNear = true; continue; }
+		vec3 n = q.xyz / q.w;
+		ndcMin = min(ndcMin, n.xy);
+		ndcMax = max(ndcMax, n.xy);
+		nearest = max(nearest, n.z);
+	}
+
+	if (outsideMask != 0u) {
+		atomicAdd(counters[6], 1u);
+		atomicAdd(counters[7], idxCount);
+		return;
+	}
+
+	atomicAdd(counters[0], 1u);
+	atomicAdd(counters[3], idxCount);
+
+	if (crossesNear) {
+		atomicAdd(counters[2], 1u);
+		atomicAdd(counters[5], idxCount);
+		return;
+	}
+
+	// Screen rectangle in depth-buffer pixels, widened by one pixel each side.
+	vec2 size = vec2(params.z, params.w);
+	vec2 pmin = clamp((ndcMin * 0.5 + 0.5) * size - 1.0, vec2(0.0), size - 1.0);
+	vec2 pmax = clamp((ndcMax * 0.5 + 0.5) * size + 1.0, vec2(0.0), size - 1.0);
+
+	// Level 0 texels are 2x2 depth pixels; level L texels are 2^(L+1) pixels wide.
+	float extent = max(max(pmax.x - pmin.x, pmax.y - pmin.y), 1.0);
+	int level = clamp(int(ceil(log2(extent))) - 1, 0, int(params.y) - 1);
+	float texelPx = exp2(float(level + 1));
+	ivec2 dim = textureSize(sampler2D(hiz, hizSampler), level);
+	ivec2 t0 = clamp(ivec2(floor(pmin / texelPx)), ivec2(0), dim - 1);
+	ivec2 t1 = clamp(ivec2(floor(pmax / texelPx)), ivec2(0), dim - 1);
+
+	float farthest = texelFetch(sampler2D(hiz, hizSampler), ivec2(t0.x, t0.y), level).r;
+	farthest = min(farthest, texelFetch(sampler2D(hiz, hizSampler), ivec2(t1.x, t0.y), level).r);
+	farthest = min(farthest, texelFetch(sampler2D(hiz, hizSampler), ivec2(t0.x, t1.y), level).r);
+	farthest = min(farthest, texelFetch(sampler2D(hiz, hizSampler), ivec2(t1.x, t1.y), level).r);
+
+	// Hidden only if the farthest occluder under the rectangle is still in front of the
+	// box's nearest point (by a margin, so equal-depth surfaces stay visible).
+	if (farthest > nearest + tune.x) {
+		atomicAdd(counters[1], 1u);
+		atomicAdd(counters[4], idxCount);
+		atomicOr(occluded[i >> 5u], 1u << (i & 31u));   // read back by hiz_audit.comp
+	}
+}

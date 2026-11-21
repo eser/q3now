@@ -40,7 +40,7 @@ require_text("code/render/ral/core/ral_atmosphere.c"
 	"Ral_AtmosphereBuildSurfaceTable")
 require_text("code/render/ral/core/ral_atmosphere.c"
 	"receipt.comparisonLimit = 8u;")
-require_text("code/render/ral/backends/vulkan/renderer/tr_init.c"
+require_text("code/render/ral/backends/vulkan/renderer/vk_init.c"
 	"RE_SetAtmosphereSurfaceTiles")
 require_text("code/render/ral/backends/vulkan/renderer/vk.c"
 	"vk.decal.surfaceClimateBuffer[frameIdx]")
@@ -64,9 +64,9 @@ require_text("code/cgame/cg_syscalls.c"
 	"trap_R_AddAtmosphereSurfaceEvent")
 require_text("code/client/cl_cgame.c"
 	"cl_desc_CG_R_ADDATMOSPHERESURFACEEVENT")
-require_text("code/render/ral/backends/vulkan/renderer/tr_init.c"
+require_text("code/render/ral/backends/vulkan/renderer/vk_init.c"
 	"FrontendAddAtmosphereSurfaceEvent")
-require_text("code/render/ral/backends/vulkan/renderer/tr_init.c"
+require_text("code/render/ral/backends/vulkan/renderer/vk_init.c"
 	"FrontendAddAtmosphereMediaVolume")
 require_text("code/render/ral/backends/opengl/ral_opengl_module.c"
 	"AddAtmosphereSurfaceEvent")

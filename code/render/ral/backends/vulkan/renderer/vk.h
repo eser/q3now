@@ -5,8 +5,8 @@
 #pragma once
 
 #include "../include/vulkan/vulkan.h"
-#include "tr_common.h"
-#include "tr_temporal_batch_request.h"
+#include "../../../../renderer/tr_common.h"
+#include "../../../../renderer/tr_temporal_batch_request.h"
 #include "../../../../../qcommon/q_feats.h"
 #include "../../../core/ral_types.h"   // ralFormat_t (renderer attachment-format helpers)
 #include "../../../core/ral_presentation_policy.h"
@@ -56,6 +56,8 @@
 typedef struct {
 	uint32_t firstIndex;   // first index of this bmodel's geometry in the shared index region
 	uint32_t indexCount;   // index count (0 = no opaque casters / not a real bmodel slot)
+	uint32_t transFirst[2];   // translucent geometry, class 1 (alpha blend) / class 2 (other blend): first index
+	uint32_t transCount[2];   // ... and index count (0 = none)
 } vkBmodelCasterRange_t;
 #endif
 
@@ -65,13 +67,15 @@ typedef struct {
 #define STAGING_BUFFER_SIZE    (2 * 1024 * 1024)  /* by default */
 #define STAGING_BUFFER_SIZE_HI (24 * 1024 * 1024) /* enough for max.texture size upload with all mip levels at once */
 
+#define RAL_HIZ_MAX_MIPS 13	// Hi-Z pyramid levels; 13 covers a 16384-pixel base
 #define NUM_COMMAND_BUFFERS 2	// double-buffered: paces CPU with GPU per-frame, prevents race-ahead bursting (matches MoltenVK's 3-drawable cap)
 
 qboolean vk_publish_menubg_shadow( uint32_t commandSlot );
 
 #define DLIGHT_SHADOW_K_MAX 4	// max simultaneous shadow-casting dynamic lights (top-K brightest); atlas = tileSize*6*K wide. 6*K_MAX mat4 = 1.5KB at K=4, well under the UBO limit (params kept a UBO).
 
-#define USE_REVERSED_DEPTH
+/* USE_REVERSED_DEPTH now lives in the neutral tr_local.h: the projection code (tr_main.c) and the
+ * Vulkan depth state must agree, so it is defined where both see it. */
 
 #define USE_UPLOAD_QUEUE
 
@@ -410,13 +414,7 @@ typedef enum {
 	POINT_LIST
 } Vk_Primitive_Topology;
 
-typedef enum {
-	DEPTH_RANGE_NORMAL,		// [0..1]
-	DEPTH_RANGE_ZERO,		// [0..0]
-	DEPTH_RANGE_ONE,		// [1..1]
-	DEPTH_RANGE_WEAPON,		// [0..0.3]
-	DEPTH_RANGE_COUNT
-}  Vk_Depth_Range;
+#include "../../../../renderer/vk_depth_range.h"   // Vk_Depth_Range (shared with the neutral renderer files)
 
 typedef struct {
 	VkSamplerAddressMode address_mode; // clamp/repeat texture addressing mode
@@ -942,6 +940,10 @@ void vk_cull_build_world_aabbs( const struct msurface_s *surfaces, int numSurfac
 void vk_cull_init( ralBackend_t *backend );
 void vk_cull_capture_world( const void *viewParms, const void *world, int viewCount );
 void vk_cull_dispatch( void );
+void vk_hiz_verify_dispatch( void );
+void vk_hiz_shutdown( void );
+void vk_world_indirect_begin_frame( void );
+void vk_world_indirect_shutdown( void );
 void vk_cull_shutdown( void );
 void vk_cull_select_world( int worldIndex );
 void vk_cull_unload_world( int worldIndex );
@@ -2377,6 +2379,33 @@ typedef struct {
 	struct ralBindGroupLayout_s *ral_gtao_prefilter_bgl;          // set 0: depth tex+sampler + 5 mip storage
 	struct ralBindGroup_s       *ral_gtao_prefilter_descriptor;
 	struct ralPipeline_s        *ral_gtao_prefilter_pipeline;
+	// Hi-Z verification (TASK-88 stage A): a conservative (MIN, reversed-Z) depth pyramid
+	// plus a compute pass that counts how much of the PVS-visible world surface set the
+	// pyramid would have discarded. Nothing is drawn differently. Built lazily the first
+	// time r_hizVerify is on; every handle is RAL-owned.
+	struct ralTexture_s         *ral_hiz_pyramid;                 // R32F, half depth resolution, full mip chain
+	struct ralTextureView_s     *ral_hiz_depth_view;              // sampling view over the scene depth copy
+	struct ralTextureView_s     *ral_hiz_full_view;               // all mips (the test samples by level)
+	struct ralTextureView_s     *ral_hiz_mip_view[RAL_HIZ_MAX_MIPS];
+	struct ralSampler_s         *ral_hiz_sampler;
+	struct ralBindGroupLayout_s *ral_hiz_reduce_bgl;
+	struct ralBindGroup_s       *ral_hiz_reduce_bg[RAL_HIZ_MAX_MIPS];
+	struct ralPipeline_s        *ral_hiz_reduce_pipeline;
+	struct ralBindGroupLayout_s *ral_hiz_test_bgl;
+	struct ralBindGroup_s       *ral_hiz_test_bg[NUM_COMMAND_BUFFERS];
+	struct ralBuffer_s          *ral_hiz_test_bg_aabb[NUM_COMMAND_BUFFERS];   // which AABB buffer each group was built for
+	struct ralBuffer_s          *ral_hiz_test_bg_reached[NUM_COMMAND_BUFFERS];
+	struct ralPipeline_s        *ral_hiz_test_pipeline;
+	struct ralBuffer_s          *ral_hiz_counters;                // uint[16], device-local, copied out by a readback owner
+	struct ralBuffer_s          *ral_hiz_flags;                   // per-surface occluded bitset (hiz_test writes, hiz_audit reads)
+	uint32_t                     hizFlagsWords;
+	struct ralBindGroupLayout_s *ral_hiz_audit_bgl;
+	struct ralBindGroup_s       *ral_hiz_audit_bg[NUM_COMMAND_BUFFERS];
+	struct ralPipeline_s        *ral_hiz_audit_pipeline;
+	uint32_t                     hizMipCount;
+	uint32_t                     hizBaseW, hizBaseH;              // pyramid mip-0 size
+	qboolean                     hizSeeded;                       // every mip has been written once
+	qboolean                     hizFailed;                       // bring-up failed; do not retry every frame
 	struct ralBindGroupLayout_s *ral_gtao_main_bgl;        // set 0: depth tex+sampler + AO storage
 	struct ralBindGroup_s       *ral_gtao_main_descriptor;
 	struct ralPipeline_s        *ral_gtao_main_pipeline;
@@ -2775,6 +2804,8 @@ typedef struct {
 		struct ralBuffer_s *ral_casterBuf; // [vec4 positions][uint32 indices], device-local
 		uint32_t         casterVtxBytes;  // byte offset where the index data begins
 		uint32_t         casterIndexCount;
+		uint32_t         casterTransFirstIndex[2];  // translucent worldspawn geometry in casterBuf's index region (class 1 / 2)
+		uint32_t         casterTransIndexCount[2];
 		const void      *casterBuiltSurfaces; // tr.world->surfaces value the buffer was built for (NULL = none)
 		// Alpha-tested (cut-out) worldspawn casters — a strictly additive second
 		// caster sub-group, built from the same surface walk but admitting surfaces
@@ -2817,6 +2848,8 @@ typedef struct {
 		// layout adds set 2 = the bindless 2D table (image array + sampler array),
 		// on top of depthLayout's set 0 (entity SSBO) + set 1 (cascadeMVP).
 		struct ralPipeline_s   *ral_depthPipelineAtest;   // 3-set alpha-test caster pipeline
+		struct ralPipeline_s   *ral_depthPipelineSkinnedDither; // translucent GPU-skinned IQM caster pipeline (skinned layout)
+		struct ralPipeline_s   *ral_depthPipelineDither;  // translucent caster pipeline (same layout as the opaque one; hash-discards by opacity)
 		VkPipelineLayout        depthLayoutAtest;          // set0 entSSBO + set1 cascadeMVP + set2 bindless
 		struct ralPipelineLayout_s *ral_depthLayoutAtest;  // typed sibling
 		VkDescriptorSetLayout   set_layout_bones;          // set 2 — 1 UNIFORM_BUFFER_DYNAMIC binding, VS

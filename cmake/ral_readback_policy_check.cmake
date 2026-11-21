@@ -17,7 +17,7 @@ file(READ "${ROOT}/tests/ral_texture_resource_receipt_test.c" RESOURCE_HOST)
 file(READ "${ROOT}/tests/ral_vulkan_texture_copy_test.c" COPY_HOST)
 file(READ "${ROOT}/tests/ral-readback-runtime-check.sh" RUNTIME)
 file(READ "${ROOT}/code/render/frontend/tr_image_png_write.c" PNG_WRITE)
-file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_init.c" VK_INIT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_init.c" VK_INIT)
 file(READ "${ROOT}/code/render/ral/backends/metal/ral_metal_module.mm" METAL_MODULE)
 file(READ "${ROOT}/code/render/ral/backends/opengl/ral_opengl_module.c" OPENGL_MODULE)
 

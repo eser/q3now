@@ -4,7 +4,7 @@
 #ifndef WIRED_VK_TEMPORAL_HISTORY_CONSUME_H
 #define WIRED_VK_TEMPORAL_HISTORY_CONSUME_H
 
-#include "tr_temporal_history.h"
+#include "../../../../renderer/tr_temporal_history.h"
 #include "../../../core/ral_command.h"
 #include "../../../core/ral_pipeline.h"
 #include <stddef.h>

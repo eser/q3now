@@ -39,9 +39,9 @@ function(function_slice content begin_marker end_marker out)
 	set(${out} "${body}" PARENT_SCOPE)
 endfunction()
 
-read_required("code/render/ral/backends/vulkan/renderer/tr_common.h" flags)
-read_required("code/render/ral/backends/vulkan/renderer/tr_image.c" image_source)
-read_required("code/render/ral/backends/vulkan/renderer/tr_map.c" map_source)
+read_required("code/render/renderer/tr_common.h" flags)
+read_required("code/render/ral/backends/vulkan/renderer/vk_image.c" image_source)
+read_required("code/render/ral/backends/vulkan/renderer/vk_map.c" map_source)
 read_required("code/render/ral/backends/vulkan/renderer/vk_ral_textures.c" stream_source)
 
 require_text("${flags}" "IMGFLAG_STREAM_ASSET_CHUNK"

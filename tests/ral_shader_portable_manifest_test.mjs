@@ -12,14 +12,14 @@ const reflection = join(root, 'code/render/ral/backends/vulkan/renderer/shaders/
 const overrides = join(root, 'code/render/ral/backends/vulkan/renderer/shaders/spirv/ral_shader_portability_overrides.json');
 const manifest = join(root, 'code/render/ral/backends/vulkan/renderer/shaders/spirv/ral_shader_portable_manifest.json');
 const translationDir = join(root, 'code/render/ral/backends/vulkan/renderer/shaders/portable');
-assert.equal(runPortableManifest({ reflection, overrides, manifest, translationDir, check: true }), 315);
+assert.equal(runPortableManifest({ reflection, overrides, manifest, translationDir, check: true }), 321);
 const resolved = JSON.parse(readFileSync(manifest));
 const decisions = JSON.parse(readFileSync(overrides));
-assert.equal(resolved.sourceCount, 315); assert.equal(decisions.entries.length, 315);
+assert.equal(resolved.sourceCount, 321); assert.equal(decisions.entries.length, 321);
 assert.ok(resolved.entries.every((entry, i) => entry.ordinal === i
 	&& entry.reflection.portable === true && entry.reflection.loweringRequirements.length === 0
 	&& entry.reflection.bindings.every((binding) => !binding.bindingClass.includes('UNRESOLVED'))));
-assert.equal(decisions.entries.filter((entry) => entry.inlineUniform).length, 22);
+assert.equal(decisions.entries.filter((entry) => entry.inlineUniform).length, 25);
 // Twelve world IBL variants no longer sample current/previous diffuse cubes;
 // atmospheric_frag gained the semantic-emitter class texture array (TASK-239).
 assert.equal(decisions.entries.reduce((sum, entry) => sum + (entry.combinedSamplers?.length ?? 0), 0), 118);
@@ -35,7 +35,7 @@ for (const decision of iblCrossfadeDecisions) {
 			sampler.set === 2 && sampler.binding === binding));
 }
 assert.equal(decisions.entries.reduce((sum, entry) => sum + (entry.arrayCounts?.length ?? 0), 0), 249);
-assert.equal(decisions.entries.reduce((sum, entry) => sum + (entry.vertexFormats?.length ?? 0), 0), 465);
+assert.equal(decisions.entries.reduce((sum, entry) => sum + (entry.vertexFormats?.length ?? 0), 0), 472);
 assert.equal(decisions.entries.reduce((sum, entry) => sum + (entry.dynamicOffsets?.length ?? 0), 0), 7);
 assert.equal(resolved.entries.filter((entry) => entry.reflection.bindings.some((binding) => binding.dynamicOffset)).length, 7);
 const particleComputeDecision = decisions.entries.find((entry) => entry.symbol === 'particle_integrate_comp_spv');
@@ -52,7 +52,7 @@ const skySurfaceCompositeDecision = decisions.entries.find((entry) =>
 	entry.symbol === 'sky_surface_composite_comp_spv');
 assert.equal(skySurfaceCompositeDecision?.combinedSamplers?.length, 5);
 const symbols = decisions.entries.map((entry) => entry.symbol);
-assert.deepEqual(symbols, [...symbols].sort()); assert.equal(new Set(symbols).size, 315);
+assert.deepEqual(symbols, [...symbols].sort()); assert.equal(new Set(symbols).size, 321);
 // Six outer faces and eight authored stages fit the existing RAL/WebGPU
 // binding budgets, including the portable lowering of push constants.
 const capture = resolved.entries.find((entry) => entry.symbol === 'ral_sky_capture_frag_spv');

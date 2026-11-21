@@ -18,7 +18,7 @@ const publicAbi = read("code/render/frontend/tr_public.h");
 const submission = read("code/render/frontend/render_submission.c");
 const submissionUi = read("code/render/frontend/render_submission_ui.c");
 const metalPresent = read("code/render/ral/backends/metal/ral_metal_present.mm");
-const vulkanBackend = read("code/render/ral/backends/vulkan/renderer/tr_backend.c");
+const vulkanBackend = read("code/render/ral/backends/vulkan/renderer/vk_backend.c");
 
 assert.match(header, /float\s+perspective\s*;/, "item contract lacks perspective");
 assert.match(parser, /WP_F\(\s*"perspective"[^\n]*perspective/, "parser lacks perspective keyword");

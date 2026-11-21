@@ -31,7 +31,7 @@ while [ $# -gt 0 ]; do
         *) echo "unknown arg: $1" >&2; exit 2;;
     esac
 done
-[ -n "$MODE" ]   || { echo "FAIL: --mode {gtao|fwdplus|viewport|shadow_atest|scene|chromatic|dlight-shadow|dlight-shadow-lifecycle|dlight-shadow-probe|selftest} required" >&2; exit 2; }
+[ -n "$MODE" ]   || { echo "FAIL: --mode {gtao|fwdplus|viewport|shadow_atest|scene|chromatic|crowd|crowdpromo|entitylight|scenegolden|crowdwasm|gpucull|worldindirect|dlight-shadow|dlight-shadow-lifecycle|dlight-shadow-probe|selftest} required" >&2; exit 2; }
 # selftest needs no engine (it exercises the assertion math on synthetic inputs).
 if [ "$MODE" != "selftest" ]; then
     [ -n "$ENGINE" ] || { echo "FAIL: --engine <wired.x64> required" >&2; exit 2; }
@@ -1048,7 +1048,7 @@ viewport)
     # captured before the WiredUI render-frame unification landed, so it predates the
     # HUD being drawn at all — leaving 2D on would have pinned health/armor/ammo/fps
     # readouts into a placement reference and made every HUD edit fail this gate.
-    SSHIP="+set r_ao 1 +set cg_draw2D 0 +set cg_drawGun 0"
+    SSHIP="+set r_ao 1 +set cg_draw2D 0 +set cg_drawGun 0 +set g_crowdPromoteAim 1"
 
     # Cache-warmup throwaway: the FIRST capture in a fresh home renders a marginally
     # different frame (cold lighting/resource state + AO pipeline compile), independent
@@ -1936,7 +1936,7 @@ entity-occlusion)
     # gone, with nothing to point at why. A harness must leave the game configured
     # as it found it, so the values are restored on the way out below. (This is the
     # same hazard tests/visual/scripts/capture_v2_impl.sh already documents.)
-    EO_COMMON="+set sv_cheats 1 +set g_gametype 6 +set cg_draw2D 0 +set cg_drawGun 0"
+    EO_COMMON="+set sv_cheats 1 +set g_gametype 6 +set cg_draw2D 0 +set cg_drawGun 0 +set g_crowdPromoteAim 1"
     # `viewpos` (CG_Viewpos_f) logs the ACHIEVED camera origin at INFO on the cgame
     # channel; see the camera assertion below for why this is not optional.
     #
@@ -2125,7 +2125,7 @@ particles)
     while [ "$attempt" -le "$PT_ATTEMPTS" ]; do
         rm -f "$on" "$off" 2>/dev/null
         CAP_POST_CMD="$PT_CMDS" capture_fixed_cam "$PT_MAP" "$PT_POS" "particles_probe" \
-            "+set sv_cheats 1" "+set cg_draw2D 0" "+set cg_drawGun 0" "+set r_particles 1" || rc=1
+            "+set sv_cheats 1" "+set cg_draw2D 0" "+set cg_drawGun 0 +set g_crowdPromoteAim 1" "+set r_particles 1" || rc=1
 
         if [ ! -s "$on" ] || [ ! -s "$off" ]; then
             echo "  attempt $attempt: one or both shots missing"
@@ -2147,6 +2147,225 @@ particles)
 
     if [ "$rc" -eq 0 ]; then echo "==> PARTICLES PASS"; else echo "==> PARTICLES FAIL"; fi
     exit $rc
+    ;;
+
+crowd)
+    # The crowd channel must put agents on screen. A frame captured with a crowd
+    # (sv_crowdAuto) has to differ from the same fixed-camera frame without one by
+    # more than the launch-to-launch noise of two crowd-less captures, and the run
+    # must have spawned the crowd and received its packets without a rejected one.
+    # Proves server step + channel + client view + scene submission end to end; the
+    # agents themselves are the engine's debug billboards (see cl_crowd.c). The view model is
+    # hidden (cg_drawGun 0): its material warm-up is a launch-to-launch image change of its own
+    # that could otherwise pass for crowd signal.
+    CROWD_POS="${CROWD_POS:-1052 1432 90 135}"
+    CROWD_COUNT="${CROWD_COUNT:-2500}"
+    CROWD_RATIO="${CROWD_RATIO:-1.5}"; CROWD_MARGIN="${CROWD_MARGIN:-5.0}"; CROWD_MIN="${CROWD_MIN:-8.0}"
+    cw="$(capture_fixed_cam arena1 "$CROWD_POS" "crowd_warm" +set sv_crowdAuto 0 +set cg_drawGun 0)" || FAIL=1
+    ca="$(capture_fixed_cam arena1 "$CROWD_POS" "crowd_a" +set sv_crowdAuto 0 +set cg_drawGun 0)" || FAIL=1
+    cb="$(capture_fixed_cam arena1 "$CROWD_POS" "crowd_b" +set sv_crowdAuto 0 +set cg_drawGun 0)" || FAIL=1
+    cc="$(capture_fixed_cam arena1 "$CROWD_POS" "crowd_c" +set sv_crowdAuto "$CROWD_COUNT" +set cl_crowdDraw 400 +set cg_drawGun 0)" || FAIL=1
+    if [ "$FAIL" = 0 ] && [ -n "$ca" ] && [ -n "$cb" ] && [ -n "$cc" ]; then
+        detect_sample_dimensions "$cw" || exit 1
+        noise="$(worst_tile_diff "$ca" "$cb")"
+        signal="$(worst_tile_diff "$ca" "$cc")"
+        need="$(awk -v n="$noise" -v r="$CROWD_RATIO" -v m="$CROWD_MARGIN" -v f="$CROWD_MIN" 'BEGIN{x=n*r+m; print (x>f)?x:f}')"
+        v="$(awk -v s="$signal" -v need="$need" 'BEGIN{print (s>=need)?"OK":"FAIL(crowd invisible: signal below noise-bound)"}')"
+        [ "${v:0:2}" = "OK" ] || FAIL=1
+        printf "  crowd visibility (fixed cam %s, %s agents): no-crowd noise worst-tile=%s  crowd-vs-none worst-tile=%s (need >= %s) -> %s\n" \
+            "$CROWD_POS" "$CROWD_COUNT" "$noise" "$signal" "$need" "$v"
+        clog="$VRF_TMP/vrf-crowd_c.log"
+        spawned="$(grep -c 'crowd: spawned' "$clog" || true)"
+        rejected="$(grep -c 'crowd: packet rejected' "$clog" || true)"
+        printf "  crowd run: spawned-lines=%s rejected-packets=%s\n" "$spawned" "$rejected"
+        [ "${spawned:-0}" -ge 1 ] || { echo "  FAIL: the crowd was never spawned" >&2; FAIL=1; }
+        [ "${rejected:-0}" -eq 0 ] || { echo "  FAIL: the client rejected crowd packets" >&2; FAIL=1; }
+    fi
+    ;;
+
+
+crowdpromo)
+    # A crowd agent that comes near a player is promoted to a visual-only model entity
+    # (code/game/g_crowd.c). With the debug sprites off (cl_crowdDraw 0) and the view
+    # model hidden (its material warm-up is a launch-to-launch image change of its own),
+    # the only thing a crowd can put on screen is those models. With g_crowdPromoteAim the first
+    # promoted entity is pinned 96 units in front of the player, so the best of two
+    # headings has to differ from the same view without promotion by more than
+    # the noise of two promotion-less captures; the game must also log a promotion.
+    CROWD_XYZ="${CROWD_XYZ:-1052 1432 90}"
+    CROWD_COUNT="${CROWD_COUNT:-2500}"
+    CROWD_RATIO="${CROWD_RATIO:-1.5}"; CROWD_MARGIN="${CROWD_MARGIN:-5.0}"; CROWD_MIN="${CROWD_MIN:-8.0}"
+    PROMO_COMMON="+set sv_crowdAuto $CROWD_COUNT +set cl_crowdDraw 0 +set sv_crowdMaxPromoted 8 +set cg_drawGun 0 +set g_crowdPromoteAim 1"
+    pw="$(capture_fixed_cam arena1 "$CROWD_XYZ 135" "promo_warm" $PROMO_COMMON +set g_crowdPromote 0)" || FAIL=1
+    pn="$(capture_fixed_cam arena1 "$CROWD_XYZ 135" "promo_noise" $PROMO_COMMON +set g_crowdPromote 0)" || FAIL=1
+    if [ "$FAIL" = 0 ]; then
+        detect_sample_dimensions "$pw" || exit 1
+        noise="$(worst_tile_diff "$pw" "$pn")"
+        need="$(awk -v n="$noise" -v r="$CROWD_RATIO" -v m="$CROWD_MARGIN" -v f="$CROWD_MIN" 'BEGIN{x=n*r+m; print (x>f)?x:f}')"
+        best=0; bestyaw=-
+        for yaw in 135 225; do
+            pnone="$(capture_fixed_cam arena1 "$CROWD_XYZ $yaw" "promo_none_$yaw" $PROMO_COMMON +set g_crowdPromote 0)" || { FAIL=1; continue; }
+            pon="$(capture_fixed_cam arena1 "$CROWD_XYZ $yaw" "promo_on_$yaw" $PROMO_COMMON +set g_crowdPromote 1)" || { FAIL=1; continue; }
+            sig="$(worst_tile_diff "$pnone" "$pon")"
+            printf "  heading %3s: promoted-vs-none worst-tile=%s\n" "$yaw" "$sig"
+            best="$(awk -v a="$best" -v b="$sig" 'BEGIN{print (b>a)?b:a}')"
+            [ "$(awk -v a="$best" -v b="$sig" 'BEGIN{print (b>=a)?1:0}')" = 1 ] && bestyaw="$yaw"
+        done
+        v="$(awk -v s="$best" -v need="$need" 'BEGIN{print (s>=need)?"OK":"FAIL(promoted model invisible: signal below noise-bound)"}')"
+        [ "${v:0:2}" = "OK" ] || FAIL=1
+        printf "  promoted visibility (fixed cam %s, %s agents): noise worst-tile=%s  best heading (%s) worst-tile=%s (need >= %s) -> %s\n" \
+            "$CROWD_XYZ" "$CROWD_COUNT" "$noise" "$bestyaw" "$best" "$need" "$v"
+        promoted=0
+        for yaw in 135 225; do
+            promoted=$(( promoted + $(grep -c 'crowd visuals: first promotion' "$VRF_TMP/vrf-promo_on_$yaw.log" 2>/dev/null || true) ))
+        done
+        printf "  promoted runs: first-promotion-lines=%s\n" "$promoted"
+        [ "$promoted" -ge 1 ] || { echo "  FAIL: no agent was ever promoted" >&2; FAIL=1; }
+    fi
+    ;;
+
+entitylight)
+    # A dynamic light must reach the first-person weapon, not only the world. The built-in
+    # test dlight (r_dlightShadowTest, a white light 200 units above the eye) is injected
+    # for one capture; against the same view without it, the world tiles (top-left 5x5 of
+    # the 8x8 grid) are the control and must change, and the weapon tiles (bottom-right 3x3,
+    # where the view model sits at this viewpoint) must change by more than the noise of two
+    # light-less captures. A weapon that ignores the light fails while the world passes.
+    # The settle is long (the first second after map load draws the view model with its
+    # first-use fallback material) and the time pins are released for the same reason.
+    EL_RATIO="${EL_RATIO:-1.5}"; EL_MARGIN="${EL_MARGIN:-3.0}"; EL_MIN="${EL_MIN:-6.0}"
+    EL_COMMON="+set r_pinFrameTime 0 +set r_pinShaderTime 0 +set g_warmup 0 +set g_doWarmup 0 +set cg_thirdPerson 0"
+    EL_POS="1052 1432 50 135"
+    CAP_EXTRA_WAIT=300
+    ew="$(capture_fixed_cam arena1 "$EL_POS" "el_warm" $EL_COMMON +set r_dlightShadowTest 0)" || FAIL=1
+    ea="$(capture_fixed_cam arena1 "$EL_POS" "el_a" $EL_COMMON +set r_dlightShadowTest 0)" || FAIL=1
+    eb="$(capture_fixed_cam arena1 "$EL_POS" "el_b" $EL_COMMON +set r_dlightShadowTest 0)" || FAIL=1
+    ec="$(capture_fixed_cam arena1 "$EL_POS" "el_c" $EL_COMMON +set r_dlightShadowTest 600)" || FAIL=1
+    if [ "$FAIL" = 0 ] && [ -n "$ea" ] && [ -n "$eb" ] && [ -n "$ec" ]; then
+        detect_sample_dimensions "$ew" || exit 1
+        region_max() {   # region_max <pngA> <pngB> <row0> <row1> <col0> <col1>
+            tiled_diff "$1" "$2" | awk -v GW="$GRID_W" -v r0="$3" -v r1="$4" -v c0="$5" -v c1="$6" '
+                { ti=$1+0; d=$2+0; r=int(ti/GW); c=ti%GW
+                  if (r>=r0 && r<=r1 && c>=c0 && c<=c1 && d>m) m=d } END { printf "%.2f", m }'
+        }
+        world_noise="$(region_max "$ea" "$eb" 0 4 0 4)"; world_sig="$(region_max "$ea" "$ec" 0 4 0 4)"
+        gun_noise="$(region_max "$ea" "$eb" 5 7 5 7)";   gun_sig="$(region_max "$ea" "$ec" 5 7 5 7)"
+        world_need="$(awk -v n="$world_noise" -v r="$EL_RATIO" -v m="$EL_MARGIN" -v f="$EL_MIN" 'BEGIN{x=n*r+m; print (x>f)?x:f}')"
+        gun_need="$(awk -v n="$gun_noise" -v r="$EL_RATIO" -v m="$EL_MARGIN" -v f="$EL_MIN" 'BEGIN{x=n*r+m; print (x>f)?x:f}')"
+        wv="$(awk -v s="$world_sig" -v n="$world_need" 'BEGIN{print (s>=n)?"OK":"FAIL(the test light changed nothing in the world: the control is invalid)"}')"
+        gv="$(awk -v s="$gun_sig" -v n="$gun_need" 'BEGIN{print (s>=n)?"OK":"FAIL(the view model ignores dynamic light)"}')"
+        printf "  world (control): noise=%s with-light=%s (need >= %s) -> %s\n" "$world_noise" "$world_sig" "$world_need" "$wv"
+        printf "  view model:      noise=%s with-light=%s (need >= %s) -> %s\n" "$gun_noise" "$gun_sig" "$gun_need" "$gv"
+        [ "${wv:0:2}" = "OK" ] && [ "${gv:0:2}" = "OK" ] || FAIL=1
+    fi
+    # Third person: the IQM player model sits in the lower middle of the frame. The same
+    # light must change that region by more than the noise of two light-less captures.
+    ETP_COMMON="$EL_COMMON +set cg_thirdPerson 1 +set cg_thirdPersonRange 90"
+    ta="$(capture_fixed_cam arena1 "$EL_POS" "el_ta" $ETP_COMMON +set r_dlightShadowTest 0)" || FAIL=1
+    tb="$(capture_fixed_cam arena1 "$EL_POS" "el_tb" $ETP_COMMON +set r_dlightShadowTest 0)" || FAIL=1
+    tc="$(capture_fixed_cam arena1 "$EL_POS" "el_tc" $ETP_COMMON +set r_dlightShadowTest 600)" || FAIL=1
+    if [ -n "$ta" ] && [ -n "$tb" ] && [ -n "$tc" ]; then
+        pl_noise="$(region_max "$ta" "$tb" 5 7 3 4)"; pl_sig="$(region_max "$ta" "$tc" 5 7 3 4)"
+        pl_need="$(awk -v n="$pl_noise" -v r="$EL_RATIO" -v m="$EL_MARGIN" -v f="$EL_MIN" 'BEGIN{x=n*r+m; print (x>f)?x:f}')"
+        pv="$(awk -v s="$pl_sig" -v n="$pl_need" 'BEGIN{print (s>=n)?"OK":"FAIL(the third-person player model ignores dynamic light)"}')"
+        printf "  player model:    noise=%s with-light=%s (need >= %s) -> %s\n" "$pl_noise" "$pl_sig" "$pl_need" "$pv"
+        [ "${pv:0:2}" = "OK" ] || FAIL=1
+    fi
+    ;;
+
+scenegolden)
+    # Absolute render check. Every other mode compares a build with ITSELF (noise-bounded
+    # equivalence), so a regression that breaks both sides alike passes. This one compares the
+    # arena1 viewpoints against 8x8 tile-mean goldens (tests/golden/scene_tiles_<id>.txt, 64
+    # numbers each, reviewable text): a wrong projection, depth state or lighting shifts tile
+    # means far beyond SG_TOL. The view model is hidden (its first-second material fallback is
+    # its own matter, covered by --mode entitylight). The goldens are for THIS GPU/driver class:
+    # bless with SMOKE_UPDATE_GOLDEN=1 after a change that is meant to alter the picture.
+    SG_TOL="${SG_TOL:-12.0}"
+    first=1
+    for entry in "${VPS[@]}"; do
+        set -- $entry; map="$1" x="$2" y="$3" z="$4" yaw="$5" id="$6"
+        [ "$map" = arena1 ] || continue
+        shot="$(capture_fixed_cam "$map" "$x $y $z $yaw" "sg_$id" +set cg_drawGun 0)" || { FAIL=1; continue; }
+        [ "$first" = 1 ] && { detect_sample_dimensions "$shot" || exit 1; first=0; }
+        cur="$VRF_TMP/sg_$id.tiles"; tile_means "$shot" > "$cur"
+        gold="$GOLDEN_DIR/scene_tiles_${id}.txt"
+        if [ "${SMOKE_UPDATE_GOLDEN:-0}" = 1 ]; then
+            mx="$(max_pixel_value "$shot")"
+            [ "${mx:-0}" -ge 64 ] || { echo "  FAIL: refusing to bless a dark frame for $id (max pixel $mx)" >&2; FAIL=1; continue; }
+            cp "$cur" "$gold"; echo "  blessed $gold"; continue
+        fi
+        [ -f "$gold" ] || { echo "  FAIL: no golden $gold (run with SMOKE_UPDATE_GOLDEN=1)" >&2; FAIL=1; continue; }
+        worst="$(paste "$gold" "$cur" | awk '{d=$4-$2; if(d<0)d=-d; if(d>m){m=d;t=$1}} END{printf "%.2f@tile%d", m, t}')"
+        wv="$(echo "$worst" | awk -F@ -v tol="$SG_TOL" '{print ($1+0<=tol)?"OK":"FAIL"}')"
+        printf "  scenegolden arena1 %s: worst tile-mean delta=%s (allowed <= %s) -> %s\n" "$id" "$worst" "$SG_TOL" "$wv"
+        [ "$wv" = OK ] || FAIL=1
+    done
+    ;;
+
+crowdwasm)
+    # The crowd promotion syscalls (G_CROWD_*, GAME_API_VERSION 11) must work under the game VM
+    # the product actually ships (vm_game 2, WASM from the pak), not only the native module the
+    # other modes force. The game's own probe (g_crowdPromote 1) promotes real agents and hands
+    # them back through the typed syscalls; the run must log the WASM load, at least one
+    # promotion and no refusal.
+    cwlog="$VRF_TMP/vrf-cw_wasm.log"
+    cws="$(capture_fixed_cam arena1 "1052 1432 50 135" "cw_wasm" +set vm_game 2 +set sv_pure 0 +set sv_crowdAuto 2500 +set sv_crowdMaxPromoted 8 +set g_crowdPromote 1 +set r_pinFrameTime 0 +set r_pinShaderTime 0 +set g_warmup 0 +set g_doWarmup 0)" || true
+    wasm_loads="$(grep -c 'loaded as WASM' "$cwlog" || true)"
+    promos="$(grep -c 'crowd visuals: first promotion' "$cwlog" || true)"
+    refused="$(grep -c 'could not be handed back\|bad typed syscall' "$cwlog" || true)"
+    printf "  crowd under the game VM: wasm-loads=%s first-promotion-lines=%s failures=%s\n" "$wasm_loads" "$promos" "$refused"
+    [ "${wasm_loads:-0}" -ge 1 ] || { echo "  FAIL: the game VM did not run as WASM (check the pak carries vm/gamesv.wasm)" >&2; FAIL=1; }
+    [ "${promos:-0}" -ge 1 ] || { echo "  FAIL: no agent was promoted under the WASM VM" >&2; FAIL=1; }
+    [ "${refused:-0}" -eq 0 ] || { echo "  FAIL: a crowd syscall failed under the WASM VM" >&2; FAIL=1; }
+    ;;
+
+gpucull)
+    # r_gpuBatchDecomp moves the world cull off the CPU recursive BSP walk (measured: the
+    # R_RecursiveWorldNode share of the main thread disappears). The image must not
+    # change: for each viewpoint, the frame with r_gpuBatchDecomp 1 may differ from the
+    # frame with 0 only by what two captures of the SAME setting already differ by
+    # (launch-to-launch animation noise), plus a margin. A cull that drops a visible
+    # surface shows as a tile far above that bound.
+    GC_RATIO="${GC_RATIO:-1.5}"; GC_MARGIN="${GC_MARGIN:-5.0}"; GC_FLOOR="${GC_FLOOR:-20.0}"
+    set -- ${VPS[0]}; capture "$1" "$2" "$3" "$4" "$5" "gc_warm" +set r_gpuBatchDecomp 0 >/dev/null 2>&1 || true
+    detect_sample_dimensions "$SHOTDIR/vrf_gc_warm.png" || exit 1
+    for entry in "${VPS[@]}"; do
+        set -- $entry; map="$1" x="$2" y="$3" z="$4" yaw="$5" id="$6"
+        g0a="$(capture "$map" "$x" "$y" "$z" "$yaw" "gc0a_$id" +set r_gpuBatchDecomp 0)" || { FAIL=1; continue; }
+        g0b="$(capture "$map" "$x" "$y" "$z" "$yaw" "gc0b_$id" +set r_gpuBatchDecomp 0)" || { FAIL=1; continue; }
+        g1a="$(capture "$map" "$x" "$y" "$z" "$yaw" "gc1a_$id" +set r_gpuBatchDecomp 1)" || { FAIL=1; continue; }
+        noise="$(worst_tile_diff "$g0a" "$g0b")"
+        signal="$(worst_tile_diff "$g0a" "$g1a")"
+        need="$(awk -v n="$noise" -v r="$GC_RATIO" -v m="$GC_MARGIN" -v f="$GC_FLOOR" 'BEGIN{x=n*r+m; print (x>f)?x:f}')"
+        v="$(awk -v s="$signal" -v need="$need" 'BEGIN{print (s<=need)?"OK":"FAIL(batch-decomp frame differs from the classic cull beyond the noise bound)"}')"
+        [ "${v:0:2}" = "OK" ] || FAIL=1
+        printf "  gpucull %s %s: classic-vs-classic noise worst-tile=%s  classic-vs-batch-decomp worst-tile=%s (allowed <= %s) -> %s\n" "$map" "$id" "$noise" "$signal" "$need" "$v"
+    done
+    ;;
+
+worldindirect)
+    # r_worldIndirect submits each world batch's merged index runs as indexed-indirect commands
+    # instead of one direct draw per run. Every run is still submitted (nothing is culled), so
+    # the image must not change: for each viewpoint the frame with r_worldIndirect 1 may differ
+    # from the frame with 0 only by what two captures of the SAME setting already differ by
+    # (launch-to-launch animation noise), plus a margin. A dropped or mis-addressed run shows
+    # as a tile far above that bound.
+    WI_RATIO="${WI_RATIO:-1.5}"; WI_MARGIN="${WI_MARGIN:-5.0}"; WI_FLOOR="${WI_FLOOR:-20.0}"
+    set -- ${VPS[0]}; capture "$1" "$2" "$3" "$4" "$5" "wi_warm" +set r_worldIndirect 0 >/dev/null 2>&1 || true
+    detect_sample_dimensions "$SHOTDIR/vrf_wi_warm.png" || exit 1
+    for entry in "${VPS[@]}"; do
+        set -- $entry; map="$1" x="$2" y="$3" z="$4" yaw="$5" id="$6"
+        w0a="$(capture "$map" "$x" "$y" "$z" "$yaw" "wi0a_$id" +set r_worldIndirect 0)" || { FAIL=1; continue; }
+        w0b="$(capture "$map" "$x" "$y" "$z" "$yaw" "wi0b_$id" +set r_worldIndirect 0)" || { FAIL=1; continue; }
+        w1a="$(capture "$map" "$x" "$y" "$z" "$yaw" "wi1a_$id" +set r_worldIndirect 1)" || { FAIL=1; continue; }
+        noise="$(worst_tile_diff "$w0a" "$w0b")"
+        signal="$(worst_tile_diff "$w0a" "$w1a")"
+        need="$(awk -v n="$noise" -v r="$WI_RATIO" -v m="$WI_MARGIN" -v f="$WI_FLOOR" 'BEGIN{x=n*r+m; print (x>f)?x:f}')"
+        v="$(awk -v s="$signal" -v need="$need" 'BEGIN{print (s<=need)?"OK":"FAIL(indirect frame differs from the direct frame beyond the noise bound)"}')"
+        [ "${v:0:2}" = "OK" ] || FAIL=1
+        printf "  worldindirect %s %s: direct-vs-direct noise worst-tile=%s  direct-vs-indirect worst-tile=%s (allowed <= %s) -> %s\n" "$map" "$id" "$noise" "$signal" "$need" "$v"
+    done
     ;;
 
 *) echo "FAIL: unknown mode '$MODE'" >&2; exit 2;;

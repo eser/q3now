@@ -5,7 +5,7 @@
 
 // g_public.h -- game module information visible to server
 
-#define	GAME_API_VERSION	10
+#define	GAME_API_VERSION	11
 
 #include "wired/entity/event.h"
 
@@ -499,10 +499,39 @@ typedef enum {
 
 	// Fixed-size typed entity event record; appended in GAME_API_VERSION 10.
 	// The server validates the VM extent and event schema before bounded enqueue.
-	G_ENTITY_EVENT_ENQUEUE = 1201
+	G_ENTITY_EVENT_ENQUEUE = 1201,
 	// ( const wiredEntityEvent_t *event ) -> qboolean
 
+	// Crowd promotion hand-off, appended in GAME_API_VERSION 11. The engine owns a
+	// population of cheap agents (sv_crowd.c); the nearest ones can be promoted to real
+	// entities. These four calls are the whole boundary: the engine says who is
+	// promotable and moves an agent in or out of the crowd, the game decides what a
+	// promoted agent IS (which entity it spawns, what it does) and gives it back.
+	G_CROWD_PROMOTION_BUDGET = 1202,
+	// ( void ) -> int   how many more agents may be promoted right now (cvar, table size and
+	//                   the entity slots that are really free)
+	G_CROWD_PROMOTABLE = 1203,
+	// ( crowdAgentRef_t *out, int max ) -> int   nearest promotable agents, nearest first
+	G_CROWD_PROMOTE = 1204,
+	// ( int userId, crowdAgentState_t *out ) -> qboolean   take the agent out of the crowd
+	G_CROWD_DEMOTE = 1205
+	// ( const crowdAgentState_t *state ) -> qboolean   give a promoted agent back
+
 } gameImport_t;
+
+/* Crowd promotion records (see G_CROWD_*). Fixed layout, no pointers. */
+typedef struct {
+	int   userId;
+	float origin[3];
+} crowdAgentRef_t;
+
+typedef struct {
+	int   userId;
+	float origin[3];
+	float velocity[2];
+	float goal[2];
+	float goalSpeed;
+} crowdAgentState_t;
 
 
 //

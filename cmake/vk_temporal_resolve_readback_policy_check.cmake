@@ -8,7 +8,7 @@ file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_resolve_
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_resolve_readback.c" C)
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VKC)
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_textures.c" RALTEX)
-file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_backend.c" BACKEND)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_backend.c" BACKEND)
 file(READ "${ROOT}/tests/vk_temporal_resolve_readback_test.c" TEST)
 file(READ "${ROOT}/tests/ral-temporal-projection-check.sh" HARNESS)
 file(READ "${ROOT}/tests/make-temporal-iqm-fixture.py" IQM_FIXTURE)

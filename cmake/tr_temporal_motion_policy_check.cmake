@@ -5,12 +5,12 @@ if(NOT DEFINED ROOT)
 	message(FATAL_ERROR "ROOT is required")
 endif()
 
-file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_temporal_motion.c" MOTION)
-file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_temporal_input.c" INPUT)
-file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_temporal_entity_cache.c" CACHE)
-file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_main.c" MAIN)
-file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_local.h" LOCAL)
-file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_backend.c" BACKEND)
+file(READ "${ROOT}/code/render/renderer/tr_temporal_motion.c" MOTION)
+file(READ "${ROOT}/code/render/renderer/tr_temporal_input.c" INPUT)
+file(READ "${ROOT}/code/render/renderer/tr_temporal_entity_cache.c" CACHE)
+file(READ "${ROOT}/code/render/renderer/tr_main.c" MAIN)
+file(READ "${ROOT}/code/render/renderer/tr_local.h" LOCAL)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_backend.c" BACKEND)
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VK)
 file(READ "${ROOT}/CMakeLists.txt" BUILD)
 
@@ -77,7 +77,7 @@ require_text(BUILD "ADD_EXECUTABLE(tr_temporal_motion_test" "focused host target
 #
 # This used to be spelled "the path appears exactly once in CMakeLists.txt",
 # which measured the wrong thing. Seven targets now list
-# code/render/ral/backends/vulkan/renderer/tr_temporal_motion.c — and that is the desired state: seven
+# code/render/renderer/tr_temporal_motion.c — and that is the desired state: seven
 # tests exercising ONE production file. Counting occurrences made growth in
 # test coverage read as a policy violation.
 #
@@ -87,15 +87,15 @@ require_text(BUILD "ADD_EXECUTABLE(tr_temporal_motion_test" "focused host target
 if(EXISTS "${ROOT}/tests/tr_temporal_motion.c")
 	message(FATAL_ERROR
 		"tests/tr_temporal_motion.c exists — host tests must compile the "
-		"production code/render/ral/backends/vulkan/renderer/tr_temporal_motion.c, not a copy that can "
+		"production code/render/renderer/tr_temporal_motion.c, not a copy that can "
 		"drift from it")
 endif()
 
-string(REGEX MATCHALL "code/render/ral/backends/vulkan/renderer/tr_temporal_motion\\.c" motion_sources "${BUILD}")
+string(REGEX MATCHALL "code/render/renderer/tr_temporal_motion\\.c" motion_sources "${BUILD}")
 list(LENGTH motion_sources motion_source_count)
 if(motion_source_count LESS 1)
 	message(FATAL_ERROR
-		"no host-test target compiles code/render/ral/backends/vulkan/renderer/tr_temporal_motion.c; "
+		"no host-test target compiles code/render/renderer/tr_temporal_motion.c; "
 		"the contracts would be testing nothing")
 endif()
 

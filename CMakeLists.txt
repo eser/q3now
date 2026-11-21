@@ -99,6 +99,15 @@ list(APPEND QCOMMON_SRCS code/qcommon/vm_interpret_policy.c)
 # stalltrace diagnostic (temporary; cvar-gated, default-off)
 list(APPEND QCOMMON_SRCS code/qcommon/wired/stalltrace.c)
 
+# per-workload CPU telemetry for the parallelization decision (TASK-130); cvar-gated, default-off
+list(APPEND QCOMMON_SRCS code/qcommon/wired/workload_stats.c)
+
+# WiredTasks: standalone task module plus its engine glue (capacity roadmap Phase 1)
+list(APPEND QCOMMON_SRCS code/qcommon/wired/tasks/wired_tasks.c code/qcommon/wired/tasks/wired_tasks_engine.c)
+
+# WiredCrowd: standalone crowd storage and stepping (capacity roadmap Phase 3)
+list(APPEND QCOMMON_SRCS code/qcommon/wired/crowd/wired_crowd.c code/qcommon/wired/crowd/wired_crowd_net.c)
+
 # LZ4 decoder (for SW3Z archive reader). These vendor translation units are
 # independent of qcommon headers and the HEADLESS compile definition, so build
 # them once for both engine variants. qcommon_tool intentionally keeps its own
@@ -942,6 +951,47 @@ TARGET_COMPILE_OPTIONS(frame_interval_stats_test PRIVATE -Wall -Wextra -Werror)
 ADD_TEST(NAME frame_interval_stats_contract COMMAND frame_interval_stats_test)
 WIRED_CONFIGURE_HOST_TEST(frame_interval_stats_test frame_interval_stats_contract)
 SET_TESTS_PROPERTIES(frame_interval_stats_contract PROPERTIES
+	LABELS "host-only;owner.engine;performance;failure.contract" TIMEOUT 10)
+# Per-workload telemetry window arithmetic (TASK-130, capacity roadmap Phase 0).
+ADD_EXECUTABLE(workload_stats_test tests/workload_stats_test.c)
+TARGET_INCLUDE_DIRECTORIES(workload_stats_test PRIVATE code/qcommon)
+TARGET_COMPILE_OPTIONS(workload_stats_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME workload_stats_contract COMMAND workload_stats_test)
+WIRED_CONFIGURE_HOST_TEST(workload_stats_test workload_stats_contract)
+SET_TESTS_PROPERTIES(workload_stats_contract PROPERTIES
+	LABELS "host-only;owner.engine;performance;failure.contract" TIMEOUT 10)
+# WiredTasks (capacity roadmap Phase 1): the module links against nothing of the
+# engine, so its contract test builds it standalone.
+FIND_PACKAGE(Threads REQUIRED)
+ADD_EXECUTABLE(wired_tasks_test tests/wired_tasks_test.c code/qcommon/wired/tasks/wired_tasks.c)
+TARGET_INCLUDE_DIRECTORIES(wired_tasks_test PRIVATE code/qcommon)
+TARGET_COMPILE_OPTIONS(wired_tasks_test PRIVATE -Wall -Wextra -Werror)
+TARGET_LINK_LIBRARIES(wired_tasks_test PRIVATE Threads::Threads)
+ADD_TEST(NAME wired_tasks_contract COMMAND wired_tasks_test)
+WIRED_CONFIGURE_HOST_TEST(wired_tasks_test wired_tasks_contract)
+SET_TESTS_PROPERTIES(wired_tasks_contract PROPERTIES
+	LABELS "host-only;owner.engine;performance;failure.contract" TIMEOUT 120)
+# WiredCrowd (capacity roadmap Phase 3): standalone with WiredTasks, no engine links.
+ADD_EXECUTABLE(wired_crowd_test tests/wired_crowd_test.c
+	code/qcommon/wired/crowd/wired_crowd.c code/qcommon/wired/tasks/wired_tasks.c)
+TARGET_INCLUDE_DIRECTORIES(wired_crowd_test PRIVATE code/qcommon)
+TARGET_COMPILE_OPTIONS(wired_crowd_test PRIVATE -Wall -Wextra -Werror)
+TARGET_LINK_LIBRARIES(wired_crowd_test PRIVATE Threads::Threads m)
+ADD_TEST(NAME wired_crowd_contract COMMAND wired_crowd_test)
+WIRED_CONFIGURE_HOST_TEST(wired_crowd_test wired_crowd_contract)
+SET_TESTS_PROPERTIES(wired_crowd_contract PROPERTIES
+	LABELS "host-only;owner.engine;performance;failure.contract" TIMEOUT 120)
+ADD_EXECUTABLE(wired_crowd_net_test tests/wired_crowd_net_test.c code/qcommon/wired/crowd/wired_crowd_net.c)
+TARGET_INCLUDE_DIRECTORIES(wired_crowd_net_test PRIVATE code/qcommon)
+TARGET_COMPILE_OPTIONS(wired_crowd_net_test PRIVATE -Wall -Wextra -Werror)
+TARGET_LINK_LIBRARIES(wired_crowd_net_test PRIVATE Threads::Threads m)
+ADD_TEST(NAME wired_crowd_net_contract COMMAND wired_crowd_net_test)
+WIRED_CONFIGURE_HOST_TEST(wired_crowd_net_test wired_crowd_net_contract)
+SET_TESTS_PROPERTIES(wired_crowd_net_contract PROPERTIES
+	LABELS "host-only;owner.engine;performance;failure.contract" TIMEOUT 60)
+ADD_TEST(NAME workload_evidence_contract
+	COMMAND python3 -B ${CMAKE_SOURCE_DIR}/tests/workload_evidence_test.py)
+SET_TESTS_PROPERTIES(workload_evidence_contract PROPERTIES
 	LABELS "host-only;owner.engine;performance;failure.contract" TIMEOUT 10)
 ADD_TEST(NAME frame_interval_evidence_contract
 	COMMAND python3 -B ${CMAKE_SOURCE_DIR}/tests/frame_interval_evidence_test.py)
@@ -1850,7 +1900,7 @@ SET_TESTS_PROPERTIES(ral_material_runtime_source_policy_contract PROPERTIES
 	TIMEOUT 30)
 # Exercise the production static mip filters/uploader without a native window.
 # Reconfigure on source changes so the regression cannot test a stale copy.
-SET(VK_MIP_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/tr_image.c")
+SET(VK_MIP_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/vk_image.c")
 SET_PROPERTY(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${VK_MIP_SOURCE}")
 FILE(READ "${VK_MIP_SOURCE}" VK_MIP_TEXT)
 STRING(FIND "${VK_MIP_TEXT}" "static float    s_srgb_to_linear_lut" VK_MIP_BEGIN)
@@ -1867,7 +1917,7 @@ MATH(EXPR VK_DOMAIN_LENGTH "${VK_DOMAIN_END} - ${VK_DOMAIN_BEGIN}")
 STRING(SUBSTRING "${VK_MIP_TEXT}" ${VK_DOMAIN_BEGIN} ${VK_DOMAIN_LENGTH} VK_DOMAIN_SOURCE)
 FILE(WRITE "${CMAKE_CURRENT_BINARY_DIR}/vk_image_mip_impl.inc" "${VK_MIP_FILTERS}\n${VK_MIP_UPLOAD}\n${VK_DOMAIN_SOURCE}")
 ADD_EXECUTABLE(vk_image_mip_test tests/vk_image_mip_test.c)
-SET(VK_SELECTION_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/tr_init.c")
+SET(VK_SELECTION_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/vk_init.c")
 SET_PROPERTY(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${VK_SELECTION_SOURCE}")
 FILE(READ "${VK_SELECTION_SOURCE}" VK_SELECTION_TEXT)
 STRING(FIND "${VK_SELECTION_TEXT}" "static image_t *FrontendMaterialBaseImage(" VK_SELECTION_BEGIN)
@@ -4347,7 +4397,7 @@ TARGET_INCLUDE_DIRECTORIES(vk_ral_pool_render_test PRIVATE
 	code/qcommon
 	code/render/ral/core
 	code/render/frontend
-	code/render/ral/backends/vulkan/renderer)
+	code/render/ral/backends/vulkan/renderer code/render/renderer)
 ADD_TEST(NAME vk_ral_pool_render_contract COMMAND vk_ral_pool_render_test)
 SET_TESTS_PROPERTIES(vk_ral_pool_render_contract PROPERTIES
 	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;backend.vulkan;backend.webgpu;feature.always"
@@ -4369,7 +4419,7 @@ TARGET_INCLUDE_DIRECTORIES(vk_atmospheric_heightgrid_test PRIVATE
 	code/qcommon
 	code/render/ral/core
 	code/render/frontend
-	code/render/ral/backends/vulkan/renderer)
+	code/render/ral/backends/vulkan/renderer code/render/renderer)
 ADD_TEST(NAME vk_atmospheric_heightgrid_contract
 	COMMAND vk_atmospheric_heightgrid_test)
 SET_TESTS_PROPERTIES(vk_atmospheric_heightgrid_contract PROPERTIES
@@ -4393,7 +4443,7 @@ TARGET_INCLUDE_DIRECTORIES(vk_atmospheric_pool_test PRIVATE
 	code/qcommon
 	code/render/ral/core
 	code/render/frontend
-	code/render/ral/backends/vulkan/renderer)
+	code/render/ral/backends/vulkan/renderer code/render/renderer)
 ADD_TEST(NAME vk_atmospheric_pool_contract COMMAND vk_atmospheric_pool_test)
 SET_TESTS_PROPERTIES(vk_atmospheric_pool_contract PROPERTIES
 	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;backend.vulkan;backend.webgpu;feature.always"
@@ -4417,7 +4467,7 @@ TARGET_INCLUDE_DIRECTORIES(vk_atmospheric_frame_test PRIVATE
 	code/qcommon
 	code/render/ral/core
 	code/render/frontend
-	code/render/ral/backends/vulkan/renderer)
+	code/render/ral/backends/vulkan/renderer code/render/renderer)
 ADD_TEST(NAME vk_atmospheric_frame_contract COMMAND vk_atmospheric_frame_test)
 SET_TESTS_PROPERTIES(vk_atmospheric_frame_contract PROPERTIES
 	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;backend.vulkan;backend.webgpu;feature.always"
@@ -4440,7 +4490,7 @@ TARGET_INCLUDE_DIRECTORIES(vk_ral_frame_uniform_test PRIVATE
 	code/qcommon
 	code/render/ral/core
 	code/render/frontend
-	code/render/ral/backends/vulkan/renderer)
+	code/render/ral/backends/vulkan/renderer code/render/renderer)
 TARGET_COMPILE_OPTIONS(vk_ral_frame_uniform_test PRIVATE -Wall -Wextra -Werror)
 ADD_TEST(NAME vk_ral_frame_uniform_contract COMMAND vk_ral_frame_uniform_test)
 SET_TESTS_PROPERTIES(vk_ral_frame_uniform_contract PROPERTIES
@@ -4457,7 +4507,7 @@ TARGET_INCLUDE_DIRECTORIES(vk_ral_buffer_shadow_test PRIVATE
 	code/qcommon
 	code/render/ral/core
 	code/render/frontend
-	code/render/ral/backends/vulkan/renderer)
+	code/render/ral/backends/vulkan/renderer code/render/renderer)
 TARGET_COMPILE_OPTIONS(vk_ral_buffer_shadow_test PRIVATE -Wall -Wextra -Werror)
 ADD_TEST(NAME vk_ral_buffer_shadow_contract COMMAND vk_ral_buffer_shadow_test)
 SET_TESTS_PROPERTIES(vk_ral_buffer_shadow_contract PROPERTIES
@@ -4481,7 +4531,7 @@ TARGET_INCLUDE_DIRECTORIES(vk_ral_shadow_storage_test PRIVATE
 	code/qcommon
 	code/render/ral/core
 	code/render/frontend
-	code/render/ral/backends/vulkan/renderer)
+	code/render/ral/backends/vulkan/renderer code/render/renderer)
 TARGET_COMPILE_OPTIONS(vk_ral_shadow_storage_test PRIVATE -Wall -Wextra -Werror)
 ADD_TEST(NAME vk_ral_shadow_storage_contract COMMAND vk_ral_shadow_storage_test)
 SET_TESTS_PROPERTIES(vk_ral_shadow_storage_contract PROPERTIES
@@ -4555,6 +4605,7 @@ TARGET_INCLUDE_DIRECTORIES(vk_ral_attachment_translate_test PRIVATE
 	code/render/ral/core
 	code/render/frontend
 	code/render/ral/backends/vulkan/renderer
+	code/render/renderer
 )
 ADD_TEST(NAME vk_ral_attachment_translate_contract
 	COMMAND vk_ral_attachment_translate_test)
@@ -4591,6 +4642,7 @@ TARGET_INCLUDE_DIRECTORIES(vk_temporal_pipeline_cohort_test PRIVATE
 	code/qcommon
 	code/render/ral/core
 	code/render/ral/backends/vulkan/renderer
+	code/render/renderer
 )
 ADD_TEST(NAME vk_temporal_pipeline_cohort_contract
 	COMMAND vk_temporal_pipeline_cohort_test)
@@ -4608,6 +4660,7 @@ TARGET_INCLUDE_DIRECTORIES(vk_temporal_shader_cohort_test PRIVATE
 	code/qcommon
 	code/render/ral/core
 	code/render/ral/backends/vulkan/renderer
+	code/render/renderer
 )
 ADD_TEST(NAME vk_temporal_shader_cohort_contract COMMAND vk_temporal_shader_cohort_test)
 SET_TESTS_PROPERTIES(vk_temporal_shader_cohort_contract PROPERTIES
@@ -4622,7 +4675,7 @@ ADD_EXECUTABLE(vk_temporal_pipeline_factory_test
 	code/render/ral/backends/vulkan/renderer/vk_temporal_generic_catalog.c
 	code/render/ral/backends/vulkan/renderer/vk_temporal_shader_cohort.c)
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_pipeline_factory_test PRIVATE
-	code/qcommon code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer)
+	code/qcommon code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer code/render/renderer)
 TARGET_COMPILE_DEFINITIONS(vk_temporal_pipeline_factory_test PRIVATE
 	WIRED_TEMPORAL_REPRESENTATIVE_FACTORY_TEST_ONLY=1)
 ADD_TEST(NAME vk_temporal_pipeline_factory_contract COMMAND vk_temporal_pipeline_factory_test)
@@ -4635,7 +4688,7 @@ ADD_EXECUTABLE(vk_generic_specialization_contract_test
 	code/render/ral/backends/vulkan/renderer/vk_generic_specialization_contract.c
 	code/render/ral/core/ral_legacy_material.c)
 TARGET_INCLUDE_DIRECTORIES(vk_generic_specialization_contract_test PRIVATE
-	code/qcommon code/render/frontend code/render/ral/backends/vulkan/renderer)
+	code/qcommon code/render/frontend code/render/ral/backends/vulkan/renderer code/render/renderer)
 ADD_TEST(NAME vk_generic_specialization_contract
 	COMMAND vk_generic_specialization_contract_test)
 SET_TESTS_PROPERTIES(vk_generic_specialization_contract PROPERTIES
@@ -4686,7 +4739,7 @@ ADD_EXECUTABLE(vk_temporal_generic_catalog_test
 	tests/vk_temporal_generic_catalog_test.c
 	code/render/ral/backends/vulkan/renderer/vk_temporal_generic_catalog.c)
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_generic_catalog_test PRIVATE
-	code/qcommon code/render/ral/core code/render/ral/backends/vulkan/renderer)
+	code/qcommon code/render/ral/core code/render/ral/backends/vulkan/renderer code/render/renderer)
 ADD_TEST(NAME vk_temporal_generic_catalog_contract COMMAND vk_temporal_generic_catalog_test)
 SET_TESTS_PROPERTIES(vk_temporal_generic_catalog_contract PROPERTIES
 	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;feature.always" TIMEOUT 30)
@@ -4699,7 +4752,7 @@ ADD_EXECUTABLE(vk_temporal_generic_recipe_table_test
 	code/render/ral/core/ral_legacy_material.c
 	code/render/ral/backends/vulkan/renderer/vk_temporal_generic_catalog.c)
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_generic_recipe_table_test PRIVATE
-	code/qcommon code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer)
+	code/qcommon code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer code/render/renderer)
 ADD_TEST(NAME vk_temporal_generic_recipe_table_contract
 	COMMAND vk_temporal_generic_recipe_table_test)
 SET_TESTS_PROPERTIES(vk_temporal_generic_recipe_table_contract PROPERTIES
@@ -4717,7 +4770,7 @@ ADD_EXECUTABLE(vk_temporal_generic_pipeline_table_test
 	code/render/ral/backends/vulkan/renderer/vk_generic_specialization_contract.c
 	code/render/ral/core/ral_legacy_material.c)
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_generic_pipeline_table_test PRIVATE
-	code/qcommon code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer)
+	code/qcommon code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer code/render/renderer)
 ADD_TEST(NAME vk_temporal_generic_pipeline_table_contract
 	COMMAND vk_temporal_generic_pipeline_table_test)
 SET_TESTS_PROPERTIES(vk_temporal_generic_pipeline_table_contract PROPERTIES
@@ -4840,12 +4893,13 @@ WIRED_CONFIGURE_HOST_TEST(ral_profile_test ral_profile_contract)
 ADD_EXECUTABLE(ral_temporal_test
 	tests/ral_temporal_test.c
 	code/render/ral/core/ral_temporal.c
-	code/render/ral/backends/vulkan/renderer/tr_temporal_projection.c
-	code/render/ral/backends/vulkan/renderer/tr_temporal_history.c
+	code/render/renderer/tr_temporal_projection.c
+	code/render/renderer/tr_temporal_history.c
 )
 TARGET_INCLUDE_DIRECTORIES(ral_temporal_test PRIVATE
 	code/render/ral/core
 	code/render/ral/backends/vulkan/renderer
+	code/render/renderer
 )
 ADD_TEST(NAME ral_temporal_contract COMMAND ral_temporal_test)
 SET_TESTS_PROPERTIES(ral_temporal_contract PROPERTIES
@@ -4856,10 +4910,11 @@ WIRED_CONFIGURE_HOST_TEST(ral_temporal_test ral_temporal_contract)
 
 ADD_EXECUTABLE(tr_antialiasing_test
 	tests/tr_antialiasing_test.c
-	code/render/ral/backends/vulkan/renderer/tr_antialiasing.c
+	code/render/renderer/tr_antialiasing.c
 )
 TARGET_INCLUDE_DIRECTORIES(tr_antialiasing_test PRIVATE
 	code/render/ral/backends/vulkan/renderer
+	code/render/renderer
 )
 ADD_TEST(NAME tr_antialiasing_contract COMMAND tr_antialiasing_test)
 SET_TESTS_PROPERTIES(tr_antialiasing_contract PROPERTIES
@@ -4870,12 +4925,13 @@ WIRED_CONFIGURE_HOST_TEST(tr_antialiasing_test tr_antialiasing_contract)
 
 ADD_EXECUTABLE(tr_temporal_motion_targets_test
 	tests/tr_temporal_motion_targets_test.c
-	code/render/ral/backends/vulkan/renderer/tr_temporal_motion_targets.c
+	code/render/renderer/tr_temporal_motion_targets.c
 )
 TARGET_INCLUDE_DIRECTORIES(tr_temporal_motion_targets_test PRIVATE
 	code/qcommon
 	code/render/ral/core
 	code/render/ral/backends/vulkan/renderer
+	code/render/renderer
 )
 ADD_TEST(NAME tr_temporal_motion_targets_contract
 	COMMAND tr_temporal_motion_targets_test)
@@ -4887,13 +4943,14 @@ WIRED_CONFIGURE_HOST_TEST(tr_temporal_motion_targets_test
 
 ADD_EXECUTABLE(tr_temporal_motion_payload_test
 	tests/tr_temporal_motion_payload_test.c
-	code/render/ral/backends/vulkan/renderer/tr_temporal_motion_payload.c
+	code/render/renderer/tr_temporal_motion_payload.c
 )
 TARGET_INCLUDE_DIRECTORIES(tr_temporal_motion_payload_test PRIVATE
 	code/qcommon
 	code/render/ral/core
 	code/render/frontend
 	code/render/ral/backends/vulkan/renderer
+	code/render/renderer
 )
 ADD_TEST(NAME tr_temporal_motion_payload_contract
 	COMMAND tr_temporal_motion_payload_test)
@@ -4918,6 +4975,7 @@ TARGET_INCLUDE_DIRECTORIES(vk_temporal_entmat_adoption_test PRIVATE
 	code/qcommon
 	code/render/ral/core
 	code/render/ral/backends/vulkan/renderer
+	code/render/renderer
 )
 ADD_TEST(NAME vk_temporal_entmat_adoption_contract
 	COMMAND vk_temporal_entmat_adoption_test)
@@ -4929,11 +4987,12 @@ WIRED_CONFIGURE_HOST_TEST(vk_temporal_entmat_adoption_test
 
 ADD_EXECUTABLE(tr_temporal_batch_request_test
 	tests/tr_temporal_batch_request_test.c
-	code/render/ral/backends/vulkan/renderer/tr_temporal_batch_request.c
+	code/render/renderer/tr_temporal_batch_request.c
 )
 TARGET_INCLUDE_DIRECTORIES(tr_temporal_batch_request_test PRIVATE
 	code/qcommon
 	code/render/ral/backends/vulkan/renderer
+	code/render/renderer
 )
 ADD_TEST(NAME tr_temporal_batch_request_contract
 	COMMAND tr_temporal_batch_request_test)
@@ -4947,13 +5006,14 @@ ADD_EXECUTABLE(vk_temporal_entmat_runtime_test
 	tests/vk_temporal_entmat_runtime_test.c
 	code/render/ral/backends/vulkan/renderer/vk_temporal_entmat_runtime.c
 	code/render/ral/backends/vulkan/renderer/vk_temporal_entmat_adoption.c
-	code/render/ral/backends/vulkan/renderer/tr_temporal_motion_payload.c
+	code/render/renderer/tr_temporal_motion_payload.c
 )
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_entmat_runtime_test PRIVATE
 	code/qcommon
 	code/render/ral/core
 	code/render/frontend
 	code/render/ral/backends/vulkan/renderer
+	code/render/renderer
 )
 ADD_TEST(NAME vk_temporal_entmat_runtime_contract
 	COMMAND vk_temporal_entmat_runtime_test)
@@ -4968,7 +5028,7 @@ ADD_EXECUTABLE(vk_temporal_motion_recording_test
 	code/render/ral/backends/vulkan/renderer/vk_temporal_motion_sequence.c
 	code/render/ral/backends/vulkan/renderer/vk_temporal_motion_recording.c)
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_motion_recording_test PRIVATE
-	code/qcommon code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer)
+	code/qcommon code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer code/render/renderer)
 ADD_TEST(NAME vk_temporal_motion_recording_contract
 	COMMAND vk_temporal_motion_recording_test)
 SET_TESTS_PROPERTIES(vk_temporal_motion_recording_contract PROPERTIES
@@ -4981,7 +5041,7 @@ ADD_EXECUTABLE(vk_temporal_motion_sequence_test
 	tests/vk_temporal_motion_sequence_test.c
 	code/render/ral/backends/vulkan/renderer/vk_temporal_motion_sequence.c)
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_motion_sequence_test PRIVATE
-	code/qcommon code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer)
+	code/qcommon code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer code/render/renderer)
 ADD_TEST(NAME vk_temporal_motion_sequence_contract
 	COMMAND vk_temporal_motion_sequence_test)
 SET_TESTS_PROPERTIES(vk_temporal_motion_sequence_contract PROPERTIES
@@ -5002,11 +5062,11 @@ ADD_EXECUTABLE(vk_temporal_main_activation_test
 	code/render/ral/backends/vulkan/renderer/vk_temporal_motion_sequence.c
 	code/render/ral/backends/vulkan/renderer/vk_temporal_iqm_payload_authoring.c
 	code/render/ral/backends/vulkan/renderer/vk_temporal_iqm_payload.c
-	code/render/ral/backends/vulkan/renderer/tr_temporal_iqm_motion.c
-	code/render/ral/backends/vulkan/renderer/tr_temporal_motion.c
+	code/render/renderer/tr_temporal_iqm_motion.c
+	code/render/renderer/tr_temporal_motion.c
 	code/render/ral/backends/vulkan/renderer/vk_bindless_publication.c)
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_main_activation_test PRIVATE
-	code/qcommon code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer)
+	code/qcommon code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer code/render/renderer)
 # tr_temporal_iqm_motion.c calls acosf/sinf. On macOS libm lives inside libc so
 # this links without asking; on Linux it does not, and the target failed there
 # with "undefined reference to `acosf'" while building clean locally. Same
@@ -5027,7 +5087,7 @@ ADD_EXECUTABLE(vk_temporal_motion_readback_test
 	code/render/ral/backends/vulkan/renderer/vk_temporal_motion_readback.c
 	code/render/ral/backends/vulkan/renderer/vk_temporal_motion_sequence.c)
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_motion_readback_test PRIVATE
-	code/qcommon code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer)
+	code/qcommon code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer code/render/renderer)
 ADD_TEST(NAME vk_temporal_motion_readback_contract
 	COMMAND vk_temporal_motion_readback_test)
 SET_TESTS_PROPERTIES(vk_temporal_motion_readback_contract PROPERTIES
@@ -5054,7 +5114,7 @@ ADD_EXECUTABLE(vk_temporal_history_store_test
 	tests/vk_temporal_history_store_test.c
 	code/render/ral/backends/vulkan/renderer/vk_temporal_history_store.c)
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_history_store_test PRIVATE
-	code/qcommon code/renderer code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer)
+	code/qcommon code/renderer code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer code/render/renderer)
 ADD_TEST(NAME vk_temporal_history_store_contract
 	COMMAND vk_temporal_history_store_test)
 SET_TESTS_PROPERTIES(vk_temporal_history_store_contract PROPERTIES
@@ -5064,10 +5124,10 @@ WIRED_CONFIGURE_HOST_TEST(vk_temporal_history_store_test
 	vk_temporal_history_store_contract)
 ADD_EXECUTABLE(tr_temporal_submit_test
 	tests/tr_temporal_submit_test.c
-	code/render/ral/backends/vulkan/renderer/tr_temporal_submit.c
-	code/render/ral/backends/vulkan/renderer/tr_temporal_batch_request.c)
+	code/render/renderer/tr_temporal_submit.c
+	code/render/renderer/tr_temporal_batch_request.c)
 TARGET_INCLUDE_DIRECTORIES(tr_temporal_submit_test PRIVATE
-	code/qcommon code/renderer code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer)
+	code/qcommon code/renderer code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer code/render/renderer)
 ADD_TEST(NAME tr_temporal_submit_contract COMMAND tr_temporal_submit_test)
 SET_TESTS_PROPERTIES(tr_temporal_submit_contract PROPERTIES
 	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;feature.always"
@@ -5097,7 +5157,7 @@ ADD_EXECUTABLE(vk_temporal_main_rendering_test
 	tests/vk_temporal_main_rendering_test.c
 	code/render/ral/backends/vulkan/renderer/vk_temporal_main_rendering.c)
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_main_rendering_test PRIVATE
-	code/qcommon code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer)
+	code/qcommon code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer code/render/renderer)
 ADD_TEST(NAME vk_temporal_main_rendering_contract
 	COMMAND vk_temporal_main_rendering_test)
 SET_TESTS_PROPERTIES(vk_temporal_main_rendering_contract PROPERTIES
@@ -5121,13 +5181,14 @@ SET_TESTS_PROPERTIES(vk_temporal_main_rendering_source_policy_contract PROPERTIE
 ADD_EXECUTABLE(vk_temporal_motion_materialization_test
 	tests/vk_temporal_motion_materialization_test.c
 	code/render/ral/backends/vulkan/renderer/vk_temporal_motion_materialization.c
-	code/render/ral/backends/vulkan/renderer/tr_temporal_motion_targets.c
+	code/render/renderer/tr_temporal_motion_targets.c
 )
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_motion_materialization_test PRIVATE
 	code/qcommon
 	code/render/ral/core
 	code/render/frontend
 	code/render/ral/backends/vulkan/renderer
+	code/render/renderer
 )
 ADD_TEST(NAME vk_temporal_motion_materialization_contract
 	COMMAND vk_temporal_motion_materialization_test)
@@ -5149,7 +5210,7 @@ ADD_EXECUTABLE(vk_temporal_resolved_hdr_test
 	tests/vk_temporal_resolved_hdr_test.c
 	code/render/ral/backends/vulkan/renderer/vk_temporal_resolved_hdr.c)
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_resolved_hdr_test PRIVATE
-	code/qcommon code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer)
+	code/qcommon code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer code/render/renderer)
 ADD_TEST(NAME vk_temporal_resolved_hdr_contract
 	COMMAND vk_temporal_resolved_hdr_test)
 SET_TESTS_PROPERTIES(vk_temporal_resolved_hdr_contract PROPERTIES
@@ -5168,7 +5229,7 @@ ADD_EXECUTABLE(vk_temporal_resolve_authority_test
 	tests/vk_temporal_resolve_authority_test.c
 	code/render/ral/backends/vulkan/renderer/vk_temporal_resolve_authority.c)
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_resolve_authority_test PRIVATE
-	code/qcommon code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer)
+	code/qcommon code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer code/render/renderer)
 ADD_TEST(NAME vk_temporal_resolve_authority_contract
 	COMMAND vk_temporal_resolve_authority_test)
 SET_TESTS_PROPERTIES(vk_temporal_resolve_authority_contract PROPERTIES
@@ -5188,7 +5249,7 @@ ADD_EXECUTABLE(vk_temporal_resolve_test
 	code/render/ral/backends/vulkan/renderer/vk_temporal_resolve.c
 	code/render/ral/backends/vulkan/renderer/vk_temporal_resolved_hdr.c)
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_resolve_test PRIVATE
-	code/qcommon code/renderer code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer)
+	code/qcommon code/renderer code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer code/render/renderer)
 ADD_TEST(NAME vk_temporal_resolve_contract COMMAND vk_temporal_resolve_test)
 SET_TESTS_PROPERTIES(vk_temporal_resolve_contract PROPERTIES
 	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;feature.always"
@@ -5198,7 +5259,7 @@ ADD_EXECUTABLE(vk_temporal_resolve_readback_test
 	tests/vk_temporal_resolve_readback_test.c
 	code/render/ral/backends/vulkan/renderer/vk_temporal_resolve_readback.c)
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_resolve_readback_test PRIVATE
-	code/qcommon code/renderer code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer)
+	code/qcommon code/renderer code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer code/render/renderer)
 ADD_TEST(NAME vk_temporal_resolve_readback_contract
 	COMMAND vk_temporal_resolve_readback_test)
 SET_TESTS_PROPERTIES(vk_temporal_resolve_readback_contract PROPERTIES
@@ -5248,12 +5309,13 @@ SET_TESTS_PROPERTIES(tr_temporal_motion_structural_source_policy_contract PROPER
 
 ADD_EXECUTABLE(ral_temporal_entity_cache_test
 	tests/ral_temporal_entity_cache_test.c
-	code/render/ral/backends/vulkan/renderer/tr_temporal_entity_cache.c
+	code/render/renderer/tr_temporal_entity_cache.c
 )
 TARGET_INCLUDE_DIRECTORIES(ral_temporal_entity_cache_test PRIVATE
 	code/qcommon
 	code/render/frontend
 	code/render/ral/backends/vulkan/renderer
+	code/render/renderer
 )
 ADD_TEST(NAME ral_temporal_entity_cache_contract
 	COMMAND ral_temporal_entity_cache_test)
@@ -5265,12 +5327,13 @@ WIRED_CONFIGURE_HOST_TEST(ral_temporal_entity_cache_test
 
 ADD_EXECUTABLE(tr_temporal_motion_test
 	tests/tr_temporal_motion_test.c
-	code/render/ral/backends/vulkan/renderer/tr_temporal_motion.c
+	code/render/renderer/tr_temporal_motion.c
 )
 TARGET_INCLUDE_DIRECTORIES(tr_temporal_motion_test PRIVATE
 	code/qcommon
 	code/render/frontend
 	code/render/ral/backends/vulkan/renderer
+	code/render/renderer
 )
 ADD_TEST(NAME tr_temporal_motion_contract
 	COMMAND tr_temporal_motion_test)
@@ -5282,14 +5345,15 @@ WIRED_CONFIGURE_HOST_TEST(tr_temporal_motion_test
 
 ADD_EXECUTABLE(tr_temporal_iqm_motion_test
 	tests/tr_temporal_iqm_motion_test.c
-	code/render/ral/backends/vulkan/renderer/tr_temporal_iqm_motion.c
-	code/render/ral/backends/vulkan/renderer/tr_temporal_motion.c
+	code/render/renderer/tr_temporal_iqm_motion.c
+	code/render/renderer/tr_temporal_motion.c
 	code/render/ral/backends/vulkan/renderer/vk_bindless_publication.c
 )
 TARGET_INCLUDE_DIRECTORIES(tr_temporal_iqm_motion_test PRIVATE
 	code/qcommon
 	code/render/frontend
 	code/render/ral/backends/vulkan/renderer
+	code/render/renderer
 )
 IF(NOT WIN32)
 	TARGET_LINK_LIBRARIES(tr_temporal_iqm_motion_test m)
@@ -5311,6 +5375,7 @@ TARGET_INCLUDE_DIRECTORIES(vk_temporal_iqm_geometry_test PRIVATE
 	code/render/frontend
 	code/render/ral/core
 	code/render/ral/backends/vulkan/renderer
+	code/render/renderer
 )
 ADD_TEST(NAME vk_temporal_iqm_geometry_contract
 	COMMAND vk_temporal_iqm_geometry_test)
@@ -5327,6 +5392,7 @@ ADD_EXECUTABLE(vk_bindless_publication_test
 TARGET_INCLUDE_DIRECTORIES(vk_bindless_publication_test PRIVATE
 	code/qcommon
 	code/render/ral/backends/vulkan/renderer
+	code/render/renderer
 )
 ADD_TEST(NAME vk_bindless_publication_contract
 	COMMAND vk_bindless_publication_test)
@@ -5348,7 +5414,7 @@ ADD_EXECUTABLE(vk_bindless_cohort_test
 	code/render/ral/backends/vulkan/renderer/vk_bindless_cohort.c
 	code/render/ral/backends/vulkan/renderer/vk_bindless_publication.c)
 TARGET_INCLUDE_DIRECTORIES(vk_bindless_cohort_test PRIVATE
-	code/qcommon code/render/ral/backends/vulkan/renderer)
+	code/qcommon code/render/ral/backends/vulkan/renderer code/render/renderer)
 ADD_TEST(NAME vk_bindless_cohort_contract
 	COMMAND vk_bindless_cohort_test)
 SET_TESTS_PROPERTIES(vk_bindless_cohort_contract PROPERTIES
@@ -5360,8 +5426,8 @@ WIRED_CONFIGURE_HOST_TEST(vk_bindless_cohort_test
 ADD_EXECUTABLE(vk_temporal_iqm_payload_test
 	tests/vk_temporal_iqm_payload_test.c
 	code/render/ral/backends/vulkan/renderer/vk_temporal_iqm_payload.c
-	code/render/ral/backends/vulkan/renderer/tr_temporal_iqm_motion.c
-	code/render/ral/backends/vulkan/renderer/tr_temporal_motion.c
+	code/render/renderer/tr_temporal_iqm_motion.c
+	code/render/renderer/tr_temporal_motion.c
 	code/render/ral/backends/vulkan/renderer/vk_bindless_publication.c)
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_iqm_payload_test PRIVATE
 	code/qcommon code/render/frontend code/render/ral/backends/vulkan/renderer code/render/ral/core)
@@ -5387,8 +5453,8 @@ ADD_EXECUTABLE(vk_temporal_iqm_payload_authoring_test
 	tests/vk_temporal_iqm_payload_authoring_test.c
 	code/render/ral/backends/vulkan/renderer/vk_temporal_iqm_payload_authoring.c
 	code/render/ral/backends/vulkan/renderer/vk_temporal_iqm_payload.c
-	code/render/ral/backends/vulkan/renderer/tr_temporal_iqm_motion.c
-	code/render/ral/backends/vulkan/renderer/tr_temporal_motion.c
+	code/render/renderer/tr_temporal_iqm_motion.c
+	code/render/renderer/tr_temporal_motion.c
 	code/render/ral/backends/vulkan/renderer/vk_bindless_publication.c)
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_iqm_payload_authoring_test PRIVATE
 	code/qcommon code/render/frontend code/render/ral/backends/vulkan/renderer code/render/ral/core)
@@ -5414,8 +5480,8 @@ ADD_EXECUTABLE(vk_temporal_iqm_exact3_factory_test
 	tests/vk_temporal_iqm_exact3_factory_test.c
 	code/render/ral/backends/vulkan/renderer/vk_temporal_iqm_exact3_factory.c
 	code/render/ral/backends/vulkan/renderer/vk_temporal_iqm_payload.c
-	code/render/ral/backends/vulkan/renderer/tr_temporal_iqm_motion.c
-	code/render/ral/backends/vulkan/renderer/tr_temporal_motion.c
+	code/render/renderer/tr_temporal_iqm_motion.c
+	code/render/renderer/tr_temporal_motion.c
 	code/render/ral/backends/vulkan/renderer/vk_bindless_publication.c)
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_iqm_exact3_factory_test PRIVATE
 	code/qcommon code/render/frontend code/render/ral/backends/vulkan/renderer code/render/ral/core)
@@ -5434,8 +5500,8 @@ ADD_EXECUTABLE(vk_temporal_iqm_command_test
 	tests/vk_temporal_iqm_command_test.c
 	code/render/ral/backends/vulkan/renderer/vk_temporal_iqm_command.c
 	code/render/ral/backends/vulkan/renderer/vk_temporal_main_rendering.c
-	code/render/ral/backends/vulkan/renderer/tr_temporal_iqm_motion.c
-	code/render/ral/backends/vulkan/renderer/tr_temporal_motion.c
+	code/render/renderer/tr_temporal_iqm_motion.c
+	code/render/renderer/tr_temporal_motion.c
 	code/render/ral/backends/vulkan/renderer/vk_bindless_publication.c)
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_iqm_command_test PRIVATE
 	code/qcommon code/render/frontend code/render/ral/backends/vulkan/renderer code/render/ral/core)
@@ -7325,6 +7391,9 @@ SET(RENDERER_MATERIAL_SOURCE_COMPAT_SRCS
 AUX_SOURCE_DIRECTORY(code/renderer RENDERER_GL_SRCS)
 AUX_SOURCE_DIRECTORY(code/renderer2 RENDERER_GL2_SRCS)
 AUX_SOURCE_DIRECTORY(code/render/ral/backends/vulkan/renderer RENDERER_VK_SRCS)
+# Backend-neutral renderer logic (models, lights, animation, temporal bookkeeping): it names no Vulkan type (TASK-231)
+AUX_SOURCE_DIRECTORY(code/render/renderer RENDERER_NEUTRAL_SRCS)
+LIST(APPEND RENDERER_VK_SRCS ${RENDERER_NEUTRAL_SRCS})
 LIST(APPEND RENDERER_VK_SRCS
 	code/tools/lighting_cook/lighting_cook_fs.c
 	${RENDERER_MATERIAL_PROJECT_COOK_SRCS}

@@ -31,12 +31,12 @@ file(READ "${ROOT}/code/render/ral/backends/webgpu/ral_webgpu_browser_bridge.c" 
 file(READ "${ROOT}/code/render/ral/backends/webgpu/ral_webgpu_browser_host.mjs" WEBGPU_HOST)
 file(READ "${ROOT}/code/render/ral/backends/webgpu/ral_webgpu_browser_dispatch.mjs" WEBGPU_DISPATCH)
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VULKAN)
-file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_init.c" VULKAN_FRONTEND)
-file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_main.c" VULKAN_SCENE)
-file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_cmds.c" VULKAN_COMMANDS)
-file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_backend.c" VULKAN_BACKEND)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_init.c" VULKAN_FRONTEND)
+file(READ "${ROOT}/code/render/renderer/tr_main.c" VULKAN_SCENE)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_cmds.c" VULKAN_COMMANDS)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_backend.c" VULKAN_BACKEND)
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_textures.c" VULKAN_RESOURCES)
-file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_shade.c" VULKAN_MATERIAL_HOST)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_shade.c" VULKAN_MATERIAL_HOST)
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/shaders/gen_frag.tmpl" VULKAN_MATERIAL_SHADER)
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/shaders/sky_surface_composite.comp" VULKAN_SKY_COMPOSITE)
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/shaders/lens_occlusion.comp" VULKAN_LENS_SHADER)
@@ -525,7 +525,7 @@ foreach(MAP_LIFECYCLE_PATH IN ITEMS
 	endforeach()
 endforeach()
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VULKAN_SKY_LIFECYCLE)
-file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_init.c" VULKAN_FRONTEND_LIFECYCLE)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_init.c" VULKAN_FRONTEND_LIFECYCLE)
 foreach(NEEDLE IN ITEMS "R_FrontendWorldLifecycleGeneration"
 		"RAL_ATMOSPHERE_EVENT_MAP_TRANSITION"
 		"skyWorldLifecycleGeneration"
@@ -544,7 +544,7 @@ foreach(NEEDLE IN ITEMS "RenderSubmission_WorldLifecycleGeneration"
 		message(FATAL_ERROR "Vulkan frontend sky ownership boundary misses: ${NEEDLE}")
 	endif()
 endforeach()
-file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_shade.c" VULKAN_SHADE)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_shade.c" VULKAN_SHADE)
 foreach(NEEDLE IN ITEMS "vk.probeCurrentProductValid"
 		"TYPE_MULTI_TEXTURE_MUL2_IBL")
 	string(FIND "${VULKAN_SHADE}" "${NEEDLE}" POSITION)

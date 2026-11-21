@@ -39,8 +39,8 @@ def exact(prefix,patterns,sev,cat):
  return found
 
 servers=exact("Server: ",[r"Server: arena7"],"INFO","server")
-loads=exact("vm/gamesv.",[r"vm/gamesv\.wasm loaded as WASM interpreter \(\d+ KB memory, \d+ ms\)"]*3,"INFO","system")
-policy=exact("VM_Create policy module=gamesv ",[r"VM_Create policy module=gamesv requested=1 effective=1 backend=wasm-interpreter"]*3,"DEBUG","system")
+loads=exact("vm/gamesv.",[r"vm/gamesv\.wasm loaded as WASM interpreter \(\d+ KB memory, \d+ ms\)"],"INFO","system")
+policy=exact("VM_Create policy module=gamesv ",[r"VM_Create policy module=gamesv requested=1 effective=1 backend=wasm-interpreter"],"DEBUG","system")
 init=exact("InitGame:",[r"InitGame: .*\\mapname\\arena7(?:\\.*)?"]*3,"INFO","game")
 nav=exact("[NAV] navmesh ready for ",[r"\[NAV\] navmesh ready for 'arena7' \((?:built|from cache)\)"],"INFO","nav")
 shutdown_game=exact("==== ShutdownGame ====",[r"==== ShutdownGame ===="]*3,"INFO","game")
@@ -67,10 +67,16 @@ for _,row,value in entered:
 for cohort in range(4):
  if not connect[cohort][0]<entered[cohort][0]<begin[cohort][0]:raise SystemExit("FAIL wasm-restart cohort order")
 if not (servers[0][0]<loads[0][0]<policy[0][0]<init[0][0] and servers[0][0]<nav[0][0] and max(init[0][0],nav[0][0])<connect[0][0]<entered[0][0]<begin[0][0]<kicks[0][0]<phase[0][0]<phase[1][0]
- <shutdown_game[0][0]<shutdown_detail[0][0]<loads[1][0]<policy[1][0]<init[1][0]<connect[1][0]<begin[1][0]<phase[2][0]<kicks[1][0]<phase[3][0]
- <shutdown_game[1][0]<shutdown_detail[1][0]<loads[2][0]<policy[2][0]<init[2][0]<connect[2][0]<begin[2][0]<phase[4][0]<kicks[2][0]
+ <shutdown_game[0][0]<shutdown_detail[0][0]<init[1][0]<connect[1][0]<begin[1][0]<phase[2][0]<kicks[1][0]<phase[3][0]
+ <shutdown_game[1][0]<shutdown_detail[1][0]<init[2][0]<connect[2][0]<begin[2][0]<phase[4][0]<kicks[2][0]
  <phase[5][0]<kicks[3][0]<connect[3][0]<begin[3][0]<phase[6][0]<kicks[4][0]<kicks[5][0]<phase[7][0]<phase[8][0]
  <shutdown[0][0]<shutdown_game[2][0]<shutdown_detail[2][0]):raise SystemExit("FAIL wasm-restart causal order")
+# Idempotence: the game VM is reused, so a restart must give back exactly what the first start
+# had. The game memory pool must be byte-identical after the initial start and after each restart;
+# a leak, or a pointer kept across the pool reset, shows here as a different number.
+pool=[re.fullmatch(r"Game memory status: (\d+) out of (\d+) bytes allocated",v) for v in vals if v.startswith("Game memory status: ")]
+if len(pool)!=3 or any(m is None for m in pool):raise SystemExit(f"FAIL wasm-restart game memory samples {len(pool)}")
+if len({m.group(1) for m in pool})!=1:raise SystemExit("FAIL wasm-restart game memory not idempotent across map_restart: "+",".join(m.group(1) for m in pool))
 if any(row["sev"].upper() in ("ERROR","FATAL") for row in rows):raise SystemExit("FAIL wasm-restart severity")
 for prefix in ("VM_Restart:","WASM module cannot restart","botkick: inactive ","botkick: refused non-bot ","botkick: invalid "):
  if family(prefix):raise SystemExit(f"FAIL wasm-restart forbidden {prefix}")
@@ -100,8 +106,8 @@ for number,line in enumerate(open(controller_path,encoding="utf-8",errors="stric
  if not isinstance(item,dict):raise SystemExit("FAIL wasm-restart controller schema")
  controller.append(item)
 commands=["addbot grunt 4 free 0 RestartBot","botkick 1 999",
- "echo Q0_WASM_RESTART_INITIAL_READY; echo Q0_WASM_RESTART_ONE_REQUESTED; map_restart 0; echo Q0_WASM_RESTART_ONE_COMPLETE",
- "botkick 1 2","echo Q0_WASM_RESTART_TWO_REQUESTED; map_restart 0; echo Q0_WASM_RESTART_TWO_COMPLETE",
+ "echo Q0_WASM_RESTART_INITIAL_READY; game_memory; echo Q0_WASM_RESTART_ONE_REQUESTED; map_restart 0; echo Q0_WASM_RESTART_ONE_COMPLETE; game_memory",
+ "botkick 1 2","echo Q0_WASM_RESTART_TWO_REQUESTED; map_restart 0; echo Q0_WASM_RESTART_TWO_COMPLETE; game_memory",
  "botkick 1 2","echo Q0_WASM_RESTART_IDENTITY_PRESERVED; botkick 1 1","addbot grunt 4 free 0 RestartBot",
  "echo Q0_WASM_RESTART_REPLACEMENT_READY; botkick 1 1","botkick 1 2",
  "echo Q0_WASM_RESTART_COMPLETE; echo Q0_WASM_RESTART_QUIT_REQUESTED; quit"]
@@ -119,17 +125,18 @@ python3 - "$1" "$2" "$3" "$4" <<'PYEOF'
 import hashlib,json,os,sys
 log,manifest,controller,mode=sys.argv[1:];rows=[]
 def add(sev,cat,msg):rows.append({"sev":sev,"cat":cat,"msg":msg+"\n"})
+def mem():add("INFO","game","Game memory status: 123456 out of 6291456 bytes allocated")
 def cohort():
  add("INFO","game","ClientConnect: 1");add("INFO","server",'broadcast: print "RestartBot has entered the game\\n"');add("INFO","game","ClientBegin: 1")
 add("INFO","server","Server: arena7");add("INFO","system","vm/gamesv.wasm loaded as WASM interpreter (4096 KB memory, 3 ms)");add("DEBUG","system","VM_Create policy module=gamesv requested=1 effective=1 backend=wasm-interpreter");add("INFO","game","InitGame: \\mapname\\arena7\\protocol\\74");add("INFO","nav","[NAV] navmesh ready for 'arena7' (built)");cohort()
-add("INFO","server","botkick: refused stale bot identity client=1 expected=999 actual=1");add("INFO","system","Q0_WASM_RESTART_INITIAL_READY");add("INFO","system","Q0_WASM_RESTART_ONE_REQUESTED")
-add("INFO","game","==== ShutdownGame ====");add("INFO","game","ShutdownGame:");add("INFO","system","vm/gamesv.wasm loaded as WASM interpreter (4096 KB memory, 2 ms)");add("DEBUG","system","VM_Create policy module=gamesv requested=1 effective=1 backend=wasm-interpreter");add("INFO","game","InitGame: \\mapname\\arena7\\protocol\\74");cohort();add("INFO","system","Q0_WASM_RESTART_ONE_COMPLETE");add("INFO","server","botkick: refused stale bot identity client=1 expected=2 actual=1");add("INFO","system","Q0_WASM_RESTART_TWO_REQUESTED")
-add("INFO","game","==== ShutdownGame ====");add("INFO","game","ShutdownGame:");add("INFO","system","vm/gamesv.wasm loaded as WASM interpreter (4096 KB memory, 2 ms)");add("DEBUG","system","VM_Create policy module=gamesv requested=1 effective=1 backend=wasm-interpreter");add("INFO","game","InitGame: \\mapname\\arena7\\protocol\\74");cohort();add("INFO","system","Q0_WASM_RESTART_TWO_COMPLETE");add("INFO","server","botkick: refused stale bot identity client=1 expected=2 actual=1");add("INFO","system","Q0_WASM_RESTART_IDENTITY_PRESERVED");add("INFO","server","botkick: removed bot client=1 allocation=1 name=RestartBot");cohort();add("INFO","system","Q0_WASM_RESTART_REPLACEMENT_READY");add("INFO","server","botkick: refused stale bot identity client=1 expected=1 actual=2");add("INFO","server","botkick: removed bot client=1 allocation=2 name=RestartBot");add("INFO","system","Q0_WASM_RESTART_COMPLETE");add("INFO","system","Q0_WASM_RESTART_QUIT_REQUESTED");add("INFO","server","----- Server Shutdown (Server quit) -----");add("INFO","game","==== ShutdownGame ====");add("INFO","game","ShutdownGame:")
+add("INFO","server","botkick: refused stale bot identity client=1 expected=999 actual=1");add("INFO","system","Q0_WASM_RESTART_INITIAL_READY");mem();add("INFO","system","Q0_WASM_RESTART_ONE_REQUESTED")
+add("INFO","game","==== ShutdownGame ====");add("INFO","game","ShutdownGame:");add("INFO","game","InitGame: \\mapname\\arena7\\protocol\\74");cohort();add("INFO","system","Q0_WASM_RESTART_ONE_COMPLETE");mem();add("INFO","server","botkick: refused stale bot identity client=1 expected=2 actual=1");add("INFO","system","Q0_WASM_RESTART_TWO_REQUESTED")
+add("INFO","game","==== ShutdownGame ====");add("INFO","game","ShutdownGame:");add("INFO","game","InitGame: \\mapname\\arena7\\protocol\\74");cohort();add("INFO","system","Q0_WASM_RESTART_TWO_COMPLETE");mem();add("INFO","server","botkick: refused stale bot identity client=1 expected=2 actual=1");add("INFO","system","Q0_WASM_RESTART_IDENTITY_PRESERVED");add("INFO","server","botkick: removed bot client=1 allocation=1 name=RestartBot");cohort();add("INFO","system","Q0_WASM_RESTART_REPLACEMENT_READY");add("INFO","server","botkick: refused stale bot identity client=1 expected=1 actual=2");add("INFO","server","botkick: removed bot client=1 allocation=2 name=RestartBot");add("INFO","system","Q0_WASM_RESTART_COMPLETE");add("INFO","system","Q0_WASM_RESTART_QUIT_REQUESTED");add("INFO","server","----- Server Shutdown (Server quit) -----");add("INFO","game","==== ShutdownGame ====");add("INFO","game","ShutdownGame:")
 def find(text,n=0):return [i for i,row in enumerate(rows) if text in row["msg"]][n]
 triggers=[max(find("InitGame:",0),find("navmesh ready",0)),find("has entered",0),find("expected=999"),find("ONE_COMPLETE"),find("expected=2 actual=1",0),find("TWO_COMPLETE"),find("expected=2 actual=1",1),find("allocation=1"),find("has entered",3),find("expected=1 actual=2"),find("allocation=2")]
-if mode=="missing-load":rows.pop(find("vm/gamesv.",1))
-elif mode=="backend-change":rows[find("vm/gamesv.",2)]["msg"]="vm/gamesv.aot loaded as WASM AOT (4096 KB memory, 2 ms)\n"
-elif mode=="wrong-policy":rows[find("VM_Create policy",1)]["msg"]="VM_Create policy module=gamesv requested=2 effective=2 backend=wasm-aot\n"
+if mode=="missing-load":rows.pop(find("vm/gamesv.",0))
+elif mode=="backend-change":rows[find("vm/gamesv.",0)]["msg"]="vm/gamesv.aot loaded as WASM AOT (4096 KB memory, 2 ms)\n"
+elif mode=="wrong-policy":rows[find("VM_Create policy",0)]["msg"]="VM_Create policy module=gamesv requested=2 effective=2 backend=wasm-aot\n"
 elif mode=="aot-attempt":rows.insert(find("InitGame:",1),{"sev":"WARN","cat":"system","msg":"WASM: failed to load vm/gamesv.aot: invalid sentinel\n"})
 elif mode=="missing-init":rows.pop(find("InitGame:",2))
 elif mode=="init-before-load":
@@ -152,7 +159,10 @@ elif mode=="restart-order":
  a=find("ONE_COMPLETE");b=find("InitGame:",1);rows[a],rows[b]=rows[b],rows[a]
 elif mode=="missing-phase":rows.pop(find("TWO_REQUESTED"))
 elif mode=="suffix":rows[find("TWO_COMPLETE")]["msg"]="Q0_WASM_RESTART_TWO_COMPLETE extra\n"
-elif mode=="metadata":rows[find("vm/gamesv.",1)]["cat"]="game"
+elif mode=="metadata":rows[find("vm/gamesv.",0)]["cat"]="game"
+elif mode=="mem-drift":rows[find("Game memory status",2)]["msg"]="Game memory status: 999 out of 6291456 bytes allocated\n"
+elif mode=="mem-missing":rows.pop(find("Game memory status",1))
+elif mode=="vm-recreated":rows.insert(find("InitGame:",1),{"sev":"INFO","cat":"system","msg":"vm/gamesv.wasm loaded as WASM interpreter (4096 KB memory, 2 ms)\n"})
 elif mode=="smuggle":rows.insert(find("TWO_COMPLETE"),{"sev":"INFO","cat":"system","msg":"benign\rQ0_WASM_RESTART_TWO_COMPLETE"})
 elif mode=="error":rows.append({"sev":"ERROR","cat":"system","msg":"VM_Restart on game failed\n"})
 elif mode=="crash":rows.append({"sev":"INFO","cat":"server","msg":"----- Server Shutdown (Server crashed) -----\n"})
@@ -165,7 +175,7 @@ items.append({"kind":"result","pid":4242,"rc":0,"timeout":False,"forced":False})
 if mode=="manifest":items[-1]["rc"]=1
 with open(manifest,"w") as out:
  for item in items:out.write(json.dumps(item)+"\n")
-commands=["addbot grunt 4 free 0 RestartBot","botkick 1 999","echo Q0_WASM_RESTART_INITIAL_READY; echo Q0_WASM_RESTART_ONE_REQUESTED; map_restart 0; echo Q0_WASM_RESTART_ONE_COMPLETE","botkick 1 2","echo Q0_WASM_RESTART_TWO_REQUESTED; map_restart 0; echo Q0_WASM_RESTART_TWO_COMPLETE","botkick 1 2","echo Q0_WASM_RESTART_IDENTITY_PRESERVED; botkick 1 1","addbot grunt 4 free 0 RestartBot","echo Q0_WASM_RESTART_REPLACEMENT_READY; botkick 1 1","botkick 1 2","echo Q0_WASM_RESTART_COMPLETE; echo Q0_WASM_RESTART_QUIT_REQUESTED; quit"]
+commands=["addbot grunt 4 free 0 RestartBot","botkick 1 999","echo Q0_WASM_RESTART_INITIAL_READY; game_memory; echo Q0_WASM_RESTART_ONE_REQUESTED; map_restart 0; echo Q0_WASM_RESTART_ONE_COMPLETE; game_memory","botkick 1 2","echo Q0_WASM_RESTART_TWO_REQUESTED; map_restart 0; echo Q0_WASM_RESTART_TWO_COMPLETE; game_memory","botkick 1 2","echo Q0_WASM_RESTART_IDENTITY_PRESERVED; botkick 1 1","addbot grunt 4 free 0 RestartBot","echo Q0_WASM_RESTART_REPLACEMENT_READY; botkick 1 1","botkick 1 2","echo Q0_WASM_RESTART_COMPLETE; echo Q0_WASM_RESTART_QUIT_REQUESTED; quit"]
 events=[{"kind":"command","seq":i+1,"trigger_line":triggers[i]+1,"command":command} for i,command in enumerate(commands)]
 if mode=="controller":events[4]["trigger_line"]+=1
 with open(controller,"w") as out:
@@ -180,7 +190,7 @@ fi
 if [ "${1:-}" = --self-test ]; then
  ROOT="$(mktemp -d -t wasm-map-restart-self-XXXXXX 2>/dev/null || mktemp -d)"; trap 'rm -rf "$ROOT"' EXIT
  write_self "$ROOT/clean" "$ROOT/manifest" "$ROOT/controller" clean; analyze_contract "$ROOT/clean" "$ROOT/manifest" "$ROOT/controller" >/dev/null || exit 1
- defects=(missing-load backend-change wrong-policy aot-attempt missing-init init-before-load nav-before-server additive-nav late-nav nav-metadata missing-shutdown server-shutdown identity-changed same-replacement cohort-order kick-before-begin restart-order missing-phase suffix metadata smuggle error crash manifest controller)
+ defects=(mem-drift mem-missing vm-recreated missing-load backend-change wrong-policy aot-attempt missing-init init-before-load nav-before-server additive-nav late-nav nav-metadata missing-shutdown server-shutdown identity-changed same-replacement cohort-order kick-before-begin restart-order missing-phase suffix metadata smuggle error crash manifest controller)
  for defect in "${defects[@]}"; do write_self "$ROOT/$defect" "$ROOT/$defect.manifest" "$ROOT/$defect.controller" "$defect"; if analyze_contract "$ROOT/$defect" "$ROOT/$defect.manifest" "$ROOT/$defect.controller" >/dev/null 2>&1; then echo "FAIL accepted $defect"; exit 1; fi; done
  echo "PASS wasm-map-restart analyzer self-test (${#defects[@]} mutations)"; exit 0
 fi
@@ -238,9 +248,9 @@ PYEOF
 wait_row 'InitGame: .*\\mapname\\arena7(?:\\.*)?' 1 INFO game 1200 || { echo "FAIL initial InitGame"; exit 1; }; INIT_LINE="$WAIT_LINE"; wait_row "\\[NAV\\] navmesh ready for 'arena7' \\((?:built|from cache)\\)" 1 INFO nav 1200 || { echo "FAIL navmesh"; exit 1; }; [ "$INIT_LINE" -gt "$WAIT_LINE" ] && WAIT_LINE="$INIT_LINE"
 send_command 'addbot grunt 4 free 0 RestartBot'; wait_row 'broadcast: print "(?:\^[0-9])?RestartBot(?:\^7)? has entered the game\\n"' 1 INFO server || { echo "FAIL initial bot"; exit 1; }
 send_command 'botkick 1 999'; wait_row 'botkick: refused stale bot identity client=1 expected=999 actual=1' 1 INFO server || { echo "FAIL initial identity"; exit 1; }
-send_command 'echo Q0_WASM_RESTART_INITIAL_READY; echo Q0_WASM_RESTART_ONE_REQUESTED; map_restart 0; echo Q0_WASM_RESTART_ONE_COMPLETE'; wait_row 'Q0_WASM_RESTART_ONE_COMPLETE' 1 INFO system 1200 || { echo "FAIL first restart"; exit 1; }
+send_command 'echo Q0_WASM_RESTART_INITIAL_READY; game_memory; echo Q0_WASM_RESTART_ONE_REQUESTED; map_restart 0; echo Q0_WASM_RESTART_ONE_COMPLETE; game_memory'; wait_row 'Q0_WASM_RESTART_ONE_COMPLETE' 1 INFO system 1200 || { echo "FAIL first restart"; exit 1; }
 send_command 'botkick 1 2'; wait_row 'botkick: refused stale bot identity client=1 expected=2 actual=1' 1 INFO server || { echo "FAIL first continuity"; exit 1; }
-send_command 'echo Q0_WASM_RESTART_TWO_REQUESTED; map_restart 0; echo Q0_WASM_RESTART_TWO_COMPLETE'; wait_row 'Q0_WASM_RESTART_TWO_COMPLETE' 1 INFO system 1200 || { echo "FAIL second restart"; exit 1; }
+send_command 'echo Q0_WASM_RESTART_TWO_REQUESTED; map_restart 0; echo Q0_WASM_RESTART_TWO_COMPLETE; game_memory'; wait_row 'Q0_WASM_RESTART_TWO_COMPLETE' 1 INFO system 1200 || { echo "FAIL second restart"; exit 1; }
 send_command 'botkick 1 2'; wait_row 'botkick: refused stale bot identity client=1 expected=2 actual=1' 2 INFO server || { echo "FAIL second continuity"; exit 1; }
 send_command 'echo Q0_WASM_RESTART_IDENTITY_PRESERVED; botkick 1 1'; wait_row 'botkick: removed bot client=1 allocation=1 name=(?:\^[0-9])?RestartBot' 1 INFO server || { echo "FAIL current identity"; exit 1; }
 send_command 'addbot grunt 4 free 0 RestartBot'; wait_row 'broadcast: print "(?:\^[0-9])?RestartBot(?:\^7)? has entered the game\\n"' 4 INFO server || { echo "FAIL replacement bot"; exit 1; }

@@ -4,6 +4,7 @@
 
 #include "q_shared.h"
 #include "qcommon.h"
+#include "q_platform.h"   /* QDECL_TLS */
 #include "cm_polylib.h"
 
 #define	MAX_SUBMODELS			256
@@ -260,6 +261,7 @@ typedef struct cmTraceCtx_s {
 extern	clipMap_t	cm;
 extern	int			c_pointcontents;
 extern	int			c_traces, c_brush_traces, c_patch_traces;
+extern QDECL_TLS int	cm_statsOwner;   // only the thread bound by CM_BindStatsOwner counts the statistics
 extern	cvar_t		*cm_noAreas;
 extern	cvar_t		*cm_noCurves;
 extern	cvar_t		*cm_playerCurveClip;

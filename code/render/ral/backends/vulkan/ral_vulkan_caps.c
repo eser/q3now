@@ -224,6 +224,8 @@ void ralVk_FillCaps( ralBackend_t *b ) {
 	// — extension visible but feature not enabled would still mean callers
 	// can't legally use vkCmdDrawIndexedIndirectCount.
 	c->drawIndirectCount   = b->haveDrawIndirectCount;
+	c->multiDrawIndirect   = b->haveMultiDrawIndirect;
+	c->drawIndirectFirstInstance = b->haveMultiDrawIndirect;
 	(void)hasDrawIndirectCount;
 	c->debugUtils          = b->haveDebugUtils;
 	c->memoryBudget        = b->haveMemoryBudget;

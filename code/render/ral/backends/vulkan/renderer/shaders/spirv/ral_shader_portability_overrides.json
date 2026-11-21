@@ -4055,6 +4055,60 @@
       }
     },
     {
+      "symbol": "hiz_audit_comp_spv",
+      "spirvDigest": {
+        "lane0": "0dc3749bcf09ecb6",
+        "lane1": "a4c3f989aa2e5c58"
+      },
+      "samplerKinds": [
+        {
+          "set": 0,
+          "binding": 4,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        }
+      ],
+      "inlineUniform": {
+        "set": 0,
+        "binding": 6
+      }
+    },
+    {
+      "symbol": "hiz_reduce_comp_spv",
+      "spirvDigest": {
+        "lane0": "cf431918f54971d0",
+        "lane1": "6b500adc5d6604df"
+      },
+      "samplerKinds": [
+        {
+          "set": 0,
+          "binding": 1,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        }
+      ],
+      "inlineUniform": {
+        "set": 0,
+        "binding": 4
+      }
+    },
+    {
+      "symbol": "hiz_test_comp_spv",
+      "spirvDigest": {
+        "lane0": "0ffc71c43ff9822f",
+        "lane1": "23466aa6d53bd3c8"
+      },
+      "samplerKinds": [
+        {
+          "set": 0,
+          "binding": 3,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        }
+      ],
+      "inlineUniform": {
+        "set": 0,
+        "binding": 6
+      }
+    },
+    {
       "symbol": "iqm_skinning_frag_spv",
       "spirvDigest": {
         "lane0": "52c3c862897e9430",
@@ -4787,11 +4841,64 @@
       ]
     },
     {
+      "symbol": "shadow_depth_dither_frag_spv",
+      "spirvDigest": {
+        "lane0": "f6539c3bc7af3c98",
+        "lane1": "841f999324ca3c0a"
+      }
+    },
+    {
+      "symbol": "shadow_depth_dither_vert_spv",
+      "spirvDigest": {
+        "lane0": "e85bd647a4cd90ce",
+        "lane1": "b24eba0f29927fcd"
+      },
+      "vertexFormats": [
+        {
+          "location": 0,
+          "format": "RAL_FORMAT_R32G32B32A32_SFLOAT"
+        }
+      ]
+    },
+    {
       "symbol": "shadow_depth_frag_spv",
       "spirvDigest": {
         "lane0": "59949730a504dfa4",
         "lane1": "80e5a095951fbcf7"
       }
+    },
+    {
+      "symbol": "shadow_depth_skinned_dither_vert_spv",
+      "spirvDigest": {
+        "lane0": "64b71959a9b57c99",
+        "lane1": "f028549451ab77a3"
+      },
+      "vertexFormats": [
+        {
+          "location": 0,
+          "format": "RAL_FORMAT_R32G32B32A32_SFLOAT"
+        },
+        {
+          "location": 1,
+          "format": "RAL_FORMAT_R32G32B32A32_SFLOAT"
+        },
+        {
+          "location": 2,
+          "format": "RAL_FORMAT_R32G32_SFLOAT"
+        },
+        {
+          "location": 3,
+          "format": "RAL_FORMAT_R32G32B32A32_SFLOAT"
+        },
+        {
+          "location": 4,
+          "format": "RAL_FORMAT_R32G32B32A32_SFLOAT"
+        },
+        {
+          "location": 5,
+          "format": "RAL_FORMAT_R8G8B8A8_UINT"
+        }
+      ]
     },
     {
       "symbol": "shadow_depth_skinned_vert_spv",

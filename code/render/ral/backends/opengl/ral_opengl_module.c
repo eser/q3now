@@ -3,6 +3,7 @@
 
 #include "ral_opengl_module.h"
 #include "render_pbr_control.h"
+#include "render_dynamic_light_control.h"
 #include "ral_opengl_lighting.h"
 #include "maps/map_format_registry.h"
 #include "render_image_decode.h"
@@ -66,6 +67,8 @@ typedef struct {
 	cvar_t						 *brightness;
 	cvar_t *pbr;
 	cvar_t pbrDefault;
+	cvar_t *dynamicLight;
+	cvar_t dynamicLightDefault;
 	cvar_t						  brightnessFallback;
 	cvar_t *aerialHaze;
 	cvar_t aerialHazeFallback;
@@ -789,6 +792,9 @@ static void BeginRegistration( glconfig_t *config )
 	if ( !s_module.pbr )
 		s_module.pbr = wired_render_pbr_register( &ri, &s_module.pbrDefault );
 	if ( !s_module.pbr ) { LogFailure( "pbr-cvar" ); return; }
+	if ( !s_module.dynamicLight )
+		s_module.dynamicLight = wired_render_dynamic_light_register( &ri, &s_module.dynamicLightDefault );
+	if ( !s_module.dynamicLight ) { LogFailure( "dynamiclight-cvar" ); return; }
 	if ( !config || !s_module.loaded || s_module.frameOpen ) {
 		LogFailure( "begin-registration-state" );
 		return;
@@ -1179,12 +1185,14 @@ static void AddPoly( qhandle_t shader, int vertices, const polyVert_t *data, int
 }
 static void AddLight( const vec3_t origin, float intensity, float red, float green, float blue )
 {
+	if ( s_module.dynamicLight && !s_module.dynamicLight->integer ) return;	/* r_dynamiclight 0: a successful no-op, not a submission failure */
 	if ( s_module.frameOpen &&
 		 !RenderSubmission_AddLight( &s_module.frontend, origin, NULL, intensity, red, green, blue ) )
 		LogFailure( "light" );
 }
 static void AddLinearLight( const vec3_t start, const vec3_t end, float intensity, float red, float green, float blue )
 {
+	if ( s_module.dynamicLight && !s_module.dynamicLight->integer ) return;
 	if ( s_module.frameOpen &&
 		 !RenderSubmission_AddLight( &s_module.frontend, start, end, intensity, red, green, blue ) )
 		LogFailure( "linear-light" );

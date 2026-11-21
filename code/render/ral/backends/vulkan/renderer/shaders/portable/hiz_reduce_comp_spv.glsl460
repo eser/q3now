@@ -1,0 +1,77 @@
+#version 460
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(std140, binding = 4) uniform Push
+{
+    uvec4 sizes;
+    uvec4 mode;
+} _23;
+
+layout(binding = 0) uniform texture2D srcDepth;
+layout(binding = 0) uniform sampler srcSampler;
+layout(binding = 0, r32f) uniform readonly image2D prevLevel;
+layout(binding = 1, r32f) uniform writeonly image2D dstLevel;
+
+void main()
+{
+    uvec2 id = gl_GlobalInvocationID.xy;
+    bool _30 = id.x >= _23.sizes.z;
+    bool _41;
+    if (!_30)
+    {
+        _41 = id.y >= _23.sizes.w;
+    }
+    else
+    {
+        _41 = _30;
+    }
+    if (_41)
+    {
+        return;
+    }
+    ivec2 hi = ivec2(int(_23.sizes.x) - 1, int(_23.sizes.y) - 1);
+    ivec2 base = ivec2(id) * ivec2(2);
+    bool _71 = id.x == (_23.sizes.z - 1u);
+    bool _78;
+    if (_71)
+    {
+        _78 = (_23.sizes.x & 1u) != 0u;
+    }
+    else
+    {
+        _78 = _71;
+    }
+    int nx = _78 ? 3 : 2;
+    bool _87 = id.y == (_23.sizes.w - 1u);
+    bool _94;
+    if (_87)
+    {
+        _94 = (_23.sizes.y & 1u) != 0u;
+    }
+    else
+    {
+        _94 = _87;
+    }
+    int ny = _94 ? 3 : 2;
+    float d = 1.0;
+    float _130;
+    for (int y = 0; y < ny; y++)
+    {
+        for (int x = 0; x < nx; x++)
+        {
+            ivec2 t = min((base + ivec2(x, y)), hi);
+            if (_23.mode.x != 0u)
+            {
+                _130 = texelFetch(sampler2D(srcDepth, srcSampler), t, 0).x;
+            }
+            else
+            {
+                _130 = imageLoad(prevLevel, t).x;
+            }
+            float v = _130;
+            d = min(d, v);
+        }
+    }
+    imageStore(dstLevel, ivec2(id), vec4(d, 0.0, 0.0, 0.0));
+}
+

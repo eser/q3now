@@ -7,7 +7,7 @@ endif()
 set(H "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_main_activation.h")
 set(C "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_main_activation.c")
 set(VK "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c")
-set(BACKEND "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_backend.c")
+set(BACKEND "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_backend.c")
 set(SEQUENCE_H "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_motion_sequence.h")
 set(SEQUENCE_C "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_motion_sequence.c")
 set(READBACK_H "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_motion_readback.h")
@@ -219,8 +219,8 @@ require_text("${VKT}" "if ( !VK_TemporalMainActivationCommitIqmDraw("
 # central-definition-only until the atomic IQM command slice lands.
 file(GLOB_RECURSE SHIPPING_SURFACE "${ROOT}/code/*.c" "${ROOT}/code/*.h")
 foreach(path IN LISTS SHIPPING_SURFACE)
-	if(path STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_temporal_iqm_motion.c"
-			OR path STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_temporal_iqm_motion.h"
+	if(path STREQUAL "${ROOT}/code/render/renderer/tr_temporal_iqm_motion.c"
+			OR path STREQUAL "${ROOT}/code/render/renderer/tr_temporal_iqm_motion.h"
 			OR path STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_iqm_payload_authoring.c"
 			OR path STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_iqm_payload_authoring.h"
 			OR path STREQUAL VK

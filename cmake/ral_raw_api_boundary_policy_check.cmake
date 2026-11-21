@@ -249,17 +249,17 @@ foreach(draw_seam IN ITEMS
 	"Ral_CmdDrawIndexed( vk.cmd->ral_cmd, vk.cmd->num_indexes, 1,"
 	"Ral_CmdDraw( vk.cmd->ral_cmd, tess.numVertexes, 1,"
 	"Ral_CmdDrawIndexed( vk.cmd->ral_cmd, rng->indexCount, 1, rng->firstIndex, 0, slot );"
-	"Ral_CmdDrawIndexed( vk.cmd->ral_cmd, sl->indexCount, 1, sl->firstIndex, sl->vertexOffset, slot );"
-	"Ral_CmdDrawIndexed( vk.cmd->ral_cmd, c->numIndexes, 1, c->firstIndex, 0, slot );")
+	"Ral_CmdDrawIndexed( vk.cmd->ral_cmd, sl->indexCount, 1, sl->firstIndex, sl->vertexOffset, ss );"
+	"Ral_CmdDrawIndexed( vk.cmd->ral_cmd, c->numIndexes, 1, c->firstIndex, 0, ss );")
 	require_text("${vk_code}" "${draw_seam}" "portable draw operand seam")
 endforeach()
 string(REGEX MATCHALL "Ral_CmdDrawIndexed[(]" ral_indexed_draws "${vk_code}")
 list(LENGTH ral_indexed_draws ral_indexed_draw_count)
 string(REGEX MATCHALL "Ral_CmdDraw[(]" ral_draws "${vk_code}")
 list(LENGTH ral_draws ral_draw_count)
-if(NOT ral_indexed_draw_count EQUAL 11 OR NOT ral_draw_count EQUAL 17)
+if(NOT ral_indexed_draw_count EQUAL 13 OR NOT ral_draw_count EQUAL 17)
 	message(FATAL_ERROR
-		"portable draw inventory changed: indexed=${ral_indexed_draw_count}/11, draw=${ral_draw_count}/17")
+		"portable draw inventory changed: indexed=${ral_indexed_draw_count}/13, draw=${ral_draw_count}/17")
 endif()
 
 forbid_regex("${vk_code}" "(^|[^A-Za-z0-9_])qvkCmdSet(Viewport|Scissor)([^A-Za-z0-9_]|$)"

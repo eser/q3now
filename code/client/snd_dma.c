@@ -623,7 +623,9 @@ static void S_Base_StartSound( const vec3_t origin, int entityNum, int entchanne
 		}
 		ch = &s_channels[chosen];
 		ch->allocTime = sfx->lastTimeUsed;
-		Com_Log( SEV_DEBUG, LOG_CH(ch_sound), "S_StartSound: No more channels free for %s, dropping earliest sound: %s\n", sfx->soundName, ch->thesfx->soundName);
+		/* The chosen channel can be one whose sound was already released (thesfx == NULL); the
+		 * log argument is evaluated whatever the log level, so it must not dereference it. */
+		Com_Log( SEV_DEBUG, LOG_CH(ch_sound), "S_StartSound: No more channels free for %s, dropping earliest sound: %s\n", sfx->soundName, ch->thesfx ? ch->thesfx->soundName : "(released)");
 	}
 
 	if ( origin ) {

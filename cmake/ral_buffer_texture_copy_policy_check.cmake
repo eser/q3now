@@ -34,9 +34,9 @@ set(command_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/ral_vulkan_comm
 set(resource_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/ral_vulkan_resource.c")
 set(translate_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/ral_vulkan_translate.c")
 set(product_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk.c")
-set(image_header_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/tr_local.h")
+set(image_header_path "${SOURCE_ROOT}/code/render/renderer/tr_local.h")
 set(image_owner_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_textures.c")
-set(image_lifecycle_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/tr_image.c")
+set(image_lifecycle_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk_image.c")
 set(host_path "${SOURCE_ROOT}/tests/ral_vulkan_texture_copy_test.c")
 set(receipt_host_path "${SOURCE_ROOT}/tests/ral_texture_resource_receipt_test.c")
 foreach(path IN ITEMS ${header_path} ${types_path} ${bridge_path} ${command_path}

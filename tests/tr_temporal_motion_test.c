@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Wired Engine contributors
 
-#include "../code/render/ral/backends/vulkan/renderer/tr_temporal_motion.h"
+#include "../code/render/renderer/tr_temporal_motion.h"
 
 #include <float.h>
 #include <math.h>

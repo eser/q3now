@@ -1,0 +1,95 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
+#version 450
+
+/*
+hiz_audit.comp — pixel-level oracle for the Hi-Z occlusion test (VERIFICATION ONLY).
+
+hiz_test.comp decides, from bounding boxes and a depth pyramid, which surfaces are hidden.
+This pass checks that decision against the depth buffer itself. For a grid of screen
+pixels it rebuilds the world-space point the final depth value belongs to (inverse of the
+same view-projection the test used), then asks which reached surfaces' bounding boxes
+contain that point. A point on a surface that really is visible lies inside that
+surface's box, so:
+
+  * contained in a box the test kept            -> explained: some kept surface can account for the pixel
+  * contained ONLY in boxes the test discarded  -> VIOLATION candidate: a discarded surface
+                                                   may own a visible pixel (a false negative)
+  * contained in no box                         -> unexplained: entities, brush models, the
+                                                   view model and other non-world pixels
+
+An incorrect transform (flipped y, wrong matrix order, wrong depth convention) rebuilds
+points that land nowhere near any surface, so it shows up as a collapsed explained share;
+a wrong occlusion decision shows up as a non-zero violation count.
+
+Counters (shared 16-word buffer, 0..7 belong to hiz_test.comp):
+  [8] sampled pixels (depth > 0)   [9] explained by a kept surface
+  [10] only discarded surfaces     [11] unexplained       [12] skipped (no depth)
+
+Bindings (set 0): 0 = AABB SSBO, 1 = reached bitset, 2 = occluded bitset (from hiz_test),
+3 = scene depth copy (texture2D), 4 = sampler, 5 = counters SSBO.
+Push: mat4 invViewProj; vec4 params = (surfaceCount, depthW, depthH, stride);
+      vec4 tune = (box expansion in world units, 0, 0, 0).
+*/
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+struct SurfAABB {
+	vec4 mins;
+	vec4 maxs;
+	vec4 plane;
+	uvec4 meta;
+};
+
+layout(std430, set = 0, binding = 0) readonly buffer Aabb { SurfAABB surfaces[]; };
+layout(std430, set = 0, binding = 1) readonly buffer Reached { uint reached[]; };
+layout(std430, set = 0, binding = 2) readonly buffer OccludedBits { uint occluded[]; };
+layout(set = 0, binding = 3) uniform texture2D sceneDepth;
+layout(set = 0, binding = 4) uniform sampler   depthSampler;
+layout(std430, set = 0, binding = 5) buffer Counters { uint counters[16]; };
+
+layout(push_constant) uniform Push {
+	mat4 invViewProj;
+	vec4 params;
+	vec4 tune;
+};
+
+void main() {
+	uint stride = uint(params.w);
+	ivec2 px = ivec2(gl_GlobalInvocationID.xy) * int(stride) + int(stride / 2u);
+	vec2 size = vec2(params.y, params.z);
+	if (px.x >= int(size.x) || px.y >= int(size.y)) return;
+
+	float d = texelFetch(sampler2D(sceneDepth, depthSampler), px, 0).r;
+	if (d <= 0.0) {                       // far plane / sky / nothing drawn
+		atomicAdd(counters[12], 1u);
+		return;
+	}
+	atomicAdd(counters[8], 1u);
+
+	vec2 uv = (vec2(px) + 0.5) / size;
+	vec4 w = invViewProj * vec4(uv * 2.0 - 1.0, d, 1.0);
+	vec3 p = w.xyz / w.w;
+
+	float eps = tune.x;
+	bool inKept = false;
+	bool inDiscarded = false;
+	uint count = uint(params.x);
+	for (uint i = 0u; i < count; i++) {
+		if ((reached[i >> 5u] & (1u << (i & 31u))) == 0u) continue;
+		vec3 mn = surfaces[i].mins.xyz - vec3(eps);
+		vec3 mx = surfaces[i].maxs.xyz + vec3(eps);
+		if (any(lessThan(p, mn)) || any(greaterThan(p, mx))) continue;
+		if ((occluded[i >> 5u] & (1u << (i & 31u))) != 0u) {
+			inDiscarded = true;
+		} else {
+			inKept = true;
+			break;
+		}
+	}
+
+	if (inKept)           atomicAdd(counters[9], 1u);
+	else if (inDiscarded) atomicAdd(counters[10], 1u);
+	else                  atomicAdd(counters[11], 1u);
+}

@@ -5,7 +5,7 @@ if(NOT DEFINED SOURCE_ROOT)
   message(FATAL_ERROR "SOURCE_ROOT is required")
 endif()
 
-set(MAP_SOURCE "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/tr_map.c")
+set(MAP_SOURCE "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk_map.c")
 file(READ "${MAP_SOURCE}" map_source)
 
 function(require_text needle label)

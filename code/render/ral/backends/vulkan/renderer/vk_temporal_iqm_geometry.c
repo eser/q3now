@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Wired Engine contributors
 
-#include "vk_temporal_iqm_geometry.h"
+#include "../../../../renderer/vk_temporal_iqm_geometry.h"
 
 #include <limits.h>
 #include <string.h>

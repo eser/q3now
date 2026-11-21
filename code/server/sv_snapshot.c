@@ -3,6 +3,7 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "server.h"
+#include "../qcommon/wired/workload_stats.h"
 #include "../qcommon/wired/net/wn_public.h"  /* WN_DATAGRAM_MTU, WN_FRAG_PAYLOAD, sv_snapshotTransport */
 LOG_DECLARE_CHANNEL( ch_server, "server" );
 LOG_DECLARE_CHANNEL( ch_network_server, "network.server" );
@@ -292,6 +293,84 @@ static void SV_AddIndexToSnapshot( svEntity_t *svEnt, int index, snapshotEntityN
 SV_AddEntitiesVisibleFromPoint
 ===============
 */
+/*
+===============
+Area of interest. With sv_aoiRadius > 0 a NON-SOLID entity farther than the radius from
+the viewer's origin is left out of that client's snapshot, on top of the PVS test. The
+client treats an entity absent from a snapshot as removed and one that appears as new, so
+an entity that crosses the radius simply leaves and re-enters, exactly as it does at a PVS
+boundary. Everything the client predicts against stays: a solid entity (players, movers,
+anything that clips Pmove) is never filtered, nor is a broadcast one, nor the viewer's own.
+Only fields the engine already reads are used (no game headers). Default 0 = off, so the
+Q3 snapshot is unchanged unless a server opts in; far non-solid entities (items, effects,
+far explosion events) are what an enabled radius drops, which is a gameplay choice.
+===============
+*/
+static cvar_t *sv_aoiRadius;
+static cvar_t *sv_entityTierRadius;
+static cvar_t *sv_entityTierEvery;
+
+void SV_Snapshot_RegisterCvars( void )
+{
+	static const cvarDesc_t d = CVAR_FLOAT( "sv_aoiRadius", "0", CVAR_ARCHIVE,
+		"Area of interest: non-solid entities farther than this from a client (world "
+		"units) are not sent to it. Solid entities, broadcast entities and the client's "
+		"own are never dropped. 0 (default) disables the filter.", 0.0f, 65536.0f );
+	sv_aoiRadius = Cvar_Register( &d );
+	{
+		static const cvarDesc_t r = CVAR_FLOAT( "sv_entityTierRadius", "0", CVAR_ARCHIVE,
+			"Entity rate tiering: a non-solid entity farther than this from a client is sent only "
+			"every sv_entityTierEvery-th snapshot; in between the client is re-sent the state it "
+			"already holds, which delta-encodes to almost nothing. 0 (default) disables it.", 0.0f, 65536.0f );
+		static const cvarDesc_t e = CVAR_INT( "sv_entityTierEvery", "4", CVAR_ARCHIVE,
+			"Snapshot interval for entities beyond sv_entityTierRadius.", 2, 32 );
+		sv_entityTierRadius = Cvar_Register( &r );
+		sv_entityTierEvery = Cvar_Register( &e );
+	}
+}
+
+/*
+===============
+The frame this client's next snapshot will be delta-compressed against, or NULL when
+the write path will send everything absolute. Mirrors the conditions in
+SV_WriteSnapshotToClient exactly (a state the writer would not delta against must not
+be substituted either, because the memory behind an out-of-date frame may be reused).
+===============
+*/
+static const clientSnapshot_t *SV_TierBaseFrame( const client_t *client )
+{
+	const clientSnapshot_t *old;
+	if ( client->state != CS_ACTIVE ) return NULL;
+	if ( client->wn_outgoing_sequence - client->deltaMessage >= ( PACKET_BACKUP - 3 ) ) return NULL;
+	old = &client->frames[ client->deltaMessage & PACKET_MASK ];
+	if ( old->frameNum - svs.lastValidFrame < 0 ) return NULL;
+	return old;
+}
+
+/* The state the client already holds for entity number `num` in `old`, or NULL. The
+ * entities of a snapshot are in ascending number order. */
+static entityState_t *SV_HeldEntityState( const clientSnapshot_t *old, int num )
+{
+	int lo = 0, hi = old->num_entities - 1;
+	while ( lo <= hi ) {
+		const int mid = ( lo + hi ) >> 1;
+		entityState_t *es = old->ents[ mid ];
+		if ( es->number == num ) return es;
+		if ( es->number < num ) lo = mid + 1; else hi = mid - 1;
+	}
+	return NULL;
+}
+
+static qboolean SV_OutsideAreaOfInterest( const vec3_t origin, const entityState_t *es, const sharedEntity_t *ent,
+		int viewerNum )
+{
+	vec3_t d;
+	if ( !sv_aoiRadius || sv_aoiRadius->value <= 0.0f ) return qfalse;
+	if ( es->number == viewerNum || es->solid ) return qfalse;      /* what the client predicts against stays */
+	VectorSubtract( ent->r.currentOrigin, origin, d );
+	return VectorLengthSquared( d ) > sv_aoiRadius->value * sv_aoiRadius->value ? qtrue : qfalse;
+}
+
 static void SV_AddEntitiesVisibleFromPoint( const vec3_t origin, clientSnapshot_t *frame,
 									snapshotEntityNumbers_t *eNums, qboolean portal ) {
 	// during an error shutdown message we may need to transmit
@@ -345,6 +424,11 @@ static void SV_AddEntitiesVisibleFromPoint( const vec3_t origin, clientSnapshot_
 		// broadcast entities are always sent
 		if ( ent->r.svFlags & SVF_BROADCAST ) {
 			SV_AddIndexToSnapshot( svEnt, e, eNums );
+			continue;
+		}
+
+		// area of interest (off by default; see SV_OutsideAreaOfInterest)
+		if ( !portal && SV_OutsideAreaOfInterest( origin, es, ent, frame->ps.clientNum ) ) {
 			continue;
 		}
 
@@ -633,6 +717,30 @@ static void SV_BuildClientSnapshot( client_t *client ) {
 	for ( int i = 0 ; i < entityNumbers.numSnapshotEntities ; i++ )	{
 		frame->ents[ i ] = svs.currFrame->ents[ entityNumbers.snapshotEntities[ i ] ];
 	}
+
+	// Entity rate tiering (off by default): a far, non-solid entity that is not due this
+	// snapshot keeps the state the client already holds, so its delta is "no change".
+	// Solid entities, and anything the client has no held state for, are never held back.
+	if ( sv_entityTierRadius && sv_entityTierRadius->value > 0.0f ) {
+		const clientSnapshot_t *old = SV_TierBaseFrame( client );
+		if ( old && old->num_entities > 0 ) {
+			const float limit = sv_entityTierRadius->value * sv_entityTierRadius->value;
+			const int every = sv_entityTierEvery->integer > 1 ? sv_entityTierEvery->integer : 2;
+			for ( int i = 0 ; i < frame->num_entities ; i++ ) {
+				entityState_t *es = frame->ents[ i ];
+				const sharedEntity_t *g;
+				vec3_t d;
+				entityState_t *held;
+				if ( es->solid ) continue;
+				if ( ( (unsigned)( frame->frameNum + es->number ) % (unsigned)every ) == 0u ) continue;   // due now
+				g = SV_GentityNum( es->number );
+				VectorSubtract( g->r.currentOrigin, org, d );
+				if ( VectorLengthSquared( d ) <= limit ) continue;
+				held = SV_HeldEntityState( old, es->number );
+				if ( held ) frame->ents[ i ] = held;
+			}
+		}
+	}
 }
 
 
@@ -760,7 +868,12 @@ void SV_SendClientSnapshot( client_t *client ) {
 	msg_t		msg;
 
 	// build the snapshot
-	SV_BuildClientSnapshot( client );
+	{
+		const int64_t wlT0 = wired_workload_clock();
+		SV_BuildClientSnapshot( client );
+		wired_workload_end( WIRED_WL_SV_SNAP_BUILD, wlT0,
+			(uint64_t)client->frames[ client->wn_outgoing_sequence & PACKET_MASK ].num_entities );
+	}
 
 	// bots need to have their snapshots build, but
 	// the query them directly without needing to be sent
@@ -780,7 +893,17 @@ void SV_SendClientSnapshot( client_t *client ) {
 
 	// send over all the relevant entityState_t
 	// and the playerState_t
-	SV_WriteSnapshotToClient( client, &msg );
+	{
+		const int64_t wlT0 = wired_workload_clock();
+		SV_WriteSnapshotToClient( client, &msg );
+		wired_workload_end( WIRED_WL_SV_SNAP_WRITE, wlT0,
+			(uint64_t)client->frames[ client->wn_outgoing_sequence & PACKET_MASK ].num_entities );
+		/* the size of what was just written, as its own row: bytes per snapshot */
+		wired_workload_end( WIRED_WL_SV_SNAP_BYTES, wired_workload_clock(), (uint64_t)msg.cursize );
+	}
+
+	// the crowd channel rides next to the snapshot, never inside it
+	SV_Crowd_WriteToClient( client, &msg );
 
 	// terminate the message so CL_ParseServerMessage's while(1) loop
 	// knows when to stop; without EOF the Huffman decoder reads one byte
@@ -790,6 +913,7 @@ void SV_SendClientSnapshot( client_t *client ) {
 	// check for overflow
 	if ( msg.overflowed ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_server), "WARNING: msg overflowed for %s\n", client->name );
+		SV_Crowd_Resync( client );   // its crowd packet went with the message
 		MSG_Clear( &msg );
 	}
 
@@ -804,7 +928,20 @@ SV_SendClientMessages
 */
 void SV_SendClientMessages( void )
 {
+	int due[MAX_CLIENTS], dueCount = 0;
+
 	svs.msgTime = Sys_Milliseconds();
+
+	// who gets a snapshot in this pass
+	for ( int i = 0; i < sv.maxclients; i++ )
+	{
+		const client_t *c = &svs.clients[ i ];
+		if ( c->state == CS_FREE || c->state == CS_CONNECTED ) continue;
+		if ( svs.time - c->lastSnapshotTime < c->snapshotMsec * com_timescale->value ) continue;
+		due[dueCount++] = i;
+	}
+	// the crowd packets of those clients are assembled together, on the task scheduler
+	SV_Crowd_PrepareClients( due, dueCount );
 
 	// send a message to each connected client
 	for ( int i = 0; i < sv.maxclients; i++ )

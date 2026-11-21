@@ -1,4 +1,4 @@
-file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_temporal_motion_targets.c" TARGETS)
+file(READ "${ROOT}/code/render/renderer/tr_temporal_motion_targets.c" TARGETS)
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_pipeline_cohort.c" COHORT)
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.h" VKH)
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VKC)

@@ -1,0 +1,9 @@
+{
+  "_comment": "Pre-registered go/no-go thresholds for TASK-130 / capacity roadmap doc-1 Phase 0. Frozen before the multi-bot measurements; change only with a recorded reason.",
+  "_amendment_2026-11-21": "Cost is measured as the share of wall time the main thread spent in the workload, expressed in ms of one 4.17 ms budget frame (share_of_wall * 4.17). The first draft divided by frames, which moves with the presentation regime (1.2 to 4.8 ms per frame for the same scene) and inflates the load slope when more bots lower the frame rate. Amended before any matrix number was read.",
+  "frame_budget_ms": 4.17,
+  "go_share_of_budget_at_reference_load": 0.10,
+  "go_single_call_p99_share_of_budget": 0.25,
+  "go_extrapolated_share_of_budget": 0.25,
+  "extrapolation_agents": 64
+}

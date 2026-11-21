@@ -6,7 +6,7 @@ if(NOT DEFINED ROOT)
 	message(FATAL_ERROR "ROOT required")
 endif()
 
-file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_scene.c" SCENE)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_scene.c" SCENE)
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VK)
 
 function(require_text variable needle label)

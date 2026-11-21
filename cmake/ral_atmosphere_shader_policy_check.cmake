@@ -145,7 +145,7 @@ endforeach()
 # worldLightParams channels. It must remain arithmetic-only and slope-gate snow
 # with the existing IBL normal; local tile lookup is a separate bounded leaf.
 file(READ "${SHADER_ROOT}/gen_frag.tmpl" MATERIAL_FRAGMENT)
-file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_shade.c" MATERIAL_HOST)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_shade.c" MATERIAL_HOST)
 foreach(REQUIREMENT
 		".yzw = wetness/frost/snow"
 		"surfaceTargets[0] + 0.5f * vk.atm.surfaceTargets[3]"
@@ -182,8 +182,8 @@ endforeach()
 file(READ "${SHADER_ROOT}/spirv/ral_shader_artifact_catalog.inc" ARTIFACT_CATALOG)
 string(REGEX MATCHALL "RAL_SHADER_SPIRV_ARTIFACT\\(" ARTIFACT_ROWS "${ARTIFACT_CATALOG}")
 list(LENGTH ARTIFACT_ROWS ARTIFACT_COUNT)
-if(NOT ARTIFACT_COUNT EQUAL 315)
-	message(FATAL_ERROR "canonical shader corpus must contain exactly 315 modules, got ${ARTIFACT_COUNT}")
+if(NOT ARTIFACT_COUNT EQUAL 321)
+	message(FATAL_ERROR "canonical shader corpus must contain exactly 321 modules, got ${ARTIFACT_COUNT}")
 endif()
 
 message(STATUS "RAL atmosphere shader policy: PASS")

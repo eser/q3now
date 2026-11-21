@@ -296,6 +296,12 @@ enum svc_ops_e {
 	// new commands, supported only by modern protocol but not legacy
 	svc_voipSpeex,     // not wrapped in USE_VOIP, so this value is reserved.
 	svc_voipOpus,      //
+
+	// The crowd channel (capacity roadmap Phase 4): [short] length [length bytes],
+	// one WiredCrowdNet packet. Appended after the existing opcodes so every value
+	// that was already in use keeps its number; a server only sends it while a
+	// crowd exists.
+	svc_crowd,
 };
 
 
@@ -1570,6 +1576,9 @@ void SV_SpawnServer_Tick( void ); /* advance one phase of the async spawn machin
 qboolean SV_IsSpawnIdle( void );  /* qtrue when svs.spawn.phase == SPAWN_IDLE (no map transition in flight) */
 void SV_ClientMapLoadComplete( const char *mapname );
 void SV_Frame( int msec );
+/* Load axis for the workload telemetry rows: connected clients, bots and the
+ * number of entities the server is running. See wired/workload_stats.h. */
+void SV_WorkloadContext( int *clients, int *bots, int *entities );
 void SV_TrackCvarChanges( void );
 void SV_PacketEvent( const netadr_t *from, msg_t *msg );
 int SV_FrameMsec( void );

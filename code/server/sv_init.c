@@ -291,7 +291,11 @@ static void SV_Startup( void ) {
 	AppMemory_Init( &svs.memory, "server", 16u * 1024u * 1024u,
 		128u * 1024u * 1024u );
 
-	SV_AllocClients( sv_maxclients->integer );
+	/* Apply a latched sv_maxclients BEFORE sizing the client array. Reading ->integer here
+	 * saw the old value (a `set sv_maxclients N` before the first map is latched), so the array
+	 * was sized for 8 while everything else looped to N and walked past its end (vanilla Q3 calls
+	 * SV_BoundMaxClients first for exactly this reason). */
+	SV_AllocClients( SV_BoundMaxClients( 1 ) );
 	svs.snapshotEntities = App_AllocArray( &svs.memory, entityState_t,
 		svs.numSnapshotEntities );
 
@@ -374,6 +378,9 @@ SV_ClearServer
 */
 static void SV_ClearServer( void ) {
 	int i;
+
+	// A new map starts with an empty crowd: its agents belong to the old world.
+	SV_Crowd_Clear();
 
 	for ( i = 0; i < MAX_CONFIGSTRINGS; i++ ) {
 		if ( sv.configstrings[i] ) {
@@ -983,6 +990,8 @@ Only called at main exe startup, not for each game
 void SV_Init( void )
 {
 	SV_AddOperatorCommands();
+	SV_Crowd_Init();
+	SV_Snapshot_RegisterCvars();
 	SV_BotAwareness_Init();
 
 #ifdef HEADLESS

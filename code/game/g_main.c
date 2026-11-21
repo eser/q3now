@@ -674,6 +674,7 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 
 	// initialize all clients for this game
 	level.maxclients = g_maxclients.integer;
+	G_CrowdInit();
 	memset( g_clients, 0, MAX_CLIENTS * sizeof(g_clients[0]) );
 	level.clients = g_clients;
 
@@ -834,6 +835,8 @@ G_ShutdownGame
 */
 void G_ShutdownGame( int restart ) {
 	Com_Log( SEV_INFO, LOG_CH(ch_game), "==== ShutdownGame ====\n");
+
+	G_CrowdShutdown();
 
 	if ( level.logFile ) {
 		G_LogPrintf("ShutdownGame:\n" );
@@ -2864,6 +2867,8 @@ void G_RunFrame( int levelTime ) {
 	level.framenum++;
 	level.previousTime = level.time;
 	level.time = levelTime;
+
+	G_CrowdFrame( levelTime );
 
 #if FEAT_UNLAGGED
 	level.frameStartTime = trap_Milliseconds();

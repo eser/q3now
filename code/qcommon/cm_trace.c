@@ -33,12 +33,19 @@ static cmTraceCtx_t *CM_ThreadTraceCtx( void ) {
 	int needPatch = cm.numSurfaces + 1;
 	if ( ctx->mapChecksum != cm.checksum
 	     || ctx->numBrushMarks < needBrush || ctx->numPatchMarks < needPatch ) {
-		if ( ctx->brushMarks ) { Z_Free( ctx->brushMarks ); ctx->brushMarks = NULL; }
-		if ( ctx->patchMarks ) { Z_Free( ctx->patchMarks ); ctx->patchMarks = NULL; }
-		ctx->brushMarks = (int *)Z_Malloc( needBrush * sizeof(int) );
-		ctx->patchMarks = (int *)Z_Malloc( needPatch * sizeof(int) );
-		memset( ctx->brushMarks, 0, needBrush * sizeof(int) );
-		memset( ctx->patchMarks, 0, needPatch * sizeof(int) );
+		/* These arrays belong to the calling thread and are sized the first time that
+		 * thread traces, which can be a worker (the navmesh bake, the WiredTasks pool).
+		 * The zone allocator has no locking, so they come from the C heap: calloc
+		 * is thread-safe and gives the zeroed marks the epoch scheme needs. */
+		free( ctx->brushMarks ); ctx->brushMarks = NULL;
+		free( ctx->patchMarks ); ctx->patchMarks = NULL;
+		ctx->brushMarks = (int *)calloc( (size_t)needBrush, sizeof(int) );
+		ctx->patchMarks = (int *)calloc( (size_t)needPatch, sizeof(int) );
+		if ( !ctx->brushMarks || !ctx->patchMarks ) {
+			/* Out of memory on a trace thread is not recoverable here; Z_Malloc would
+			 * have raised ERR_FATAL, which must not be raised from a worker. */
+			abort();
+		}
 		ctx->numBrushMarks = needBrush;
 		ctx->numPatchMarks = needPatch;
 		ctx->mapChecksum   = cm.checksum;
@@ -506,7 +513,7 @@ CM_TraceThroughPatch
 ================
 */
 static void CM_TraceThroughPatch( traceWork_t *tw, const cPatch_t *patch ) {
-	c_patch_traces++;
+	if ( cm_statsOwner ) c_patch_traces++;
 
 	float oldFrac = tw->trace.fraction;
 
@@ -543,7 +550,7 @@ static void CM_TraceThroughBrush( traceWork_t *tw, const cbrush_t *brush ) {
 
 	clipplane = NULL;
 
-	c_brush_traces++;
+	if ( cm_statsOwner ) c_brush_traces++;
 
 	getout = qfalse;
 	startout = qfalse;
@@ -1241,7 +1248,7 @@ void CM_Trace( trace_t *results, const vec3_t start, const vec3_t end, const vec
 
 	cmod = CM_ClipHandleToModel( model );
 
-	c_traces++;				// for statistics, may be zeroed
+	if ( cm_statsOwner ) c_traces++;				// for statistics, may be zeroed
 
 	// fill in a default trace
 	memset( &tw, 0, sizeof(tw) );
@@ -1629,7 +1636,7 @@ void CMQ3_BiSphereTrace( trace_t *results, const vec3_t start, const vec3_t end,
 
 	cmod = CM_ClipHandleToModel( model );
 
-	c_traces++;				// for statistics, may be zeroed
+	if ( cm_statsOwner ) c_traces++;				// for statistics, may be zeroed
 
 	memset( &tw, 0, sizeof( tw ) );
 	tw.trace.fraction = 1.0f;

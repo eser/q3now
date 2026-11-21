@@ -4,7 +4,7 @@
 #ifndef WIRED_VK_TEMPORAL_MOTION_SEQUENCE_H
 #define WIRED_VK_TEMPORAL_MOTION_SEQUENCE_H
 
-#include "tr_temporal_motion.h"
+#include "../../../../renderer/tr_temporal_motion.h"
 #include "vk_temporal_generic_pipeline_table.h"
 
 typedef struct {

@@ -390,7 +390,7 @@ void WN_Init( void )
 	{
 		static const cvarDesc_t descs[] = {
 			CVAR_STRING( "sv_wirednetAuthToken",  "",   CVAR_ARCHIVE, "Authentication token for Wired QUIC transport." ),
-			CVAR_INT(    "sv_wirednetMaxClients", "8",  CVAR_ARCHIVE, "Maximum QUIC/Wired clients.", 0, 0 ),
+			CVAR_INT(    "sv_wirednetMaxClients", "128",  CVAR_ARCHIVE, "Maximum QUIC/Wired clients (bounded by WN_MAX_CLIENTS and sv_maxclients).", 0, 0 ),
 			CVAR_INT(    "sv_wirednetStateRate",  "10", CVAR_ARCHIVE, "State update rate (Hz) for QUIC transport.", 0, 0 ),
 			CVAR_INT(    "sv_wirednetEventRate",  "20", CVAR_ARCHIVE, "Event update rate (Hz) for QUIC transport.", 0, 0 ),
 		};

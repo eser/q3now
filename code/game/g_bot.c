@@ -996,6 +996,10 @@ void G_InitBots( qboolean restart ) {
 	char		map[MAX_QPATH];
 	char		serverinfo[MAX_INFO_STRING];
 
+	/* A reused game VM keeps this file-scope queue across map_restart; entries from the
+	 * previous level would ClientBegin a client slot the new level may have reassigned. */
+	memset( botSpawnQueue, 0, sizeof( botSpawnQueue ) );
+
 	G_LoadBots();
 	G_LoadArenas();
 

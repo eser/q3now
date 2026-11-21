@@ -7,7 +7,7 @@ endif()
 
 file(READ "${ROOT}/code/render/frontend/render_material_project_cook.h" HEADER)
 file(READ "${ROOT}/code/render/frontend/render_material_project_cook.c" FRONTEND)
-file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_init.c" VULKAN)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_init.c" VULKAN)
 file(READ "${ROOT}/code/render/ral/backends/metal/ral_metal_module.mm" METAL)
 file(READ "${ROOT}/code/render/ral/backends/opengl/ral_opengl_module.c" OPENGL)
 file(READ "${ROOT}/code/render/ral/backends/webgpu/ral_webgpu_renderer_module.c" WEBGPU)

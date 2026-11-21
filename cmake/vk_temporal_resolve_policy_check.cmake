@@ -171,7 +171,7 @@ require_text(C "historyReadIndex ) == 44u"
 	"host ABI must pin the final reflected push member offset")
 
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VKC)
-file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_backend.c" BACKEND)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_backend.c" BACKEND)
 require_count(VKC "VK_TemporalResolveInit\\(" 1 "sole H3 Init")
 require_count(VKC "VK_TemporalResolveNeedsIdle\\(" 1 "sole H3 idle query")
 require_count(VKC "VK_TemporalResolveEnsureAfterFence\\(" 1 "sole H3 Ensure")
@@ -321,7 +321,7 @@ foreach(path IN LISTS PRODUCT_C)
 		continue()
 	endif()
 	file(READ "${path}" body)
-	if(NOT path STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_backend.c")
+	if(NOT path STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_backend.c")
 		foreach(wrapper IN ITEMS
 			"vk_temporal_resolve_prepare_authority"
 			"vk_temporal_resolve_record_or_copy")

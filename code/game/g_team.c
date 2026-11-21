@@ -27,6 +27,7 @@ void Team_SetFlagStatus( int team, flagStatus_t status );
 
 void Team_InitGame( void ) {
 	memset(&teamgame, 0, sizeof teamgame);
+	neutralObelisk = NULL;   /* points at a previous level's entity when the VM is reused */
 
 	switch( g_gametype.integer ) {
 	case GT_CTF:

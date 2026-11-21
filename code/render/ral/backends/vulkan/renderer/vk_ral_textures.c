@@ -15,7 +15,7 @@
 // Asset images and BSP lightmap asset chunks are migrated here. Dynamic glyphs,
 // scratch images and render-target attachments retain their dedicated owners.
 
-#include "tr_local.h"
+#include "vk_local.h"
 #include "../../../../frontend/r_log.h"  // rilog-channel-mechanism — renderer.ral
 
 R_LOG_DECLARE_CHANNEL( rch_ral,         "renderer.ral"         );
@@ -593,6 +593,7 @@ qboolean vk_ral_boot_backend( void ) {
 	bci.requestFeatures.wantDescriptorIndexing    = qtrue;
 	bci.requestFeatures.wantHostQueryReset        = qtrue;
 	bci.requestFeatures.wantDrawIndirectCount     = qtrue;
+	bci.requestFeatures.wantMultiDrawIndirect     = qtrue;   // world indirect path (r_hizIndirect); off unless the device offers both
 	bci.requestFeatures.wantVulkanMemoryModel     = qtrue;
 	bci.requestFeatures.wantBufferDeviceAddress   = qtrue;
 	bci.requestFeatures.want8BitStorage           = qtrue;
@@ -771,6 +772,8 @@ void vk_ral_textures_init( void ) {
 	s_ral_init_attempted  = qtrue;
 
 	caps = Ral_GetCaps( s_ral_backend );
+	if ( caps )
+		R_LOG( rch_ral, SEV_INFO, "ral caps: drawIndirectCount=%d multiDrawIndirect=%d drawIndirectFirstInstance=%d\n", (int)caps->drawIndirectCount, (int)caps->multiDrawIndirect, (int)caps->drawIndirectFirstInstance );
 	s_ral_bindless_capacity = (uint32_t)WIRED_BINDLESS_TEX_SLOTS;   // target slot count; RAL caps would allow ~1M on RTX hardware
 	if ( caps && caps->maxBindlessTextures > 0 && caps->maxBindlessTextures < s_ral_bindless_capacity )
 		s_ral_bindless_capacity = caps->maxBindlessTextures;
@@ -1994,6 +1997,10 @@ void vk_ral_release_internal_texture_dependents( void )
 	// AO textures + the sampling view over the depth copy are RAL-owned; free
 	// them here (before the depth copy below — the view must not outlive its image).
 	vk_gtao_shutdown();
+
+	// Hi-Z verification pyramid + its sampling view over the same depth copy.
+	vk_hiz_shutdown();
+	vk_world_indirect_shutdown();
 
 	// Lens-glow oracle: the sampling view over the depth copy + the lens SSBOs +
 	// pipeline are RAL-owned; free them here (before the depth copy below — the view
@@ -3339,6 +3346,7 @@ Q_EXPORT void Ral_DumpLive( void ) {
 		R_LOG( rch_ral, SEV_INFO, "  debugUtils               : %s\n", c->debugUtils ? "yes" : "no" );
 		R_LOG( rch_ral, SEV_INFO, "  memoryBudget             : %s (imported mode leaves this off in 7.4c-pre)\n", c->memoryBudget ? "yes" : "no" );
 		R_LOG( rch_ral, SEV_INFO, "  drawIndirectCount        : %s\n", c->drawIndirectCount ? "yes" : "no" );
+		R_LOG( rch_ral, SEV_INFO, "  multiDrawIndirect        : %s (firstInstance %s)\n", c->multiDrawIndirect ? "yes" : "no", c->drawIndirectFirstInstance ? "yes" : "no" );
 		R_LOG( rch_ral, SEV_INFO, "  maxTextureDimension2D    : %u\n", c->maxTextureDimension2D );
 		R_LOG( rch_ral, SEV_INFO, "  maxSamplerAnisotropy     : %.0fx\n", c->maxSamplerAnisotropy );
 	}

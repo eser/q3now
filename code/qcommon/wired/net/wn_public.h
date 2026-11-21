@@ -141,24 +141,24 @@ conn_handle_t WN_GetConnHandleByAddr( const netadr_t *addr );
 qboolean      WN_GetAddrByConnHandle( conn_handle_t conn, netadr_t *out );
 
 /* Sentinel conn_handle for the single outgoing client connection.
- * Ordering: CONN_INVALID(0) < server slots(1..8) < CONN_CLIENT_QUIC(9).
+ * Ordering: CONN_INVALID(0) < server slots(1..128) < CONN_CLIENT_QUIC(129).
  * Value must equal WN_MAX_CLIENTS+1 from wn_local.h. */
-#define CONN_CLIENT_QUIC  ((conn_handle_t)9)
+#define CONN_CLIENT_QUIC  ((conn_handle_t)129)
 
 /* In-memory same-process local-app handle range (in-process-queue). A local app
  * i connects as WN_APP_CONN_BASE + i. Chosen high + disjoint from CONN_CLIENT_QUIC
- * and the 1..8 game-conn slots. Promoted to this public header so the transport
+ * and the 1..128 game-conn slots. Promoted to this public header so the transport
  * selector (transport_for_handle, below) is visible to all conn-bearing call
  * sites. WN_APP_CONN_COUNT mirrors wn_local.h's WN_MAX_LOCAL_CLIENTS (a
  * _Static_assert in wn_transport.c pins them equal). */
-#define WN_APP_CONN_BASE   ((conn_handle_t)100)
+#define WN_APP_CONN_BASE   ((conn_handle_t)1000)
 #define WN_APP_CONN_COUNT  4
 
 /* Server-side handle range for the SAME in-process apps. An in-memory connection
  * has two ends, exactly like a QUIC loopback connection has two distinct handles:
- *   client end  = WN_APP_CONN_BASE   + slot  (100..103) — wtcl_array[slot],
+ *   client end  = WN_APP_CONN_BASE   + slot  (1000..1003) — wtcl_array[slot],
  *                 decoded by wn_get_client_state / WN_AppSlotForConn.
- *   server end  = WN_APP_SVCONN_BASE + slot  (110..113) — game_conns[].pub_handle,
+ *   server end  = WN_APP_SVCONN_BASE + slot  (1010..1013) — game_conns[].pub_handle,
  *                 stored in svs.clients[].quic_conn.
  * Both ranges route to inmem_transport (transport_for_handle). The split lets the
  * in-memory send path infer DIRECTION from the handle range (server end → push to
@@ -166,7 +166,7 @@ qboolean      WN_GetAddrByConnHandle( conn_handle_t conn, netadr_t *out );
  * QUIC's wn_get_cnx distinguishes the client cnx (handle 9/100+) from a server
  * game-conn cnx (1..8). Without the split, handle 100 would mean "client end" to
  * wn_get_client_state yet "server game-conn" to pub_handle — a direction collision. */
-#define WN_APP_SVCONN_BASE ((conn_handle_t)110)
+#define WN_APP_SVCONN_BASE ((conn_handle_t)1010)
 #define WN_APP_SVCONN_COUNT 4
 
 /* The two transport backends. quic_transport is the reference (picoquic/UDP);

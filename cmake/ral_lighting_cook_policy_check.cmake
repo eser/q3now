@@ -12,7 +12,7 @@ file(READ "${ROOT}/code/render/frontend/render_lighting_project_source.c" PROJEC
 file(READ "${ROOT}/code/render/frontend/render_lighting_project_cook.c" PROJECT_COOK)
 file(READ "${ROOT}/code/render/frontend/tr_public.h" RENDER_ABI)
 file(READ "${ROOT}/code/client/cl_main.c" CLIENT)
-file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_init.c" VULKAN_MODULE)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_init.c" VULKAN_MODULE)
 file(READ "${ROOT}/code/render/ral/backends/opengl/ral_opengl_module.c" OPENGL_MODULE)
 file(READ "${ROOT}/code/render/ral/backends/metal/ral_metal_module.mm" METAL_MODULE)
 file(READ "${ROOT}/code/render/ral/backends/webgpu/ral_webgpu_renderer_module.c" WEBGPU_MODULE)

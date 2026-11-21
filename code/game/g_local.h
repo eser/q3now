@@ -1449,6 +1449,16 @@ void         trap_Nav_RemoveCrowdAgent( int agentId );
 void         trap_Nav_UpdateCrowd( float deltaTime );
 qboolean     trap_Nav_IsReady( void );
 qboolean     trap_Nav_IsBaking( void );
+
+/* Crowd promotion hand-off (GAME_API_VERSION 11). The engine says who is promotable and moves
+ * agents in and out of its crowd; the game decides what a promoted agent is. */
+void         G_CrowdInit( void );
+void         G_CrowdShutdown( void );
+void         G_CrowdFrame( int levelTime );
+int          trap_Crowd_PromotionBudget( void );
+int          trap_Crowd_Promotable( crowdAgentRef_t *out, int max );
+qboolean     trap_Crowd_Promote( int userId, crowdAgentState_t *out );
+qboolean     trap_Crowd_Demote( const crowdAgentState_t *state );
 void         trap_Nav_SetPolyFlagsForDoor( const char *targetname, int setFlags, int clearFlags );
 /* Re-apply every func_door's blocked-flags from its live mover state. Called once
  * when the async navmesh bake finishes (nav.ready false→true) so doors that spawned

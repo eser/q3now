@@ -1,0 +1,175 @@
+#pragma clang diagnostic ignored "-Wunused-variable"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+#include <metal_atomic>
+
+using namespace metal;
+
+struct Push
+{
+    float4x4 viewProj;
+    float4 params;
+    float4 tune;
+};
+
+struct Reached
+{
+    uint reached[1];
+};
+
+struct SurfAABB
+{
+    float4 mins;
+    float4 maxs;
+    float4 plane;
+    uint4 meta;
+};
+
+struct Aabb
+{
+    SurfAABB surfaces[1];
+};
+
+struct Counters
+{
+    uint counters[16];
+};
+
+struct OccludedBits
+{
+    uint occluded[1];
+};
+
+constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(256u, 1u, 1u);
+
+struct spvDescriptorSetBuffer0
+{
+    device Reached* m_39 [[id(0)]];
+    device Aabb* m_63 [[id(1)]];
+    device Counters* m_258 [[id(2)]];
+    texture2d<float> hiz [[id(3)]];
+    sampler hizSampler [[id(4)]];
+    device OccludedBits* m_455 [[id(5)]];
+};
+
+kernel void main0(device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], constant Push& _22 [[buffer(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+{
+    uint i = gl_GlobalInvocationID.x;
+    uint count = uint(_22.params.x);
+    if (i >= count)
+    {
+        return;
+    }
+    if (((*spvDescriptorSet0.m_39).reached[i >> 5u] & (1u << (i & 31u))) == 0u)
+    {
+        return;
+    }
+    uint idxCount = ((device uint*)&(*spvDescriptorSet0.m_63).surfaces[i].meta)[2u];
+    float3 mn = (*spvDescriptorSet0.m_63).surfaces[i].mins.xyz;
+    float3 mx = (*spvDescriptorSet0.m_63).surfaces[i].maxs.xyz;
+    float2 ndcMin = float2(1000000015047466219876688855040.0);
+    float2 ndcMax = float2(-1000000015047466219876688855040.0);
+    float nearest = -1000000015047466219876688855040.0;
+    bool crossesNear = false;
+    uint outsideMask = 63u;
+    float _111;
+    float _124;
+    float _137;
+    for (int c = 0; c < 8; c++)
+    {
+        if ((c & 1) != 0)
+        {
+            _111 = mx.x;
+        }
+        else
+        {
+            _111 = mn.x;
+        }
+        if ((c & 2) != 0)
+        {
+            _124 = mx.y;
+        }
+        else
+        {
+            _124 = mn.y;
+        }
+        if ((c & 4) != 0)
+        {
+            _137 = mx.z;
+        }
+        else
+        {
+            _137 = mn.z;
+        }
+        float3 p = float3(_111, _124, _137);
+        float4 q = _22.viewProj * float4(p, 1.0);
+        if (q.x >= (-q.w))
+        {
+            outsideMask &= 4294967294u;
+        }
+        if (q.x <= q.w)
+        {
+            outsideMask &= 4294967293u;
+        }
+        if (q.y >= (-q.w))
+        {
+            outsideMask &= 4294967291u;
+        }
+        if (q.y <= q.w)
+        {
+            outsideMask &= 4294967287u;
+        }
+        if (q.z >= 0.0)
+        {
+            outsideMask &= 4294967279u;
+        }
+        if (q.z <= q.w)
+        {
+            outsideMask &= 4294967263u;
+        }
+        if (q.w <= 9.9999997473787516355514526367188e-05)
+        {
+            crossesNear = true;
+            continue;
+        }
+        float3 n = q.xyz / float3(q.w);
+        ndcMin = fast::min(ndcMin, n.xy);
+        ndcMax = fast::max(ndcMax, n.xy);
+        nearest = fast::max(nearest, n.z);
+    }
+    if (outsideMask != 0u)
+    {
+        uint _261 = atomic_fetch_add_explicit((device atomic_uint*)&(*spvDescriptorSet0.m_258).counters[6], 1u, memory_order_relaxed);
+        uint _265 = atomic_fetch_add_explicit((device atomic_uint*)&(*spvDescriptorSet0.m_258).counters[7], idxCount, memory_order_relaxed);
+        return;
+    }
+    uint _268 = atomic_fetch_add_explicit((device atomic_uint*)&(*spvDescriptorSet0.m_258).counters[0], 1u, memory_order_relaxed);
+    uint _271 = atomic_fetch_add_explicit((device atomic_uint*)&(*spvDescriptorSet0.m_258).counters[3], idxCount, memory_order_relaxed);
+    if (crossesNear)
+    {
+        uint _276 = atomic_fetch_add_explicit((device atomic_uint*)&(*spvDescriptorSet0.m_258).counters[2], 1u, memory_order_relaxed);
+        uint _280 = atomic_fetch_add_explicit((device atomic_uint*)&(*spvDescriptorSet0.m_258).counters[5], idxCount, memory_order_relaxed);
+        return;
+    }
+    float2 size = float2(_22.params.z, _22.params.w);
+    float2 pmin = fast::clamp((((ndcMin * 0.5) + float2(0.5)) * size) - float2(1.0), float2(0.0), size - float2(1.0));
+    float2 pmax = fast::clamp((((ndcMax * 0.5) + float2(0.5)) * size) + float2(1.0), float2(0.0), size - float2(1.0));
+    float extent = fast::max(fast::max(pmax.x - pmin.x, pmax.y - pmin.y), 1.0);
+    int level0 = clamp(int(ceil(log2(extent))) - 1, 0, int(_22.params.y) - 1);
+    float texelPx = exp2(float(level0 + 1));
+    int2 dim = int2(spvDescriptorSet0.hiz.get_width(level0), spvDescriptorSet0.hiz.get_height(level0));
+    int2 t0 = clamp(int2(floor(pmin / float2(texelPx))), int2(0), dim - int2(1));
+    int2 t1 = clamp(int2(floor(pmax / float2(texelPx))), int2(0), dim - int2(1));
+    float farthest = spvDescriptorSet0.hiz.read(uint2(int2(t0.x, t0.y)), level0).x;
+    farthest = fast::min(farthest, spvDescriptorSet0.hiz.read(uint2(int2(t1.x, t0.y)), level0).x);
+    farthest = fast::min(farthest, spvDescriptorSet0.hiz.read(uint2(int2(t0.x, t1.y)), level0).x);
+    farthest = fast::min(farthest, spvDescriptorSet0.hiz.read(uint2(int2(t1.x, t1.y)), level0).x);
+    if (farthest > (nearest + _22.tune.x))
+    {
+        uint _448 = atomic_fetch_add_explicit((device atomic_uint*)&(*spvDescriptorSet0.m_258).counters[1], 1u, memory_order_relaxed);
+        uint _451 = atomic_fetch_add_explicit((device atomic_uint*)&(*spvDescriptorSet0.m_258).counters[4], idxCount, memory_order_relaxed);
+        uint _462 = atomic_fetch_or_explicit((device atomic_uint*)&(*spvDescriptorSet0.m_455).occluded[i >> 5u], 1u << (i & 31u), memory_order_relaxed);
+    }
+}
+

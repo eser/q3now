@@ -60,7 +60,7 @@ foreach(TOKEN IN ITEMS "RenderMaterialScript_ApplyLighting"
 	endif()
 endforeach()
 foreach(BACKEND IN ITEMS
-	"${ROOT}/code/render/ral/backends/vulkan/renderer/tr_init.c"
+	"${ROOT}/code/render/ral/backends/vulkan/renderer/vk_init.c"
 	"${ROOT}/code/render/ral/backends/opengl/ral_opengl_module.c"
 	"${ROOT}/code/render/ral/backends/metal/ral_metal_module.mm"
 	"${ROOT}/code/render/ral/backends/webgpu/ral_webgpu_renderer_module.c")
@@ -78,7 +78,7 @@ foreach(BACKEND IN ITEMS
 		message(FATAL_ERROR "backend world load lost irradiance sidecar ingestion: ${BACKEND}")
 	endif()
 endforeach()
-file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_init.c" VULKAN_MODULE_TEXT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_init.c" VULKAN_MODULE_TEXT)
 file(READ "${ROOT}/code/render/ral/backends/opengl/ral_opengl_module.c" OPENGL_MODULE_TEXT)
 file(READ "${ROOT}/code/render/ral/backends/metal/ral_metal_module.mm" METAL_MODULE_TEXT)
 file(READ "${ROOT}/code/render/ral/backends/webgpu/ral_webgpu_renderer_module.c" WEBGPU_MODULE_TEXT)
@@ -115,8 +115,8 @@ foreach(TOKEN IN ITEMS "localIrradiance" "lightingComposition"
 		message(FATAL_ERROR "lighting entity submission contract missing ${TOKEN}")
 	endif()
 endforeach()
-file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_scene.c" VULKAN_SCENE_TEXT)
-file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_shade_calc.c" VULKAN_SHADE_TEXT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_scene.c" VULKAN_SCENE_TEXT)
+file(READ "${ROOT}/code/render/renderer/tr_shade_calc.c" VULKAN_SHADE_TEXT)
 foreach(TOKEN IN ITEMS "RE_SetRefEntityLocalIrradiance" "localShQ16"
 	"hasLocalIrradiance" "coefficientHash" "r_showIrradianceProbes"
 	"FrontendDrawIrradianceDebug" "Ral_IrradianceDebugBuild"

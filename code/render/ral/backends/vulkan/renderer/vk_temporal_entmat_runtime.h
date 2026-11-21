@@ -5,7 +5,7 @@
 #define WIRED_VK_TEMPORAL_ENTMAT_RUNTIME_H
 
 #include "vk_temporal_entmat_adoption.h"
-#include "tr_temporal_motion_payload.h"
+#include "../../../../renderer/tr_temporal_motion_payload.h"
 
 typedef struct {
 	vkTemporalEntMatAdoptionOwner_t adoption;

@@ -41,6 +41,13 @@ clipMap_t	cm;
 int			c_pointcontents;
 int			c_traces, c_brush_traces, c_patch_traces;
 
+// The statistics above are plain counters for the main thread (com_showtrace).
+// Collision traces also run on worker threads (the navmesh bake, the WiredTasks
+// pool), where bumping the shared counters would be a data race and a contended
+// cache line; only the thread bound as the stats owner counts.
+QDECL_TLS int	cm_statsOwner;
+void CM_BindStatsOwner( void ) { cm_statsOwner = 1; }
+
 
 static mapFile_t *cm_bsp;
 

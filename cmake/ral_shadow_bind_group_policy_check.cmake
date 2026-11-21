@@ -73,7 +73,7 @@ FOREACH(NEEDLE IN ITEMS
 	REQUIRE_TEXT("${VK_H}" "${NEEDLE}" "retained shadow inventory")
 ENDFOREACH()
 
-REQUIRE_COUNT("${ABI}" "Ral_RegisterExternalPipelineBindGroupLayouts[(]" 3
+REQUIRE_COUNT("${ABI}" "Ral_RegisterExternalPipelineBindGroupLayouts[(]" 5
 	"shadow pipeline set-layout ABI inventory")
 FOREACH(NEEDLE IN ITEMS
 	"vk.shadowMap.ral_depthPipeline, 2u, staticLayouts"
@@ -141,7 +141,7 @@ FOREACH(NEEDLE IN ITEMS
 	REQUIRE_TEXT("${VK}" "${NEEDLE}" "shadow arena-owned MVP callsite")
 ENDFOREACH()
 
-REQUIRE_COUNT("${CSM}" "Ral_CmdBindBindGroupDynamicExact[(]" 8
+REQUIRE_COUNT("${CSM}" "Ral_CmdBindBindGroupDynamicExact[(]" 14
 	"CSM exact bind callsite inventory")
 REQUIRE_COUNT("${DLIGHT}" "Ral_CmdBindBindGroupDynamicExact[(]" 2
 	"dlight exact bind callsite inventory")

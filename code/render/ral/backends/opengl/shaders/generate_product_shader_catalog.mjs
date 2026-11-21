@@ -65,7 +65,7 @@ function render(portable) {
 	const catalog = JSON.parse(readFileSync(join(portable, 'translation_catalog.json'), 'utf8'));
 	if (catalog.schemaVersion !== 2
 			|| JSON.stringify(catalog.requiredTargets) !== JSON.stringify(['glsl460'])
-			|| !Array.isArray(catalog.entries) || catalog.entries.length !== 315)
+			|| !Array.isArray(catalog.entries) || catalog.entries.length !== 321)
 		throw new Error('OpenGL GLSL 4.60 catalog is not the exact canonical corpus');
 	const rendered = [];
 	for (const module of MODULES) {

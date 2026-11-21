@@ -3,6 +3,7 @@
 
 #include "ral_webgpu_renderer_module.h"
 #include "render_pbr_control.h"
+#include "render_dynamic_light_control.h"
 #include "ral_webgpu_browser_emscripten.h"
 #include "ral_webgpu_lighting.h"
 #include "ral_atmosphere_conformance.h"
@@ -123,6 +124,8 @@ typedef struct {
 	cvar_t								 *brightness;
 	cvar_t *pbr;
 	cvar_t pbrDefault;
+	cvar_t *dynamicLight;
+	cvar_t dynamicLightDefault;
 	cvar_t								  brightnessFallback;
 	cvar_t *aerialHaze;
 	cvar_t aerialHazeFallback;
@@ -2164,6 +2167,9 @@ static void BeginRegistration( glconfig_t *config )
 	if ( !s_module.pbr )
 		s_module.pbr = wired_render_pbr_register( &ri, &s_module.pbrDefault );
 	if ( !s_module.pbr ) { MarkFailed( "pbr-cvar" ); return; }
+	if ( !s_module.dynamicLight )
+		s_module.dynamicLight = wired_render_dynamic_light_register( &ri, &s_module.dynamicLightDefault );
+	if ( !s_module.dynamicLight ) { MarkFailed( "dynamiclight-cvar" ); return; }
 	if ( !config || !s_module.loaded || s_module.frameOpen || s_module.pendingFrameReady ) {
 		MarkFailed( "registration-state" );
 		return;
@@ -2875,11 +2881,13 @@ static void AddPoly( qhandle_t h, int n, const polyVert_t *v, int c )
 }
 static void AddLight( const vec3_t o, float i, float r, float g, float b )
 {
+	if ( s_module.dynamicLight && !s_module.dynamicLight->integer ) return;	/* r_dynamiclight 0: a successful no-op, not a submission failure */
 	if ( s_module.frameOpen && !RenderSubmission_AddLight( &s_module.frontend, o, NULL, i, r, g, b ) )
 		MarkFailed( "light" );
 }
 static void AddLinearLight( const vec3_t a, const vec3_t b, float i, float r, float g, float bl )
 {
+	if ( s_module.dynamicLight && !s_module.dynamicLight->integer ) return;
 	if ( s_module.frameOpen && !RenderSubmission_AddLight( &s_module.frontend, a, b, i, r, g, bl ) )
 		MarkFailed( "linear-light" );
 }

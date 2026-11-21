@@ -12,7 +12,7 @@
 #ifdef USE_VULKAN
 
 #include "../ral_vulkan_bridge.h"
-#include "vk_bindless_publication.h"
+#include "../../../../renderer/vk_bindless_publication.h"
 #include "vk_bindless_cohort.h"
 
 struct image_s;     // forward — from tr_local.h

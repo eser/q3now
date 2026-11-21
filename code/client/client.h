@@ -140,6 +140,15 @@ typedef struct {
 	entityState_t	parseEntities[MAX_PARSE_ENTITIES];
 
 	byte			baselineUsed[MAX_GENTITIES];
+
+	// The crowd channel (sv_crowd.c / wired_crowd_net). The view is allocated on
+	// the first packet and freed with the rest of the state in CL_ClearState.
+	struct wired_crowd_net_view *crowdView;
+	uint32_t		crowdTick;			// server tick of the last applied packet
+	int				crowdTickTime;		// cl.serverTime when it arrived
+	uint32_t		crowdPackets, crowdBytes, crowdGaps, crowdMalformed;
+	qboolean		crowdResyncPending;	// a crowdresync is in flight; do not queue another
+	int				crowdResyncTime;	// cl.serverTime when it was requested
 } clientActive_t;
 
 // 'cl' is no longer a bare global — it lives in the per-app container
@@ -619,6 +628,12 @@ extern	cvar_t	*cl_drawBuffer;
 // cl_main
 //
 void CL_AddReliableCommand( clientApp_t *app, const char *cmd, qboolean isDisconnectCmd );
+
+// cl_crowd.c -- the crowd channel (capacity roadmap Phase 4)
+void CL_Crowd_Init( void );
+void CL_Crowd_Parse( clientApp_t *app, msg_t *msg );
+void CL_Crowd_Free( clientApp_t *app );
+void CL_Crowd_AddToScene( clientApp_t *app, const refdef_t *fd );
 
 /* Typed browser connect path.  The caller has already normalized `target`
  * and resolved `address`; no credential enters Cbuf, a cvar, or a log. */

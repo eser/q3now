@@ -1,0 +1,161 @@
+#version 460
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+struct SurfAABB
+{
+    vec4 mins;
+    vec4 maxs;
+    vec4 plane;
+    uvec4 meta;
+};
+
+layout(binding = 1, std430) readonly buffer Reached
+{
+    uint reached[];
+} _39;
+
+layout(binding = 0, std430) readonly buffer Aabb
+{
+    SurfAABB surfaces[];
+} _63;
+
+layout(binding = 2, std430) buffer Counters
+{
+    uint counters[16];
+} _258;
+
+layout(binding = 3, std430) buffer OccludedBits
+{
+    uint occluded[];
+} _455;
+
+layout(std140, binding = 6) uniform Push
+{
+    mat4 viewProj;
+    vec4 params;
+    vec4 tune;
+} _22;
+
+layout(binding = 0) uniform texture2D hiz;
+layout(binding = 0) uniform sampler hizSampler;
+
+void main()
+{
+    uint i = gl_GlobalInvocationID.x;
+    uint count = uint(_22.params.x);
+    if (i >= count)
+    {
+        return;
+    }
+    if ((_39.reached[i >> 5u] & (1u << (i & 31u))) == 0u)
+    {
+        return;
+    }
+    uint idxCount = _63.surfaces[i].meta.z;
+    vec3 mn = _63.surfaces[i].mins.xyz;
+    vec3 mx = _63.surfaces[i].maxs.xyz;
+    vec2 ndcMin = vec2(1000000015047466219876688855040.0);
+    vec2 ndcMax = vec2(-1000000015047466219876688855040.0);
+    float nearest = -1000000015047466219876688855040.0;
+    bool crossesNear = false;
+    uint outsideMask = 63u;
+    float _111;
+    float _124;
+    float _137;
+    for (int c = 0; c < 8; c++)
+    {
+        if ((c & 1) != 0)
+        {
+            _111 = mx.x;
+        }
+        else
+        {
+            _111 = mn.x;
+        }
+        if ((c & 2) != 0)
+        {
+            _124 = mx.y;
+        }
+        else
+        {
+            _124 = mn.y;
+        }
+        if ((c & 4) != 0)
+        {
+            _137 = mx.z;
+        }
+        else
+        {
+            _137 = mn.z;
+        }
+        vec3 p = vec3(_111, _124, _137);
+        vec4 q = _22.viewProj * vec4(p, 1.0);
+        if (q.x >= (-q.w))
+        {
+            outsideMask &= 4294967294u;
+        }
+        if (q.x <= q.w)
+        {
+            outsideMask &= 4294967293u;
+        }
+        if (q.y >= (-q.w))
+        {
+            outsideMask &= 4294967291u;
+        }
+        if (q.y <= q.w)
+        {
+            outsideMask &= 4294967287u;
+        }
+        if (q.z >= 0.0)
+        {
+            outsideMask &= 4294967279u;
+        }
+        if (q.z <= q.w)
+        {
+            outsideMask &= 4294967263u;
+        }
+        if (q.w <= 9.9999997473787516355514526367188e-05)
+        {
+            crossesNear = true;
+            continue;
+        }
+        vec3 n = q.xyz / vec3(q.w);
+        ndcMin = min(ndcMin, n.xy);
+        ndcMax = max(ndcMax, n.xy);
+        nearest = max(nearest, n.z);
+    }
+    if (outsideMask != 0u)
+    {
+        uint _261 = atomicAdd(_258.counters[6], 1u);
+        uint _265 = atomicAdd(_258.counters[7], idxCount);
+        return;
+    }
+    uint _268 = atomicAdd(_258.counters[0], 1u);
+    uint _271 = atomicAdd(_258.counters[3], idxCount);
+    if (crossesNear)
+    {
+        uint _276 = atomicAdd(_258.counters[2], 1u);
+        uint _280 = atomicAdd(_258.counters[5], idxCount);
+        return;
+    }
+    vec2 size = vec2(_22.params.z, _22.params.w);
+    vec2 pmin = clamp((((ndcMin * 0.5) + vec2(0.5)) * size) - vec2(1.0), vec2(0.0), size - vec2(1.0));
+    vec2 pmax = clamp((((ndcMax * 0.5) + vec2(0.5)) * size) + vec2(1.0), vec2(0.0), size - vec2(1.0));
+    float extent = max(max(pmax.x - pmin.x, pmax.y - pmin.y), 1.0);
+    int level = clamp(int(ceil(log2(extent))) - 1, 0, int(_22.params.y) - 1);
+    float texelPx = exp2(float(level + 1));
+    ivec2 dim = textureSize(sampler2D(hiz, hizSampler), level);
+    ivec2 t0 = clamp(ivec2(floor(pmin / vec2(texelPx))), ivec2(0), dim - ivec2(1));
+    ivec2 t1 = clamp(ivec2(floor(pmax / vec2(texelPx))), ivec2(0), dim - ivec2(1));
+    float farthest = texelFetch(sampler2D(hiz, hizSampler), ivec2(t0.x, t0.y), level).x;
+    farthest = min(farthest, texelFetch(sampler2D(hiz, hizSampler), ivec2(t1.x, t0.y), level).x);
+    farthest = min(farthest, texelFetch(sampler2D(hiz, hizSampler), ivec2(t0.x, t1.y), level).x);
+    farthest = min(farthest, texelFetch(sampler2D(hiz, hizSampler), ivec2(t1.x, t1.y), level).x);
+    if (farthest > (nearest + _22.tune.x))
+    {
+        uint _448 = atomicAdd(_258.counters[1], 1u);
+        uint _451 = atomicAdd(_258.counters[4], idxCount);
+        uint _462 = atomicOr(_455.occluded[i >> 5u], 1u << (i & 31u));
+    }
+}
+
