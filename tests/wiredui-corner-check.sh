@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# wiredui-corner-check.sh — computed check for the SMAA corner-squares fix.
+# wiredui-corner-check.sh — computed check for the screen-corner squares over the menu.
 #
 # Symptom: four small squares in the screen corners over the menu that DIFFER
 # from the blessed-clean menu (originally near-black mis-cleared voids). The real
@@ -42,7 +42,7 @@ W="${VR_W:-1280}"; H="${VR_H:-720}"
 BLK_N="${BLK_N:-24}"
 # Max allowed mean-per-channel divergence (0-255) of a live corner from its
 # blessed golden corner. Corners are byte-stable launch-to-launch, so the only
-# spread is SMAA/dither sub-unit jitter; 6 sits clear above that and well below a
+# spread is dither sub-unit jitter; 6 sits clear above that and well below a
 # real square (which shifts a corner by tens of units — even a near-black square
 # on a near-black menu differs by the fill's own brightness, ~7+).
 CORNER_DELTA="${CORNER_DELTA:-6.0}"
@@ -255,7 +255,7 @@ HOME_NATIVE="$HOME_DIR"
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) HOME_NATIVE="$(cygpath -w "$HOME_DIR")" ;; esac
 
 MODE="verify"; [ "${SMOKE_UPDATE_GOLDEN:-0}" = "1" ] && MODE="bless"
-echo "==> WiredUI corner check (SMAA corner-squares, corner-vs-golden, mode=$MODE): $WIRED"
+echo "==> WiredUI corner check (corner squares, corner-vs-golden, mode=$MODE): $WIRED"
 
 # Keep the run's output. Discarding it makes a CRASH and a menu-that-never-opened
 # report identically as "no menu screenshot captured", which hides the one line
@@ -298,7 +298,6 @@ fi
         +set com_automated 1 +set s_initsound 0 \
         +set r_fullscreen 0 +set r_mode -1 +set r_customwidth "$W" +set r_customheight "$H" \
         +set r_layoutDump "${WIRED_LAYOUT_DUMP:-0}" \
-        +set r_smaa 1 \
         $SURFACE_ARGS +screenshot cornercap +wait 30 +quit \
         >"$RUN_LOG" 2>&1
 )

@@ -480,7 +480,7 @@ foreach(RETIRED IN ITEMS "VkImage " "VkImageView " "VkDeviceMemory " "VkSampler 
 endforeach()
 
 string(FIND "${PRODUCT}" "// Create + upload the baked blue-noise dither tile" BLUE_BEGIN)
-string(FIND "${PRODUCT}" "Inverse of vk_smaa_alloc_resources" BLUE_END)
+string(FIND "${PRODUCT}" "static void vk_shadow_destroy_group" BLUE_END)
 if(BLUE_BEGIN EQUAL -1 OR BLUE_END EQUAL -1 OR BLUE_END LESS BLUE_BEGIN)
 	message(FATAL_ERROR "cannot isolate blue-noise RAL-owned cohort")
 endif()
@@ -663,7 +663,7 @@ foreach(RETIRED IN ITEMS qvkAllocateDescriptorSets qvkUpdateDescriptorSets
 endforeach()
 
 string(FIND "${PRODUCT}" "// Shared effects per-draw UBO ring." EFFECTS_BEGIN)
-string(FIND "${PRODUCT}" "// SMAA rtMetrics per-frame UBO." EFFECTS_END)
+string(FIND "${PRODUCT}" "\n\tif ( vk.ral_color_image )\n\t{\n\t\talloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;" EFFECTS_END)
 if(EFFECTS_BEGIN EQUAL -1 OR EFFECTS_END EQUAL -1 OR EFFECTS_END LESS EFFECTS_BEGIN)
 	message(FATAL_ERROR "cannot isolate effects arena-owned bind-group span")
 endif()
@@ -1032,25 +1032,12 @@ require_text(PRODUCT_BINDINGS
 	"Vulkan: MSDF RAL bind-group cohort drifted at slot %u"
 	"MSDF adoption fallback retirement")
 
-string(FIND "${PRODUCT}" "// SMAA rtMetrics per-frame UBO." SMAA_RT_BEGIN)
-string(FIND "${PRODUCT}" "// End arena-owned SMAA rtMetrics cohort." SMAA_RT_END)
-if(SMAA_RT_BEGIN EQUAL -1 OR SMAA_RT_END EQUAL -1
-		OR SMAA_RT_END LESS SMAA_RT_BEGIN)
-	message(FATAL_ERROR "cannot isolate SMAA rtMetrics arena-owned bind-group span")
-endif()
-math(EXPR SMAA_RT_LEN "${SMAA_RT_END} - ${SMAA_RT_BEGIN}")
-string(SUBSTRING "${PRODUCT}" ${SMAA_RT_BEGIN} ${SMAA_RT_LEN} SMAA_RT)
-foreach(NEEDLE IN ITEMS
-	"rtCreate.arena = vk.ral_descriptor_arena;"
-	"rtCreate.arenaReceipt = &vk.ral_descriptor_arena_receipt;"
-	"vk.smaaRt.ral_descriptor[i] = Ral_CreateBindGroup("
-	"vk.smaaRt.descriptor[i] = (VkDescriptorSet)Ral_GetBindGroupHandle(")
-	require_text(SMAA_RT "${NEEDLE}" "SMAA rtMetrics arena-owned bind group")
-endforeach()
-foreach(RETIRED IN ITEMS qvkAllocateDescriptorSets qvkUpdateDescriptorSets)
-	string(FIND "${SMAA_RT}" "${RETIRED}" POS)
+
+# SMAA is retired: its rtMetrics UBO bind-group cohort must not return.
+foreach(RETIRED IN ITEMS "vk.smaaRt" "ral_bgl_smaa_rtmetrics" "set_layout_smaa_rtmetrics")
+	string(FIND "${PRODUCT}" "${RETIRED}" POS)
 	if(NOT POS EQUAL -1)
-		message(FATAL_ERROR "SMAA rtMetrics retained raw descriptor authority: ${RETIRED}")
+		message(FATAL_ERROR "retired SMAA rtMetrics cohort returned: ${RETIRED}")
 	endif()
 endforeach()
 
@@ -1113,7 +1100,6 @@ foreach(RETIRED IN ITEMS
 	endif()
 endforeach()
 foreach(NEEDLE IN ITEMS
-	"vk.smaaRt.ral_buffer[i]"
 	"vk.exposure.ral_buffer[i]"
 	"vk.menubg.ral_buffer[i]")
 	require_text(PRODUCT_BINDINGS "${NEEDLE}" "non-dynamic UBO wrapper teardown")
@@ -1330,89 +1316,35 @@ foreach(NEEDLE IN ITEMS
 	require_text(ENTMAT_PRODUCT "${NEEDLE}" "entity-matrix fail-closed lifecycle")
 endforeach()
 
-# SMAA owns five sampled texture cohorts directly through RAL. Raw descriptor
-# fields are Vulkan compatibility mirrors only; allocation, update and retained
-# adoption may not return. Arena refresh retires group -> view while the direct
-# texture parents survive until the SMAA resource owner tears them down.
-string(FIND "${PRODUCT}" "void vk_ral_release_smaa_sampler_cohorts" SMAA_SAMPLE_BEGIN)
-string(FIND "${PRODUCT}" "void vk_update_attachment_descriptors" SMAA_SAMPLE_END)
-if(SMAA_SAMPLE_BEGIN EQUAL -1 OR SMAA_SAMPLE_END EQUAL -1
-		OR SMAA_SAMPLE_END LESS SMAA_SAMPLE_BEGIN)
-	message(FATAL_ERROR "cannot isolate direct SMAA sampler cohorts")
-endif()
-math(EXPR SMAA_SAMPLE_LEN "${SMAA_SAMPLE_END} - ${SMAA_SAMPLE_BEGIN}")
-string(SUBSTRING "${PRODUCT}" ${SMAA_SAMPLE_BEGIN} ${SMAA_SAMPLE_LEN} SMAA_SAMPLE)
-foreach(NEEDLE IN ITEMS
-	"Ral_DestroyBindGroup( (group) );"
-	"Ral_DestroyTextureView( (view) );"
-	"vk_ral_refresh_texture_sampler_group( vk.smaa.ral_edges_image,"
-	"vk_ral_refresh_texture_sampler_group( vk.smaa.ral_blend_image,"
-	"vk_ral_refresh_texture_sampler_group( vk.smaa.ral_input_image,"
-	"vk_ral_refresh_texture_sampler_group( vk.smaa.ral_area_image,"
-	"vk_ral_refresh_texture_sampler_group( vk.smaa.ral_search_image,"
-	"vk.smaa.ral_point_sampler, \"wired-smaa-edges-bg\""
-	"vk.smaa.ral_linear_sampler, \"wired-smaa-blend-bg\""
-	"vk.smaa.ral_linear_sampler, \"wired-smaa-input-bg\""
-	"vk.smaa.ral_linear_sampler, \"wired-smaa-area-bg\""
-	"vk.smaa.ral_point_sampler, \"wired-smaa-search-bg\""
-	"vk.smaa.edges_descriptor = Ral_GetBindGroupHandle("
-	"vk.smaa.search_descriptor = Ral_GetBindGroupHandle(")
-	require_text(SMAA_SAMPLE "${NEEDLE}" "direct SMAA sampler cohort")
-endforeach()
-foreach(NEEDLE IN ITEMS
-	"struct ralTexture_s *ral_area_image;"
-	"struct ralTextureView_s *ral_area_view;"
-	"struct ralTexture_s *ral_search_image;"
-	"struct ralTextureView_s *ral_search_view;"
-	"struct ralTextureView_s *ral_edges_view;"
-	"struct ralTextureView_s *ral_blend_view;"
-	"struct ralTextureView_s *ral_input_view;"
-	"void vk_ral_release_smaa_sampler_cohorts( void );")
-	require_text(PRODUCT_HEADER "${NEEDLE}" "SMAA direct RAL inventory")
-endforeach()
+# SMAA is retired. Its five directly RAL-owned sampled texture cohorts, the
+# release/refresh helpers and the texture-parent release are gone from the
+# renderer, and the attachment-sampler release helper that remains must keep
+# the group -> view release order.
 foreach(RETIRED IN ITEMS
-	"qvkAllocateDescriptorSets( vk.device, &alloc, &vk.smaa.edges_descriptor )"
-	"qvkAllocateDescriptorSets( vk.device, &alloc, &vk.smaa.blend_descriptor )"
-	"qvkAllocateDescriptorSets( vk.device, &alloc, &vk.smaa.input_descriptor )"
-	"qvkAllocateDescriptorSets( vk.device, &alloc, &vk.smaa.area_descriptor )"
-	"qvkAllocateDescriptorSets( vk.device, &alloc, &vk.smaa.search_descriptor )"
-	"desc.dstSet = vk.smaa.edges_descriptor;"
-	"desc.dstSet = vk.smaa.blend_descriptor;"
-	"desc.dstSet = vk.smaa.input_descriptor;"
-	"desc.dstSet = vk.smaa.area_descriptor;"
-	"desc.dstSet = vk.smaa.search_descriptor;"
-	"RETAIN_ADOPT( vk.smaa.ral_edges_descriptor"
-	"RETAIN_ADOPT( vk.smaa.ral_blend_descriptor"
-	"RETAIN_ADOPT( vk.smaa.ral_input_descriptor"
-	"RETAIN_ADOPT( vk.smaa.ral_area_descriptor"
-	"RETAIN_ADOPT( vk.smaa.ral_search_descriptor")
-	string(FIND "${PRODUCT}${PRODUCT_BINDINGS}" "${RETIRED}" POS)
+	"vk.smaa."
+	"vk_ral_release_smaa_sampler_cohorts"
+	"vk_ral_refresh_smaa_sampler_cohorts"
+	"vk_smaa_release_resources"
+	"vk_smaa_alloc_resources"
+	"RETAIN_ADOPT( vk.smaa")
+	string(FIND "${PRODUCT}${PRODUCT_BINDINGS}${PRODUCT_HEADER}" "${RETIRED}" POS)
 	if(NOT POS EQUAL -1)
-		message(FATAL_ERROR "SMAA sampler retained raw/adopted authority: ${RETIRED}")
+		message(FATAL_ERROR "retired SMAA sampler cohort returned: ${RETIRED}")
 	endif()
 endforeach()
-string(FIND "${SMAA_SAMPLE}" "Ral_DestroyBindGroup( (group) );" SMAA_GROUP_RELEASE)
-string(FIND "${SMAA_SAMPLE}" "Ral_DestroyTextureView( (view) );" SMAA_VIEW_RELEASE)
-if(SMAA_GROUP_RELEASE EQUAL -1 OR SMAA_VIEW_RELEASE EQUAL -1
-		OR NOT SMAA_GROUP_RELEASE LESS SMAA_VIEW_RELEASE)
-	message(FATAL_ERROR "SMAA sampler lost group -> view release order")
+string(FIND "${PRODUCT}" "void vk_ral_release_attachment_sampler_cohorts" ATTACH_SAMPLE_BEGIN)
+string(FIND "${PRODUCT}" "void vk_update_attachment_descriptors" ATTACH_SAMPLE_END)
+if(ATTACH_SAMPLE_BEGIN EQUAL -1 OR ATTACH_SAMPLE_END EQUAL -1
+		OR ATTACH_SAMPLE_END LESS ATTACH_SAMPLE_BEGIN)
+	message(FATAL_ERROR "cannot isolate attachment sampler cohort release")
 endif()
-string(FIND "${PRODUCT}" "static void vk_smaa_release_resources" SMAA_RELEASE_BEGIN)
-string(FIND "${PRODUCT}" "static void vk_shadow_destroy_group" SMAA_RELEASE_END)
-if(SMAA_RELEASE_BEGIN EQUAL -1 OR SMAA_RELEASE_END EQUAL -1
-		OR SMAA_RELEASE_END LESS SMAA_RELEASE_BEGIN)
-	message(FATAL_ERROR "cannot isolate SMAA texture-parent release")
-endif()
-math(EXPR SMAA_RELEASE_LEN "${SMAA_RELEASE_END} - ${SMAA_RELEASE_BEGIN}")
-string(SUBSTRING "${PRODUCT}" ${SMAA_RELEASE_BEGIN} ${SMAA_RELEASE_LEN} SMAA_RELEASE)
-require_text(SMAA_RELEASE "vk_ral_release_smaa_sampler_cohorts();"
-	"direct SMAA child release")
-require_text(SMAA_RELEASE "Ral_DestroyTexture( (texture) );"
-	"direct SMAA texture-parent release")
-string(FIND "${SMAA_RELEASE}" "vk_ral_release_smaa_sampler_cohorts();" SMAA_CHILD_RELEASE)
-string(FIND "${SMAA_RELEASE}" "Ral_DestroyTexture( (texture) );" SMAA_PARENT_RELEASE)
-if(SMAA_CHILD_RELEASE GREATER SMAA_PARENT_RELEASE)
-	message(FATAL_ERROR "SMAA texture parents must be released after bind-group/view children")
+math(EXPR ATTACH_SAMPLE_LEN "${ATTACH_SAMPLE_END} - ${ATTACH_SAMPLE_BEGIN}")
+string(SUBSTRING "${PRODUCT}" ${ATTACH_SAMPLE_BEGIN} ${ATTACH_SAMPLE_LEN} ATTACH_SAMPLE)
+string(FIND "${ATTACH_SAMPLE}" "Ral_DestroyBindGroup( (group) );" ATTACH_GROUP_RELEASE)
+string(FIND "${ATTACH_SAMPLE}" "Ral_DestroyTextureView( (view) );" ATTACH_VIEW_RELEASE)
+if(ATTACH_GROUP_RELEASE EQUAL -1 OR ATTACH_VIEW_RELEASE EQUAL -1
+		OR NOT ATTACH_GROUP_RELEASE LESS ATTACH_VIEW_RELEASE)
+	message(FATAL_ERROR "attachment sampler lost group -> view release order")
 endif()
 
 # Ribbon, rail-ribbon and beam share one WebGPU-shaped primitive sampling ABI:
@@ -1511,16 +1443,6 @@ foreach(RETIRED IN ITEMS qvkAllocateDescriptorSets qvkUpdateDescriptorSets VkWri
 		message(FATAL_ERROR "primitive product publication regained raw descriptor authority: ${RETIRED}")
 	endif()
 endforeach()
-math(EXPR SMAA_RELEASE_LEN "${SMAA_RELEASE_END} - ${SMAA_RELEASE_BEGIN}")
-string(SUBSTRING "${PRODUCT}" ${SMAA_RELEASE_BEGIN} ${SMAA_RELEASE_LEN} SMAA_RELEASE)
-string(FIND "${SMAA_RELEASE}" "vk_ral_release_smaa_sampler_cohorts();" SMAA_CHILD_RELEASE)
-string(FIND "${SMAA_RELEASE}" "Ral_DestroyTexture( (texture) );" SMAA_TEXTURE_RELEASE)
-if(SMAA_CHILD_RELEASE EQUAL -1 OR SMAA_TEXTURE_RELEASE EQUAL -1
-		OR NOT SMAA_CHILD_RELEASE LESS SMAA_TEXTURE_RELEASE)
-	message(FATAL_ERROR
-		"SMAA teardown lost RAL children -> direct texture-parent order")
-endif()
-
 string(REGEX MATCHALL "Ral_CreateBindGroupArena[(]" PRODUCT_CREATE_CALLS "${PRODUCT}")
 list(LENGTH PRODUCT_CREATE_CALLS PRODUCT_CREATE_COUNT)
 string(REGEX MATCHALL "vk_ral_reset_descriptor_arena[(]" PRODUCT_RESET_CALLS "${PRODUCT}")

@@ -156,8 +156,7 @@ static qboolean vk_ral_upload_ticket_complete( ralUploadTicket_t *ticket ) {
 
 static void                 vk_ral_destroy_adopted_pipeline_layouts( void );  // fwd
 void                        vk_ral_adopt_static_pipeline_layouts( void );      // fwd
-// internal-texture adoption (depth, color, tonemapped,
-// SMAA input/edges/blend). GPU timestamp queries are native RAL resources
+// internal-texture adoption (depth, color, tonemapped). GPU timestamp queries are native RAL resources
 // owned directly by vk_gpu_ts_init/vk_gpu_ts_shutdown in vk.c.
 
 // boot-time adoption of every allocate-once
@@ -868,50 +867,6 @@ void vk_ral_textures_init( void ) {
 // The main rotating set cohort is also retained here through its named owners:
 // set0 tess uniform, set2 engine resources and set3 MSDF/entMat. Set1 remains
 // the central bindless owner in this TU.
-static void vk_ral_destroy_smaa_bindgroups( void )
-{
-	uint32_t i;
-	#define DESTROY_SMAA_BG( field ) do { \
-		if ( (field) ) { Ral_DestroyBindGroup( (field) ); (field) = NULL; } \
-	} while ( 0 )
-	vk_ral_release_smaa_sampler_cohorts();
-	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		DESTROY_SMAA_BG( vk.smaaRt.ral_descriptor[i] );
-	}
-	#undef DESTROY_SMAA_BG
-}
-
-static qboolean vk_ral_smaa_bindgroups_ready( void )
-{
-	uint32_t i;
-	if ( vk.smaa.active
-			&& ( !vk.smaa.ral_edges_image || !vk.smaa.ral_edges_view
-				|| !vk.smaa.ral_edges_descriptor
-				|| !vk.smaa.ral_blend_image || !vk.smaa.ral_blend_view
-				|| !vk.smaa.ral_blend_descriptor
-				|| !vk.smaa.ral_input_image || !vk.smaa.ral_input_view
-				|| !vk.smaa.ral_input_descriptor
-				|| !vk.smaa.ral_area_image || !vk.smaa.ral_area_view
-				|| !vk.smaa.ral_area_descriptor
-				|| !vk.smaa.ral_search_image || !vk.smaa.ral_search_view
-				|| !vk.smaa.ral_search_descriptor
-				|| Ral_GetBindGroupHandle( vk.smaa.ral_edges_descriptor )
-					!= (void *)vk.smaa.edges_descriptor
-				|| Ral_GetBindGroupHandle( vk.smaa.ral_blend_descriptor )
-					!= (void *)vk.smaa.blend_descriptor
-				|| Ral_GetBindGroupHandle( vk.smaa.ral_input_descriptor )
-					!= (void *)vk.smaa.input_descriptor
-				|| Ral_GetBindGroupHandle( vk.smaa.ral_area_descriptor )
-					!= (void *)vk.smaa.area_descriptor
-				|| Ral_GetBindGroupHandle( vk.smaa.ral_search_descriptor )
-					!= (void *)vk.smaa.search_descriptor ) ) return qfalse;
-	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ )
-		if ( !vk.smaaRt.ral_descriptor[i] || !vk.smaaRt.ral_buffer[i]
-		  || Ral_GetBindGroupHandle( vk.smaaRt.ral_descriptor[i] )
-			!= (void *)vk.smaaRt.descriptor[i] ) return qfalse;
-	return qtrue;
-}
-
 void vk_ral_release_tess_uniform_bindgroup( uint32_t slot )
 {
 	if ( slot >= ARRAY_LEN( vk.tess ) ) return;
@@ -1576,13 +1531,6 @@ void vk_ral_adopt_static_bindgroups( void )
 				"Vulkan: IQM bone RAL bind-group cohort drifted at slot %u", i );
 #endif
 	}
-	if ( !vk.fboActive || !vk_ral_smaa_bindgroups_ready() ) {
-		if ( vk.fboActive )
-			R_LOG( rch_ral, SEV_WARN,
-				"SMAA direct RAL sampler cohort creation failed; disabling typed SMAA command path\n" );
-		vk_ral_destroy_smaa_bindgroups();
-	}
-
 	#undef ADOPT
 	#undef RETAIN_ADOPT
 
@@ -1597,9 +1545,8 @@ void vk_ral_adopt_static_bindgroups( void )
 	// adopt the 6 renderer-owned internal-image VkImages
 	// + the GPU-timestamp VkQueryPool into ralTexture_t / ralQueryPool_t
 	// siblings. Must run AFTER vk_initialize (which creates the VkImages) and
-	// AFTER vk_smaa_alloc_resources (when r_smaa is on at boot). The boot-time
 	// call path is vk_initialize → vk_init_descriptors → vk_ral_adopt_static_bindgroups
-	// → here; the SMAA images are conditionally adopted under vk.fboActive.
+	// → here.
 	vk_ral_refresh_internal_texture_dependents();
 }
 
@@ -1824,7 +1771,6 @@ static void vk_ral_destroy_adopted_bindgroups( void )
 	vk_ral_release_engine_resources_bindgroup();
 	DESTROY_RETAINED_BG( vk.blueNoise.ral_descriptor );
 	vk.blueNoise.descriptor = VK_NULL_HANDLE;
-	vk_ral_destroy_smaa_bindgroups();
 	vk_ral_release_particle_compute_bindgroups();
 	vk_ral_release_particle_render_bindgroups();
 	vk_ral_release_decal_render_bindgroups();
@@ -1884,7 +1830,6 @@ void vk_ral_adopt_static_pipeline_layouts( void )
 	} while ( 0 )
 	VERIFY_PL( vk.pipeline_layout, vk.ral_pipeline_layout );
 	VERIFY_PL( vk.pipeline_layout_post_process, vk.ral_pipeline_layout_post_process );
-	VERIFY_PL( vk.pipeline_layout_smaa, vk.ral_pipeline_layout_smaa );
 	VERIFY_PL( vk.pipeline_layout_msdf, vk.ral_pipeline_layout_msdf );
 	VERIFY_PL( vk.pipeline_layout_ao, vk.ral_pipeline_layout_ao );
 	VERIFY_PL( vk.pipeline_layout_sunrays, vk.ral_pipeline_layout_sunrays );
@@ -2021,7 +1966,6 @@ static void vk_ral_destroy_adopted_pipeline_layouts( void )
 	#define KILL_PL( ralfield ) do { if ( ralfield ) { Ral_DestroyPipelineLayout( ralfield ); ralfield = NULL; } } while ( 0 )
 	KILL_PL( vk.ral_pipeline_layout );
 	KILL_PL( vk.ral_pipeline_layout_post_process );
-	KILL_PL( vk.ral_pipeline_layout_smaa );
 	KILL_PL( vk.ral_pipeline_layout_msdf );
 	KILL_PL( vk.ral_pipeline_layout_ao );
 	KILL_PL( vk.ral_pipeline_layout_sunrays );
@@ -2177,7 +2121,6 @@ void vk_ral_textures_shutdown( qboolean destroyWindow ) {
 		KILL_BGL( vk.ral_bgl_uniform );
 		KILL_BGL( vk.ral_bgl_exposure );
 		KILL_BGL( vk.ral_bgl_effects_ubo );
-		KILL_BGL( vk.ral_bgl_smaa_rtmetrics );
 		#undef KILL_PIPE
 		#undef KILL_BGL
 	}
@@ -3400,8 +3343,8 @@ static void Ral_PipelineTest_retired( void ) {
 	}
 
 	// Special-case sibling fields populated by per-call vk_ral_create_special_pipeline.
-	// Fixtures numbered per the 19-entry fixture table; some are "umbrella" entries
-	// covering a cluster (e.g. fixture #15 SMAA → 3 ral pipelines), in which case
+	// Fixtures are numbered in table order; some are "umbrella" entries
+	// covering a cluster of several ral pipelines, in which case
 	// PASS requires ALL pipelines in the cluster non-NULL.
 	const ral_pipeline_test_fixture_t fixtures[] = {
 		// 1-4: centralized helper coverage — UI/world surfaces live as
@@ -3436,16 +3379,12 @@ static void Ral_PipelineTest_retired( void ) {
 		{ "tonemap default (special-case)",
 		  (const ralPipeline_t **)&vk.ral_tonemap_pipeline,
 		  "may be NULL if tonemap variant > 0 is active; check tonemap_variants[] below" },
-		// 15: SMAA edge detect (special-case, three-pipeline cluster).
-		{ "SMAA edge detect (special-case)",
-		  (const ralPipeline_t **)&vk.ral_smaa_edge_pipeline,
-		  "+ smaa_blend + smaa_resolve checked separately" },
-		// 16-17: Mirror portal + wireframe — both run through centralized
+		// Mirror portal + wireframe — both run through centralized
 		// helper under specific shader_types / state_bits; same array-scan
 		// coverage as 1-7.
 		{ "mirror portal opaque",                  NULL, "shader_type triggered by R_DrawMirror; centralized helper" },
 		{ "wireframe surface",                     NULL, "r_showtris > 0; centralized helper polygonMode=LINE" },
-		// 18: Q1 lightstyle blend — centralized helper, FEAT_Q1 shader_type.
+		// Q1 lightstyle blend — centralized helper, FEAT_Q1 shader_type.
 		{ "Q1 lightstyle blend",                   NULL, "FEAT_Q1 shader_type triggered by Q1 BSP map; centralized helper" },
 	};
 
@@ -3468,14 +3407,12 @@ static void Ral_PipelineTest_retired( void ) {
 		        fixtures[i].note ? fixtures[i].note : "" );
 	}
 
-	// Additional cluster pipelines (umbrella'd into fixtures #14 / #15).
+	// Additional cluster pipelines (umbrella'd into the tonemap fixture).
 	R_LOG( rch_ral, SEV_INFO, "  Sub-fixture (cluster expansion):\n" );
 	#define DUMP_FIELD(label, ptr) do { \
 		if ( (ptr) ) { R_LOG( rch_ral, SEV_INFO, "    %-44s : %s\n", (label), "PASS" ); pass++; } \
 		else         { R_LOG( rch_ral, SEV_INFO, "    %-44s : %s\n", (label), "miss" );  } \
 	} while (0)
-	DUMP_FIELD( "smaa_blend (cluster of #15)",       vk.ral_smaa_blend_pipeline );
-	DUMP_FIELD( "smaa_resolve (cluster of #15)",     vk.ral_smaa_resolve_pipeline );
 	DUMP_FIELD( "gamma (post-process)",              vk.ral_gamma_pipeline );
 	DUMP_FIELD( "capture (post-process)",            vk.ral_capture_pipeline );
 	DUMP_FIELD( "bloom_extract (post-process)",      vk.ral_bloom_extract_pipeline );

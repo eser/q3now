@@ -1447,7 +1447,7 @@ typedef struct {
 
 	qboolean screenMapDone;
 	qboolean doneBloom;
-	qboolean doneUIPass;	// Block 8 (Delta 2): single source of truth for "the 3D→2D transition orchestrator already ran this frame" — set when render_pass.ui (gameplay: after bloom/tonemap/SMAA) or render_pass.ui_clear (pure-2D) was opened on img 265. Subsequent transition-site calls in the same frame are no-ops. Resets per frame next to doneBloom. (Replaces the old doneTonemap once-guard.)
+	qboolean doneUIPass;	// Block 8 (Delta 2): single source of truth for "the 3D→2D transition orchestrator already ran this frame" — set when render_pass.ui (gameplay: after bloom/tonemap) or render_pass.ui_clear (pure-2D) was opened on img 265. Subsequent transition-site calls in the same frame are no-ops. Resets per frame next to doneBloom. (Replaces the old doneTonemap once-guard.)
 	qboolean sceneRenderedThisFrame;	// HUD-translucency fix (2026-06-30): set by the FRONT END (R_AddDrawSurfCmd) the moment a real world scene is queued (rdflags & RDF_NOWORLDMODEL excluded — UI 3D model previews don't count). RB_TransitionToUI reads it to decide LOAD-the-world (gameplay → HUD blends over the tonemapped scene) vs CLEAR-to-black (pure-2D menu/loading). Replaces the unreliable back-end command-stream pre-scan (rb_frameHas3D), which couldn't see RDF_NOWORLDMODEL and mis-classified gameplay frames as pure-2D → UI pass CLEARed img265 to black → translucent panels/console read as grey-over-black instead of see-through. Reset per frame in RE_BeginFrame.
 
 	// loading throttle: last time a buffer swap actually presented while
@@ -1797,8 +1797,6 @@ extern cvar_t	*r_sunRayIntensity;
 extern cvar_t	*r_sunRayDecay;
 #endif
 extern cvar_t	*r_aa;
-extern cvar_t	*r_smaa;
-extern cvar_t	*r_smaa_threshold;
 extern cvar_t	*r_lerpLightstyles;		// 0=10Hz stepped, 1=smooth lerp between pattern chars
 #endif
 
@@ -1909,11 +1907,10 @@ void R_SwapBuffers( int );
 void R_RenderView( const viewParms_t *parms );
 uint64_t R_TemporalProjectionPrepare( viewParms_t *view );
 
-// Anti-aliasing decisions (r_aa, r_smaa, r_temporalInputTest, entity-matrix
-// path) resolved by tr_antialiasing.c.  Every SMAA and temporal enable check in
-// the renderer reads these instead of the cvars.
+// Anti-aliasing decisions (r_aa, r_temporalInputTest, entity-matrix path)
+// resolved by tr_antialiasing.c.  Every temporal enable check in the renderer
+// reads these instead of the cvars.
 void R_AntialiasingPlan( rAntialiasingPlan_t *outPlan );
-int  R_AntialiasingSmaaQuality( void );
 int  R_AntialiasingTemporalRequested( void );
 void R_TemporalProjectionFinish( int worldIndex, uint64_t frameId, qboolean queued );
 void R_TemporalBackendRecorded( int worldIndex, uint64_t frameId );

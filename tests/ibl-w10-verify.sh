@@ -94,7 +94,7 @@ CFG
 nullab)
     # NULL A/B: identical determinism settings, but r_pbr held at 0 for BOTH shots
     # (no toggle). Measures the engine's irreducible per-frame nondeterminism
-    # (SMAA/dither/jitter) at this viewpoint — the noise floor the real A/B's
+    # (dither/jitter) at this viewpoint — the noise floor the real A/B's
     # delta must beat. Same 8 floor remaps + same inter-shot gap as `capture`.
     x="$1"; y="$2"; z="$3"; yaw="$4"
     rm -f "$SHOT_DIR"/w10_n0.png "$SHOT_DIR"/w10_n1.png

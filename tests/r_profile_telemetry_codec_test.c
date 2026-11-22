@@ -15,12 +15,12 @@ int main(void) {
 	memcpy(in.capability,token,16); memset(in.session,0xa5,16);
 	in.kind=R_PROFILE_PACKET_SAMPLE; in.status=R_PROFILE_STATUS_ACTIVE;
 	in.producerGeneration=3; in.topologyEpoch=7; in.sequence=42; in.producerTickUsec=99;
-	in.laneCount=2; strcpy(in.labels[0],"smaa_edges"); strcpy(in.labels[1],"wired.present");
+	in.laneCount=2; strcpy(in.labels[0],"bloom_extract"); strcpy(in.labels[1],"wired.present");
 	in.durationMs[0]=1.25; in.durationMs[1]=0.5;
 	assert(R_ProfileTelemetryEncode(&in,packet,sizeof(packet),&bytes));
 	assert(bytes < R_PROFILE_TELEMETRY_PACKET_MAX && packet[0]=='W' && packet[1]=='P' && packet[2]=='T' && packet[3]=='1');
 	memset(&out,0,sizeof(out)); assert(R_ProfileTelemetryDecode(packet,bytes,&out));
-	assert(out.sequence==42 && out.laneCount==2 && strcmp(out.labels[0],"smaa_edges")==0 && out.durationMs[1]==0.5);
+	assert(out.sequence==42 && out.laneCount==2 && strcmp(out.labels[0],"bloom_extract")==0 && out.durationMs[1]==0.5);
 	memset(&sentinel,0x5a,sizeof(sentinel)); out=sentinel;
 	assert(!R_ProfileTelemetryDecode(packet,bytes-1,&out)); assert(memcmp(&out,&sentinel,sizeof(out))==0);
 	packet[12]^=1; assert(!R_ProfileTelemetryDecode(packet,bytes,&out)); packet[12]^=1;

@@ -4,13 +4,13 @@
 #
 # GPU cost of the anti-aliasing modes side by side, inside ONE process.
 #
-# The temporal quality gate (ral-temporal-quality-check.sh) compares "no AA" with TAA only,
-# so it cannot say what TAA costs against SMAA. This runs the three arms (r_aa 0 / 1 / 2) in a
-# palindromic order, N S T T S N repeated, so a drifting GPU clock hits every arm alike, and
-# reports per-arm medians of the engine's own GPU aggregate (r_gpuSpeeds, 200-frame averages).
+# TAA is the only anti-aliasing technique. This runs the arms none (r_aa 0), TAA (r_aa 2) and the
+# temporal gate's own "on" arm in a palindromic order, N T G G T N repeated, so a drifting GPU
+# clock hits every arm alike, and reports per-arm medians of the engine's own GPU aggregate
+# (r_gpuSpeeds, 200-frame averages).
 #
 # Instrument checks built in (not claims):
-#   * repeat spread: the N arm appears four times; its spread is the noise floor the S and T
+#   * repeat spread: the N arm appears four times; its spread is the noise floor the T and G
 #     deltas have to beat.
 #   * the "gate-on" arm reproduces the temporal gate's own comparison; if its delta disagrees with the gate
 #     (+0.75 ms) the instrument or the configuration differs and the other numbers are not trusted.
@@ -66,15 +66,23 @@ ln -sfn "$PAX21" "$HOME_DIR/base/pax21.sw3z"
 ln -sfn "$GAMECL" "$HOME_DIR/base/gameclarm64.dylib"
 ln -sfn "$GAMESV" "$HOME_DIR/base/gamesvarm64.dylib"
 
-# Arms, run in a palindromic order and repeated. 0 none (r_aa 0), 1 SMAA preset 3 (r_aa 1), 2 TAA (r_aa 2),
-# 3 the temporal gate's own "on" arm (r_aa 0 + r_temporalInputTest 1), 4 SMAA preset 1, 5 SMAA preset 4,
+# Arms, run in a palindromic order and repeated. 0 none (r_aa 0), 2 TAA (r_aa 2),
+# 3 the temporal gate's own "on" arm (r_aa 0 + r_temporalInputTest 1),
 # 6 none + 4 redundant pass splits, 7 none + 16 redundant pass splits (r_dbgExtraSplit), 8 TAA with the older
-# per-draw exact pass (r_dbgExactHold 0; the default is the held exact pass). Arms 4-7 are dose
-# responses: they say whether a cost grows with shader work (SMAA 1 -> 4) or with the number of render passes.
+# per-draw exact pass (r_dbgExactHold 0; the default is the held exact pass). Arms 6-7 are dose
+# responses: they say whether a cost grows with the number of render passes. The arm numbers
+# are stable identifiers: the retired SMAA arms (1, 4, 5) are simply not assigned.
 ORDER=()
-# AAC_ARMS picks the arms (default 0 1 2 3: none, SMAA3, TAA, gate). The dose arms 4-7 answered their question and
+# AAC_ARMS picks the arms (default 0 2 3: none, TAA, gate). The dose arms 6-7 answered their question and
 # every live mode switch eats descriptor-pool memory (TASK-258), so they are opt-in.
-ARMS=(${AAC_ARMS:-0 1 2 3})
+ARMS=(${AAC_ARMS:-0 2 3})
+for a in "${ARMS[@]}"; do
+	case "$a" in
+		1|4|5) echo "FAIL arm $a was an SMAA arm; SMAA is retired (TAA is the only AA technique)"; exit 64 ;;
+		0|2|3|6|7|8|9|10|11|12|13|14|15|16) ;;
+		*) echo "FAIL unknown arm '$a' in AAC_ARMS"; exit 64 ;;
+	esac
+done
 for (( r = 0; r < ROUNDS; r++ )); do
 	for a in "${ARMS[@]}"; do ORDER+=("$a"); done
 	for (( k = ${#ARMS[@]} - 1; k >= 0; k-- )); do ORDER+=("${ARMS[$k]}"); done
@@ -94,29 +102,26 @@ set vm_game 0
 set vm_cgame 0
 set sv_cheats 1
 set sv_pure 0
-set aacSetup "cg_draw2D 0; cg_drawGun 0; cg_thirdPerson 0; con_notifytime 0; sv_fps 125; timescale 1; fixedtime 0; r_pinShaderTime 2.0; r_pinFrameTime 2.0; wait 512; noclip; setviewpos 888 -768 434 180 0; r_temporalInputTest 0; r_smaa 0; ${AAC_PAN:+cl_yawspeed 60; +right; }wait 64; vstr aacSeg0"
+set aacSetup "cg_draw2D 0; cg_drawGun 0; cg_thirdPerson 0; con_notifytime 0; sv_fps 125; timescale 1; fixedtime 0; r_pinShaderTime 2.0; r_pinFrameTime 2.0; wait 512; noclip; setviewpos 888 -768 434 180 0; r_temporalInputTest 0; ${AAC_PAN:+cl_yawspeed 60; +right; }wait 64; vstr aacSeg0"
 CFGEOF
 	for (( i = 0; i <= LAST; i++ )); do
 		arm="${ORDER[$i]}"; tag="ARM${arm}_$i"
 		if [ "$i" -lt "$LAST" ]; then next="vstr aacSeg$(( i + 1 ))"; else next="echo AAC_COMPLETE; quit"; fi
 		case "$arm" in
-			0) armcmd="r_temporalInputTest 0; r_aa 0; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 0" ;;
-			1) armcmd="r_temporalInputTest 0; r_aa 1; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 0" ;;
-			2) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve 1; r_dbgTemporalRepeatStore 1; r_dbgTemporalFold 1; r_dbgTemporalQuality 7" ;;
-			3) armcmd="r_aa 0; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 1; r_temporalInputTest 1" ;;
-			4) armcmd="r_temporalInputTest 0; r_aa 1; r_smaa 1; r_dbgExtraSplit 0" ;;
-			5) armcmd="r_temporalInputTest 0; r_aa 1; r_smaa 4; r_dbgExtraSplit 0" ;;
-			6) armcmd="r_temporalInputTest 0; r_aa 0; r_smaa 0; r_dbgExtraSplit 4" ;;
-			7) armcmd="r_temporalInputTest 0; r_aa 0; r_smaa 0; r_dbgExtraSplit 16" ;;
-			8) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 0" ;;
-			9) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve 4; r_dbgTemporalRepeatStore 1" ;;
-			10) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve 1; r_dbgTemporalRepeatStore 4" ;;
-			11) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve -1; r_dbgTemporalRepeatStore 1" ;;
-			12) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve -1; r_dbgTemporalRepeatStore -1" ;;
-			13) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve 1; r_dbgTemporalRepeatStore 1; r_dbgTemporalFold 0" ;;
-			14) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve 1; r_dbgTemporalRepeatStore 1; r_dbgTemporalFold 1; r_dbgTemporalQuality 0" ;;
-			15) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve 1; r_dbgTemporalRepeatStore 1; r_dbgTemporalFold 1; r_dbgTemporalQuality 3" ;;
-			16) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve 1; r_dbgTemporalRepeatStore 1; r_dbgTemporalFold 1; r_dbgTemporalQuality 4" ;;
+			0) armcmd="r_temporalInputTest 0; r_aa 0; r_dbgExtraSplit 0; r_dbgExactHold 0" ;;
+			2) armcmd="r_temporalInputTest 0; r_aa 2; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve 1; r_dbgTemporalRepeatStore 1; r_dbgTemporalFold 1; r_dbgTemporalQuality 7" ;;
+			3) armcmd="r_aa 0; r_dbgExtraSplit 0; r_dbgExactHold 1; r_temporalInputTest 1" ;;
+			6) armcmd="r_temporalInputTest 0; r_aa 0; r_dbgExtraSplit 4" ;;
+			7) armcmd="r_temporalInputTest 0; r_aa 0; r_dbgExtraSplit 16" ;;
+			8) armcmd="r_temporalInputTest 0; r_aa 2; r_dbgExtraSplit 0; r_dbgExactHold 0" ;;
+			9) armcmd="r_temporalInputTest 0; r_aa 2; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve 4; r_dbgTemporalRepeatStore 1" ;;
+			10) armcmd="r_temporalInputTest 0; r_aa 2; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve 1; r_dbgTemporalRepeatStore 4" ;;
+			11) armcmd="r_temporalInputTest 0; r_aa 2; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve -1; r_dbgTemporalRepeatStore 1" ;;
+			12) armcmd="r_temporalInputTest 0; r_aa 2; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve -1; r_dbgTemporalRepeatStore -1" ;;
+			13) armcmd="r_temporalInputTest 0; r_aa 2; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve 1; r_dbgTemporalRepeatStore 1; r_dbgTemporalFold 0" ;;
+			14) armcmd="r_temporalInputTest 0; r_aa 2; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve 1; r_dbgTemporalRepeatStore 1; r_dbgTemporalFold 1; r_dbgTemporalQuality 0" ;;
+			15) armcmd="r_temporalInputTest 0; r_aa 2; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve 1; r_dbgTemporalRepeatStore 1; r_dbgTemporalFold 1; r_dbgTemporalQuality 3" ;;
+			16) armcmd="r_temporalInputTest 0; r_aa 2; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve 1; r_dbgTemporalRepeatStore 1; r_dbgTemporalFold 1; r_dbgTemporalQuality 4" ;;
 		esac
 		printf 'set aacSeg%s "%s; wait 96; set r_gpuSpeeds 1; echo AAC_%s_BEGIN; wait 220; echo AAC_%s_END; set r_gpuSpeeds 0; wait 16; %s"\n' "$i" "$armcmd" "$tag" "$tag" "$next"
 	done
@@ -134,7 +139,7 @@ python3 "$TIMEOUT_RUNNER" --timeout 900 --kill-after 15 --cwd "$WD" --stdout "$S
 	"$WIRED" +set fs_basepath "$HOME_DIR" +set fs_homepath "$HOME_DIR" +set fs_game base \
 	+set com_automated 1 +set com_noHardReboot 1 +set s_initsound 0 +set s_volume 0 +set s_musicVolume 0 \
 	+set r_fullscreen 0 +set r_mode -1 +set r_customwidth "${AAC_W:-1280}" +set r_customheight "${AAC_H:-720}" \
-	+set r_vkValidate 0 +set r_temporalInputTest 0 +set r_smaa 0 \
+	+set r_vkValidate 0 +set r_temporalInputTest 0 \
 	"${STRIP[@]}" \
 	+set log_severity DEBUG +set log_file_severity DEBUG +set log_file_mode overwrite_synced \
 	+exec ral-aa-cost.cfg
@@ -195,7 +200,7 @@ for i, arm in enumerate(order):
     for k, v in full_s[0].items():
         if k not in ("frames", "total"): lanes[arm].setdefault(k, []).append(v)
 RAN = [arm for arm in range(24) if per[arm]]
-name = {0: "none", 1: "SMAA3", 2: "TAA", 3: "gate-on", 4: "SMAA1", 5: "SMAA4", 6: "none+4sp", 7: "none+16sp", 8: "TAA-legacy", 9: "TAA resolve x4", 10: "TAA store x4", 11: "TAA resolve skipped", 12: "TAA resolve+store skipped", 13: "TAA store-copy", 14: "TAA quality off", 15: "TAA no fallback", 16: "TAA fallback only"}
+name = {0: "none", 2: "TAA", 3: "gate-on", 6: "none+4sp", 7: "none+16sp", 8: "TAA-legacy", 9: "TAA resolve x4", 10: "TAA store x4", 11: "TAA resolve skipped", 12: "TAA resolve+store skipped", 13: "TAA store-copy", 14: "TAA quality off", 15: "TAA no fallback", 16: "TAA fallback only"}
 print(f"config: {'full default renderer' if full == '1' else 'stripped (as the temporal gate)'}; order {order_s}")
 for arm in RAN:
     v = per[arm]
@@ -220,9 +225,6 @@ for arm in RAN[1:]:
     dp = (statistics.median(passes[arm]) - statistics.median(passes[0])) if passes[arm] and passes[0] else None
     per_pass = f"; {d / dp:+.3f} ms per extra pass ({dp:+.1f} passes)" if dp else ""
     print(f"  {name[arm]} - none = {d:+.3f} ms ({d / base * 100:+.1f}%)  -> {'above' if abs(d) > noise else 'WITHIN'} the noise floor{per_pass}")
-if 1 in RAN and 2 in RAN:
-    d_ts = statistics.median(per[2]) - statistics.median(per[1])
-    print(f"  TAA - SMAA3 = {d_ts:+.3f} ms")
 print("  exact-route structure per arm (a run costs 4 render passes):")
 for arm in RAN:
     rs = [t for (a_, i_), v in route_seg.items() if a_ == arm for t in v]
@@ -234,7 +236,7 @@ for arm in RAN:
     big = sorted(((statistics.median(vs), k) for k, vs in lanes[arm].items() if statistics.median(vs) > 0.05), reverse=True)
     print(f"    {name[arm]:8s} " + ", ".join(f"{k}={v:.3f}" for v, k in big))
 print("  lane medians that differ most from 'none' (ms):")
-for arm in [a for a in (1, 2, 3) if a in RAN]:
+for arm in [a for a in (2, 3) if a in RAN]:
     diffs = []
     for k, vs in lanes[arm].items():
         b = lanes[0].get(k)

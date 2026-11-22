@@ -21,6 +21,7 @@ file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.h" PRODUCT_HEADER
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_textures.c" PRODUCT_TEXTURE_TEXT)
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_textures.h" PRODUCT_TEXTURE_HEADER_TEXT)
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_image.c" PRODUCT_IMAGE_TEXT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_backend.c" PRODUCT_BACKEND_TEXT)
 file(READ "${ROOT}/code/render/renderer/tr_local.h" PRODUCT_LOCAL_TEXT)
 file(READ "${ROOT}/tests/ral_vulkan_translate_test.c" TRANSLATE_TEST_TEXT)
 file(READ "${ROOT}/tests/ral_transition_command_test.c" TRANSITION_COMMAND_TEST_TEXT)
@@ -391,7 +392,7 @@ endforeach()
 extract_between("${PRODUCT_TEXT}" "static void vk_scene_depth_copy_internal"
 	"void vk_scene_depth_copy( void )" SCENE_DEPTH_COPY_TEXT)
 extract_between("${PRODUCT_TEXT}" "void vk_forwardplus_depth_copy( void )"
-	"void vk_smaa( void )" FORWARDPLUS_DEPTH_COPY_TEXT)
+	"void vk_begin_bloom_extract_render_pass" FORWARDPLUS_DEPTH_COPY_TEXT)
 foreach(SPAN_NAME IN ITEMS MAIN_HANDOFF_TEXT SCENE_DEPTH_COPY_TEXT FORWARDPLUS_DEPTH_COPY_TEXT)
 	foreach(FORBIDDEN IN ITEMS "VkImageMemoryBarrier" "qvkCmdPipelineBarrier"
 		"qvkCmdCopyImage" "Ral_SetTextureLayout")
@@ -428,105 +429,50 @@ if(NOT LEGACY_SCENE_DEPTH_TRANSITION EQUAL -1)
 	message(FATAL_ERROR "sceneDepth regained native-shaped transition authority")
 endif()
 
-extract_between("${PRODUCT_TEXT}" "static qboolean vk_smaa_transition_copy_pair"
-	"static qboolean vk_smaa_publish_attachment_sampled" SMAA_COPY_TRANSITION_TEXT)
-extract_between("${PRODUCT_TEXT}" "static qboolean vk_smaa_publish_attachment_sampled"
-	"void vk_smaa( void )" SMAA_ATTACHMENT_TRANSITION_TEXT)
-extract_between("${PRODUCT_TEXT}" "void vk_smaa( void )"
-	"void vk_begin_bloom_extract_render_pass" SMAA_TEXT)
-foreach(REQUIRED IN ITEMS
-	"RAL_RESOURCE_USAGE_SAMPLED_TEXTURE"
-	"RAL_RESOURCE_USAGE_COPY_SOURCE"
-	"RAL_RESOURCE_USAGE_COPY_DESTINATION"
-	"RAL_STAGE_FRAGMENT"
-	"Ral_CmdTransitionResources( vk.cmd->ral_cmd")
-	string(FIND "${SMAA_COPY_TRANSITION_TEXT}" "${REQUIRED}" POSITION)
-	if(POSITION EQUAL -1)
-		message(FATAL_ERROR "SMAA portable copy transition lost: ${REQUIRED}")
-	endif()
-endforeach()
-foreach(REQUIRED IN ITEMS
-	"RAL_RESOURCE_USAGE_COLOR_ATTACHMENT"
-	"RAL_RESOURCE_USAGE_SAMPLED_TEXTURE"
-	"Ral_CmdTransitionResources( vk.cmd->ral_cmd")
-	string(FIND "${SMAA_ATTACHMENT_TRANSITION_TEXT}" "${REQUIRED}" POSITION)
-	if(POSITION EQUAL -1)
-		message(FATAL_ERROR "SMAA portable attachment transition lost: ${REQUIRED}")
-	endif()
-endforeach()
-foreach(REQUIRED IN ITEMS
-	"vk_smaa_transition_copy_pair( qtrue )"
-	"Ral_CmdCopyImage( vk.cmd->ral_cmd, vk.ral_tonemapped_image"
-	"vk_smaa_transition_copy_pair( qfalse )"
-	"vk_smaa_publish_attachment_sampled( vk.smaa.ral_edges_image )"
-	"vk_smaa_publish_attachment_sampled( vk.smaa.ral_blend_image )"
-	"vk_smaa_publish_attachment_sampled( vk.ral_tonemapped_image )"
-	"TERM_UNRECOVERABLE")
-	string(FIND "${SMAA_TEXT}" "${REQUIRED}" POSITION)
-	if(POSITION EQUAL -1)
-		message(FATAL_ERROR "SMAA portable command chain lost: ${REQUIRED}")
-	endif()
-endforeach()
-foreach(REQUIRED IN ITEMS
-	"Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 0,\n\t\t\tvk.smaa.ral_input_descriptor )"
-	"Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 0,\n\t\t\tvk.smaa.ral_edges_descriptor )"
-	"Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 1,\n\t\t\tvk.smaa.ral_area_descriptor )"
-	"Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 2,\n\t\t\tvk.smaa.ral_search_descriptor )"
-	"Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 1,\n\t\t\tvk.smaa.ral_blend_descriptor )"
-	"Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 2,\n\t\t\tvk.smaa.ral_blend_descriptor )"
-	"Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 3,\n\t\t\tvk.smaaRt.ral_descriptor[ vk.cmd_index ] )")
-	string(FIND "${SMAA_TEXT}" "${REQUIRED}" POSITION)
-	if(POSITION EQUAL -1)
-		message(FATAL_ERROR "SMAA retained bind-group command lost: ${REQUIRED}")
-	endif()
-endforeach()
-string(REGEX MATCHALL "Ral_CmdBindBindGroup[(]" SMAA_BINDS "${SMAA_TEXT}")
-list(LENGTH SMAA_BINDS SMAA_BIND_COUNT)
-if(NOT SMAA_BIND_COUNT EQUAL 10)
-	message(FATAL_ERROR "SMAA must issue exactly 10 retained bind-group commands, got ${SMAA_BIND_COUNT}")
-endif()
-foreach(FORBIDDEN IN ITEMS "VkImageMemoryBarrier" "qvkCmdPipelineBarrier"
-	"qvkCmdCopyImage" "qvkCmdBindDescriptorSets" "Ral_SetTextureLayout")
-	string(FIND "${SMAA_TEXT}" "${FORBIDDEN}" POSITION)
-	if(NOT POSITION EQUAL -1)
-		message(FATAL_ERROR "SMAA regained raw/manual image authority: ${FORBIDDEN}")
-	endif()
-endforeach()
-foreach(REQUIRED IN ITEMS
-	"struct ralBindGroupLayout_s *ral_bgl_smaa_rtmetrics"
-	"struct ralBindGroup_s *ral_descriptor[NUM_COMMAND_BUFFERS]"
-	"struct ralBindGroup_s *ral_area_descriptor"
-	"struct ralBindGroup_s *ral_search_descriptor"
-	"struct ralBindGroup_s *ral_edges_descriptor"
-	"struct ralBindGroup_s *ral_blend_descriptor"
-	"struct ralBindGroup_s *ral_input_descriptor")
-	string(FIND "${PRODUCT_HEADER_TEXT}" "${REQUIRED}" POSITION)
-	if(POSITION EQUAL -1)
-		message(FATAL_ERROR "SMAA retained bind-group inventory lost: ${REQUIRED}")
-	endif()
-endforeach()
-foreach(REQUIRED IN ITEMS
+# SMAA is retired: the tonemapped scene goes straight from vk_tonemap() to the
+# LOAD-mode UI pass (vk_open_ui_pass( qfalse )), so no SMAA copy/transition
+# helper, pass, retained bind group or layout may exist in the renderer.
+foreach(RETIRED IN ITEMS
+	"vk_smaa("
+	"vk_smaa_transition_copy_pair"
+	"vk_smaa_publish_attachment_sampled"
+	"vk_smaa_create_texture"
+	"vk.smaa."
+	"vk.smaaRt"
+	"ral_bgl_smaa_rtmetrics"
+	"set_layout_smaa_rtmetrics"
+	"pipeline_layout_smaa"
 	"vk_ral_refresh_smaa_sampler_cohorts"
 	"vk_ral_release_smaa_sampler_cohorts"
-	"Ral_CreateBindGroup( backend, &createInfo )"
 	"vk_ral_smaa_bindgroups_ready"
-	"vk_ral_destroy_smaa_bindgroups"
+	"vk_ral_destroy_smaa_bindgroups")
+	string(FIND "${PRODUCT_TEXTURE_TEXT}${PRODUCT_TEXT}${PRODUCT_HEADER_TEXT}" "${RETIRED}" POSITION)
+	if(NOT POSITION EQUAL -1)
+		message(FATAL_ERROR "retired SMAA runtime returned: ${RETIRED}")
+	endif()
+endforeach()
+# The gameplay 3D->2D handoff is bloom -> tonemap -> LOAD-mode UI pass, with no
+# anti-aliasing pass between tonemap and the UI.
+string(FIND "${PRODUCT_BACKEND_TEXT}"
+	"\tvk_tonemap();\n\tvk_open_ui_pass( qfalse );\n\tbackEnd.doneUIPass = qtrue;" POSITION)
+if(POSITION EQUAL -1)
+	message(FATAL_ERROR "gameplay UI transition lost the tonemap -> LOAD-mode UI pass sequence")
+endif()
+foreach(REQUIRED IN ITEMS
+	"Ral_CreateBindGroup( backend, &createInfo )"
 	"void vk_ral_release_static_bindgroups( void )")
 	string(FIND "${PRODUCT_TEXTURE_TEXT}${PRODUCT_TEXT}" "${REQUIRED}" POSITION)
 	if(POSITION EQUAL -1)
-		message(FATAL_ERROR "SMAA retained bind-group lifecycle lost: ${REQUIRED}")
+		message(FATAL_ERROR "retained bind-group lifecycle lost: ${REQUIRED}")
 	endif()
 endforeach()
 foreach(REQUIRED IN ITEMS
-	"&vk.ral_bgl_smaa_rtmetrics, &vk.set_layout_smaa_rtmetrics,"
-	"\"wired-set-layout-smaa-rtmetrics\" );"
 	"vk_ral_release_static_bindgroups();\n\t\t{\n\t\t\tint sl6d;"
 	"vk_ral_release_static_bindgroups();\n\tRal_DestroyBindGroupArena"
-	"vk_ral_release_static_bindgroups();\n\t{\n\t\tint sl6d;"
-	"Ral_DestroyBindGroupLayout( vk.ral_bgl_smaa_rtmetrics )")
+	"vk_ral_release_static_bindgroups();\n\t{\n\t\tint sl6d;")
 	string(FIND "${PRODUCT_TEXT}" "${REQUIRED}" POSITION)
 	if(POSITION EQUAL -1)
-		message(FATAL_ERROR "SMAA descriptor-pool/layout ordering lost: ${REQUIRED}")
+		message(FATAL_ERROR "descriptor-pool/layout ordering lost: ${REQUIRED}")
 	endif()
 endforeach()
 string(FIND "${PRODUCT_TEXTURE_HEADER_TEXT}"
@@ -651,16 +597,6 @@ foreach(REQUIRED IN ITEMS
 	string(FIND "${BRIDGE_TEXT}${RESOURCE_TEXT}" "${REQUIRED}" POSITION)
 	if(POSITION EQUAL -1)
 		message(FATAL_ERROR "borrowed native image-view bridge lost: ${REQUIRED}")
-	endif()
-endforeach()
-foreach(REQUIRED IN ITEMS
-	"vk.smaa.ral_input_image = vk_smaa_create_texture("
-	"vk.smaa.ral_edges_image = vk_smaa_create_texture("
-	"vk.smaa.ral_blend_image = vk_smaa_create_texture("
-	"RAL_TEXTURE_USAGE_TRANSFER_DST | RAL_TEXTURE_USAGE_SAMPLED")
-	string(FIND "${PRODUCT_TEXTURE_TEXT}${PRODUCT_TEXT}" "${REQUIRED}" POSITION)
-	if(POSITION EQUAL -1)
-		message(FATAL_ERROR "SMAA direct texture ownership lost: ${REQUIRED}")
 	endif()
 endforeach()
 

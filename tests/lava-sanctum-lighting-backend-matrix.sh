@@ -57,7 +57,7 @@ capture_native() {
     +set sv_pure 0 +set sv_cheats 1 +set vm_game 0 +set vm_cgame 0 \
     +set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 \
     +set r_renderScale 1 +set r_pinShaderTime 1.0 +set r_pinFrameTime 1.0 \
-    +set r_hdrAutoExposure 0 +set r_bloom 0 +set r_smaa 0 +set con_notifytime 0 \
+    +set r_hdrAutoExposure 0 +set r_bloom 0 +set con_notifytime 0 \
     +set cg_draw2D 0 +log renderer.init info +exec lava-sanctum-matrix.cfg
   shot="$(wired_newest_shot "$marker" "$home/base/screenshots")" || {
     echo "FAIL: $backend produced no fresh arena7 capture" >&2; tail -n 100 "$log"; exit 1;

@@ -37,7 +37,7 @@ int main(){
 	send_socket_t sender=socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);assert(sender>=0);
 	rProfileTelemetryFrame_t f{};memcpy(f.capability,token,16);memset(f.session,0x11,16);
 	f.kind=R_PROFILE_PACKET_SAMPLE;f.status=R_PROFILE_STATUS_ACTIVE;f.producerGeneration=1;f.topologyEpoch=1;f.laneCount=2;f.sequence=1;f.producerTickUsec=100;
-	strcpy(f.labels[0],"smaa_edges");strcpy(f.labels[1],"wired.present");f.durationMs[0]=1.0;f.durationMs[1]=2.0;
+	strcpy(f.labels[0],"bloom_extract");strcpy(f.labels[1],"wired.present");f.durationMs[0]=1.0;f.durationMs[1]=2.0;
 	Send(sender,port,f);wiredProfileTelemetryUdpReceipt_t receipt=Pump(receiver,1000,[](const auto&r){return r.acceptedSequence==1;});
 	assert(receipt.live&&receipt.acceptedSequence==1&&receipt.sessionChanges==1);
 	ralProfileSnapshot_t snapshot{};double history[RAL_PROFILE_HISTORY_CAPACITY][RAL_PROFILE_MAX_LANES]{};
@@ -47,7 +47,7 @@ int main(){
 	f.sequence=2;f.durationMs[0]=3.0;Send(sender,port,f);receipt=Pump(receiver,1200,[](const auto&r){return r.acceptedSequence==2;});
 	assert(WiredProfileTelemetryUdp_Snapshot(receiver,&snapshot,&history[0][0],RAL_PROFILE_HISTORY_CAPACITY,&receipt)&&receipt.historyFrames==2&&snapshot.latestMs[0]==3.0);
 	WiredProfileTelemetryUdp_Poll(receiver,2000000,&receipt);assert(!receipt.live&&receipt.staleTransitions==1);
-	memset(f.session,0x22,16);f.producerGeneration=1;f.topologyEpoch=2;f.sequence=1;strcpy(f.labels[0],"smaa_blend");
+	memset(f.session,0x22,16);f.producerGeneration=1;f.topologyEpoch=2;f.sequence=1;strcpy(f.labels[0],"bloom_blend");
 	Send(sender,port,f);receipt=Pump(receiver,2000100,[](const auto&r){return r.sessionChanges==2&&r.acceptedSequence==1;});assert(receipt.live);
 	assert(WiredProfileTelemetryUdp_Snapshot(receiver,&snapshot,&history[0][0],RAL_PROFILE_HISTORY_CAPACITY,&receipt)&&receipt.historyFrames==1);
 	f.kind=R_PROFILE_PACKET_TERMINAL;f.status=R_PROFILE_STATUS_RENDERER_STOPPED;f.laneCount=0;Send(sender,port,f);

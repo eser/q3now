@@ -3,7 +3,7 @@
 //
 // blue_noise_texture.h — 64x64 tileable blue-noise threshold tile (R8),
 // void-and-cluster (Ulichney 1993). Uniform histogram, blue spectrum. Baked
-// (deterministic seed) like the SMAA area/search LUTs; uploaded as an R8 tile
+// (deterministic seed); uploaded as an R8 tile
 // and sampled by gamma.frag's blue-noise dither (r_dither 2). WebGPU-safe (R8).
 
 #ifndef BLUE_NOISE_TEXTURE_H

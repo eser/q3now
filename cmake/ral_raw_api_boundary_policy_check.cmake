@@ -257,9 +257,9 @@ string(REGEX MATCHALL "Ral_CmdDrawIndexed[(]" ral_indexed_draws "${vk_code}")
 list(LENGTH ral_indexed_draws ral_indexed_draw_count)
 string(REGEX MATCHALL "Ral_CmdDraw[(]" ral_draws "${vk_code}")
 list(LENGTH ral_draws ral_draw_count)
-if(NOT ral_indexed_draw_count EQUAL 13 OR NOT ral_draw_count EQUAL 17)
+if(NOT ral_indexed_draw_count EQUAL 13 OR NOT ral_draw_count EQUAL 14)
 	message(FATAL_ERROR
-		"portable draw inventory changed: indexed=${ral_indexed_draw_count}/13, draw=${ral_draw_count}/17")
+		"portable draw inventory changed: indexed=${ral_indexed_draw_count}/13, draw=${ral_draw_count}/14")
 endif()
 
 forbid_regex("${vk_code}" "(^|[^A-Za-z0-9_])qvkCmdSet(Viewport|Scissor)([^A-Za-z0-9_]|$)"
@@ -278,9 +278,9 @@ string(REGEX MATCHALL "Ral_CmdSetViewport[(]" ral_viewports "${vk_code}")
 list(LENGTH ral_viewports ral_viewport_count)
 string(REGEX MATCHALL "Ral_CmdSetScissor[(]" ral_scissors "${vk_code}")
 list(LENGTH ral_scissors ral_scissor_count)
-if(NOT ral_viewport_count EQUAL 20 OR NOT ral_scissor_count EQUAL 21)
+if(NOT ral_viewport_count EQUAL 17 OR NOT ral_scissor_count EQUAL 18)
 	message(FATAL_ERROR
-		"portable dynamic-state inventory changed: viewport=${ral_viewport_count}/20, scissor=${ral_scissor_count}/21")
+		"portable dynamic-state inventory changed: viewport=${ral_viewport_count}/17, scissor=${ral_scissor_count}/18")
 endif()
 
 # Tess geometry and the main entity-matrix ring use the same CPU-shadow owner as
@@ -324,7 +324,7 @@ require_text("${vk_buffer_shadow_code}"
 require_text("${vk_buffer_shadow_code}"
 	"&& ( (uint32_t)usage & forbidden ) == 0u;"
 	"CPU-shadow owner mapped-capability gate")
-foreach(cohort IN ITEMS msdf effectsUbo smaaRt exposure menubg)
+foreach(cohort IN ITEMS msdf effectsUbo exposure menubg)
 	require_text("${vk_code}" "vk.${cohort}.ral_buffer[i]" "${cohort} RAL buffer ownership")
 	forbid_regex("${vk_code}" "vk[.]${cohort}[.](buffer|memory)" "${cohort} raw buffer ownership")
 endforeach()
@@ -470,13 +470,11 @@ foreach(geometry_buffer_seam IN ITEMS
 	require_text("${vk_header}${vk}" "${geometry_buffer_seam}"
 		"portable tess/static-VBO geometry ownership")
 endforeach()
-foreach(smaa_staging_seam IN ITEMS
+foreach(texture_staging_seam IN ITEMS
 	"static qboolean vk_ral_stage_texture_copy( ralTexture_t *destination,"
-	"vk_smaa_alloc_resources area LUT"
-	"vk_smaa_alloc_resources search LUT"
 	"image->ral, update, (uint32_t)num_regions")
-	require_text("${vk}" "${smaa_staging_seam}"
-		"typed SMAA/general texture upload staging path")
+	require_text("${vk}" "${texture_staging_seam}"
+		"typed general texture upload staging path")
 endforeach()
 foreach(iqm_geometry_seam IN ITEMS
 	"qboolean vk_create_iqm_vbo( ralBuffer_t **outVertBuf,"
@@ -537,25 +535,11 @@ forbid_regex("${vk_code}"
 forbid_regex("${vk_code}"
 	"Ral_AdoptTextureExact[(][^;]*sceneDepth"
 	"adopted shared scene-depth texture ownership")
-foreach(smaa_texture IN ITEMS edges blend input area search)
-	require_text("${vk_code}"
-		"vk.smaa.ral_${smaa_texture}_image = vk_smaa_create_texture("
-		"direct SMAA ${smaa_texture} texture ownership")
-endforeach()
-foreach(smaa_texture_seam IN ITEMS
-	"static ralTexture_t *vk_smaa_create_texture("
-	"vk_ral_seed_smaa_intermediate_states( rcmd )"
-	"RELEASE_SMAA_TEXTURE( vk.smaa.ral_edges_image );"
-	"vk_ral_release_smaa_sampler_cohorts();")
-	require_text("${vk_code}" "${smaa_texture_seam}"
-		"direct SMAA texture/view lifecycle")
-endforeach()
+# SMAA is retired: no runtime SMAA resource, pass, pipeline or lifecycle helper
+# may exist in the product renderer (the sealed shader corpus keeps its modules).
 forbid_regex("${vk_code}"
-	"vk[.]smaa[.](edges|blend|input|area|search)_(image|view|memory)"
-	"raw SMAA texture ownership")
-forbid_regex("${vk_code}"
-	"(Ral_AdoptTextureExact|vk_ral_adopt_one_texture)[(][^;]*smaa"
-	"adopted SMAA texture ownership")
+	"vk[.]smaa|vk_smaa|ral_smaa_|smaaRt|smaa_rtmetrics|RPFMT_SMAA|VK_PM_SMAA"
+	"retired SMAA runtime ownership")
 foreach(dlight_texture_seam IN ITEMS
 	"texture_desc.debugName = \"wired-dlight-shadow-atlas\";"
 	"vk.dlightShadow.ral_image = Ral_CreateTexture( vk_ral_get_backend(),"

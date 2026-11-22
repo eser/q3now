@@ -89,7 +89,7 @@ slice_between(_beam "${_vk}" "void RB_DrawBeams( void )" "void vk_init_sprite( v
 slice_between(_sprite "${_vk}" "void RB_DrawSprites( void )" "void vk_init_particle( void )")
 slice_between(_effects_adopt "${_vk}"
 	"// Shared effects per-draw UBO ring."
-	"// SMAA rtMetrics per-frame UBO.")
+	"\n\tif ( vk.ral_color_image )\n\t{\n\t\talloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;")
 
 # One pipeline-authoritative portable bind transaction: set0 has no offsets;
 # set1 has exactly one uint32 dynamic offset. Both binds must be checked.

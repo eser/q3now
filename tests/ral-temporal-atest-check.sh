@@ -208,7 +208,7 @@ with open(sys.argv[1],"w") as out:
 PYEOF
 QCONSOLE="$HOME_DIR/qconsole.jsonl"
 STDOUT="$ROOT/stdout.log"
-python3 "$TIMEOUT_RUNNER" --timeout 120 --kill-after 15 --cwd "$WD" --stdout "$STDOUT" -- "$WIRED" +set fs_basepath "$HOME_DIR" +set fs_homepath "$HOME_DIR" +set fs_game base +set com_automated 1 +set com_noHardReboot 1 +set s_initsound 0 +set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set r_vkValidate 0 +set r_temporalInputTest 0 +set r_bloom 0 +set r_ao 0 +set r_smaa 0 +set r_forwardPlus 0 +set r_drawSunRays 0 +set r_shadows "$MEASURE" +set r_depthFade 0 +set r_lens 0 +set r_gpuDecals 0 +set r_particles 0 +set r_atmosphericGPU 0 +set log_severity DEBUG +set log_file_severity DEBUG +set log_file_mode overwrite_synced +exec ral-temporal-atest.cfg
+python3 "$TIMEOUT_RUNNER" --timeout 120 --kill-after 15 --cwd "$WD" --stdout "$STDOUT" -- "$WIRED" +set fs_basepath "$HOME_DIR" +set fs_homepath "$HOME_DIR" +set fs_game base +set com_automated 1 +set com_noHardReboot 1 +set s_initsound 0 +set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set r_vkValidate 0 +set r_temporalInputTest 0 +set r_bloom 0 +set r_ao 0 +set r_forwardPlus 0 +set r_drawSunRays 0 +set r_shadows "$MEASURE" +set r_depthFade 0 +set r_lens 0 +set r_gpuDecals 0 +set r_particles 0 +set r_atmosphericGPU 0 +set log_severity DEBUG +set log_file_severity DEBUG +set log_file_mode overwrite_synced +exec ral-temporal-atest.cfg
 RC=$?
 TIMEOUT=false
 [ "$RC" -eq 124 ] && TIMEOUT=true

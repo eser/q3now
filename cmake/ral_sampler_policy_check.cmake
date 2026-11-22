@@ -42,24 +42,29 @@ endforeach()
 
 foreach(REQUIRED IN ITEMS
 	"struct ralSampler_s *ral_handle[MAX_VK_SAMPLERS]"
-	"struct ralSampler_s\t*ral_sampler_repeat"
-	"struct ralSampler_s *ral_point_sampler"
-	"struct ralSampler_s *ral_linear_sampler")
+	"struct ralSampler_s\t*ral_sampler_repeat")
 	string(FIND "${PRODUCT_HEADER}" "${REQUIRED}" POSITION)
 	if(POSITION EQUAL -1)
 		message(FATAL_ERROR "renderer sampler ownership inventory lost: ${REQUIRED}")
 	endif()
 endforeach()
+# The SMAA point/linear samplers are retired together with the SMAA pass.
+foreach(RETIRED IN ITEMS "ral_point_sampler" "ral_linear_sampler")
+	string(FIND "${PRODUCT_HEADER}${PRODUCT}" "${RETIRED}" POSITION)
+	if(NOT POSITION EQUAL -1)
+		message(FATAL_ERROR "retired SMAA sampler owner returned: ${RETIRED}")
+	endif()
+endforeach()
 
 string(REGEX MATCHALL "vk_create_ral_sampler[(]" CREATE_CALLS "${PRODUCT}")
 list(LENGTH CREATE_CALLS CREATE_COUNT)
-if(NOT CREATE_COUNT EQUAL 9)
-	message(FATAL_ERROR "renderer sampler create inventory drifted: expected definition + 8 raw-mirror owner sites (including fixed FX helper), got ${CREATE_COUNT}")
+if(NOT CREATE_COUNT EQUAL 7)
+	message(FATAL_ERROR "renderer sampler create inventory drifted: expected definition + 6 raw-mirror owner sites (including fixed FX helper), got ${CREATE_COUNT}")
 endif()
 string(REGEX MATCHALL "Ral_DestroySampler[(]" DESTROY_CALLS "${PRODUCT}")
 list(LENGTH DESTROY_CALLS DESTROY_COUNT)
-if(NOT DESTROY_COUNT EQUAL 24)
-	message(FATAL_ERROR "renderer RAL sampler destroy inventory drifted: expected 24 owned/rollback sites including particle/decal owners, the AO point sampler, the Hi-Z verification sampler and the atmospheric semantic-effect sampler, got ${DESTROY_COUNT}")
+if(NOT DESTROY_COUNT EQUAL 22)
+	message(FATAL_ERROR "renderer RAL sampler destroy inventory drifted: expected 22 owned/rollback sites including particle/decal owners, the AO point sampler, the Hi-Z verification sampler and the atmospheric semantic-effect sampler, got ${DESTROY_COUNT}")
 endif()
 
 # Fixed FX samplers must not borrow from the r_textureMode-controlled pool.

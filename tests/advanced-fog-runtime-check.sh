@@ -155,7 +155,7 @@ write_runtime_config() {
 		'set r_customwidth 1280' 'set r_customheight 720' \
 		'set r_useGlFog 1' 'set r_defaultFogParmsType -1' \
 		'set r_vkValidate 1' 'set r_hdr 2' 'set r_bloom 0' 'set r_ao 0' \
-		'set r_smaa 0' 'set r_forwardPlus 0' 'set r_drawSunRays 0' 'set r_shadows 0' \
+		'set r_forwardPlus 0' 'set r_drawSunRays 0' 'set r_shadows 0' \
 		'set r_dither 0' 'set r_depthFade 0' 'set r_lens 0' \
 		'set r_pinShaderTime 1' 'set r_pinFrameTime 1' \
 		'set log_severity DEBUG' 'set log_file_severity DEBUG' \
