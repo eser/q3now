@@ -1825,7 +1825,6 @@ extern	cvar_t	*r_offsetUnits;
 
 extern	cvar_t	*r_fullbright;					// avoid lightmap pass
 extern	cvar_t	*r_lightmap;					// render lightmaps only
-extern	cvar_t	*r_entitySSBO;					// per-entity matrices via frame-wide storage buffer (portable-binding surface)
 extern	cvar_t	*r_vertexLight;					// vertex lighting mode for better performance
 
 extern	cvar_t	*r_showTris;					// enables wireframe rendering of the world

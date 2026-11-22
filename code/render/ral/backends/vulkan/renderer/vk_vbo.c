@@ -1274,7 +1274,7 @@ static qboolean vk_world_indirect_draw( const ibo_item_t *runs, int n, uint32_t 
 void VBO_RenderIBOItems( uint32_t firstInstance )
 {
 	// firstInstance selects the per-entity matrix storage-buffer slot on the
-	// r_entitySSBO path (== gl_InstanceIndex; 0 on the OFF path, where it is
+	// entity-matrix path (== gl_InstanceIndex; 0 on the OFF path, where it is
 	// ignored — the world VBO surfaces read ubo.mvp). Threaded into every per-run
 	// and the soft draw so one batch's runs share its slot.
 	//

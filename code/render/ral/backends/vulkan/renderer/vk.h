@@ -881,7 +881,6 @@ qboolean vk_tess_publish_shadow_range( uint32_t offset, uint32_t size );
 void vk_bind_index_buffer( struct ralBuffer_s *buffer, uint32_t offset );
 #ifdef USE_VBO
 void vk_draw_indexed( uint32_t indexCount, uint32_t firstIndex, uint32_t firstInstance );
-qboolean vk_entmat_active( void );
 void vk_entmat_ensure_buffer( uint32_t requiredSlots );
 void vk_entmat_begin_frame( void );
 #endif
@@ -1124,7 +1123,7 @@ typedef struct vk_tess_s {
 	// Per-command-buffer-slot host-coherent storage buffer of per-entity
 	// transforms (one slot per main draw, written at the draw from this draw's
 	// uniform-ring item), indexed in the vertex shader by gl_InstanceIndex ==
-	// firstInstance. Active only on the r_entitySSBO path; a storage-buffer clone
+	// firstInstance. Active only on the entity-matrix path; a storage-buffer clone
 	// of shadowEntMat* below. Each slot is the main-path transform pair (mvp, and
 	// modelMatrix under FEAT_SHADOW_MAPPING) — see ENTITY_MATRIX_SLOT_BYTES.
 	// Lazily (re)created on growth; the descriptor re-allocated on grow OR after a
@@ -1621,8 +1620,8 @@ typedef struct {
 	VkDescriptorSetLayout set_layout_sampler;	// combined image sampler
 	VkDescriptorSetLayout set_layout_uniform;	// dynamic uniform buffer
 	// Per-entity model/MVP matrix storage buffer layout — 1 STORAGE_BUFFER
-	// binding, VERTEX stage. Set 3 of vk.pipeline_layout on the r_entitySSBO
-	// path (a free set slot — MSDF's set 3 is on its own layout). A clone of
+	// binding, VERTEX stage. Set 3 of vk.pipeline_layout
+	// (a free set slot — MSDF's set 3 is on its own layout). A clone of
 	// vk.shadowMap.set_layout_entmat. Each command slot owns a direct RAL group;
 	// vk_tess_t.entMatDesc is only its native mirror and is bound once per frame.
 	VkDescriptorSetLayout set_layout_entmat;

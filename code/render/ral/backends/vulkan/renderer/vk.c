@@ -23986,7 +23986,7 @@ qboolean vk_initialize( void )
 	// Per-entity matrix storage-buffer layout — one STORAGE_BUFFER binding, VERTEX
 	// stage. Born here before any pipeline is built against vk.pipeline_layout, so
 	// every main pipeline is 4-set-compatible (set 3 = this) regardless of
-	// r_entitySSBO — the shader only READS it on the variant path, but the layout
+	// The entity-matrix buffer — the shader only READS it on the variant path, but the layout
 	// is uniformly present, so this is not a live mutation. A clone of
 	// vk.shadowMap.set_layout_entmat.
 	vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -24060,7 +24060,7 @@ qboolean vk_initialize( void )
 		set_layouts[WIRED_ENGINE_RES_SET] = vk.set_layout_engine_resources;
 		// Set 3 — per-entity matrix storage buffer. Always present in the layout
 		// (born-with, so every main pipeline is 4-set-compatible); the descriptor is
-		// only bound + the shader only reads it on the r_entitySSBO path.
+		// only bound + the shader only reads it on the entity-matrix path.
 		set_layouts[WIRED_ENTITY_MAT_SET] = vk.set_layout_entmat;
 		ral_layouts[0] = vk.ral_bgl_uniform;
 		ral_layouts[WIRED_BINDLESS_SET] = vk_ral_get_bindless_layout();
@@ -28307,12 +28307,12 @@ static void create_pipeline( const Vk_Pipeline_Def *def,
 	//
 	// Constant id 16 selects the per-entity transform source: read mvp (and
 	// modelMatrix under shadows) from the set-3 storage buffer indexed by
-	// gl_InstanceIndex (r_entitySSBO 1) vs the set-0 uniform ring's ubo.mvp (0).
+	// gl_InstanceIndex (entity-matrix path) vs the set-0 uniform ring's ubo.mvp (0).
 	// Latched, so it is constant for every pipeline built this session; the spec
 	// constant resolves the branch at pipeline build → no runtime cost and a
 	// byte-identical OFF pipeline. Harmlessly ignored by vertex shaders that
 	// don't declare id 16.
-	vert_spec_data.i = ( r_entitySSBO && r_entitySSBO->integer ) ? 1 : 0;
+	vert_spec_data.i = 1;   // the entity-matrix storage buffer is the only path
 	if ( !VK_GenericSpecializationAuthor( &specialization,
 			&vert_spec_data, frag_spec_data ) ) {
 		ri.Terminate( TERM_UNRECOVERABLE,
@@ -29652,7 +29652,7 @@ void vk_bind_index_buffer( ralBuffer_t *buffer, uint32_t offset )
 void vk_draw_indexed( uint32_t indexCount, uint32_t firstIndex, uint32_t firstInstance )
 {
 	// firstInstance == gl_InstanceIndex (instanceCount stays 1) selects the
-	// per-entity matrix storage-buffer slot on the r_entitySSBO path; 0 (ignored)
+	// per-entity matrix storage-buffer slot on the entity-matrix path; 0 (ignored)
 	// on the OFF path.
 	Ral_CmdDrawIndexed( vk.cmd->ral_cmd, indexCount, 1, firstIndex, 0, firstInstance );
 }
@@ -30026,7 +30026,7 @@ static qboolean vk_bind_descriptor_sets( void )
 			// Set 3 is overloaded by layout (same numeric index, different content):
 			//   * vk.pipeline_layout_msdf → MSDF per-draw UBO (UNIFORM_BUFFER_DYNAMIC,
 			//     registered by vk_update_msdf_outline with a dynamic offset).
-			//   * vk.pipeline_layout (r_entitySSBO path) → the per-entity matrix
+			//   * vk.pipeline_layout (entity-matrix path) → the per-entity matrix
 			//     storage buffer (STORAGE_BUFFER, NO dynamic offset). The descriptor
 			//     is the per-command-buffer entMatDesc, set in current[] at frame
 			//     begin. Bound only when present (the OFF path leaves it NULL, so the
@@ -30212,18 +30212,10 @@ void vk_bind_pipeline( uint32_t pipeline ) {
 	vk_world.dirty_depth_attachment |= ( vk.pipelines[ pipeline ].def.state_bits & GLS_DEPTHMASK_TRUE );
 }
 
-// r_entitySSBO path: whether the per-entity matrix storage buffer is the active
-// transform-delivery for this frame. Latched, so it is stable across the frame.
-qboolean vk_entmat_active( void )
-{
-	return r_entitySSBO && r_entitySSBO->integer ? qtrue : qfalse;
-}
-
-
 // Ensure this command-buffer slot's per-entity matrix storage buffer is sized
 // for the frame's main draws and its descriptor points at the current buffer;
 // reset the per-frame slot cursor. Called once per frame before the main draws
-// when the r_entitySSBO path is active. A storage-buffer clone of the shadow
+// every frame (the entity-matrix buffer is the only path). A storage-buffer clone of the shadow
 // depth pass's per-caster matrix ensure (grow-on-demand + per-command-buffer
 // descriptor, freed by the pool). capacitySlots is a generous floor for the
 // number of main draws (each draw consumes one slot); it grows on overflow.
@@ -30468,7 +30460,7 @@ void vk_entmat_ensure_buffer( uint32_t requiredSlots )
 	const uint32_t     floorSlots = requiredSlots > 1024u ? requiredSlots : 1024u;
 	const VkDeviceSize need       = (VkDeviceSize)floorSlots * ENTITY_MATRIX_SLOT_BYTES;
 
-	// Allocate + bind UNCONDITIONALLY (not gated on r_entitySSBO). Every main
+	// Allocate + bind UNCONDITIONALLY (never gated). Every main
 	// pipeline is built with set 3 in its layout, and the vertex SPIR-V declares
 	// the set-3 storage buffer even on the OFF variant (the spec-const dead-strips
 	// the READ, not the binding interface). A pipeline that declares a set but
@@ -31204,7 +31196,7 @@ void vk_draw_geometry( Vk_Depth_Range depth_range, qboolean indexed ) {
 
 	// configure pipeline's dynamic state
 	vk_update_depth_range( depth_range );
-	if ( vk_entmat_active() && vk.cmd->entMatMapped
+	if ( vk.cmd->entMatMapped
 			&& vk.cmd->entMatSize / ENTITY_MATRIX_SLOT_BYTES <= UINT32_MAX ) {
 		entMatPlanValid = VK_TemporalEntMatPlanUniformSlot(
 			vk.cmd->uniform_read_offset, vk.cmd->entMatLastUniformOffset,
@@ -31259,7 +31251,7 @@ void vk_draw_geometry( Vk_Depth_Range depth_range, qboolean indexed ) {
 		}
 	}
 
-	// r_entitySSBO path: copy THIS draw's transform (the mvp the bindless write
+	// entity-matrix path: copy THIS draw's transform (the mvp the bindless write
 	// just wrote next to, plus modelMatrix under shadows) out of this draw's
 	// per-draw uniform-ring item into the per-entity storage buffer at the next
 	// free slot, and select that slot as firstInstance so the vertex shader reads
@@ -34643,7 +34635,7 @@ void vk_begin_frame( const temporalBatchRequest_t *temporalRequest )
 	}
 	temporalCapacityRequested =
 		R_TemporalBatchRequestValidateExact( temporalRequest )
-		&& temporalRequest->enabled && vk_entmat_active()
+		&& temporalRequest->enabled
 		&& temporalCapacityExact ? qtrue : qfalse;
 	if ( temporalCapacityRequested
 			&& !vk_entmat_ensure_temporal_ring( temporalRequiredSlots ) ) {
@@ -34713,7 +34705,6 @@ void vk_begin_frame( const temporalBatchRequest_t *temporalRequest )
 		VK_TemporalMotionRecordingFinish( &vk_temporal_motion_recording );
 	if ( R_TemporalBatchRequestValidateExact( temporalRequest )
 			&& temporalRequest->enabled && temporalCapacityRequested
-			&& vk_entmat_active()
 			&& vk.cmd->ral_entMatBuf != NULL
 			&& vk.cmd->entMatAllocationGeneration
 			&& vk.cmd->entMatAllocationGeneration != UINT32_MAX ) {

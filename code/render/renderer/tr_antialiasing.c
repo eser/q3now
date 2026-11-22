@@ -18,7 +18,6 @@ void R_AntialiasingResolve( const rAntialiasingInput_t *input,
 
 	if ( !outPlan ) return;
 	plan.temporalRequested = 0;
-	plan.temporalRefused = 0;
 	plan.smaaQuality = 0;
 	if ( !input ) {
 		*outPlan = plan;
@@ -29,17 +28,14 @@ void R_AntialiasingResolve( const rAntialiasingInput_t *input,
 	taa = input->mode == R_AA_MODE_TAA;
 	smaa = input->mode == R_AA_MODE_SMAA;
 
-	// The mode asks for TAA; it is granted only with the payload prerequisite.
-	// The diagnostic cvar is independent and unchanged: it forces the temporal
-	// path on whatever the mode says.
-	plan.temporalRefused = taa && !input->entityMatrixPath;
-	plan.temporalRequested = ( input->temporalDiagnostic
-		|| ( taa && input->entityMatrixPath ) ) ? 1 : 0;
+	// The TAA mode is always granted: the entity-matrix payload it needs is the
+	// only path. The diagnostic cvar is independent and unchanged: it forces the
+	// temporal path on whatever the mode says.
+	plan.temporalRequested = ( input->temporalDiagnostic || taa ) ? 1 : 0;
 
-	// SMAA is suppressed only by a granted TAA mode.  It is deliberately not
-	// tied to temporalRequested: the diagnostic must not flip SMAA, and a
-	// refused TAA mode must leave SMAA exactly as the legacy cvar has it.
-	if ( taa && input->entityMatrixPath ) {
+	// SMAA is suppressed only by the TAA mode.  It is deliberately not tied to
+	// temporalRequested: the diagnostic must not flip SMAA.
+	if ( taa ) {
 		plan.smaaQuality = 0;
 	} else if ( smaa && preset == 0 ) {
 		plan.smaaQuality = R_AA_SMAA_PRESET_DEFAULT;

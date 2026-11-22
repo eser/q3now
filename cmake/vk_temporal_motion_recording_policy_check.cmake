@@ -50,7 +50,7 @@ forbid_text(RECORD "Ral_BeginRendering" "pass authority")
 forbid_text(RECORD "Ral_CmdBindPipeline" "temporal bind authority")
 
 # Capacity expansion is active-exact-only; OFF/NONE/CONFLICT retain 1024.
-require_text(VKC "temporalCapacityRequested =\n\t\tR_TemporalBatchRequestValidateExact( temporalRequest )\n\t\t&& temporalRequest->enabled && vk_entmat_active()" "exact-enabled capacity request")
+require_text(VKC "temporalCapacityRequested =\n\t\tR_TemporalBatchRequestValidateExact( temporalRequest )\n\t\t&& temporalRequest->enabled\n\t\t&& temporalCapacityExact ? qtrue : qfalse;" "exact-enabled capacity request")
 require_text(VKC "if ( temporalCapacityRequested\n\t\t\t&& !vk_entmat_ensure_temporal_ring( temporalRequiredSlots ) ) {\n\t\ttemporalCapacityRequested = qfalse;" "fail-closed active ring-wide capacity preparation")
 require_text(VKC "if ( !temporalCapacityRequested )\n\t\tvk_entmat_ensure_buffer( 1024u );" "OFF 1024 current-slot floor")
 require_text(VKC "vk.geometry_buffer_size\n\t\t\t/ (uint64_t)vk.uniform_item_size" "physical capacity proof")

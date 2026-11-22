@@ -305,7 +305,6 @@ cvar_t *r_ext_alpha_to_coverage;
 
 cvar_t *r_drawBuffer;
 cvar_t *r_lightmap;
-cvar_t *r_entitySSBO;
 cvar_t *r_vertexLight;
 cvar_t *r_shadows;
 cvar_t *r_flares;
@@ -1675,21 +1674,8 @@ void R_AntialiasingPlan( rAntialiasingPlan_t *outPlan )
 	input.mode = r_aa ? r_aa->integer : R_AA_MODE_OFF;
 	input.smaaPreset = r_smaa ? r_smaa->integer : 0;
 	input.temporalDiagnostic = r_temporalInputTest && r_temporalInputTest->integer ? 1 : 0;
-#ifdef USE_VULKAN
-	input.entityMatrixPath = vk_entmat_active() ? 1 : 0;
-#else
-	input.entityMatrixPath = 0;
-#endif
 	R_AntialiasingResolve( &input, &plan );
 
-	if ( plan.temporalRefused != s_lastRefused ) {
-		s_lastRefused = plan.temporalRefused;
-		if ( plan.temporalRefused ) {
-			R_LOG( rch_init, SEV_WARN,
-				"r_aa 2 (TAA) is not available: it needs the entity-matrix path. "
-				"Set r_entitySSBO 1 and run vid_restart; temporal anti-aliasing stays off.\n" );
-		}
-	}
 	if ( outPlan ) {
 		*outPlan = plan;
 	}
@@ -2168,7 +2154,6 @@ static void R_Register( void )
 							" 0: temporal path follows r_aa (default)\n"
 							" 1: primary world views run the temporal path (jitter, history and resolve)\n"
 							" 2: same temporal path, but force-defer ATEST draws as a measurement baseline\n"
-							"Needs r_entitySSBO 1; with it off the path reports enabled but commits nothing.\n"
 							"Use `ral_dump live temporal` for the latest committed receipt." );
 	r_vkDebugTiming = ri.Cvar_Get( "r_vkDebugTiming", "0", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_vkDebugTiming, "Print Vulkan host-side timing averages every 200 frames.\n 0: off\n 1: "
@@ -2964,13 +2949,6 @@ static void R_Register( void )
 	// selected at pipeline build, so the value cannot change mid-frame.
 	// Default 1 (2026-11-20): TAA (r_aa 2) needs this path, and paired A/B runs
 	// (8 rounds, default vs 1) showed no measurable CPU/GPU cost from it.
-	r_entitySSBO = ri.Cvar_Get( "r_entitySSBO", "1", CVAR_ARCHIVE | CVAR_LATCH | CVAR_NODEFAULT );
-	ri.Cvar_CheckRange( ri.Cvar_Get( "r_entitySSBO", "1", 0 ), "0", "1", CV_INTEGER );
-	ri.Cvar_SetDescription( ri.Cvar_Get( "r_entitySSBO", "1", 0 ),
-							"Deliver per-entity matrices via a frame-wide storage buffer indexed by\n"
-							" instance, instead of the per-draw uniform ring. Render-identical.\n"
-							" Required by TAA (r_aa 2). Latched: takes effect on vid_restart." );
-	ri.Cvar_SetGroup( ri.Cvar_Get( "r_entitySSBO", "1", 0 ), CVG_RENDERER );
 	ri.Cvar_Get( "r_shadowPCF", "5", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( ri.Cvar_Get( "r_shadowPCF", "5", 0 ), "1", "9", CV_INTEGER );
 	ri.Cvar_Get( "r_shadowMapSize", "2048", CVAR_ARCHIVE | CVAR_NODEFAULT );
@@ -3093,10 +3071,8 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_aa, "Anti-aliasing technique:\n"
 								  " 0 - off (default). r_smaa, if set, still applies as a developer override\n"
 								  " 1 - SMAA, using the r_smaa preset, or preset 3 (high) when r_smaa is 0\n"
-								  " 2 - TAA (temporal). Needs r_entitySSBO 1 (the default; latched: set it, then\n"
-								  "     vid_restart); without it TAA is refused with a log message and stays off.\n"
-								  "     SMAA is off while TAA is active.\n"
-								  "Requires r_fbo 1. Vulkan renderer only. Live: takes effect on next frame via the\n"
+								  " 2 - TAA (temporal). SMAA is off while TAA is active.\n"
+								  "Requires r_fbo 1. Live: takes effect on next frame via the\n"
 								  "renderer post-process pipeline group." );
 	ri.Cvar_SetGroup( r_aa, CVG_RENDERER );
 

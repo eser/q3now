@@ -51,7 +51,7 @@ EXTRACT_SPAN("${VK}" "static void create_pipeline( const Vk_Pipeline_Def *def,
 EXTRACT_SPAN("${VK}" "static ralPipeline_t *vk_gen_pipeline( uint32_t index )"
 	"uint32_t vk_find_pipeline_ext" GENERATE)
 EXTRACT_SPAN("${VK}" "void vk_bind_pipeline( uint32_t pipeline )"
-	"qboolean vk_entmat_active" BIND)
+	"// Ensure this command-buffer slot's per-entity matrix storage buffer is sized" BIND)
 EXTRACT_SPAN("${VK}" "static void vk_destroy_pipelines( qboolean resetCounter )"
 	"// tonemap default + variant pipelines." DESTROY)
 EXTRACT_SPAN("${VK}" "// vk_destroy_samplers();"
