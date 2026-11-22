@@ -2479,12 +2479,20 @@ worlddecal)
         { printf 'set cg_draw2D 0\nset cg_drawGun 0\nset fixedtime 8\n'
           while [ $# -gt 0 ]; do printf 'set %s %s\n' "$1" "$2"; shift 2; done
           # capture_fixed_cam enters noclip, and a noclipping player cannot fire: leave it, stay alive (god), land, arm the
-          # rocket launcher (its splash would otherwise hurt at this range) and shoot the wall in front.
-          printf '%b' "${WD_FIRE:-cmd god\ncmd noclip\nwait 60\ncmd give all\nwait 10\nweapon 5\nwait 60\n+attack\nwait 60\n-attack\n}"; } > "$SMOKE_HOME/base/vrf_wd.cfg"
+          # rocket launcher (its splash would otherwise hurt at this range) and shoot the wall in front. 'weapon N' only works once the
+          # snapshot carries the weapons that 'give all' added server-side, hence the long wait before it.
+          printf '%b' "${WD_FIRE:-set sv_cheats 1\nset g_cheats 1\nset cg_debugEvents 1\ncmd god\ncmd noclip\nwait 120\ncmd give all\nwait 200\nweapon 5\nwait 200\nscreenshot vrf_wd_prefire\nwait 20\n+attack\nwait 80\n-attack\nwait 100\n}"; } > "$SMOKE_HOME/base/vrf_wd.cfg"
         CAP_POST_CMD="exec vrf_wd.cfg" capture_fixed_cam arena1 "$WD_POS" "$tag" >/dev/null || return 1
         echo "$SHOTDIR/vrf_$tag.png"
     }
     b0="$(wd wd_base0 r_dbgWorldPhase 0)" || { FAIL=1; b0=""; }
+    if [ -n "$b0" ] && [ -z "${WD_FIRE:-}" ]; then
+        wdl="$VRF_TMP/vrf-wd_base0.log"
+        if ! grep -q "EV_FIRE_WEAPON_PRI" "$wdl" || ! grep -q "EV_MISSILE_MISS" "$wdl"; then
+            echo "  FAIL: the fixture did not fire a rocket (no EV_FIRE_WEAPON_PRI / EV_MISSILE_MISS in $wdl); is the weapon selected and are cheats on?" >&2; FAIL=1
+        fi
+        printf "  worlddecal: shot proof: fire=%s missile-events=%s decals-reaching-renderer=%s\n" "$(grep -c EV_FIRE_WEAPON_PRI "$wdl")" "$(grep -c EV_MISSILE_MISS "$wdl")" "$(grep -c 'decal ring' "$wdl")"
+    fi
     b1="$(wd wd_base1 r_dbgWorldPhase 0)" || { FAIL=1; b1=""; }
     nd="$(wd wd_nodecal r_dbgWorldPhase 0 r_gpuDecals 0)" || { FAIL=1; nd=""; }
     if [ -n "$b0" ] && [ -n "$b1" ] && [ -n "$nd" ]; then
