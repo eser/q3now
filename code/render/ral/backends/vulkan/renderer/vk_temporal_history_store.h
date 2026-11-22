@@ -61,6 +61,13 @@ qboolean VK_TemporalHistoryStoreRecord(
 	uint32_t expectedAllocationGeneration,
 	ralCommandBuffer_t *commandBuffer, uint32_t writeIndex,
 	const vkTemporalHistoryStorePush_t *push );
+/* Same as Record but the history pair was already written by the resolve dispatch: transitions and validation only. */
+qboolean VK_TemporalHistoryStoreRecordFolded(
+	const vkTemporalHistoryStoreOwner_t *owner,
+	const vkTemporalHistoryStoreKey_t *expectedKey,
+	uint32_t expectedAllocationGeneration,
+	ralCommandBuffer_t *commandBuffer, uint32_t writeIndex,
+	const vkTemporalHistoryStorePush_t *push );
 qboolean VK_TemporalHistoryStoreHasLive(
 	const vkTemporalHistoryStoreOwner_t *owner );
 qboolean VK_TemporalHistoryStoreReleaseAfterIdle(

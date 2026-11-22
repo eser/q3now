@@ -31,7 +31,7 @@ while [ $# -gt 0 ]; do
         *) echo "unknown arg: $1" >&2; exit 2;;
     esac
 done
-[ -n "$MODE" ]   || { echo "FAIL: --mode {gtao|fwdplus|viewport|shadow_atest|scene|chromatic|crowd|crowdpromo|entitylight|scenegolden|crowdwasm|gpucull|worldindirect|worldphase|worlddecal|exacthold|aacompare|aalatency|capturenoise|cullref|dlight-shadow|dlight-shadow-lifecycle|dlight-shadow-probe|selftest} required" >&2; exit 2; }
+[ -n "$MODE" ]   || { echo "FAIL: --mode {gtao|fwdplus|viewport|shadow_atest|scene|chromatic|crowd|crowdpromo|entitylight|scenegolden|crowdwasm|gpucull|worldindirect|worldphase|worlddecal|exacthold|temporalfold|aacompare|aalatency|capturenoise|cullref|dlight-shadow|dlight-shadow-lifecycle|dlight-shadow-probe|selftest} required" >&2; exit 2; }
 # selftest needs no engine (it exercises the assertion math on synthetic inputs).
 if [ "$MODE" != "selftest" ]; then
     [ -n "$ENGINE" ] || { echo "FAIL: --engine <wired.x64> required" >&2; exit 2; }
@@ -2590,6 +2590,39 @@ aalatency)
         done
         echo "$line"
     done 3<<<"${AL_CFGS:-$'none 0 0 1\nsmaa 1 3 1\ntaa 2 0 1'}"
+    ;;
+
+temporalfold)
+    # r_dbgTemporalFold 1: the resolve dispatch writes the history pair itself and the store pass only transitions. Fold 0 runs
+    # the older store copy as well, which overwrites that pair with identical data, so it is the reference. History feeds back,
+    # so a wrong fold accumulates: the capture follows a still camera and two yaw sweeps (60 deg/s) with many frames in between.
+    # Negative control: fold 1 with the resolve dispatch skipped (r_dbgTemporalRepeatResolve -1) never updates the resolved
+    # target or the history and must be detected.
+    TF_FLOOR="${TF_FLOOR:-2.0}"; TF_POS="${TF_POS:-1052 1432 50 135}"
+    tf() {
+        local tag="$1" fold="$2" yaw="$3" skip="${4:-1}"
+        { printf 'set cg_draw2D 0\nset cg_drawGun 0\nset fixedtime 8\nset r_dbgTemporalFold %s\nset r_dbgTemporalRepeatResolve %s\n' "$fold" "$skip"
+          case "$yaw" in
+            0) printf 'wait 60\n' ;;
+            1) printf 'cl_yawspeed 60\n+right\nwait 24\n-right\nwait 12\n+left\nwait 30\n-left\nwait 40\n' ;;
+          esac; } > "$SMOKE_HOME/base/vrf_tf.cfg"
+        CAP_POST_CMD="exec vrf_tf.cfg" capture_fixed_cam arena1 "$TF_POS" "$tag" +set r_aa 2 >/dev/null || return 1
+        echo "$SHOTDIR/vrf_$tag.png"
+    }
+    for yaw in 0 1; do
+        a0="$(tf tf_off_a_$yaw 0 $yaw)" || { FAIL=1; continue; }
+        a1="$(tf tf_off_b_$yaw 0 $yaw)" || { FAIL=1; continue; }
+        f1="$(tf tf_on_$yaw 1 $yaw)" || { FAIL=1; continue; }
+        f2="$(tf tf_neg_$yaw 1 $yaw -1)" || { FAIL=1; continue; }
+        noise="$(worst_tile_diff_nohud "$a0" "$a1")"; on="$(worst_tile_diff_nohud "$a0" "$f1")"; neg="$(worst_tile_diff_nohud "$a0" "$f2")"
+        act="$(grep -c 'temporal-resolved-hdr' "$VRF_TMP/vrf-tf_on_$yaw.log" || true)"
+        v="$(awk -v s="$on" -v f="$TF_FLOOR" 'BEGIN{print (s<=f)?"OK":"FAIL(folded frame differs from the store-copy frame)"}')"
+        [ "${act:-0}" -ge 1 ] || v="FAIL(TAA was not active: no temporal-resolved lines)"
+        informative="$(awk -v s="$neg" -v f="$TF_FLOOR" 'BEGIN{print (s>f)?"yes":"NO"}')"
+        [ "$informative" = yes ] || v="FAIL(negative control not detected: the check cannot see a missing history/resolve write)"
+        [ "${v:0:2}" = "OK" ] || FAIL=1
+        printf "  temporalfold yaw=%s: repeat noise worst-tile=%s; fold-vs-store-copy worst-tile=%s (allowed <= %s) -> %s; negative control worst-tile=%s (must exceed %s: %s)\n" "$yaw" "$noise" "$on" "$TF_FLOOR" "$v" "$neg" "$TF_FLOOR" "$informative"
+    done
     ;;
 
 worldphase)

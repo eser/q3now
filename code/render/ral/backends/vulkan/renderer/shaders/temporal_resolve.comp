@@ -13,6 +13,10 @@ layout(set = 0, binding = 4) uniform texture2D motionVelocity;
 layout(set = 0, binding = 5) uniform texture2D motionValidity;
 layout(set = 0, binding = 6) uniform sampler nearestSampler;
 layout(rgba16f, set = 0, binding = 7) uniform writeonly image2D resolvedColor;
+// History commit, folded into the resolve: the pair the next frame reads. It receives exactly what the separate store pass
+// used to copy (the resolved colour and the same frame's linear depth), so the store pass only dispatches on the bootstrap path.
+layout(rgba16f, set = 0, binding = 8) uniform writeonly image2D historyOutColor;
+layout(r32f, set = 0, binding = 9) uniform writeonly image2D historyOutLinearDepth;
 
 layout(push_constant) uniform TemporalResolvePush {
 	uvec2 extent;
@@ -120,6 +124,12 @@ float samplePreviousDepthLinear(vec2 texel) {
 	return mixPrecise(top, bottom, f.y);
 }
 
+// Same arithmetic as temporal_history_store.comp (deliberately not precise): the folded history depth must be bit-identical to
+// what the store pass wrote. Declared after the precise helpers so their generated result names keep their numbering.
+float storeLinearDepth(float z) {
+	return pc.zNear * pc.zFar / (pc.zNear + z * (pc.zFar - pc.zNear));
+}
+
 void main() {
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
 	if (any(greaterThanEqual(pixel, ivec2(pc.extent)))) return;
@@ -192,4 +202,7 @@ void main() {
 	}
 	if (!finite4(result)) result = vec4(0.0);
 	imageStore(resolvedColor, pixel, result);
+	imageStore(historyOutColor, pixel, result);
+	imageStore(historyOutLinearDepth, pixel, vec4(storeLinearDepth(texelFetch(
+		sampler2D(currentDeviceDepth, nearestSampler), pixel, 0).r)));
 }

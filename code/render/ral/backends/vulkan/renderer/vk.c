@@ -13328,6 +13328,7 @@ static qboolean vk_temporal_history_store_feedback( qboolean recursive )
 	vkTemporalHistoryStorePush_t push;
 	vkHdrPostprocessSource_t route;
 	qboolean staged;
+	qboolean foldedHistory;
 	if ( !s_temporalHistoryStoreFrame.prepared || !plan || !history
 			|| !content->valid || content->submitted
 			|| content->target != vk_temporal_history_store_owner.key.feedbackColor
@@ -13410,10 +13411,27 @@ static qboolean vk_temporal_history_store_feedback( qboolean recursive )
 	push.extent[1] = history->height;
 	push.zNear = s_temporalHistoryStoreFrame.zNear;
 	push.zFar = s_temporalHistoryStoreFrame.zFar;
-	if ( !VK_TemporalHistoryStoreRecord( &vk_temporal_history_store_owner,
-			&s_temporalHistoryStoreFrame.storeKey,
-			s_temporalHistoryStoreFrame.storeOwnerAllocationGeneration,
-			vk.cmd->ral_cmd, plan->historyWriteIndex, &push ) ) {
+	// When the resolve dispatch produced this frame it already wrote the history pair (colour and linear depth) itself, so the
+	// store keeps its transitions and receipts but skips the copy dispatch. r_dbgTemporalFold 0 dispatches it anyway; it
+	// overwrites the pair with identical data, which is the older behaviour and the reference for the identity test.
+	foldedHistory = recursive
+		&& vk_temporal_resolve_frame.recordedCommands
+		&& vk_temporal_resolve_frame.recorded.historyFolded
+		&& vk_temporal_resolve_frame.recorded.committedWriteExpected.historyIndex
+			== plan->historyWriteIndex
+		&& ( !r_dbgTemporalFold || r_dbgTemporalFold->integer )
+		? qtrue : qfalse;
+	if ( !( foldedHistory
+			? VK_TemporalHistoryStoreRecordFolded(
+				&vk_temporal_history_store_owner,
+				&s_temporalHistoryStoreFrame.storeKey,
+				s_temporalHistoryStoreFrame.storeOwnerAllocationGeneration,
+				vk.cmd->ral_cmd, plan->historyWriteIndex, &push )
+			: VK_TemporalHistoryStoreRecord(
+				&vk_temporal_history_store_owner,
+				&s_temporalHistoryStoreFrame.storeKey,
+				s_temporalHistoryStoreFrame.storeOwnerAllocationGeneration,
+				vk.cmd->ral_cmd, plan->historyWriteIndex, &push ) ) ) {
 		vk_temporal_resolve_readback_cancel_recorded();
 		if ( s_temporalHistoryStoreFrame.consumeRecorded )
 			(void)VK_TemporalHistoryConsumeAcceptStore(

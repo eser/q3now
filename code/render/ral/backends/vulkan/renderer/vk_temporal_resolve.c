@@ -41,7 +41,7 @@ static qboolean FeedbackSourceEqualExact(
 
 #include "../include/vulkan/vulkan.h"
 
-#define VK_TEMPORAL_RESOLVE_BINDINGS 8u
+#define VK_TEMPORAL_RESOLVE_BINDINGS 10u
 #define VK_TEMPORAL_RESOLVE_DEPTH_ABSOLUTE 0.125f
 #define VK_TEMPORAL_RESOLVE_DEPTH_RELATIVE 0.02f
 #define VK_TEMPORAL_RESOLVE_HISTORY_WEIGHT 0.875f
@@ -301,6 +301,11 @@ qboolean VK_TemporalResolveEnsureAfterFence( vkTemporalResolveOwner_t *owner,
 	entries[6] = (ralBindEntry_t){ 6, RAL_BIND_SAMPLER, 1, RAL_STAGE_COMPUTE };
 	entries[7] = (ralBindEntry_t){ 7, RAL_BIND_STORAGE_TEXTURE, 1,
 		RAL_STAGE_COMPUTE };
+	// Folded history commit: the pair this frame writes, i.e. the one the group's read index does not name.
+	entries[8] = (ralBindEntry_t){ 8, RAL_BIND_STORAGE_TEXTURE, 1,
+		RAL_STAGE_COMPUTE };
+	entries[9] = (ralBindEntry_t){ 9, RAL_BIND_STORAGE_TEXTURE, 1,
+		RAL_STAGE_COMPUTE };
 	memset( &lci, 0, sizeof( lci ) );
 	lci.entries = entries;
 	lci.numEntries = VK_TEMPORAL_RESOLVE_BINDINGS;
@@ -331,6 +336,12 @@ qboolean VK_TemporalResolveEnsureAfterFence( vkTemporalResolveOwner_t *owner,
 		values[7] = (ralBindingValue_t){ .binding=7,
 			.type=RAL_BIND_STORAGE_TEXTURE,
 			.textureView=key->resolvedTargetView };
+		values[8] = (ralBindingValue_t){ .binding=8,
+			.type=RAL_BIND_STORAGE_TEXTURE,
+			.textureView=key->historyColorView[readIndex ^ 1u] };
+		values[9] = (ralBindingValue_t){ .binding=9,
+			.type=RAL_BIND_STORAGE_TEXTURE,
+			.textureView=key->historyDepthView[readIndex ^ 1u] };
 		memset( &gci, 0, sizeof( gci ) );
 		gci.layout = candidate.layout;
 		gci.values = values;
@@ -621,6 +632,7 @@ qboolean VK_TemporalResolveRecord( vkTemporalResolveOwner_t *owner,
 		TEMPORAL_HISTORY_WRITE_RESOLVED_FEEDBACK;
 	ticket.push = push;
 	ticket.ownerAllocationGeneration = owner->allocationGeneration;
+	ticket.historyFolded = qtrue;
 	ticket.recorded = qtrue;
 
 	Ral_CmdTransitionTexture( commandBuffer, owner->key.currentColor,
@@ -649,6 +661,17 @@ qboolean VK_TemporalResolveRecord( vkTemporalResolveOwner_t *owner,
 		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
 	Ral_CmdTransitionTexture( commandBuffer, owner->key.resolvedTarget,
 		RAL_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+		RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_IMAGE_LAYOUT_GENERAL );
+	// The folded history commit writes the other pair of the history ring; the store pass leaves it in the sampled layout.
+	Ral_CmdTransitionTexture( commandBuffer,
+		owner->key.historyColor[authority->historyWriteIndex],
+		RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_IMAGE_LAYOUT_GENERAL );
+	Ral_CmdTransitionTexture( commandBuffer,
+		owner->key.historyDepth[authority->historyWriteIndex],
+		RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 		RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 		VK_IMAGE_LAYOUT_GENERAL );
 	Ral_CmdBindPipeline( commandBuffer, owner->pipeline );
@@ -882,6 +905,7 @@ qboolean VK_TemporalResolveTicketEqualExact(
 		&& ap->historyWeight == bp->historyWeight
 		&& ap->historyReadIndex == bp->historyReadIndex
 		&& a->ownerAllocationGeneration == b->ownerAllocationGeneration
+		&& a->historyFolded == b->historyFolded
 		&& a->recorded == b->recorded && a->submitted == b->submitted
 		? qtrue : qfalse;
 }

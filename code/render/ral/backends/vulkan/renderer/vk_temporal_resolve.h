@@ -76,6 +76,9 @@ typedef struct {
 	// renderer state would not prove the dispatch that actually ran.
 	vkTemporalResolvePush_t push;
 	uint32_t ownerAllocationGeneration;
+	/* The dispatch also wrote the history pair named by committedWriteExpected (colour and linear depth), so the store pass
+	 * only has to keep its transitions and receipts. Always set when the resolve is recorded. */
+	qboolean historyFolded;
 	qboolean recorded;
 	qboolean submitted;
 } vkTemporalResolveTicket_t;

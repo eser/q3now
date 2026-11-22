@@ -4175,14 +4175,14 @@
       "symbol": "temporal_resolve_comp_spv",
       "stage": "RAL_STAGE_COMPUTE",
       "sourceDigest": {
-        "lane0": "328a279fa4838461",
-        "lane1": "4ead53172d02a334"
+        "lane0": "626017717b39c657",
+        "lane1": "5f805783e5eac6d4"
       },
       "spirv": {
-        "byteCount": 18020,
+        "byteCount": 18976,
         "digest": {
-          "lane0": "1eeda6960d0c5729",
-          "lane1": "77b585736ed11b25"
+          "lane0": "d6e7ba19b531a37c",
+          "lane1": "f06a8efaf4ff8091"
         }
       },
       "reflection": {
@@ -4289,6 +4289,30 @@
           {
             "set": 0,
             "binding": 8,
+            "bindingClass": "RAL_SHADER_BIND_STORAGE_TEXTURE_WRITE",
+            "arrayCount": 1,
+            "stageFlags": "RAL_STAGE_COMPUTE",
+            "minBufferBindingSize": 0,
+            "viewDimension": "RAL_SHADER_VIEW_2D",
+            "sampleType": 0,
+            "storageTextureFormat": "RAL_FORMAT_R16G16B16A16_SFLOAT",
+            "dynamicOffset": false
+          },
+          {
+            "set": 0,
+            "binding": 9,
+            "bindingClass": "RAL_SHADER_BIND_STORAGE_TEXTURE_WRITE",
+            "arrayCount": 1,
+            "stageFlags": "RAL_STAGE_COMPUTE",
+            "minBufferBindingSize": 0,
+            "viewDimension": "RAL_SHADER_VIEW_2D",
+            "sampleType": 0,
+            "storageTextureFormat": "RAL_FORMAT_R32_SFLOAT",
+            "dynamicOffset": false
+          },
+          {
+            "set": 0,
+            "binding": 10,
             "bindingClass": "RAL_SHADER_BIND_UNIFORM_BUFFER",
             "arrayCount": 1,
             "stageFlags": "RAL_STAGE_COMPUTE",
@@ -4304,7 +4328,7 @@
           "byteSize": 48,
           "stageFlags": "RAL_STAGE_COMPUTE",
           "webgpuUniformSet": 0,
-          "webgpuUniformBinding": 8
+          "webgpuUniformBinding": 10
         },
         "specConstants": [],
         "portable": true,

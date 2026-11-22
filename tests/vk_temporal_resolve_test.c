@@ -24,8 +24,8 @@ static uintptr_t nextHandle = 0x100000u;
 static uint32_t createCount, failStep, destroyCount, commandCount;
 static void *aliasAtStep;
 static destroyEvent_t destroys[2048];
-static ralBindEntry_t capturedEntries[8];
-static ralBindingValue_t capturedValues[2][8];
+static ralBindEntry_t capturedEntries[10];
+static ralBindingValue_t capturedValues[2][10];
 static uint32_t capturedGroupCount;
 static ralComputePipelineCreateInfo_t capturedPipeline;
 static vkTemporalResolvePush_t capturedPush;
@@ -65,14 +65,14 @@ ralSampler_t *Ral_CreateSampler( ralBackend_t *backend,
 ralBindGroupLayout_t *Ral_CreateBindGroupLayout( ralBackend_t *backend,
 		const ralBindGroupLayoutCreateInfo_t *ci ) {
 	(void)backend;
-	if ( ci && ci->numEntries == 8 )
+	if ( ci && ci->numEntries == 10 )
 		memcpy( capturedEntries, ci->entries, sizeof( capturedEntries ) );
 	return (ralBindGroupLayout_t *)NewHandle();
 }
 ralBindGroup_t *Ral_CreateBindGroup( ralBackend_t *backend,
 		const ralBindGroupCreateInfo_t *ci ) {
 	(void)backend;
-	if ( ci && capturedGroupCount < 2 && ci->numValues == 8 ) {
+	if ( ci && capturedGroupCount < 2 && ci->numValues == 10 ) {
 		memcpy( capturedValues[capturedGroupCount], ci->values,
 			sizeof( capturedValues[capturedGroupCount] ) );
 		++capturedGroupCount;
@@ -306,7 +306,9 @@ int main( void ) {
 	for ( i = 0; i < 6; ++i ) CHECK( capturedEntries[i].binding == i
 		&& capturedEntries[i].type == RAL_BIND_SAMPLED_TEXTURE );
 	CHECK( capturedEntries[6].type == RAL_BIND_SAMPLER
-		&& capturedEntries[7].type == RAL_BIND_STORAGE_TEXTURE );
+		&& capturedEntries[7].type == RAL_BIND_STORAGE_TEXTURE
+		&& capturedEntries[8].type == RAL_BIND_STORAGE_TEXTURE
+		&& capturedEntries[9].type == RAL_BIND_STORAGE_TEXTURE );
 	CHECK( capturedValues[0][2].textureView == f.key.historyColorView[0]
 		&& capturedValues[1][2].textureView == f.key.historyColorView[1]
 		&& capturedValues[0][3].textureView == f.key.historyDepthView[0]
@@ -314,7 +316,12 @@ int main( void ) {
 		&& capturedValues[0][4].textureView == f.key.velocityView
 		&& capturedValues[0][5].textureView == f.key.validityView
 		&& capturedValues[0][6].sampler == owner.nearestSampler
-		&& capturedValues[0][7].textureView == f.key.resolvedTargetView );
+		&& capturedValues[0][7].textureView == f.key.resolvedTargetView
+		// Folded history commit: each group writes the pair its read index does not name.
+		&& capturedValues[0][8].textureView == f.key.historyColorView[1]
+		&& capturedValues[1][8].textureView == f.key.historyColorView[0]
+		&& capturedValues[0][9].textureView == f.key.historyDepthView[1]
+		&& capturedValues[1][9].textureView == f.key.historyDepthView[0] );
 	CHECK( capturedPipeline.computeSpirv == f.key.computeSpirv
 		&& capturedPipeline.computeSpirvSize == f.key.computeSpirvSize
 		&& capturedPipeline.pushConstantSize == sizeof( vkTemporalResolvePush_t ) );
@@ -392,7 +399,7 @@ int main( void ) {
 		bad = ticket; bad.products.velocityView = H( 0xe03 );
 		CHECK( !VK_TemporalResolveTicketEqualExact( &ticket, &bad ) );
 	}
-	CHECK( commandCount == baseCommands + 13 );
+	CHECK( commandCount == baseCommands + 15 );
 	CHECK( capturedPush.extent[0] == 1280 && capturedPush.extent[1] == 720
 		&& capturedPush.currentEffectiveJitterUv[0] ==
 			f.authority.currentEffectiveJitterUv[0]
@@ -433,38 +440,49 @@ int main( void ) {
 		&& commands[baseCommands + 5].a == RAL_PIPELINE_STAGE_ALL_COMMANDS_BIT
 		&& commands[baseCommands + 5].b == RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
 		&& commands[baseCommands + 5].c == VK_IMAGE_LAYOUT_GENERAL );
-	CHECK( commands[baseCommands + 6].kind == 'P'
-		&& commands[baseCommands + 6].object == owner.pipeline );
-	CHECK( commands[baseCommands + 7].kind == 'G'
-		&& commands[baseCommands + 7].object == owner.groups[0]
-		&& commands[baseCommands + 7].a == 0 );
-	CHECK( commands[baseCommands + 8].kind == 'U'
-		&& commands[baseCommands + 8].a == RAL_STAGE_COMPUTE
-		&& commands[baseCommands + 8].b == sizeof( vkTemporalResolvePush_t ) );
-	CHECK( commands[baseCommands + 9].kind == 'D'
-		&& commands[baseCommands + 9].a == 160
-		&& commands[baseCommands + 9].b == 90
-		&& commands[baseCommands + 9].c == 1 );
-	CHECK( commands[baseCommands + 10].kind == 'T'
-		&& commands[baseCommands + 10].object == f.key.velocity
-		&& commands[baseCommands + 10].a == RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
-		&& commands[baseCommands + 10].b ==
-			RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-		&& commands[baseCommands + 10].c ==
-			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL );
-	CHECK( commands[baseCommands + 11].kind == 'T'
-		&& commands[baseCommands + 11].object == f.key.validity
-		&& commands[baseCommands + 11].a == RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
-		&& commands[baseCommands + 11].b ==
-			RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-		&& commands[baseCommands + 11].c ==
-			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL );
+	// Folded history commit: the pair the dispatch writes is moved to the storage layout before the pipeline is bound.
+	CHECK( commands[baseCommands + 6].kind == 'T'
+		&& commands[baseCommands + 6].object == f.key.historyColor[1]
+		&& commands[baseCommands + 6].a == RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+		&& commands[baseCommands + 6].b == RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+		&& commands[baseCommands + 6].c == VK_IMAGE_LAYOUT_GENERAL );
+	CHECK( commands[baseCommands + 7].kind == 'T'
+		&& commands[baseCommands + 7].object == f.key.historyDepth[1]
+		&& commands[baseCommands + 7].a == RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+		&& commands[baseCommands + 7].b == RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+		&& commands[baseCommands + 7].c == VK_IMAGE_LAYOUT_GENERAL );
+	CHECK( commands[baseCommands + 8].kind == 'P'
+		&& commands[baseCommands + 8].object == owner.pipeline );
+	CHECK( commands[baseCommands + 9].kind == 'G'
+		&& commands[baseCommands + 9].object == owner.groups[0]
+		&& commands[baseCommands + 9].a == 0 );
+	CHECK( commands[baseCommands + 10].kind == 'U'
+		&& commands[baseCommands + 10].a == RAL_STAGE_COMPUTE
+		&& commands[baseCommands + 10].b == sizeof( vkTemporalResolvePush_t ) );
+	CHECK( commands[baseCommands + 11].kind == 'D'
+		&& commands[baseCommands + 11].a == 160
+		&& commands[baseCommands + 11].b == 90
+		&& commands[baseCommands + 11].c == 1 );
 	CHECK( commands[baseCommands + 12].kind == 'T'
-		&& commands[baseCommands + 12].object == f.key.resolvedTarget
+		&& commands[baseCommands + 12].object == f.key.velocity
 		&& commands[baseCommands + 12].a == RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
-		&& commands[baseCommands + 12].b == ( RAL_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
-			| RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT )
+		&& commands[baseCommands + 12].b ==
+			RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
 		&& commands[baseCommands + 12].c ==
+			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL );
+	CHECK( commands[baseCommands + 13].kind == 'T'
+		&& commands[baseCommands + 13].object == f.key.validity
+		&& commands[baseCommands + 13].a == RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+		&& commands[baseCommands + 13].b ==
+			RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+		&& commands[baseCommands + 13].c ==
+			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL );
+	CHECK( commands[baseCommands + 14].kind == 'T'
+		&& commands[baseCommands + 14].object == f.key.resolvedTarget
+		&& commands[baseCommands + 14].a == RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+		&& commands[baseCommands + 14].b == ( RAL_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+			| RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT )
+		&& commands[baseCommands + 14].c ==
 			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
 
 	memset( &submitted, 0x5a, sizeof( submitted ) ); ticketBefore = submitted;

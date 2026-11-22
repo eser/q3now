@@ -263,12 +263,12 @@ qboolean VK_TemporalHistoryStoreEnsureAfterFence(
 fail: DestroyCandidate(&c,owner,key);return qfalse;
 }
 
-qboolean VK_TemporalHistoryStoreRecord(
+static qboolean StoreRecordImpl(
 		const vkTemporalHistoryStoreOwner_t *owner,
 		const vkTemporalHistoryStoreKey_t *expectedKey,
 		uint32_t expectedAllocationGeneration,
 		ralCommandBuffer_t *cb, uint32_t writeIndex,
-		const vkTemporalHistoryStorePush_t *push ) {
+		const vkTemporalHistoryStorePush_t *push, qboolean dispatch ) {
 	if(!owner||!expectedAllocationGeneration
 			||owner->allocationGeneration!=expectedAllocationGeneration
 			||!VK_TemporalHistoryStoreMatchesExact(owner,expectedKey)
@@ -283,6 +283,7 @@ qboolean VK_TemporalHistoryStoreRecord(
 		RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,VK_IMAGE_LAYOUT_GENERAL);
 	Ral_CmdTransitionTexture(cb,owner->key.historyDepth[writeIndex],
 		RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,VK_IMAGE_LAYOUT_GENERAL);
+	if(dispatch){
 	Ral_CmdBindPipeline(cb,owner->pipeline);Ral_CmdBindBindGroup(cb,0,owner->groups[writeIndex]);
 	Ral_CmdPushConstants(cb,RAL_STAGE_COMPUTE,0,sizeof(*push),push);
 	{
@@ -290,11 +291,32 @@ qboolean VK_TemporalHistoryStoreRecord(
 		uint32_t repeat=vk_temporal_dbg_repeat_store==0xFFFFFFFFu?0u:(vk_temporal_dbg_repeat_store?vk_temporal_dbg_repeat_store:1u);   // -1 skips the dispatch (barriers stay)
 		while(repeat--)Ral_CmdDispatch(cb,(push->extent[0]+7u)/8u,(push->extent[1]+7u)/8u,1);
 	}
+	}
 	Ral_CmdTransitionTexture(cb,owner->key.historyColor[writeIndex],
 		RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 	Ral_CmdTransitionTexture(cb,owner->key.historyDepth[writeIndex],
 		RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 	return qtrue;
+}
+
+qboolean VK_TemporalHistoryStoreRecord(
+		const vkTemporalHistoryStoreOwner_t *owner,
+		const vkTemporalHistoryStoreKey_t *expectedKey,
+		uint32_t expectedAllocationGeneration,
+		ralCommandBuffer_t *cb, uint32_t writeIndex,
+		const vkTemporalHistoryStorePush_t *push ) {
+	return StoreRecordImpl(owner,expectedKey,expectedAllocationGeneration,cb,writeIndex,push,qtrue);
+}
+
+// The resolve dispatch already wrote this frame's history pair. Same validation and the same layout transitions as the store
+// pass (the pair ends in the sampled layout the next frame expects), without the copy dispatch.
+qboolean VK_TemporalHistoryStoreRecordFolded(
+		const vkTemporalHistoryStoreOwner_t *owner,
+		const vkTemporalHistoryStoreKey_t *expectedKey,
+		uint32_t expectedAllocationGeneration,
+		ralCommandBuffer_t *cb, uint32_t writeIndex,
+		const vkTemporalHistoryStorePush_t *push ) {
+	return StoreRecordImpl(owner,expectedKey,expectedAllocationGeneration,cb,writeIndex,push,qfalse);
 }
 
 qboolean VK_TemporalHistoryStoreReleaseAfterIdle(

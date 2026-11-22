@@ -102,7 +102,7 @@ CFGEOF
 		case "$arm" in
 			0) armcmd="r_temporalInputTest 0; r_aa 0; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 0" ;;
 			1) armcmd="r_temporalInputTest 0; r_aa 1; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 0" ;;
-			2) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve 1; r_dbgTemporalRepeatStore 1" ;;
+			2) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve 1; r_dbgTemporalRepeatStore 1; r_dbgTemporalFold 1" ;;
 			3) armcmd="r_aa 0; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 1; r_temporalInputTest 1" ;;
 			4) armcmd="r_temporalInputTest 0; r_aa 1; r_smaa 1; r_dbgExtraSplit 0" ;;
 			5) armcmd="r_temporalInputTest 0; r_aa 1; r_smaa 4; r_dbgExtraSplit 0" ;;
@@ -113,6 +113,7 @@ CFGEOF
 			10) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve 1; r_dbgTemporalRepeatStore 4" ;;
 			11) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve -1; r_dbgTemporalRepeatStore 1" ;;
 			12) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve -1; r_dbgTemporalRepeatStore -1" ;;
+			13) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve 1; r_dbgTemporalRepeatStore 1; r_dbgTemporalFold 0" ;;
 		esac
 		printf 'set aacSeg%s "%s; wait 96; set r_gpuSpeeds 1; echo AAC_%s_BEGIN; wait 220; echo AAC_%s_END; set r_gpuSpeeds 0; wait 16; %s"\n' "$i" "$armcmd" "$tag" "$tag" "$next"
 	done
@@ -191,7 +192,7 @@ for i, arm in enumerate(order):
     for k, v in full_s[0].items():
         if k not in ("frames", "total"): lanes[arm].setdefault(k, []).append(v)
 RAN = [arm for arm in range(16) if per[arm]]
-name = {0: "none", 1: "SMAA3", 2: "TAA", 3: "gate-on", 4: "SMAA1", 5: "SMAA4", 6: "none+4sp", 7: "none+16sp", 8: "TAA-legacy", 9: "TAA resolve x4", 10: "TAA store x4", 11: "TAA resolve skipped", 12: "TAA resolve+store skipped"}
+name = {0: "none", 1: "SMAA3", 2: "TAA", 3: "gate-on", 4: "SMAA1", 5: "SMAA4", 6: "none+4sp", 7: "none+16sp", 8: "TAA-legacy", 9: "TAA resolve x4", 10: "TAA store x4", 11: "TAA resolve skipped", 12: "TAA resolve+store skipped", 13: "TAA store-copy"}
 print(f"config: {'full default renderer' if full == '1' else 'stripped (as the temporal gate)'}; order {order_s}")
 for arm in RAN:
     v = per[arm]

@@ -5209,8 +5209,8 @@
     {
       "symbol": "temporal_resolve_comp_spv",
       "spirvDigest": {
-        "lane0": "1eeda6960d0c5729",
-        "lane1": "77b585736ed11b25"
+        "lane0": "d6e7ba19b531a37c",
+        "lane1": "f06a8efaf4ff8091"
       },
       "samplerKinds": [
         {
@@ -5221,7 +5221,7 @@
       ],
       "inlineUniform": {
         "set": 0,
-        "binding": 8
+        "binding": 10
       }
     },
     {
