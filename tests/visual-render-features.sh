@@ -31,7 +31,7 @@ while [ $# -gt 0 ]; do
         *) echo "unknown arg: $1" >&2; exit 2;;
     esac
 done
-[ -n "$MODE" ]   || { echo "FAIL: --mode {gtao|fwdplus|viewport|shadow_atest|scene|chromatic|crowd|crowdpromo|entitylight|scenegolden|crowdwasm|gpucull|worldindirect|worldphase|worlddecal|exacthold|temporalfold|portalworld|aaportal|aacompare|aalatency|capturenoise|cullref|dlight-shadow|dlight-shadow-lifecycle|dlight-shadow-probe|selftest} required" >&2; exit 2; }
+[ -n "$MODE" ]   || { echo "FAIL: --mode {gtao|fwdplus|viewport|shadow_atest|scene|chromatic|crowd|crowdpromo|entitylight|scenegolden|crowdwasm|gpucull|worldindirect|worldphase|worlddecal|exacthold|temporalfold|bootstrapaa|portalworld|aaportal|aacompare|aalatency|capturenoise|cullref|dlight-shadow|dlight-shadow-lifecycle|dlight-shadow-probe|selftest} required" >&2; exit 2; }
 # selftest needs no engine (it exercises the assertion math on synthetic inputs).
 if [ "$MODE" != "selftest" ]; then
     [ -n "$ENGINE" ] || { echo "FAIL: --engine <wired.x64> required" >&2; exit 2; }
@@ -2679,6 +2679,68 @@ PYEOF
     v="$(awk -v r="$1" -v m="$PW_MIN_RATIO" 'BEGIN{print (r>=m)?"OK":"FAIL(world vanished with the portal view active)"}')"
     [ "${v:0:2}" = "OK" ] || FAIL=1
     printf "  portalworld %s %s: mean brightness portal-on=%s portal-off=%s ratio=%s (needs >= %s) -> %s\n" "$PW_MAP" "$PW_POS" "$2" "$3" "$1" "$PW_MIN_RATIO" "$v"
+    ;;
+
+bootstrapaa)
+    # The first frame of a temporal history (here: r_aa switched from 0 to 2) used to be an unfiltered copy of the scene. With
+    # r_dbgTemporalBootstrap 1 it goes through the spatial filter. Frames are captured on consecutive frames after the switch
+    # (a0 is the bootstrap frame, a1/a2 the first reprojected ones) and compared with a settled TAA frame of the same camera.
+    # The filtered bootstrap frame must be closer to the settled frame than the unfiltered one, and the filter must not smear
+    # (it may not be further from the settled frame than the unfiltered copy is on any later frame).
+    BA_POS="${BA_POS:-1052 1432 50 135}"
+    ba() {
+        local tag="$1" boot="$2"
+        { printf 'set cg_draw2D 0\nset cg_drawGun 0\nset fixedtime 8\nset r_dbgTemporalBootstrap %s\nset r_aa 0\nwait 40\n' "$boot"
+          printf 'set r_aa 2\nscreenshot vrf_%s_a0\nwait 1\nscreenshot vrf_%s_a1\nwait 1\nscreenshot vrf_%s_a2\nwait 60\n' "$tag" "$tag" "$tag"; } > "$SMOKE_HOME/base/vrf_ba.cfg"
+        CAP_POST_CMD="exec vrf_ba.cfg" capture_fixed_cam arena1 "$BA_POS" "$tag" +set r_aa 0 >/dev/null || return 1
+    }
+    ba ba_on 1 || FAIL=1
+    ba ba_off 0 || FAIL=1
+    ba ba_off2 0 || FAIL=1
+    copies="$(grep -c 'producer=copy' "$VRF_TMP/vrf-ba_on.log" || true)"
+    rm -f "$VRF_TMP/ba_results.txt"
+    PNG2RAW_BIN="${PNG2RAW:-$WIRED_SOURCE/tools/png2raw/png2raw}"
+    for fr in a0 a1 a2; do
+    res="$(python3 - "$SHOTDIR" "$PNG2RAW_BIN" "$fr" <<'PYEOF'
+import subprocess, sys
+d, dec = sys.argv[1], sys.argv[2]
+def load(n):
+    return subprocess.check_output([dec, f"{d}/vrf_{n}.png"])
+def diff(a, b, thr=6):
+    # pixels (RGB triples) that differ by more than thr in any channel, and the mean absolute difference
+    n = min(len(a), len(b)) // 3
+    cnt = 0; tot = 0
+    for i in range(0, n * 3, 3):
+        m = max(abs(a[i] - b[i]), abs(a[i + 1] - b[i + 1]), abs(a[i + 2] - b[i + 2]))
+        tot += m
+        if m > thr: cnt += 1
+    return cnt, tot / max(1, n)
+k = sys.argv[3]
+on = load("ba_on_" + k); off = load("ba_off_" + k); off2 = load("ba_off2_" + k); st = load("ba_on")
+c_onoff, _ = diff(on, off); c_noise, _ = diff(off, off2)
+c_on_st, m_on_st = diff(on, st); c_off_st, m_off_st = diff(off, st)
+print(c_onoff, c_noise, c_on_st, c_off_st, "%.4f" % m_on_st, "%.4f" % m_off_st)
+PYEOF
+)"
+    set -- $res
+    v="$(awk -v a="$1" -v n="$2" -v on="$3" -v off="$4" 'BEGIN{ if (a <= n + 200) print "FAIL(bootstrap on/off frames do not differ: the filter did not run or the capture missed the bootstrap frame)"; else if (on >= off) print "FAIL(filtered bootstrap frame is not closer to the settled frame)"; else print "OK" }')"
+    printf "  bootstrapaa %s: pixels differing on-vs-off=%s (repeat noise %s); pixels differing from the settled frame: filtered=%s unfiltered=%s (mean abs %s vs %s) -> %s\n" "$fr" "$1" "$2" "$3" "$4" "$5" "$6" "$v"
+    echo "$v|$1|$2|$3|$4" >> "$VRF_TMP/ba_results.txt"
+done
+    # The bootstrap frame is whichever of a0..a2 differs between on and off; it must be filtered-closer, and no frame may be worse.
+    verdict="$(python3 - "$VRF_TMP/ba_results.txt" "$copies" <<'PYEOF'
+import sys
+rows = [l.strip().split("|") for l in open(sys.argv[1]) if l.strip()]
+differing = [r for r in rows if int(r[1]) > int(r[2]) + 200]
+if int(sys.argv[2]) < 1: print("FAIL(no producer=copy frame in the log: the capture never had a bootstrap frame)")
+elif not differing: print("FAIL(no captured frame differs between bootstrap on and off: the filter did not run or the capture missed the bootstrap frame)")
+elif any(int(r[3]) >= int(r[4]) for r in differing): print("FAIL(the filtered bootstrap frame is not closer to the settled frame)")
+else: print("OK")
+PYEOF
+)"
+    rm -f "$VRF_TMP/ba_results.txt"
+    [ "$verdict" = OK ] || FAIL=1
+    echo "  bootstrapaa verdict (copy-producer frames=$copies): $verdict"
     ;;
 
 worldphase)

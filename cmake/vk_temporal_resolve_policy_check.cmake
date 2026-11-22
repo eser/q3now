@@ -108,8 +108,14 @@ require_text(SHADER "currentLinear > 0.0 && priorLinear > 0.0"
 	"both depths must be finite positive before history consumption")
 require_text(SHADER "abs(currentLinear - priorLinear) <= depthLimit"
 	"depth discontinuity must reject history")
-require_text(SHADER "prior.rgb, neighborhoodMin, neighborhoodMax"
-	"history color must be clamped to the current 3x3 neighborhood")
+require_text(SHADER "vec3 clipMin = neighborhoodMin;"
+	"the history clamp box must start from the current 3x3 min/max")
+require_text(SHADER "clipMin = max(neighborhoodMin,"
+	"variance clipping may only tighten the box (intersection with the 3x3 min)")
+require_text(SHADER "clipMax = min(neighborhoodMax,"
+	"variance clipping may only tighten the box (intersection with the 3x3 max)")
+require_text(SHADER "clamp(prior.rgb, clipMin, clipMax)"
+	"history color must be clamped to the current 3x3 neighborhood box")
 require_text(SHADER "mixPrecise(current.rgb, clampedPrior"
 	"accepted history must feed the resolved RGB")
 require_text(SHADER "current.a);"
@@ -165,9 +171,11 @@ require_text(TEST "bad.allocationGeneration = 0;"
 	"host must reject a forged zero-generation live owner")
 require_text(TEST "bad.groups[f.authority.historyReadIndex] = NULL;"
 	"host must reject a missing selected history group before commands")
-require_text(C "sizeof( vkTemporalResolvePush_t ) == 48u"
+require_text(C "sizeof( vkTemporalResolvePush_t ) == 52u"
 	"host ABI must pin the exact reflected push size")
 require_text(C "historyReadIndex ) == 44u"
+	"host ABI must pin the reflected history index push member offset")
+require_text(C "qualityFlags ) == 48u"
 	"host ABI must pin the final reflected push member offset")
 
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VKC)

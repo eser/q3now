@@ -114,7 +114,7 @@ test -n "$sampler_ptr" && test -n "$sampler_type"
 grep -Eq "^[[:space:]]*${sampler_type} = OpTypeSampler$" "$dis"
 
 offset=0
-for member in 0 1 2 3 4 5 6 7 8
+for member in 0 1 2 3 4 5 6 7 8 9
 do
 	grep -Eq "^[[:space:]]*OpMemberDecorate %TemporalResolvePush ${member} Offset ${offset}$" "$dis"
 	case "$member" in
@@ -124,9 +124,9 @@ do
 		*) offset=$((offset + 4)) ;;
 	esac
 done
-test "$offset" -eq 48
+test "$offset" -eq 52
 grep -Eq '^[[:space:]]*OpDecorate %TemporalResolvePush Block$' "$dis"
-grep -Eq '^[[:space:]]*%TemporalResolvePush = OpTypeStruct %v2uint %v2float %v2float %float %float %float %float %float %uint$' "$dis"
+grep -Eq '^[[:space:]]*%TemporalResolvePush = OpTypeStruct %v2uint %v2float %v2float %float %float %float %float %float %uint %uint$' "$dis"
 output_ptr=$(sed -n 's/^[[:space:]]*%resolvedColor = OpVariable \(%[^ ]*\) UniformConstant$/\1/p' "$dis")
 output_type=$(sed -n "s/^[[:space:]]*${output_ptr} = OpTypePointer UniformConstant \(%[^ ]*\)$/\\1/p" "$dis")
 test -n "$output_ptr" && test -n "$output_type"

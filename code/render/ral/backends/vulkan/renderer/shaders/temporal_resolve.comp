@@ -28,6 +28,7 @@ layout(push_constant) uniform TemporalResolvePush {
 	float depthThresholdRelative;
 	float historyWeight;
 	uint historyReadIndex;
+	uint qualityFlags;
 } pc;
 
 bool finite1(float v) { return v == v && abs(v) <= 3.402823466e38; }
@@ -231,6 +232,34 @@ vec4 fxSpatialAa(ivec2 px, vec4 centerColor) {
 	return vec4(centerColor.rgb * (1.0 - fxBlend) + fxAcrossColor * fxBlend, centerColor.a);
 }
 
+// ---- end spatial fallback ----
+
+// Velocity dilation: at a foreground edge the centre pixel often belongs to the background while the edge belongs to the object in
+// front, so reprojecting it with the background velocity drags a ghost behind the object. Taking the velocity of the closest pixel
+// of the 3x3 neighbourhood moves the whole edge with the object. The depth range is reversed (a larger device depth is closer).
+vec2 dlMotionVelocity(ivec2 px, float centerValid) {
+	vec2 centerVelocity = texelFetch(
+		sampler2D(motionVelocity, nearestSampler), px, 0).xy;
+	if ((pc.qualityFlags & 2u) == 0u || !(centerValid > 0.0) || !finite2(centerVelocity))
+		return centerVelocity;
+	ivec2 hi = ivec2(pc.extent) - ivec2(1);
+	ivec2 best = px;
+	float bestDepth = texelFetch(sampler2D(currentDeviceDepth, nearestSampler), px, 0).r;
+	for (int y = -1; y <= 1; ++y) {
+		for (int x = -1; x <= 1; ++x) {
+			ivec2 q = clamp(px + ivec2(x, y), ivec2(0), hi);
+			float d = texelFetch(sampler2D(currentDeviceDepth, nearestSampler), q, 0).r;
+			if (d > bestDepth) { bestDepth = d; best = q; }
+		}
+	}
+	if (best == px) return centerVelocity;
+	// The neighbour's velocity is only meaningful where its own motion is valid.
+	float v = texelFetch(sampler2D(motionValidity, nearestSampler), best, 0).r;
+	if (!(v > 0.0)) return centerVelocity;
+	vec2 dv = texelFetch(sampler2D(motionVelocity, nearestSampler), best, 0).xy;
+	return finite2(dv) ? dv : centerVelocity;
+}
+
 void main() {
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
 	if (any(greaterThanEqual(pixel, ivec2(pc.extent)))) return;
@@ -240,8 +269,7 @@ void main() {
 	bool usedHistory = false;
 	float valid = texelFetch(
 		sampler2D(motionValidity, nearestSampler), pixel, 0).r;
-	vec2 velocity = texelFetch(
-		sampler2D(motionVelocity, nearestSampler), pixel, 0).xy;
+	vec2 velocity = dlMotionVelocity(pixel, valid);
 	precise vec2 jitterDelta =
 		pc.previousEffectiveJitterUv - pc.currentEffectiveJitterUv;
 	precise vec2 jitterTexel = jitterDelta * vec2(pc.extent);
@@ -276,16 +304,30 @@ void main() {
 			vec4 prior = samplePreviousColorLinear(previousTexel);
 			vec3 neighborhoodMin = vec3(3.402823466e+38);
 			vec3 neighborhoodMax = vec3(-3.402823466e+38);
+			vec3 momentSum = vec3(0.0);
+			vec3 momentSquares = vec3(0.0);
 			for (int y = -1; y <= 1; ++y) {
 				for (int x = -1; x <= 1; ++x) {
 					vec3 c = sampleCurrent(pixel + ivec2(x, y)).rgb;
 					neighborhoodMin = min(neighborhoodMin, c);
 					neighborhoodMax = max(neighborhoodMax, c);
+					momentSum += c;
+					momentSquares += c * c;
 				}
 			}
 			if (finite4(prior) && finite3(neighborhoodMin) && finite3(neighborhoodMax)) {
-				vec3 clampedPrior = clamp(
-					prior.rgb, neighborhoodMin, neighborhoodMax);
+				// Variance clipping: tighten the min/max box to mean +/- gamma * sigma of the same 3x3 samples. The box is an
+				// intersection, so it can only get smaller; mean lies inside both, hence it is never empty.
+				vec3 clipMin = neighborhoodMin;
+				vec3 clipMax = neighborhoodMax;
+				if ((pc.qualityFlags & 1u) != 0u) {
+					vec3 momentMean = momentSum * (1.0 / 9.0);
+					vec3 momentSigma = sqrt(max(momentSquares * (1.0 / 9.0)
+						- momentMean * momentMean, vec3(0.0)));
+					clipMin = max(neighborhoodMin, momentMean - 1.25 * momentSigma);
+					clipMax = min(neighborhoodMax, momentMean + 1.25 * momentSigma);
+				}
+				vec3 clampedPrior = clamp(prior.rgb, clipMin, clipMax);
 				// Scale the history weight by the pixel's confidence. At
 				// valid == 1 this is exactly the previous behaviour
 				// (weight * 1.0), so fully-trusted surfaces are unchanged
@@ -303,7 +345,7 @@ void main() {
 			}
 		}
 	}
-	if (!usedHistory && finite4(current)) result = fxSpatialAa(pixel, current);
+	if (!usedHistory && finite4(current) && (pc.qualityFlags & 4u) != 0u) result = fxSpatialAa(pixel, current);
 	if (!finite4(result)) result = vec4(0.0);
 	imageStore(resolvedColor, pixel, result);
 	imageStore(historyOutColor, pixel, result);

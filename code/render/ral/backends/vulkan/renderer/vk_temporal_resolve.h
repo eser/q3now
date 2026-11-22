@@ -39,6 +39,8 @@ typedef struct {
 	float depthThresholdAbsolute, depthThresholdRelative;
 	float historyWeight;
 	uint32_t historyReadIndex;
+	/* Resolve quality switches (bit 0: variance clipping, bit 1: velocity dilation, bit 2: spatial fallback), driven by r_dbgTemporalQuality for A/B work. */
+	uint32_t qualityFlags;
 } vkTemporalResolvePush_t;
 
 typedef struct {
@@ -125,5 +127,7 @@ qboolean VK_TemporalResolveReleaseAfterIdle(
 
 /* Measurement only: dispatch repeat count for the resolve compute (1 = normal). Set from r_dbgTemporalRepeatResolve. */
 extern uint32_t vk_temporal_dbg_repeat_resolve;
+/* Resolve quality switches copied into the push block (default 7 = all on: variance clip, velocity dilation, spatial fallback). */
+extern uint32_t vk_temporal_dbg_quality_flags;
 
 #endif

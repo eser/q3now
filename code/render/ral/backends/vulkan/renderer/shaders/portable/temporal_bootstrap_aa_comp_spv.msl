@@ -1,0 +1,251 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct TemporalBootstrapPush
+{
+    uint2 extent;
+    float zNear;
+    float zFar;
+};
+
+constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(8u, 8u, 1u);
+
+struct spvDescriptorSetBuffer0
+{
+    texture2d<float> currentColor [[id(0)]];
+    sampler nearestSampler [[id(1)]];
+    texture2d<float, access::write> bootstrapColor [[id(2)]];
+    texture2d<float, access::write> historyOutColor [[id(3)]];
+    texture2d<float, access::write> historyOutLinearDepth [[id(4)]];
+    texture2d<float> currentDeviceDepth [[id(5)]];
+};
+
+static inline __attribute__((always_inline))
+bool finite4(thread const float4& v)
+{
+    bool _66 = all(v == v);
+    bool _74;
+    if (_66)
+    {
+        _74 = all(abs(v) <= float4(3.4028234663852885981170418348452e+38));
+    }
+    else
+    {
+        _74 = _66;
+    }
+    return _74;
+}
+
+static inline __attribute__((always_inline))
+bool finite1(thread const float& v)
+{
+    bool _52 = v == v;
+    bool _59;
+    if (_52)
+    {
+        _59 = abs(v) <= 3.4028234663852885981170418348452e+38;
+    }
+    else
+    {
+        _59 = _52;
+    }
+    return _59;
+}
+
+static inline __attribute__((always_inline))
+float fxLuma(thread const float3& c)
+{
+    float l = dot(c, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    float param = l;
+    if (!finite1(param))
+    {
+        return 0.0;
+    }
+    l = fast::clamp(l, 0.0, 10000.0);
+    return l * rsqrt(1.0 + (l * l));
+}
+
+static inline __attribute__((always_inline))
+float4 sampleCurrent(thread const int2& pixel, constant TemporalBootstrapPush& pc, texture2d<float> currentColor, sampler nearestSampler)
+{
+    int2 bounded = clamp(pixel, int2(0), int2(pc.extent) - int2(1));
+    return currentColor.read(uint2(bounded), 0);
+}
+
+static inline __attribute__((always_inline))
+float fxLumaAt(thread const int2& p, constant TemporalBootstrapPush& pc, texture2d<float> currentColor, sampler nearestSampler)
+{
+    int2 param = p;
+    float3 param_1 = sampleCurrent(param, pc, currentColor, nearestSampler).xyz;
+    return fxLuma(param_1);
+}
+
+static inline __attribute__((always_inline))
+float fxEdgeLuma(thread const int2& base, thread const int2& across, constant TemporalBootstrapPush& pc, texture2d<float> currentColor, sampler nearestSampler)
+{
+    int2 param = base;
+    int2 param_1 = base + across;
+    return 0.5 * (fxLumaAt(param, pc, currentColor, nearestSampler) + fxLumaAt(param_1, pc, currentColor, nearestSampler));
+}
+
+static inline __attribute__((always_inline))
+float4 fxSpatialAa(thread const int2& px, thread const float4& centerColor, constant TemporalBootstrapPush& pc, texture2d<float> currentColor, sampler nearestSampler)
+{
+    float3 param = centerColor.xyz;
+    float fxM = fxLuma(param);
+    int2 param_1 = px + int2(0, -1);
+    float fxN = fxLumaAt(param_1, pc, currentColor, nearestSampler);
+    int2 param_2 = px + int2(0, 1);
+    float fxS = fxLumaAt(param_2, pc, currentColor, nearestSampler);
+    int2 param_3 = px + int2(-1, 0);
+    float fxW = fxLumaAt(param_3, pc, currentColor, nearestSampler);
+    int2 param_4 = px + int2(1, 0);
+    float fxE = fxLumaAt(param_4, pc, currentColor, nearestSampler);
+    float fxHi = fast::max(fast::max(fxN, fxS), fast::max(fast::max(fxW, fxE), fxM));
+    float fxLo = fast::min(fast::min(fxN, fxS), fast::min(fast::min(fxW, fxE), fxM));
+    float fxSpan = fxHi - fxLo;
+    if (fxSpan < fast::max(0.031199999153614044189453125, fxHi * 0.125))
+    {
+        return centerColor;
+    }
+    int2 param_5 = px + int2(-1);
+    float fxNW = fxLumaAt(param_5, pc, currentColor, nearestSampler);
+    int2 param_6 = px + int2(1, -1);
+    float fxNE = fxLumaAt(param_6, pc, currentColor, nearestSampler);
+    int2 param_7 = px + int2(-1, 1);
+    float fxSW = fxLumaAt(param_7, pc, currentColor, nearestSampler);
+    int2 param_8 = px + int2(1);
+    float fxSE = fxLumaAt(param_8, pc, currentColor, nearestSampler);
+    float fxNS = fxN + fxS;
+    float fxWE = fxW + fxE;
+    float fxNWSW = fxNW + fxSW;
+    float fxNESE = fxNE + fxSE;
+    float fxHorz = abs(((-2.0) * fxW) + fxNWSW) + ((abs(((-2.0) * fxM) + fxNS) * 2.0) + abs(((-2.0) * fxE) + fxNESE));
+    float fxVert = abs(((-2.0) * fxS) + (fxSW + fxSE)) + ((abs(((-2.0) * fxM) + fxWE) * 2.0) + abs(((-2.0) * fxN) + (fxNW + fxNE)));
+    bool fxHorzSpan = fxHorz >= fxVert;
+    float fxAround = ((fxNS + fxWE) * 2.0) + (fxNWSW + fxNESE);
+    float fxLoSide = fxHorzSpan ? fxN : fxW;
+    float fxHiSide = fxHorzSpan ? fxS : fxE;
+    float fxGradLo = fxLoSide - fxM;
+    float fxGradHi = fxHiSide - fxM;
+    bool fxLoSteeper = abs(fxGradLo) >= abs(fxGradHi);
+    float fxGradient = fast::max(abs(fxGradLo), abs(fxGradHi));
+    float _352;
+    if (fxLoSteeper)
+    {
+        _352 = fxLoSide + fxM;
+    }
+    else
+    {
+        _352 = fxHiSide + fxM;
+    }
+    float fxPair = _352;
+    int2 fxAcross = select(int2(1, 0), int2(0, 1), bool2(fxHorzSpan));
+    int2 fxAlong = select(int2(0, 1), int2(1, 0), bool2(fxHorzSpan));
+    if (fxLoSteeper)
+    {
+        fxAcross = -fxAcross;
+    }
+    float fxInvSpan = rsqrt(fxSpan * fxSpan);
+    float fxBlendC = fast::clamp(abs((fxAround * 0.083333335816860198974609375) - fxM) * fxInvSpan, 0.0, 1.0);
+    float fxBlendF = (((-2.0) * fxBlendC) + 3.0) * (fxBlendC * fxBlendC);
+    float fxSubpixel = (fxBlendF * fxBlendF) * 0.75;
+    float fxHalfPair = fxPair * 0.5;
+    float fxScaled = fxGradient * 0.25;
+    bool fxMidNegative = (fxM - fxHalfPair) < 0.0;
+    int2 param_9 = px - fxAlong;
+    int2 param_10 = fxAcross;
+    float fxEndN = fxEdgeLuma(param_9, param_10, pc, currentColor, nearestSampler) - fxHalfPair;
+    int2 param_11 = px + fxAlong;
+    int2 param_12 = fxAcross;
+    float fxEndP = fxEdgeLuma(param_11, param_12, pc, currentColor, nearestSampler) - fxHalfPair;
+    bool fxDoneN = abs(fxEndN) >= fxScaled;
+    bool fxDoneP = abs(fxEndP) >= fxScaled;
+    int fxStepsN = 1;
+    int fxStepsP = 1;
+    for (int i = 2; i <= 12; i++)
+    {
+        if (!fxDoneN)
+        {
+            int2 param_13 = px - (fxAlong * int2(i));
+            int2 param_14 = fxAcross;
+            fxEndN = fxEdgeLuma(param_13, param_14, pc, currentColor, nearestSampler) - fxHalfPair;
+            fxDoneN = abs(fxEndN) >= fxScaled;
+            fxStepsN = i;
+        }
+        if (!fxDoneP)
+        {
+            int2 param_15 = px + (fxAlong * int2(i));
+            int2 param_16 = fxAcross;
+            fxEndP = fxEdgeLuma(param_15, param_16, pc, currentColor, nearestSampler) - fxHalfPair;
+            fxDoneP = abs(fxEndP) >= fxScaled;
+            fxStepsP = i;
+        }
+        if (fxDoneN && fxDoneP)
+        {
+            break;
+        }
+    }
+    bool fxTowardN = fxStepsN < fxStepsP;
+    float fxEndG = fxTowardN ? fxEndN : fxEndP;
+    bool fxGoodSpan = (fxEndG < 0.0) != fxMidNegative;
+    float fxSpanLen = float(fxStepsN + fxStepsP);
+    float fxNear = float(fxTowardN ? fxStepsN : fxStepsP);
+    float _539;
+    if (fxGoodSpan)
+    {
+        _539 = 0.5 - (fxNear * rsqrt(fxSpanLen * fxSpanLen));
+    }
+    else
+    {
+        _539 = 0.0;
+    }
+    float fxEdgeBlend = _539;
+    float fxBlend = fast::clamp(fast::max(fxEdgeBlend, fxSubpixel), 0.0, 1.0);
+    int2 param_17 = px + fxAcross;
+    float3 fxAcrossColor = sampleCurrent(param_17, pc, currentColor, nearestSampler).xyz;
+    return float4((centerColor.xyz * (1.0 - fxBlend)) + (fxAcrossColor * fxBlend), centerColor.w);
+}
+
+static inline __attribute__((always_inline))
+float storeLinearDepth(thread const float& z, constant TemporalBootstrapPush& pc)
+{
+    return (pc.zNear * pc.zFar) / (pc.zNear + (z * (pc.zFar - pc.zNear)));
+}
+
+kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], constant TemporalBootstrapPush& pc [[buffer(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+{
+    int2 pixel = int2(gl_GlobalInvocationID.xy);
+    if (any(pixel >= int2(pc.extent)))
+    {
+        return;
+    }
+    float4 current = spvDescriptorSet0.currentColor.read(uint2(pixel), 0);
+    float4 param = current;
+    float4 _627;
+    if (finite4(param))
+    {
+        int2 param_1 = pixel;
+        float4 param_2 = current;
+        _627 = fxSpatialAa(param_1, param_2, pc, spvDescriptorSet0.currentColor, spvDescriptorSet0.nearestSampler);
+    }
+    else
+    {
+        _627 = float4(0.0);
+    }
+    float4 result = _627;
+    float4 param_3 = result;
+    if (!finite4(param_3))
+    {
+        result = float4(0.0);
+    }
+    spvDescriptorSet0.bootstrapColor.write(result, uint2(pixel));
+    spvDescriptorSet0.historyOutColor.write(result, uint2(pixel));
+    float param_4 = spvDescriptorSet0.currentDeviceDepth.read(uint2(pixel), 0).x;
+    spvDescriptorSet0.historyOutLinearDepth.write(float4(storeLinearDepth(param_4, pc)), uint2(pixel));
+}
+

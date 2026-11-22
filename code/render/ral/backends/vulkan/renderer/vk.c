@@ -30,6 +30,7 @@
 #include "vk_temporal_motion_readback.h"
 #include "vk_temporal_history_consume.h"
 #include "vk_temporal_history_store.h"
+#include "vk_temporal_bootstrap_aa.h"
 #include "vk_temporal_resolved_hdr.h"
 #include "vk_temporal_resolve.h"
 #include "vk_temporal_resolve_readback.h"
@@ -106,6 +107,7 @@ static vkTemporalMainActivationOwner_t vk_temporal_main_activation;
 static vkTemporalMotionReadbackOwner_t vk_temporal_motion_readback;
 static vkTemporalHistoryConsumeOwner_t vk_temporal_history_consume;
 static vkTemporalHistoryStoreOwner_t vk_temporal_history_store_owner;
+static vkTemporalBootstrapAaOwner_t vk_temporal_bootstrap_aa_owner;
 static vkTemporalResolvedHdrOwner_t vk_temporal_resolved_hdr;
 static vkTemporalResolveOwner_t vk_temporal_resolve;
 static vkTemporalResolveReadbackOwner_t vk_temporal_resolve_readback;
@@ -797,8 +799,11 @@ static struct {
 	uint64_t contentSerial;
 	qboolean prepared;
 	qboolean copied;
+	// The bootstrap copy ran the spatial filter and already committed the history pair (the store only transitions).
+	qboolean bootstrapFiltered;
 	qboolean producerPrevalidated;
 } vk_temporal_resolved_hdr_frame;
+static qboolean vk_temporal_bootstrap_aa_try_record( const ralTexture_t *routeTarget );
 static struct {
 	vkTemporalResolveAuthorityReceipt_t authority;
 	vkTemporalResolveProductView_t products;
@@ -835,6 +840,7 @@ static void vk_temporal_resolved_hdr_reset_frame( void ) {
 		sizeof( vk_temporal_resolved_hdr_frame.recorded ) );
 	vk_temporal_resolved_hdr_frame.prepared = qfalse;
 	vk_temporal_resolved_hdr_frame.copied = qfalse;
+	vk_temporal_resolved_hdr_frame.bootstrapFiltered = qfalse;
 	memset( &vk_temporal_resolved_hdr_frame.prevalidated, 0,
 		sizeof( vk_temporal_resolved_hdr_frame.prevalidated ) );
 	vk_temporal_resolved_hdr_frame.producerPrevalidated = qfalse;
@@ -948,6 +954,11 @@ void vk_temporal_resolved_hdr_record_copy( void ) {
 				&vk_temporal_resolved_hdr_frame.target, &content, &route )
 			|| !route.resolved ) return;
 
+	// The first frame of a history is not reprojected; run the spatial filter over it when the bootstrap owner is ready (it also
+	// commits the history pair), otherwise fall back to the plain transfer copy.
+	if ( vk_temporal_bootstrap_aa_try_record( route.attachment ) ) {
+		vk_temporal_resolved_hdr_frame.bootstrapFiltered = qtrue;
+	} else {
 	memset( &region, 0, sizeof( region ) );
 	region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	region.srcSubresource.layerCount = 1;
@@ -980,6 +991,7 @@ void vk_temporal_resolved_hdr_record_copy( void ) {
 		RAL_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
 			| RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+	}
 	vk_temporal_resolved_hdr_frame.contentSerial = serial;
 	vk_temporal_resolved_hdr_frame.recorded = content;
 	vk_temporal_resolved_hdr_frame.route = route;
@@ -1329,6 +1341,7 @@ static qboolean vk_temporal_motion_has_live( void ) {
 		|| ( vk_temporal_history_store_owner.initialized
 			&& VK_TemporalHistoryStoreHasLive(
 				&vk_temporal_history_store_owner ) )
+		|| VK_TemporalBootstrapAaHasLive( &vk_temporal_bootstrap_aa_owner )
 		|| VK_TemporalGenericPipelineTableHasLive(
 			&vk_temporal_generic_pipeline_table )
 		|| VK_TemporalIqmPayloadHasLive( &vk_temporal_iqm_payload )
@@ -13141,6 +13154,11 @@ static void vk_temporal_history_store_release_after_idle( void ) {
 				&vk_temporal_history_store_owner, qtrue ) )
 		ri.Terminate( TERM_UNRECOVERABLE,
 			"temporal history Store release failed after idle" );
+	if ( vk_temporal_bootstrap_aa_owner.initialized
+			&& !VK_TemporalBootstrapAaReleaseAfterIdle(
+				&vk_temporal_bootstrap_aa_owner, qtrue ) )
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"temporal bootstrap AA release failed after idle" );
 	memset( &s_temporalHistoryStoreFrame, 0,
 		sizeof( s_temporalHistoryStoreFrame ) );
 }
@@ -13150,7 +13168,8 @@ void vk_temporal_history_store_shutdown( void ) {
 			&& VK_TemporalResolveHasLive( &vk_temporal_resolve ) )
 			|| VK_TemporalHistoryConsumeHasLive( &vk_temporal_history_consume )
 			|| VK_TemporalHistoryStoreHasLive(
-				&vk_temporal_history_store_owner ) ) vk_wait_idle();
+				&vk_temporal_history_store_owner )
+			|| VK_TemporalBootstrapAaHasLive( &vk_temporal_bootstrap_aa_owner ) ) vk_wait_idle();
 	vk_temporal_history_store_release_after_idle();
 	if ( vk_ral_get_backend()
 			&& Ral_WaitIdleAndDrainDeferred( vk_ral_get_backend() ) != ralSuccess )
@@ -13210,6 +13229,79 @@ static qboolean vk_temporal_history_store_build_key(
 	return qtrue;
 }
 
+static qboolean vk_temporal_bootstrap_aa_build_key(
+		const temporalHistoryResources_t *history,
+		const vkTemporalResolvedHdrReceipt_t *resolved,
+		vkTemporalBootstrapAaKey_t *outKey ) {
+	uint32_t i;
+	if ( !history || !resolved || !resolved->ready || !outKey
+			|| !vk.ral_color_image || !vk.sceneDepth.ral_image
+			|| resolved->backend != history->backend
+			|| resolved->width != history->width
+			|| resolved->height != history->height
+			|| resolved->sceneFormat != RAL_FORMAT_R16G16B16A16_SFLOAT ) return qfalse;
+	memset( outKey, 0, sizeof( *outKey ) );
+	outKey->backend = resolved->backend;
+	outKey->width = history->width; outKey->height = history->height;
+	outKey->historyAllocationGeneration = history->allocationGeneration;
+	outKey->sceneColorAttachmentGeneration = resolved->sceneColorAttachmentGeneration;
+	outKey->resolvedTargetAllocationGeneration = resolved->allocationGeneration;
+	outKey->currentColor = vk.ral_color_image;
+	outKey->currentDepth = vk.sceneDepth.ral_image;
+	outKey->resolvedTarget = resolved->target;
+	outKey->resolvedTargetView = resolved->targetView;
+	for ( i = 0; i < 2; ++i ) {
+		outKey->historyColor[i] = history->color[i];
+		outKey->historyColorView[i] = history->colorView[i];
+		outKey->historyDepth[i] = history->depth[i];
+		outKey->historyDepthView[i] = history->depthView[i];
+	}
+	outKey->computeSpirv = (const uint32_t *)temporal_bootstrap_aa_comp_spv;
+	outKey->computeSpirvSize = sizeof( temporal_bootstrap_aa_comp_spv );
+	return qtrue;
+}
+
+// Best effort: when the owner cannot be made ready the first frame of a history keeps the plain transfer copy.
+static void vk_temporal_bootstrap_aa_materialize_after_fence(
+		const temporalHistoryResources_t *history,
+		const vkTemporalResolvedHdrReceipt_t *resolved ) {
+	vkTemporalBootstrapAaKey_t key;
+	qboolean idleProven = qfalse;
+	if ( !vk_temporal_bootstrap_aa_build_key( history, resolved, &key ) ) return;
+	if ( !vk_temporal_bootstrap_aa_owner.initialized )
+		VK_TemporalBootstrapAaInit( &vk_temporal_bootstrap_aa_owner );
+	if ( VK_TemporalBootstrapAaNeedsIdle( &vk_temporal_bootstrap_aa_owner, &key ) ) {
+		vk_wait_idle();
+		idleProven = qtrue;
+	}
+	if ( !VK_TemporalBootstrapAaEnsureAfterFence(
+			&vk_temporal_bootstrap_aa_owner, &key, idleProven ) )
+		R_LOG( rch_ral, SEV_WARN, "temporal bootstrap AA owner unavailable; first frames use the plain copy\n" );
+}
+
+static qboolean vk_temporal_bootstrap_aa_try_record( const ralTexture_t *routeTarget ) {
+	vkTemporalBootstrapAaKey_t key;
+	vkTemporalHistoryStorePush_t push;
+	const ralTemporalFramePlan_t *plan = s_temporalHistoryStoreFrame.plan;
+	const temporalHistoryResources_t *history = s_temporalHistoryStoreFrame.history;
+	if ( ( r_dbgTemporalBootstrap && !r_dbgTemporalBootstrap->integer )
+			|| !s_temporalHistoryStoreFrame.prepared || !plan || !history
+			|| plan->historyValid || !vk.cmd
+			|| !vk_temporal_bootstrap_aa_build_key( history,
+				&vk_temporal_resolved_hdr_frame.target, &key )
+			|| key.resolvedTarget != routeTarget
+			|| key.currentColor != vk_temporal_resolved_hdr_frame.current.attachment )
+		return qfalse;
+	memset( &push, 0, sizeof( push ) );
+	push.extent[0] = history->width; push.extent[1] = history->height;
+	push.zNear = s_temporalHistoryStoreFrame.zNear;
+	push.zFar = s_temporalHistoryStoreFrame.zFar;
+	if ( !VK_TemporalBootstrapAaRecord( &vk_temporal_bootstrap_aa_owner, &key,
+			vk.cmd->ral_cmd, plan->historyWriteIndex, &push ) ) return qfalse;
+	vk.cmd->last_ral_pipeline = NULL;
+	return qtrue;
+}
+
 static qboolean vk_temporal_history_store_materialize_after_fence(
 		const temporalHistoryResources_t *history, int worldIndex,
 		const vkTemporalResolvedHdrReceipt_t *resolved )
@@ -13225,8 +13317,11 @@ static qboolean vk_temporal_history_store_materialize_after_fence(
 		vk_wait_idle();
 		idleProven = qtrue;
 	}
-	return VK_TemporalHistoryStoreEnsureAfterFence(
-		&vk_temporal_history_store_owner, &storeKey, idleProven );
+	if ( !VK_TemporalHistoryStoreEnsureAfterFence(
+			&vk_temporal_history_store_owner, &storeKey, idleProven ) )
+		return qfalse;
+	vk_temporal_bootstrap_aa_materialize_after_fence( history, resolved );
+	return qtrue;
 }
 
 static qboolean vk_temporal_history_store_ready_exact(
@@ -13417,11 +13512,12 @@ static qboolean vk_temporal_history_store_feedback( qboolean recursive )
 	// When the resolve dispatch produced this frame it already wrote the history pair (colour and linear depth) itself, so the
 	// store keeps its transitions and receipts but skips the copy dispatch. r_dbgTemporalFold 0 dispatches it anyway; it
 	// overwrites the pair with identical data, which is the older behaviour and the reference for the identity test.
-	foldedHistory = recursive
-		&& vk_temporal_resolve_frame.recordedCommands
-		&& vk_temporal_resolve_frame.recorded.historyFolded
-		&& vk_temporal_resolve_frame.recorded.committedWriteExpected.historyIndex
-			== plan->historyWriteIndex
+	foldedHistory = ( ( recursive
+			&& vk_temporal_resolve_frame.recordedCommands
+			&& vk_temporal_resolve_frame.recorded.historyFolded
+			&& vk_temporal_resolve_frame.recorded.committedWriteExpected.historyIndex
+				== plan->historyWriteIndex )
+			|| ( !recursive && vk_temporal_resolved_hdr_frame.bootstrapFiltered ) )
 		&& ( !r_dbgTemporalFold || r_dbgTemporalFold->integer )
 		? qtrue : qfalse;
 	if ( !( foldedHistory
@@ -13734,6 +13830,7 @@ void vk_temporal_recursive_record( void ) {
 	}
 	if ( !R_TemporalBackendGetPending( worldIndex, frameId, &plan, &history )
 			|| !plan || !history ) return;
+	vk_temporal_dbg_quality_flags = r_dbgTemporalQuality ? (uint32_t)r_dbgTemporalQuality->integer : 7u;
 	vk_temporal_dbg_repeat_resolve = r_dbgTemporalRepeatResolve ? (uint32_t)r_dbgTemporalRepeatResolve->integer : 1u;
 	vk_temporal_dbg_repeat_store = r_dbgTemporalRepeatStore ? (uint32_t)r_dbgTemporalRepeatStore->integer : 1u;
 	vk_gpu_ts_write( "temporal_pre" );   // everything before this stamp is the post chain; the lanes below split the TAA tail

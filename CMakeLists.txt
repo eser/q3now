@@ -5122,6 +5122,18 @@ SET_TESTS_PROPERTIES(vk_temporal_history_store_contract PROPERTIES
 	TIMEOUT 30)
 WIRED_CONFIGURE_HOST_TEST(vk_temporal_history_store_test
 	vk_temporal_history_store_contract)
+ADD_EXECUTABLE(vk_temporal_bootstrap_aa_test
+	tests/vk_temporal_bootstrap_aa_test.c
+	code/render/ral/backends/vulkan/renderer/vk_temporal_bootstrap_aa.c)
+TARGET_INCLUDE_DIRECTORIES(vk_temporal_bootstrap_aa_test PRIVATE
+	code/qcommon code/renderer code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer code/render/renderer)
+ADD_TEST(NAME vk_temporal_bootstrap_aa_contract
+	COMMAND vk_temporal_bootstrap_aa_test)
+SET_TESTS_PROPERTIES(vk_temporal_bootstrap_aa_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(vk_temporal_bootstrap_aa_test
+	vk_temporal_bootstrap_aa_contract)
 ADD_EXECUTABLE(tr_temporal_submit_test
 	tests/tr_temporal_submit_test.c
 	code/render/renderer/tr_temporal_submit.c
@@ -5285,6 +5297,12 @@ ADD_TEST(NAME vk_temporal_resolve_shader_reflection_contract
 SET_TESTS_PROPERTIES(vk_temporal_resolve_shader_reflection_contract PROPERTIES
 	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;feature.always"
 	SKIP_RETURN_CODE 77 TIMEOUT 60)
+ADD_TEST(NAME vk_temporal_spatial_fallback_parity_contract
+	COMMAND bash ${CMAKE_SOURCE_DIR}/tests/vk-temporal-fx-parity-check.sh
+		${CMAKE_SOURCE_DIR})
+SET_TESTS_PROPERTIES(vk_temporal_spatial_fallback_parity_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
 
 ADD_TEST(NAME vk_temporal_entmat_runtime_source_policy_contract
 	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}

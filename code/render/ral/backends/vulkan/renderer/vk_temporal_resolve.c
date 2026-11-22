@@ -4,6 +4,7 @@
 #include "vk_temporal_resolve.h"
 
 uint32_t vk_temporal_dbg_repeat_resolve = 1u;
+uint32_t vk_temporal_dbg_quality_flags = 7u;
 
 #include <limits.h>
 #include <math.h>
@@ -46,8 +47,8 @@ static qboolean FeedbackSourceEqualExact(
 #define VK_TEMPORAL_RESOLVE_DEPTH_RELATIVE 0.02f
 #define VK_TEMPORAL_RESOLVE_HISTORY_WEIGHT 0.875f
 
-_Static_assert( sizeof( vkTemporalResolvePush_t ) == 48u,
-	"temporal resolve push ABI must remain 48 bytes" );
+_Static_assert( sizeof( vkTemporalResolvePush_t ) == 52u,
+	"temporal resolve push ABI must remain 52 bytes" );
 _Static_assert( offsetof( vkTemporalResolvePush_t, extent ) == 0u,
 	"temporal resolve extent ABI" );
 _Static_assert( offsetof( vkTemporalResolvePush_t,
@@ -66,6 +67,8 @@ _Static_assert( offsetof( vkTemporalResolvePush_t, historyWeight ) == 40u,
 	"temporal resolve history weight ABI" );
 _Static_assert( offsetof( vkTemporalResolvePush_t, historyReadIndex ) == 44u,
 	"temporal resolve history index ABI" );
+_Static_assert( offsetof( vkTemporalResolvePush_t, qualityFlags ) == 48u,
+	"temporal resolve quality flags ABI" );
 
 static uint32_t KeyPointers( const vkTemporalResolveKey_t *key,
 		const void **out ) {
@@ -574,6 +577,7 @@ qboolean VK_TemporalResolveRecord( vkTemporalResolveOwner_t *owner,
 	push.depthThresholdRelative = VK_TEMPORAL_RESOLVE_DEPTH_RELATIVE;
 	push.historyWeight = VK_TEMPORAL_RESOLVE_HISTORY_WEIGHT;
 	push.historyReadIndex = readIndex;
+	push.qualityFlags = vk_temporal_dbg_quality_flags;
 	memset( &ticket, 0, sizeof( ticket ) );
 	ticket.authority = *authority;
 	ticket.products = *products;
@@ -904,6 +908,7 @@ qboolean VK_TemporalResolveTicketEqualExact(
 		&& ap->depthThresholdRelative == bp->depthThresholdRelative
 		&& ap->historyWeight == bp->historyWeight
 		&& ap->historyReadIndex == bp->historyReadIndex
+		&& ap->qualityFlags == bp->qualityFlags
 		&& a->ownerAllocationGeneration == b->ownerAllocationGeneration
 		&& a->historyFolded == b->historyFolded
 		&& a->recorded == b->recorded && a->submitted == b->submitted

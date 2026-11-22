@@ -1,0 +1,234 @@
+#version 460
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(std140, binding = 6) uniform TemporalBootstrapPush
+{
+    uvec2 extent;
+    float zNear;
+    float zFar;
+} pc;
+
+layout(binding = 0) uniform texture2D currentColor;
+layout(binding = 0) uniform sampler nearestSampler;
+layout(binding = 0, rgba16f) uniform writeonly image2D bootstrapColor;
+layout(binding = 1, rgba16f) uniform writeonly image2D historyOutColor;
+layout(binding = 2, r32f) uniform writeonly image2D historyOutLinearDepth;
+layout(binding = 1) uniform texture2D currentDeviceDepth;
+
+bool finite4(vec4 v)
+{
+    bool _66 = all(equal(v, v));
+    bool _74;
+    if (_66)
+    {
+        _74 = all(lessThanEqual(abs(v), vec4(3.4028234663852885981170418348452e+38)));
+    }
+    else
+    {
+        _74 = _66;
+    }
+    return _74;
+}
+
+bool finite1(float v)
+{
+    bool _52 = v == v;
+    bool _59;
+    if (_52)
+    {
+        _59 = abs(v) <= 3.4028234663852885981170418348452e+38;
+    }
+    else
+    {
+        _59 = _52;
+    }
+    return _59;
+}
+
+float fxLuma(vec3 c)
+{
+    float l = dot(c, vec3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    float param = l;
+    if (!finite1(param))
+    {
+        return 0.0;
+    }
+    l = clamp(l, 0.0, 10000.0);
+    return l * inversesqrt(1.0 + (l * l));
+}
+
+vec4 sampleCurrent(ivec2 pixel)
+{
+    ivec2 bounded = clamp(pixel, ivec2(0), ivec2(pc.extent) - ivec2(1));
+    return texelFetch(sampler2D(currentColor, nearestSampler), bounded, 0);
+}
+
+float fxLumaAt(ivec2 p)
+{
+    ivec2 param = p;
+    vec3 param_1 = sampleCurrent(param).xyz;
+    return fxLuma(param_1);
+}
+
+float fxEdgeLuma(ivec2 base, ivec2 across)
+{
+    ivec2 param = base;
+    ivec2 param_1 = base + across;
+    return 0.5 * (fxLumaAt(param) + fxLumaAt(param_1));
+}
+
+vec4 fxSpatialAa(ivec2 px, vec4 centerColor)
+{
+    vec3 param = centerColor.xyz;
+    float fxM = fxLuma(param);
+    ivec2 param_1 = px + ivec2(0, -1);
+    float fxN = fxLumaAt(param_1);
+    ivec2 param_2 = px + ivec2(0, 1);
+    float fxS = fxLumaAt(param_2);
+    ivec2 param_3 = px + ivec2(-1, 0);
+    float fxW = fxLumaAt(param_3);
+    ivec2 param_4 = px + ivec2(1, 0);
+    float fxE = fxLumaAt(param_4);
+    float fxHi = max(max(fxN, fxS), max(max(fxW, fxE), fxM));
+    float fxLo = min(min(fxN, fxS), min(min(fxW, fxE), fxM));
+    float fxSpan = fxHi - fxLo;
+    if (fxSpan < max(0.031199999153614044189453125, fxHi * 0.125))
+    {
+        return centerColor;
+    }
+    ivec2 param_5 = px + ivec2(-1);
+    float fxNW = fxLumaAt(param_5);
+    ivec2 param_6 = px + ivec2(1, -1);
+    float fxNE = fxLumaAt(param_6);
+    ivec2 param_7 = px + ivec2(-1, 1);
+    float fxSW = fxLumaAt(param_7);
+    ivec2 param_8 = px + ivec2(1);
+    float fxSE = fxLumaAt(param_8);
+    float fxNS = fxN + fxS;
+    float fxWE = fxW + fxE;
+    float fxNWSW = fxNW + fxSW;
+    float fxNESE = fxNE + fxSE;
+    float fxHorz = abs(((-2.0) * fxW) + fxNWSW) + ((abs(((-2.0) * fxM) + fxNS) * 2.0) + abs(((-2.0) * fxE) + fxNESE));
+    float fxVert = abs(((-2.0) * fxS) + (fxSW + fxSE)) + ((abs(((-2.0) * fxM) + fxWE) * 2.0) + abs(((-2.0) * fxN) + (fxNW + fxNE)));
+    bool fxHorzSpan = fxHorz >= fxVert;
+    float fxAround = ((fxNS + fxWE) * 2.0) + (fxNWSW + fxNESE);
+    float fxLoSide = fxHorzSpan ? fxN : fxW;
+    float fxHiSide = fxHorzSpan ? fxS : fxE;
+    float fxGradLo = fxLoSide - fxM;
+    float fxGradHi = fxHiSide - fxM;
+    bool fxLoSteeper = abs(fxGradLo) >= abs(fxGradHi);
+    float fxGradient = max(abs(fxGradLo), abs(fxGradHi));
+    float _352;
+    if (fxLoSteeper)
+    {
+        _352 = fxLoSide + fxM;
+    }
+    else
+    {
+        _352 = fxHiSide + fxM;
+    }
+    float fxPair = _352;
+    ivec2 fxAcross = mix(ivec2(1, 0), ivec2(0, 1), bvec2(fxHorzSpan));
+    ivec2 fxAlong = mix(ivec2(0, 1), ivec2(1, 0), bvec2(fxHorzSpan));
+    if (fxLoSteeper)
+    {
+        fxAcross = -fxAcross;
+    }
+    float fxInvSpan = inversesqrt(fxSpan * fxSpan);
+    float fxBlendC = clamp(abs((fxAround * 0.083333335816860198974609375) - fxM) * fxInvSpan, 0.0, 1.0);
+    float fxBlendF = (((-2.0) * fxBlendC) + 3.0) * (fxBlendC * fxBlendC);
+    float fxSubpixel = (fxBlendF * fxBlendF) * 0.75;
+    float fxHalfPair = fxPair * 0.5;
+    float fxScaled = fxGradient * 0.25;
+    bool fxMidNegative = (fxM - fxHalfPair) < 0.0;
+    ivec2 param_9 = px - fxAlong;
+    ivec2 param_10 = fxAcross;
+    float fxEndN = fxEdgeLuma(param_9, param_10) - fxHalfPair;
+    ivec2 param_11 = px + fxAlong;
+    ivec2 param_12 = fxAcross;
+    float fxEndP = fxEdgeLuma(param_11, param_12) - fxHalfPair;
+    bool fxDoneN = abs(fxEndN) >= fxScaled;
+    bool fxDoneP = abs(fxEndP) >= fxScaled;
+    int fxStepsN = 1;
+    int fxStepsP = 1;
+    for (int i = 2; i <= 12; i++)
+    {
+        if (!fxDoneN)
+        {
+            ivec2 param_13 = px - (fxAlong * ivec2(i));
+            ivec2 param_14 = fxAcross;
+            fxEndN = fxEdgeLuma(param_13, param_14) - fxHalfPair;
+            fxDoneN = abs(fxEndN) >= fxScaled;
+            fxStepsN = i;
+        }
+        if (!fxDoneP)
+        {
+            ivec2 param_15 = px + (fxAlong * ivec2(i));
+            ivec2 param_16 = fxAcross;
+            fxEndP = fxEdgeLuma(param_15, param_16) - fxHalfPair;
+            fxDoneP = abs(fxEndP) >= fxScaled;
+            fxStepsP = i;
+        }
+        if (fxDoneN && fxDoneP)
+        {
+            break;
+        }
+    }
+    bool fxTowardN = fxStepsN < fxStepsP;
+    float fxEndG = fxTowardN ? fxEndN : fxEndP;
+    bool fxGoodSpan = (fxEndG < 0.0) != fxMidNegative;
+    float fxSpanLen = float(fxStepsN + fxStepsP);
+    float fxNear = float(fxTowardN ? fxStepsN : fxStepsP);
+    float _539;
+    if (fxGoodSpan)
+    {
+        _539 = 0.5 - (fxNear * inversesqrt(fxSpanLen * fxSpanLen));
+    }
+    else
+    {
+        _539 = 0.0;
+    }
+    float fxEdgeBlend = _539;
+    float fxBlend = clamp(max(fxEdgeBlend, fxSubpixel), 0.0, 1.0);
+    ivec2 param_17 = px + fxAcross;
+    vec3 fxAcrossColor = sampleCurrent(param_17).xyz;
+    return vec4((centerColor.xyz * (1.0 - fxBlend)) + (fxAcrossColor * fxBlend), centerColor.w);
+}
+
+float storeLinearDepth(float z)
+{
+    return (pc.zNear * pc.zFar) / (pc.zNear + (z * (pc.zFar - pc.zNear)));
+}
+
+void main()
+{
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pixel, ivec2(pc.extent))))
+    {
+        return;
+    }
+    vec4 current = texelFetch(sampler2D(currentColor, nearestSampler), pixel, 0);
+    vec4 param = current;
+    vec4 _627;
+    if (finite4(param))
+    {
+        ivec2 param_1 = pixel;
+        vec4 param_2 = current;
+        _627 = fxSpatialAa(param_1, param_2);
+    }
+    else
+    {
+        _627 = vec4(0.0);
+    }
+    vec4 result = _627;
+    vec4 param_3 = result;
+    if (!finite4(param_3))
+    {
+        result = vec4(0.0);
+    }
+    imageStore(bootstrapColor, pixel, result);
+    imageStore(historyOutColor, pixel, result);
+    float param_4 = texelFetch(sampler2D(currentDeviceDepth, nearestSampler), pixel, 0).x;
+    imageStore(historyOutLinearDepth, pixel, vec4(storeLinearDepth(param_4)));
+}
+

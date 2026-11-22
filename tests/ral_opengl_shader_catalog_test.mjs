@@ -22,12 +22,12 @@ const exact = (bytes, digest) => {
 
 assert.equal(catalog.schemaVersion, 2);
 assert.deepEqual(catalog.requiredTargets, ['glsl460']);
-assert.equal(catalog.entries.length, 321);
-assert.equal(manifest.entries.length, 321);
+assert.equal(catalog.entries.length, 322);
+assert.equal(manifest.entries.length, 322);
 assert.equal(catalog.portableManifest.byteCount, Buffer.byteLength(manifestText));
 assert.ok(exact(Buffer.from(manifestText), catalog.portableManifest.digest));
-assert.equal(readdirSync(root).filter((name) => name.endsWith('.glsl460')).length, 321);
-for (let ordinal = 0; ordinal < 321; ++ordinal) {
+assert.equal(readdirSync(root).filter((name) => name.endsWith('.glsl460')).length, 322);
+for (let ordinal = 0; ordinal < 322; ++ordinal) {
 	const entry = catalog.entries[ordinal];
 	const portable = manifest.entries[ordinal];
 	const artifact = entry.artifacts[0];
@@ -42,7 +42,6 @@ for (let ordinal = 0; ordinal < 321; ++ordinal) {
 	assert.doesNotMatch(source, /layout\([^)]*set\s*=|push_constant|nonuniformEXT|GL_EXT_nonuniform_qualifier|#version 3/);
 }
 assert.deepEqual(catalog.entries.slice(-20).map((entry) => entry.symbol), [
-	'sky_view_comp_spv',
 	'project_sky_sh_comp_spv',
 	'sky_surface_composite_comp_spv',
 	'ral_sky_material_frag_spv',
@@ -62,6 +61,7 @@ assert.deepEqual(catalog.entries.slice(-20).map((entry) => entry.symbol), [
 	'hiz_reduce_comp_spv',
 	'hiz_test_comp_spv',
 	'hiz_audit_comp_spv',
+	'temporal_bootstrap_aa_comp_spv',
 ]);
 generateProductShaderCatalog({ portable: root, output: productCatalogPath, check: true });
 // Check the actual translated product shaders, not only host-side uploads.
@@ -98,4 +98,4 @@ const first = catalog.entries[0].artifacts[0];
 const bad = Buffer.from(readFileSync(join(root, `${catalog.entries[0].symbol}.glsl460`)));
 bad[bad.length - 1] ^= 1;
 assert.equal(exact(bad, first.digest), false);
-console.log('RAL OpenGL GLSL 4.60 catalog: PASS (321 modules; product artifact selected)');
+console.log('RAL OpenGL GLSL 4.60 catalog: PASS (322 modules; product artifact selected)');

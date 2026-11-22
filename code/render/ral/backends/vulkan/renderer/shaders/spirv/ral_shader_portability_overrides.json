@@ -5171,6 +5171,24 @@
       ]
     },
     {
+      "symbol": "temporal_bootstrap_aa_comp_spv",
+      "spirvDigest": {
+        "lane0": "099dd001c5d5a3fb",
+        "lane1": "0834f40d319f970e"
+      },
+      "samplerKinds": [
+        {
+          "set": 0,
+          "binding": 2,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        }
+      ],
+      "inlineUniform": {
+        "set": 0,
+        "binding": 6
+      }
+    },
+    {
       "symbol": "temporal_history_consume_comp_spv",
       "spirvDigest": {
         "lane0": "53156960ceeeef51",
@@ -5209,8 +5227,8 @@
     {
       "symbol": "temporal_resolve_comp_spv",
       "spirvDigest": {
-        "lane0": "d1088a6ced833d82",
-        "lane1": "a934433633843e3a"
+        "lane0": "040b92fc7947b134",
+        "lane1": "0c1748c5fa08b5e8"
       },
       "samplerKinds": [
         {

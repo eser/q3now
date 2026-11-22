@@ -445,4 +445,7 @@ export default [
 	{ stage: 'comp', source: 'hiz_reduce.comp', output: 'hiz_reduce_comp_spv' },
 	{ stage: 'comp', source: 'hiz_test.comp',   output: 'hiz_test_comp_spv'   },
 	{ stage: 'comp', source: 'hiz_audit.comp',  output: 'hiz_audit_comp_spv'  },
+
+	// First-frame spatial anti-aliasing for the temporal history bootstrap. Appended: the sealed corpus is never reordered.
+	{ stage: 'comp', source: 'temporal_bootstrap_aa.comp', output: 'temporal_bootstrap_aa_comp_spv' },
 ];
