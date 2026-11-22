@@ -13260,7 +13260,10 @@ static qboolean vk_temporal_history_store_prepare( void )
 	if ( backEnd.viewParms.viewportX != 0 || backEnd.viewParms.viewportY != 0
 			|| backEnd.viewParms.viewportWidth != glConfig.vidWidth
 			|| backEnd.viewParms.viewportHeight != glConfig.vidHeight ) return qfalse;
-	if ( vk.cmd->open_dynamic_pass == VK_DYN_PASS_NONE ) return qfalse;
+	// No pass may be required to be open here. Features that run between the world list and the UI (the full atmosphere
+	// composition, for one) end the 3D pass first; requiring an open pass made the history store refuse every such frame, so a
+	// map with atmosphere never got past the bootstrap frame and TAA never resolved in real play. UI-only frames have no pending
+	// temporal frame and were already rejected above; the pass, when still open, is closed just below.
 
 	// Force a final post-world snapshot. Early soft-particle consumers may have
 	// copied depth already, but they cannot define temporal history depth.
@@ -32604,6 +32607,7 @@ static void vk_scene_depth_copy_internal( qboolean forceFinal,
 	ralQueueType_t retainedDepthQueue;
 	const ralTextureAspectFlags_t depthAspects = RAL_TEXTURE_ASPECT_DEPTH
 		| ( glConfig.stencilBits > 0 ? RAL_TEXTURE_ASPECT_STENCIL : 0 );
+	qboolean passWasOpen;
 
 	if ( !vk.sceneDepth.active || ( vk.sceneDepth.copied && !forceFinal ) )
 		return;
@@ -32612,7 +32616,10 @@ static void vk_scene_depth_copy_internal( qboolean forceFinal,
 	// keeps the RAL depth tracker at DEPTH_STENCIL_ATTACHMENT; the depth-copy
 	// barriers below move depth_image to TRANSFER_SRC and back explicitly, so the
 	// RAL depth tracker is re-synced before the dynamic depth-fade re-begin.
-	vk_end_render_pass();
+	// A feature that ran between the world list and here (the full atmosphere composition) may already have ended the pass; the
+	// attachments are then in the same state this end would leave them in, and nothing is reopened afterwards.
+	passWasOpen = vk.cmd->open_dynamic_pass != VK_DYN_PASS_NONE ? qtrue : qfalse;
+	if ( passWasOpen ) vk_end_render_pass();
 	if ( !forceFinal ) vk_gpu_ts_write( "opaque_to_depth" );
 
 	// Whole-resource layout authority covers depth+stencil for combined formats;
@@ -32720,7 +32727,7 @@ static void vk_scene_depth_copy_internal( qboolean forceFinal,
 
 	if ( !forceFinal ) vk_gpu_ts_write( "lens_depth" );
 
-	vk_scene_pass_reopen();
+	if ( passWasOpen ) vk_scene_pass_reopen();
 
 	// The soft-particle dfade fragment samples this depth copy via the bindless
 	// table at WIRED_BINDLESS_SCENEDEPTH_SLOT (role 4: depth_texture), registered in
@@ -32815,7 +32822,7 @@ void vk_forwardplus_depth_copy( void )
 	// The transitions + copy must be outside a render pass. End the open scene pass
 	// (its color/depth are already produced this frame); the reopen below restores it
 	// for the caller's subsequent vk_end_render_pass. Mirrors vk_scene_depth_copy.
-	vk_end_render_pass();
+	if ( vk.cmd->open_dynamic_pass != VK_DYN_PASS_NONE ) vk_end_render_pass();
 
 	memset( transitions, 0, sizeof( transitions ) );
 	transitions[0].texture = vk.sceneDepth.ral_image;
