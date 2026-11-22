@@ -230,7 +230,7 @@ capture() {
         +set sv_cheats 1 +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 \
         +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set r_fullscreen 0 \
         +log renderer.ral info \
-        +set r_pinShaderTime 1.0 +set r_pinFrameTime 1.0 +set con_notifytime 0 +set s_initsound 0 +set s_volume 0 +set s_musicVolume 0 \
+        +set r_aa 0 +set r_pinShaderTime 1.0 +set r_pinFrameTime 1.0 +set con_notifytime 0 +set s_initsound 0 +set s_volume 0 +set s_musicVolume 0 \
         +set com_automated 1 \
         "${FOLDED[@]}" \
         +map "$map" +waitForMap +wait 80 \
@@ -306,7 +306,7 @@ capture_fixed_cam() {
         +set sv_cheats 1 +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 \
         +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set r_fullscreen 0 \
         +log renderer.ral info \
-        +set r_ao 0 \
+        +set r_ao 0 +set r_aa 0 \
         +set r_pinShaderTime 1.0 +set r_pinFrameTime 1.0 +set con_notifytime 0 +set s_initsound 0 +set s_volume 0 +set s_musicVolume 0 \
         +set com_automated 1 \
         "${FOLDED[@]}" `# extra +set tokens; a later +set r_ao 1 here overrides the default-off above (last-wins)` \
@@ -384,7 +384,7 @@ capture_scene() {
         +set sv_cheats 1 +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 \
         +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set r_fullscreen 0 \
         +log renderer.ral info \
-        +set r_ao 0 \
+        +set r_ao 0 +set r_aa 0 \
         +set r_pinShaderTime 1.0 +set r_pinFrameTime 1.0 +set con_notifytime 0 +set s_initsound 0 +set s_volume 0 +set s_musicVolume 0 \
         +set fixedtime 1 \
         +set com_automated 1 \

@@ -3040,11 +3040,11 @@ static void R_Register( void )
 	// regardless. The decision logic lives in tr_antialiasing.c; every temporal
 	// enable check reads R_AntialiasingPlan() rather than these cvars. In
 	// CVG_RENDERER so a change re-runs vk_update_post_process_pipelines.
-	r_aa = ri.Cvar_Get( "r_aa", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	r_aa = ri.Cvar_Get( "r_aa", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_aa, "0", "2", CV_INTEGER );
 	ri.Cvar_SetDescription( r_aa, "Anti-aliasing technique:\n"
-								  " 0 - off (default)\n"
-								  " 1 or 2 - temporal anti-aliasing (TAA)\n"
+								  " 0 - off\n"
+								  " 1 or 2 - temporal anti-aliasing (TAA) (default)\n"
 								  "Requires r_fbo 1. Live: takes effect on next frame via the\n"
 								  "renderer post-process pipeline group." );
 	ri.Cvar_SetGroup( r_aa, CVG_RENDERER );
