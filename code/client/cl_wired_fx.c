@@ -154,7 +154,13 @@ static uint32_t CL_WiredFx_ResolveResource( wiredFxResourceType_t type,
 			if ( !Q_stricmp( s_fx.particleNames[i].name, name ) ) return (uint32_t)s_fx.particleNames[i].handle;
 		s_fx.unknownParticleResources++; return 0u;
 	case WIRED_FX_RESOURCE_MODEL: return re.RegisterModel ? (uint32_t)re.RegisterModel( name ) : 0u;
-	case WIRED_FX_RESOURCE_SOUND: return (uint32_t)S_RegisterSound( name, qfalse );
+	case WIRED_FX_RESOURCE_SOUND: {
+		/* With no sound backend every registration returns 0, which the authoring layer
+		 * treats as a missing asset and rejects the whole profile (all weapon effects with a
+		 * sound). Hand out a stable non-zero placeholder instead; nothing plays it. */
+		const uint32_t handle = (uint32_t)S_RegisterSound( name, qfalse );
+		return handle ? handle : ( S_BackendAvailable() ? 0u : CL_WiredFx_Hash( name ) );
+	}
 	case WIRED_FX_RESOURCE_FLARE:
 		/* A flare may be presented either as an RT_SPRITE or, when the
 		 * author requests an anamorphic aspect, through the shared beam

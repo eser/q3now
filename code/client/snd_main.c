@@ -285,6 +285,12 @@ void S_BeginRegistration( void )
 S_RegisterSound
 =================
 */
+qboolean S_BackendAvailable( void )
+{
+	return si.RegisterSound ? qtrue : qfalse;
+}
+
+
 sfxHandle_t	S_RegisterSound( const char *sample, qboolean compressed )
 {
 	if ( !sample || !*sample ) {

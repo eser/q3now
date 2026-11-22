@@ -71,6 +71,10 @@ void S_BeginRegistration( void );
 // checks for missing files
 sfxHandle_t	S_RegisterSound( const char *sample, qboolean compressed );
 
+// qfalse when no sound backend is running (s_initsound 0, no device): S_RegisterSound then
+// returns 0 for every name, which callers must not mistake for "asset missing".
+qboolean S_BackendAvailable( void );
+
 // Returns the duration of a registered sound in milliseconds.
 // Returns 0 if the handle is invalid or the sound system is not running.
 int S_SoundDuration( sfxHandle_t handle );
