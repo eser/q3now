@@ -370,6 +370,27 @@ void Ral_CmdPushConstants   ( ralCommandBuffer_t *cb, uint32_t stageFlags, uint3
 void Ral_CmdDraw                  ( ralCommandBuffer_t *cb, uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex, uint32_t firstInstance );
 void Ral_CmdDrawIndexed           ( ralCommandBuffer_t *cb, uint32_t indexCount, uint32_t instanceCount, uint32_t firstIndex, int32_t vertexOffset, uint32_t firstInstance );
 void Ral_CmdDrawIndexedIndirect   ( ralCommandBuffer_t *cb, ralBuffer_t *argBuf, uint64_t offset, uint32_t drawCount, uint32_t stride );
+
+// ── command recording (replay spike, TASK-88) ───────────────────────────
+// A recording captures the world-batch command vocabulary (pipeline / vertex / index / bind-group
+// binds, viewport, indexed and indexed-indirect draws) while the commands still execute, and can
+// replay them later on the same or another command buffer through the public Ral_Cmd* entry
+// points. Any other command issued during capture is counted as unsupported so a caller can
+// refuse to replay an incomplete stream. A recorded indexed-indirect draw may carry one
+// alternate argument offset (variant 1 of the replay), written by the caller before the draw.
+typedef struct ralCommandRecording_s ralCommandRecording_t;
+ralCommandRecording_t *Ral_CreateCommandRecording( void );
+void     Ral_DestroyCommandRecording( ralCommandRecording_t *rec );
+void     Ral_CommandRecordingClear( ralCommandRecording_t *rec );
+uint32_t Ral_CommandRecordingOpCount( const ralCommandRecording_t *rec );
+uint32_t Ral_CommandRecordingUnsupportedCount( const ralCommandRecording_t *rec, const char **firstName );
+void     Ral_CmdRecordingBegin( ralCommandBuffer_t *cb, ralCommandRecording_t *rec );
+void     Ral_CmdRecordingEnd( ralCommandBuffer_t *cb );
+void     Ral_CmdRecordingNoteIndirectVariant( ralCommandBuffer_t *cb, uint64_t variantOffset );
+typedef struct { uint32_t n, unsupported; const char *first; } ralRecordingMark_t;
+void     Ral_CommandRecordingMark( const ralCommandRecording_t *rec, ralRecordingMark_t *mark );
+void     Ral_CommandRecordingRollback( ralCommandRecording_t *rec, const ralRecordingMark_t *mark );
+qboolean Ral_CmdRecordingReplay( ralCommandBuffer_t *cb, const ralCommandRecording_t *rec, uint32_t variant );
 void Ral_CmdDrawIndexedIndirectCount( ralCommandBuffer_t *cb, ralBuffer_t *argBuf, uint64_t argOffset,
                                       ralBuffer_t *countBuf, uint64_t countOffset, uint32_t maxDrawCount, uint32_t stride );  // §9.3
 void Ral_CmdDispatch              ( ralCommandBuffer_t *cb, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ );

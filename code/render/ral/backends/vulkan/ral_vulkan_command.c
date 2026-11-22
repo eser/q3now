@@ -10,6 +10,149 @@
 
 #include "ral_vulkan_internal.h"
 
+// ── command recording (TASK-88 replay spike) ────────────────────────────────────────────
+// Captures the small command vocabulary an opaque world batch issues (measured with a trace:
+// pipeline / vertex / index / bind-group binds, viewport, indexed + indexed-indirect draws).
+// Everything else issued while capturing is counted, so an incomplete stream can be refused.
+enum { RAL_REC_PIPELINE = 1, RAL_REC_VERTEX, RAL_REC_GROUP, RAL_REC_INDEX, RAL_REC_VIEWPORT, RAL_REC_DRAW, RAL_REC_INDIRECT, RAL_REC_SCISSOR };
+#define RAL_REC_MAX_VB  RAL_VK_MAX_TRACKED_VERTEX_BUFFERS
+#define RAL_REC_MAX_DYN 4u
+typedef struct {
+	uint32_t op;
+	union {
+		struct { ralPipeline_t *p; } pipe;
+		struct { uint32_t first, count; ralBuffer_t *buf[RAL_REC_MAX_VB]; uint64_t off[RAL_REC_MAX_VB]; } vb;
+		struct { uint32_t set, n; ralBindGroup_t *g; uint32_t dyn[RAL_REC_MAX_DYN]; } grp;
+		struct { ralBuffer_t *buf; uint64_t off; ralIndexType_t type; } ib;
+		struct { ralViewport_t vp; } vp;
+		struct { ralRect_t rect; } sc;
+		struct { uint32_t indexCount, instanceCount, firstIndex; int32_t vertexOffset; uint32_t firstInstance; } di;
+		struct { ralBuffer_t *buf; uint64_t off, altOff; uint32_t count, stride; qboolean hasAlt; } ind;
+	} u;
+} ralRecOp_t;
+
+struct ralCommandRecording_s {
+	ralRecOp_t *ops;
+	uint32_t    n, cap, unsupported;
+	const char *firstUnsupported;
+	uint64_t    pendingAlt;
+	qboolean    hasPendingAlt;
+};
+
+ralCommandRecording_t *Ral_CreateCommandRecording( void ) {
+	return (ralCommandRecording_t *)calloc( 1u, sizeof( ralCommandRecording_t ) );
+}
+void Ral_DestroyCommandRecording( ralCommandRecording_t *rec ) {
+	if ( !rec ) return;
+	free( rec->ops );
+	free( rec );
+}
+void Ral_CommandRecordingClear( ralCommandRecording_t *rec ) {
+	if ( !rec ) return;
+	rec->n = 0u; rec->unsupported = 0u; rec->firstUnsupported = NULL; rec->hasPendingAlt = qfalse;
+}
+uint32_t Ral_CommandRecordingOpCount( const ralCommandRecording_t *rec ) { return rec ? rec->n : 0u; }
+uint32_t Ral_CommandRecordingUnsupportedCount( const ralCommandRecording_t *rec, const char **firstName ) {
+	if ( firstName ) *firstName = rec ? rec->firstUnsupported : NULL;
+	return rec ? rec->unsupported : 0u;
+}
+static ralRecOp_t *ralVk_RecNext( ralCommandRecording_t *rec, uint32_t op ) {
+	ralRecOp_t *o;
+	if ( rec->n == rec->cap ) {
+		const uint32_t cap = rec->cap ? rec->cap * 2u : 256u;
+		ralRecOp_t *grown = (ralRecOp_t *)realloc( rec->ops, (size_t)cap * sizeof( ralRecOp_t ) );
+		if ( !grown ) { rec->unsupported++; if ( !rec->firstUnsupported ) rec->firstUnsupported = "recording-oom"; return NULL; }
+		rec->ops = grown; rec->cap = cap;
+	}
+	o = &rec->ops[rec->n++];
+	memset( o, 0, sizeof( *o ) );
+	o->op = op;
+	return o;
+}
+static void ralVk_RecUnsupported( ralCommandBuffer_t *cb, const char *name ) {
+	if ( !cb || !cb->recording ) return;
+	cb->recording->unsupported++;
+	if ( !cb->recording->firstUnsupported ) cb->recording->firstUnsupported = name;
+}
+static void ralVk_RecBindPipeline( ralCommandRecording_t *r, ralPipeline_t *p ) {
+	ralRecOp_t *o = ralVk_RecNext( r, RAL_REC_PIPELINE ); if ( o ) o->u.pipe.p = p;
+}
+static void ralVk_RecScissor( ralCommandRecording_t *r, const ralRect_t *rect ) {
+	ralRecOp_t *o = ralVk_RecNext( r, RAL_REC_SCISSOR ); if ( o ) o->u.sc.rect = *rect;
+}
+static void ralVk_RecViewport( ralCommandRecording_t *r, const ralViewport_t *vp ) {
+	ralRecOp_t *o = ralVk_RecNext( r, RAL_REC_VIEWPORT ); if ( o ) o->u.vp.vp = *vp;
+}
+static void ralVk_RecBindGroup( ralCommandRecording_t *r, uint32_t set, ralBindGroup_t *g, const uint32_t *dyn, uint32_t n ) {
+	ralRecOp_t *o;
+	if ( n > RAL_REC_MAX_DYN ) { r->unsupported++; if ( !r->firstUnsupported ) r->firstUnsupported = "bind-group-dynamic-offsets>4"; return; }
+	o = ralVk_RecNext( r, RAL_REC_GROUP ); if ( !o ) return;
+	o->u.grp.set = set; o->u.grp.g = g; o->u.grp.n = n;
+	if ( n && dyn ) memcpy( o->u.grp.dyn, dyn, (size_t)n * sizeof( uint32_t ) );
+}
+static void ralVk_RecBindVertex( ralCommandRecording_t *r, uint32_t first, uint32_t count, ralBuffer_t *const *bufs, const uint64_t *offs ) {
+	ralRecOp_t *o; uint32_t i;
+	if ( count > RAL_REC_MAX_VB || !bufs || !offs ) { r->unsupported++; if ( !r->firstUnsupported ) r->firstUnsupported = "vertex-bindings>max"; return; }
+	o = ralVk_RecNext( r, RAL_REC_VERTEX ); if ( !o ) return;
+	o->u.vb.first = first; o->u.vb.count = count;
+	for ( i = 0; i < count; i++ ) { o->u.vb.buf[i] = bufs[i]; o->u.vb.off[i] = offs[i]; }
+}
+static void ralVk_RecBindIndex( ralCommandRecording_t *r, ralBuffer_t *buf, uint64_t off, ralIndexType_t type ) {
+	ralRecOp_t *o = ralVk_RecNext( r, RAL_REC_INDEX ); if ( !o ) return;
+	o->u.ib.buf = buf; o->u.ib.off = off; o->u.ib.type = type;
+}
+static void ralVk_RecDrawIndexed( ralCommandRecording_t *r, uint32_t ic, uint32_t inst, uint32_t fi, int32_t vo, uint32_t fInst ) {
+	ralRecOp_t *o = ralVk_RecNext( r, RAL_REC_DRAW ); if ( !o ) return;
+	o->u.di.indexCount = ic; o->u.di.instanceCount = inst; o->u.di.firstIndex = fi; o->u.di.vertexOffset = vo; o->u.di.firstInstance = fInst;
+}
+static void ralVk_RecDrawIndirect( ralCommandRecording_t *r, ralBuffer_t *buf, uint64_t off, uint32_t count, uint32_t stride ) {
+	ralRecOp_t *o = ralVk_RecNext( r, RAL_REC_INDIRECT ); if ( !o ) return;
+	o->u.ind.buf = buf; o->u.ind.off = off; o->u.ind.count = count; o->u.ind.stride = stride;
+	o->u.ind.hasAlt = r->hasPendingAlt; o->u.ind.altOff = r->pendingAlt;
+	r->hasPendingAlt = qfalse;
+}
+void Ral_CommandRecordingMark( const ralCommandRecording_t *rec, ralRecordingMark_t *m ) {
+	if ( !rec || !m ) return;
+	m->n = rec->n; m->unsupported = rec->unsupported; m->first = rec->firstUnsupported;
+}
+void Ral_CommandRecordingRollback( ralCommandRecording_t *rec, const ralRecordingMark_t *m ) {
+	if ( !rec || !m ) return;
+	rec->n = m->n; rec->unsupported = m->unsupported; rec->firstUnsupported = m->first; rec->hasPendingAlt = qfalse;
+}
+void Ral_CmdRecordingBegin( ralCommandBuffer_t *cb, ralCommandRecording_t *rec ) { if ( cb ) cb->recording = rec; }
+void Ral_CmdRecordingEnd( ralCommandBuffer_t *cb ) { if ( cb ) cb->recording = NULL; }
+void Ral_CmdRecordingNoteIndirectVariant( ralCommandBuffer_t *cb, uint64_t variantOffset ) {
+	if ( !cb || !cb->recording ) return;
+	cb->recording->pendingAlt = variantOffset; cb->recording->hasPendingAlt = qtrue;
+}
+qboolean Ral_CmdRecordingReplay( ralCommandBuffer_t *cb, const ralCommandRecording_t *rec, uint32_t variant ) {
+	ralCommandRecording_t *saved;
+	qboolean ok = qtrue;
+	uint32_t i;
+	if ( !cb || !rec || rec->unsupported ) return qfalse;
+	saved = cb->recording; cb->recording = NULL;   // a replay is never itself captured
+	for ( i = 0; i < rec->n; i++ ) {
+		const ralRecOp_t *o = &rec->ops[i];
+		switch ( o->op ) {
+		case RAL_REC_PIPELINE: Ral_CmdBindPipeline( cb, o->u.pipe.p ); break;
+		case RAL_REC_VIEWPORT: Ral_CmdSetViewport( cb, &o->u.vp.vp ); break;
+		case RAL_REC_SCISSOR:  Ral_CmdSetScissor( cb, &o->u.sc.rect ); break;
+		case RAL_REC_GROUP:    ok = Ral_CmdBindBindGroupDynamicExact( cb, o->u.grp.set, o->u.grp.g, o->u.grp.n ? o->u.grp.dyn : NULL, o->u.grp.n ) && ok; break;
+		case RAL_REC_VERTEX:   ok = Ral_CmdBindVertexBuffersExact( cb, o->u.vb.first, o->u.vb.count, o->u.vb.buf, o->u.vb.off ) && ok; break;
+		case RAL_REC_INDEX:    ok = Ral_CmdBindIndexBufferExact( cb, o->u.ib.buf, o->u.ib.off, o->u.ib.type ) && ok; break;
+		case RAL_REC_DRAW:     if ( variant ) break;   // direct draws have no second-phase form: first phase only
+			Ral_CmdDrawIndexed( cb, o->u.di.indexCount, o->u.di.instanceCount, o->u.di.firstIndex, o->u.di.vertexOffset, o->u.di.firstInstance ); break;
+		case RAL_REC_INDIRECT:
+			if ( variant && !o->u.ind.hasAlt ) break;
+			Ral_CmdDrawIndexedIndirect( cb, o->u.ind.buf, ( variant && o->u.ind.hasAlt ) ? o->u.ind.altOff : o->u.ind.off, o->u.ind.count, o->u.ind.stride );
+			break;
+		default: ok = qfalse; break;
+		}
+	}
+	cb->recording = saved;
+	return ok;
+}
+
 #define RAL_VK_MAX_SUBMIT_CBS   16u
 #define RAL_VK_MAX_SUBMIT_SEMS  16u
 
@@ -417,6 +560,7 @@ ralResult_t Ral_Submit( ralBackend_t *b, ralQueueType_t q, const ralSubmitInfo_t
 // ════════════════════════════════════════════════════════════════════════
 qboolean Ral_CmdCopyBufferExact( ralCommandBuffer_t *cb, ralBuffer_t *src,
 		ralBuffer_t *dst, const ralBufferCopy_t *region ) {
+	ralVk_RecUnsupported( cb, "Ral_CmdCopyBufferExact" );
 	VkBufferCopy r;
 	if ( !cb || !src || !dst || !region
 			|| src->backend != cb->backend || dst->backend != cb->backend
@@ -444,6 +588,7 @@ qboolean Ral_CmdCopyBufferExact( ralCommandBuffer_t *cb, ralBuffer_t *src,
 
 void Ral_CmdCopyBuffer( ralCommandBuffer_t *cb, ralBuffer_t *src,
 		ralBuffer_t *dst, const ralBufferCopy_t *region ) {
+	ralVk_RecUnsupported( cb, "Ral_CmdCopyBuffer" );
 	(void)Ral_CmdCopyBufferExact( cb, src, dst, region );
 }
 
@@ -458,6 +603,7 @@ static qboolean ralVk_CopyMul( uint64_t a, uint64_t b, uint64_t *out ) {
 qboolean Ral_CmdCopyBufferToTextureRegionsExact( ralCommandBuffer_t *cb,
 		ralBuffer_t *src, ralTexture_t *dst, uint32_t regionCount,
 		const ralBufferTextureCopy_t *regions ) {
+	ralVk_RecUnsupported( cb, "Ral_CmdCopyBufferToTextureRegionsExact" );
 	VkBufferImageCopy nativeRegions[ RAL_VK_BUFFER_TEXTURE_COPY_MAX_REGIONS ];
 	uint32_t blockWidth, blockHeight, bytesPerBlock, i;
 	if ( !cb || !src || !dst || !regions || !cb->backend
@@ -588,6 +734,7 @@ qboolean Ral_CmdCopyBufferToTextureRegionsExact( ralCommandBuffer_t *cb,
 
 void Ral_CmdCopyBufferToTexture( ralCommandBuffer_t *cb, ralBuffer_t *src,
 		ralTexture_t *dst, const ralBufferTextureCopy_t *region ) {
+	ralVk_RecUnsupported( cb, "Ral_CmdCopyBufferToTexture" );
 	(void)Ral_CmdCopyBufferToTextureRegionsExact( cb, src, dst, 1u, region );
 }
 
@@ -597,6 +744,7 @@ void Ral_CmdCopyBufferToTexture( ralCommandBuffer_t *cb, ralBuffer_t *src,
 qboolean Ral_CmdCopyTextureToBuffer( ralCommandBuffer_t *cb,
 		ralTexture_t *src, ralBuffer_t *dst,
 		const ralBufferTextureCopy_t *region ) {
+	ralVk_RecUnsupported( cb, "Ral_CmdCopyTextureToBuffer" );
 	VkBufferImageCopy bic;
 	VkImageAspectFlags aspect;
 	uint32_t bpp;
@@ -657,6 +805,7 @@ qboolean Ral_CmdCopyTextureToBuffer( ralCommandBuffer_t *cb,
 
 qboolean Ral_CmdClearStorageBuffer( ralCommandBuffer_t *cb,
 		ralBuffer_t *buffer, uint64_t offset, uint64_t size ) {
+	ralVk_RecUnsupported( cb, "Ral_CmdClearStorageBuffer" );
 	VkBufferMemoryBarrier barrier;
 	if ( !cb || !buffer || !cb->backend || buffer->backend != cb->backend
 			|| cb->state != RAL_VK_CMD_RECORDING
@@ -701,6 +850,7 @@ qboolean Ral_CmdClearStorageBuffer( ralCommandBuffer_t *cb,
 }
 
 void Ral_CmdPipelineBarrier( ralCommandBuffer_t *cb, ralBarrierScope_t scope ) {
+	ralVk_RecUnsupported( cb, "Ral_CmdPipelineBarrier" );
 	VkMemoryBarrier mb;
 	ralVkBarrierTranslation_t barrier;
 	if ( !cb ) return;
@@ -755,18 +905,21 @@ void Ral_ResetDebugLabelStats( ralCommandBuffer_t *cb ) {
 }
 
 void Ral_CmdSetViewport( ralCommandBuffer_t *cb, const ralViewport_t *vp ) {
+	if ( cb && cb->recording && vp ) ralVk_RecViewport( cb->recording, vp );
 	VkViewport v;
 	if ( !cb || !vp ) return;
 	v.x = vp->x; v.y = vp->y; v.width = vp->width; v.height = vp->height; v.minDepth = vp->minDepth; v.maxDepth = vp->maxDepth;
 	cb->backend->vk.CmdSetViewport( cb->cb, 0, 1, &v );
 }
 void Ral_CmdSetScissor( ralCommandBuffer_t *cb, const ralRect_t *rect ) {
+	if ( cb && cb->recording && rect ) ralVk_RecScissor( cb->recording, rect );
 	VkRect2D r;
 	if ( !cb || !rect ) return;
 	r.offset.x = rect->x; r.offset.y = rect->y; r.extent.width = rect->width; r.extent.height = rect->height;
 	cb->backend->vk.CmdSetScissor( cb->cb, 0, 1, &r );
 }
 void Ral_CmdSetDepthBias( ralCommandBuffer_t *cb, float constant, float clamp, float slope ) {
+	ralVk_RecUnsupported( cb, "Ral_CmdSetDepthBias" );
 	if ( !cb ) return;
 	cb->backend->vk.CmdSetDepthBias( cb->cb, constant, clamp, slope );
 }
@@ -781,6 +934,7 @@ void Ral_CmdSetDepthBias( ralCommandBuffer_t *cb, float constant, float clamp, f
 // guarantees the pipeline outlives Submit completion via the deferred-destroy
 // queue's frame-fence delay).
 void Ral_CmdBindPipeline( ralCommandBuffer_t *cb, ralPipeline_t *p ) {
+	if ( cb && cb->recording ) ralVk_RecBindPipeline( cb->recording, p );
 	if ( !cb ) return;
 	if ( !p ) {
 		// NULL-fallthrough contract: clear cb's current-
@@ -800,11 +954,13 @@ void Ral_CmdBindPipeline( ralCommandBuffer_t *cb, ralPipeline_t *p ) {
 }
 
 void Ral_CmdBindBindGroup( ralCommandBuffer_t *cb, uint32_t setIndex, ralBindGroup_t *g ) {
+	ralVk_RecUnsupported( cb, "Ral_CmdBindBindGroup" );
 	(void)ralVk_CmdBindBindGroupDynamic( cb, setIndex, g, NULL, 0 );
 }
 
 qboolean Ral_CmdBindBindGroupDynamic( ralCommandBuffer_t *cb, uint32_t setIndex,
 ralBindGroup_t *g, const uint32_t *dynamicOffsets, uint32_t dynamicOffsetCount ) {
+	ralVk_RecUnsupported( cb, "Ral_CmdBindBindGroupDynamic" );
 return ralVk_CmdBindBindGroupDynamic( cb, setIndex, g,
 dynamicOffsets, dynamicOffsetCount );
 }
@@ -812,6 +968,7 @@ dynamicOffsets, dynamicOffsetCount );
 qboolean Ral_CmdBindBindGroupDynamicExact( ralCommandBuffer_t *cb,
 uint32_t setIndex, ralBindGroup_t *g, const uint32_t *dynamicOffsets,
 uint32_t dynamicOffsetCount ) {
+	if ( cb && cb->recording ) ralVk_RecBindGroup( cb->recording, setIndex, g, dynamicOffsets, dynamicOffsetCount );
 return ralVk_CmdBindBindGroupDynamicExact( cb, setIndex, g,
 dynamicOffsets, dynamicOffsetCount );
 }
@@ -833,6 +990,7 @@ static qboolean ralVk_CommandRecordsBufferBindings( const ralCommandBuffer_t *cb
 qboolean Ral_CmdBindVertexBuffersExact( ralCommandBuffer_t *cb,
 		uint32_t firstBinding, uint32_t bindingCount,
 		ralBuffer_t *const *buffers, const uint64_t *offsets ) {
+	if ( cb && cb->recording ) ralVk_RecBindVertex( cb->recording, firstBinding, bindingCount, buffers, offsets );
 	VkBuffer scratchBuffers[RAL_VK_MAX_TRACKED_VERTEX_BUFFERS];
 	VkDeviceSize scratchOffsets[RAL_VK_MAX_TRACKED_VERTEX_BUFFERS];
 	uint32_t i;
@@ -860,6 +1018,7 @@ qboolean Ral_CmdBindVertexBuffersExact( ralCommandBuffer_t *cb,
 
 qboolean Ral_CmdBindVertexBufferExact( ralCommandBuffer_t *cb,
 		uint32_t binding, ralBuffer_t *buf, uint64_t offset ) {
+	ralVk_RecUnsupported( cb, "Ral_CmdBindVertexBufferExact" );
 	ralBuffer_t *buffers[1] = { buf };
 	uint64_t offsets[1] = { offset };
 	return Ral_CmdBindVertexBuffersExact( cb, binding, 1u, buffers, offsets );
@@ -867,11 +1026,13 @@ qboolean Ral_CmdBindVertexBufferExact( ralCommandBuffer_t *cb,
 
 void Ral_CmdBindVertexBuffer( ralCommandBuffer_t *cb, uint32_t binding,
 		ralBuffer_t *buf, uint64_t offset ) {
+	ralVk_RecUnsupported( cb, "Ral_CmdBindVertexBuffer" );
 	(void)Ral_CmdBindVertexBufferExact( cb, binding, buf, offset );
 }
 
 qboolean Ral_CmdBindIndexBufferExact( ralCommandBuffer_t *cb,
 		ralBuffer_t *buf, uint64_t offset, ralIndexType_t type ) {
+	if ( cb && cb->recording ) ralVk_RecBindIndex( cb->recording, buf, offset, type );
 	uint64_t elementSize;
 	if ( type != RAL_INDEX_UINT16 && type != RAL_INDEX_UINT32 ) return qfalse;
 	elementSize = type == RAL_INDEX_UINT32 ? 4u : 2u;
@@ -889,6 +1050,7 @@ qboolean Ral_CmdBindIndexBufferExact( ralCommandBuffer_t *cb,
 
 void Ral_CmdBindIndexBuffer( ralCommandBuffer_t *cb, ralBuffer_t *buf,
 		uint64_t offset, ralIndexType_t type ) {
+	ralVk_RecUnsupported( cb, "Ral_CmdBindIndexBuffer" );
 	(void)Ral_CmdBindIndexBufferExact( cb, buf, offset, type );
 }
 
@@ -896,6 +1058,7 @@ void Ral_CmdBindIndexBuffer( ralCommandBuffer_t *cb, ralBuffer_t *buf,
 // RAL exposes per-call stageFlags (RAL_STAGE_*) instead of forcing the
 // pipeline's declared stages — lets the caller push to a subset.
 void Ral_CmdPushConstants( ralCommandBuffer_t *cb, uint32_t stageFlags, uint32_t offset, uint32_t size, const void *data ) {
+	ralVk_RecUnsupported( cb, "Ral_CmdPushConstants" );
 	VkShaderStageFlags vkStages = 0;
 	if ( !cb || !data || size == 0 || cb->currentLayout == VK_NULL_HANDLE ) {
 		if ( cb && cb->currentLayout == VK_NULL_HANDLE )
@@ -950,6 +1113,7 @@ static qboolean ralVk_CommandBindGroupsExact( const ralCommandBuffer_t *cb ) {
 }
 
 void Ral_CmdDraw( ralCommandBuffer_t *cb, uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex, uint32_t firstInstance ) {
+	ralVk_RecUnsupported( cb, "Ral_CmdDraw" );
 	if ( !cb ) return;
 	// Bail when no pipeline is currently bound. The
 	// renderer's parallel-paths era can hit this when vk_ral_lookup_pipeline
@@ -962,6 +1126,7 @@ void Ral_CmdDraw( ralCommandBuffer_t *cb, uint32_t vertexCount, uint32_t instanc
 }
 
 void Ral_CmdDrawIndexed( ralCommandBuffer_t *cb, uint32_t indexCount, uint32_t instanceCount, uint32_t firstIndex, int32_t vertexOffset, uint32_t firstInstance ) {
+	if ( cb && cb->recording ) ralVk_RecDrawIndexed( cb->recording, indexCount, instanceCount, firstIndex, vertexOffset, firstInstance );
 	if ( !cb ) return;
 	if ( !cb->currentPipeline || !ralVk_CommandBoundBuffersGpuUseAllowed( cb )
 			|| !ralVk_CommandBindGroupsExact( cb ) ) return;   // Same NULL-fallthrough rationale as Ral_CmdDraw above.
@@ -969,6 +1134,7 @@ void Ral_CmdDrawIndexed( ralCommandBuffer_t *cb, uint32_t indexCount, uint32_t i
 }
 
 void Ral_CmdDrawIndexedIndirect( ralCommandBuffer_t *cb, ralBuffer_t *argBuf, uint64_t offset, uint32_t drawCount, uint32_t stride ) {
+	if ( cb && cb->recording ) ralVk_RecDrawIndirect( cb->recording, argBuf, offset, drawCount, stride );
 	if ( !cb || !ralVk_BufferGpuUseAllowed( argBuf )
 	  || !ralVk_CommandBoundBuffersGpuUseAllowed( cb ) ) return;
 	cb->backend->vk.CmdDrawIndexedIndirect( cb->cb, argBuf->buffer, (VkDeviceSize)offset, drawCount, stride );
@@ -976,6 +1142,7 @@ void Ral_CmdDrawIndexedIndirect( ralCommandBuffer_t *cb, ralBuffer_t *argBuf, ui
 
 void Ral_CmdDrawIndexedIndirectCount( ralCommandBuffer_t *cb, ralBuffer_t *argBuf, uint64_t argOffset,
                                       ralBuffer_t *countBuf, uint64_t countOffset, uint32_t maxDrawCount, uint32_t stride ) {
+	ralVk_RecUnsupported( cb, "Ral_CmdDrawIndexedIndirectCount" );
 	if ( !cb || !ralVk_BufferGpuUseAllowed( argBuf ) || !ralVk_BufferGpuUseAllowed( countBuf )
 	  || !ralVk_CommandBoundBuffersGpuUseAllowed( cb ) ) return;
 	// Refuse to silently degrade. The earlier fallback substituted
@@ -994,12 +1161,14 @@ void Ral_CmdDrawIndexedIndirectCount( ralCommandBuffer_t *cb, ralBuffer_t *argBu
 }
 
 void Ral_CmdDispatch( ralCommandBuffer_t *cb, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ ) {
+	ralVk_RecUnsupported( cb, "Ral_CmdDispatch" );
 	if ( !cb ) return;
 	if ( !cb->currentPipeline || !ralVk_CommandBoundBuffersGpuUseAllowed( cb ) ) return;   // NULL-fallthrough (see Ral_CmdDraw).
 	cb->backend->vk.CmdDispatch( cb->cb, groupCountX ? groupCountX : 1, groupCountY ? groupCountY : 1, groupCountZ ? groupCountZ : 1 );
 }
 
 void Ral_CmdDispatchIndirect( ralCommandBuffer_t *cb, ralBuffer_t *argBuf, uint64_t offset ) {
+	ralVk_RecUnsupported( cb, "Ral_CmdDispatchIndirect" );
 	if ( !cb || !ralVk_BufferGpuUseAllowed( argBuf )
 	  || !ralVk_CommandBoundBuffersGpuUseAllowed( cb ) ) return;
 	cb->backend->vk.CmdDispatchIndirect( cb->cb, argBuf->buffer, (VkDeviceSize)offset );
@@ -1024,6 +1193,7 @@ void Ral_CmdBindVertexBuffers( ralCommandBuffer_t *cb, uint32_t firstBinding,
                                ralBuffer_t *const *buffers,
                                const uint64_t *offsets )
 {
+	ralVk_RecUnsupported( cb, "Ral_CmdBindVertexBuffers" );
 	(void)Ral_CmdBindVertexBuffersExact( cb, firstBinding, bindingCount,
 		buffers, offsets );
 }
@@ -1031,6 +1201,7 @@ void Ral_CmdBindVertexBuffers( ralCommandBuffer_t *cb, uint32_t firstBinding,
 qboolean Ral_CmdPushConstantsLayoutExact( ralCommandBuffer_t *cb,
 		ralPipelineLayout_t *layout, uint32_t stageFlags,
 		uint32_t offset, uint32_t size, const void *data ) {
+	ralVk_RecUnsupported( cb, "Ral_CmdPushConstantsLayoutExact" );
 	VkShaderStageFlags vkStages = 0;
 	uint32_t i;
 	qboolean authorized = qfalse;
@@ -1063,12 +1234,14 @@ qboolean Ral_CmdPushConstantsLayoutExact( ralCommandBuffer_t *cb,
 void Ral_CmdPushConstantsLayout( ralCommandBuffer_t *cb,
 		ralPipelineLayout_t *layout, uint32_t stageFlags,
 		uint32_t offset, uint32_t size, const void *data ) {
+	ralVk_RecUnsupported( cb, "Ral_CmdPushConstantsLayout" );
 	(void)Ral_CmdPushConstantsLayoutExact( cb, layout, stageFlags,
 		offset, size, data );
 }
 
 void Ral_CmdPipelineBarrierFull( ralCommandBuffer_t *cb, const ralPipelineBarrierInfo_t *info )
 {
+	ralVk_RecUnsupported( cb, "Ral_CmdPipelineBarrierFull" );
 	VkMemoryBarrier       memBarriers   [ 8 ];
 	VkBufferMemoryBarrier bufferBarriers[ 8 ];
 	VkImageMemoryBarrier  imageBarriers [ 16 ];
@@ -1156,6 +1329,7 @@ void Ral_CmdTransitionTexture( ralCommandBuffer_t *cb, ralTexture_t *tex,
                                ralPipelineStageFlags_t srcStage,
                                ralPipelineStageFlags_t dstStage,
                                uint32_t newVkLayout ) {
+	ralVk_RecUnsupported( cb, "Ral_CmdTransitionTexture" );
 	VkImageMemoryBarrier ib;
 	if ( !cb || !tex ) return;
 	RAL_ZERO( ib );
@@ -1262,6 +1436,7 @@ ralResult_t Ral_PrepareSwapchainImageForPresent( ralCommandBuffer_t *cb,
 void Ral_CmdCopyImage( ralCommandBuffer_t *cb, ralTexture_t *src, ralTexture_t *dst,
                        uint32_t regionCount, const ralImageCopy_t *regions )
 {
+	ralVk_RecUnsupported( cb, "Ral_CmdCopyImage" );
 	if ( !cb || !src || !dst || regionCount == 0 || !regions ) return;
 	// ralImageCopy_t is binary-compat with VkImageCopy (matching field order).
 	cb->backend->vk.CmdCopyImage( cb->cb,
@@ -1278,6 +1453,7 @@ void Ral_CmdBlitImage( ralCommandBuffer_t *cb, ralTexture_t *src, ralTexture_t *
                        uint32_t regionCount, const ralImageBlit_t *regions,
                        ralFilter_t filter )
 {
+	ralVk_RecUnsupported( cb, "Ral_CmdBlitImage" );
 	if ( !cb || !src || !dst || regionCount == 0 || !regions ) return;
 	cb->backend->vk.CmdBlitImage( cb->cb,
 	                               src->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -1293,6 +1469,7 @@ void Ral_CmdBlitImage( ralCommandBuffer_t *cb, ralTexture_t *src, ralTexture_t *
 qboolean Ral_CmdClearAttachmentsExact( ralCommandBuffer_t *cb,
 		uint32_t attachmentCount, const ralClearAttachment_t *attachments,
 		uint32_t rectCount, const ralClearRect_t *rects ) {
+	ralVk_RecUnsupported( cb, "Ral_CmdClearAttachmentsExact" );
 	VkClearAttachment nativeAttachments[RAL_MAX_COLOR_ATTACHMENTS];
 	VkClearRect nativeRects[RAL_MAX_COLOR_ATTACHMENTS];
 	uint32_t i;
@@ -1347,6 +1524,7 @@ qboolean Ral_CmdClearAttachmentsExact( ralCommandBuffer_t *cb,
 void Ral_CmdClearAttachments( ralCommandBuffer_t *cb, uint32_t attachmentCount,
 		const ralClearAttachment_t *attachments,
 		uint32_t rectCount, const ralClearRect_t *rects ) {
+	ralVk_RecUnsupported( cb, "Ral_CmdClearAttachments" );
 	(void)Ral_CmdClearAttachmentsExact( cb, attachmentCount, attachments,
 		rectCount, rects );
 }
@@ -1354,6 +1532,7 @@ void Ral_CmdClearAttachments( ralCommandBuffer_t *cb, uint32_t attachmentCount,
 void Ral_CmdResetQueryPool( ralCommandBuffer_t *cb, ralQueryPool_t *pool,
                             uint32_t firstQuery, uint32_t queryCount )
 {
+	ralVk_RecUnsupported( cb, "Ral_CmdResetQueryPool" );
 	if ( !cb || !pool || queryCount == 0 ) return;
 	cb->backend->vk.CmdResetQueryPool( cb->cb, pool->pool, firstQuery, queryCount );
 }
@@ -1361,6 +1540,7 @@ void Ral_CmdResetQueryPool( ralCommandBuffer_t *cb, ralQueryPool_t *pool,
 void Ral_CmdWriteTimestamp( ralCommandBuffer_t *cb, uint32_t pipelineStageBits,
                             ralQueryPool_t *pool, uint32_t query )
 {
+	ralVk_RecUnsupported( cb, "Ral_CmdWriteTimestamp" );
 	if ( !cb || !pool ) return;
 	cb->backend->vk.CmdWriteTimestamp( cb->cb, (VkPipelineStageFlagBits)pipelineStageBits,
 	                                    pool->pool, query );

@@ -615,6 +615,8 @@ struct ralCommandBuffer_s {
 	// (the renderer's existing pool owns lifetime). Wrappers created by
 	// Ral_AcquireCommandBuffer have ownsBuffer == qtrue (legacy RAL path).
 	qboolean            ownsBuffer;
+	// Active command recording (Ral_CmdRecordingBegin), NULL when not capturing.
+	ralCommandRecording_t *recording;
 };
 
 static inline qboolean ralVk_CommandBoundBuffersGpuUseAllowed( const ralCommandBuffer_t *cb ) {
