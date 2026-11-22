@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 # 1280x720 temporal quality + full-path GPU budget acceptance gate.
+# The in-run baseline is the AA-off frame at the same camera (SMAA is no longer needed as a reference: a still frame without AA is as
+# stable as a still SMAA frame, and AA off is a legitimate readability baseline).
 
 set -uo pipefail
 
@@ -51,7 +53,7 @@ if not any(message.startswith("temporal-history-feedback ") for message in messa
     raise SystemExit("FAIL temporal-quality has no recursive history feedback")
 
 names = (
-    "temporal_smaa_a", "temporal_smaa_a_2", "temporal_smaa_b", "temporal_taa_a_1",
+    "temporal_off_a", "temporal_off_a_2", "temporal_off_b", "temporal_taa_a_1",
     "temporal_taa_a_2", "temporal_taa_b_first", "temporal_taa_b_steady",
 )
 
@@ -128,20 +130,20 @@ if changed < 1000:
     raise SystemExit(f"FAIL temporal-quality camera pan witness too small ({changed})")
 ghost_ratio = ghosts / changed
 
-static_reference_delta = mae("temporal_smaa_a", "temporal_smaa_a_2")
+static_baseline_delta = mae("temporal_off_a", "temporal_off_a_2")
 static_delta = mae("temporal_taa_a_1", "temporal_taa_a_2")
-static_excess = max(0.0, static_delta - static_reference_delta)
+static_excess = max(0.0, static_delta - static_baseline_delta)
 motion_delta = mae("temporal_taa_a_2", "temporal_taa_b_steady")
 first_settled_delta = mae("temporal_taa_b_first", "temporal_taa_b_steady")
-reference_delta = mae("temporal_smaa_b", "temporal_taa_b_steady")
-edge_smaa = edge_energy("temporal_smaa_b")
+reference_delta = mae("temporal_off_b", "temporal_taa_b_steady")
+edge_off = edge_energy("temporal_off_b")
 edge_taa = edge_energy("temporal_taa_b_steady")
-edge_ratio = edge_taa / edge_smaa if edge_smaa else 0.0
+edge_ratio = edge_taa / edge_off if edge_off else 0.0
 
 if static_excess > 2.0:
     raise SystemExit(
         f"FAIL temporal-quality excess static shimmer {static_excess:.3f} > 2.000 "
-        f"(SMAA={static_reference_delta:.3f}, TAA={static_delta:.3f})")
+        f"(AA-off baseline={static_baseline_delta:.3f}, TAA={static_delta:.3f})")
 if motion_delta < 4.0:
     raise SystemExit(f"FAIL temporal-quality camera pan is not visually distinct ({motion_delta:.3f})")
 if ghost_ratio > 0.05:
@@ -194,10 +196,10 @@ delta_ms = on_ms - off_ms
 delta_percent = delta_ms / off_ms * 100.0
 # The quality criteria above already passed (each raises on failure); report them even when the budget below fails.
 print(
-    f"PASS temporal quality: static SMAA={static_reference_delta:.3f} TAA={static_delta:.3f} "
+    f"PASS temporal quality: static AA-off={static_baseline_delta:.3f} TAA={static_delta:.3f} "
     f"excess={static_excess:.3f}, pan={motion_delta:.3f}, "
     f"first-settled={first_settled_delta:.3f}, old-frame-residual={ghost_ratio:.2%}, "
-    f"edge-ratio={edge_ratio:.3f}, SMAA-reference-delta={reference_delta:.3f}")
+    f"edge-ratio={edge_ratio:.3f}, AA-off-reference-delta={reference_delta:.3f}")
 if delta_ms > 0.75 or on_ms > 4.0:
     raise SystemExit(
         f"FAIL temporal-quality GPU budget off={off_ms:.3f}ms on={on_ms:.3f}ms "
@@ -278,7 +280,7 @@ set vm_game 0
 set vm_cgame 0
 set sv_cheats 1
 set sv_pure 0
-set tqSetup "cg_draw2D 0; cg_drawGun 0; cg_thirdPerson 0; con_notifytime 0; cl_yawspeed 90; sv_fps 125; timescale 1; fixedtime 0; r_pinShaderTime 2.0; r_pinFrameTime 2.0; wait 512; noclip; echo Q3_TEMPORAL_QUALITY_BEGIN; setviewpos 888 -768 434 180 0; r_temporalInputTest 0; r_smaa 3; wait 96; screenshot temporal_smaa_a png silent; wait 8; screenshot temporal_smaa_a_2 png silent; +right; wait 12; -right; wait 8; screenshot temporal_smaa_b png silent; vstr tqTemporalA"
+set tqSetup "cg_draw2D 0; cg_drawGun 0; cg_thirdPerson 0; con_notifytime 0; cl_yawspeed 90; sv_fps 125; timescale 1; fixedtime 0; r_pinShaderTime 2.0; r_pinFrameTime 2.0; wait 512; noclip; echo Q3_TEMPORAL_QUALITY_BEGIN; setviewpos 888 -768 434 180 0; r_temporalInputTest 0; r_smaa 0; wait 96; screenshot temporal_off_a png silent; wait 8; screenshot temporal_off_a_2 png silent; +right; wait 12; -right; wait 8; screenshot temporal_off_b png silent; vstr tqTemporalA"
 set tqTemporalA "r_smaa 0; r_temporalInputTest 1; setviewpos 888 -768 434 180 0; wait 96; screenshot temporal_taa_a_1 png silent; wait 8; screenshot temporal_taa_a_2 png silent; +right; wait 12; -right; wait 4; screenshot temporal_taa_b_first png silent; wait 96; screenshot temporal_taa_b_steady png silent; echo Q3_TEMPORAL_QUALITY_CAPTURED; vstr tqPerfOff1"
 set tqPerfOff1 "r_temporalInputTest 0; wait 96; set r_gpuSpeeds 0; wait 4; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_OFF_1_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_OFF_1_END; set r_gpuSpeeds 0; wait 16; vstr tqPerfOn1"
 set tqPerfOn1 "r_temporalInputTest 1; wait 96; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_ON_1_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_ON_1_END; set r_gpuSpeeds 0; wait 16; vstr tqPerfOn2"
