@@ -643,7 +643,7 @@ static void RB_EndSurfaceCaptured( const shader_t *sh, int entityNum ) {
 		// Decided per batch, at capture time, because the temporal views have no CPU-rebuild fallback: a batch that
 		// took an exact-segment stage or issued a command the recorder cannot replay is taken back entirely, and
 		// its filtered first-phase args are rewritten unfiltered, so it simply draws whole in the first phase.
-		if ( ( vk_world_route_mask & ~( ( 1u << 1 ) | ( 1u << 4 ) ) )
+		if ( ( vk_world_route_mask & ~( 1u << 1 ) )
 				|| Ral_CommandRecordingUnsupportedCount( s_worldRec, NULL ) != mark.unsupported ) {
 			static uint32_t reverted;
 			Ral_CommandRecordingRollback( s_worldRec, &mark );

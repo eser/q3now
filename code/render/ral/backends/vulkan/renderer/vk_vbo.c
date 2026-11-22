@@ -1337,13 +1337,14 @@ static struct { uint32_t ringByteOff, count, fullOff; } s_capChunks[WORLD_REVERT
 static uint32_t s_capChunkN;
 uint32_t vk_world_route_mask;
 
-// Only the plain (ordinary / fp-lit) routes can be deferred: an exact temporal segment draws into its own
-// velocity-carrying pass, so it must draw whole in the first phase. Large batches draw whole as well (revert scratch).
+// Only the ordinary route can be deferred: an exact temporal segment draws into its own velocity-carrying pass,
+// so it must draw whole in the first phase. The Forward+ union pass (route 4) runs AFTER the second phase with the
+// phase flag cleared, so it never reaches this test. Large batches draw whole as well (revert scratch).
 qboolean vk_world_phase_eligible( void )
 {
 	return ( vk_world_phase != 0 && tess.shader && tess.shader->sort == SS_OPAQUE
 		&& backEnd.currentEntity == &tr.worldEntity
-		&& ( vk_world_route == 1 || vk_world_route == 4 )
+		&& vk_world_route == 1
 		&& world_vbo.items_queue_count <= (int)WORLD_REVERT_ITEMS ) ? qtrue : qfalse;
 }
 
