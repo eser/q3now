@@ -3,6 +3,8 @@
 
 #include "vk_temporal_resolve.h"
 
+uint32_t vk_temporal_dbg_repeat_resolve = 1u;
+
 #include <limits.h>
 #include <math.h>
 #include <stddef.h>
@@ -653,8 +655,14 @@ qboolean VK_TemporalResolveRecord( vkTemporalResolveOwner_t *owner,
 	Ral_CmdBindBindGroup( commandBuffer, 0, owner->groups[readIndex] );
 	Ral_CmdPushConstants( commandBuffer, RAL_STAGE_COMPUTE, 0,
 		sizeof( push ), &push );
-	Ral_CmdDispatch( commandBuffer, ( authority->width + 7u ) / 8u,
-		( authority->height + 7u ) / 8u, 1u );
+	{
+		// Measurement only (r_dbgTemporalRepeatResolve): the resolve is idempotent, so repeating the dispatch keeps the image
+		// identical and shows the marginal cost of one dispatch against the fixed cost of the surrounding barriers.
+		uint32_t repeat = vk_temporal_dbg_repeat_resolve == 0xFFFFFFFFu ? 0u : ( vk_temporal_dbg_repeat_resolve ? vk_temporal_dbg_repeat_resolve : 1u );   // -1 skips the dispatch (barriers stay)
+		while ( repeat-- )
+			Ral_CmdDispatch( commandBuffer, ( authority->width + 7u ) / 8u,
+				( authority->height + 7u ) / 8u, 1u );
+	}
 	Ral_CmdTransitionTexture( commandBuffer, owner->key.velocity,
 		RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 		RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,

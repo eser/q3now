@@ -120,4 +120,7 @@ qboolean VK_TemporalResolveHasLive( const vkTemporalResolveOwner_t *owner );
 qboolean VK_TemporalResolveReleaseAfterIdle(
 	vkTemporalResolveOwner_t *owner, qboolean idleProven );
 
+/* Measurement only: dispatch repeat count for the resolve compute (1 = normal). Set from r_dbgTemporalRepeatResolve. */
+extern uint32_t vk_temporal_dbg_repeat_resolve;
+
 #endif

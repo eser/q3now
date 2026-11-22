@@ -3,6 +3,8 @@
 
 #include "vk_temporal_history_store.h"
 
+uint32_t vk_temporal_dbg_repeat_store = 1u;
+
 #include <limits.h>
 #include <math.h>
 #include <string.h>
@@ -283,7 +285,11 @@ qboolean VK_TemporalHistoryStoreRecord(
 		RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,VK_IMAGE_LAYOUT_GENERAL);
 	Ral_CmdBindPipeline(cb,owner->pipeline);Ral_CmdBindBindGroup(cb,0,owner->groups[writeIndex]);
 	Ral_CmdPushConstants(cb,RAL_STAGE_COMPUTE,0,sizeof(*push),push);
-	Ral_CmdDispatch(cb,(push->extent[0]+7u)/8u,(push->extent[1]+7u)/8u,1);
+	{
+		// Measurement only (r_dbgTemporalRepeatStore): idempotent, see the resolve.
+		uint32_t repeat=vk_temporal_dbg_repeat_store==0xFFFFFFFFu?0u:(vk_temporal_dbg_repeat_store?vk_temporal_dbg_repeat_store:1u);   // -1 skips the dispatch (barriers stay)
+		while(repeat--)Ral_CmdDispatch(cb,(push->extent[0]+7u)/8u,(push->extent[1]+7u)/8u,1);
+	}
 	Ral_CmdTransitionTexture(cb,owner->key.historyColor[writeIndex],
 		RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 	Ral_CmdTransitionTexture(cb,owner->key.historyDepth[writeIndex],

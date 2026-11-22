@@ -102,13 +102,17 @@ CFGEOF
 		case "$arm" in
 			0) armcmd="r_temporalInputTest 0; r_aa 0; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 0" ;;
 			1) armcmd="r_temporalInputTest 0; r_aa 1; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 0" ;;
-			2) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 1" ;;
+			2) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve 1; r_dbgTemporalRepeatStore 1" ;;
 			3) armcmd="r_aa 0; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 1; r_temporalInputTest 1" ;;
 			4) armcmd="r_temporalInputTest 0; r_aa 1; r_smaa 1; r_dbgExtraSplit 0" ;;
 			5) armcmd="r_temporalInputTest 0; r_aa 1; r_smaa 4; r_dbgExtraSplit 0" ;;
 			6) armcmd="r_temporalInputTest 0; r_aa 0; r_smaa 0; r_dbgExtraSplit 4" ;;
 			7) armcmd="r_temporalInputTest 0; r_aa 0; r_smaa 0; r_dbgExtraSplit 16" ;;
 			8) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 0" ;;
+			9) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve 4; r_dbgTemporalRepeatStore 1" ;;
+			10) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve 1; r_dbgTemporalRepeatStore 4" ;;
+			11) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve -1; r_dbgTemporalRepeatStore 1" ;;
+			12) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve -1; r_dbgTemporalRepeatStore -1" ;;
 		esac
 		printf 'set aacSeg%s "%s; wait 96; set r_gpuSpeeds 1; echo AAC_%s_BEGIN; wait 220; echo AAC_%s_END; set r_gpuSpeeds 0; wait 16; %s"\n' "$i" "$armcmd" "$tag" "$tag" "$next"
 	done
@@ -144,7 +148,7 @@ if any(r.get("sev", "").upper() in ("ERROR", "FATAL") for r in rows):
     raise SystemExit("FAIL aa-cost ERROR/FATAL severity in the log")
 if "AAC_COMPLETE" not in msgs:
     raise SystemExit("FAIL aa-cost run did not complete")
-marker = re.compile(r"AAC_ARM([0-8])_(\d+)_(BEGIN|END)")
+marker = re.compile(r"AAC_ARM(\d+)_(\d+)_(BEGIN|END)")
 header = re.compile(r"gpu \((\d+)f avg, ms\):")
 label = re.compile(r"  ([A-Za-z_0-9]+)=([0-9.]+)")
 route_pat = re.compile(r"temporal route sequence: (\d+) draws: exact (\d+) in (\d+) runs, ordinary (\d+); plans write (\d+) invalidate (\d+) preserve (\d+)")
@@ -174,9 +178,9 @@ for row, m in zip(rows, msgs):
     if seg[active]:
         l = label.fullmatch(m)
         if l: seg[active][-1][l.group(1)] = float(l.group(2))
-per = {a: [] for a in range(9)}
-lanes = {a: {} for a in range(9)}
-passes = {a: [] for a in range(9)}
+per = {a: [] for a in range(16)}
+lanes = {a: {} for a in range(16)}
+passes = {a: [] for a in range(16)}
 pass_pat = re.compile(r"render passes per frame \(100 frames\): ([0-9.]+) ")
 for i, arm in enumerate(order):
     full_s = [s for s in seg.get((arm, i), []) if s.get("frames") == 200 and "total" in s]
@@ -186,8 +190,8 @@ for i, arm in enumerate(order):
     if pas_seg.get((arm, i)): passes[arm].append(statistics.median(pas_seg[(arm, i)]))
     for k, v in full_s[0].items():
         if k not in ("frames", "total"): lanes[arm].setdefault(k, []).append(v)
-RAN = [arm for arm in range(9) if per[arm]]
-name = {0: "none", 1: "SMAA3", 2: "TAA", 3: "gate-on", 4: "SMAA1", 5: "SMAA4", 6: "none+4sp", 7: "none+16sp", 8: "TAA-legacy"}
+RAN = [arm for arm in range(16) if per[arm]]
+name = {0: "none", 1: "SMAA3", 2: "TAA", 3: "gate-on", 4: "SMAA1", 5: "SMAA4", 6: "none+4sp", 7: "none+16sp", 8: "TAA-legacy", 9: "TAA resolve x4", 10: "TAA store x4", 11: "TAA resolve skipped", 12: "TAA resolve+store skipped"}
 print(f"config: {'full default renderer' if full == '1' else 'stripped (as the temporal gate)'}; order {order_s}")
 for arm in RAN:
     v = per[arm]

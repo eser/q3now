@@ -66,4 +66,7 @@ qboolean VK_TemporalHistoryStoreHasLive(
 qboolean VK_TemporalHistoryStoreReleaseAfterIdle(
 	vkTemporalHistoryStoreOwner_t *owner, qboolean idleProven );
 
+/* Measurement only: dispatch repeat count for the history store compute (1 = normal). */
+extern uint32_t vk_temporal_dbg_repeat_store;
+
 #endif

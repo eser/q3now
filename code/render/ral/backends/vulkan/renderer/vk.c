@@ -13656,6 +13656,8 @@ qboolean vk_temporal_resolve_prepare_authority( void ) {
 	return qtrue;
 }
 
+static void vk_gpu_ts_write( const char *label );
+
 static qboolean vk_temporal_resolve_record_or_copy( void ) {
 	vkTemporalResolveTicket_t ticket;
 	vkHdrPostprocessSource_t route;
@@ -13711,14 +13713,20 @@ void vk_temporal_recursive_record( void ) {
 	}
 	if ( !R_TemporalBackendGetPending( worldIndex, frameId, &plan, &history )
 			|| !plan || !history ) return;
+	vk_temporal_dbg_repeat_resolve = r_dbgTemporalRepeatResolve ? (uint32_t)r_dbgTemporalRepeatResolve->integer : 1u;
+	vk_temporal_dbg_repeat_store = r_dbgTemporalRepeatStore ? (uint32_t)r_dbgTemporalRepeatStore->integer : 1u;
+	vk_gpu_ts_write( "temporal_pre" );   // everything before this stamp is the post chain; the lanes below split the TAA tail
 	recursiveProduced = vk_temporal_resolve_record_or_copy();
+	vk_gpu_ts_write( "temporal_resolve" );   // resolve compute, or the scene copy when no history exists yet
 	if ( ( plan->historyValid && recursiveProduced )
 			|| ( !plan->historyValid
 				&& vk_temporal_resolved_hdr_frame.copied
 				&& vk_temporal_resolved_hdr_frame.recorded.producer ==
-					VK_TEMPORAL_RESOLVED_HDR_PRODUCER_COPY ) )
+					VK_TEMPORAL_RESOLVED_HDR_PRODUCER_COPY ) ) {
 		(void)vk_temporal_history_store_feedback(
 			plan->historyValid ? qtrue : qfalse );
+		vk_gpu_ts_write( "temporal_store" );   // history store compute (colour + depth into the history pair)
+	}
 }
 
 // SHADER_MODULE_BL macro retired.
