@@ -31,7 +31,7 @@ while [ $# -gt 0 ]; do
         *) echo "unknown arg: $1" >&2; exit 2;;
     esac
 done
-[ -n "$MODE" ]   || { echo "FAIL: --mode {gtao|fwdplus|viewport|shadow_atest|scene|chromatic|crowd|crowdpromo|entitylight|scenegolden|crowdwasm|gpucull|worldindirect|dlight-shadow|dlight-shadow-lifecycle|dlight-shadow-probe|selftest} required" >&2; exit 2; }
+[ -n "$MODE" ]   || { echo "FAIL: --mode {gtao|fwdplus|viewport|shadow_atest|scene|chromatic|crowd|crowdpromo|entitylight|scenegolden|crowdwasm|gpucull|worldindirect|worldphase|worlddecal|capturenoise|cullref|dlight-shadow|dlight-shadow-lifecycle|dlight-shadow-probe|selftest} required" >&2; exit 2; }
 # selftest needs no engine (it exercises the assertion math on synthetic inputs).
 if [ "$MODE" != "selftest" ]; then
     [ -n "$ENGINE" ] || { echo "FAIL: --engine <wired.x64> required" >&2; exit 2; }
@@ -186,6 +186,33 @@ scrub_home_cgame() {
 
 # ── capture: launch the engine with the given extra cvars, return the PNG path ──
 # Args: MAP X Y Z YAW TAG  <extra +set cvar tokens...>
+# The launch line is split at every unquoted '+' into at most 32 console lines; past that, "+screenshot"
+# swallows "+quit" (screenshot saved as "+quit.png") and the engine idles with a frozen-looking window until
+# the SIGKILL timeout. Callers keep passing "+set name value" triples; they are folded into a cfg inside the
+# harness' isolated home and replaced by ONE "+exec" token, so the extra cvars can never overflow the line.
+# Latched cvars ("will be changed upon restarting") only take effect from the real command line, before the
+# renderer starts, so they must NOT be folded into the cfg: they stay as +set tokens.
+FOLD_KEEP="${FOLD_KEEP:-r_forwardPlus r_gpuBatchDecomp r_vkSplitPresent r_aa}"
+FOLDED=()
+fold_extra_args() {
+    local cfg="$SMOKE_HOME/base/vrf_extra.cfg"; : > "$cfg"; FOLDED=()
+    while [ $# -gt 0 ]; do
+        if [ "$1" = "+set" ] && [ $# -ge 3 ] && ! case " $FOLD_KEEP " in *" $2 "*) true;; *) false;; esac; then printf 'set %s %s\n' "$2" "$3" >> "$cfg"; shift 3
+        else FOLDED+=("$1"); shift; fi
+    done
+    FOLDED+=("+exec" "vrf_extra.cfg")
+}
+
+# Wall-clock milliseconds between the first gameplay frame and the saved screenshot, from the
+# engine log. It is the capture's STATE: the same setting at 250 fps and at 60 fps settles for a
+# different wall time and the view is not the same view. Comparisons across states are refused.
+capture_state_ms() {
+    local lf="$VRF_TMP/vrf-$1.log"
+    awk '/FIRST GAMEPLAY FRAME/ {split($1,a,/[:.]/); t0=((a[1]*60+a[2])*60+a[3])*1000+a[4]}
+         /Screenshot saved as/ {split($1,b,/[:.]/); t1=((b[1]*60+b[2])*60+b[3])*1000+b[4]}
+         END {if (t0 && t1) print t1-t0; else print -1}' "$lf"
+}
+
 capture() {
     local map="$1" x="$2" y="$3" z="$4" yaw="$5" tag="$6"; shift 6
     local logfile shot
@@ -197,14 +224,15 @@ capture() {
     # -s KILL / -k: the windowed engine ignores SIGTERM, so a plain `timeout` on an
     # intermittent map-load stall leaves a zombie process. Send SIGKILL on timeout, and a
     # second SIGKILL 15s later if the first didn't take, so a stalled capture never lingers.
+    fold_extra_args "$@"
     ( cd "$ENGINE_DIR" && timeout -s KILL -k 15 150 "$ENGINE_BIN" \
         +set fs_homepath "$SMOKE_HOME_NATIVE" \
         +set sv_cheats 1 +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 \
         +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set r_fullscreen 0 \
         +log renderer.ral info \
-        +set r_pinShaderTime 1.0 +set r_pinFrameTime 1.0 +set con_notifytime 0 \
+        +set r_pinShaderTime 1.0 +set r_pinFrameTime 1.0 +set con_notifytime 0 +set s_initsound 0 +set s_volume 0 +set s_musicVolume 0 \
         +set com_automated 1 \
-        "$@" \
+        "${FOLDED[@]}" \
         +map "$map" +waitForMap +wait 80 \
         +cmd noclip +wait 20 +cmd setviewpos $x $y $z $yaw \
         +wait $(( 60 + 40 + 60 )) \
@@ -216,6 +244,7 @@ capture() {
     # console line, "+screenshot" eats "+quit" as its filename ("+quit.png") and the engine
     # idles to the SIGKILL timeout. See capture_fixed_cam's note for the full mechanism.
     reap_engine   # belt-and-suspenders: no run leaves a lingering engine window (see reap_engine)
+    if grep -q "screenshots/+quit" "$logfile" 2>/dev/null; then rm -f "$SHOTDIR/+quit.png"; echo >&2 "  FAIL — the launch line overflowed the 32 console-line split ('+screenshot' swallowed '+quit'); see $logfile"; return 1; fi
     if ! grep -q "FIRST GAMEPLAY FRAME" "$logfile"; then
         echo >&2 "  capture($tag): FAIL — never reached CA_ACTIVE (see $logfile)"
         return 1
@@ -271,15 +300,16 @@ capture_fixed_cam() {
     # -s KILL / -k: the windowed engine ignores SIGTERM, so a plain `timeout` on an
     # intermittent map-load stall leaves a zombie process. Send SIGKILL on timeout, and a
     # second SIGKILL 15s later if the first didn't take, so a stalled capture never lingers.
+    fold_extra_args "$@"
     ( cd "$ENGINE_DIR" && timeout -s KILL -k 15 160 "$ENGINE_BIN" \
         +set fs_homepath "$SMOKE_HOME_NATIVE" \
         +set sv_cheats 1 +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 \
         +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set r_fullscreen 0 \
         +log renderer.ral info \
         +set r_ao 0 \
-        +set r_pinShaderTime 1.0 +set r_pinFrameTime 1.0 +set con_notifytime 0 \
+        +set r_pinShaderTime 1.0 +set r_pinFrameTime 1.0 +set con_notifytime 0 +set s_initsound 0 +set s_volume 0 +set s_musicVolume 0 \
         +set com_automated 1 \
-        "$@" `# extra +set tokens; a later +set r_ao 1 here overrides the default-off above (last-wins)` \
+        "${FOLDED[@]}" `# extra +set tokens; a later +set r_ao 1 here overrides the default-off above (last-wins)` \
         +map "$map" +waitForMap +wait 80 \
         +cmd noclip +wait 20 +cmd setviewpos $pos \
         ${CAP_POST_CMD:+ +$CAP_POST_CMD} \
@@ -309,6 +339,7 @@ capture_fixed_cam() {
     # engine process still alive by image name before this capture returns, so no run ever
     # leaves a lingering window. (Harmless no-op when the engine already exited cleanly.)
     reap_engine
+    if grep -q "screenshots/+quit" "$logfile" 2>/dev/null; then rm -f "$SHOTDIR/+quit.png"; echo >&2 "  FAIL — the launch line overflowed the 32 console-line split ('+screenshot' swallowed '+quit'); see $logfile"; return 1; fi
     if ! grep -q "FIRST GAMEPLAY FRAME" "$logfile"; then
         echo >&2 "  capture_fixed_cam($tag): FAIL — never reached CA_ACTIVE (see $logfile)"; return 1
     fi
@@ -347,16 +378,17 @@ capture_scene() {
     rm -f "$SMOKE_HOME/base/config.cfg" 2>/dev/null
     scrub_home_cgame   # no stale home cgame may shadow the fresh installpath module
     # -s KILL / -k mirrors capture_fixed_cam (windowed engine ignores SIGTERM).
+    fold_extra_args "$@"
     ( cd "$ENGINE_DIR" && timeout -s KILL -k 15 160 "$ENGINE_BIN" \
         +set fs_homepath "$SMOKE_HOME_NATIVE" \
         +set sv_cheats 1 +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 \
         +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set r_fullscreen 0 \
         +log renderer.ral info \
         +set r_ao 0 \
-        +set r_pinShaderTime 1.0 +set r_pinFrameTime 1.0 +set con_notifytime 0 \
+        +set r_pinShaderTime 1.0 +set r_pinFrameTime 1.0 +set con_notifytime 0 +set s_initsound 0 +set s_volume 0 +set s_musicVolume 0 \
         +set fixedtime 1 \
         +set com_automated 1 \
-        "$@" `# extra +set tokens; last-wins over the defaults above` \
+        "${FOLDED[@]}" `# extra +set tokens; last-wins over the defaults above` \
         +map "$map" +waitForMap +wait 80 \
         +cmd noclip +wait 40 \
         +sceneplay "scripts/scene/$scenename.lua" +wait "$waitframes" \
@@ -367,6 +399,7 @@ capture_scene() {
     # +quit always land on their own console lines. See capture_fixed_cam's note for what
     # happens when a recipe DOES cross 32 tokens (the +quit-eaten-as-filename stall).
     reap_engine
+    if grep -q "screenshots/+quit" "$logfile" 2>/dev/null; then rm -f "$SHOTDIR/+quit.png"; echo >&2 "  FAIL — the launch line overflowed the 32 console-line split ('+screenshot' swallowed '+quit'); see $logfile"; return 1; fi
     if ! grep -q "FIRST GAMEPLAY FRAME" "$logfile"; then
         echo >&2 "  capture_scene($tag): FAIL — never reached CA_ACTIVE (see $logfile)"; return 1
     fi
@@ -550,6 +583,10 @@ tiled_diff() {
 
 # worst tile-diff (max meanDiff across all 8x8 tiles) between two PNGs.
 worst_tile_diff() { tiled_diff "$1" "$2" | awk 'BEGIN{m=0} {if($2>m)m=$2} END{printf "%.2f", m}'; }
+# Same, but ignoring the top-right tile: the HUD fps counter ("60fps" vs "250fps") is drawn there and
+# has no cvar to hide it, so it differs between otherwise identical captures (159 pixels at the
+# 2321..2343 x 53..68 box in a cullref repro). Costs 1/64 of the frame's sensitivity.
+worst_tile_diff_nohud() { tiled_diff "$1" "$2" | awk -v GW="$GRID_W" 'BEGIN{m=0} {r=int($1/GW); c=$1%GW; if (r==0 && c==GW-1) next; if($2>m)m=$2} END{printf "%.2f", m}'; }
 
 # edge-vs-centre tile-diff split (for the radial chromatic assertion). Given two
 # PNGs, emit "maxEdge maxCenter": the largest tile-diff among the outer-ring tiles
@@ -2359,13 +2396,179 @@ worldindirect)
         w0a="$(capture "$map" "$x" "$y" "$z" "$yaw" "wi0a_$id" +set r_worldIndirect 0)" || { FAIL=1; continue; }
         w0b="$(capture "$map" "$x" "$y" "$z" "$yaw" "wi0b_$id" +set r_worldIndirect 0)" || { FAIL=1; continue; }
         w1a="$(capture "$map" "$x" "$y" "$z" "$yaw" "wi1a_$id" +set r_worldIndirect 1)" || { FAIL=1; continue; }
+        w2a="$(capture "$map" "$x" "$y" "$z" "$yaw" "wi2a_$id" +set r_worldIndirect 2)" || { FAIL=1; continue; }
         noise="$(worst_tile_diff "$w0a" "$w0b")"
         signal="$(worst_tile_diff "$w0a" "$w1a")"
         need="$(awk -v n="$noise" -v r="$WI_RATIO" -v m="$WI_MARGIN" -v f="$WI_FLOOR" 'BEGIN{x=n*r+m; print (x>f)?x:f}')"
         v="$(awk -v s="$signal" -v need="$need" 'BEGIN{print (s<=need)?"OK":"FAIL(indirect frame differs from the direct frame beyond the noise bound)"}')"
+        signal2="$(worst_tile_diff "$w0a" "$w2a")"
+        v2="$(awk -v s="$signal2" -v need="$need" 'BEGIN{print (s<=need)?"OK":"FAIL(per-item indirect frame differs from the direct frame beyond the noise bound)"}')"
+        [ "${v2:0:2}" = "OK" ] || FAIL=1
+        printf "  worldindirect-items %s %s: direct-vs-per-item worst-tile=%s (allowed <= %s) -> %s\n" "$map" "$id" "$signal2" "$need" "$v2"
         [ "${v:0:2}" = "OK" ] || FAIL=1
         printf "  worldindirect %s %s: direct-vs-direct noise worst-tile=%s  direct-vs-indirect worst-tile=%s (allowed <= %s) -> %s\n" "$map" "$id" "$noise" "$signal" "$need" "$v"
     done
+    ;;
+
+capturenoise)
+    # Instrument qualification for every image comparison in this script: how different are
+    # captures that use the SAME settings, per capture state? Run N captures per viewpoint with the
+    # default pins and N with fixedtime 8 (the pin the parity harness needed for bit-identical
+    # frames), print each capture's state and its worst-tile diff against the first capture, and
+    # separately the diff restricted to captures whose state matches the first within 25%.
+    CN_N="${CN_N:-6}"; CN_EXTRA="${CN_EXTRA:-}"
+    CN_ENTRIES=("${VPS[0]}" "${VPS[4]}"); [ "${CN_ALL:-0}" = 1 ] && CN_ENTRIES=("${VPS[@]}")
+    for entry in "${CN_ENTRIES[@]}"; do
+        set -- $entry; map="$1" x="$2" y="$3" z="$4" yaw="$5" id="$6"
+        for cfg in ${CN_CFGS:-plain fixedtime}; do
+            extra=""; [ "$cfg" = fixedtime ] && extra="+set fixedtime 8"
+            ref=""; refms=""
+            for (( i=1; i<=CN_N; i++ )); do
+                cs="$(capture "$map" "$x" "$y" "$z" "$yaw" "cn${cfg}${i}_$id" +set cg_drawGun 0 +set cg_draw2D 0 $extra $CN_EXTRA)" || { FAIL=1; continue; }
+                ms="$(capture_state_ms "cn${cfg}${i}_$id")"
+                if [ -z "$ref" ]; then ref="$cs"; refms="$ms"; printf "  capturenoise %s %s %s #%s: state=%sms (reference)\n" "$cfg" "$map" "$id" "$i" "$ms"; continue; fi
+                d="$(worst_tile_diff "$ref" "$cs")"
+                same="$(awk -v a="$refms" -v b="$ms" 'BEGIN{r=(b>a)?b/a:a/b; print (a>0&&b>0&&r<=1.25)?"same-state":"DIFFERENT-STATE"}')"
+                printf "  capturenoise %s %s %s #%s: state=%sms %s worst-tile-vs-first=%s\n" "$cfg" "$map" "$id" "$i" "$ms" "$same" "$d"
+            done
+        done
+    done
+    ;;
+
+cullref)
+    # Does the visibility cull (PVS + areamask + frustum) drop geometry that is actually visible?
+    # Same fixed camera, fixedtime 8 (captures are bit-identical, see capturenoise), once with the
+    # default cull and once with r_novis 1 (every non-solid leaf counts as visible, so it can only
+    # ADD surfaces). Any difference above the noise floor is geometry the PVS removed that the
+    # camera can see. noclip lets the camera sit inside solids and in closed-off areas.
+    CR_MAP="${CR_MAP:-arena17}"
+    CR_XS="${CR_XS:-200 488 900}"; CR_YS="${CR_YS:-200 700 1096}"; CR_ZS="${CR_ZS:-100 300}"
+    CR_FLOOR="${CR_FLOOR:-2.0}"
+    yaws=(0 90 180 270); n=0; hits=0; total=0; ctl_seen=0
+    for cx in $CR_XS; do for cy in $CR_YS; do for cz in $CR_ZS; do
+        yaw="${yaws[$(( n % 4 ))]}"; n=$(( n + 1 )); id="p${cx}_${cy}_${cz}"
+        r="$(capture "$CR_MAP" "$cx" "$cy" "$cz" "$yaw" "cr_ref_$id" +set cg_drawGun 0 +set cg_drawFPS 0 +set fixedtime 8 +set r_novis 1 +set r_showCluster 0)" || { FAIL=1; continue; }
+        t="$(capture "$CR_MAP" "$cx" "$cy" "$cz" "$yaw" "cr_def_$id" +set cg_drawGun 0 +set cg_drawFPS 0 +set fixedtime 8 +set r_novis 0 +set r_showCluster 1)" || { FAIL=1; continue; }
+        cl="$(grep -o 'cluster:-\?[0-9]*' "$VRF_TMP/vrf-cr_def_$id.log" | tail -1)"
+        # Positive control: lock the PVS to wherever the engine first computed it (the spawn), so
+        # the camera sits outside the locked set and the cull must now drop visible geometry.
+        lk="$(capture "$CR_MAP" "$cx" "$cy" "$cz" "$yaw" "cr_lock_$id" +set cg_drawGun 0 +set cg_drawFPS 0 +set fixedtime 8 +set r_novis 0 +set r_lockpvs 1)" || { FAIL=1; continue; }
+        dl="$(worst_tile_diff_nohud "$r" "$lk")"
+        awk -v s="$dl" -v f="$CR_FLOOR" 'BEGIN{exit !(s>f)}' && ctl_seen=$(( ctl_seen + 1 ))
+        d="$(worst_tile_diff_nohud "$r" "$t")"; total=$(( total + 1 ))
+        v="$(awk -v s="$d" -v f="$CR_FLOOR" 'BEGIN{print (s>f)?"DIFFERS":"same"}')"
+        [ "$v" = DIFFERS ] && hits=$(( hits + 1 ))
+        printf "  cullref %s (%s %s %s yaw %s) %s: default-vs-novis worst-tile=%s (floor %s) -> %s; control(lockpvs) worst-tile=%s\n" "$CR_MAP" "$cx" "$cy" "$cz" "$yaw" "${cl:-cluster:?}" "$d" "$CR_FLOOR" "$v" "$dl"
+    done; done; done
+    printf "  cullref: %s of %s viewpoints differ between the default cull and r_novis 1; the locked-PVS control was visible in %s of them\n" "$hits" "$total" "$ctl_seen"
+    [ "$ctl_seen" -ge 3 ] || { echo "  FAIL: the locked-PVS positive control was visible in fewer than 3 viewpoints, so this check cannot see a PVS that drops geometry" >&2; FAIL=1; }
+    [ "$hits" -eq 0 ] || FAIL=1
+    ;;
+
+worlddecal)
+    # GPU decals are composited after the sorted surface list against the COPIED world depth, so the
+    # second world phase must be complete before that copy. Fire at a wall under fixedtime 8 (the
+    # simulation is deterministic, so the same shot lands in every capture) and require the phased
+    # frames to equal the single-phase frame WITH the decal in it. The decal itself is the control:
+    # r_gpuDecals 0 must differ from the baseline, otherwise no decal was on screen.
+    WD_POS="${WD_POS:-1052 1432 50 135}"; WD_FLOOR="${WD_FLOOR:-2.0}"; WD_SHOT=""
+    # Every cvar goes through the cfg (not +set tokens): the launch line is split at 32 '+' tokens and
+    # more of them make "+screenshot" swallow "+quit".
+    wd() {
+        local tag="$1"; shift
+        { printf 'set cg_draw2D 0\nset cg_drawGun 0\nset fixedtime 8\n'
+          while [ $# -gt 0 ]; do printf 'set %s %s\n' "$1" "$2"; shift 2; done
+          printf 'cmd give all\nwait 10\n+attack\nwait 6\n-attack\n'; } > "$SMOKE_HOME/base/vrf_wd.cfg"
+        CAP_POST_CMD="exec vrf_wd.cfg" capture_fixed_cam arena1 "$WD_POS" "$tag" >/dev/null || return 1
+        echo "$SHOTDIR/vrf_$tag.png"
+    }
+    b0="$(wd wd_base0 r_dbgWorldPhase 0)" || { FAIL=1; b0=""; }
+    b1="$(wd wd_base1 r_dbgWorldPhase 0)" || { FAIL=1; b1=""; }
+    nd="$(wd wd_nodecal r_dbgWorldPhase 0 r_gpuDecals 0)" || { FAIL=1; nd=""; }
+    if [ -n "$b0" ] && [ -n "$b1" ] && [ -n "$nd" ]; then
+        noise="$(worst_tile_diff "$b0" "$b1")"; dec="$(worst_tile_diff "$b0" "$nd")"
+        vd="$(awk -v s="$dec" -v f="$WD_FLOOR" 'BEGIN{print (s>f)?"OK":"FAIL(no decal on screen: r_gpuDecals 0 equals the baseline)"}')"
+        [ "${vd:0:2}" = "OK" ] || FAIL=1
+        printf "  worlddecal: repeat noise worst-tile=%s; decal control (r_gpuDecals 0 vs on) worst-tile=%s (must exceed %s) -> %s\n" "$noise" "$dec" "$WD_FLOOR" "$vd"
+        for rep in 1 2; do for pm in 1 2 3; do
+            pa="$(wd "wd_p${pm}_r${rep}" r_dbgWorldReplay "$rep" r_dbgWorldPhase "$pm")" || { FAIL=1; continue; }
+            sig="$(worst_tile_diff "$b0" "$pa")"
+            lg="$VRF_TMP/vrf-wd_p${pm}_r${rep}.log"
+            if [ "$rep" = 2 ]; then m="$(grep -c 'world phase 2 via recorded replay' "$lg" || true)"; rf="$(grep -c 'recording refused' "$lg" || true)"; else m="$(grep -c 'world phase 2 via CPU rebuild' "$lg" || true)"; rf=0; fi
+            v="$(awk -v s="$sig" -v f="$WD_FLOOR" 'BEGIN{print (s<=f)?"OK":"FAIL(phased frame with a decal differs from the single-phase frame)"}')"
+            { [ "${m:-0}" -ge 1 ] && [ "${rf:-0}" -eq 0 ]; } || v="FAIL(mechanism check: lines=${m:-0} refusals=${rf:-0})"
+            [ "${v:0:2}" = "OK" ] || FAIL=1
+            printf "  worlddecal replay %s mode %s: single-vs-phased worst-tile=%s (allowed <= %s) -> %s\n" "$rep" "$pm" "$sig" "$WD_FLOOR" "$v"
+        done; done
+    fi
+    ;;
+
+worldphase)
+    # r_dbgWorldPhase splits the opaque world batches of the main view into two phases and draws
+    # the second one later (at the opaque -> transparent crossing) through the replay mechanism
+    # selected by r_dbgWorldReplay. Every item is still drawn exactly once, so the image must not
+    # change: 1 = even items first / odd second, 2 = everything second, 3 = everything first
+    # (replay runs but draws nothing). Same noise-bound rule as worldindirect.
+    # fixedtime 8 makes same-setting captures bit-identical (capturenoise mode: 0.00-0.71), so the floor is
+    # set from that measured noise instead of the 20.0 that earlier modes copied.
+    WP_RATIO="${WP_RATIO:-1.5}"; WP_MARGIN="${WP_MARGIN:-1.0}"; WP_FLOOR="${WP_FLOOR:-2.0}"
+    WP_REPLAY="${WP_REPLAY:-1}"
+    WP_INFORMATIVE=0
+    # WP_EXTRA adds launch cvars to every capture (e.g. '+set r_aa 2' for the temporal exact route,
+    # '+set r_forwardPlus 1' for the fp-lit route); cg_draw2D 0 also removes the HUD fps counter.
+    WP_EXTRA="${WP_EXTRA:-}"
+    set -- ${VPS[0]}; capture "$1" "$2" "$3" "$4" "$5" "wp_warm" +set cg_drawGun 0 +set cg_draw2D 0 +set fixedtime 8 $WP_EXTRA +set r_dbgWorldPhase 0 >/dev/null 2>&1 || true
+    detect_sample_dimensions "$SHOTDIR/vrf_wp_warm.png" || exit 1
+    for entry in "${VPS[@]}"; do
+        set -- $entry; map="$1" x="$2" y="$3" z="$4" yaw="$5" id="$6"
+        p0a="$(capture "$map" "$x" "$y" "$z" "$yaw" "wp0a_$id" +set cg_drawGun 0 +set cg_draw2D 0 +set fixedtime 8 $WP_EXTRA +set r_dbgWorldPhase 0)" || { FAIL=1; continue; }
+        p0b="$(capture "$map" "$x" "$y" "$z" "$yaw" "wp0b_$id" +set cg_drawGun 0 +set cg_draw2D 0 +set fixedtime 8 $WP_EXTRA +set r_dbgWorldPhase 0)" || { FAIL=1; continue; }
+        noise="$(worst_tile_diff_nohud "$p0a" "$p0b")"
+        need="$(awk -v n="$noise" -v r="$WP_RATIO" -v m="$WP_MARGIN" -v f="$WP_FLOOR" 'BEGIN{x=n*r+m; print (x>f)?x:f}')"
+        for pm in 1 2 3; do
+            pa="$(capture "$map" "$x" "$y" "$z" "$yaw" "wp${pm}_$id" +set r_dbgWorldReplay "$WP_REPLAY" +set cg_drawGun 0 +set cg_draw2D 0 +set fixedtime 8 $WP_EXTRA +set r_dbgWorldPhase "$pm")" || { FAIL=1; continue; }
+            sig="$(worst_tile_diff_nohud "$p0a" "$pa")"
+            v="$(awk -v s="$sig" -v need="$need" 'BEGIN{print (s<=need)?"OK":"FAIL(phased frame differs from the single-phase frame beyond the noise bound)"}')"
+            [ "${v:0:2}" = "OK" ] || FAIL=1
+            # Prove which mechanism produced the second phase: a silent fallback must not pass.
+            wplog="$VRF_TMP/vrf-wp${pm}_$id.log"
+            if [ "$WP_REPLAY" = 2 ]; then
+                wpmech="$(grep -c 'world phase 2 via recorded replay' "$wplog" || true)"; wpref="$(grep -c 'world replay: recording refused' "$wplog" || true)"
+            else
+                wpmech="$(grep -c 'world phase 2 via CPU rebuild' "$wplog" || true)"; wpref=0
+            fi
+            # Optional: prove the route under test was really exercised (a latched cvar that did not apply
+            # leaves the plain route and would pass silently).
+            if [ -n "${WP_REQUIRE_ROUTE:-}" ] && ! grep -q "world route $WP_REQUIRE_ROUTE: first CANDIDATE" "$wplog"; then
+                v="FAIL(route check: no '$WP_REQUIRE_ROUTE' candidate batch was seen)"; FAIL=1
+            fi
+            if [ "${wpmech:-0}" -lt 1 ] || [ "${wpref:-0}" -gt 0 ]; then
+                v="FAIL(mechanism check: replay=$WP_REPLAY lines=${wpmech:-0} refusals=${wpref:-0})"; FAIL=1
+            fi
+            printf "  worldphase mode %s replay %s %s %s: noise worst-tile=%s  single-vs-phased worst-tile=%s (allowed <= %s) -> %s\n" "$pm" "$WP_REPLAY" "$map" "$id" "$noise" "$sig" "$need" "$v"
+        done
+        # Sensitivity control: mode 5 never draws exactly ONE opaque world item per frame (the first
+        # with at most N indexes). Report the smallest N whose loss this viewpoint's check detects.
+        smallest="none"
+        for sz in 3000 300 30 6; do
+            ps="$(capture "$map" "$x" "$y" "$z" "$yaw" "wp5_${sz}_$id" +set cg_drawGun 0 +set cg_draw2D 0 +set fixedtime 8 $WP_EXTRA +set r_dbgWorldReplay "$WP_REPLAY" +set r_dbgWorldPhase 5 +set r_dbgWorldDropIdx "$sz")" || { FAIL=1; continue; }
+            sg="$(worst_tile_diff_nohud "$p0a" "$ps")"
+            dl="$(grep -o 'world drop control: item [0-9]* ([0-9]* indexes)' "$VRF_TMP/vrf-wp5_${sz}_$id.log" | head -1)"
+            det="$(awk -v s="$sg" -v need="$need" 'BEGIN{print (s>need)?"detected":"not-detected"}')"
+            [ "$det" = detected ] && smallest="$sz"
+            printf "  worldphase sensitivity %s %s: drop one item <= %s indexes (%s): worst-tile=%s (floor %s) -> %s\n" "$map" "$id" "$sz" "${dl:-no item matched}" "$sg" "$need" "$det"
+        done
+        printf "  worldphase sensitivity %s %s: smallest single-item loss detected = items of <= %s indexes\n" "$map" "$id" "$smallest"
+        # Negative control: mode 4 skips the second phase, so half of the opaque world items are
+        # never drawn. The identity check above must be able to see that; if it cannot, it proves nothing.
+        pn="$(capture "$map" "$x" "$y" "$z" "$yaw" "wp4_$id" +set r_dbgWorldReplay "$WP_REPLAY" +set cg_drawGun 0 +set cg_draw2D 0 +set fixedtime 8 $WP_EXTRA +set r_dbgWorldPhase 4)" || { FAIL=1; continue; }
+        sigN="$(worst_tile_diff_nohud "$p0a" "$pn")"
+        vN="$(awk -v s="$sigN" -v need="$need" 'BEGIN{print (s>need)?"OK":"UNINFORMATIVE(the check cannot see missing world geometry from this viewpoint; its identity result is excluded)"}')"
+        [ "${vN:0:2}" = "OK" ] && WP_INFORMATIVE=$(( WP_INFORMATIVE + 1 ))
+        printf "  worldphase negative-control %s %s: skipped-phase worst-tile=%s must exceed %s -> %s\n" "$map" "$id" "$sigN" "$need" "$vN"
+    done
+    printf "  worldphase: %s of %s viewpoints are informative (negative control detected)\n" "$WP_INFORMATIVE" "${#VPS[@]}"
+    [ "$WP_INFORMATIVE" -ge 3 ] || { echo "  FAIL: fewer than 3 viewpoints can tell a missing world batch from a complete one" >&2; FAIL=1; }
     ;;
 
 *) echo "FAIL: unknown mode '$MODE'" >&2; exit 2;;

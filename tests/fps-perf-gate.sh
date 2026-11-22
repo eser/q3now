@@ -403,7 +403,7 @@ set +e
     --cwd "$(python_path "$(dirname "$HEADLESS")")" \
     --stdout "$(python_path "$WARM_STDOUT")" -- \
     "$(python_path "$HEADLESS")" \
-    +set fs_homepath "$HOME_NATIVE" \
+    +set fs_homepath "$HOME_NATIVE" +set s_initsound 0 \
     +set com_noHardReboot 1 \
     +set net_port "$warm_port" \
     +exec fps-perf-warm.cfg
@@ -430,7 +430,7 @@ HOLD_VIEWPOS="$(echo "$VIEWPOS" | awk '{printf "%s %s %d %s", $1, $2, $3 + 256, 
             'set g_scorelimit 0' 'set g_timelimit 0' "set sv_seed $SEED" \
             'set fixedtime 0' 'set timescale 1' 'set com_maxfps 0' \
             'set com_maxfpsUnfocused 1000' 'set com_maxfpsMinimized 30' \
-            'set r_swapInterval 0' 'set com_automated 0' 'set con_notifytime 0' \
+            'set r_swapInterval 0' 'set com_automated 0' 'set con_notifytime 0' 'set s_volume 0' 'set s_musicVolume 0' \
             'set r_textureMode GL_LINEAR_MIPMAP_LINEAR' \
             'set r_ext_texture_filter_anisotropic 1' 'set r_ext_max_anisotropy 8' \
             'set r_bloom 1' 'set r_bloomPasses 2' 'set r_bloomThresholdMode 0' \
@@ -554,7 +554,7 @@ HOLD_VIEWPOS="$(echo "$VIEWPOS" | awk '{printf "%s %s %d %s", $1, $2, $3 + 256, 
         'set r_dlightShadowProfile 1' \
         'set r_particles 1' \
         'set r_dither 0' \
-        'set con_notifytime 0' \
+        'set con_notifytime 0' 'set s_volume 0' 'set s_musicVolume 0' \
         'set cg_debugevents 1' \
         'cmd give all' \
         'cmd god' \
@@ -675,7 +675,7 @@ if [ "$GAMEPLAY_SECONDS" -gt 0 ] && [ "$REGIME_MIN_FPS" -gt 0 ]; then
             --cwd "$(python_path "$(dirname "$RUN_ENGINE")")" \
             --stdout "$(python_path "$RUN_OUTDIR/regime-probe-$attempt.stdout.log")" -- \
             "$(python_path "$RUN_ENGINE")" \
-            +set fs_homepath "$HOME_NATIVE" +set com_noHardReboot 1 +set vm_game 0 +set vm_cgame 0 \
+            +set fs_homepath "$HOME_NATIVE" +set s_initsound 0 +set com_noHardReboot 1 +set vm_game 0 +set vm_cgame 0 \
             +set log_file_severity DEBUG +set r_mode -1 +set r_customwidth "$RENDER_WIDTH" \
             +set r_customheight "$RENDER_HEIGHT" +set r_fullscreen 0 +set r_fbo 1 \
             +set r_renderScale "$RENDER_SCALE" +set r_renderWidth "$RENDER_WIDTH" \
@@ -735,7 +735,7 @@ set +e
     --cwd "$(python_path "$(dirname "$RUN_ENGINE")")" \
     --stdout "$(python_path "$STDOUT")" -- \
     "$(python_path "$RUN_ENGINE")" \
-    +set fs_homepath "$HOME_NATIVE" \
+    +set fs_homepath "$HOME_NATIVE" +set s_initsound 0 \
     +set com_noHardReboot 1 \
     +set vm_game 0 \
     +set vm_cgame 0 \
