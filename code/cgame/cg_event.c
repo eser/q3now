@@ -839,6 +839,9 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		break;
 	case EV_FIRE_WEAPON_PRI:
 		DEBUGNAME("EV_FIRE_WEAPON_PRI");
+		if ( cg_debugEvents.integer )
+			Com_Log( SEV_INFO, LOG_CH(ch_cgame), "  fire: entity %d weapon %d (WP_ROCKET_LAUNCHER=%d, WP_MACHINEGUN=%d)\n",
+				es->number, es->weapon, WP_ROCKET_LAUNCHER, WP_MACHINEGUN );
 		CG_FireWeapon( cent, qfalse );
 		break;
 
@@ -1033,6 +1036,11 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 	case EV_MISSILE_MISS:
 		DEBUGNAME("EV_MISSILE_MISS");
 		ByteToDir( es->eventParm, dir );
+		if ( cg_debugEvents.integer )
+			Com_Log( SEV_INFO, LOG_CH(ch_cgame), "  missile miss: pType %d (PROJ_ROCKET=%d) free-air %d at %.0f %.0f %.0f -> %s\n",
+				(int)es->pType, (int)PROJ_ROCKET, ( es->generic1 & WIRED_MISSILE_EVENT_FREE_AIR ) ? 1 : 0,
+				position[0], position[1], position[2],
+				( es->pType == PROJ_ROCKET && ( es->generic1 & WIRED_MISSILE_EVENT_FREE_AIR ) ) ? "CG_WiredFx_RocketExplosion (no wall mark)" : "CG_MissileHitWall (explosion + wall mark)" );
 		if ( es->pType == PROJ_ROCKET
 				&& ( es->generic1 & WIRED_MISSILE_EVENT_FREE_AIR ) )
 			CG_WiredFx_RocketExplosion( position, dir, IMPACTSOUND_DEFAULT,

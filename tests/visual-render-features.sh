@@ -2476,7 +2476,7 @@ worlddecal)
     # more of them make "+screenshot" swallow "+quit".
     wd() {
         local tag="$1"; shift
-        { printf 'set cg_draw2D 0\nset cg_drawGun 0\nset fixedtime 8\n'
+        { printf 'set cg_draw2D 0\nset cg_drawGun 1\nset fixedtime 8\n'   # the gun stays visible: seeing the shot is part of the proof
           while [ $# -gt 0 ]; do printf 'set %s %s\n' "$1" "$2"; shift 2; done
           # capture_fixed_cam enters noclip, and a noclipping player cannot fire: leave it, stay alive (god), land, arm the
           # rocket launcher (its splash would otherwise hurt at this range) and shoot the wall in front. 'weapon N' only works once the

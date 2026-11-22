@@ -587,6 +587,12 @@ static wiredFxDispatchResult_t CL_WiredFx_Dispatch( const wiredFxProfile_t *prof
 			+ (float)( ( event->seed ^ action->actionId ) & 0xffffu )
 				* ( 360.0f / 65536.0f ) ); Vector4Copy( color, desc.rgba );
 		desc.shader = (qhandle_t)action->payload.decal.material; desc.lifetime = action->duration;
+		{
+			static unsigned decalDispatches;
+			if ( ++decalDispatches <= 3u )
+				Com_Log( SEV_INFO, LOG_CH(ch_wired_fx), "decal action dispatched: radius %.1f material %u lifetime %.1f at %.0f %.0f %.0f\n",
+					desc.radius, (unsigned)desc.shader, desc.lifetime, desc.origin[0], desc.origin[1], desc.origin[2] );
+		}
 		re.AddDecalToScene( &desc ); return WIRED_FX_DISPATCH_EXECUTED;
 	}
 	case WIRED_FX_ACTION_MODEL: {
