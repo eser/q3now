@@ -31,7 +31,7 @@ while [ $# -gt 0 ]; do
         *) echo "unknown arg: $1" >&2; exit 2;;
     esac
 done
-[ -n "$MODE" ]   || { echo "FAIL: --mode {gtao|fwdplus|viewport|shadow_atest|scene|chromatic|crowd|crowdpromo|entitylight|scenegolden|crowdwasm|gpucull|worldindirect|worldphase|worlddecal|exacthold|capturenoise|cullref|dlight-shadow|dlight-shadow-lifecycle|dlight-shadow-probe|selftest} required" >&2; exit 2; }
+[ -n "$MODE" ]   || { echo "FAIL: --mode {gtao|fwdplus|viewport|shadow_atest|scene|chromatic|crowd|crowdpromo|entitylight|scenegolden|crowdwasm|gpucull|worldindirect|worldphase|worlddecal|exacthold|aacompare|aalatency|capturenoise|cullref|dlight-shadow|dlight-shadow-lifecycle|dlight-shadow-probe|selftest} required" >&2; exit 2; }
 # selftest needs no engine (it exercises the assertion math on synthetic inputs).
 if [ "$MODE" != "selftest" ]; then
     [ -n "$ENGINE" ] || { echo "FAIL: --engine <wired.x64> required" >&2; exit 2; }
@@ -2539,6 +2539,57 @@ exacthold)
         [ "${v:0:2}" = "OK" ] || FAIL=1
         printf "  exacthold yaw=%s: repeat noise worst-tile=%s; hold-vs-off worst-tile=%s (allowed <= %s) -> %s; leak control worst-tile=%s (informational: a visible leak shows here)\n" "$yaw" "$noise" "$on" "$EH_FLOOR" "$v" "$leak"
     done
+    ;;
+
+aacompare)
+    # Same camera, fixedtime 8: no AA / SMAA preset 3 / TAA. Still, after a yaw, and 3 frames after a teleport (a cut: no valid
+    # history). The frames differ by construction (SMAA is spatial, TAA accumulates); this mode produces the images and the pairwise
+    # tile differences for a human to judge. It never fails on image content, only when a capture is missing or TAA is not active.
+    AC_POS="${AC_POS:-1052 1432 50 135}"; AC_CUT_POS="${AC_CUT_POS:-300 300 200 45}"
+    ac() {
+        local tag="$1" aa="$2" smaa="$3" yaw="$4"
+        { printf 'set cg_draw2D 0\nset cg_drawGun 0\nset fixedtime 8\n'
+          case "$yaw" in
+            0) printf 'wait 40\n' ;;
+            1) printf 'cl_yawspeed 60\n+right\nwait 24\n-right\nwait 40\n' ;;
+            2) printf 'wait 40\nsetviewpos %s 0\nwait 3\nscreenshot vrf_%s_cut\nwait 3\n' "$AC_CUT_POS" "$tag" ;;
+          esac; } > "$SMOKE_HOME/base/vrf_ac.cfg"
+        CAP_POST_CMD="exec vrf_ac.cfg" capture_fixed_cam arena1 "$AC_POS" "$tag" +set r_aa "$aa" +set r_smaa "$smaa" >/dev/null || return 1
+    }
+    for yaw in 0 1 2; do
+        for cfg in "none 0 0" "smaa 1 3" "taa 2 0"; do
+            set -- $cfg
+            ac "ac_$1_$yaw" "$2" "$3" "$yaw" || FAIL=1
+        done
+        if ! grep -q 'temporal-resolved-hdr' "$VRF_TMP/vrf-ac_taa_$yaw.log"; then
+            echo "  aacompare yaw=$yaw: FAIL(TAA was not active: no temporal-resolved lines)"; FAIL=1
+        fi
+        a="$SHOTDIR/vrf_ac_none_$yaw.png"; b="$SHOTDIR/vrf_ac_smaa_$yaw.png"; c="$SHOTDIR/vrf_ac_taa_$yaw.png"
+        printf "  aacompare case=%s: worst-tile none-vs-smaa=%s none-vs-taa=%s smaa-vs-taa=%s (images in %s)\n" "$yaw" \
+            "$(worst_tile_diff_nohud "$a" "$b")" "$(worst_tile_diff_nohud "$a" "$c")" "$(worst_tile_diff_nohud "$b" "$c")" "$SHOTDIR"
+    done
+    ;;
+
+aalatency)
+    # How many frames after a teleport does the captured image show the NEW view, for no AA / SMAA / TAA? Each capture teleports,
+    # waits N frames and takes a screenshot; it is compared to a settled capture at the destination (N=40) taken in the same
+    # configuration. A configuration that needs more frames than the others adds presentation latency.
+    AL_POS="${AL_POS:-1052 1432 50 135}"; AL_DEST="${AL_DEST:-300 300 200 45}"
+    al() {
+        local tag="$1" aa="$2" smaa="$3" n="$4" hold="${5:-1}"
+        { printf 'set cg_draw2D 0\nset cg_drawGun 0\nset fixedtime 8\nset r_dbgExactHold %s\nwait 40\nsetviewpos %s 0\nwait %s\nscreenshot vrf_%s_n\nwait 40\n' "$hold" "$AL_DEST" "$n" "$tag"; } > "$SMOKE_HOME/base/vrf_al.cfg"
+        CAP_POST_CMD="exec vrf_al.cfg" capture_fixed_cam arena1 "$AL_POS" "$tag" +set r_aa "$aa" +set r_smaa "$smaa" >/dev/null || return 1
+    }
+    while read -r -u 3 cfg; do
+        [ -n "$cfg" ] || continue
+        set -- $cfg
+        line="  aalatency $1: diff to settled destination by frames after teleport:"
+        for n in ${AL_NS:-1 2 3 5}; do
+            al "al_$1_$n" "$2" "$3" "$n" "$4" || { FAIL=1; continue; }
+            line="$line N=$n:$(worst_tile_diff_nohud "$SHOTDIR/vrf_al_$1_${n}_n.png" "$SHOTDIR/vrf_al_$1_$n.png")"
+        done
+        echo "$line"
+    done 3<<<"${AL_CFGS:-$'none 0 0 1\nsmaa 1 3 1\ntaa 2 0 1'}"
     ;;
 
 worldphase)
