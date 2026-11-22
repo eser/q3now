@@ -31,7 +31,7 @@ while [ $# -gt 0 ]; do
         *) echo "unknown arg: $1" >&2; exit 2;;
     esac
 done
-[ -n "$MODE" ]   || { echo "FAIL: --mode {gtao|fwdplus|viewport|shadow_atest|scene|chromatic|crowd|crowdpromo|entitylight|scenegolden|crowdwasm|gpucull|worldindirect|worldphase|worlddecal|exacthold|temporalfold|aacompare|aalatency|capturenoise|cullref|dlight-shadow|dlight-shadow-lifecycle|dlight-shadow-probe|selftest} required" >&2; exit 2; }
+[ -n "$MODE" ]   || { echo "FAIL: --mode {gtao|fwdplus|viewport|shadow_atest|scene|chromatic|crowd|crowdpromo|entitylight|scenegolden|crowdwasm|gpucull|worldindirect|worldphase|worlddecal|exacthold|temporalfold|aaportal|aacompare|aalatency|capturenoise|cullref|dlight-shadow|dlight-shadow-lifecycle|dlight-shadow-probe|selftest} required" >&2; exit 2; }
 # selftest needs no engine (it exercises the assertion math on synthetic inputs).
 if [ "$MODE" != "selftest" ]; then
     [ -n "$ENGINE" ] || { echo "FAIL: --engine <wired.x64> required" >&2; exit 2; }
@@ -2622,6 +2622,31 @@ temporalfold)
         [ "$informative" = yes ] || v="FAIL(negative control not detected: the check cannot see a missing history/resolve write)"
         [ "${v:0:2}" = "OK" ] || FAIL=1
         printf "  temporalfold yaw=%s: repeat noise worst-tile=%s; fold-vs-store-copy worst-tile=%s (allowed <= %s) -> %s; negative control worst-tile=%s (must exceed %s: %s)\n" "$yaw" "$noise" "$on" "$TF_FLOOR" "$v" "$neg" "$TF_FLOOR" "$informative"
+    done
+    ;;
+
+aaportal)
+    # AA coverage of a portal view: q3dm7 has a misc_portal_surface at (1078 -832 -384). Four approach points look at it from
+    # each side; each is captured with no AA / SMAA preset 3 / TAA at fixedtime 8 (PORTAL_MAP / AP_VIEWS override). Images only.
+    AP_MAP="${AP_MAP:-q3dm7}"
+    AP_VIEWS="${AP_VIEWS:-1078 -632 -344 270|1078 -1032 -344 90|1278 -832 -344 180|878 -832 -344 0}"
+    ap() {
+        local tag="$1" aa="$2" smaa="$3" pos="$4"
+        { printf 'set cg_draw2D 0\nset cg_drawGun 0\nset fixedtime 8\nwait 60\n'; } > "$SMOKE_HOME/base/vrf_ap.cfg"
+        CAP_POST_CMD="exec vrf_ap.cfg" capture_fixed_cam "$AP_MAP" "$pos" "$tag" +set r_aa "$aa" +set r_smaa "$smaa" >/dev/null || return 1
+    }
+    n=0
+    IFS='|' read -r -a APV <<< "$AP_VIEWS"
+    for pos in "${APV[@]}"; do
+        for cfg in "none 0 0" "smaa 1 3" "taa 2 0"; do
+            set -- $cfg
+            ap "ap_$1_$n" "$2" "$3" "$pos 0" || FAIL=1
+        done
+        printf "  aaportal view %s (%s): worst-tile none-vs-smaa=%s none-vs-taa=%s smaa-vs-taa=%s\n" "$n" "$pos" \
+            "$(worst_tile_diff_nohud "$SHOTDIR/vrf_ap_none_$n.png" "$SHOTDIR/vrf_ap_smaa_$n.png")" \
+            "$(worst_tile_diff_nohud "$SHOTDIR/vrf_ap_none_$n.png" "$SHOTDIR/vrf_ap_taa_$n.png")" \
+            "$(worst_tile_diff_nohud "$SHOTDIR/vrf_ap_smaa_$n.png" "$SHOTDIR/vrf_ap_taa_$n.png")"
+        n=$((n+1))
     done
     ;;
 
