@@ -387,6 +387,9 @@ uint32_t Ral_CommandRecordingUnsupportedCount( const ralCommandRecording_t *rec,
 void     Ral_CmdRecordingBegin( ralCommandBuffer_t *cb, ralCommandRecording_t *rec );
 void     Ral_CmdRecordingEnd( ralCommandBuffer_t *cb );
 void     Ral_CmdRecordingNoteIndirectVariant( ralCommandBuffer_t *cb, uint64_t variantOffset );
+// Diagnostics: number of dynamic-rendering instances closed since start (Vulkan backend).
+uint64_t Ral_DebugRenderingEndCount( void );
+
 typedef struct { uint32_t n, unsupported; const char *first; } ralRecordingMark_t;
 void     Ral_CommandRecordingMark( const ralCommandRecording_t *rec, ralRecordingMark_t *mark );
 void     Ral_CommandRecordingRollback( ralCommandRecording_t *rec, const ralRecordingMark_t *mark );

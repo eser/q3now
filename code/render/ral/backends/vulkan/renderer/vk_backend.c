@@ -916,8 +916,11 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs
 			}
 			// depth fade: copy depth buffer at opaque->transparent boundary
 			if ( oldShaderSort < INSERT_POINT && shader->sort >= INSERT_POINT ) {
-				if ( r_dbgExtraSplit && r_dbgExtraSplit->integer && vk.sceneDepth.active && !vk.sceneDepth.copied )
-					vk_debug_extra_split();   // measurement only: one redundant pass split (TASK-88)
+				if ( r_dbgExtraSplit && r_dbgExtraSplit->integer > 0 && ( r_dbgExtraSplit->integer > 1 || ( vk.sceneDepth.active && !vk.sceneDepth.copied ) ) ) {
+					// measurement only (TASK-88): N redundant pass splits per view; 1 keeps the older depth-copy-gated meaning
+					int splits;
+					for ( splits = 0; splits < r_dbgExtraSplit->integer; splits++ ) vk_debug_extra_split();
+				}
 				vk_scene_depth_copy();
 			}
 #endif

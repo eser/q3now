@@ -30991,6 +30991,24 @@ static qboolean vk_temporal_main_issue_exact_segment(
 	// the exact segment and LOAD resume are an infallible command-emission unit;
 	// callers may therefore fall back to the ordinary draw only on the preflight
 	// failure above and can never replay a draw after exact3 commands were emitted.
+	{
+		// Measurement (TASK-241): which draws open an exact (velocity-carrying) segment, i.e. four extra render
+		// passes each. Logged per 100 exact segments plus the first distinct shader names.
+		static uint32_t exactTotal, exactWorld, exactEntity, namesLogged;
+		static char seen[16][40];
+		qboolean world = ( backEnd.currentEntity == &tr.worldEntity ) ? qtrue : qfalse;
+		const char *nm = tess.shader ? tess.shader->name : "?";
+		uint32_t k; qboolean dup = qfalse;
+		exactTotal++; if ( world ) exactWorld++; else exactEntity++;
+		for ( k = 0; k < namesLogged && k < 16u; k++ ) if ( !Q_stricmp( seen[k], nm ) ) { dup = qtrue; break; }
+		if ( !dup && namesLogged < 16u ) {
+			Q_strncpyz( seen[namesLogged++], nm, sizeof( seen[0] ) );
+			R_LOG( rch_ral, SEV_INFO, "exact segment #%u: %s shader '%s' sort %.1f alphatest %d\n", exactTotal, world ? "WORLD" : "ENTITY", nm,
+				tess.shader ? (double)tess.shader->sort : -1.0, tess.shader ? (int)( tess.shader->stages[0] && tess.shader->stages[0]->stateBits & GLS_ATEST_BITS ) : -1 );
+		}
+		if ( exactTotal % 500u == 0u )
+			R_LOG( rch_ral, SEV_INFO, "exact segments so far: %u (world %u, entity %u)\n", exactTotal, exactWorld, exactEntity );
+	}
 	Ral_EndRendering( vk.cmd->ral_cmd );
 	vk.cmd->open_dynamic_pass = VK_DYN_PASS_NONE;
 	vk_temporal_main_attachment_barrier();

@@ -1738,8 +1738,12 @@ void Ral_BeginRendering( ralCommandBuffer_t *cb, const ralRenderingInfo_t *ri_ )
 	cb->renderingActive = qtrue;
 }
 
+static uint64_t s_renderingEnds;   // diagnostics: dynamic-rendering instances closed since start
+uint64_t Ral_DebugRenderingEndCount( void ) { return s_renderingEnds; }
+
 void Ral_EndRendering( ralCommandBuffer_t *cb ) {
 	if ( !cb ) return;
+	s_renderingEnds++;
 	cb->backend->vk.CmdEndRendering( cb->cb );
 	cb->renderingActive = qfalse;
 	if ( cb->renderingDebugLabelActive ) {

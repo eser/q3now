@@ -1193,9 +1193,21 @@ static uint32_t            s_wiBatches, s_wiCommands, s_wiFallbackBatches, s_wiF
 
 static uint64_t s_ringEntMat, s_ringUniform, s_ringFrames;
 extern uint64_t vk_temporal_finish_ready, vk_temporal_finish_poisoned;
+uint64_t Ral_DebugRenderingEndCount( void );
 void vk_world_ring_sample( uint32_t entMatSlots, uint32_t uniformReadOffset )
 {
 	s_ringEntMat += entMatSlots; s_ringUniform += uniformReadOffset; s_ringFrames++;
+	{
+		// Render passes (dynamic-rendering instances) per frame over 100-frame windows, tagged with the AA mode,
+		// so a cost test can attribute a lane change to a pass-count change.
+		static uint64_t lastEnds; static uint32_t frames;
+		if ( ++frames == 100u ) {
+			const uint64_t ends = Ral_DebugRenderingEndCount();
+			R_LOG( rch_ral, SEV_INFO, "render passes per frame (100 frames): %.2f r_aa=%d r_smaa=%d\n",
+				(double)( ends - lastEnds ) / 100.0, r_aa ? r_aa->integer : -1, r_smaa ? r_smaa->integer : -1 );
+			lastEnds = ends; frames = 0u;
+		}
+	}
 	if ( s_ringFrames == 600u ) {
 		R_LOG( rch_ral, SEV_INFO, "ring usage per frame (600 frames): entity-matrix slots %.1f, uniform ring read offset %.0f bytes\n",
 			(double)s_ringEntMat / 600.0, (double)s_ringUniform / 600.0 );

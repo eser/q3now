@@ -29,7 +29,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/lib/wired_paths.sh"
 
 TIMEOUT_RUNNER="$SCRIPT_DIR/run-with-timeout.py"
-ROUNDS="${AAC_ROUNDS:-2}"
+ROUNDS="${AAC_ROUNDS:-1}"   # more than one round (32 live mode switches) exhausts the descriptor pool, see the AA-switch bug
 
 WIRED="${1:-${WIRED_BINARY:-}}"
 [ -n "$WIRED" ] && [ -x "$WIRED" ] || { echo "usage: $0 /absolute/path/to/wired"; exit 64; }
@@ -66,20 +66,21 @@ ln -sfn "$PAX21" "$HOME_DIR/base/pax21.sw3z"
 ln -sfn "$GAMECL" "$HOME_DIR/base/gameclarm64.dylib"
 ln -sfn "$GAMESV" "$HOME_DIR/base/gamesvarm64.dylib"
 
-# Arm order: N S T D D T S N, repeated. 0 = none (r_aa 0), 1 = SMAA preset 3 (r_aa 1), 2 = TAA (r_aa 2),
-# 3 = the temporal gate's own "on" arm (r_aa 0 + r_temporalInputTest 1), kept so this instrument can be checked
-# against the gate's +0.75 ms figure in the same process.
+# Arms, run in a palindromic order and repeated. 0 none (r_aa 0), 1 SMAA preset 3 (r_aa 1), 2 TAA (r_aa 2),
+# 3 the temporal gate's own "on" arm (r_aa 0 + r_temporalInputTest 1), 4 SMAA preset 1, 5 SMAA preset 4,
+# 6 none + 4 redundant pass splits, 7 none + 16 redundant pass splits (r_dbgExtraSplit). Arms 4-7 are dose
+# responses: they say whether a cost grows with shader work (SMAA 1 -> 4) or with the number of render passes.
 ORDER=()
-for (( r = 0; r < ROUNDS; r++ )); do ORDER+=(0 1 2 3 3 2 1 0); done
+for (( r = 0; r < ROUNDS; r++ )); do ORDER+=(0 1 2 3 4 5 6 7 7 6 5 4 3 2 1 0); done
 LAST=$(( ${#ORDER[@]} - 1 ))
 
 BOOT="$HOME_DIR/base/ral-aa-cost.cfg"
 {
-	cat <<'CFGEOF'
+	cat <<CFGEOF
 set r_fullscreen 0
 set r_mode -1
-set r_customwidth 1280
-set r_customheight 720
+set r_customwidth ${AAC_W:-1280}
+set r_customheight ${AAC_H:-720}
 log renderer.ral info
 log renderer.timing debug
 set vm_game 0
@@ -91,7 +92,16 @@ CFGEOF
 	for (( i = 0; i <= LAST; i++ )); do
 		arm="${ORDER[$i]}"; tag="ARM${arm}_$i"
 		if [ "$i" -lt "$LAST" ]; then next="vstr aacSeg$(( i + 1 ))"; else next="echo AAC_COMPLETE; quit"; fi
-		if [ "$arm" = 3 ]; then armcmd="r_aa 0; r_temporalInputTest 1"; else armcmd="r_temporalInputTest 0; r_aa $arm"; fi
+		case "$arm" in
+			0) armcmd="r_temporalInputTest 0; r_aa 0; r_smaa 0; r_dbgExtraSplit 0" ;;
+			1) armcmd="r_temporalInputTest 0; r_aa 1; r_smaa 0; r_dbgExtraSplit 0" ;;
+			2) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 0; r_dbgExtraSplit 0" ;;
+			3) armcmd="r_aa 0; r_smaa 0; r_dbgExtraSplit 0; r_temporalInputTest 1" ;;
+			4) armcmd="r_temporalInputTest 0; r_aa 1; r_smaa 1; r_dbgExtraSplit 0" ;;
+			5) armcmd="r_temporalInputTest 0; r_aa 1; r_smaa 4; r_dbgExtraSplit 0" ;;
+			6) armcmd="r_temporalInputTest 0; r_aa 0; r_smaa 0; r_dbgExtraSplit 4" ;;
+			7) armcmd="r_temporalInputTest 0; r_aa 0; r_smaa 0; r_dbgExtraSplit 16" ;;
+		esac
 		printf 'set aacSeg%s "%s; wait 96; set r_gpuSpeeds 1; echo AAC_%s_BEGIN; wait 220; echo AAC_%s_END; set r_gpuSpeeds 0; wait 16; %s"\n' "$i" "$armcmd" "$tag" "$tag" "$next"
 	done
 	echo 'set activeAction "vstr aacSetup"'
@@ -104,10 +114,10 @@ STRIP=(+set r_bloom 0 +set r_ao 0 +set r_forwardPlus 0 +set r_drawSunRays 0 +set
 
 QCONSOLE="$HOME_DIR/qconsole.jsonl"
 STDOUT="$ROOT/stdout.log"
-python3 "$TIMEOUT_RUNNER" --timeout 420 --kill-after 15 --cwd "$WD" --stdout "$STDOUT" -- \
+python3 "$TIMEOUT_RUNNER" --timeout 900 --kill-after 15 --cwd "$WD" --stdout "$STDOUT" -- \
 	"$WIRED" +set fs_basepath "$HOME_DIR" +set fs_homepath "$HOME_DIR" +set fs_game base \
 	+set com_automated 1 +set com_noHardReboot 1 +set s_initsound 0 +set s_volume 0 +set s_musicVolume 0 \
-	+set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 \
+	+set r_fullscreen 0 +set r_mode -1 +set r_customwidth "${AAC_W:-1280}" +set r_customheight "${AAC_H:-720}" \
 	+set r_vkValidate 0 +set r_temporalInputTest 0 +set r_smaa 0 \
 	"${STRIP[@]}" \
 	+set log_severity DEBUG +set log_file_severity DEBUG +set log_file_mode overwrite_synced \
@@ -126,10 +136,11 @@ if any(r.get("sev", "").upper() in ("ERROR", "FATAL") for r in rows):
     raise SystemExit("FAIL aa-cost ERROR/FATAL severity in the log")
 if "AAC_COMPLETE" not in msgs:
     raise SystemExit("FAIL aa-cost run did not complete")
-marker = re.compile(r"AAC_ARM([0123])_(\d+)_(BEGIN|END)")
+marker = re.compile(r"AAC_ARM([0-7])_(\d+)_(BEGIN|END)")
 header = re.compile(r"gpu \((\d+)f avg, ms\):")
 label = re.compile(r"  ([A-Za-z_0-9]+)=([0-9.]+)")
-seg = {}; active = None
+pass_pat = re.compile(r"render passes per frame \(100 frames\): ([0-9.]+) ")
+seg = {}; active = None; pas_seg = {}
 for row, m in zip(rows, msgs):
     mm = marker.fullmatch(m)
     if mm:
@@ -141,6 +152,9 @@ for row, m in zip(rows, msgs):
             if active != key: raise SystemExit("FAIL aa-cost marker order")
             active = None
         continue
+    if active is not None:
+        pm = pass_pat.match(m)
+        if pm: pas_seg.setdefault(active, []).append(float(pm.group(1)))
     if active is None or row.get("cat", "").lower() != "renderer.timing":
         continue
     h = header.fullmatch(m)
@@ -148,27 +162,49 @@ for row, m in zip(rows, msgs):
     if seg[active]:
         l = label.fullmatch(m)
         if l: seg[active][-1][l.group(1)] = float(l.group(2))
-per = {0: [], 1: [], 2: [], 3: []}
-lanes = {0: {}, 1: {}, 2: {}, 3: {}}
+per = {a: [] for a in range(8)}
+lanes = {a: {} for a in range(8)}
+passes = {a: [] for a in range(8)}
+pass_pat = re.compile(r"render passes per frame \(100 frames\): ([0-9.]+) ")
 for i, arm in enumerate(order):
     full_s = [s for s in seg.get((arm, i), []) if s.get("frames") == 200 and "total" in s]
     if len(full_s) != 1:
         raise SystemExit(f"FAIL aa-cost segment {i} (arm {arm}): expected one 200-frame aggregate, got {len(full_s)}")
     per[arm].append(full_s[0]["total"])
+    if pas_seg.get((arm, i)): passes[arm].append(statistics.median(pas_seg[(arm, i)]))
     for k, v in full_s[0].items():
         if k not in ("frames", "total"): lanes[arm].setdefault(k, []).append(v)
-name = {0: "none", 1: "SMAA3", 2: "TAA", 3: "gate-on"}
+name = {0: "none", 1: "SMAA3", 2: "TAA", 3: "gate-on", 4: "SMAA1", 5: "SMAA4", 6: "none+4sp", 7: "none+16sp"}
 print(f"config: {'full default renderer' if full == '1' else 'stripped (as the temporal gate)'}; order {order_s}")
-for arm in (0, 1, 2, 3):
+for arm in range(8):
     v = per[arm]
-    print(f"  {name[arm]:6s} n={len(v)} median={statistics.median(v):.3f} ms  min={min(v):.3f} max={max(v):.3f}  all={['%.3f' % x for x in v]}")
+    pp = f"  passes/frame={statistics.median(passes[arm]):.1f}" if passes[arm] else "  passes/frame=?"
+    print(f"  {name[arm]:9s} n={len(v)} median={statistics.median(v):.3f} ms  min={min(v):.3f} max={max(v):.3f}{pp}")
+# Regime check. When the GPU is paced by presentation (240 Hz => 4.16 ms) the "total" of every window reads
+# the frame period, not the work, and the present_prep lane absorbs the wait. A window is pacing-bound when it
+# sits within 4.10-4.20 ms; if the none arm is, no cost claim from this run is valid.
+PERIOD_LO, PERIOD_HI = 4.10, 4.20
+bound = {arm: sum(1 for x in per[arm] if PERIOD_LO <= x <= PERIOD_HI) for arm in range(8)}
+total_w = sum(len(per[arm]) for arm in range(8)); bound_w = sum(bound.values())
+print(f"  regime: {bound_w} of {total_w} windows read the 240 Hz frame period (4.10-4.20 ms)")
+if bound[0] == len(per[0]) or bound_w * 2 > total_w:
+    print("  REGIME-LOCKED: the machine was paced by presentation during this run; the numbers above measure the frame period, not the GPU work. NO cost claim is valid. Run again later (the decoupled regime comes and goes).")
+    raise SystemExit(75)
+if bound_w:
+    print("  WARNING: some windows are pacing-bound; deltas that involve them are not valid. Valid windows only are the ones outside 4.10-4.20 ms.")
 base = statistics.median(per[0]); noise = max(per[0]) - min(per[0])
 print(f"  noise floor (spread of the 'none' arm, {len(per[0])} windows): {noise:.3f} ms")
-for arm in (1, 2, 3):
+for arm in range(1, 8):
     d = statistics.median(per[arm]) - base
-    print(f"  {name[arm]} - none = {d:+.3f} ms ({d / base * 100:+.1f}%)  -> {'above' if abs(d) > noise else 'WITHIN'} the noise floor")
+    dp = (statistics.median(passes[arm]) - statistics.median(passes[0])) if passes[arm] and passes[0] else None
+    per_pass = f"; {d / dp:+.3f} ms per extra pass ({dp:+.1f} passes)" if dp else ""
+    print(f"  {name[arm]} - none = {d:+.3f} ms ({d / base * 100:+.1f}%)  -> {'above' if abs(d) > noise else 'WITHIN'} the noise floor{per_pass}")
 d_ts = statistics.median(per[2]) - statistics.median(per[1])
 print(f"  TAA - SMAA3 = {d_ts:+.3f} ms")
+print("  per-arm lane medians above 0.05 ms:")
+for arm in (0, 1, 2, 3, 4, 5):
+    big = sorted(((statistics.median(vs), k) for k, vs in lanes[arm].items() if statistics.median(vs) > 0.05), reverse=True)
+    print(f"    {name[arm]:8s} " + ", ".join(f"{k}={v:.3f}" for v, k in big))
 print("  lane medians that differ most from 'none' (ms):")
 for arm in (1, 2, 3):
     diffs = []
