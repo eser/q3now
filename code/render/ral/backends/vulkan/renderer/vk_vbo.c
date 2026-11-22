@@ -1083,8 +1083,16 @@ static int run_length( const int *a, int from, int to, int *count )
 }
 
 
+static uint32_t s_covQueued, s_covIssued;
+void vk_world_coverage_take( uint32_t *queued, uint32_t *issued )
+{
+	*queued = s_covQueued; *issued = s_covIssued;
+	s_covQueued = s_covIssued = 0u;
+}
+
 void VBO_QueueItem( int itemIndex )
 {
+	if ( r_dbgWorldCoverage && r_dbgWorldCoverage->integer && vk_world_phase != 2 ) s_covQueued++;
 	vbo_t *vbo = &world_vbo;
 
 	if ( vbo->items_queue_count < vbo->items_count )
@@ -1172,11 +1180,51 @@ static struct ralBuffer_s *s_wiBuf[NUM_COMMAND_BUFFERS];
 static uint32_t            s_wiUsed[NUM_COMMAND_BUFFERS];
 static qboolean            s_wiFailed;
 static qboolean            s_wiLogged;
-static uint32_t            s_wiBatches, s_wiCommands, s_wiFallbackBatches, s_wiFrames, s_wiInstanceNonZero, s_wiSoftItems, s_wiRunItems;
+int      vk_world_route;
+int      vk_world_phase;
+static qboolean s_dropDone, s_dropLogged;
+int      vk_world_capture;
+qboolean vk_world_capture_failed;     // a command recording is active on the frame's command buffer
+uint32_t vk_frame_draw_seq;
+static uint32_t s_wiRouteTotal[5], s_wiRouteCand[5];
+static uint32_t s_wiSeq[32], s_wiSeqN, s_wiSeqTotal, s_wiSeqFrame;   // per-frame draw ordinals of world batches (one sampled frame)
+static uint32_t s_wiSeqLast[32], s_wiSeqLastN, s_wiSeqLastTotal;
+static uint32_t            s_wiBatches, s_wiCommands, s_wiFallbackBatches, s_wiFrames, s_wiInstanceNonZero, s_wiSoftItems, s_wiRunItems, s_wiItemBatches;
+
+static uint64_t s_ringEntMat, s_ringUniform, s_ringFrames;
+extern uint64_t vk_temporal_finish_ready, vk_temporal_finish_poisoned;
+void vk_world_ring_sample( uint32_t entMatSlots, uint32_t uniformReadOffset )
+{
+	s_ringEntMat += entMatSlots; s_ringUniform += uniformReadOffset; s_ringFrames++;
+	if ( s_ringFrames == 600u ) {
+		R_LOG( rch_ral, SEV_INFO, "ring usage per frame (600 frames): entity-matrix slots %.1f, uniform ring read offset %.0f bytes\n",
+			(double)s_ringEntMat / 600.0, (double)s_ringUniform / 600.0 );
+		R_LOG( rch_ral, SEV_INFO, "temporal motion receipts so far: ready=%llu poisoned=%llu\n", (unsigned long long)vk_temporal_finish_ready, (unsigned long long)vk_temporal_finish_poisoned );
+		s_ringEntMat = s_ringUniform = s_ringFrames = 0u;
+	}
+}
 
 void vk_world_indirect_begin_frame( void )
 {
+	// Route/interleave inventory (measurement only): the sequence of the frame that just ended.
+	s_wiSeqLastN = s_wiSeqN; s_wiSeqLastTotal = vk_frame_draw_seq;
+	memcpy( s_wiSeqLast, s_wiSeq, sizeof( s_wiSeq ) );
+	s_wiSeqN = 0u; vk_frame_draw_seq = 0u;
+	s_dropDone = qfalse;
 	if ( vk.cmd_index < NUM_COMMAND_BUFFERS ) s_wiUsed[vk.cmd_index] = 0u;
+	if ( ++s_wiSeqFrame == 600u ) {
+		uint32_t i;
+		char buf[400]; int o = 0;
+		for ( i = 0; i < s_wiSeqLastN && i < 32u && o < 360; i++ ) o += Com_sprintf( buf + o, (int)sizeof( buf ) - o, "%u ", s_wiSeqLast[i] );
+		buf[o] = 0;
+		R_LOG( rch_ral, SEV_INFO, "world route candidates (opaque world main-view batches, 600 frames): ordinary=%u exact=%u exact-fallback=%u fp-lit=%u\n",
+			s_wiRouteCand[1], s_wiRouteCand[2], s_wiRouteCand[3], s_wiRouteCand[4] );
+		memset( s_wiRouteCand, 0, sizeof( s_wiRouteCand ) );
+		R_LOG( rch_ral, SEV_INFO, "world routes (600-frame totals): ordinary=%u exact=%u exact-fallback=%u fp-lit=%u; sampled frame: %u world batches among %u geometry draws, world draw ordinals: %s\n",
+			s_wiRouteTotal[1], s_wiRouteTotal[2], s_wiRouteTotal[3], s_wiRouteTotal[4], s_wiSeqLastN, s_wiSeqLastTotal, buf );
+		memset( s_wiRouteTotal, 0, sizeof( s_wiRouteTotal ) );
+		s_wiSeqFrame = 0u;
+	}
 	// Proof of use, and the cost side of the stage-B measurement: batches and commands per
 	// frame over a 600-frame window (only while the path is on and has drawn something).
 	if ( s_wiBatches && ++s_wiFrames >= 600u ) {
@@ -1271,6 +1319,156 @@ static qboolean vk_world_indirect_draw( const ibo_item_t *runs, int n, uint32_t 
 }
 
 
+// Per-item submission (r_worldIndirect 2 / 3): one command per queued ITEM instead of one per
+// merged run, all from the device-local index buffer (the host-visible "soft" path is not
+// used). Mode 2 must be image-identical. Mode 3 additionally zeroes every second command's
+// index count, so it is a cost probe for "half of the items culled", NOT image-correct.
+// Returns qfalse (nothing drawn) when the indirect path is unavailable.
+// Eligible for the two-phase split: opaque world batches of the main view (the only draws a GPU
+// occlusion test may legally defer). Everything else is drawn whole in the first phase.
+// Per-batch revert bookkeeping: while a batch is captured its first-phase args are written filtered, so a
+// refusal discovered AFTER the batch (an unsupported command, an exact-route stage) must be able to put the
+// unfiltered commands back before the GPU reads them (host-coherent ring, read at execution, not at record).
+#define WORLD_REVERT_ITEMS  4096u
+#define WORLD_REVERT_CHUNKS 64u
+static worldIndirectCmd_t s_capFull[WORLD_REVERT_ITEMS];
+static uint32_t s_capFullN;
+static struct { uint32_t ringByteOff, count, fullOff; } s_capChunks[WORLD_REVERT_CHUNKS];
+static uint32_t s_capChunkN;
+uint32_t vk_world_route_mask;
+
+// Only the plain (ordinary / fp-lit) routes can be deferred: an exact temporal segment draws into its own
+// velocity-carrying pass, so it must draw whole in the first phase. Large batches draw whole as well (revert scratch).
+qboolean vk_world_phase_eligible( void )
+{
+	return ( vk_world_phase != 0 && tess.shader && tess.shader->sort == SS_OPAQUE
+		&& backEnd.currentEntity == &tr.worldEntity
+		&& ( vk_world_route == 1 || vk_world_route == 4 )
+		&& world_vbo.items_queue_count <= (int)WORLD_REVERT_ITEMS ) ? qtrue : qfalse;
+}
+
+void vk_world_batch_capture_begin( void ) { s_capFullN = 0u; s_capChunkN = 0u; vk_world_route_mask = 0u; }
+
+// Put the unfiltered commands back for every chunk of the batch just captured.
+void vk_world_batch_capture_revert( void )
+{
+	const uint32_t ci = vk.cmd_index;
+	uint32_t i;
+	if ( ci >= NUM_COMMAND_BUFFERS || !s_wiBuf[ci] ) return;
+	for ( i = 0; i < s_capChunkN; i++ ) {
+		ralBufferUploadReceipt_t upload;
+		if ( !Ral_BufferWriteImmediate( s_wiBuf[ci], (uint64_t)s_capChunks[i].ringByteOff, &s_capFull[ s_capChunks[i].fullOff ],
+				(uint64_t)s_capChunks[i].count * sizeof( worldIndirectCmd_t ), &upload ) ) {
+			vk_world_capture_failed = qtrue;   // cannot restore: the caller must not replay this frame
+			R_LOG( rch_ral, SEV_ERROR, "world batch revert: could not rewrite chunk %u\n", i );
+		}
+	}
+	s_capChunkN = 0u; s_capFullN = 0u;
+}
+
+// Which phase an item belongs to under r_dbgWorldPhase: 1 = even item ids first, odd second;
+// 2 = everything second; 3 = everything first.
+static qboolean vk_world_item_in_phase( int itemId, int phase )
+{
+	const int mode = r_dbgWorldPhase ? r_dbgWorldPhase->integer : 0;
+	int itemPhase;
+	if ( mode == 2 ) itemPhase = 2;
+	else if ( mode == 3 || mode == 5 ) itemPhase = 1;   // 5 = sensitivity control: everything first, one item dropped elsewhere
+	else itemPhase = ( itemId & 1 ) ? 2 : 1;   // modes 1 and 4 (4 = negative control: phase 2 is skipped, half the items vanish)
+	return itemPhase == phase ? qtrue : qfalse;
+}
+
+static qboolean vk_world_indirect_draw_items( uint32_t firstInstance, qboolean zeroEveryOther )
+{
+	const vbo_t *vbo = &world_vbo;
+	const int n = vbo->items_queue_count;
+	const ralCaps_t *caps;
+	worldIndirectCmd_t cmds[WORLD_INDIRECT_CHUNK], cmdsAlt[WORLD_INDIRECT_CHUNK];
+	const uint32_t ci = vk.cmd_index;
+	const int chunksNeeded = ( n + (int)WORLD_INDIRECT_CHUNK - 1 ) / (int)WORLD_INDIRECT_CHUNK;
+	// While capturing, a draw that cannot be reverted (scratch full) is drawn whole instead of filtered.
+	const qboolean phased = ( vk_world_phase_eligible()
+		&& ( !vk_world_capture || ( s_capFullN + (uint32_t)n <= WORLD_REVERT_ITEMS && s_capChunkN + (uint32_t)chunksNeeded <= WORLD_REVERT_CHUNKS ) ) ) ? qtrue : qfalse;
+	const qboolean capture = ( phased && vk_world_capture ) ? qtrue : qfalse;   // also write the second-phase variant
+	int done = 0;
+
+	if ( s_wiFailed || n <= 0 || ci >= NUM_COMMAND_BUFFERS ) return qfalse;
+	caps = Ral_GetCaps( vk_ral_get_backend() );
+	if ( !caps || !caps->multiDrawIndirect || !caps->drawIndirectFirstInstance ) return qfalse;
+	if ( !s_wiBuf[ci] ) {
+		ralBufferCreateInfo_t bci;
+		memset( &bci, 0, sizeof( bci ) );
+		bci.size      = (uint64_t)WORLD_INDIRECT_CAPACITY * sizeof( worldIndirectCmd_t );
+		bci.usage     = RAL_BUFFER_INDIRECT | RAL_BUFFER_TRANSFER_DST;
+		bci.memory    = RAL_MEMORY_HOST_COHERENT;
+		bci.debugName = "wired-world-indirect";
+		s_wiBuf[ci] = Ral_CreateBuffer( vk_ral_get_backend(), &bci );
+		if ( !s_wiBuf[ci] ) { s_wiFailed = qtrue; return qfalse; }
+	}
+	if ( s_wiUsed[ci] + (uint32_t)n * ( capture ? 2u : 1u ) > WORLD_INDIRECT_CAPACITY ) { s_wiFallbackBatches++; return qfalse; }
+
+	vk_bind_index_buffer( vk.vbo.ral_vertex_buffer, tess.shader->iboOffset );
+	s_wiBatches++;
+	s_wiCommands += (uint32_t)n;
+	s_wiItemBatches++;
+
+	while ( done < n ) {
+		const int chunk = ( n - done > (int)WORLD_INDIRECT_CHUNK ) ? (int)WORLD_INDIRECT_CHUNK : ( n - done );
+		ralBufferUploadReceipt_t upload;
+		int k;
+		for ( k = 0; k < chunk; k++ ) {
+			const vbo_item_t *it = vbo->items + vbo->items_queue[ done + k ];
+			cmds[k].indexCount    = ( zeroEveryOther && ( ( done + k ) & 1 ) ) ? 0u : (uint32_t)it->num_indexes;
+			if ( phased && !vk_world_item_in_phase( vbo->items_queue[ done + k ], vk_world_phase ) )
+				cmds[k].indexCount = 0u;
+			if ( phased && r_dbgWorldPhase->integer == 5 && !s_dropDone && vk_world_phase == 1
+					&& (int)it->num_indexes * 2 > r_dbgWorldDropIdx->integer && (int)it->num_indexes <= r_dbgWorldDropIdx->integer ) {
+				s_dropDone = qtrue;   // exactly one item per frame, never drawn: the smallest loss the image check must be able to see
+				cmds[k].indexCount = 0u;
+				if ( !s_dropLogged ) { s_dropLogged = qtrue; R_LOG( rch_ral, SEV_INFO, "world drop control: item %d (%d indexes) is not drawn\n", vbo->items_queue[ done + k ], (int)it->num_indexes ); }
+			}
+			cmds[k].instanceCount = 1u;
+			cmds[k].firstIndex    = (uint32_t)it->index_offset;
+			cmds[k].vertexOffset  = 0;
+			cmds[k].firstInstance = firstInstance;
+			if ( capture ) {
+				s_capFull[ s_capFullN + (uint32_t)k ] = cmds[k];
+				s_capFull[ s_capFullN + (uint32_t)k ].indexCount = (uint32_t)it->num_indexes;   // unfiltered, for a revert
+				cmdsAlt[k] = cmds[k];
+				cmdsAlt[k].indexCount = vk_world_item_in_phase( vbo->items_queue[ done + k ], 2 ) ? (uint32_t)it->num_indexes : 0u;
+			}
+		}
+		if ( capture && !Ral_BufferWriteImmediate( s_wiBuf[ci], (uint64_t)( s_wiUsed[ci] + (uint32_t)chunk ) * sizeof( worldIndirectCmd_t ),
+				cmdsAlt, (uint64_t)chunk * sizeof( worldIndirectCmd_t ), &upload ) ) {
+			// Could not write the second-phase variant: the recording cannot be replayed faithfully.
+			Ral_CmdRecordingNoteIndirectVariant( vk.cmd->ral_cmd, 0u );
+			vk_world_capture_failed = qtrue;
+		}
+		if ( !Ral_BufferWriteImmediate( s_wiBuf[ci], (uint64_t)s_wiUsed[ci] * sizeof( worldIndirectCmd_t ),
+				cmds, (uint64_t)chunk * sizeof( worldIndirectCmd_t ), &upload ) ) {
+			for ( k = done; k < n; k++ ) {
+				const vbo_item_t *it = vbo->items + vbo->items_queue[ k ];
+				vk_draw_indexed( (uint32_t)it->num_indexes, (uint32_t)it->index_offset, firstInstance );
+			}
+			return qtrue;
+		}
+		if ( capture ) {
+			s_capChunks[s_capChunkN].ringByteOff = s_wiUsed[ci] * (uint32_t)sizeof( worldIndirectCmd_t );
+			s_capChunks[s_capChunkN].count = (uint32_t)chunk;
+			s_capChunks[s_capChunkN].fullOff = s_capFullN;
+			s_capChunkN++; s_capFullN += (uint32_t)chunk;
+		}
+		if ( capture )
+			Ral_CmdRecordingNoteIndirectVariant( vk.cmd->ral_cmd, (uint64_t)( s_wiUsed[ci] + (uint32_t)chunk ) * sizeof( worldIndirectCmd_t ) );
+		Ral_CmdDrawIndexedIndirect( vk.cmd->ral_cmd, s_wiBuf[ci],
+			(uint64_t)s_wiUsed[ci] * sizeof( worldIndirectCmd_t ), (uint32_t)chunk, (uint32_t)sizeof( worldIndirectCmd_t ) );
+		s_wiUsed[ci] += (uint32_t)chunk * ( capture ? 2u : 1u );
+		done += chunk;
+	}
+	return qtrue;
+}
+
+
 void VBO_RenderIBOItems( uint32_t firstInstance )
 {
 	// firstInstance selects the per-entity matrix storage-buffer slot on the
@@ -1285,7 +1483,32 @@ void VBO_RenderIBOItems( uint32_t firstInstance )
 	// draw's own).
 	const worldBatchList_t *bl;
 
+	if ( r_dbgWorldCoverage && r_dbgWorldCoverage->integer && vk_world_phase != 2 ) s_covIssued += (uint32_t)world_vbo.items_queue_count;   // phase 2 re-queues the same items: count each item once
 	if ( world_batch_count == 0 )
+		return;
+
+	if ( vk_world_route >= 1 && vk_world_route <= 4 ) vk_world_route_mask |= 1u << vk_world_route;
+	{
+		// Route x eligibility inventory: a "candidate" is an opaque world batch of the main view, i.e. what the
+		// two-phase split may defer. Logged on first sight per route and in the 600-frame line.
+		static const char *const routeName[5] = { "?", "ordinary", "exact", "exact-fallback", "fp-lit" };
+		static qboolean seenAll[5], seenCand[5];
+		const qboolean cand = ( tess.shader && tess.shader->sort == SS_OPAQUE && backEnd.currentEntity == &tr.worldEntity
+			&& vk.renderPassIndex == RENDER_PASS_MAIN ) ? qtrue : qfalse;
+		if ( vk_world_route >= 1 && vk_world_route <= 4 ) {
+			s_wiRouteCand[vk_world_route] += cand ? 1u : 0u;
+			if ( !seenAll[vk_world_route] ) { seenAll[vk_world_route] = qtrue; R_LOG( rch_ral, SEV_INFO, "world route %s: first batch seen (phase=%d)\n", routeName[vk_world_route], vk_world_phase ); }
+			if ( cand && !seenCand[vk_world_route] ) { seenCand[vk_world_route] = qtrue; R_LOG( rch_ral, SEV_INFO, "world route %s: first CANDIDATE (opaque world main-view) batch seen (phase=%d, phase-eligible=%d)\n", routeName[vk_world_route], vk_world_phase, (int)vk_world_phase_eligible() ); }
+		}
+	}
+	if ( vk_world_route >= 1 && vk_world_route <= 4 ) { s_wiRouteTotal[vk_world_route]++; }
+	if ( s_wiSeqN < 32u ) s_wiSeq[s_wiSeqN] = vk_frame_draw_seq;
+	s_wiSeqN++;
+
+	// r_worldIndirect 2/3: per-item commands from the device-local buffer replace the runs AND
+	// the soft draw (every item has device-local index data).
+	if ( ( ( r_worldIndirect && r_worldIndirect->integer >= 2 ) || vk_world_phase_eligible() )
+			&& vk_world_indirect_draw_items( firstInstance, r_worldIndirect->integer >= 3 ? qtrue : qfalse ) )
 		return;
 
 	bl = &world_batches[ world_batch_count - 1 ];

@@ -611,8 +611,133 @@ RB_RenderDrawSurfList
 ==================
 */
 #ifdef USE_VULKAN
+static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs, qboolean temporalPrimaryCommand );
+R_LOG_DECLARE_CHANNEL( rch_ral, "renderer.ral" );
+extern uint64_t vk_temporal_finish_ready, vk_temporal_finish_poisoned;
+static qboolean s_phaseTemporal;   // the root view is a temporal primary command: its draws carry a record/commit transaction
+static uint64_t s_phase2LateCopy, s_phase2Seen;
+static uint64_t s_phase2Calls, s_phase2Us, s_phase2Ring, s_phase2Slots;
+static ralCommandRecording_t *s_worldRec;
+static int      s_worldRecPass;
+static uint32_t s_replayCalls, s_replayOps, s_replayFallbacks;
+static uint64_t s_replayUs, s_replayRing, s_replaySlots;
+// Flush one batch. In replay mode 2 an eligible first-phase batch is captured while it executes,
+// starting from a forgotten bind state so the stream is self-contained.
+static void RB_EndSurfaceCaptured( const shader_t *sh, int entityNum ) {
+	const qboolean cap = ( vk_world_phase == 1 && r_dbgWorldReplay && r_dbgWorldReplay->integer == 2
+		&& sh && sh->sort == SS_OPAQUE && entityNum == REFENTITYNUM_WORLD ) ? qtrue : qfalse;
+	if ( !cap ) { RB_EndSurface(); return; }
+	if ( !s_worldRec ) s_worldRec = Ral_CreateCommandRecording();
+	if ( !s_worldRec ) { RB_EndSurface(); return; }
+	if ( Ral_CommandRecordingOpCount( s_worldRec ) == 0u ) s_worldRecPass = vk.cmd->open_dynamic_pass;
+	{
+		ralRecordingMark_t mark;
+		Ral_CommandRecordingMark( s_worldRec, &mark );
+		vk_world_batch_capture_begin();
+		vk_world_reset_bind_state();
+		vk_world_capture = 1;
+		Ral_CmdRecordingBegin( vk.cmd->ral_cmd, s_worldRec );
+		RB_EndSurface();
+		Ral_CmdRecordingEnd( vk.cmd->ral_cmd );
+		vk_world_capture = 0;
+		// Decided per batch, at capture time, because the temporal views have no CPU-rebuild fallback: a batch that
+		// took an exact-segment stage or issued a command the recorder cannot replay is taken back entirely, and
+		// its filtered first-phase args are rewritten unfiltered, so it simply draws whole in the first phase.
+		if ( ( vk_world_route_mask & ~( ( 1u << 1 ) | ( 1u << 4 ) ) )
+				|| Ral_CommandRecordingUnsupportedCount( s_worldRec, NULL ) != mark.unsupported ) {
+			static uint32_t reverted;
+			Ral_CommandRecordingRollback( s_worldRec, &mark );
+			vk_world_batch_capture_revert();
+			if ( ++reverted == 1u || reverted % 5000u == 0u )
+				R_LOG( rch_ral, SEV_INFO, "world batch drawn whole in the first phase (exact route or unsupported command): %u so far\n", reverted );
+		}
+	}
+}
+static void RB_WorldPhase2( drawSurf_t *drawSurfs, int count ) {
+	const int64_t t0 = ri.Microseconds();
+	const uint32_t ringBefore = vk.cmd->uniform_read_offset, slotBefore = vk.cmd->entMatSlot;
+	// Decals and every other depth consumer read the scene-depth COPY; if it was already taken when the
+	// second phase starts, they saw an incomplete world. Must stay 0.
+	if ( vk.sceneDepth.copied ) s_phase2LateCopy++;
+	s_phase2Seen++;
+	qboolean replayed = qfalse;
+	static qboolean loggedReplay, loggedRebuild;
+	if ( r_dbgWorldPhase && r_dbgWorldPhase->integer == 4 ) { vk_world_phase = 0; return; }   // negative control
+	if ( r_dbgWorldReplay && r_dbgWorldReplay->integer == 2 && s_worldRec && Ral_CommandRecordingOpCount( s_worldRec ) == 0u
+			&& Ral_CommandRecordingUnsupportedCount( s_worldRec, NULL ) == 0u ) {
+		vk_world_phase = 0;   // nothing eligible was drawn in the first phase (e.g. a view without world batches)
+		return;
+	}
+	if ( r_dbgWorldReplay && r_dbgWorldReplay->integer == 2 && s_worldRec ) {
+		const char *why = NULL;
+		const uint32_t unsupported = Ral_CommandRecordingUnsupportedCount( s_worldRec, &why );
+		if ( unsupported == 0u && !vk_world_capture_failed && s_worldRecPass == vk.cmd->open_dynamic_pass
+				&& Ral_CommandRecordingOpCount( s_worldRec ) > 0u ) {
+			replayed = Ral_CmdRecordingReplay( vk.cmd->ral_cmd, s_worldRec, 1u );
+			vk_world_reset_bind_state();
+			if ( replayed && !loggedReplay ) {
+				loggedReplay = qtrue;
+				R_LOG( rch_ral, SEV_INFO, "world phase 2 via recorded replay: first call replayed %u ops\n", Ral_CommandRecordingOpCount( s_worldRec ) );
+			}
+			s_replayOps += Ral_CommandRecordingOpCount( s_worldRec );
+		} else {
+			static qboolean logged;
+			s_replayFallbacks++;
+			if ( !logged ) {
+				logged = qtrue;
+				R_LOG( rch_ral, SEV_INFO, "world replay: recording refused (unsupported=%u first=%s captureFailed=%d passChanged=%d ops=%u); falling back to the CPU rebuild\n",
+					unsupported, why ? why : "-", (int)vk_world_capture_failed, s_worldRecPass != vk.cmd->open_dynamic_pass,
+					Ral_CommandRecordingOpCount( s_worldRec ) );
+			}
+		}
+	}
+	if ( replayed ) {
+		vk_world_phase = 0;
+		s_replayCalls++;
+		s_replayUs += (uint64_t)( ri.Microseconds() - t0 );
+		s_replayRing += (uint64_t)( vk.cmd->uniform_read_offset - ringBefore );
+		s_replaySlots += (uint64_t)( vk.cmd->entMatSlot - slotBefore );
+		if ( s_replayCalls == 600u ) {
+			R_LOG( rch_ral, SEV_INFO, "world phase 2 depth-copy invariant: %llu of %llu phase-2 starts found the scene-depth copy already taken (must be 0)\n", (unsigned long long)s_phase2LateCopy, (unsigned long long)s_phase2Seen );
+			R_LOG( rch_ral, SEV_INFO, "temporal motion receipts so far: ready=%llu poisoned=%llu\n", (unsigned long long)vk_temporal_finish_ready, (unsigned long long)vk_temporal_finish_poisoned );
+			R_LOG( rch_ral, SEV_INFO, "world phase 2 (recorded replay): %.1f us per call, %.1f ops per call, uniform ring +%.0f bytes, entity-matrix slots +%.1f per call (same frame, before/after), %u fallbacks to the CPU rebuild\n",
+				(double)s_replayUs / 600.0, (double)s_replayOps / 600.0, (double)s_replayRing / 600.0, (double)s_replaySlots / 600.0, s_replayFallbacks );
+			s_replayCalls = s_replayOps = s_replayFallbacks = 0u; s_replayUs = 0u; s_replayRing = s_replaySlots = 0u;
+		}
+		return;
+	}
+	if ( s_phaseTemporal ) {
+		// A second CPU walk would consume each draw's temporal record/commit transaction twice. Refusing here
+		// means second-phase items were already withheld from the first phase: this must not happen.
+		static qboolean errLogged;
+		if ( !errLogged ) { errLogged = qtrue; R_LOG( rch_ral, SEV_ERROR, "world phase 2: replay refused in a temporal view and no CPU rebuild is allowed; second-phase items are lost\n" ); }
+		vk_world_phase = 0;
+		return;
+	}
+	if ( !loggedRebuild ) {
+		loggedRebuild = qtrue;
+		R_LOG( rch_ral, SEV_INFO, "world phase 2 via CPU rebuild: first call\n" );
+	}
+	vk_world_phase = 2;
+	RB_RenderDrawSurfList( drawSurfs, count, qfalse );
+	vk_world_phase = 0;   // the second phase is over: lit passes and every later draw must not be filtered
+	s_phase2Calls++;
+	s_phase2Us += (uint64_t)( ri.Microseconds() - t0 );
+	s_phase2Ring += (uint64_t)( vk.cmd->uniform_read_offset - ringBefore );
+	s_phase2Slots += (uint64_t)( vk.cmd->entMatSlot - slotBefore );
+	if ( s_phase2Calls == 600u ) {
+		R_LOG( rch_ral, SEV_INFO, "world phase 2 depth-copy invariant: %llu of %llu phase-2 starts found the scene-depth copy already taken (must be 0)\n", (unsigned long long)s_phase2LateCopy, (unsigned long long)s_phase2Seen );
+		R_LOG( rch_ral, SEV_INFO, "world phase 2 (CPU rebuild, mode %d): %.1f us per call, uniform ring +%.0f bytes, entity-matrix slots +%.1f per call (same frame, before/after the call) over %u calls\n",
+			r_dbgWorldPhase ? r_dbgWorldPhase->integer : 0, (double)s_phase2Us / (double)s_phase2Calls,
+			(double)s_phase2Ring / (double)s_phase2Calls, (double)s_phase2Slots / (double)s_phase2Calls, (unsigned)s_phase2Calls );
+		s_phase2Calls = s_phase2Us = s_phase2Ring = s_phase2Slots = 0u;
+	}
+}
+static uint32_t s_covInvoked;
+static qboolean RB_IsBspSurface( const surfaceType_t *t ) { return ( *t == SF_FACE || *t == SF_GRID || *t == SF_TRIANGLES ) ? qtrue : qfalse; }
 static void RB_InvokeDrawSurf( drawSurf_t *drawSurf, uint32_t absoluteOrdinal,
 		qboolean temporalPrimaryCommand ) {
+	if ( r_dbgWorldCoverage && r_dbgWorldCoverage->integer && RB_IsBspSurface( drawSurf->surface ) && vk_world_phase != 2 ) s_covInvoked++;
 	if ( temporalPrimaryCommand )
 		vk_temporal_iqm_publish_drawsurf_ordinal( absoluteOrdinal );
 	rb_surfaceTable[ *drawSurf->surface ]( drawSurf->surface );
@@ -641,10 +766,49 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs
 #endif
 	double			originalTime; // -EC-
 	qboolean		pinShaderTime;
+#ifdef USE_VULKAN
+	// Two-phase world draw (TASK-88 spike, r_dbgWorldPhase): the root call draws the first phase
+	// of the eligible world batches, and the second phase is produced at the opaque -> transparent
+	// crossing (or at the end of the list) by running this same function again over the
+	// surfaces already walked, restricted to the eligible ones (vk_world_phase == 2).
+	// The crossing is SS_OPAQUE -> SS_DECAL, NOT the later SS_FOG one: a blended decal drawn before
+	// the world pixels it sits on would blend against the cleared colour instead of the wall.
+	const qboolean	phaseNested = ( vk_world_phase == 2 ) ? qtrue : qfalse;
+	const qboolean	phaseRoot = ( vk_world_phase == 0 && r_dbgWorldPhase && r_dbgWorldPhase->integer > 0
+							&& backEnd.viewParms.portalView == PV_NONE && vk.renderPassIndex == RENDER_PASS_MAIN
+							&& ( !temporalPrimaryCommand || ( r_dbgWorldReplay && r_dbgWorldReplay->integer == 2 ) ) ) ? qtrue : qfalse;   // temporal views: recorded replay only, never the CPU rebuild
+	qboolean		phase2Done = qfalse;
+	if ( phaseRoot ) s_phaseTemporal = temporalPrimaryCommand;
+	const qboolean	covOn = ( r_dbgWorldCoverage && r_dbgWorldCoverage->integer && !phaseNested ) ? qtrue : qfalse;
+	uint32_t		covListed = 0u;
+#endif
 
 	// save original time for entity shader offsets
 	originalTime = backEnd.refdef.floatTime;
 	pinShaderTime = r_pinShaderTime->value > 0.0f;
+#ifdef USE_VULKAN
+	if ( r_dbgWorldPhase && r_dbgWorldPhase->integer > 0 && !phaseNested && !phaseRoot ) {
+		static int lastWhy = -1;
+		const int why = vk_world_phase != 0 ? 1 : ( backEnd.viewParms.portalView != PV_NONE ? 2 : ( vk.renderPassIndex != RENDER_PASS_MAIN ? 3 : ( temporalPrimaryCommand ? 4 : 0 ) ) );
+		if ( why != lastWhy ) {
+			static const char *const whyName[5] = { "?", "phase flag already set", "portal/mirror view", "not the MAIN render pass", "temporal primary command" };
+			lastWhy = why;
+			R_LOG( rch_ral, SEV_INFO, "world phase root refused: %s\n", whyName[why] );
+		}
+	}
+	if ( covOn ) {
+		uint32_t q, is;
+		int ci;
+		for ( ci = 0; ci < numDrawSurfs; ci++ ) if ( RB_IsBspSurface( drawSurfs[ci].surface ) ) covListed++;
+		s_covInvoked = 0u;
+		vk_world_coverage_take( &q, &is );   // discard whatever earlier work left behind
+	}
+	if ( phaseRoot ) {
+		vk_world_phase = 1;
+		if ( s_worldRec ) Ral_CommandRecordingClear( s_worldRec );
+		vk_world_capture_failed = qfalse;
+	}
+#endif
 
 	// draw everything
 	oldEntityNum = -1;
@@ -663,6 +827,14 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs
 	backEnd.pc.c_surfaces += numDrawSurfs;
 
 	for (i = 0, drawSurf = drawSurfs ; i < numDrawSurfs ; i++, drawSurf++) {
+#ifdef USE_VULKAN
+		if ( phaseNested ) {
+			// second phase: only opaque world surfaces, in the same order as the first phase
+			int ne, nf, nd; shader_t *ns;
+			R_DecomposeSort( drawSurf->sort, &ne, &ns, &nf, &nd );
+			if ( ne != REFENTITYNUM_WORLD || ns->sort != SS_OPAQUE ) continue;
+		}
+#endif
 		if ( drawSurf->sort == oldSort ) {
 			// fast path, same as previous sort
 #ifdef USE_VULKAN
@@ -686,8 +858,15 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs
 		// entities merged into a single batch, like smoke and blood puff sprites
 		if ( ( (oldSort ^ drawSurf->sort ) & ~QSORT_REFENTITYNUM_MASK ) || !shader->entityMergable ) {
 			//if ( oldShader != NULL ) {
-				RB_EndSurface();
+				RB_EndSurfaceCaptured( oldShader, oldEntityNum );
 			//}
+#ifdef USE_VULKAN
+			if ( phaseRoot && !phase2Done && oldShaderSort < SS_DECAL && shader->sort >= SS_DECAL ) {
+				phase2Done = qtrue;
+				RB_WorldPhase2( drawSurfs, i );
+				oldEntityNum = -1;   // force matrix setup after the nested walk
+			}
+#endif
 #ifdef USE_PMLIGHT
 			#define INSERT_POINT SS_FOG
 			if ( ( backEnd.refdef.numLitSurfs
@@ -737,6 +916,8 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs
 			}
 			// depth fade: copy depth buffer at opaque->transparent boundary
 			if ( oldShaderSort < INSERT_POINT && shader->sort >= INSERT_POINT ) {
+				if ( r_dbgExtraSplit && r_dbgExtraSplit->integer && vk.sceneDepth.active && !vk.sceneDepth.copied )
+					vk_debug_extra_split();   // measurement only: one redundant pass split (TASK-88)
 				vk_scene_depth_copy();
 			}
 #endif
@@ -870,8 +1051,33 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs
 
 	// draw the contents of the last shader batch
 	if ( oldShader != NULL ) {
-		RB_EndSurface();
+		RB_EndSurfaceCaptured( oldShader, oldEntityNum );
 	}
+#ifdef USE_VULKAN
+	if ( phaseRoot && !phase2Done ) {
+		phase2Done = qtrue;
+		RB_WorldPhase2( drawSurfs, numDrawSurfs );
+	}
+	if ( phaseRoot ) vk_world_phase = 0;
+	if ( covOn ) {
+		static uint64_t tList, tInv, tQ, tIss, views, bad, minList = ~0ull, maxList;
+		uint32_t q, is;
+		vk_world_coverage_take( &q, &is );
+		tList += covListed; tInv += s_covInvoked; tQ += q; tIss += is; views++;
+		if ( covListed < minList ) minList = covListed;
+		if ( covListed > maxList ) maxList = covListed;
+		if ( s_covInvoked != covListed || q != is ) {
+			bad++;
+			if ( bad <= 3u )
+				R_LOG( rch_ral, SEV_WARN, "world coverage MISMATCH (view %llu, pass %d): listed=%u invoked=%u queued=%u issued=%u\n",
+					(unsigned long long)views, (int)vk.renderPassIndex, covListed, s_covInvoked, q, is );
+		}
+		if ( views % 600u == 0u )
+			R_LOG( rch_ral, SEV_INFO, "world coverage (%llu views): listed %.1f invoked %.1f queued %.1f issued %.1f per view, listed min/max %llu/%llu, mismatching views %llu\n",
+				(unsigned long long)views, (double)tList / views, (double)tInv / views, (double)tQ / views, (double)tIss / views,
+				(unsigned long long)minList, (unsigned long long)maxList, (unsigned long long)bad );
+	}
+#endif
 	// Reset only after the final batch has emitted its UBO snapshots; unrelated
 	// passes must never inherit this draw list's advanced fog state.
 	R_FogOff();

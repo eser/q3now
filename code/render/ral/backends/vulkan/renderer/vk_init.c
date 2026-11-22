@@ -168,6 +168,11 @@ cvar_t *r_shadowAtestTest;
 cvar_t *r_shadowTranslucent;
 cvar_t *r_hizVerify;
 cvar_t *r_worldIndirect;
+cvar_t *r_dbgWorldPhase;
+cvar_t *r_dbgWorldCoverage;
+cvar_t *r_dbgWorldDropIdx;
+cvar_t *r_dbgWorldReplay;
+cvar_t *r_dbgExtraSplit;
 cvar_t *r_shadowTranslucentOpacity;
 #endif
 cvar_t *r_bloom;
@@ -1667,7 +1672,6 @@ Reports a refused TAA mode once per transition, not once per frame.
 */
 void R_AntialiasingPlan( rAntialiasingPlan_t *outPlan )
 {
-	static int s_lastRefused = 0;
 	rAntialiasingInput_t input;
 	rAntialiasingPlan_t plan;
 
@@ -2920,7 +2924,14 @@ static void R_Register( void )
 	// call per batch). Nothing is culled; the image is identical. Needs multiDrawIndirect and
 	// drawIndirectFirstInstance; otherwise the direct draws stay in use.
 	r_worldIndirect = ri.Cvar_Get( "r_worldIndirect", "0", 0 );
-	ri.Cvar_CheckRange( r_worldIndirect, "0", "1", CV_INTEGER );
+	// Measurement only: 1 = one redundant end/reopen of the main pass per frame at the opaque ->
+	// transparent crossing, to price the extra pass split a two-phase world draw needs.
+	r_dbgExtraSplit = ri.Cvar_Get( "r_dbgExtraSplit", "0", CVAR_CHEAT );
+	r_dbgWorldPhase = ri.Cvar_Get( "r_dbgWorldPhase", "0", CVAR_CHEAT );
+	r_dbgWorldCoverage = ri.Cvar_Get( "r_dbgWorldCoverage", "0", CVAR_CHEAT );
+	r_dbgWorldDropIdx = ri.Cvar_Get( "r_dbgWorldDropIdx", "3000", CVAR_CHEAT );
+	r_dbgWorldReplay = ri.Cvar_Get( "r_dbgWorldReplay", "1", CVAR_CHEAT );
+	ri.Cvar_CheckRange( r_worldIndirect, "0", "3", CV_INTEGER );   // 2 = one command per item (image-identical); 3 = cost probe, every second command zeroed (NOT image-correct)
 	ri.Cvar_CheckRange( r_hizVerify, "0", "2", CV_INTEGER );
 	r_shadowTranslucent = ri.Cvar_Get( "r_shadowTranslucent", "1", CVAR_ARCHIVE );
 	ri.Cvar_CheckRange( r_shadowTranslucent, "0", "1", CV_INTEGER );

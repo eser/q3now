@@ -942,7 +942,20 @@ void vk_cull_dispatch( void );
 void vk_hiz_verify_dispatch( void );
 void vk_hiz_shutdown( void );
 void vk_world_indirect_begin_frame( void );
+void vk_world_coverage_take( uint32_t *queued, uint32_t *issued );
+void vk_world_ring_sample( uint32_t entMatSlots, uint32_t uniformReadOffset );
+void vk_world_batch_capture_begin( void );
+void vk_world_batch_capture_revert( void );
+extern uint32_t vk_world_route_mask;
+extern int      vk_world_capture;
+extern qboolean vk_world_capture_failed;
+void vk_world_reset_bind_state( void );
+extern int      vk_world_phase;       // 0 = off, 1 = first-phase draws (filtered), 2 = second-phase draws (TASK-88 spike)
+qboolean vk_world_phase_eligible( void );
+extern int      vk_world_route;       // 1 ordinary, 2 temporal exact segment, 3 exact fallback, 4 fp-lit (measurement tag)
+extern uint32_t vk_frame_draw_seq;    // geometry draws issued so far this frame (measurement)
 void vk_world_indirect_shutdown( void );
+void vk_debug_extra_split( void );
 void vk_cull_shutdown( void );
 void vk_cull_select_world( int worldIndex );
 void vk_cull_unload_world( int worldIndex );

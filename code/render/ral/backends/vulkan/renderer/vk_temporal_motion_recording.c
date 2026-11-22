@@ -282,9 +282,12 @@ void VK_TemporalMotionRecordingPoison(
 	owner->poisoned = qtrue;
 }
 
+uint64_t vk_temporal_finish_ready, vk_temporal_finish_poisoned;   // measurement: views whose receipt was published vs poisoned
+
 void VK_TemporalMotionRecordingFinish(
 		vkTemporalMotionRecordingOwner_t *owner ) {
 	if ( !owner ) return;
+	if ( owner->active ) { if ( owner->pending || owner->primaryCommandActive || owner->poisoned ) vk_temporal_finish_poisoned++; else vk_temporal_finish_ready++; }
 	if ( owner->pending || owner->primaryCommandActive ) owner->poisoned = qtrue;
 	owner->pending = qfalse;
 	owner->pendingHasMatrices = qfalse;

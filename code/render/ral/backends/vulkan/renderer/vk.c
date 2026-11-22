@@ -30512,6 +30512,7 @@ void vk_entmat_ensure_buffer( uint32_t requiredSlots )
 // is allocated unconditionally by vk_entmat_ensure_buffer in the pre-pass seam.
 void vk_entmat_begin_frame( void )
 {
+	vk_world_ring_sample( vk.cmd->entMatSlot, vk.cmd->uniform_read_offset );   // measurement: usage of the frame this slot last recorded
 	vk.cmd->entMatSlot = 0;
 	vk.cmd->entMatLastUniformOffset = ~0U;
 }
@@ -30786,6 +30787,12 @@ static void vk_temporal_main_reset_bind_cache( void ) {
 		vk.cmd->descriptor_set.end = WIRED_ENGINE_RES_SET;
 }
 
+// Forget what the renderer believes is bound (pipeline, depth range, descriptor sets) so the next
+// draw re-emits every bind; used around a recorded-command capture and after its replay.
+void vk_world_reset_bind_state( void ) {
+	vk_temporal_main_reset_bind_cache();
+}
+
 #if FEAT_IQM
 typedef struct {
 	iqmData_t *data;
@@ -30942,6 +30949,7 @@ static const vkTemporalIqmCommandOps_t vk_temporal_iqm_command_ops = {
 #endif
 
 static void vk_issue_geometry_draws( qboolean indexed, uint32_t firstInstance ) {
+	vk_frame_draw_seq++;
 #ifdef USE_VBO
 	if ( tess.vboIndex )
 		VBO_RenderIBOItems( firstInstance );
@@ -31001,6 +31009,7 @@ static qboolean vk_temporal_main_issue_exact_segment(
 		&& Ral_CmdBindBindGroupDynamicExact( vk.cmd->ral_cmd, 3u,
 			resources->groups[3], NULL, 0u );
 	if ( groupsBound ) {
+		vk_world_route = 2;
 		vk_issue_geometry_draws( indexed, firstInstance );
 	} else {
 		/* The exact cohort was fully preflighted before EndRendering. A drift
@@ -31164,6 +31173,15 @@ void vk_draw_geometry( Vk_Depth_Range depth_range, qboolean indexed ) {
 	memset( &segmentResources, 0, sizeof( segmentResources ) );
 	vk_temporal_bound_pipeline_slot = UINT32_MAX;
 
+	{
+		// Positive control for the world-coverage counters (r_dbgWorldCoverage 2): silently skip
+		// every 500th world batch draw, the same shape as the early returns below. The counters
+		// must flag it; if they do not, they cannot see a lost draw.
+		static uint32_t covCtl;
+		if ( r_dbgWorldCoverage && r_dbgWorldCoverage->integer == 2 && tess.vboIndex && ( ++covCtl % 500u ) == 0u )
+			return;
+	}
+
 	if ( vk.geometry_buffer_size_new ) {
 		// geometry buffer overflow happened this frame
 		if ( VK_TemporalMotionReadbackIsArmed( &vk_temporal_motion_readback ) )
@@ -31318,12 +31336,14 @@ void vk_draw_geometry( Vk_Depth_Range depth_range, qboolean indexed ) {
 		if ( !vk_temporal_main_issue_exact_segment( &activationPlan,
 				&segmentResources, depth_range, indexed, firstInstance ) ) {
 			VK_TemporalMainActivationPoison( &vk_temporal_main_activation );
+			vk_world_route = 3;
 			vk_issue_geometry_draws( indexed, firstInstance );
 		} else if ( !VK_TemporalMainActivationCommitDraw(
 				&vk_temporal_main_activation, &activationPlan ) ) {
 			VK_TemporalMainActivationPoison( &vk_temporal_main_activation );
 		}
 	} else {
+		vk_world_route = 1;
 		vk_issue_geometry_draws( indexed, firstInstance );
 		if ( activationPlanned && !VK_TemporalMainActivationCommitDraw(
 				&vk_temporal_main_activation, &activationPlan ) )
@@ -31379,9 +31399,11 @@ void vk_draw_forwardplus( Vk_Depth_Range depth_range )
 	vk_update_depth_range( depth_range );
 
 #ifdef USE_VBO
-	if ( tess.vboIndex )
+	if ( tess.vboIndex ) {
+		vk_world_route = 4;
+		vk_frame_draw_seq++;
 		VBO_RenderIBOItems( 0 );
-	else
+	} else
 #endif
 		Ral_CmdDrawIndexed( vk.cmd->ral_cmd, vk.cmd->num_indexes, 1, 0, 0, 0 );
 
@@ -32340,6 +32362,63 @@ then begin the depth fade render pass (which loads color+depth without clearing)
 This is called at the opaque->transparent transition to enable soft particle rendering.
 ================
 */
+static void vk_scene_pass_reopen( void )
+{
+	// Re-open the scene pass as dynamic rendering, LOADing color + depth (the
+	// soft-transparent geometry that follows binds the same dynamic MAIN-slot
+	// pipelines). Mirror render_pass.depth_fade's LOAD/STORE: color LOAD/STORE,
+	// depth LOAD + STORE iff bloom/depthFade, stencil LOAD/STORE on stencilBits.
+	{
+		ralRenderingInfo_t ri;
+		ralViewport_t      vp;
+		ralRect_t          sc;
+
+		/* Still in MAIN context for pipeline compatibility; restore the same
+		 * presentation-to-render mapping used before the depth-copy seam. */
+		vk_set_main_render_domain();
+
+		memset( &ri, 0, sizeof( ri ) );
+		ri.colorAttachments[0] = vk.ral_color_image;
+		ri.colorLoadOps[0]     = RAL_LOAD_OP_LOAD;
+		ri.colorStoreOps[0]    = RAL_STORE_OP_STORE;
+		ri.numColorAttachments = 1;
+		ri.depthAttachment     = vk.ral_depth_image;
+		ri.depthLoadOp         = RAL_LOAD_OP_LOAD;
+		ri.depthStoreOp        = ( r_bloom->integer || vk.sceneDepth.active ) ? RAL_STORE_OP_STORE : RAL_STORE_OP_DONT_CARE;
+		if ( glConfig.stencilBits ) {
+			ri.stencilLoadOp   = RAL_LOAD_OP_LOAD;
+			ri.stencilStoreOp  = ( r_bloom->integer || vk.sceneDepth.active ) ? RAL_STORE_OP_STORE : RAL_STORE_OP_DONT_CARE;
+		} else {
+			ri.stencilLoadOp   = RAL_LOAD_OP_DONT_CARE;
+			ri.stencilStoreOp  = RAL_STORE_OP_DONT_CARE;
+		}
+		ri.renderArea.x        = 0;
+		ri.renderArea.y        = 0;
+		ri.renderArea.width    = vk.renderWidth;
+		ri.renderArea.height   = vk.renderHeight;
+		vk_profile_rendering_marker( &ri, "wired.scene-depth-resume", VK_PM_SCENE_DEPTH_RESUME );
+		Ral_BeginRendering( vk.cmd->ral_cmd, &ri );
+
+		vp.x = 0.0f; vp.y = 0.0f;
+		vp.width  = (float)vk.renderWidth;
+		vp.height = (float)vk.renderHeight;
+		vp.minDepth = 0.0f; vp.maxDepth = 1.0f;
+		Ral_CmdSetViewport( vk.cmd->ral_cmd, &vp );
+		sc.x = 0; sc.y = 0; sc.width = vk.renderWidth; sc.height = vk.renderHeight;
+		Ral_CmdSetScissor( vk.cmd->ral_cmd, &sc );
+
+		// Dynamic depth-bias for polygon_offset surfaces (see vk_begin_main_render_pass).
+#ifdef USE_REVERSED_DEPTH
+		Ral_CmdSetDepthBias( vk.cmd->ral_cmd, -r_offsetUnits->value, 0.0f, -r_offsetFactor->value );
+#else
+		Ral_CmdSetDepthBias( vk.cmd->ral_cmd,  r_offsetUnits->value, 0.0f,  r_offsetFactor->value );
+#endif
+	vk.cmd->last_ral_pipeline = NULL;
+		vk.cmd->depth_range = DEPTH_RANGE_COUNT;
+		vk.cmd->open_dynamic_pass = VK_DYN_PASS_MAIN;
+	}
+}
+
 static void vk_scene_depth_copy_internal( qboolean forceFinal,
 		qboolean dispatchDepthConsumers )
 {
@@ -32466,59 +32545,7 @@ static void vk_scene_depth_copy_internal( qboolean forceFinal,
 
 	if ( !forceFinal ) vk_gpu_ts_write( "lens_depth" );
 
-	// Re-open the scene pass as dynamic rendering, LOADing color + depth (the
-	// soft-transparent geometry that follows binds the same dynamic MAIN-slot
-	// pipelines). Mirror render_pass.depth_fade's LOAD/STORE: color LOAD/STORE,
-	// depth LOAD + STORE iff bloom/depthFade, stencil LOAD/STORE on stencilBits.
-	{
-		ralRenderingInfo_t ri;
-		ralViewport_t      vp;
-		ralRect_t          sc;
-
-		/* Still in MAIN context for pipeline compatibility; restore the same
-		 * presentation-to-render mapping used before the depth-copy seam. */
-		vk_set_main_render_domain();
-
-		memset( &ri, 0, sizeof( ri ) );
-		ri.colorAttachments[0] = vk.ral_color_image;
-		ri.colorLoadOps[0]     = RAL_LOAD_OP_LOAD;
-		ri.colorStoreOps[0]    = RAL_STORE_OP_STORE;
-		ri.numColorAttachments = 1;
-		ri.depthAttachment     = vk.ral_depth_image;
-		ri.depthLoadOp         = RAL_LOAD_OP_LOAD;
-		ri.depthStoreOp        = ( r_bloom->integer || vk.sceneDepth.active ) ? RAL_STORE_OP_STORE : RAL_STORE_OP_DONT_CARE;
-		if ( glConfig.stencilBits ) {
-			ri.stencilLoadOp   = RAL_LOAD_OP_LOAD;
-			ri.stencilStoreOp  = ( r_bloom->integer || vk.sceneDepth.active ) ? RAL_STORE_OP_STORE : RAL_STORE_OP_DONT_CARE;
-		} else {
-			ri.stencilLoadOp   = RAL_LOAD_OP_DONT_CARE;
-			ri.stencilStoreOp  = RAL_STORE_OP_DONT_CARE;
-		}
-		ri.renderArea.x        = 0;
-		ri.renderArea.y        = 0;
-		ri.renderArea.width    = vk.renderWidth;
-		ri.renderArea.height   = vk.renderHeight;
-		vk_profile_rendering_marker( &ri, "wired.scene-depth-resume", VK_PM_SCENE_DEPTH_RESUME );
-		Ral_BeginRendering( vk.cmd->ral_cmd, &ri );
-
-		vp.x = 0.0f; vp.y = 0.0f;
-		vp.width  = (float)vk.renderWidth;
-		vp.height = (float)vk.renderHeight;
-		vp.minDepth = 0.0f; vp.maxDepth = 1.0f;
-		Ral_CmdSetViewport( vk.cmd->ral_cmd, &vp );
-		sc.x = 0; sc.y = 0; sc.width = vk.renderWidth; sc.height = vk.renderHeight;
-		Ral_CmdSetScissor( vk.cmd->ral_cmd, &sc );
-
-		// Dynamic depth-bias for polygon_offset surfaces (see vk_begin_main_render_pass).
-#ifdef USE_REVERSED_DEPTH
-		Ral_CmdSetDepthBias( vk.cmd->ral_cmd, -r_offsetUnits->value, 0.0f, -r_offsetFactor->value );
-#else
-		Ral_CmdSetDepthBias( vk.cmd->ral_cmd,  r_offsetUnits->value, 0.0f,  r_offsetFactor->value );
-#endif
-	vk.cmd->last_ral_pipeline = NULL;
-		vk.cmd->depth_range = DEPTH_RANGE_COUNT;
-		vk.cmd->open_dynamic_pass = VK_DYN_PASS_MAIN;
-	}
+	vk_scene_pass_reopen();
 
 	// The soft-particle dfade fragment samples this depth copy via the bindless
 	// table at WIRED_BINDLESS_SCENEDEPTH_SLOT (role 4: depth_texture), registered in
@@ -32530,6 +32557,18 @@ static void vk_scene_depth_copy_internal( qboolean forceFinal,
 	// so NEXT frame's vk_gtao_async_begin can read it (cross-frame source). Stays set
 	// for the device lifetime once the first copy lands.
 	vk.gtaoSnapshotValid = qtrue;
+}
+
+// Measurement hook for the two-phase world work (TASK-88): one redundant end / reopen of the
+// main pass with LOAD color + depth, exactly the pass boundary a phase split adds, without
+// any copy or depth consumer. r_dbgExtraSplit 1 runs it once per frame at the opaque ->
+// transparent crossing so the stored/reloaded tile contents are the real opaque scene.
+void vk_debug_extra_split( void )
+{
+	if ( vk.cmd->open_dynamic_pass != VK_DYN_PASS_MAIN )
+		return;
+	vk_end_render_pass();
+	vk_scene_pass_reopen();
 }
 
 void vk_scene_depth_copy( void )
