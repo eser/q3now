@@ -192,16 +192,17 @@ off_ms = statistics.mean(buckets[("off", i)]["total"] for i in (1, 2))
 on_ms = statistics.mean(buckets[("on", i)]["total"] for i in (1, 2))
 delta_ms = on_ms - off_ms
 delta_percent = delta_ms / off_ms * 100.0
-if delta_ms > 0.75 or on_ms > 4.0:
-    raise SystemExit(
-        f"FAIL temporal-quality GPU budget off={off_ms:.3f}ms on={on_ms:.3f}ms "
-        f"delta={delta_ms:+.3f}ms/{delta_percent:+.2f}%")
-
+# The quality criteria above already passed (each raises on failure); report them even when the budget below fails.
 print(
     f"PASS temporal quality: static SMAA={static_reference_delta:.3f} TAA={static_delta:.3f} "
     f"excess={static_excess:.3f}, pan={motion_delta:.3f}, "
     f"first-settled={first_settled_delta:.3f}, old-frame-residual={ghost_ratio:.2%}, "
     f"edge-ratio={edge_ratio:.3f}, SMAA-reference-delta={reference_delta:.3f}")
+if delta_ms > 0.75 or on_ms > 4.0:
+    raise SystemExit(
+        f"FAIL temporal-quality GPU budget off={off_ms:.3f}ms on={on_ms:.3f}ms "
+        f"delta={delta_ms:+.3f}ms/{delta_percent:+.2f}%")
+
 print(
     f"PASS temporal GPU budget: off={off_ms:.3f}ms on={on_ms:.3f}ms "
     f"delta={delta_ms:+.3f}ms/{delta_percent:+.2f}%")
@@ -296,7 +297,7 @@ python3 "$TIMEOUT_RUNNER" --timeout 180 --kill-after 15 --cwd "$WD" --stdout "$S
 	+set r_vkValidate 0 +set r_temporalInputTest 0 +set r_smaa 0 \
 	+set r_bloom 0 +set r_ao 0 +set r_forwardPlus 0 +set r_drawSunRays 0 \
 	+set r_shadows 0 +set r_depthFade 0 +set r_lens 0 +set r_gpuDecals 0 \
-	+set r_particles 0 +set r_atmosphericGPU 0 +set log_severity DEBUG \
+	+set r_particles 0 +set r_atmosphericGPU 0 ${RAL_TEMPORAL_EXTRA_ARGS:-} +set log_severity DEBUG \
 	+set log_file_severity DEBUG +set log_file_mode overwrite_synced \
 	+exec ral-temporal-quality.cfg
 RC=$?

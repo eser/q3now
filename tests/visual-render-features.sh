@@ -31,7 +31,7 @@ while [ $# -gt 0 ]; do
         *) echo "unknown arg: $1" >&2; exit 2;;
     esac
 done
-[ -n "$MODE" ]   || { echo "FAIL: --mode {gtao|fwdplus|viewport|shadow_atest|scene|chromatic|crowd|crowdpromo|entitylight|scenegolden|crowdwasm|gpucull|worldindirect|worldphase|worlddecal|capturenoise|cullref|dlight-shadow|dlight-shadow-lifecycle|dlight-shadow-probe|selftest} required" >&2; exit 2; }
+[ -n "$MODE" ]   || { echo "FAIL: --mode {gtao|fwdplus|viewport|shadow_atest|scene|chromatic|crowd|crowdpromo|entitylight|scenegolden|crowdwasm|gpucull|worldindirect|worldphase|worlddecal|exacthold|capturenoise|cullref|dlight-shadow|dlight-shadow-lifecycle|dlight-shadow-probe|selftest} required" >&2; exit 2; }
 # selftest needs no engine (it exercises the assertion math on synthetic inputs).
 if [ "$MODE" != "selftest" ]; then
     [ -n "$ENGINE" ] || { echo "FAIL: --engine <wired.x64> required" >&2; exit 2; }
@@ -2511,6 +2511,34 @@ worlddecal)
             printf "  worlddecal replay %s mode %s: single-vs-phased worst-tile=%s (allowed <= %s) -> %s\n" "$rep" "$pm" "$sig" "$WD_FLOOR" "$v"
         done; done
     fi
+    ;;
+
+exacthold)
+    # r_dbgExactHold 1 keeps the exact temporal pass open across consecutive exact draws instead of closing and
+    # reopening it per draw. Pass structure only: with TAA on (r_aa 2) and fixedtime 8 the frame must equal the
+    # frame with the hold off, for a still camera AND after a yaw (a still camera has zero velocity, which would
+    # hide a broken velocity buffer). Mode 2 (a leak control that skips the close for ordinary draws) must NOT.
+    EH_FLOOR="${EH_FLOOR:-2.0}"; EH_POS="${EH_POS:-1052 1432 50 135}"
+    eh() {
+        local tag="$1" hold="$2" yaw="$3"
+        { printf 'set cg_draw2D 0\nset cg_drawGun 0\nset fixedtime 8\nset r_dbgExactHold %s\n' "$hold"
+          if [ "$yaw" = 1 ]; then printf 'cl_yawspeed 60\n+right\nwait 24\n-right\nwait 40\n'; else printf 'wait 40\n'; fi; } > "$SMOKE_HOME/base/vrf_eh.cfg"
+        CAP_POST_CMD="exec vrf_eh.cfg" capture_fixed_cam arena1 "$EH_POS" "$tag" +set r_aa 2 >/dev/null || return 1
+        echo "$SHOTDIR/vrf_$tag.png"
+    }
+    for yaw in 0 1; do
+        a0="$(eh eh_off_a_$yaw 0 $yaw)" || { FAIL=1; continue; }
+        a1="$(eh eh_off_b_$yaw 0 $yaw)" || { FAIL=1; continue; }
+        h1="$(eh eh_on_$yaw 1 $yaw)" || { FAIL=1; continue; }
+        h2="$(eh eh_leak_$yaw 2 $yaw)" || { FAIL=1; continue; }
+        noise="$(worst_tile_diff_nohud "$a0" "$a1")"; on="$(worst_tile_diff_nohud "$a0" "$h1")"; leak="$(worst_tile_diff_nohud "$a0" "$h2")"
+        tl="$VRF_TMP/vrf-eh_on_$yaw.log"
+        act="$(grep -c 'temporal-resolved-hdr' "$tl" || true)"
+        v="$(awk -v s="$on" -v f="$EH_FLOOR" 'BEGIN{print (s<=f)?"OK":"FAIL(hold frame differs from the per-draw frame)"}')"
+        [ "${act:-0}" -ge 1 ] || v="FAIL(TAA was not active: no temporal-resolved lines)"
+        [ "${v:0:2}" = "OK" ] || FAIL=1
+        printf "  exacthold yaw=%s: repeat noise worst-tile=%s; hold-vs-off worst-tile=%s (allowed <= %s) -> %s; leak control worst-tile=%s (informational: a visible leak shows here)\n" "$yaw" "$noise" "$on" "$EH_FLOOR" "$v" "$leak"
+    done
     ;;
 
 worldphase)

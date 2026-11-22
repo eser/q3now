@@ -68,10 +68,17 @@ ln -sfn "$GAMESV" "$HOME_DIR/base/gamesvarm64.dylib"
 
 # Arms, run in a palindromic order and repeated. 0 none (r_aa 0), 1 SMAA preset 3 (r_aa 1), 2 TAA (r_aa 2),
 # 3 the temporal gate's own "on" arm (r_aa 0 + r_temporalInputTest 1), 4 SMAA preset 1, 5 SMAA preset 4,
-# 6 none + 4 redundant pass splits, 7 none + 16 redundant pass splits (r_dbgExtraSplit). Arms 4-7 are dose
+# 6 none + 4 redundant pass splits, 7 none + 16 redundant pass splits (r_dbgExtraSplit), 8 TAA with the older
+# per-draw exact pass (r_dbgExactHold 0; the default is the held exact pass). Arms 4-7 are dose
 # responses: they say whether a cost grows with shader work (SMAA 1 -> 4) or with the number of render passes.
 ORDER=()
-for (( r = 0; r < ROUNDS; r++ )); do ORDER+=(0 1 2 3 4 5 6 7 7 6 5 4 3 2 1 0); done
+# AAC_ARMS picks the arms (default 0 1 2 3: none, SMAA3, TAA, gate). The dose arms 4-7 answered their question and
+# every live mode switch eats descriptor-pool memory (TASK-258), so they are opt-in.
+ARMS=(${AAC_ARMS:-0 1 2 3})
+for (( r = 0; r < ROUNDS; r++ )); do
+	for a in "${ARMS[@]}"; do ORDER+=("$a"); done
+	for (( k = ${#ARMS[@]} - 1; k >= 0; k-- )); do ORDER+=("${ARMS[$k]}"); done
+done
 LAST=$(( ${#ORDER[@]} - 1 ))
 
 BOOT="$HOME_DIR/base/ral-aa-cost.cfg"
@@ -87,20 +94,21 @@ set vm_game 0
 set vm_cgame 0
 set sv_cheats 1
 set sv_pure 0
-set aacSetup "cg_draw2D 0; cg_drawGun 0; cg_thirdPerson 0; con_notifytime 0; sv_fps 125; timescale 1; fixedtime 0; r_pinShaderTime 2.0; r_pinFrameTime 2.0; wait 512; noclip; setviewpos 888 -768 434 180 0; r_temporalInputTest 0; r_smaa 0; wait 64; vstr aacSeg0"
+set aacSetup "cg_draw2D 0; cg_drawGun 0; cg_thirdPerson 0; con_notifytime 0; sv_fps 125; timescale 1; fixedtime 0; r_pinShaderTime 2.0; r_pinFrameTime 2.0; wait 512; noclip; setviewpos 888 -768 434 180 0; r_temporalInputTest 0; r_smaa 0; ${AAC_PAN:+cl_yawspeed 60; +right; }wait 64; vstr aacSeg0"
 CFGEOF
 	for (( i = 0; i <= LAST; i++ )); do
 		arm="${ORDER[$i]}"; tag="ARM${arm}_$i"
 		if [ "$i" -lt "$LAST" ]; then next="vstr aacSeg$(( i + 1 ))"; else next="echo AAC_COMPLETE; quit"; fi
 		case "$arm" in
-			0) armcmd="r_temporalInputTest 0; r_aa 0; r_smaa 0; r_dbgExtraSplit 0" ;;
-			1) armcmd="r_temporalInputTest 0; r_aa 1; r_smaa 0; r_dbgExtraSplit 0" ;;
-			2) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 0; r_dbgExtraSplit 0" ;;
-			3) armcmd="r_aa 0; r_smaa 0; r_dbgExtraSplit 0; r_temporalInputTest 1" ;;
+			0) armcmd="r_temporalInputTest 0; r_aa 0; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 0" ;;
+			1) armcmd="r_temporalInputTest 0; r_aa 1; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 0" ;;
+			2) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 1" ;;
+			3) armcmd="r_aa 0; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 1; r_temporalInputTest 1" ;;
 			4) armcmd="r_temporalInputTest 0; r_aa 1; r_smaa 1; r_dbgExtraSplit 0" ;;
 			5) armcmd="r_temporalInputTest 0; r_aa 1; r_smaa 4; r_dbgExtraSplit 0" ;;
 			6) armcmd="r_temporalInputTest 0; r_aa 0; r_smaa 0; r_dbgExtraSplit 4" ;;
 			7) armcmd="r_temporalInputTest 0; r_aa 0; r_smaa 0; r_dbgExtraSplit 16" ;;
+			8) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 0" ;;
 		esac
 		printf 'set aacSeg%s "%s; wait 96; set r_gpuSpeeds 1; echo AAC_%s_BEGIN; wait 220; echo AAC_%s_END; set r_gpuSpeeds 0; wait 16; %s"\n' "$i" "$armcmd" "$tag" "$tag" "$next"
 	done
@@ -136,9 +144,11 @@ if any(r.get("sev", "").upper() in ("ERROR", "FATAL") for r in rows):
     raise SystemExit("FAIL aa-cost ERROR/FATAL severity in the log")
 if "AAC_COMPLETE" not in msgs:
     raise SystemExit("FAIL aa-cost run did not complete")
-marker = re.compile(r"AAC_ARM([0-7])_(\d+)_(BEGIN|END)")
+marker = re.compile(r"AAC_ARM([0-8])_(\d+)_(BEGIN|END)")
 header = re.compile(r"gpu \((\d+)f avg, ms\):")
 label = re.compile(r"  ([A-Za-z_0-9]+)=([0-9.]+)")
+route_pat = re.compile(r"temporal route sequence: (\d+) draws: exact (\d+) in (\d+) runs, ordinary (\d+); plans write (\d+) invalidate (\d+) preserve (\d+)")
+route_seg = {}
 pass_pat = re.compile(r"render passes per frame \(100 frames\): ([0-9.]+) ")
 seg = {}; active = None; pas_seg = {}
 for row, m in zip(rows, msgs):
@@ -155,6 +165,8 @@ for row, m in zip(rows, msgs):
     if active is not None:
         pm = pass_pat.match(m)
         if pm: pas_seg.setdefault(active, []).append(float(pm.group(1)))
+        rm = route_pat.match(m)
+        if rm: route_seg.setdefault(active, []).append(tuple(int(x) for x in rm.groups()))
     if active is None or row.get("cat", "").lower() != "renderer.timing":
         continue
     h = header.fullmatch(m)
@@ -162,9 +174,9 @@ for row, m in zip(rows, msgs):
     if seg[active]:
         l = label.fullmatch(m)
         if l: seg[active][-1][l.group(1)] = float(l.group(2))
-per = {a: [] for a in range(8)}
-lanes = {a: {} for a in range(8)}
-passes = {a: [] for a in range(8)}
+per = {a: [] for a in range(9)}
+lanes = {a: {} for a in range(9)}
+passes = {a: [] for a in range(9)}
 pass_pat = re.compile(r"render passes per frame \(100 frames\): ([0-9.]+) ")
 for i, arm in enumerate(order):
     full_s = [s for s in seg.get((arm, i), []) if s.get("frames") == 200 and "total" in s]
@@ -174,9 +186,10 @@ for i, arm in enumerate(order):
     if pas_seg.get((arm, i)): passes[arm].append(statistics.median(pas_seg[(arm, i)]))
     for k, v in full_s[0].items():
         if k not in ("frames", "total"): lanes[arm].setdefault(k, []).append(v)
-name = {0: "none", 1: "SMAA3", 2: "TAA", 3: "gate-on", 4: "SMAA1", 5: "SMAA4", 6: "none+4sp", 7: "none+16sp"}
+RAN = [arm for arm in range(9) if per[arm]]
+name = {0: "none", 1: "SMAA3", 2: "TAA", 3: "gate-on", 4: "SMAA1", 5: "SMAA4", 6: "none+4sp", 7: "none+16sp", 8: "TAA-legacy"}
 print(f"config: {'full default renderer' if full == '1' else 'stripped (as the temporal gate)'}; order {order_s}")
-for arm in range(8):
+for arm in RAN:
     v = per[arm]
     pp = f"  passes/frame={statistics.median(passes[arm]):.1f}" if passes[arm] else "  passes/frame=?"
     print(f"  {name[arm]:9s} n={len(v)} median={statistics.median(v):.3f} ms  min={min(v):.3f} max={max(v):.3f}{pp}")
@@ -184,8 +197,8 @@ for arm in range(8):
 # the frame period, not the work, and the present_prep lane absorbs the wait. A window is pacing-bound when it
 # sits within 4.10-4.20 ms; if the none arm is, no cost claim from this run is valid.
 PERIOD_LO, PERIOD_HI = 4.10, 4.20
-bound = {arm: sum(1 for x in per[arm] if PERIOD_LO <= x <= PERIOD_HI) for arm in range(8)}
-total_w = sum(len(per[arm]) for arm in range(8)); bound_w = sum(bound.values())
+bound = {arm: sum(1 for x in per[arm] if PERIOD_LO <= x <= PERIOD_HI) for arm in RAN}
+total_w = sum(len(per[arm]) for arm in RAN); bound_w = sum(bound.values())
 print(f"  regime: {bound_w} of {total_w} windows read the 240 Hz frame period (4.10-4.20 ms)")
 if bound[0] == len(per[0]) or bound_w * 2 > total_w:
     print("  REGIME-LOCKED: the machine was paced by presentation during this run; the numbers above measure the frame period, not the GPU work. NO cost claim is valid. Run again later (the decoupled regime comes and goes).")
@@ -194,19 +207,26 @@ if bound_w:
     print("  WARNING: some windows are pacing-bound; deltas that involve them are not valid. Valid windows only are the ones outside 4.10-4.20 ms.")
 base = statistics.median(per[0]); noise = max(per[0]) - min(per[0])
 print(f"  noise floor (spread of the 'none' arm, {len(per[0])} windows): {noise:.3f} ms")
-for arm in range(1, 8):
+for arm in RAN[1:]:
     d = statistics.median(per[arm]) - base
     dp = (statistics.median(passes[arm]) - statistics.median(passes[0])) if passes[arm] and passes[0] else None
     per_pass = f"; {d / dp:+.3f} ms per extra pass ({dp:+.1f} passes)" if dp else ""
     print(f"  {name[arm]} - none = {d:+.3f} ms ({d / base * 100:+.1f}%)  -> {'above' if abs(d) > noise else 'WITHIN'} the noise floor{per_pass}")
-d_ts = statistics.median(per[2]) - statistics.median(per[1])
-print(f"  TAA - SMAA3 = {d_ts:+.3f} ms")
+if 1 in RAN and 2 in RAN:
+    d_ts = statistics.median(per[2]) - statistics.median(per[1])
+    print(f"  TAA - SMAA3 = {d_ts:+.3f} ms")
+print("  exact-route structure per arm (a run costs 4 render passes):")
+for arm in RAN:
+    rs = [t for (a_, i_), v in route_seg.items() if a_ == arm for t in v]
+    if rs:
+        d, e, r, o, w, inv, pr = (sum(x[k] for x in rs) for k in range(7))
+        print(f"    {name[arm]:9s} draws={d} exact={e} ({e / d * 100:.0f}%) in {r} runs ({e / max(r, 1):.1f} draws/run); plans write={w} invalidate={inv} preserve={pr}")
 print("  per-arm lane medians above 0.05 ms:")
-for arm in (0, 1, 2, 3, 4, 5):
+for arm in RAN:
     big = sorted(((statistics.median(vs), k) for k, vs in lanes[arm].items() if statistics.median(vs) > 0.05), reverse=True)
     print(f"    {name[arm]:8s} " + ", ".join(f"{k}={v:.3f}" for v, k in big))
 print("  lane medians that differ most from 'none' (ms):")
-for arm in (1, 2, 3):
+for arm in [a for a in (1, 2, 3) if a in RAN]:
     diffs = []
     for k, vs in lanes[arm].items():
         b = lanes[0].get(k)
