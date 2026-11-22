@@ -31,7 +31,7 @@ while [ $# -gt 0 ]; do
         *) echo "unknown arg: $1" >&2; exit 2;;
     esac
 done
-[ -n "$MODE" ]   || { echo "FAIL: --mode {gtao|fwdplus|viewport|shadow_atest|scene|chromatic|crowd|crowdpromo|entitylight|scenegolden|crowdwasm|gpucull|worldindirect|worldphase|worlddecal|exacthold|temporalfold|aaportal|aacompare|aalatency|capturenoise|cullref|dlight-shadow|dlight-shadow-lifecycle|dlight-shadow-probe|selftest} required" >&2; exit 2; }
+[ -n "$MODE" ]   || { echo "FAIL: --mode {gtao|fwdplus|viewport|shadow_atest|scene|chromatic|crowd|crowdpromo|entitylight|scenegolden|crowdwasm|gpucull|worldindirect|worldphase|worlddecal|exacthold|temporalfold|portalworld|aaportal|aacompare|aalatency|capturenoise|cullref|dlight-shadow|dlight-shadow-lifecycle|dlight-shadow-probe|selftest} required" >&2; exit 2; }
 # selftest needs no engine (it exercises the assertion math on synthetic inputs).
 if [ "$MODE" != "selftest" ]; then
     [ -n "$ENGINE" ] || { echo "FAIL: --engine <wired.x64> required" >&2; exit 2; }
@@ -2650,6 +2650,35 @@ aaportal)
             "$(worst_tile_diff_nohud "$SHOTDIR/vrf_ap_smaa_$n.png" "$SHOTDIR/vrf_ap_taa_$n.png")"
         n=$((n+1))
     done
+    ;;
+
+portalworld)
+    # Regression guard for the portal black-frame bug: arena7 has a portal surface at (1078 -832 -384); looking at it from the front
+    # (1082 -960 -395, facing +y) used to make the main view's world vanish because R_SetWorldSlot rewound visCount on every draw
+    # command. The same camera is captured with portals on and with r_noportals 1; only the portal interior may differ, so the
+    # mean brightness with portals on must stay close to the one without.
+    PW_MAP="${PW_MAP:-arena7}"; PW_POS="${PW_POS:-1082 -960 -395 90 0}"; PW_MIN_RATIO="${PW_MIN_RATIO:-0.6}"
+    PNG2RAW_BIN="${PNG2RAW:-$WIRED_SOURCE/tools/png2raw/png2raw}"
+    pw() {
+        local tag="$1"; shift
+        { printf 'set cg_draw2D 0\nset cg_drawGun 0\nset fixedtime 8\nwait 60\n'; } > "$SMOKE_HOME/base/vrf_pw.cfg"
+        CAP_POST_CMD="exec vrf_pw.cfg" capture_fixed_cam "$PW_MAP" "$PW_POS" "$tag" +set r_aa 0 "$@" >/dev/null || return 1
+    }
+    pw pw_on || FAIL=1
+    pw pw_off +set r_noportals 1 || FAIL=1
+    ratio="$(python3 - "$SHOTDIR/vrf_pw_on.png" "$SHOTDIR/vrf_pw_off.png" "$PNG2RAW_BIN" <<'PYEOF'
+import subprocess, sys
+def mean(path):
+    raw = subprocess.check_output([sys.argv[3], path])
+    return sum(raw[::37]) / max(1, len(raw[::37]))
+on, off = mean(sys.argv[1]), mean(sys.argv[2])
+print("%.3f %.2f %.2f" % (on / off if off > 0 else 0.0, on, off))
+PYEOF
+)"
+    set -- $ratio
+    v="$(awk -v r="$1" -v m="$PW_MIN_RATIO" 'BEGIN{print (r>=m)?"OK":"FAIL(world vanished with the portal view active)"}')"
+    [ "${v:0:2}" = "OK" ] || FAIL=1
+    printf "  portalworld %s %s: mean brightness portal-on=%s portal-off=%s ratio=%s (needs >= %s) -> %s\n" "$PW_MAP" "$PW_POS" "$2" "$3" "$1" "$PW_MIN_RATIO" "$v"
     ;;
 
 worldphase)

@@ -3439,12 +3439,19 @@ app: only slot 0 is ever loaded, and tr.world already points there.
 void R_SetWorldSlot( int worldIndex ) {
 	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS )
 		worldIndex = 0;
-	if ( s_activeWorldIndex >= 0 && s_activeWorldIndex != worldIndex )
+	// The saved per-world state (visCount, viewCluster, lightmaps, fog, ...) is only meaningful across a switch. While the same
+	// slot stays active the tr.* globals ARE the live state, so re-applying the saved copy would rewind them. The backend selects
+	// the world for every draw command, and a frame with a portal or mirror view has two: the second selection rewound visCount
+	// to a stale value while the BSP leaves kept the stamps of the view just marked, R_MarkLeaves then found the cluster
+	// "already marked", and nearly every leaf of the main view read as outside the PVS (the world vanished, entities stayed).
+	const qboolean switching = s_activeWorldIndex != worldIndex;
+	if ( s_activeWorldIndex >= 0 && switching )
 		R_SaveWorldMapState( s_activeWorldIndex );
 	if ( R_WorldSlotResident( worldIndex ) ) {
 		s_activeWorldIndex = worldIndex;
 		tr.world = &s_worldDataSlots[worldIndex];
-		R_ApplyWorldMapState( worldIndex );
+		if ( switching )
+			R_ApplyWorldMapState( worldIndex );
 #ifdef USE_VBO
 		VBO_SelectWorld( worldIndex );
 		vk_cull_select_world( worldIndex );
