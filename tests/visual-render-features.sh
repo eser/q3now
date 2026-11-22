@@ -2478,7 +2478,9 @@ worlddecal)
         local tag="$1"; shift
         { printf 'set cg_draw2D 0\nset cg_drawGun 0\nset fixedtime 8\n'
           while [ $# -gt 0 ]; do printf 'set %s %s\n' "$1" "$2"; shift 2; done
-          printf 'cmd give all\nwait 10\n+attack\nwait 6\n-attack\n'; } > "$SMOKE_HOME/base/vrf_wd.cfg"
+          # capture_fixed_cam enters noclip, and a noclipping player cannot fire: leave it, stay alive (god), land, arm the
+          # rocket launcher (its splash would otherwise hurt at this range) and shoot the wall in front.
+          printf '%b' "${WD_FIRE:-cmd god\ncmd noclip\nwait 60\ncmd give all\nwait 10\nweapon 5\nwait 60\n+attack\nwait 60\n-attack\n}"; } > "$SMOKE_HOME/base/vrf_wd.cfg"
         CAP_POST_CMD="exec vrf_wd.cfg" capture_fixed_cam arena1 "$WD_POS" "$tag" >/dev/null || return 1
         echo "$SHOTDIR/vrf_$tag.png"
     }

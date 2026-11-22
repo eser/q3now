@@ -8,6 +8,7 @@
 #include "vk_fixtures.h"
 
 R_LOG_DECLARE_CHANNEL( rch_cmd, "renderer.cmd" );
+R_LOG_DECLARE_CHANNEL( rch_ral, "renderer.ral" );
 
 static int			r_firstSceneDrawSurf;
 #ifdef USE_PMLIGHT
@@ -1051,6 +1052,12 @@ void RE_AddDecalToScene( const decalDesc_t *desc ) {
 	decalGPU_t  d;
 	uint32_t    slot;
 
+	{
+		// Measurement: prove a fixture really produced decals (a missing shot looks like an empty ring).
+		static uint32_t s_decalCalls;
+		if ( ++s_decalCalls == 1u || s_decalCalls % 50u == 0u )
+			R_LOG( rch_ral, SEV_INFO, "decal ring: %u add calls so far (available=%d, desc=%d)\n", s_decalCalls, (int)vk.decal.available, desc ? 1 : 0 );
+	}
 	if ( !vk.decal.available || desc == NULL )
 		return;
 
