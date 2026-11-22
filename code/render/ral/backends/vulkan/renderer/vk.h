@@ -947,6 +947,7 @@ void vk_world_ring_sample( uint32_t entMatSlots, uint32_t uniformReadOffset );
 void vk_world_batch_capture_begin( void );
 void vk_world_batch_capture_revert( void );
 extern uint32_t vk_world_route_mask;
+void vk_temporal_main_close_exact_segment( void );   // close a held exact temporal pass (no-op when none)
 extern int      vk_world_capture;
 extern qboolean vk_world_capture_failed;
 void vk_world_reset_bind_state( void );

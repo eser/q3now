@@ -629,6 +629,7 @@ static void RB_EndSurfaceCaptured( const shader_t *sh, int entityNum ) {
 	if ( !cap ) { RB_EndSurface(); return; }
 	if ( !s_worldRec ) s_worldRec = Ral_CreateCommandRecording();
 	if ( !s_worldRec ) { RB_EndSurface(); return; }
+	vk_temporal_main_close_exact_segment();   // a close inside the capture window would be an unsupported command and revert the batch
 	if ( Ral_CommandRecordingOpCount( s_worldRec ) == 0u ) s_worldRecPass = vk.cmd->open_dynamic_pass;
 	{
 		ralRecordingMark_t mark;
@@ -861,7 +862,9 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs
 				RB_EndSurfaceCaptured( oldShader, oldEntityNum );
 			//}
 #ifdef USE_VULKAN
+			if ( oldShaderSort < SS_FOG && shader->sort >= SS_FOG ) vk_temporal_main_close_exact_segment();   // lit passes need the ordinary pass
 			if ( phaseRoot && !phase2Done && oldShaderSort < SS_DECAL && shader->sort >= SS_DECAL ) {
+				vk_temporal_main_close_exact_segment();
 				phase2Done = qtrue;
 				RB_WorldPhase2( drawSurfs, i );
 				oldEntityNum = -1;   // force matrix setup after the nested walk
@@ -1057,6 +1060,7 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs
 		RB_EndSurfaceCaptured( oldShader, oldEntityNum );
 	}
 #ifdef USE_VULKAN
+	vk_temporal_main_close_exact_segment();   // the list is over: hand the ordinary pass back before anything else records
 	if ( phaseRoot && !phase2Done ) {
 		phase2Done = qtrue;
 		RB_WorldPhase2( drawSurfs, numDrawSurfs );

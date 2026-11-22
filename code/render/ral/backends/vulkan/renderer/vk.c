@@ -30681,6 +30681,33 @@ static const vkTemporalMainActivationOps_t vk_temporal_activation_ops = {
 	vk_temporal_activation_preflight
 };
 
+// ── Held exact temporal segment (TASK-241, r_dbgExactHold) ─────────────────────────────────────────────────────────
+// Every exact draw used to cost four render passes (end ordinary, begin exact3, end exact3, resume ordinary). Static
+// opaque world batches are consecutive in the sorted draw list, so runs of ~9 exact draws are common. With the hold on
+// the exact pass stays open across consecutive exact draws and is closed (with the LOAD resume) the first time anything
+// else needs the ordinary pass. The per-draw activation plan, its commit and the draw sequence are untouched: only where
+// the pass commands are emitted changes.
+static struct {
+	qboolean               open;
+	const void            *scene, *velocity, *validity, *depth;   // attachment identities of the open exact pass
+	uint32_t               width, height;
+	ralRenderingInfo_t     resumeInfo;
+	Vk_Depth_Range         depthRange;
+} s_exactHold;
+static uint32_t s_exactHoldLeaks;   // control only (r_dbgExactHold 2): ordinary draws issued into a held exact pass
+
+static void vk_update_depth_range( Vk_Depth_Range depth_range );   // defined with the draw helpers below
+
+static qboolean vk_exact_hold_enabled( void ) {
+	return r_dbgExactHold && r_dbgExactHold->integer > 0 ? qtrue : qfalse;
+}
+
+// True while the pass state is one a new exact draw may start from: the ordinary pass, or our own held exact pass.
+static qboolean vk_temporal_main_pass_ready( void ) {
+	return vk.cmd->open_dynamic_pass == VK_DYN_PASS_MAIN
+		|| ( s_exactHold.open && vk.cmd->open_dynamic_pass == VK_DYN_PASS_TEMPORAL_MAIN ) ? qtrue : qfalse;
+}
+
 static qboolean vk_temporal_main_get_segment_resources(
 		const vkTemporalMainActivationPlan_t *plan,
 		vkTemporalMainSegmentResources_t *outResources ) {
@@ -30689,7 +30716,7 @@ static qboolean vk_temporal_main_get_segment_resources(
 	const vkTemporalMotionRecordingAuthority_t *authority;
 	if ( !plan || !outResources || !plan->beginExact3 || !plan->pipeline
 			|| !vk.fboActive || vk.renderPassIndex != RENDER_PASS_MAIN
-			|| vk.cmd->open_dynamic_pass != VK_DYN_PASS_MAIN
+			|| !vk_temporal_main_pass_ready()
 			|| !VK_TemporalMotionMaterializationGetReceipt(
 				&vk_temporal_motion_materialization, &receipt ) ) return qfalse;
 	authority = &plan->authority;
@@ -30965,6 +30992,33 @@ static void vk_issue_geometry_draws( qboolean indexed, uint32_t firstInstance ) 
 	vk_diag_drawcalls++;
 }
 
+// Close a held exact pass: end it, hand the attachments back and resume the ordinary pass with LOAD, exactly as the
+// per-draw tail used to. Safe to call when nothing is held.
+void vk_temporal_main_close_exact_segment( void ) {
+	if ( !s_exactHold.open ) return;
+	s_exactHold.open = qfalse;
+	Ral_EndRendering( vk.cmd->ral_cmd );
+	vk.cmd->open_dynamic_pass = VK_DYN_PASS_NONE;
+	vk_temporal_main_attachment_barrier();
+	vk_profile_rendering_marker( &s_exactHold.resumeInfo, "wired.temporal-main-resume",
+		VK_PM_TEMPORAL_MAIN_RESUME );
+	Ral_BeginRendering( vk.cmd->ral_cmd, &s_exactHold.resumeInfo );
+	vk.cmd->open_dynamic_pass = VK_DYN_PASS_MAIN;
+	vk_temporal_main_set_dynamic_state( s_exactHold.depthRange );
+	vk_temporal_main_reset_bind_cache();
+}
+
+// An ordinary draw is about to issue while an exact pass is held. The pipeline and descriptor binds for it were
+// recorded BEFORE this point (into the exact pass), so after the close they are rebound explicitly.
+static void vk_temporal_main_leave_exact_for_ordinary( uint32_t pipelineSlot, Vk_Depth_Range depthRange ) {
+	if ( !s_exactHold.open ) return;
+	if ( r_dbgExactHold && r_dbgExactHold->integer == 2 ) { s_exactHoldLeaks++; return; }   // leak control, never a default
+	vk_temporal_main_close_exact_segment();
+	if ( pipelineSlot < vk.pipelines_count ) vk_bind_pipeline( pipelineSlot );
+	(void)vk_bind_descriptor_sets();
+	vk_update_depth_range( depthRange );
+}
+
 static qboolean vk_temporal_main_issue_exact_segment(
 		const vkTemporalMainActivationPlan_t *plan,
 		const vkTemporalMainSegmentResources_t *resources,
@@ -31009,13 +31063,22 @@ static qboolean vk_temporal_main_issue_exact_segment(
 		if ( exactTotal % 500u == 0u )
 			R_LOG( rch_ral, SEV_INFO, "exact segments so far: %u (world %u, entity %u)\n", exactTotal, exactWorld, exactEntity );
 	}
-	Ral_EndRendering( vk.cmd->ral_cmd );
-	vk.cmd->open_dynamic_pass = VK_DYN_PASS_NONE;
-	vk_temporal_main_attachment_barrier();
-	vk_profile_rendering_marker( &exactInfo, "wired.temporal-main",
-		VK_PM_TEMPORAL_MAIN );
-	Ral_BeginRendering( vk.cmd->ral_cmd, &exactInfo );
-	vk.cmd->open_dynamic_pass = VK_DYN_PASS_TEMPORAL_MAIN;
+	if ( vk_exact_hold_enabled() && s_exactHold.open
+			&& ( s_exactHold.scene != (const void *)resources->materialization.scene
+				|| s_exactHold.velocity != (const void *)resources->materialization.velocity
+				|| s_exactHold.validity != (const void *)resources->materialization.validity
+				|| s_exactHold.depth != (const void *)resources->materialization.depth
+				|| s_exactHold.width != plan->authority.width || s_exactHold.height != plan->authority.height ) )
+		vk_temporal_main_close_exact_segment();   // a different attachment set: start a fresh exact pass
+	if ( !( vk_exact_hold_enabled() && s_exactHold.open ) ) {
+		Ral_EndRendering( vk.cmd->ral_cmd );
+		vk.cmd->open_dynamic_pass = VK_DYN_PASS_NONE;
+		vk_temporal_main_attachment_barrier();
+		vk_profile_rendering_marker( &exactInfo, "wired.temporal-main",
+			VK_PM_TEMPORAL_MAIN );
+		Ral_BeginRendering( vk.cmd->ral_cmd, &exactInfo );
+		vk.cmd->open_dynamic_pass = VK_DYN_PASS_TEMPORAL_MAIN;
+	}
 	vk_temporal_main_set_dynamic_state( depthRange );
 	Ral_CmdBindPipeline( vk.cmd->ral_cmd, plan->pipeline );
 	groupsBound = Ral_CmdBindBindGroupDynamicExact( vk.cmd->ral_cmd, 0u,
@@ -31035,6 +31098,22 @@ static qboolean vk_temporal_main_issue_exact_segment(
 		 * consume the segment without a draw, poison publication, and never
 		 * replay the ordinary draw after commands have begun. */
 		VK_TemporalMainActivationPoison( &vk_temporal_main_activation );
+	}
+	if ( vk_exact_hold_enabled() ) {
+		// Keep the exact pass open for the next consecutive exact draw; whoever needs the ordinary pass closes it.
+		s_exactHold.open = qtrue;
+		s_exactHold.scene = (const void *)resources->materialization.scene;
+		s_exactHold.velocity = (const void *)resources->materialization.velocity;
+		s_exactHold.validity = (const void *)resources->materialization.validity;
+		s_exactHold.depth = (const void *)resources->materialization.depth;
+		s_exactHold.width = plan->authority.width; s_exactHold.height = plan->authority.height;
+		s_exactHold.resumeInfo = resumeInfo;
+		s_exactHold.depthRange = depthRange;
+		// The exact draw bound its own pipeline and groups behind the renderer's cache. Forget the cache so the next draw's
+		// vk_bind_pipeline / vk_bind_descriptor_sets re-establish the RAL state they validate against (without this the
+		// descriptor bind of the next draw fails and poisons the motion recording).
+		vk_temporal_main_reset_bind_cache();
+		return qtrue;
 	}
 	Ral_EndRendering( vk.cmd->ral_cmd );
 	vk.cmd->open_dynamic_pass = VK_DYN_PASS_NONE;
@@ -31113,6 +31192,14 @@ qboolean vk_temporal_iqm_draw_exact( iqmData_t *data,
 	// A same-sort CPU tess batch must be committed before this direct segment so
 	// the shared online generic/IQM receipt follows actual command order.
 	RB_EndSurface();
+	if ( s_exactHold.open ) {
+		// The IQM exact path starts from the ordinary pass. The ordinary pipeline for this draw was bound into the
+		// held pass just before, so rebind it after the close (a failed IQM exact falls back to an ordinary draw).
+		const uint32_t slot = vk_temporal_bound_pipeline_slot;
+		vk_temporal_main_close_exact_segment();
+		if ( slot < vk.pipelines_count ) vk_bind_pipeline( slot );
+		(void)vk_bind_descriptor_sets();
+	}
 	memset( &observed, 0, sizeof( observed ) );
 	memset( &plan, 0, sizeof( plan ) );
 	memset( &resources, 0, sizeof( resources ) );
@@ -31349,12 +31436,54 @@ void vk_draw_geometry( Vk_Depth_Range depth_range, qboolean indexed ) {
 	}
 	// Exact temporal draws are issued once inside a bounded three-attachment
 	// segment; PRESERVE and every fail-closed path remain in the ordinary pass.
+	{
+		// Measurement (TASK-241): route sequence per 100 frames. A "run" is a maximal sequence of consecutive geometry
+		// draws that take the exact route; each run costs 4 render passes today.
+		static uint32_t exactDraws, ordDraws, runs, frames, prevExact, outW, outI, outP;
+		const qboolean exact = ( activationPlanned && activationPlan.beginExact3 && exactResourcesReady ) ? qtrue : qfalse;
+		if ( vk_frame_draw_seq == 0u ) prevExact = 0u;   // first geometry draw of the frame
+		{
+			// why a draw did not take the exact route (first failing gate)
+			static uint32_t why[8];
+			const int recActive = ( VK_TemporalMotionRecordingIsActive( &vk_temporal_motion_recording )
+				&& vk_temporal_motion_recording.primaryCommandActive ) ? 1 : 0;
+			if ( !exact ) {
+				if ( !recActive ) why[0]++;
+				else if ( !entMatPlanValid ) why[1]++;
+				else if ( !entMatPlan.fresh ) why[2]++;
+				else if ( !temporalPrepared ) why[3]++;
+				else if ( !vk_temporal_main_activation.active ) why[4]++;
+				else if ( !activationPlanned ) why[5]++;
+				else why[6]++;
+			}
+			if ( exactDraws + ordDraws + 1u >= 1000u ) {
+				R_LOG( rch_ral, SEV_INFO, "temporal ordinary-route reasons (per 1000 draws): recording-inactive %u, entmat-plan-invalid %u, entmat-not-fresh %u, not-prepared %u, activation-inactive %u, no-plan %u, resources-not-ready %u; recording-poisoned=%d activation-poisoned=%d\n",
+					why[0], why[1], why[2], why[3], why[4], why[5], why[6],
+					(int)vk_temporal_motion_recording.poisoned, (int)vk_temporal_main_activation.poisoned );
+				memset( why, 0, sizeof( why ) );
+			}
+		}
+		if ( exact ) { exactDraws++; if ( !prevExact ) runs++; prevExact = 1u; }
+		else { ordDraws++; prevExact = 0u; }
+		if ( activationPlanned ) {
+			if ( activationPlan.kind == VK_TEMPORAL_SHADER_WRITE ) outW++;
+			else if ( activationPlan.kind == VK_TEMPORAL_SHADER_INVALIDATE ) outI++;
+			else outP++;
+		}
+		if ( exactDraws + ordDraws >= 1000u ) {
+			R_LOG( rch_ral, SEV_INFO, "temporal route sequence: %u draws: exact %u in %u runs, ordinary %u; plans write %u invalidate %u preserve %u\n",
+				exactDraws + ordDraws, exactDraws, runs, ordDraws, outW, outI, outP );
+			exactDraws = ordDraws = runs = outW = outI = outP = 0u;
+		}
+		frames++;
+	}
 	if ( activationPlanned && activationPlan.beginExact3
 			&& exactResourcesReady ) {
 		if ( !vk_temporal_main_issue_exact_segment( &activationPlan,
 				&segmentResources, depth_range, indexed, firstInstance ) ) {
 			VK_TemporalMainActivationPoison( &vk_temporal_main_activation );
 			vk_world_route = 3;
+			vk_temporal_main_leave_exact_for_ordinary( temporalPipelineSlot, depth_range );
 			vk_issue_geometry_draws( indexed, firstInstance );
 		} else if ( !VK_TemporalMainActivationCommitDraw(
 				&vk_temporal_main_activation, &activationPlan ) ) {
@@ -31362,6 +31491,7 @@ void vk_draw_geometry( Vk_Depth_Range depth_range, qboolean indexed ) {
 		}
 	} else {
 		vk_world_route = 1;
+		vk_temporal_main_leave_exact_for_ordinary( temporalPipelineSlot, depth_range );
 		vk_issue_geometry_draws( indexed, firstInstance );
 		if ( activationPlanned && !VK_TemporalMainActivationCommitDraw(
 				&vk_temporal_main_activation, &activationPlan ) )
@@ -31383,6 +31513,7 @@ void vk_draw_geometry( Vk_Depth_Range depth_range, qboolean indexed ) {
 void vk_draw_forwardplus( Vk_Depth_Range depth_range )
 {
 	ralBindGroup_t *bindless;
+	vk_temporal_main_close_exact_segment();   // never draw into a held exact pass
 	uint32_t uniformOffset;
 
 	if ( vk.geometry_buffer_size_new )
@@ -33269,6 +33400,7 @@ static qboolean vk_publish_shadow_sample_handoff( ralTexture_t *texture,
 
 void vk_end_render_pass( void )
 {
+	vk_temporal_main_close_exact_segment();   // a held exact pass must hand back to the ordinary pass first
 	if ( vk.cmd->open_dynamic_pass == VK_DYN_PASS_MAIN ) {
 		// End the dynamic 3D pass and hand the attachments off to the legacy
 		// passes that follow, matching render_pass.main's baked finalLayouts:

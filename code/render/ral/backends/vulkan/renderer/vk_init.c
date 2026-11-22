@@ -168,6 +168,7 @@ cvar_t *r_shadowAtestTest;
 cvar_t *r_shadowTranslucent;
 cvar_t *r_hizVerify;
 cvar_t *r_worldIndirect;
+cvar_t *r_dbgExactHold;
 cvar_t *r_dbgWorldPhase;
 cvar_t *r_dbgWorldCoverage;
 cvar_t *r_dbgWorldDropIdx;
@@ -2927,6 +2928,7 @@ static void R_Register( void )
 	// Measurement only: 1 = one redundant end/reopen of the main pass per frame at the opaque ->
 	// transparent crossing, to price the extra pass split a two-phase world draw needs.
 	r_dbgExtraSplit = ri.Cvar_Get( "r_dbgExtraSplit", "0", CVAR_CHEAT );
+	r_dbgExactHold = ri.Cvar_Get( "r_dbgExactHold", "1", CVAR_CHEAT );   // 1 = default: exact temporal pass held across consecutive exact draws
 	r_dbgWorldPhase = ri.Cvar_Get( "r_dbgWorldPhase", "0", CVAR_CHEAT );
 	r_dbgWorldCoverage = ri.Cvar_Get( "r_dbgWorldCoverage", "0", CVAR_CHEAT );
 	r_dbgWorldDropIdx = ri.Cvar_Get( "r_dbgWorldDropIdx", "3000", CVAR_CHEAT );

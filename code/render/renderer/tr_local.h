@@ -1721,6 +1721,7 @@ extern cvar_t	*r_dlightShadowTest; // test-only (CVAR_CHEAT): inject a synthetic
 extern cvar_t	*r_dlightShadowTestN; // test-only (CVAR_CHEAT): how many synthetic dlights (1..4) to inject in a ring
 extern cvar_t	*r_dlightShadowCount; // diagnostic (CVAR_CHEAT): log per-frame count + peak of shadow-eligible dlights
 extern cvar_t	*r_dlightShadowProfile; // diagnostic (CVAR_CHEAT): wall-clock the omni-shadow bake (us/frame + pass count)
+extern cvar_t	*r_dbgExactHold;            // exact temporal pass: 1 (default) held open across consecutive exact draws, 0 the older close-and-reopen per draw, 2 leak control for tests
 extern cvar_t	*r_dbgWorldPhase;           // measurement: split eligible world batches into two phases (1 even/odd items, 2 all in phase 2, 3 all in phase 1)
 extern cvar_t	*r_dbgWorldCoverage;        // measurement: per-view world coverage counters (listed / invoked / queued / issued BSP surfaces), logged every 600 views
 extern cvar_t	*r_dbgWorldDropIdx;         // measurement: with r_dbgWorldPhase 5, drop exactly one opaque world item per frame (the first with N/2 < indexes <= N)
