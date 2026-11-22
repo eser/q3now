@@ -2629,18 +2629,20 @@ aaportal)
     # AA coverage of a portal view: q3dm7 has a misc_portal_surface at (1078 -832 -384). Four approach points look at it from
     # each side; each is captured with no AA / SMAA preset 3 / TAA at fixedtime 8 (PORTAL_MAP / AP_VIEWS override). Images only.
     AP_MAP="${AP_MAP:-q3dm7}"
-    AP_VIEWS="${AP_VIEWS:-1078 -632 -344 270|1078 -1032 -344 90|1278 -832 -344 180|878 -832 -344 0}"
+    AP_VIEWS="${AP_VIEWS:-1082 -700 -395 270 0}"   # "x y z yaw pitch" per view, separated by |
     ap() {
         local tag="$1" aa="$2" smaa="$3" pos="$4"
-        { printf 'set cg_draw2D 0\nset cg_drawGun 0\nset fixedtime 8\nwait 60\n'; } > "$SMOKE_HOME/base/vrf_ap.cfg"
-        CAP_POST_CMD="exec vrf_ap.cfg" capture_fixed_cam "$AP_MAP" "$pos" "$tag" +set r_aa "$aa" +set r_smaa "$smaa" >/dev/null || return 1
+        { printf 'set cg_draw2D 0\nset cg_drawGun 0\nset fixedtime 8\nwait 60\n'
+          # AP_YAW=1: a short yaw sweep so a portal view reprojected with the wrong velocity shows as ghosting.
+          [ "${AP_YAW:-0}" = 1 ] && printf 'cl_yawspeed 30\n+left\nwait 14\n-left\nwait 2\n'; } > "$SMOKE_HOME/base/vrf_ap.cfg"
+        CAP_POST_CMD="exec vrf_ap.cfg" capture_fixed_cam "$AP_MAP" "$pos" "$tag" +set r_aa "$aa" +set r_smaa "$smaa" ${AP_EXTRA:-} >/dev/null || return 1
     }
     n=0
     IFS='|' read -r -a APV <<< "$AP_VIEWS"
     for pos in "${APV[@]}"; do
         for cfg in "none 0 0" "smaa 1 3" "taa 2 0"; do
             set -- $cfg
-            ap "ap_$1_$n" "$2" "$3" "$pos 0" || FAIL=1
+            ap "ap_$1_$n" "$2" "$3" "$pos" || FAIL=1
         done
         printf "  aaportal view %s (%s): worst-tile none-vs-smaa=%s none-vs-taa=%s smaa-vs-taa=%s\n" "$n" "$pos" \
             "$(worst_tile_diff_nohud "$SHOTDIR/vrf_ap_none_$n.png" "$SHOTDIR/vrf_ap_smaa_$n.png")" \

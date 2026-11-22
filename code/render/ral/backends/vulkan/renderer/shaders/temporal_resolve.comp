@@ -130,12 +130,114 @@ float storeLinearDepth(float z) {
 	return pc.zNear * pc.zFar / (pc.zNear + z * (pc.zFar - pc.zNear));
 }
 
+// ---- Spatial fallback ---------------------------------------------------------------------------------------------------
+// A pixel without usable history (no motion validity, reprojection off screen or refused by the depth test, a secondary view
+// such as a portal or mirror that is neither jittered nor reprojected, a disocclusion) used to keep its raw, aliased colour.
+// It now gets an edge-directed filter in the style of FXAA 3.11: detect the local contrast, find which way the edge runs,
+// walk along it to both ends and blend the pixel toward the neighbour across the edge by how far along the stair step it
+// sits. It only runs for those pixels, adds no pass and no binding, and uses no division (the reflection contract admits
+// exactly one non-precise division, the history depth), so reciprocals are written with inversesqrt.
+//
+// Luma is compressed (l / sqrt(1 + l^2)) so HDR highlights do not dominate the edge test; the blend itself stays linear.
+float fxLuma(vec3 c) {
+	float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+	if (!finite1(l)) return 0.0;
+	l = clamp(l, 0.0, 1.0e4);
+	return l * inversesqrt(1.0 + l * l);
+}
+
+float fxLumaAt(ivec2 p) {
+	return fxLuma(sampleCurrent(p).rgb);
+}
+
+// Luma half-way between a pixel and its neighbour across the edge: the position FXAA walks along.
+float fxEdgeLuma(ivec2 base, ivec2 across) {
+	return 0.5 * (fxLumaAt(base) + fxLumaAt(base + across));
+}
+
+vec4 fxSpatialAa(ivec2 px, vec4 centerColor) {
+	float fxM = fxLuma(centerColor.rgb);
+	float fxN = fxLumaAt(px + ivec2(0, -1));
+	float fxS = fxLumaAt(px + ivec2(0, 1));
+	float fxW = fxLumaAt(px + ivec2(-1, 0));
+	float fxE = fxLumaAt(px + ivec2(1, 0));
+	float fxHi = max(max(fxN, fxS), max(max(fxW, fxE), fxM));
+	float fxLo = min(min(fxN, fxS), min(min(fxW, fxE), fxM));
+	float fxSpan = fxHi - fxLo;
+	if (fxSpan < max(0.0312, fxHi * 0.125)) return centerColor;
+
+	float fxNW = fxLumaAt(px + ivec2(-1, -1));
+	float fxNE = fxLumaAt(px + ivec2(1, -1));
+	float fxSW = fxLumaAt(px + ivec2(-1, 1));
+	float fxSE = fxLumaAt(px + ivec2(1, 1));
+	float fxNS = fxN + fxS;
+	float fxWE = fxW + fxE;
+	float fxNWSW = fxNW + fxSW;
+	float fxNESE = fxNE + fxSE;
+	float fxHorz = abs(-2.0 * fxW + fxNWSW)
+		+ (abs(-2.0 * fxM + fxNS) * 2.0 + abs(-2.0 * fxE + fxNESE));
+	float fxVert = abs(-2.0 * fxS + (fxSW + fxSE))
+		+ (abs(-2.0 * fxM + fxWE) * 2.0 + abs(-2.0 * fxN + (fxNW + fxNE)));
+	bool fxHorzSpan = fxHorz >= fxVert;
+	float fxAround = (fxNS + fxWE) * 2.0 + (fxNWSW + fxNESE);
+	// Rename the two neighbours across the edge: north/south for a horizontal span, west/east for a vertical one.
+	float fxLoSide = fxHorzSpan ? fxN : fxW;
+	float fxHiSide = fxHorzSpan ? fxS : fxE;
+	float fxGradLo = fxLoSide - fxM;
+	float fxGradHi = fxHiSide - fxM;
+	bool fxLoSteeper = abs(fxGradLo) >= abs(fxGradHi);
+	float fxGradient = max(abs(fxGradLo), abs(fxGradHi));
+	float fxPair = fxLoSteeper ? fxLoSide + fxM : fxHiSide + fxM;
+	ivec2 fxAcross = fxHorzSpan ? ivec2(0, 1) : ivec2(1, 0);
+	ivec2 fxAlong = fxHorzSpan ? ivec2(1, 0) : ivec2(0, 1);
+	if (fxLoSteeper) fxAcross = -fxAcross;
+
+	float fxInvSpan = inversesqrt(fxSpan * fxSpan);
+	float fxBlendC = clamp(abs(fxAround * (1.0 / 12.0) - fxM) * fxInvSpan, 0.0, 1.0);
+	float fxBlendF = (-2.0 * fxBlendC + 3.0) * (fxBlendC * fxBlendC);
+	float fxSubpixel = fxBlendF * fxBlendF * 0.75;
+
+	float fxHalfPair = fxPair * 0.5;
+	float fxScaled = fxGradient * 0.25;
+	bool fxMidNegative = fxM - fxHalfPair < 0.0;
+	float fxEndN = fxEdgeLuma(px - fxAlong, fxAcross) - fxHalfPair;
+	float fxEndP = fxEdgeLuma(px + fxAlong, fxAcross) - fxHalfPair;
+	bool fxDoneN = abs(fxEndN) >= fxScaled;
+	bool fxDoneP = abs(fxEndP) >= fxScaled;
+	int fxStepsN = 1;
+	int fxStepsP = 1;
+	for (int i = 2; i <= 12; ++i) {
+		if (!fxDoneN) {
+			fxEndN = fxEdgeLuma(px - fxAlong * i, fxAcross) - fxHalfPair;
+			fxDoneN = abs(fxEndN) >= fxScaled;
+			fxStepsN = i;
+		}
+		if (!fxDoneP) {
+			fxEndP = fxEdgeLuma(px + fxAlong * i, fxAcross) - fxHalfPair;
+			fxDoneP = abs(fxEndP) >= fxScaled;
+			fxStepsP = i;
+		}
+		if (fxDoneN && fxDoneP) break;
+	}
+	bool fxTowardN = fxStepsN < fxStepsP;
+	float fxEndG = fxTowardN ? fxEndN : fxEndP;
+	bool fxGoodSpan = (fxEndG < 0.0) != fxMidNegative;
+	float fxSpanLen = float(fxStepsN + fxStepsP);
+	float fxNear = float(fxTowardN ? fxStepsN : fxStepsP);
+	float fxEdgeBlend = fxGoodSpan ? (0.5 - fxNear * inversesqrt(fxSpanLen * fxSpanLen)) : 0.0;
+	float fxBlend = clamp(max(fxEdgeBlend, fxSubpixel), 0.0, 1.0);
+	vec3 fxAcrossColor = sampleCurrent(px + fxAcross).rgb;
+	// Written out instead of mix(): the reflection contract forbids the opaque FMix instruction anywhere in this shader.
+	return vec4(centerColor.rgb * (1.0 - fxBlend) + fxAcrossColor * fxBlend, centerColor.a);
+}
+
 void main() {
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
 	if (any(greaterThanEqual(pixel, ivec2(pc.extent)))) return;
 	vec4 current = texelFetch(
 		sampler2D(currentColor, nearestSampler), pixel, 0);
 	vec4 result = current;
+	bool usedHistory = false;
 	float valid = texelFetch(
 		sampler2D(motionValidity, nearestSampler), pixel, 0).r;
 	vec2 velocity = texelFetch(
@@ -197,9 +299,11 @@ void main() {
 				precise vec3 resolvedRgb = mixPrecise(current.rgb, clampedPrior,
 					weight);
 				result = vec4(resolvedRgb, current.a);
+				usedHistory = true;
 			}
 		}
 	}
+	if (!usedHistory && finite4(current)) result = fxSpatialAa(pixel, current);
 	if (!finite4(result)) result = vec4(0.0);
 	imageStore(resolvedColor, pixel, result);
 	imageStore(historyOutColor, pixel, result);
