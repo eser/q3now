@@ -2572,6 +2572,7 @@ Should only be called by CL_StartHunkUsers
 void CL_InitCGame( clientApp_t *app ) {
 	const char			*info;
 	const char			*mapname;
+	char				mapnameCopy[ MAX_QPATH ];
 	// The input-focused app drives the host-visible loading screen, console
 	// state, and asset-paging side-effects. An additional app priming its own
 	// cgame does the VM work but must not touch the host UI; isFocused gates
@@ -2604,7 +2605,10 @@ void CL_InitCGame( clientApp_t *app ) {
 
 	// find the current mapname
 	info = app->cl.gameState.stringData + app->cl.gameState.stringOffsets[ CS_SERVERINFO ];
-	mapname = Info_ValueForKey( info, "mapname" );
+	/* Info_ValueForKey returns one of four rotating static buffers; CG_INIT below makes many
+	 * more calls, so keep our own copy for the SV_ClientMapLoadComplete handshake at the end. */
+	Q_strncpyz( mapnameCopy, Info_ValueForKey( info, "mapname" ), sizeof( mapnameCopy ) );
+	mapname = mapnameCopy;
 	Com_sprintf( app->cl.mapname, sizeof( app->cl.mapname ), "maps/%s.bsp", mapname );
 
 	// allow vertex lighting for in-game elements
