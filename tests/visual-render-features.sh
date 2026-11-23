@@ -2330,6 +2330,10 @@ scenegolden)
         if [ "${SMOKE_UPDATE_GOLDEN:-0}" = 1 ]; then
             mx="$(max_pixel_value "$shot")"
             [ "${mx:-0}" -ge 64 ] || { echo "  FAIL: refusing to bless a dark frame for $id (max pixel $mx)" >&2; FAIL=1; continue; }
+            # The HUD alone reaches 64, so a frame whose world was not drawn passed the check above (B_high was once blessed
+            # with every tile ~0). Require that most tiles carry light.
+            lit="$(awk '$2 >= 2.0 {n++} END {print n+0}' "$cur")"
+            [ "${lit:-0}" -ge 32 ] || { echo "  FAIL: refusing to bless $id: only $lit of 64 tiles have a mean >= 2 (world not drawn?)" >&2; FAIL=1; continue; }
             cp "$cur" "$gold"; echo "  blessed $gold"; continue
         fi
         [ -f "$gold" ] || { echo "  FAIL: no golden $gold (run with SMOKE_UPDATE_GOLDEN=1)" >&2; FAIL=1; continue; }
