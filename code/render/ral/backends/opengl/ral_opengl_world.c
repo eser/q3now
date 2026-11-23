@@ -1505,6 +1505,7 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 	}
 	for ( uint32_t i = 0u; i < entityCount; ++i ) {
 		uint32_t drawsBefore = receipt.entityDrawCount;
+		if ( !RalOpenGl_EntityInPrimaryView( &entities[i].entity ) ) continue;
 		if ( entities[i].entity.reType == RT_MODEL
 				&& entities[i].entity.hModel > 0 ) {
 			if ( !DrawModelEntity( &gl, uniformBuffer, materialUniformBuffer,

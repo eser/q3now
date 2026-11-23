@@ -84,6 +84,7 @@ qboolean RalOpenGl_FrontendPlanBuild(
 	const beamDesc_t *effectBeams;
 	uint32_t polygonCommandCount = 0u, polyVertexCount = 0u, lightCount = 0u;
 	uint32_t entityCount = 0u, uiCount = 0u;
+	uint32_t excludedTemporalEntityCount = 0u, excludedLocalIrradianceEntityCount = 0u;
 	if ( !coreReceipt || !frontend || !submission || !outReceipt
 			|| !RalOpenGl_CoreReceiptExact( coreReceipt, coreReceipt )
 			|| !RenderSubmission_ReceiptExact( submission, submission )
@@ -158,6 +159,12 @@ qboolean RalOpenGl_FrontendPlanBuild(
 			|| ( entityCount && !entities ) ) candidate.unresolvedCount++;
 	for ( uint32_t i = 0u; entities && i < entityCount; ++i ) {
 		const refEntity_t *entity = &entities[i].entity;
+		/* Excluded entities still account for their submitted temporal / local-irradiance records. */
+		if ( !RalOpenGl_EntityInPrimaryView( entity ) ) {
+			if ( entities[i].hasTemporal ) excludedTemporalEntityCount++;
+			if ( entities[i].hasLocalIrradiance ) excludedLocalIrradianceEntityCount++;
+			continue;
+		}
 		if ( entities[i].hasTemporal ) candidate.loweredTemporalEntityCount++;
 		if ( entities[i].hasLocalIrradiance ) {
 			if ( !Ral_IrradianceEntitySampleReceiptValid( &entities[i].localIrradiance )
@@ -215,9 +222,9 @@ qboolean RalOpenGl_FrontendPlanBuild(
 			candidate.unresolvedCount++;
 		}
 	}
-	if ( candidate.loweredTemporalEntityCount != submission->temporalEntityCount )
+	if ( candidate.loweredTemporalEntityCount + excludedTemporalEntityCount != submission->temporalEntityCount )
 		candidate.unresolvedCount++;
-	if ( candidate.loweredLocalIrradianceEntityCount
+	if ( candidate.loweredLocalIrradianceEntityCount + excludedLocalIrradianceEntityCount
 			!= submission->localIrradianceEntityCount ) candidate.unresolvedCount++;
 	ui = RenderSubmission_UiPrimitives( frontend, &uiCount );
 	if ( uiCount != submission->uiPrimitiveCount || ( uiCount && !ui ) )

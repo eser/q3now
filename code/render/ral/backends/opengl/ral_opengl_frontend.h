@@ -54,6 +54,12 @@ typedef struct {
 	qboolean ready;
 } ralOpenGlFrontendPlanReceipt_t;
 
+/* RF_THIRD_PERSON marks mirror/portal-only entities (the local player's own body): drawing them in the primary view puts the camera
+ * inside that model. The plan and the world pass both exclude them, as the Metal renderer does. */
+static inline qboolean RalOpenGl_EntityInPrimaryView( const refEntity_t *entity ) {
+	return ( entity->renderfx & RF_THIRD_PERSON ) ? qfalse : qtrue;
+}
+
 qboolean RalOpenGl_FrontendPlanBuild(
 	const ralOpenGlCoreReceipt_t *coreReceipt,
 	const renderSubmissionState_t *frontend,
