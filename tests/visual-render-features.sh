@@ -31,7 +31,7 @@ while [ $# -gt 0 ]; do
         *) echo "unknown arg: $1" >&2; exit 2;;
     esac
 done
-[ -n "$MODE" ]   || { echo "FAIL: --mode {gtao|fwdplus|viewport|shadow_atest|scene|chromatic|crowd|crowdpromo|entitylight|scenegolden|crowdwasm|gpucull|worldindirect|worldphase|worlddecal|exacthold|temporalfold|bootstrapaa|portalworld|aaportal|aacompare|aalatency|capturenoise|cullref|dlight-shadow|dlight-shadow-lifecycle|dlight-shadow-probe|selftest} required" >&2; exit 2; }
+[ -n "$MODE" ]   || { echo "FAIL: --mode {gtao|fwdplus|viewport|shadow_atest|scene|chromatic|crowd|crowdpromo|entitylight|scenegolden|crowdwasm|gpucull|worldindirect|worldphase|worlddecal|exacthold|temporalfold|bootstrapaa|gunsmear|portalworld|aaportal|aacompare|aalatency|capturenoise|cullref|dlight-shadow|dlight-shadow-lifecycle|dlight-shadow-probe|selftest} required" >&2; exit 2; }
 # selftest needs no engine (it exercises the assertion math on synthetic inputs).
 if [ "$MODE" != "selftest" ]; then
     [ -n "$ENGINE" ] || { echo "FAIL: --engine <wired.x64> required" >&2; exit 2; }
@@ -2739,6 +2739,58 @@ PYEOF
     rm -f "$VRF_TMP/ba_results.txt"
     [ "$verdict" = OK ] || FAIL=1
     echo "  bootstrapaa verdict (copy-producer frames=$copies): $verdict"
+    ;;
+
+gunsmear)
+    # First-person weapon smear during a camera pan. The gun is fixed on screen while the world moves, so a draw that inherits the
+    # opaque history beneath it (r_dbgTemporalEffectMask 0) is reprojected with the world's motion and trails; with the mask (1) the
+    # gun pixels are filtered spatially. The same frame (fixedtime 8, same camera path, one frame after the sweep stops: the pose is identical, the history still holds the sweep) is
+    # captured with AA off, TAA mask 0 and TAA mask 1; the deviation of each TAA frame from the AA-off frame inside the gun region
+    # (lower right) is the smear. Controls: a repeat of the mask-1 capture gives the noise floor (the pan timing is not bit-identical between processes, so single runs can be
+    # inconclusive); the mask must never make the gun region deviate more. Measured over four runs: mask 1 1.21-1.29, mask 0 1.29-1.74 mean abs.
+    GS_POS="${GS_POS:-1052 1432 50 135}"
+    gs() {
+        local tag="$1" aa="$2" mask="$3"
+        { printf 'set cg_draw2D 0\nset cg_drawGun 1\nset fixedtime 8\nset r_dbgTemporalEffectMask %s\nwait 60\ncl_yawspeed 120\n+right\nwait 24\n-right\nwait 1\nscreenshot vrf_%s_mid\nwait 30\n' "$mask" "$tag"; } > "$SMOKE_HOME/base/vrf_gs.cfg"
+        CAP_POST_CMD="exec vrf_gs.cfg" capture_fixed_cam arena1 "$GS_POS" "$tag" +set r_aa "$aa" >/dev/null || return 1
+    }
+    gs gs_off 0 1 || FAIL=1
+    gs gs_m0 2 0 || FAIL=1
+    gs gs_m1 2 1 || FAIL=1
+    gs gs_m1b 2 1 || FAIL=1
+    PNG2RAW_BIN="${PNG2RAW:-$WIRED_SOURCE/tools/png2raw/png2raw}"
+    res="$(python3 - "$SHOTDIR" "$PNG2RAW_BIN" <<'PYEOF'
+import subprocess, struct, sys
+d, dec = sys.argv[1], sys.argv[2]
+def load(n):
+    p = f"{d}/vrf_{n}_mid.png"
+    w, h = struct.unpack(">II", open(p, "rb").read(24)[16:24])
+    return w, h, subprocess.check_output([dec, p])
+w, h, off = load("gs_off"); _, _, m0 = load("gs_m0"); _, _, m1 = load("gs_m1"); _, _, m1b = load("gs_m1b")
+x0, x1, y0, y1 = int(w * 0.55), w, int(h * 0.50), h   # lower right: the weapon
+def dev(a, b, thr=10):
+    tot = cnt = big = 0
+    for y in range(y0, y1, 2):
+        row = y * w * 3
+        for x in range(x0, x1, 2):
+            i = row + x * 3
+            m = max(abs(a[i] - b[i]), abs(a[i + 1] - b[i + 1]), abs(a[i + 2] - b[i + 2]))
+            tot += m; cnt += 1
+            if m > thr: big += 1
+    return tot / cnt, 100.0 * big / cnt
+a0, b0 = dev(m0, off); a1, b1 = dev(m1, off); an, bn = dev(m1, m1b)
+print("%.3f %.3f %.3f %.3f %.3f %.3f" % (a0, b0, a1, b1, an, bn))
+PYEOF
+)"
+    set -- $res
+    v="$(awk -v a0="$1" -v a1="$3" -v an="$5" -v p0="$2" -v p1="$4" 'BEGIN{
+        if (an > 0.5 && a1 <= a0 + 0.25) print "OK(inconclusive: this run was not deterministic, repeat noise " an "; mask1 " a1 " vs mask0 " a0 ")";
+        else if (a1 > a0 + 0.25) print "FAIL(the effect mask made the gun region deviate MORE from AA off)";
+        else if (a0 > a1 + 0.25) print "OK(mask removes smear: " a0 " -> " a1 ")";
+        else if (a0 < 3.0 && p0 < 3.0) print "OK(no measurable smear: TAA stays within " a0 " mean abs / " p0 "% of pixels of AA off in the gun region with and without the mask; positive control unavailable in this scene)";
+        else print "FAIL(smear present (" a0 " / " p0 "%) and the mask does not reduce it: the gun draws probably never reach the effect classification)" }')"
+    [ "${v:0:2}" = "OK" ] || FAIL=1
+    printf "  gunsmear: deviation from AA-off in the gun region (mean abs / %% pixels >10): mask0=%s/%s%% mask1=%s/%s%% repeat-noise=%s/%s%% -> %s\n" "$1" "$2" "$3" "$4" "$5" "$6" "$v"
     ;;
 
 worldphase)
