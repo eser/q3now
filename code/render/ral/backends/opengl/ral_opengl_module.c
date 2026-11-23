@@ -787,6 +787,24 @@ fail:
 	return qfalse;
 }
 
+/* r_aa (0 off, 1 TAA, 2 SMAA) is registered so the cvar exists and is documented here, but this renderer has no anti-aliasing yet
+ * (TASK-257; Vulkan has TAA and SMAA, Metal has SMAA). A non-zero value is said to be ignored once instead of being silently dropped. */
+static void NoteAntiAliasingUnavailable( void ) {
+	static qboolean noted;
+	cvar_t *aa;
+	if ( noted || !ri.Cvar_Get || !ri.Cvar_CheckRange ) return;
+	aa = ri.Cvar_Get( "r_aa", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	if ( !aa ) return;
+	ri.Cvar_CheckRange( aa, "0", "2", CV_INTEGER );
+	if ( ri.Cvar_SetDescription ) ri.Cvar_SetDescription( aa,
+		"Anti-aliasing: 0 off, 1 TAA, 2 SMAA. Not available on this renderer yet; the frame is not anti-aliased." );
+	if ( ri.Cvar_SetGroup ) ri.Cvar_SetGroup( aa, CVG_RENDERER );
+	noted = qtrue;
+	if ( aa->integer && s_module.imports.LogCh && s_module.logChannel >= 0 )
+		s_module.imports.LogCh( s_module.logChannel, SEV_INFO,
+			"Wired native OpenGL RAL: r_aa %d requested; anti-aliasing is not available on this renderer yet (TASK-257), the frame is not anti-aliased\n", aa->integer );
+}
+
 static void BeginRegistration( glconfig_t *config )
 {
 	if ( !s_module.pbr )
@@ -803,6 +821,7 @@ static void BeginRegistration( glconfig_t *config )
 		LogFailure( "owner-initialization" );
 		return;
 	}
+	NoteAntiAliasingUnavailable();
 	if ( !s_module.brightness ) {
 		if ( !ri.Cvar_Get || !ri.Cvar_CheckRange ) {
 			memset( &s_module.brightnessFallback, 0,
