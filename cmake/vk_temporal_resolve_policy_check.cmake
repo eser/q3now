@@ -80,7 +80,7 @@ require_text(SHADER "precise vec2 previousTexel = vec2(pixel) - motionTexel;"
 	"history lives on the fixed pixel grid: the previous texel is the pixel minus the motion only")
 require_count(SHADER "previousEffectiveJitterUv - " 0
 	"the history must not be shifted by the jitter delta (it would put the output on the jittered grid)")
-require_text(SHADER "vec4 current = reconstructCurrent(tileIndex);"
+require_text(SHADER "vec4 current = reconstructCurrent(tileIndex, clipMin, clipMax);"
 	"the current frame must be reconstructed at the pixel centre from the jittered tile")
 require_text(SHADER "vec2 t = pc.currentEffectiveJitterUv * vec2(pc.extent);"
 	"the reconstruction must use the current effective jitter in texels")
@@ -116,11 +116,11 @@ require_text(SHADER "currentLinear > 0.0 && priorLinear > 0.0"
 	"both depths must be finite positive before history consumption")
 require_text(SHADER "abs(currentLinear - priorLinear) <= depthLimit"
 	"depth discontinuity must reject history")
-require_text(SHADER "vec3 clipMin = neighborhoodMin;"
+require_text(SHADER "boxMin = neighborhoodMin;"
 	"the history clamp box must start from the current 3x3 min/max")
-require_text(SHADER "clipMin = max(neighborhoodMin,"
+require_text(SHADER "boxMin = max(neighborhoodMin,"
 	"variance clipping may only tighten the box (intersection with the 3x3 min)")
-require_text(SHADER "clipMax = min(neighborhoodMax,"
+require_text(SHADER "boxMax = min(neighborhoodMax,"
 	"variance clipping may only tighten the box (intersection with the 3x3 max)")
 require_text(SHADER "clamp(prior.rgb, clipMin, clipMax)"
 	"history color must be clamped to the current 3x3 neighborhood box")

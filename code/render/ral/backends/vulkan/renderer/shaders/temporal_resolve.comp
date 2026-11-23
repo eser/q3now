@@ -301,7 +301,22 @@ vec2 dlMotionVelocity(ivec2 px, int tileIndex, float centerValid) {
 // that feeds a precise result, and each such operation is emitted by SPIRV-Cross as an optnone spvFAdd/spvFMul call that the
 // Metal compiler does not inline: measured at ~0.9 ms of this pass at 1280x720. The box needs no bit-exact arithmetic (it only
 // bounds a clamp), whereas the reprojection and the final blend keep their precise chains.
-bool neighborhoodBox(int tileIndex, out vec3 boxMin, out vec3 boxMax) {
+// One pass over the 3x3 tile the workgroup already holds yields both the current frame reconstructed at the pixel centre and the
+// neighbourhood box the history is clamped into.
+//
+// Reconstruction: the current frame was rendered with its geometry displaced by the jitter (currentEffectiveJitterUv, in the texture
+// space of the tile), so the tile texel at offset o shows the scene at o - jitter from this pixel's centre. Separable quadratic
+// Lagrange weights interpolate the scene exactly at the pixel centre (weights 0,1,0 without jitter); the result is clamped into the
+// 3x3 range so the interpolation cannot overshoot. The resolved image and its history therefore stay on the fixed pixel grid instead
+// of moving with the jitter every frame (which showed as frame-to-frame shimmer on a static scene).
+//
+// Box: the 3x3 min/max, tightened by variance clipping (mean +/- 1.25 sigma) when qualityFlags bit 0 is set. The box is an
+// intersection, so it can only get smaller; the mean lies inside both, hence it is never empty.
+vec4 reconstructCurrent(int tileIndex, out vec3 boxMin, out vec3 boxMax) {
+	vec2 t = pc.currentEffectiveJitterUv * vec2(pc.extent);
+	vec3 wx = vec3(0.5 * t.x * (t.x - 1.0), 1.0 - t.x * t.x, 0.5 * t.x * (t.x + 1.0));
+	vec3 wy = vec3(0.5 * t.y * (t.y - 1.0), 1.0 - t.y * t.y, 0.5 * t.y * (t.y + 1.0));
+	vec3 sum = vec3(0.0);
 	vec3 neighborhoodMin = vec3(3.402823466e+38);
 	vec3 neighborhoodMax = vec3(-3.402823466e+38);
 	vec3 momentSum = vec3(0.0);
@@ -309,50 +324,23 @@ bool neighborhoodBox(int tileIndex, out vec3 boxMin, out vec3 boxMax) {
 	for (int y = -1; y <= 1; ++y) {
 		for (int x = -1; x <= 1; ++x) {
 			vec3 c = tileColor[tileIndex + y * tileSide + x].rgb;
+			sum += c * (wx[x + 1] * wy[y + 1]);
 			neighborhoodMin = min(neighborhoodMin, c);
 			neighborhoodMax = max(neighborhoodMax, c);
 			momentSum += c;
 			momentSquares += c * c;
 		}
 	}
-	if (!(finite3(neighborhoodMin) && finite3(neighborhoodMax))) return false;
-	// Variance clipping: tighten the min/max box to mean +/- gamma * sigma of the same 3x3 samples. The box is an
-	// intersection, so it can only get smaller; mean lies inside both, hence it is never empty.
-	vec3 clipMin = neighborhoodMin;
-	vec3 clipMax = neighborhoodMax;
+	boxMin = neighborhoodMin;
+	boxMax = neighborhoodMax;
 	if ((pc.qualityFlags & 1u) != 0u) {
 		vec3 momentMean = momentSum * (1.0 / 9.0);
 		vec3 momentSigma = sqrt(max(momentSquares * (1.0 / 9.0)
 			- momentMean * momentMean, vec3(0.0)));
-		clipMin = max(neighborhoodMin, momentMean - 1.25 * momentSigma);
-		clipMax = min(neighborhoodMax, momentMean + 1.25 * momentSigma);
+		boxMin = max(neighborhoodMin, momentMean - 1.25 * momentSigma);
+		boxMax = min(neighborhoodMax, momentMean + 1.25 * momentSigma);
 	}
-	boxMin = clipMin;
-	boxMax = clipMax;
-	return true;
-}
-
-// The current frame was rendered with its geometry displaced by the jitter (currentEffectiveJitterUv, in the texture space of the
-// tile), so the tile texel at offset o shows the scene at o - jitter from this pixel's centre. Quadratic Lagrange weights over the
-// 3x3 tile interpolate the scene exactly at the pixel centre (weights 0,1,0 without jitter), and the result is clamped into the
-// 3x3 range so the interpolation cannot overshoot. The resolved image and its history therefore stay on the fixed pixel grid
-// instead of moving with the jitter every frame (which showed as frame-to-frame shimmer on a static scene).
-vec4 reconstructCurrent(int tileIndex) {
-	vec2 t = pc.currentEffectiveJitterUv * vec2(pc.extent);
-	vec3 wx = vec3(0.5 * t.x * (t.x - 1.0), 1.0 - t.x * t.x, 0.5 * t.x * (t.x + 1.0));
-	vec3 wy = vec3(0.5 * t.y * (t.y - 1.0), 1.0 - t.y * t.y, 0.5 * t.y * (t.y + 1.0));
-	vec4 sum = vec4(0.0);
-	vec3 lo = vec3(3.402823466e+38);
-	vec3 hi = vec3(-3.402823466e+38);
-	for (int y = -1; y <= 1; ++y) {
-		for (int x = -1; x <= 1; ++x) {
-			vec4 c = tileColor[tileIndex + y * tileSide + x];
-			sum += c * (wx[x + 1] * wy[y + 1]);
-			lo = min(lo, c.rgb);
-			hi = max(hi, c.rgb);
-		}
-	}
-	return vec4(clamp(sum.rgb, lo, hi), tileColor[tileIndex].a);
+	return vec4(clamp(sum, neighborhoodMin, neighborhoodMax), tileColor[tileIndex].a);
 }
 
 void main() {
@@ -368,7 +356,9 @@ void main() {
 	barrier();
 	if (any(greaterThanEqual(pixel, ivec2(pc.extent)))) return;
 	int tileIndex = (int(gl_LocalInvocationID.y) + 1) * tileSide + int(gl_LocalInvocationID.x) + 1;
-	vec4 current = reconstructCurrent(tileIndex);
+	vec3 clipMin;
+	vec3 clipMax;
+	vec4 current = reconstructCurrent(tileIndex, clipMin, clipMax);
 	vec4 result = current;
 	bool usedHistory = false;
 	float valid = texelFetch(
@@ -403,9 +393,7 @@ void main() {
 				&& currentLinear > 0.0 && priorLinear > 0.0
 				&& abs(currentLinear - priorLinear) <= depthLimit) {
 			vec4 prior = samplePreviousColor(previousTexel);
-			vec3 clipMin;
-			vec3 clipMax;
-			if (finite4(prior) && neighborhoodBox(tileIndex, clipMin, clipMax)) {
+			if (finite4(prior) && finite3(clipMin) && finite3(clipMax)) {
 				vec3 clampedPrior = clamp(prior.rgb, clipMin, clipMax);
 				// Scale the history weight by the pixel's confidence. At
 				// valid == 1 this is exactly the previous behaviour
