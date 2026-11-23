@@ -109,7 +109,6 @@ typedef struct {
 	cvar_t bloomFallback[5];
 	cvar_t *aa, *smaa;                   /* r_aa (0 off, 1 TAA, 2 SMAA) and the r_smaa preset */
 	cvar_t aaFallback, smaaFallback;
-	qboolean aaTaaNoticeLogged;
 	cvar_t toneMapFallback;
 	cvar_t *toneMapExposure;
 	cvar_t toneMapExposureFallback;
@@ -1497,7 +1496,7 @@ static void BeginRegistration( glconfig_t *config ) {
 			if ( !s_module.bloomCvars[i] ) { MarkFailed( "bloom-cvars" ); return; }
 		}
 		s_module.aa = RegisterMetalRenderCvar( "r_aa", "1", "0", "2", qtrue,
-			"Anti-aliasing: 0 off, 1 TAA (default technique; the Metal renderer does not have it yet and uses SMAA), 2 SMAA.",
+			"Anti-aliasing: 0 off, 1 TAA (default; camera-motion reprojection on this renderer, moving entities rely on the depth test and clip), 2 SMAA.",
 			&s_module.aaFallback );
 		s_module.smaa = RegisterMetalRenderCvar( "r_smaa", "0", "0", "4", qtrue,
 			"SMAA quality preset 1 low .. 4 ultra; 0 uses preset 3 (high) when r_aa selects SMAA.", &s_module.smaaFallback );

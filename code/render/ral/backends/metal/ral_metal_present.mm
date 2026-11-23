@@ -6316,6 +6316,11 @@ static qboolean RenderAndSubmit( ralMetalPresent_t *present,
 	memset( &taaPlan, 0, sizeof( taaPlan ) );
 	if ( present->taaState.pending )
 		(void)Ral_TemporalCancelFrame( &present->taaState, present->taaState.pendingPlan.frameId );
+	/* TAA switched off (r_aa changed): drop the history so a later switch-on starts from the bootstrap frame, not a stale image. */
+	if ( !present->taaEnabled && present->taaState.active ) {
+		Ral_TemporalInit( &present->taaState );
+		present->taaFrameId = 0u;
+	}
 	if ( present->taaEnabled && offscreenScene && receipt.width && receipt.height ) {
 		ralTemporalFrameInput_t taaInput;
 		memset( &taaInput, 0, sizeof( taaInput ) );
