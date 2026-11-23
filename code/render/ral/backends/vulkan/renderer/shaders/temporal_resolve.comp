@@ -282,7 +282,7 @@ vec2 dlMotionVelocity(ivec2 px, int tileIndex, float centerValid) {
 // that feeds a precise result, and each such operation is emitted by SPIRV-Cross as an optnone spvFAdd/spvFMul call that the
 // Metal compiler does not inline: measured at ~0.9 ms of this pass at 1280x720. The box needs no bit-exact arithmetic (it only
 // bounds a clamp), whereas the reprojection and the final blend keep their precise chains.
-bool neighborhoodBox(int tileIndex, out vec3 boxMin, out vec3 boxMax) {
+bool neighborhoodBox(int tileIndex, out vec3 boxMin, out vec3 boxMax, out vec3 boxMean) {
 	vec3 neighborhoodMin = vec3(3.402823466e+38);
 	vec3 neighborhoodMax = vec3(-3.402823466e+38);
 	vec3 momentSum = vec3(0.0);
@@ -310,6 +310,7 @@ bool neighborhoodBox(int tileIndex, out vec3 boxMin, out vec3 boxMax) {
 	}
 	boxMin = clipMin;
 	boxMax = clipMax;
+	boxMean = momentSum * (1.0 / 9.0);
 	return true;
 }
 
@@ -365,7 +366,8 @@ void main() {
 			vec4 prior = samplePreviousColorLinear(previousTexel);
 			vec3 clipMin;
 			vec3 clipMax;
-			if (finite4(prior) && neighborhoodBox(tileIndex, clipMin, clipMax)) {
+			vec3 clipMean;
+			if (finite4(prior) && neighborhoodBox(tileIndex, clipMin, clipMax, clipMean)) {
 				vec3 clampedPrior = clamp(prior.rgb, clipMin, clipMax);
 				// Scale the history weight by the pixel's confidence. At
 				// valid == 1 this is exactly the previous behaviour
@@ -379,7 +381,10 @@ void main() {
 				float weight = scalePrecise(baseWeight, confidence);
 				precise vec3 resolvedRgb = mixPrecise(current.rgb, clampedPrior,
 					weight);
-				result = vec4(resolvedRgb, current.a);
+				// Detail restoration. Every frame resamples the history bilinearly at a fractional offset, a low-pass that leaves about half of
+				// the AA-off edge energy (measured on Vulkan and Metal). A fraction of the current frame's own high frequency (its pixel
+				// minus its 3x3 mean) is added back, clamped into the neighbourhood box so it cannot overshoot or ring.
+				result = vec4(clamp(resolvedRgb + 0.6 * (current.rgb - clipMean), clipMin, clipMax), current.a);
 				usedHistory = true;
 			}
 		}
