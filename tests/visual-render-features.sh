@@ -2915,6 +2915,62 @@ PYEOF
     printf "  beamghost: beam %s px, old-only region %s px, TAA deviation there=%s repeat-noise=%s -> %s\n" "$1" "$2" "$3" "$4" "$v"
     ;;
 
+rocketghost)
+    # Rocket explosion trail (TASK-263). The harness player fires the rocket launcher point blank at a wall (noclip off, so the shot
+    # is allowed; fixedtime 8 and a script-stepped shader time make the frames repeatable). Frames f0 and f1 (RG_FRAMES apart) are
+    # captured RG_AFTER frames after the shot with AA off, with TAA mask 0 and mask 1, and a shot-less reference. Explosion mask =
+    # pixels where the AA-off frame differs from the reference; old-only mask = covered in f0, not in f1. Deviation of TAA from AA-off
+    # there is the trail; the mask can only help if the explosion's translucent draws take the exact route.
+    RG_POS="${RG_POS:-400 2096 40 180}"; RG_AFTER="${RG_AFTER:-16}"; RG_FRAMES="${RG_FRAMES:-3}"; RG_DT="${RG_DT:-0.05}"
+    rg() {  # tag aa mask fire(0/1)
+        local tag="$1" aa="$2" mask="$3" fire="$4" k n=100
+        { printf 'set cg_draw2D 0\nset cg_drawGun 0\nset fixedtime 8\nset r_pinFrameTime 1.0\nset r_dbgTemporalEffectMask %s\ncmd noclip\ncmd give all\n' "$mask"
+          for (( k = 0; k <= n + RG_FRAMES; k++ )); do
+              printf 'set r_pinShaderTime %s\n' "$(awk -v k="$k" -v dt="$RG_DT" 'BEGIN{printf "%.4f", 2.0 + k * dt}')"
+              [ "$k" = 40 ] && printf 'weapon 5\n'
+              [ "$k" = $(( n - RG_AFTER )) ] && [ "$fire" = 1 ] && printf '+attack\n'
+              [ "$k" = $(( n - RG_AFTER + 1 )) ] && printf -- '-attack\n'
+              printf 'wait 1\n'
+              [ "$k" = "$n" ] && printf 'screenshot vrf_%s_f0\n' "$tag"
+          done
+          printf 'screenshot vrf_%s_f1\nwait 4\n' "$tag"; } > "$SMOKE_HOME/base/vrf_rg.cfg"
+        CAP_POST_CMD="exec vrf_rg.cfg" capture_fixed_cam arena1 "$RG_POS" "$tag" +set r_aa "$aa" >/dev/null || return 1
+    }
+    PNG2RAW_BIN="${PNG2RAW:-$WIRED_SOURCE/tools/png2raw/png2raw}"
+    rg rg_ref 0 1 0 || FAIL=1
+    rg rg_off 0 1 1 || FAIL=1
+    rg rg_m0 1 0 1 || FAIL=1
+    rg rg_m1 1 1 1 || FAIL=1
+    rg rg_m1b 1 1 1 || FAIL=1
+    res="$(python3 - "$SHOTDIR" "$PNG2RAW_BIN" <<'PYEOF'
+import subprocess, struct, sys
+d, dec = sys.argv[1:3]
+def load(n):
+    p = f"{d}/vrf_{n}.png"
+    w, h = struct.unpack(">II", open(p, "rb").read(24)[16:24])
+    return w, h, subprocess.check_output([dec, p])
+w, h, r1 = load("rg_ref_f1"); _, _, o0 = load("rg_off_f0"); _, _, o1 = load("rg_off_f1")
+_, _, a1 = load("rg_m0_f1"); _, _, b1 = load("rg_m1_f1"); _, _, c1 = load("rg_m1b_f1")
+step = 2
+pix = [(y * w + x) * 3 for y in range(0, h, step) for x in range(0, w, step)]
+def diff(a, b, i): return max(abs(a[i] - b[i]), abs(a[i+1] - b[i+1]), abs(a[i+2] - b[i+2]))
+expl = [i for i in pix if diff(o1, r1, i) > 24]
+old = [i for i in pix if diff(o0, r1, i) > 24 and diff(o1, r1, i) <= 6]
+def dev(a, b, idx): return sum(diff(a, b, i) for i in idx) / len(idx) if idx else 0.0
+print("%d %d %.3f %.3f %.3f" % (len(expl), len(old), dev(a1, o1, old), dev(b1, o1, old), dev(c1, b1, old)))
+PYEOF
+)"
+    set -- $res
+    v="$(awk -v ne="$1" -v no="$2" -v d0="$3" -v d1="$4" -v nz="$5" 'BEGIN{
+        if (ne < 200) print "FAIL(no explosion footprint: " ne " px; the shot did not reach the wall or the frames are off)";
+        else if (no < 100) print "OK(footprint " ne " px but nothing left a position between the frames: " no " px; raise RG_FRAMES)";
+        else if (d1 > d0 + 0.25) print "FAIL(the effect mask made the old region deviate MORE: " d0 " -> " d1 ")";
+        else if (d0 > d1 + 0.25 && nz < d0) print "OK(mask removes the trail: " d0 " -> " d1 ", noise " nz ")";
+        else print "OK(no measurable mask effect: mask0 " d0 " mask1 " d1 " noise " nz ")" }')"
+    [ "${v:0:2}" = "OK" ] || FAIL=1
+    printf "  rocketghost: explosion %s px, old-only %s px, deviation from AA-off mask0=%s mask1=%s repeat-noise=%s -> %s\n" "$1" "$2" "$3" "$4" "$5" "$v"
+    ;;
+
 worldphase)
     # r_dbgWorldPhase splits the opaque world batches of the main view into two phases and draws
     # the second one later (at the opaque -> transparent crossing) through the replay mechanism
