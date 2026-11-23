@@ -3099,6 +3099,23 @@ IF(APPLE)
 		LIST(APPEND RAL_METAL_SMAA_HEADERS ${SMAA_HEADER})
 	ENDFOREACH()
 	ADD_CUSTOM_TARGET(ral_metal_smaa_metallibs DEPENDS ${RAL_METAL_SMAA_HEADERS})
+	SET(RAL_METAL_TAA_HEADERS)
+	FOREACH(TAA_SHADER IN ITEMS temporal_resolve_comp temporal_bootstrap_aa_comp)
+		SET(TAA_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/shaders/portable/${TAA_SHADER}_spv.msl")
+		SET(TAA_BASE "${RAL_METAL_PRODUCT_SHADER_DIR}/${TAA_SHADER}")
+		SET(TAA_HEADER "${RAL_METAL_PRODUCT_SHADER_DIR}/ral_metal_${TAA_SHADER}_metallib.h")
+		ADD_CUSTOM_COMMAND(OUTPUT ${TAA_HEADER}
+			BYPRODUCTS "${TAA_BASE}.air" "${TAA_BASE}.metallib"
+			COMMAND ${CMAKE_COMMAND} -E make_directory ${RAL_METAL_PRODUCT_SHADER_DIR}
+			COMMAND xcrun -sdk macosx metal -x metal -c ${TAA_SOURCE} -o "${TAA_BASE}.air"
+			COMMAND xcrun -sdk macosx metallib "${TAA_BASE}.air" -o "${TAA_BASE}.metallib"
+			COMMAND ${CMAKE_COMMAND} -DINPUT=${TAA_BASE}.metallib -DOUTPUT=${TAA_HEADER}
+				-DSYMBOL=ral_metal_${TAA_SHADER}_metallib
+				-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake
+			DEPENDS ${TAA_SOURCE} ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake VERBATIM)
+		LIST(APPEND RAL_METAL_TAA_HEADERS ${TAA_HEADER})
+	ENDFOREACH()
+	ADD_CUSTOM_TARGET(ral_metal_taa_metallibs DEPENDS ${RAL_METAL_TAA_HEADERS})
 	SET(RAL_METAL_ATMOSPHERE_HEADERS)
 	FOREACH(ATMOSPHERE_SHADER IN ITEMS atmosphere_froxel_inject atmosphere_froxel_light
 			atmosphere_froxel_cloud atmosphere_froxel_integrate forwardplus_tile)
@@ -3245,6 +3262,7 @@ IF(APPLE)
 		code/render/ral/backends/metal/ral_metal_exposure.mm
 		code/render/ral/backends/metal/ral_metal_bloom.mm
 		code/render/ral/backends/metal/ral_metal_smaa.mm
+		code/render/ral/backends/metal/ral_metal_taa.mm
 		code/render/ral/backends/metal/ral_metal_atmosphere.mm
 		code/render/ral/backends/metal/ral_metal_present.mm
 		code/render/frontend/render_material_runtime_catalog.c
@@ -3310,7 +3328,7 @@ IF(APPLE)
 		code/qcommon code/render/ral/core code/render/ral/backends/metal code/render/frontend)
 	TARGET_INCLUDE_DIRECTORIES(ral_metal PRIVATE ${RAL_METAL_PRODUCT_SHADER_DIR})
 	ADD_DEPENDENCIES(ral_metal ral_metal_product_metallib
-		ral_metal_particle_metallibs ral_metal_sky_metallibs ral_metal_exposure_metallibs ral_metal_bloom_metallibs ral_metal_smaa_metallibs
+		ral_metal_particle_metallibs ral_metal_sky_metallibs ral_metal_exposure_metallibs ral_metal_bloom_metallibs ral_metal_smaa_metallibs ral_metal_taa_metallibs
 		ral_metal_atmosphere_metallibs)
 	TARGET_LINK_LIBRARIES(ral_metal PUBLIC
 		${WIRED_METAL_FRAMEWORK} ${WIRED_FOUNDATION_FRAMEWORK}
