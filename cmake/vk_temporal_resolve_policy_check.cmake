@@ -148,9 +148,10 @@ require_count(SHADER "previousTexel\\." 0
 	"no post-declaration reprojection component or swizzle mutation is admitted")
 require_count(SHADER "currentUv" 0
 	"color path must not normalize current coordinates")
-# Exactly one filtered fetch: the 9-tap bilinear evaluation of the bicubic history kernel. Every other input is an integer texel fetch.
-require_count(SHADER "textureLod" 1
-	"resolve inputs must use integer texel fetches (except the one bicubic history fetch)")
+# Exactly two filtered fetch sites, both on the history: the bicubic history taps and the output-only sharpening blur. Every other
+# input is an integer texel fetch.
+require_count(SHADER "textureLod" 2
+	"exactly two filtered history fetch sites: the bicubic history taps and the output-only sharpening blur")
 require_count(SHADER "velocity\\." 0
 	"no component-wise velocity transform is admitted")
 require_count(SHADER "velocity[ \t]*(\\+|-|\\*|/)?=" 1

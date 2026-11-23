@@ -140,6 +140,22 @@ vec4 samplePreviousColor(vec2 texel) {
 	return sum * inversesqrt(total * total);
 }
 
+// Output-only sharpening. TAA averages the jittered sub-pixel samples, which softens texture detail SMAA leaves untouched. The
+// detail is taken from the history (previous output, stable on the fixed grid): its bicubic sample minus a [1 2 1] blur built from
+// four bilinear taps half a texel off on the diagonals. It is added to the displayed colour only; the history keeps the unsharpened
+// result, so nothing feeds back and nothing follows the jitter (re-injecting the current frame's detail did, as shimmer).
+const float outputSharpen = 0.5;
+vec3 samplePreviousBlur(vec2 texel) {
+	vec2 extent = vec2(pc.extent);
+	vec2 invExtent = inversesqrt(extent * extent);
+	vec3 sum = vec3(0.0);
+	for (int i = 0; i < 4; ++i) {
+		vec2 o = vec2((i & 1) != 0 ? 0.5 : -0.5, (i & 2) != 0 ? 0.5 : -0.5);
+		sum += textureLod(sampler2D(previousColor, nearestSampler), (texel + 0.5 + o) * invExtent, 0.0).rgb;
+	}
+	return sum * 0.25;
+}
+
 float samplePreviousDepthLinear(vec2 texel) {
 	vec2 baseFloat = floor(texel);
 	ivec2 base = ivec2(baseFloat);
@@ -360,6 +376,7 @@ void main() {
 	vec3 clipMax;
 	vec4 current = reconstructCurrent(tileIndex, clipMin, clipMax);
 	vec4 result = current;
+	vec4 displayed = current;
 	bool usedHistory = false;
 	float valid = texelFetch(
 		sampler2D(motionValidity, nearestSampler), pixel, 0).r;
@@ -408,13 +425,18 @@ void main() {
 				precise vec3 resolvedRgb = mixPrecise(current.rgb, clampedPrior,
 					weight);
 				result = vec4(resolvedRgb, current.a);
+				// Sharpened copy for display only, kept inside the range of the result and the clamp box (no halos).
+				vec3 detail = prior.rgb - samplePreviousBlur(previousTexel);
+				displayed = vec4(clamp(resolvedRgb + outputSharpen * confidence * detail,
+					min(resolvedRgb, clipMin), max(resolvedRgb, clipMax)), current.a);
 				usedHistory = true;
 			}
 		}
 	}
 	if (!usedHistory && finite4(current) && (pc.qualityFlags & 4u) != 0u) result = fxSpatialAa(pixel, current);
 	if (!finite4(result)) result = vec4(0.0);
-	imageStore(resolvedColor, pixel, result);
+	if (!usedHistory || !finite4(displayed)) displayed = result;
+	imageStore(resolvedColor, pixel, displayed);
 	imageStore(historyOutColor, pixel, result);
 	imageStore(historyOutLinearDepth, pixel, vec4(storeLinearDepth(tileDepth[tileIndex])));
 }
