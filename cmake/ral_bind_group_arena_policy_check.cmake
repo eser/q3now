@@ -429,6 +429,8 @@ foreach(NEEDLE IN ITEMS
 	"Ral_BindGroupArenaReceiptExact( &arenaLive, ci->arenaReceipt )"
 	"dai.descriptorPool     = pool;"
 	"if ( g->ownsSet && !g->arena )"
+	"ralVk_DeferFreeArenaSet( b, g->set, g->arena, g->arenaReceipt.generation )"
+	"VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;   // a group's set is returned on destroy"
 	"Ral_BindGroupArenaLifecyclePublishReset")
 	require_text(VULKAN "${NEEDLE}" "Vulkan arena lowering")
 endforeach()
@@ -1548,7 +1550,7 @@ if(NOT NATIVE_HOST EQUAL -1)
 	message(FATAL_ERROR "Vulkan token escaped portable/WebGPU-shaped arena host")
 endif()
 foreach(NEEDLE IN ITEMS
-	"capturedInfo.flags == 0u"
+	"capturedInfo.flags == VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT"
 	"VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC"
 	"VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC"
 	"resetResult = VK_ERROR_DEVICE_LOST"
@@ -1556,7 +1558,7 @@ foreach(NEEDLE IN ITEMS
 	"capturedAllocationPool == (VkDescriptorPool)(uintptr_t)0x55u"
 	"Ral_BindGroupArenaReceiptExact( &group->arenaReceipt, &first )"
 	"!ralVk_BindGroupArenaLive( group )"
-	"freeCalls == 0u"
+	"freeCalls == 1u"
 	"arena->lifecycle.generation = UINT64_MAX - 1u"
 	"createResult = VK_ERROR_OUT_OF_HOST_MEMORY"
 	"destroyCalls == 1u")

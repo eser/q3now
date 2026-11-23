@@ -29,7 +29,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/lib/wired_paths.sh"
 
 TIMEOUT_RUNNER="$SCRIPT_DIR/run-with-timeout.py"
-ROUNDS="${AAC_ROUNDS:-1}"   # more than one round (32 live mode switches) exhausts the descriptor pool, see the AA-switch bug
+ROUNDS="${AAC_ROUNDS:-1}"   # AAC_ROUNDS=8 with arms "0 1 2" is the live-switch regression test (72 switches, TASK-258: arena sets were never reclaimed)
 
 WIRED="${1:-${WIRED_BINARY:-}}"
 [ -n "$WIRED" ] && [ -x "$WIRED" ] || { echo "usage: $0 /absolute/path/to/wired"; exit 64; }

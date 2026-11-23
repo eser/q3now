@@ -684,7 +684,8 @@ typedef enum {
 	RAL_RES_PIPELINE,         // h1 = VkPipeline
 	RAL_RES_PIPELINE_LAYOUT,  // h1 = VkPipelineLayout     (layout cache refcount → 0)
 	RAL_RES_CMD_BUFFER,       // h1 = VkCommandBuffer, h2 = ralQueueType_t (which cmdPool to free from)
-	RAL_RES_ALLOCATION_ONLY   // no handle; alloc freed after aliased child images retire
+	RAL_RES_ALLOCATION_ONLY,  // no handle; alloc freed after aliased child images retire
+	RAL_RES_ARENA_DESC_SET    // h1 = VkDescriptorSet, owner = the arena it came from, gen = the arena generation it was allocated in
 } ralResourceKind_t;
 
 typedef struct {
@@ -693,6 +694,8 @@ typedef struct {
 	uint64_t           h2;            // secondary handle (VkImageView for IMAGE_AND_VIEW), else 0
 	ralVkAllocation_t *alloc;         // memory to free, or NULL
 	uint64_t           destroyedAtFrame;
+	const ralBindGroupArena_t *owner; // RAL_RES_ARENA_DESC_SET only
+	uint64_t           gen;           // RAL_RES_ARENA_DESC_SET only
 } ralVkPendingDestroy_t;
 
 typedef struct ralVkLegacyShaderModuleNode_s {
@@ -913,6 +916,10 @@ void     ralVk_RunPipelineTest          ( ralBackend_t *b );
 qboolean ralVk_InitFrameLayer     ( ralBackend_t *b );
 void     ralVk_ShutdownFrameLayer ( ralBackend_t *b );
 void     ralVk_DeferDestroy       ( ralBackend_t *b, ralResourceKind_t kind, uint64_t h1, uint64_t h2, ralVkAllocation_t *alloc );
+// An arena set is reclaimed individually once the frames that may still use it have retired, but only if its arena has not been reset
+// (a reset already returned every set) or destroyed (the pending entries are purged by Ral_DestroyBindGroupArena).
+void     ralVk_DeferFreeArenaSet  ( ralBackend_t *b, VkDescriptorSet set, const ralBindGroupArena_t *arena, uint64_t generation );
+void     ralVk_PurgeArenaSets     ( ralBackend_t *b, const ralBindGroupArena_t *arena );
 void     ralVk_DrainPendingDestroy( ralBackend_t *b, uint64_t drainBeforeFrame );   // ~0ull → drain everything
 qboolean ralVk_HasExtension       ( const VkExtensionProperties *exts, uint32_t count, const char *name );
 void     ralVk_SetObjectName      ( ralBackend_t *b, uint64_t handle, VkObjectType type, const char *name );

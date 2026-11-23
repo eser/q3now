@@ -217,7 +217,7 @@ int main( void ) {
 		&& first.generation == 1u && first.maxGroups == 200u
 		&& Ral_GetBindGroupArenaHandle( arena ) == (void *)(uintptr_t)0x55u );
 	CHECK( capturedInfo.sType == VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
-		&& capturedInfo.flags == 0u && capturedInfo.maxSets == 200u
+		&& capturedInfo.flags == VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT && capturedInfo.maxSets == 200u
 		&& capturedInfo.poolSizeCount == 5u
 		&& capturedSizes[0].type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
 		&& capturedSizes[1].type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC
@@ -354,6 +354,9 @@ int main( void ) {
 		&& capturedFirstSampler == arraySampler.sampler
 		&& capturedLastSampler == arraySampler.sampler );
 	Ral_DestroyBindGroup( arrayGroup );
+	// An arena group destroyed in the generation it was allocated in returns its set to the arena's pool (without this every republished
+	// cohort leaked its sets until a reset); the free is generation-checked, so a group that outlives a reset frees nothing (below).
+	CHECK( freeCalls == 1u );
 	value.sampler = NULL;
 	CHECK( Ral_CreateBindGroup( &backend, &groupInfo ) == NULL
 		&& allocateCalls == 2u && updateCalls == 6u );
@@ -392,7 +395,7 @@ int main( void ) {
 		&& !Ral_BindGroupArenaReceiptExact( &first, &second ) );
 	CHECK( !ralVk_BindGroupArenaLive( group ) );
 	Ral_DestroyBindGroup( group );
-	CHECK( freeCalls == 0u );
+	CHECK( freeCalls == 1u );   // unchanged: the group belongs to the generation before the reset
 	arena->lifecycle.generation = UINT64_MAX - 1u;
 	CHECK( Ral_GetBindGroupArenaReceipt( arena, &stale ) == ralSuccess );
 	CHECK( Ral_ResetBindGroupArenaExact( arena, &stale, &untouched )

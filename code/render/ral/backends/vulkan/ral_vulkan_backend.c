@@ -1560,6 +1560,10 @@ static void ralVk_DoDestroyEntry( ralBackend_t *b, const ralVkPendingDestroy_t *
 	case RAL_RES_IMAGE_VIEW:      b->vk.DestroyImageView( b->device, RAL_VK_U2H( VkImageView, e->h1 ), NULL ); break;
 	case RAL_RES_SAMPLER:         b->vk.DestroySampler( b->device, RAL_VK_U2H( VkSampler, e->h1 ), NULL ); break;
 	case RAL_RES_DESC_SET_LAYOUT: b->vk.DestroyDescriptorSetLayout( b->device, RAL_VK_U2H( VkDescriptorSetLayout, e->h1 ), NULL ); break;
+	case RAL_RES_ARENA_DESC_SET:  { VkDescriptorSet ds = RAL_VK_U2H( VkDescriptorSet, e->h1 );
+		if ( e->owner && e->owner->pool != VK_NULL_HANDLE && e->owner->lifecycle.generation == e->gen )
+			b->vk.FreeDescriptorSets( b->device, e->owner->pool, 1, &ds );
+		break; }
 	case RAL_RES_DESC_SET:        { VkDescriptorSet ds = RAL_VK_U2H( VkDescriptorSet, e->h1 ); if ( b->descriptorPool != VK_NULL_HANDLE ) b->vk.FreeDescriptorSets( b->device, b->descriptorPool, 1, &ds ); break; }
 	case RAL_RES_FENCE:           b->vk.DestroyFence( b->device, RAL_VK_U2H( VkFence, e->h1 ), NULL ); break;
 	case RAL_RES_SEMAPHORE:       b->vk.DestroySemaphore( b->device, RAL_VK_U2H( VkSemaphore, e->h1 ), NULL ); break;
@@ -1591,7 +1595,7 @@ void ralVk_DrainPendingDestroy( ralBackend_t *b, uint64_t drainBeforeFrame ) {
 
 void ralVk_DeferDestroy( ralBackend_t *b, ralResourceKind_t kind, uint64_t h1, uint64_t h2, ralVkAllocation_t *alloc ) {
 	ralVkPendingDestroy_t e;
-	e.kind = kind; e.h1 = h1; e.h2 = h2; e.alloc = alloc;
+	e.kind = kind; e.h1 = h1; e.h2 = h2; e.alloc = alloc; e.owner = NULL; e.gen = 0u;
 	if ( !b->pendingDestroy ) {                 // frame layer not up — destroy now (drain the GPU first)
 		if ( b->device != VK_NULL_HANDLE && b->vk.DeviceWaitIdle ) b->vk.DeviceWaitIdle( b->device );
 		e.destroyedAtFrame = 0;
@@ -1604,6 +1608,37 @@ void ralVk_DeferDestroy( ralBackend_t *b, ralResourceKind_t kind, uint64_t h1, u
 	}
 	e.destroyedAtFrame = b->currentFrame;
 	b->pendingDestroy[ b->numPendingDestroy++ ] = e;
+}
+
+void ralVk_DeferFreeArenaSet( ralBackend_t *b, VkDescriptorSet set, const ralBindGroupArena_t *arena, uint64_t generation ) {
+	ralVkPendingDestroy_t e;
+	if ( !b || !arena || set == VK_NULL_HANDLE ) return;
+	e.kind = RAL_RES_ARENA_DESC_SET; e.h1 = RAL_VK_H2U( set ); e.h2 = 0; e.alloc = NULL; e.owner = arena; e.gen = generation;
+	if ( !b->pendingDestroy ) {                 // frame layer not up: nothing can still use the set after an idle wait
+		if ( b->device != VK_NULL_HANDLE && b->vk.DeviceWaitIdle ) b->vk.DeviceWaitIdle( b->device );
+		e.destroyedAtFrame = 0;
+		ralVk_DoDestroyEntry( b, &e );
+		return;
+	}
+	if ( b->numPendingDestroy >= RAL_VK_PENDING_DESTROY_MAX ) {
+		if ( b->vk.DeviceWaitIdle ) b->vk.DeviceWaitIdle( b->device );
+		ralVk_DrainPendingDestroy( b, ~0ull );
+	}
+	e.destroyedAtFrame = b->currentFrame;
+	b->pendingDestroy[ b->numPendingDestroy++ ] = e;
+}
+
+// The arena is going away: pending frees of its sets must not touch it afterwards.
+void ralVk_PurgeArenaSets( ralBackend_t *b, const ralBindGroupArena_t *arena ) {
+	uint32_t i;
+	if ( !b || !b->pendingDestroy ) return;
+	for ( i = 0; i < b->numPendingDestroy; ++i ) {
+		if ( b->pendingDestroy[i].kind == RAL_RES_ARENA_DESC_SET && b->pendingDestroy[i].owner == arena ) {
+			b->pendingDestroy[i].kind = RAL_RES_ALLOCATION_ONLY;
+			b->pendingDestroy[i].alloc = NULL;
+			b->pendingDestroy[i].owner = NULL;
+		}
+	}
 }
 
 // ── per-frame lifecycle ─────────────────────────────────────────────────

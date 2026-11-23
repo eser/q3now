@@ -2179,6 +2179,7 @@ ralBindGroupArena_t *Ral_CreateBindGroupArena(
 	arena->backend = backend;
 	RAL_ZERO( nativeInfo );
 	nativeInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+	nativeInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;   // a group's set is returned on destroy (generation-checked)
 	nativeInfo.maxSets = createInfo->maxGroups;
 	nativeInfo.poolSizeCount = createInfo->numEntries;
 	nativeInfo.pPoolSizes = sizes;
@@ -2234,6 +2235,7 @@ ralResult_t Ral_ResetBindGroupArenaExact(
 
 void Ral_DestroyBindGroupArena( ralBindGroupArena_t *arena ) {
 	if ( !arena ) return;
+	ralVk_PurgeArenaSets( arena->backend, arena );
 	if ( arena->pool != VK_NULL_HANDLE )
 		arena->backend->vk.DestroyDescriptorPool(
 			arena->backend->device, arena->pool, NULL );
@@ -2557,8 +2559,7 @@ ralBindGroup_t *Ral_CreateBindGroup( ralBackend_t *b, const ralBindGroupCreateIn
 						? val->buffer->size - val->bufferOffset : val->bufferRange;
 					if ( !ralVk_RegisterDynamicBuffer( bg, val->binding, val->buffer,
 						val->bufferOffset, range ) ) {
-						if ( !bg->arena )
-							b->vk.FreeDescriptorSets( b->device, b->descriptorPool, 1, &bg->set );
+						b->vk.FreeDescriptorSets( b->device, bg->arena ? bg->arena->pool : b->descriptorPool, 1, &bg->set );
 						free( bg ); return NULL;
 					}
 				}
@@ -2619,6 +2620,11 @@ void Ral_DestroyBindGroup( ralBindGroup_t *g ) {
 	// own descriptor pool — vkFreeDescriptorSets would race with / double-free
 	// against the existing vkResetDescriptorPool / vk_destroy_descriptor_pools
 	// path. Wrapper struct is freed in both cases.
+	if ( g->ownsSet && g->arena ) {
+		// Arena set: returned to its arena's pool after the frames that may use it retire, if the arena is still in the generation it
+		// was allocated in. Without this every republished cohort (attachment rebuild, r_aa switch) leaked its sets until a reset.
+		ralVk_DeferFreeArenaSet( b, g->set, g->arena, g->arenaReceipt.generation );
+	}
 	if ( g->ownsSet && !g->arena ) {
 		// the pool has FREE_DESCRIPTOR_SET_BIT — the set is returned to the
 		// pool via vkFreeDescriptorSets after the deferred-destroy delay.
