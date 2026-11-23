@@ -208,10 +208,11 @@ print(
 # this configuration (Apple GPU, 2560x1440 resolve for the 1280x720 logical window): +0.46..+0.69 ms over six runs. The gate used to
 # flip between two scene states (+0.6..1.0 ms and +2.1..2.3 ms) because the camera was placed while the player was still falling out
 # of the noclip transition; the velocity now decays before setviewpos.
-# The absolute 0.75 ms depends on the GPU's power state: the same code measured +0.46..+0.69 ms in the morning and +1.2..+1.4 ms
-# later the same day (reverting every renderer change in between gave the same +1.3). SMAA is measured in the same run as the
+# The absolute 0.75 ms is not stable on this machine: the same code measured +0.46..+0.69 ms in the morning and +0.2..+1.4 ms
+# later the same day, run to run (reverting every renderer change in between gave the same +1.3; the cause of the regime is not identified). SMAA is measured in the same run as the
 # reference the owner asked TAA to match: TAA is accepted when it is within 0.75 ms of AA off OR not dearer than SMAA by more than
-# SMAA_MARGIN_MS (the noise of two 220-frame windows is about 0.15 ms).
+# SMAA_MARGIN_MS. Observed TAA-minus-SMAA gaps at the default settings: -0.26..+0.20 ms over five runs; a min/max-only run (not the
+# default) reached +0.57 ms and failed, so the margin is tight rather than generous.
 smaa_margin = float(os.environ.get("TQ_SMAA_MARGIN_MS", "0.35"))
 if on_ms > 4.0 or (delta_ms > 0.75 and delta_ms > smaa_delta_ms + smaa_margin):
     raise SystemExit(
