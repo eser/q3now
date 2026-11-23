@@ -29,11 +29,9 @@ for line in lines:
 required={
  "%range":"OpFSub","%scaled":"OpFMul","%denominator":"OpFAdd",
  "%numerator":"OpFMul","%result":"OpFDiv",
- "%oneMinus":"OpFSub","%left":"OpFMul","%right":"OpFMul","%result_0":"OpFAdd",
- "%oneMinus_0":"OpFSub","%left_0":"OpVectorTimesScalar",
- "%right_0":"OpVectorTimesScalar","%result_1":"OpFAdd",
- "%oneMinus_1":"OpFSub","%left_1":"OpVectorTimesScalar",
- "%right_1":"OpVectorTimesScalar","%result_2":"OpFAdd",
+ # Only the vec3 mixPrecise (the final history blend) is reachable now: the bilinear history taps use contractable lerps, so the float
+ # and vec4 variants are not emitted and the generated names %oneMinus/%left/%right/%result_0 belong to the vec3 one.
+ "%oneMinus":"OpFSub","%left":"OpVectorTimesScalar","%right":"OpVectorTimesScalar","%result_0":"OpFAdd",
  "%f":"OpFSub","%f_0":"OpFSub",
  "%jitterDelta":"OpFSub","%jitterTexel":"OpFMul","%motionTexel":"OpFMul",
  "%unjitteredPreviousTexel":"OpFSub","%previousTexel":"OpFAdd",

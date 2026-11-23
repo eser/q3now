@@ -84,6 +84,12 @@ float scalePrecise(float weight, float confidence) {
 	return scaled;
 }
 
+// Plain (contractable) lerps for the bilinear taps of the history. The reprojected POSITION stays precise (jitter, motion, fraction f);
+// the weights applied to already-fetched texels need no bit-exactness, and every `precise` operation costs a non-inlined optnone
+// call after SPIRV-Cross (24 of them per pixel in the two bilinear taps). The final history blend keeps mixPrecise.
+float mixFast(float x, float y, float a) { return x * (1.0 - a) + y * a; }
+vec4 mixFast(vec4 x, vec4 y, float a) { return x * (1.0 - a) + y * a; }
+
 vec4 sampleCurrent(ivec2 pixel) {
 	ivec2 bounded = clamp(pixel, ivec2(0), ivec2(pc.extent) - ivec2(1));
 	return texelFetch(sampler2D(currentColor, nearestSampler), bounded, 0);
@@ -102,9 +108,9 @@ vec4 samplePreviousColorLinear(vec2 texel) {
 		clamp(base + ivec2(0, 1), ivec2(0), hi), 0);
 	vec4 c11 = texelFetch(sampler2D(previousColor, nearestSampler),
 		clamp(base + ivec2(1, 1), ivec2(0), hi), 0);
-	precise vec4 top = mixPrecise(c00, c10, f.x);
-	precise vec4 bottom = mixPrecise(c01, c11, f.x);
-	return mixPrecise(top, bottom, f.y);
+	vec4 top = mixFast(c00, c10, f.x);
+	vec4 bottom = mixFast(c01, c11, f.x);
+	return mixFast(top, bottom, f.y);
 }
 
 float samplePreviousDepthLinear(vec2 texel) {
@@ -120,9 +126,9 @@ float samplePreviousDepthLinear(vec2 texel) {
 		clamp(base + ivec2(0, 1), ivec2(0), hi), 0).r;
 	float d11 = texelFetch(sampler2D(previousLinearDepth, nearestSampler),
 		clamp(base + ivec2(1, 1), ivec2(0), hi), 0).r;
-	precise float top = mixPrecise(d00, d10, f.x);
-	precise float bottom = mixPrecise(d01, d11, f.x);
-	return mixPrecise(top, bottom, f.y);
+	float top = mixFast(d00, d10, f.x);
+	float bottom = mixFast(d01, d11, f.x);
+	return mixFast(top, bottom, f.y);
 }
 
 // Same arithmetic as temporal_history_store.comp (deliberately not precise): the folded history depth must be bit-identical to
