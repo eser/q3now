@@ -14,7 +14,7 @@
 //   * tonemap operator (PBR Neutral / AgX / Lottes / Reinhard)
 //   * colour grading (tint / saturation / contrast)
 //   * saturation mix (r_saturation)
-// FXAA is removed — SMAA replaces it as the engine's AA path.
+// FXAA is removed; temporal anti-aliasing (TAA) is the engine's AA path.
 //
 // gamma.frag downstream remains a thin "linear -> sRGB encode
 // + framebuffer-bit-depth dither" pass.
@@ -99,7 +99,7 @@ layout(constant_id = 21) const float cg_tint_b = 1.0;
 layout(constant_id = 22) const float cg_saturation = 1.0;
 layout(constant_id = 23) const float cg_contrast = 1.0;
 #endif
-// USE_FXAA removed (SMAA replaces it). Spec id 24 is reclaimed from
+// USE_FXAA removed (TAA replaces it). Spec id 24 is reclaimed from
 // the retired FXAA range for chromatic aberration (below); id 25
 // (show_ao, a FEAT_AO debug slot) stays free — no post-process
 // variant declares it, so the host's spec entry is ignored.
@@ -360,8 +360,7 @@ vec3 computeSunRays() {
 }
 #endif
 
-// applyFXAA() is removed entirely. SMAA (smaa_edge / smaa_blend
-// / smaa_resolve) is the AA path going forward.
+// applyFXAA() is removed entirely; temporal AA (temporal_resolve.comp) is the AA path.
 
 // Chromatic aberration: sample R/G/B from radially-offset UVs so the colour
 // channels fringe apart toward the screen edge (a lens dispersion look). The

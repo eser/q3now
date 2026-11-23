@@ -12,17 +12,17 @@ const reflection = join(root, 'code/render/ral/backends/vulkan/renderer/shaders/
 const overrides = join(root, 'code/render/ral/backends/vulkan/renderer/shaders/spirv/ral_shader_portability_overrides.json');
 const manifest = join(root, 'code/render/ral/backends/vulkan/renderer/shaders/spirv/ral_shader_portable_manifest.json');
 const translationDir = join(root, 'code/render/ral/backends/vulkan/renderer/shaders/portable');
-assert.equal(runPortableManifest({ reflection, overrides, manifest, translationDir, check: true }), 376);
+assert.equal(runPortableManifest({ reflection, overrides, manifest, translationDir, check: true }), 370);
 const resolved = JSON.parse(readFileSync(manifest));
 const decisions = JSON.parse(readFileSync(overrides));
-assert.equal(resolved.sourceCount, 376); assert.equal(decisions.entries.length, 376);
+assert.equal(resolved.sourceCount, 370); assert.equal(decisions.entries.length, 370);
 assert.ok(resolved.entries.every((entry, i) => entry.ordinal === i
 	&& entry.reflection.portable === true && entry.reflection.loweringRequirements.length === 0
 	&& entry.reflection.bindings.every((binding) => !binding.bindingClass.includes('UNRESOLVED'))));
 assert.equal(decisions.entries.filter((entry) => entry.inlineUniform).length, 26);
 // Twelve world IBL variants no longer sample current/previous diffuse cubes;
 // atmospheric_frag gained the semantic-emitter class texture array (TASK-239).
-assert.equal(decisions.entries.reduce((sum, entry) => sum + (entry.combinedSamplers?.length ?? 0), 0), 154);
+assert.equal(decisions.entries.reduce((sum, entry) => sum + (entry.combinedSamplers?.length ?? 0), 0), 148);
 const iblCrossfadeDecisions = decisions.entries.filter((entry) =>
 	entry.symbol.includes('_ibl') && entry.symbol.startsWith('frag_tx'));
 assert.equal(iblCrossfadeDecisions.length, 12);
@@ -52,7 +52,7 @@ const skySurfaceCompositeDecision = decisions.entries.find((entry) =>
 	entry.symbol === 'sky_surface_composite_comp_spv');
 assert.equal(skySurfaceCompositeDecision?.combinedSamplers?.length, 5);
 const symbols = decisions.entries.map((entry) => entry.symbol);
-assert.deepEqual(symbols, [...symbols].sort()); assert.equal(new Set(symbols).size, 376);
+assert.deepEqual(symbols, [...symbols].sort()); assert.equal(new Set(symbols).size, 370);
 // Six outer faces and eight authored stages fit the existing RAL/WebGPU
 // binding budgets, including the portable lowering of push constants.
 const capture = resolved.entries.find((entry) => entry.symbol === 'ral_sky_capture_frag_spv');

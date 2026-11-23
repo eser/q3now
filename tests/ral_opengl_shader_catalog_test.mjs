@@ -22,12 +22,12 @@ const exact = (bytes, digest) => {
 
 assert.equal(catalog.schemaVersion, 2);
 assert.deepEqual(catalog.requiredTargets, ['glsl460']);
-assert.equal(catalog.entries.length, 376);
-assert.equal(manifest.entries.length, 376);
+assert.equal(catalog.entries.length, 370);
+assert.equal(manifest.entries.length, 370);
 assert.equal(catalog.portableManifest.byteCount, Buffer.byteLength(manifestText));
 assert.ok(exact(Buffer.from(manifestText), catalog.portableManifest.digest));
-assert.equal(readdirSync(root).filter((name) => name.endsWith('.glsl460')).length, 376);
-for (let ordinal = 0; ordinal < 376; ++ordinal) {
+assert.equal(readdirSync(root).filter((name) => name.endsWith('.glsl460')).length, 370);
+for (let ordinal = 0; ordinal < 370; ++ordinal) {
 	const entry = catalog.entries[ordinal];
 	const portable = manifest.entries[ordinal];
 	const artifact = entry.artifacts[0];
@@ -98,4 +98,4 @@ const first = catalog.entries[0].artifacts[0];
 const bad = Buffer.from(readFileSync(join(root, `${catalog.entries[0].symbol}.glsl460`)));
 bad[bad.length - 1] ^= 1;
 assert.equal(exact(bad, first.digest), false);
-console.log('RAL OpenGL GLSL 4.60 catalog: PASS (376 modules; product artifact selected)');
+console.log('RAL OpenGL GLSL 4.60 catalog: PASS (370 modules; product artifact selected)');
