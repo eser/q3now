@@ -201,10 +201,11 @@ print(
     f"first-settled={first_settled_delta:.3f}, old-frame-residual={ghost_ratio:.2%}, "
     f"edge-ratio={edge_ratio:.3f}, AA-off-reference-delta={reference_delta:.3f}")
 # Budget. The absolute bound is the 240 Hz frame period (4.17 ms): the whole frame with TAA must fit in it. The delta bound is a
-# regression ceiling measured on this configuration (720p, stripped scene, Apple GPU): the TAA frame costs +2.1..2.2 ms over AA
-# off, of which the exact3 scene pass plus the resolve/store scaffolding is already +0.65 ms with the resolve dispatch skipped.
-# The earlier 0.75 ms target predates a full-resolution compute resolve and cannot be met by it; 2.5 ms catches a regression
-# without pretending that target is met.
+# regression ceiling measured on this configuration (720p, Apple GPU). The gate scene runs in one of two regimes that are not
+# produced by the code under test (a blend-admission A/B in the same session flipped between them regardless of the arm): with
+# "static AA-off" near 3.4 the TAA frame costs +0.6..+1.0 ms over AA off, with it near 9.4 it costs +2.1..+2.3 ms (on = 3.7..4.0
+# ms). 2.5 ms catches a regression in either regime. The earlier 0.75 ms target predates a full-resolution compute resolve and is
+# met only in the cheap regime; the exact3 scene pass plus the resolve/store scaffolding is +0.65 ms with the dispatch skipped.
 if delta_ms > 2.5 or on_ms > 4.0:
     raise SystemExit(
         f"FAIL temporal-quality GPU budget off={off_ms:.3f}ms on={on_ms:.3f}ms "
