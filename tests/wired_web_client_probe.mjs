@@ -336,7 +336,9 @@ try {
     canvas,
     statusElement: result,
     generation,
-    canvasIdentity: 0x7100 + generation
+    canvasIdentity: 0x7100 + generation,
+    // ?mute starts the client without the sound system (measurement runs on a developer machine).
+    launchArguments: new URLSearchParams(location.search).has("mute") ? "+set s_initsound 0" : ""
   });
   const first = await create(1);
   globalThis.wiredWebClientProbeFirst = first;

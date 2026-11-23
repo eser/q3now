@@ -12,7 +12,7 @@ export async function createWiredWebClient({ moduleFactory, gpu, canvas,
     statusElement, requestAnimationFrame = globalThis.requestAnimationFrame?.bind(globalThis),
     cancelAnimationFrame = globalThis.cancelAnimationFrame?.bind(globalThis),
     eventTarget = globalThis, generation = 1, canvasIdentity = 1,
-    displayMode = RAL_WEBGPU_BROWSER_DEFAULT_MODE } = {}) {
+    displayMode = RAL_WEBGPU_BROWSER_DEFAULT_MODE, launchArguments = "" } = {}) {
   if (typeof requestAnimationFrame !== "function" || typeof cancelAnimationFrame !== "function")
     throw new TypeError("browser animation-frame ownership is required");
   if (!statusElement || !("textContent" in statusElement))
@@ -31,6 +31,18 @@ export async function createWiredWebClient({ moduleFactory, gpu, canvas,
     throw new TypeError("Emscripten full-client lifecycle exports are unavailable");
   }
 
+  /* Extra launch arguments (e.g. "+set s_initsound 0" for a test page) go through the command buffer, which the client reads once
+   * at start; the default is none. */
+  const writeLaunchArguments = (text) => {
+    const pointer = module._WiredWeb_CommandBuffer?.();
+    const size = module._WiredWeb_CommandBufferSize?.() ?? 0;
+    const memory = module.wasmMemory?.buffer ?? module.HEAPU8?.buffer;
+    const bytes = new TextEncoder().encode(String(text));
+    if (!pointer || !memory || bytes.length + 1 > size) return false;
+    const view = new Uint8Array(memory, pointer, size);
+    view.set(bytes); view[bytes.length] = 0;
+    return true;
+  };
   let state = "starting", started = false, destroyed = false, frameHandle = 0;
   let lastFailure = "", pendingResize = null;
   const listeners = [];
@@ -99,6 +111,9 @@ export async function createWiredWebClient({ moduleFactory, gpu, canvas,
       }
       if (capability.status === "ready") {
 		if (!started) {
+          if (launchArguments && !writeLaunchArguments(launchArguments)) {
+            fail("Wired Web client launch arguments do not fit the command buffer"); return;
+          }
           if (!startClient()) { fail("Wired Web client rejected startup"); return; }
 			started = true; publish("running");
 		}

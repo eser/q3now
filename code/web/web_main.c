@@ -99,14 +99,20 @@ EMSCRIPTEN_KEEPALIVE int WiredWeb_ClientStart( void ) {
 	ralWebGpuBrowserModuleBorrow_t browser;
 	/* Com_Init tokenizes this buffer in place. Keep browser defaults explicit;
 	 * display enumeration and window ownership do not belong to this target. */
-	char commandLine[] =
+	static const char defaults[] =
 		"+set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 "
 		"+set r_customheight 720 +set r_modeFullscreen -2 "
-		"+set vm_game 0 +set vm_cgame 0 +set sv_pure 0 +map arena17";
+		"+set vm_game 0 +set vm_cgame 0 +set sv_pure 0";
+	/* Text the host put into the command buffer before the first start is extra launch arguments (applied before the map loads,
+	 * e.g. a test page's "+set s_initsound 0"); the shipped page writes nothing, so its command line is the defaults. */
+	char commandLine[sizeof( defaults ) + sizeof( s_webCommand ) + 16];
 
 	if ( s_client.status == WIRED_WEB_CLIENT_RUNNING ) return 1;
 	if ( s_client.status != WIRED_WEB_CLIENT_IDLE
 			&& s_client.status != WIRED_WEB_CLIENT_STOPPED ) return 0;
+	s_webCommand[sizeof( s_webCommand ) - 1] = '\0';
+	snprintf( commandLine, sizeof( commandLine ), "%s %s +map arena17", defaults, s_webCommand );
+	s_webCommand[0] = '\0';
 	memset( &browser, 0, sizeof( browser ) );
 	if ( !RalWebGpu_BrowserModuleBorrow( &browser ) || !browser.runtime
 			|| !browser.presentation || browser.width != 1280u
