@@ -389,16 +389,7 @@ void main() {
 			}
 		}
 	}
-	if (!usedHistory && finite4(current) && (pc.qualityFlags & 4u) != 0u) {
-		result = fxSpatialAa(pixel, current);
-		// The edge-directed filter blurs the pixels that have no history (entities, effects, disocclusions) by a few percent of the
-		// edge energy; the same detail restoration as the history path puts that back, inside the current 3x3 neighbourhood range.
-		vec3 fallbackMin;
-		vec3 fallbackMax;
-		vec3 fallbackMean;
-		if (neighborhoodBox(tileIndex, fallbackMin, fallbackMax, fallbackMean))
-			result = vec4(clamp(result.rgb + 0.4 * (current.rgb - fallbackMean), fallbackMin, fallbackMax), result.a);
-	}
+	if (!usedHistory && finite4(current) && (pc.qualityFlags & 4u) != 0u) result = fxSpatialAa(pixel, current);
 	if (!finite4(result)) result = vec4(0.0);
 	imageStore(resolvedColor, pixel, result);
 	imageStore(historyOutColor, pixel, result);

@@ -623,27 +623,15 @@ void main()
         ivec2 param_23 = pixel;
         vec4 param_24 = current;
         result = fxSpatialAa(param_23, param_24);
-        int param_25 = tileIndex;
-        vec3 param_26;
-        vec3 param_27;
-        vec3 param_28;
-        bool _1522 = neighborhoodBox(param_25, param_26, param_27, param_28);
-        vec3 fallbackMin = param_26;
-        vec3 fallbackMax = param_27;
-        vec3 fallbackMean = param_28;
-        if (_1522)
-        {
-            result = vec4(clamp(result.xyz + ((current.xyz - fallbackMean) * 0.4000000059604644775390625), fallbackMin, fallbackMax), result.w);
-        }
     }
-    vec4 param_29 = result;
-    if (!finite4(param_29))
+    vec4 param_25 = result;
+    if (!finite4(param_25))
     {
         result = vec4(0.0);
     }
     imageStore(resolvedColor, pixel, result);
     imageStore(historyOutColor, pixel, result);
-    float param_30 = tileDepth[tileIndex];
-    imageStore(historyOutLinearDepth, pixel, vec4(storeLinearDepth(param_30)));
+    float param_26 = tileDepth[tileIndex];
+    imageStore(historyOutLinearDepth, pixel, vec4(storeLinearDepth(param_26)));
 }
 
