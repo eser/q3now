@@ -33,8 +33,7 @@ required={
  # and vec4 variants are not emitted and the generated names %oneMinus/%left/%right/%result_0 belong to the vec3 one.
  "%oneMinus":"OpFSub","%left":"OpVectorTimesScalar","%right":"OpVectorTimesScalar","%result_0":"OpFAdd",
  "%f":"OpFSub","%f_0":"OpFSub",
- "%jitterDelta":"OpFSub","%jitterTexel":"OpFMul","%motionTexel":"OpFMul",
- "%unjitteredPreviousTexel":"OpFSub","%previousTexel":"OpFAdd",
+ "%motionTexel":"OpFMul","%previousTexel":"OpFSub",
  "%previousCenter":"OpFAdd",
  # scalePrecise: history weight scaled by the pixel's motion confidence.
  # glslang renames the second `scaled` to %scaled_0 (the first belongs to

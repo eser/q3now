@@ -76,10 +76,14 @@ require_text(SHADER "layout(rgba16f, set = 0, binding = 7) uniform writeonly ima
 	"resolved output ABI missing")
 require_text(SHADER "precise vec2 motionTexel = velocity * vec2(pc.extent);"
 	"previous texel must consume motion velocity without division")
-require_text(SHADER "precise vec2 unjitteredPreviousTexel = vec2(pixel) - motionTexel;"
-	"previous texel subtraction must be explicit")
-require_text(SHADER "pc.previousEffectiveJitterUv - pc.currentEffectiveJitterUv"
-	"previous UV must remove current and add prior effective jitter")
+require_text(SHADER "precise vec2 previousTexel = vec2(pixel) - motionTexel;"
+	"history lives on the fixed pixel grid: the previous texel is the pixel minus the motion only")
+require_count(SHADER "previousEffectiveJitterUv - " 0
+	"the history must not be shifted by the jitter delta (it would put the output on the jittered grid)")
+require_text(SHADER "vec4 current = reconstructCurrent(tileIndex);"
+	"the current frame must be reconstructed at the pixel centre from the jittered tile")
+require_text(SHADER "vec2 t = pc.currentEffectiveJitterUv * vec2(pc.extent);"
+	"the reconstruction must use the current effective jitter in texels")
 require_text(SHADER "float samplePreviousDepthLinear(vec2 texel)"
 	"manual bilinear previous-depth helper missing")
 require_text(SHADER "vec4 samplePreviousColor(vec2 texel)"
@@ -136,8 +140,8 @@ require_count(SHADER "previousTexel[ \t]*=" 1
 	"previous texel must have one canonical authoring site")
 require_count(SHADER "previousTexel[ \t]*(\\+|-|\\*|/)?=" 1
 	"previous texel must not be reassigned after canonical authoring")
-require_count(SHADER "previousEffectiveJitterUv - pc.currentEffectiveJitterUv" 1
-	"effective jitter correction must occur exactly once")
+require_count(SHADER "pc.currentEffectiveJitterUv" 1
+	"the current jitter is read once, by the pixel-centre reconstruction")
 require_count(SHADER "previousTexel\\.y[ \t]*=" 0
 	"no hidden reprojection Y flip is admitted")
 require_count(SHADER "previousTexel\\." 0
