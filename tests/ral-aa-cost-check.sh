@@ -142,7 +142,7 @@ python3 "$TIMEOUT_RUNNER" --timeout 900 --kill-after 15 --cwd "$WD" --stdout "$S
 	"$WIRED" +set fs_basepath "$HOME_DIR" +set fs_homepath "$HOME_DIR" +set fs_game base \
 	+set com_automated 1 +set com_noHardReboot 1 +set s_initsound 0 +set s_volume 0 +set s_musicVolume 0 \
 	+set r_fullscreen 0 +set r_mode -1 +set r_customwidth "${AAC_W:-1280}" +set r_customheight "${AAC_H:-720}" \
-	+set r_vkValidate 0 +set r_temporalInputTest 0 \
+	+set r_vkValidate "${AAC_VALIDATE:-0}" +set r_temporalInputTest 0 \
 	"${STRIP[@]}" \
 	+set log_severity DEBUG +set log_file_severity DEBUG +set log_file_mode overwrite_synced \
 	+exec ral-aa-cost.cfg
