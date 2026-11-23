@@ -975,9 +975,12 @@ static qboolean CollectSkyWorkCompletion( ralOpenGlProduct_t *product,
 		 result != GL_CONDITION_SATISFIED_VALUE ) return qfalse;
 	product->gl.DeleteSync( product->skyFence );
 	product->skyFence = NULL;
-	product->skyTimingDurationNanoseconds[0] = 0u;
-	product->gl.GetQueryObjectui64v( product->skyTimingQueries[0],
-		GL_QUERY_RESULT_VALUE, &product->skyTimingDurationNanoseconds[0] );
+	{
+		/* GLuint64 is unsigned long long; uint64_t is unsigned long on LP64 Linux, so read through the GL type. */
+		glUInt64_t duration = 0u;
+		product->gl.GetQueryObjectui64v( product->skyTimingQueries[0], GL_QUERY_RESULT_VALUE, &duration );
+		product->skyTimingDurationNanoseconds[0] = (uint64_t)duration;
+	}
 	product->skyTimingState[0] = product->gl.GetError() == GL_NO_ERROR_VALUE
 			&& product->skyTimingDurationNanoseconds[0] > 0u
 		? RAL_SKY_GPU_TIMING_VALID : RAL_SKY_GPU_TIMING_FAILED;
@@ -1004,9 +1007,12 @@ static qboolean CollectSkyRadianceCompletion( ralOpenGlProduct_t *product,
 		 result != GL_CONDITION_SATISFIED_VALUE ) return qfalse;
 	product->gl.DeleteSync( product->skyRadianceFence );
 	product->skyRadianceFence = NULL;
-	product->skyTimingDurationNanoseconds[1] = 0u;
-	product->gl.GetQueryObjectui64v( product->skyTimingQueries[1],
-		GL_QUERY_RESULT_VALUE, &product->skyTimingDurationNanoseconds[1] );
+	{
+		/* GLuint64 is unsigned long long; uint64_t is unsigned long on LP64 Linux, so read through the GL type. */
+		glUInt64_t duration = 0u;
+		product->gl.GetQueryObjectui64v( product->skyTimingQueries[1], GL_QUERY_RESULT_VALUE, &duration );
+		product->skyTimingDurationNanoseconds[1] = (uint64_t)duration;
+	}
 	product->skyTimingState[1] = product->gl.GetError() == GL_NO_ERROR_VALUE
 			&& product->skyTimingDurationNanoseconds[1] > 0u
 		? RAL_SKY_GPU_TIMING_VALID : RAL_SKY_GPU_TIMING_FAILED;
