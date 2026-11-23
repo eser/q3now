@@ -30061,6 +30061,11 @@ static qboolean vk_temporal_motion_prepare_bound_draw( uint32_t pipelineSlot )
 		}
 	}
 	outcome = R_TemporalMotionClassify( &facts );
+	// A blended recipe's WRITE sibling exists (the factory builds all three) but is never valid to select: velocity written under
+	// an alpha blend would describe a surface that is not there. The classification cannot return WRITE for a blended draw; this
+	// keeps that true if it is ever changed.
+	if ( facts.blended && outcome != TEMPORAL_MOTION_PRESERVE && outcome != TEMPORAL_MOTION_INVALIDATE_OPAQUE )
+		return qfalse;
 	rejectedBefore = vk_temporal_motion_recording.rejected;
 	prepared = VK_TemporalMotionRecordingPrepareDraw(
 		&vk_temporal_motion_recording, &vk_temporal_generic_pipeline_table,

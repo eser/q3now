@@ -16,9 +16,13 @@ qboolean VK_TemporalShaderRecipeBuild(
 	uint32_t i;
 
 	if ( !input || !out || input->sceneFormat == RAL_FORMAT_UNDEFINED
-			|| input->alphaTested || input->depthOnly || input->blended
-			|| input->special || input->dynamicDiscard
-			|| input->sceneBlend.blendEnable ) return qfalse;
+			|| input->alphaTested || input->depthOnly
+			|| input->special || input->dynamicDiscard ) return qfalse;
+	// A scene blend is admitted for the generic kinds: the draw's own blend state is carried on attachment zero and the
+	// velocity/validity attachments never blend. Only the INVALIDATE sibling of a blended recipe is ever selected (the draw
+	// classification gives a blended draw WRITE_VALID never); the IQM invalidate recipe stays opaque-only.
+	if ( input->kind == VK_TEMPORAL_SHADER_IQM_INVALIDATE
+			&& ( input->blended || input->sceneBlend.blendEnable ) ) return qfalse;
 	if ( input->kind < VK_TEMPORAL_SHADER_PRESERVE
 			|| input->kind > VK_TEMPORAL_SHADER_IQM_INVALIDATE ) return qfalse;
 	if ( input->kind == VK_TEMPORAL_SHADER_IQM_INVALIDATE && input->fog ) return qfalse;

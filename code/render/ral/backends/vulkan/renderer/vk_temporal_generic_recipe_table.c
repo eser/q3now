@@ -23,6 +23,36 @@ static qboolean CompareValid( VkCompareOp op ) {
 	return op == VK_COMPARE_OP_EQUAL || op == VK_COMPARE_OP_GREATER_OR_EQUAL
 		|| op == VK_COMPARE_OP_LESS_OR_EQUAL;
 }
+// The factors the legacy shader state bits can express (vk_pipeline blend setup). A scene blend is admitted so that translucent
+// draws can take the exact route through their INVALIDATE sibling; anything outside this set is not a state the ordinary
+// renderer can have produced, so it is refused rather than copied into a sibling.
+static qboolean BlendFactorValid( VkBlendFactor f ) {
+	switch ( f ) {
+	case VK_BLEND_FACTOR_ZERO: case VK_BLEND_FACTOR_ONE:
+	case VK_BLEND_FACTOR_SRC_COLOR: case VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR:
+	case VK_BLEND_FACTOR_DST_COLOR: case VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR:
+	case VK_BLEND_FACTOR_SRC_ALPHA: case VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA:
+	case VK_BLEND_FACTOR_DST_ALPHA: case VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA:
+	case VK_BLEND_FACTOR_SRC_ALPHA_SATURATE: return qtrue;
+	default: return qfalse;
+	}
+}
+// Blend disabled keeps the canonical all-zero factor record; blend enabled must carry valid factors and the ADD operation.
+static qboolean SceneBlendValid( const VkPipelineColorBlendAttachmentState *a ) {
+	if ( !BoolValid( a->blendEnable ) ) return qfalse;
+	if ( a->colorWriteMask != ( VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
+			| VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT ) ) return qfalse;
+	if ( !a->blendEnable )
+		return a->srcColorBlendFactor == VK_BLEND_FACTOR_ZERO
+			&& a->dstColorBlendFactor == VK_BLEND_FACTOR_ZERO
+			&& a->colorBlendOp == VK_BLEND_OP_ADD
+			&& a->srcAlphaBlendFactor == VK_BLEND_FACTOR_ZERO
+			&& a->dstAlphaBlendFactor == VK_BLEND_FACTOR_ZERO
+			&& a->alphaBlendOp == VK_BLEND_OP_ADD;
+	return BlendFactorValid( a->srcColorBlendFactor ) && BlendFactorValid( a->dstColorBlendFactor )
+		&& BlendFactorValid( a->srcAlphaBlendFactor ) && BlendFactorValid( a->dstAlphaBlendFactor )
+		&& a->colorBlendOp == VK_BLEND_OP_ADD && a->alphaBlendOp == VK_BLEND_OP_ADD;
+}
 static qboolean StencilCanonicalDisabled( const VkStencilOpState *s ) {
 	return s->failOp == VK_STENCIL_OP_KEEP && s->passOp == VK_STENCIL_OP_KEEP
 		&& s->depthFailOp == VK_STENCIL_OP_KEEP
@@ -120,17 +150,7 @@ static qboolean NormalizeRecipe( const vkTemporalGenericRecipeCaptureInput_t *in
 			|| ds->minDepthBounds > ds->maxDepthBounds
 			|| !BoolValid(cb->logicOpEnable) || cb->logicOpEnable
 			|| cb->logicOp != VK_LOGIC_OP_COPY || cb->attachmentCount != 1u
-			|| !cb->pAttachments || cb->pAttachments[0].blendEnable
-			|| !BoolValid(cb->pAttachments[0].blendEnable)
-			|| cb->pAttachments[0].srcColorBlendFactor != VK_BLEND_FACTOR_ZERO
-			|| cb->pAttachments[0].dstColorBlendFactor != VK_BLEND_FACTOR_ZERO
-			|| cb->pAttachments[0].colorBlendOp != VK_BLEND_OP_ADD
-			|| cb->pAttachments[0].srcAlphaBlendFactor != VK_BLEND_FACTOR_ZERO
-			|| cb->pAttachments[0].dstAlphaBlendFactor != VK_BLEND_FACTOR_ZERO
-			|| cb->pAttachments[0].alphaBlendOp != VK_BLEND_OP_ADD
-			|| cb->pAttachments[0].colorWriteMask
-				!= ( VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
-					| VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT )
+			|| !cb->pAttachments || !SceneBlendValid( &cb->pAttachments[0] )
 			|| dyn->dynamicStateCount != 2u || !dyn->pDynamicStates
 			|| dyn->pDynamicStates[0] != VK_DYNAMIC_STATE_VIEWPORT
 			|| dyn->pDynamicStates[1] != VK_DYNAMIC_STATE_SCISSOR ) return qfalse;

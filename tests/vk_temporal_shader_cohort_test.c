@@ -87,14 +87,31 @@ int main( void ) {
 #define REJECT_MUTATION(stmt) do { in = Valid(VK_TEMPORAL_SHADER_WRITE); stmt; memset(&out,0x5A,sizeof(out)); before=out; CHECK(!VK_TemporalShaderRecipeBuild(&in,&out)); CHECK(memcmp(&out,&before,sizeof(out))==0); } while(0)
 	REJECT_MUTATION( in.alphaTested = qtrue );
 	REJECT_MUTATION( in.depthOnly = qtrue );
-	REJECT_MUTATION( in.blended = qtrue );
 	REJECT_MUTATION( in.special = qtrue );
 	REJECT_MUTATION( in.dynamicDiscard = qtrue );
-	REJECT_MUTATION( in.sceneBlend.blendEnable = qtrue );
 	REJECT_MUTATION( in.sceneFormat = RAL_FORMAT_UNDEFINED );
 	REJECT_MUTATION( in.genericSetLayouts[2] = NULL );
 	REJECT_MUTATION( in.temporalVertex.bytes = NULL );
 	REJECT_MUTATION( in.temporalWriteFragment.size = 3u );
+	// A scene blend is admitted for the generic kinds (translucent draws take the exact route through INVALIDATE): the draw's blend
+	// state rides on attachment zero and the velocity/validity attachments never blend. The IQM invalidate recipe stays opaque.
+	{
+		static const vkTemporalShaderRecipeKind_t generic[3] = { VK_TEMPORAL_SHADER_PRESERVE, VK_TEMPORAL_SHADER_WRITE,
+			VK_TEMPORAL_SHADER_INVALIDATE };
+		uint32_t k;
+		for ( k = 0; k < 3u; ++k ) {
+			in = Valid( generic[k] ); in.blended = qtrue; in.sceneBlend.blendEnable = qtrue;
+			CHECK( VK_TemporalShaderRecipeBuild( &in, &out ) );
+			CHECK( out.colorBlends[0].blendEnable && !out.colorBlends[1].blendEnable && !out.colorBlends[2].blendEnable );
+			CHECK( out.numColorAttachments == 3u );
+		}
+		in = Valid( VK_TEMPORAL_SHADER_IQM_INVALIDATE ); in.blended = qtrue;
+		memset(&out,0x5A,sizeof(out)); before=out;
+		CHECK( !VK_TemporalShaderRecipeBuild(&in,&out) && memcmp(&out,&before,sizeof(out)) == 0 );
+		in = Valid( VK_TEMPORAL_SHADER_IQM_INVALIDATE ); in.sceneBlend.blendEnable = qtrue;
+		memset(&out,0x5A,sizeof(out)); before=out;
+		CHECK( !VK_TemporalShaderRecipeBuild(&in,&out) && memcmp(&out,&before,sizeof(out)) == 0 );
+	}
 	in = Valid( (vkTemporalShaderRecipeKind_t)99 ); memset(&out,0x5A,sizeof(out)); before=out;
 	CHECK( !VK_TemporalShaderRecipeBuild( &in, &out ) && memcmp(&out,&before,sizeof(out)) == 0 );
 

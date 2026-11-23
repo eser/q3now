@@ -373,13 +373,35 @@ int main( void ) {
 
 	// Rejected replacement invalidates the old slot and consumes no generation.
 	{ uint32_t generationBeforeReject=owner.lastEntryGeneration;
-		f.attachment.blendEnable=VK_TRUE;
+		// A blend enabled with a factor the legacy state bits cannot produce is refused; valid factors are covered below.
+		f.attachment.blendEnable=VK_TRUE;f.attachment.srcColorBlendFactor=VK_BLEND_FACTOR_CONSTANT_COLOR;
 		CHECK(!VK_TemporalGenericRecipeTableCapture(&owner,&in,&receipt));
 		CHECK(owner.lastEntryGeneration==generationBeforeReject
 			&&!VK_TemporalGenericRecipeTableGet(&owner,epoch,2,gen,&got));
 		CHECK(MakeFixture(&f));in.base=&f.gp;
 		CHECK(VK_TemporalGenericRecipeTableCapture(&owner,&in,&receipt));
 		CHECK(owner.lastEntryGeneration==generationBeforeReject+1u); }
+	// A translucent draw's scene blend (alpha, additive, modulate) is captured as-is; a bad operation or write mask is not.
+	{ vkTemporalGenericRecipe_t blendRecipe;vkTemporalGenericRecipeReceipt_t blendReceipt;
+		static const VkBlendFactor src[3]={VK_BLEND_FACTOR_SRC_ALPHA,VK_BLEND_FACTOR_ONE,VK_BLEND_FACTOR_DST_COLOR};
+		static const VkBlendFactor dst[3]={VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,VK_BLEND_FACTOR_ONE,VK_BLEND_FACTOR_ZERO};
+		uint32_t bi;
+		for(bi=0;bi<3u;++bi){
+			CHECK(MakeFixture(&f));in.base=&f.gp;
+			f.attachment.blendEnable=VK_TRUE;f.attachment.srcColorBlendFactor=src[bi];f.attachment.dstColorBlendFactor=dst[bi];
+			f.attachment.srcAlphaBlendFactor=src[bi];f.attachment.dstAlphaBlendFactor=dst[bi];
+			CHECK(VK_TemporalGenericRecipeTableCapture(&owner,&in,&blendReceipt));
+			CHECK(VK_TemporalGenericRecipeTableGet(&owner,blendReceipt.ownerEpoch,blendReceipt.slot,blendReceipt.entryGeneration,&blendRecipe));
+			CHECK(blendRecipe.sceneBlend.blendEnable&&blendRecipe.sceneBlend.srcColorBlendFactor==src[bi]
+				&&blendRecipe.sceneBlend.dstColorBlendFactor==dst[bi]);
+		}
+		CHECK(MakeFixture(&f));in.base=&f.gp;f.attachment.blendEnable=VK_TRUE;f.attachment.colorBlendOp=VK_BLEND_OP_SUBTRACT;
+		CHECK(!VK_TemporalGenericRecipeTableCapture(&owner,&in,&blendReceipt));
+		CHECK(MakeFixture(&f));in.base=&f.gp;f.attachment.blendEnable=VK_TRUE;f.attachment.srcColorBlendFactor=VK_BLEND_FACTOR_ONE;
+		f.attachment.colorWriteMask=VK_COLOR_COMPONENT_R_BIT;
+		CHECK(!VK_TemporalGenericRecipeTableCapture(&owner,&in,&blendReceipt));
+		CHECK(MakeFixture(&f));in.base=&f.gp;
+		CHECK(VK_TemporalGenericRecipeTableCapture(&owner,&in,&receipt)); }
 	gen=owner.lastEntryGeneration;
 	// Stored scalar poison is rejected before publication.
 #define REJECT_FIXTURE_POISON(statement) do { \

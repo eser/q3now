@@ -8,6 +8,7 @@
 #define CHECK(x) do { if(!(x)){fprintf(stderr,"CHECK %s:%d: %s\n",__FILE__,__LINE__,#x);return 1;} } while(0)
 
 static uintptr_t s_nextRaw=100, s_nextAdopt=200, s_nextPipe=300;
+static int s_expectBlend0; /* the base's scene blend must reach attachment zero unchanged (translucent draws) */
 static int s_failRaw, s_failAdopt, s_failPipeAt, s_createPipeCount, s_destroyCount;
 static int s_destroyOrder[128], s_destroyOrderCount, s_drainFails;
 static uint32_t s_lastPushCount,s_lastPushOffset,s_lastPushSize,s_lastPushStages;
@@ -88,7 +89,9 @@ static ralPipeline_t *FakeCreatePipe(const VkGraphicsPipelineCreateInfo *ci,ralP
 	}
 	if(!ci->pColorBlendState||ci->pColorBlendState->attachmentCount!=3)return NULL;
 	a=ci->pColorBlendState->pAttachments;
-	if(a[0].blendEnable||a[1].blendEnable||a[2].blendEnable)return NULL;
+	if(s_expectBlend0){if(!a[0].blendEnable||a[0].srcColorBlendFactor!=VK_BLEND_FACTOR_SRC_ALPHA||a[0].dstColorBlendFactor!=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA)return NULL;}
+	else if(a[0].blendEnable)return NULL;
+	if(a[1].blendEnable||a[2].blendEnable)return NULL;
 	if(a[1].srcColorBlendFactor||a[1].dstColorBlendFactor||a[1].colorBlendOp||a[1].srcAlphaBlendFactor||a[1].dstAlphaBlendFactor||a[1].alphaBlendOp)return NULL;
 	if(a[2].srcColorBlendFactor||a[2].dstColorBlendFactor||a[2].colorBlendOp||a[2].srcAlphaBlendFactor||a[2].dstAlphaBlendFactor||a[2].alphaBlendOp)return NULL;
 	if((s_splitMode?s_createPipeCount==1:s_createPipeCount%4==1)){if(a[1].colorWriteMask||a[2].colorWriteMask)return NULL;}
@@ -258,6 +261,16 @@ int main(void){
 			gi.pipelineGeneration++;CHECK(VK_TemporalGenericCatalogSelect(&gi.key,&s_splitEntry));
 			s_createPipeCount=0;
 			CHECK(VK_TemporalGenericPipelineFactoryEnsure(&go,&lo,&gp,&gi,&pops)); }
+		// A translucent base: the generic factory builds the same three siblings, the draw's own blend rides on attachment zero and
+		// the velocity/validity attachments stay blend-free. (The combined generic+IQM factory above stays opaque-only.)
+		{ att.blendEnable=VK_TRUE;att.srcColorBlendFactor=VK_BLEND_FACTOR_SRC_ALPHA;att.dstColorBlendFactor=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+			att.srcAlphaBlendFactor=VK_BLEND_FACTOR_SRC_ALPHA;att.dstAlphaBlendFactor=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+			s_expectBlend0=1;gi.pipelineGeneration++;s_createPipeCount=0;
+			CHECK(VK_TemporalGenericPipelineFactoryEnsure(&go,&lo,&gp,&gi,&pops));
+			CHECK(go.ready&&go.pipelines[0]&&go.pipelines[1]&&go.pipelines[2]&&s_createPipeCount==3);
+			s_expectBlend0=0;att.blendEnable=VK_FALSE;att.srcColorBlendFactor=att.dstColorBlendFactor=VK_BLEND_FACTOR_ZERO;
+			att.srcAlphaBlendFactor=att.dstAlphaBlendFactor=VK_BLEND_FACTOR_ZERO;
+			gi.pipelineGeneration++;s_createPipeCount=0;CHECK(VK_TemporalGenericPipelineFactoryEnsure(&go,&lo,&gp,&gi,&pops)); }
 		// A requested key-B cannot borrow the key-A ordinary module provenance.
 		{ vkTemporalGenericPipelineFactoryOwner_t live=go;s_splitLookupEntry=go.catalog;
 			gi.key=(vkTemporalGenericKey_t){2,VK_TEMPORAL_GENERIC_CL,qtrue,qfalse};

@@ -535,9 +535,9 @@ qboolean VK_TemporalGenericPipelineFactoryEnsure( vkTemporalGenericPipelineFacto
 			||!input->pipelineGeneration||!input->topologyGeneration||!input->catalogGeneration
 			||input->sceneFormat==RAL_FORMAT_UNDEFINED||input->depthFormat==RAL_FORMAT_UNDEFINED
 			||(input->alphaTested&&input->key.textureCount!=0u)
-			||input->depthOnly||input->blended||input->special||input->dynamicDiscard
+			||input->depthOnly||input->special||input->dynamicDiscard
 			||!base->pColorBlendState||base->pColorBlendState->attachmentCount!=1u
-			||!base->pColorBlendState->pAttachments||base->pColorBlendState->pAttachments[0].blendEnable
+			||!base->pColorBlendState->pAttachments
 			||!VK_TemporalGenericCatalogSelect(&input->key,&catalog)) return qfalse;
 	specializationFacts.textureCount=input->key.textureCount;
 	specializationFacts.shaderFog=input->key.shaderFog;
