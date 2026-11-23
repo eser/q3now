@@ -192,6 +192,8 @@ bool RalMetal_TaaEncode(ralMetalTaa_t *s, id<MTLCommandBuffer> command, id<MTLTe
 			wiredTaaResolvePush push;
 			memset(&push, 0, sizeof(push));
 			push.extent[0] = frame->width; push.extent[1] = frame->height;
+			/* The projection shifts the image by +(jx, jy) pixels (y down), so the effective jitter the resolve compensates is +(jx, jy)
+			 * in UV; the Vulkan path passes -jy because its projection chain flips y. */
 			push.currentJitterUv[0] = frame->currentJitterUv[0]; push.currentJitterUv[1] = frame->currentJitterUv[1];
 			push.previousJitterUv[0] = frame->previousJitterUv[0]; push.previousJitterUv[1] = frame->previousJitterUv[1];
 			push.zNear = zNear; push.zFar = zNear * WIRED_TAA_FAR_SCALE;
