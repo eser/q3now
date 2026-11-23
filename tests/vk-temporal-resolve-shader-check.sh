@@ -53,15 +53,14 @@ text="\n".join(lines)
 if " FMix " in text or " Fract " in text:
     raise SystemExit("contracted/opaque temporal interpolation survived")
 divisions=[result for result,op in opcode.items() if op=="OpFDiv"]
-# The precise linearizeDepth division (%result) is the only division allowed on the colour/reprojection path. The history commit
-# folded into this shader linearizes the depth it stores with ONE more division, deliberately not precise so it stays bit-identical
-# to temporal_history_store.comp; it must not be decorated NoContraction and must only feed the history linear-depth image.
+# The precise linearizeDepth division (%result) is the only division in this shader. The history commit folded into it linearizes
+# the depth it stores WITHOUT a division (inversesqrt(d*d)), with the same expression as temporal_history_store.comp, and that
+# value must not be NoContraction-decorated.
 precise_division=stored.get("%result",[])
-extra_divisions=[d for d in divisions if d not in precise_division]
-if [d for d in divisions if d in precise_division]!=precise_division or len(extra_divisions)!=1:
-    raise SystemExit(f"unexpected color-path OpFDiv: {divisions}")
-if extra_divisions[0] in decorated:
-    raise SystemExit("history depth division must match the store shader (not precise)")
+if divisions!=precise_division:
+    raise SystemExit(f"unexpected OpFDiv besides the precise linearizeDepth one: {divisions}")
+if " InverseSqrt " not in text:
+    raise SystemExit("the history depth must be linearized with inversesqrt, not a division")
 
 # Motion validity is a CONTINUOUS confidence, not a flag.
 #

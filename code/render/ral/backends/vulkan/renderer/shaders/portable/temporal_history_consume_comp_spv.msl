@@ -40,7 +40,8 @@ struct spvDescriptorSetBuffer0
 static inline __attribute__((always_inline))
 float linearizeDepth(thread const float& z, constant HistoryConsumePush& pc)
 {
-    return (pc.zNear * pc.zFar) / (pc.zNear + (z * (pc.zFar - pc.zNear)));
+    float denominator = pc.zNear + (z * (pc.zFar - pc.zNear));
+    return (pc.zNear * pc.zFar) * rsqrt(denominator * denominator);
 }
 
 kernel void main0(device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], constant HistoryConsumePush& pc [[buffer(1)]])

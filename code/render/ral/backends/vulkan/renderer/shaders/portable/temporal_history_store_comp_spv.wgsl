@@ -19,13 +19,18 @@ var outputColor: texture_storage_2d<rgba16float,write>;
 var outputLinearDepth: texture_storage_2d<r32float,write>;
 
 fn linearizeDepth_u0028_f1_u003b(z: ptr<function, f32>) -> f32 {
-    let _e16 = pc.zNear;
-    let _e18 = pc.zFar;
-    let _e21 = pc.zNear;
-    let _e22 = (*z);
-    let _e24 = pc.zFar;
-    let _e26 = pc.zNear;
-    return ((_e16 * _e18) / (_e21 + (_e22 * (_e24 - _e26))));
+    var denominator: f32;
+
+    let _e17 = pc.zNear;
+    let _e18 = (*z);
+    let _e20 = pc.zFar;
+    let _e22 = pc.zNear;
+    denominator = (_e17 + (_e18 * (_e20 - _e22)));
+    let _e27 = pc.zNear;
+    let _e29 = pc.zFar;
+    let _e31 = denominator;
+    let _e32 = denominator;
+    return ((_e27 * _e29) * inverseSqrt((_e31 * _e32)));
 }
 
 fn main_1() {

@@ -29,7 +29,8 @@ layout(binding = 3) uniform texture2D previousLinearDepth;
 
 float linearizeDepth(float z)
 {
-    return (pc.zNear * pc.zFar) / (pc.zNear + (z * (pc.zFar - pc.zNear)));
+    float denominator = pc.zNear + (z * (pc.zFar - pc.zNear));
+    return (pc.zNear * pc.zFar) * inversesqrt(denominator * denominator);
 }
 
 void main()

@@ -128,7 +128,11 @@ float samplePreviousDepthLinear(vec2 texel) {
 // Same arithmetic as temporal_history_store.comp (deliberately not precise): the folded history depth must be bit-identical to
 // what the store pass wrote. Declared after the precise helpers so their generated result names keep their numbering.
 float storeLinearDepth(float z) {
-	return pc.zNear * pc.zFar / (pc.zNear + z * (pc.zFar - pc.zNear));
+	// 1/x as inversesqrt(x*x): the denominator is positive for any depth in [0, 1]. A true division is a long instruction sequence on
+	// Apple GPUs; every shader that writes or reads the history depth uses this exact expression so the values stay bit-identical
+	// across the store, bootstrap and folded paths.
+	float denominator = pc.zNear + z * (pc.zFar - pc.zNear);
+	return pc.zNear * pc.zFar * inversesqrt(denominator * denominator);
 }
 
 // ---- Spatial fallback ---------------------------------------------------------------------------------------------------

@@ -32,13 +32,18 @@ var previousColor: texture_2d<f32>;
 var previousLinearDepth: texture_2d<f32>;
 
 fn linearizeDepth_u0028_f1_u003b(z: ptr<function, f32>) -> f32 {
-    let _e34 = pc.zNear;
-    let _e36 = pc.zFar;
-    let _e39 = pc.zNear;
-    let _e40 = (*z);
-    let _e42 = pc.zFar;
-    let _e44 = pc.zNear;
-    return ((_e34 * _e36) / (_e39 + (_e40 * (_e42 - _e44))));
+    var denominator: f32;
+
+    let _e35 = pc.zNear;
+    let _e36 = (*z);
+    let _e38 = pc.zFar;
+    let _e40 = pc.zNear;
+    denominator = (_e35 + (_e36 * (_e38 - _e40)));
+    let _e45 = pc.zNear;
+    let _e47 = pc.zFar;
+    let _e49 = denominator;
+    let _e50 = denominator;
+    return ((_e45 * _e47) * inverseSqrt((_e49 * _e50)));
 }
 
 fn main_1() {

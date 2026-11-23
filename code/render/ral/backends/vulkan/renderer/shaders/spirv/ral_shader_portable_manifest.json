@@ -3953,14 +3953,14 @@
       "symbol": "temporal_history_store_comp_spv",
       "stage": "RAL_STAGE_COMPUTE",
       "sourceDigest": {
-        "lane0": "c51bf5bc65aa0a25",
-        "lane1": "8ba883e9cca1ff21"
+        "lane0": "f9b8885c62f41b66",
+        "lane1": "1c6c855461441b78"
       },
       "spirv": {
-        "byteCount": 2640,
+        "byteCount": 2764,
         "digest": {
-          "lane0": "0138641c7e083015",
-          "lane1": "25715fa556895971"
+          "lane0": "c3d95a4ae5b915b9",
+          "lane1": "5760bddda0d8aaca"
         }
       },
       "reflection": {
@@ -4058,14 +4058,14 @@
       "symbol": "temporal_history_consume_comp_spv",
       "stage": "RAL_STAGE_COMPUTE",
       "sourceDigest": {
-        "lane0": "59543e0a59782b2a",
-        "lane1": "82f807f15a949f1f"
+        "lane0": "c3dde62c2ab8a2a2",
+        "lane1": "e5cd702edd46bb65"
       },
       "spirv": {
-        "byteCount": 5000,
+        "byteCount": 5124,
         "digest": {
-          "lane0": "53156960ceeeef51",
-          "lane1": "51dc6dcbb79991a5"
+          "lane0": "912d3d57c253bcf4",
+          "lane1": "d97f6f972367e5ac"
         }
       },
       "reflection": {
@@ -4175,14 +4175,14 @@
       "symbol": "temporal_resolve_comp_spv",
       "stage": "RAL_STAGE_COMPUTE",
       "sourceDigest": {
-        "lane0": "403173e28a586b39",
-        "lane1": "2001b39f8abb73f1"
+        "lane0": "fc0dd72b38e852ce",
+        "lane1": "3bfa6680e931554e"
       },
       "spirv": {
-        "byteCount": 35520,
+        "byteCount": 35644,
         "digest": {
-          "lane0": "8bd42c2cb4c439ca",
-          "lane1": "28633b79eef18962"
+          "lane0": "5a3f47548adc9df1",
+          "lane1": "d3e8279a09ea940f"
         }
       },
       "reflection": {
@@ -32607,14 +32607,14 @@
       "symbol": "temporal_bootstrap_aa_comp_spv",
       "stage": "RAL_STAGE_COMPUTE",
       "sourceDigest": {
-        "lane0": "0d9774fc7b8fff68",
-        "lane1": "e31438f2d02c5321"
+        "lane0": "ca745e0fc15de878",
+        "lane1": "6688b912f1be2b47"
       },
       "spirv": {
-        "byteCount": 15804,
+        "byteCount": 15928,
         "digest": {
-          "lane0": "099dd001c5d5a3fb",
-          "lane1": "0834f40d319f970e"
+          "lane0": "002e51c3f2a2cd06",
+          "lane1": "c7349445a20538b1"
         }
       },
       "reflection": {

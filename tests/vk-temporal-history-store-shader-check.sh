@@ -46,8 +46,8 @@ if len(writes)!=2:
     raise SystemExit(f'exact imageStore count changed: {len(writes)}')
 if ' OpImageSample' in text or ' OpImageSparseSample' in text:
     raise SystemExit('normalized/filtering sample reintroduced into Store')
-if sum(' OpFDiv ' in line for line in lines)!=1:
-    raise SystemExit('linear-depth division dataflow changed')
+if any(' OpFDiv ' in line for line in lines) or not any(' InverseSqrt ' in line for line in lines):
+    raise SystemExit('linear-depth must be inversesqrt(d*d), not a division (same expression as the folded resolve)')
 PYEOF
 
 echo 'vk temporal history Store shader reflection: PASS'

@@ -214,7 +214,8 @@ float4 fxSpatialAa(thread const int2& px, thread const float4& centerColor, cons
 static inline __attribute__((always_inline))
 float storeLinearDepth(thread const float& z, constant TemporalBootstrapPush& pc)
 {
-    return (pc.zNear * pc.zFar) / (pc.zNear + (z * (pc.zFar - pc.zNear)));
+    float denominator = pc.zNear + (z * (pc.zFar - pc.zNear));
+    return (pc.zNear * pc.zFar) * rsqrt(denominator * denominator);
 }
 
 kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], constant TemporalBootstrapPush& pc [[buffer(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
@@ -226,18 +227,18 @@ kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buff
     }
     float4 current = spvDescriptorSet0.currentColor.read(uint2(pixel), 0);
     float4 param = current;
-    float4 _627;
+    float4 _632;
     if (finite4(param))
     {
         int2 param_1 = pixel;
         float4 param_2 = current;
-        _627 = fxSpatialAa(param_1, param_2, pc, spvDescriptorSet0.currentColor, spvDescriptorSet0.nearestSampler);
+        _632 = fxSpatialAa(param_1, param_2, pc, spvDescriptorSet0.currentColor, spvDescriptorSet0.nearestSampler);
     }
     else
     {
-        _627 = float4(0.0);
+        _632 = float4(0.0);
     }
-    float4 result = _627;
+    float4 result = _632;
     float4 param_3 = result;
     if (!finite4(param_3))
     {

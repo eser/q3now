@@ -197,7 +197,8 @@ vec4 fxSpatialAa(ivec2 px, vec4 centerColor)
 
 float storeLinearDepth(float z)
 {
-    return (pc.zNear * pc.zFar) / (pc.zNear + (z * (pc.zFar - pc.zNear)));
+    float denominator = pc.zNear + (z * (pc.zFar - pc.zNear));
+    return (pc.zNear * pc.zFar) * inversesqrt(denominator * denominator);
 }
 
 void main()
@@ -209,18 +210,18 @@ void main()
     }
     vec4 current = texelFetch(sampler2D(currentColor, nearestSampler), pixel, 0);
     vec4 param = current;
-    vec4 _627;
+    vec4 _632;
     if (finite4(param))
     {
         ivec2 param_1 = pixel;
         vec4 param_2 = current;
-        _627 = fxSpatialAa(param_1, param_2);
+        _632 = fxSpatialAa(param_1, param_2);
     }
     else
     {
-        _627 = vec4(0.0);
+        _632 = vec4(0.0);
     }
-    vec4 result = _627;
+    vec4 result = _632;
     vec4 param_3 = result;
     if (!finite4(param_3))
     {

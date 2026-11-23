@@ -134,7 +134,11 @@ vec4 fxSpatialAa(ivec2 px, vec4 centerColor) {
 // ---- end spatial fallback ----
 
 float storeLinearDepth(float z) {
-	return pc.zNear * pc.zFar / (pc.zNear + z * (pc.zFar - pc.zNear));
+	// 1/x as inversesqrt(x*x): the denominator is positive for any depth in [0, 1]. A true division is a long instruction sequence on
+	// Apple GPUs; every shader that writes or reads the history depth uses this exact expression so the values stay bit-identical
+	// across the store, bootstrap and folded paths.
+	float denominator = pc.zNear + z * (pc.zFar - pc.zNear);
+	return pc.zNear * pc.zFar * inversesqrt(denominator * denominator);
 }
 
 void main() {

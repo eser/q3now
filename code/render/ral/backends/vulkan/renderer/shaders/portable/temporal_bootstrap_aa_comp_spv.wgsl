@@ -21,13 +21,18 @@ var historyOutLinearDepth: texture_storage_2d<r32float,write>;
 var currentDeviceDepth: texture_2d<f32>;
 
 fn storeLinearDepth_u0028_f1_u003b(z: ptr<function, f32>) -> f32 {
-    let _e48 = pc.zNear;
-    let _e50 = pc.zFar;
-    let _e53 = pc.zNear;
-    let _e54 = (*z);
-    let _e56 = pc.zFar;
-    let _e58 = pc.zNear;
-    return ((_e48 * _e50) / (_e53 + (_e54 * (_e56 - _e58))));
+    var denominator: f32;
+
+    let _e49 = pc.zNear;
+    let _e50 = (*z);
+    let _e52 = pc.zFar;
+    let _e54 = pc.zNear;
+    denominator = (_e49 + (_e50 * (_e52 - _e54)));
+    let _e59 = pc.zNear;
+    let _e61 = pc.zFar;
+    let _e63 = denominator;
+    let _e64 = denominator;
+    return ((_e59 * _e61) * inverseSqrt((_e63 * _e64)));
 }
 
 fn sampleCurrent_u0028_vi2_u003b(pixel: ptr<function, vec2<i32>>) -> vec4<f32> {

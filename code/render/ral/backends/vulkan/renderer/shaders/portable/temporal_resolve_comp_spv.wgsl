@@ -36,13 +36,18 @@ var historyOutColor: texture_storage_2d<rgba16float,write>;
 var historyOutLinearDepth: texture_storage_2d<r32float,write>;
 
 fn storeLinearDepth_u0028_f1_u003b(z: ptr<function, f32>) -> f32 {
-    let _e70 = pc.zNear;
-    let _e72 = pc.zFar;
-    let _e75 = pc.zNear;
-    let _e76 = (*z);
-    let _e78 = pc.zFar;
-    let _e80 = pc.zNear;
-    return ((_e70 * _e72) / (_e75 + (_e76 * (_e78 - _e80))));
+    var denominator: f32;
+
+    let _e71 = pc.zNear;
+    let _e72 = (*z);
+    let _e74 = pc.zFar;
+    let _e76 = pc.zNear;
+    denominator = (_e71 + (_e72 * (_e74 - _e76)));
+    let _e81 = pc.zNear;
+    let _e83 = pc.zFar;
+    let _e85 = denominator;
+    let _e86 = denominator;
+    return ((_e81 * _e83) * inverseSqrt((_e85 * _e86)));
 }
 
 fn sampleCurrent_u0028_vi2_u003b(pixel: ptr<function, vec2<i32>>) -> vec4<f32> {
@@ -527,7 +532,7 @@ fn neighborhoodBox_u0028_vi2_u003b_vf3_u003b_vf3_u003b(pixel_1: ptr<function, ve
     var clipMax: vec3<f32>;
     var momentMean: vec3<f32>;
     var momentSigma: vec3<f32>;
-    var phi_1140_: bool;
+    var phi_1145_: bool;
 
     neighborhoodMin = vec3<f32>(340282350000000000000000000000000000000f, 340282350000000000000000000000000000000f, 340282350000000000000000000000000000000f);
     neighborhoodMax = vec3<f32>(-340282350000000000000000000000000000000f, -340282350000000000000000000000000000000f, -340282350000000000000000000000000000000f);
@@ -581,14 +586,14 @@ fn neighborhoodBox_u0028_vi2_u003b_vf3_u003b_vf3_u003b(pixel_1: ptr<function, ve
     let _e114 = neighborhoodMin;
     param_24 = _e114;
     let _e115 = finite3_u0028_vf3_u003b((&param_24));
-    phi_1140_ = _e115;
+    phi_1145_ = _e115;
     if _e115 {
         let _e116 = neighborhoodMax;
         param_25 = _e116;
         let _e117 = finite3_u0028_vf3_u003b((&param_25));
-        phi_1140_ = _e117;
+        phi_1145_ = _e117;
     }
-    let _e119 = phi_1140_;
+    let _e119 = phi_1145_;
     if !(_e119) {
         return false;
     }
@@ -809,7 +814,7 @@ fn samplePreviousDepthLinear_u0028_vf2_u003b(texel_1: ptr<function, vec2<f32>>) 
 fn linearizeDepth_u0028_f1_u003b(z_1: ptr<function, f32>) -> f32 {
     var range: f32;
     var scaled_1: f32;
-    var denominator: f32;
+    var denominator_1: f32;
     var numerator: f32;
     var result_3: f32;
 
@@ -821,12 +826,12 @@ fn linearizeDepth_u0028_f1_u003b(z_1: ptr<function, f32>) -> f32 {
     scaled_1 = (_e79 * _e80);
     let _e83 = pc.zNear;
     let _e84 = scaled_1;
-    denominator = (_e83 + _e84);
+    denominator_1 = (_e83 + _e84);
     let _e87 = pc.zNear;
     let _e89 = pc.zFar;
     numerator = (_e87 * _e89);
     let _e91 = numerator;
-    let _e92 = denominator;
+    let _e92 = denominator_1;
     result_3 = (_e91 / _e92);
     let _e94 = result_3;
     return _e94;
@@ -875,28 +880,28 @@ fn dlMotionVelocity_u0028_vi2_u003b_f1_u003b(px_1: ptr<function, vec2<i32>>, cen
     var v_4: f32;
     var dv: vec2<f32>;
     var param_45: vec2<f32>;
-    var phi_969_: bool;
-    var phi_977_: bool;
+    var phi_974_: bool;
+    var phi_982_: bool;
 
     let _e82 = (*px_1);
     let _e83 = textureLoad(motionVelocity, _e82, 0i);
     centerVelocity = _e83.xy;
     let _e86 = pc.qualityFlags;
     let _e88 = ((_e86 & 2u) == 0u);
-    phi_969_ = _e88;
+    phi_974_ = _e88;
     if !(_e88) {
         let _e90 = (*centerValid);
-        phi_969_ = !((_e90 > 0f));
+        phi_974_ = !((_e90 > 0f));
     }
-    let _e94 = phi_969_;
-    phi_977_ = _e94;
+    let _e94 = phi_974_;
+    phi_982_ = _e94;
     if !(_e94) {
         let _e96 = centerVelocity;
         param_44 = _e96;
         let _e97 = finite2_u0028_vf2_u003b((&param_44));
-        phi_977_ = !(_e97);
+        phi_982_ = !(_e97);
     }
-    let _e100 = phi_977_;
+    let _e100 = phi_982_;
     if _e100 {
         let _e101 = centerVelocity;
         return _e101;
@@ -1026,15 +1031,15 @@ fn main_1() {
     var param_68: vec4<f32>;
     var param_69: vec4<f32>;
     var param_70: f32;
-    var phi_1272_: bool;
-    var phi_1281_: bool;
-    var phi_1290_: bool;
-    var phi_1296_: bool;
-    var phi_1337_: bool;
-    var phi_1352_: bool;
-    var phi_1373_: bool;
-    var phi_1419_: bool;
-    var phi_1427_: bool;
+    var phi_1277_: bool;
+    var phi_1286_: bool;
+    var phi_1295_: bool;
+    var phi_1301_: bool;
+    var phi_1342_: bool;
+    var phi_1357_: bool;
+    var phi_1378_: bool;
+    var phi_1424_: bool;
+    var phi_1432_: bool;
 
     let _e118 = gl_GlobalInvocationID_1;
     pixel_2 = bitcast<vec2<i32>>(_e118.xy);
@@ -1077,43 +1082,43 @@ fn main_1() {
     previousCenter = (_e158 + vec2(0.5f));
     let _e161 = previousCenter;
     let _e163 = all((_e161 >= vec2<f32>(0f, 0f)));
-    phi_1272_ = _e163;
+    phi_1277_ = _e163;
     if _e163 {
         let _e164 = previousCenter;
         let _e166 = pc.extent;
-        phi_1272_ = all((_e164 < vec2<f32>(_e166)));
+        phi_1277_ = all((_e164 < vec2<f32>(_e166)));
     }
-    let _e171 = phi_1272_;
+    let _e171 = phi_1277_;
     inside = _e171;
     let _e172 = current;
     param_48 = _e172;
     let _e173 = finite4_u0028_vf4_u003b((&param_48));
-    phi_1281_ = _e173;
+    phi_1286_ = _e173;
     if _e173 {
         let _e174 = valid;
         param_49 = _e174;
         let _e175 = finite1_u0028_f1_u003b((&param_49));
-        phi_1281_ = _e175;
+        phi_1286_ = _e175;
     }
-    let _e177 = phi_1281_;
+    let _e177 = phi_1286_;
     let _e178 = valid;
     let _e180 = (_e177 && (_e178 > 0f));
-    phi_1290_ = _e180;
+    phi_1295_ = _e180;
     if _e180 {
         let _e181 = velocity;
         param_50 = _e181;
         let _e182 = finite2_u0028_vf2_u003b((&param_50));
-        phi_1290_ = _e182;
+        phi_1295_ = _e182;
     }
-    let _e184 = phi_1290_;
-    phi_1296_ = _e184;
+    let _e184 = phi_1295_;
+    phi_1301_ = _e184;
     if _e184 {
         let _e185 = previousTexel;
         param_51 = _e185;
         let _e186 = finite2_u0028_vf2_u003b((&param_51));
-        phi_1296_ = _e186;
+        phi_1301_ = _e186;
     }
-    let _e188 = phi_1296_;
+    let _e188 = phi_1301_;
     let _e189 = inside;
     if (_e188 && _e189) {
         let _e191 = pixel_2;
@@ -1135,25 +1140,25 @@ fn main_1() {
         let _e207 = currentLinear;
         param_54 = _e207;
         let _e208 = finite1_u0028_f1_u003b((&param_54));
-        phi_1337_ = _e208;
+        phi_1342_ = _e208;
         if _e208 {
             let _e209 = priorLinear;
             param_55 = _e209;
             let _e210 = finite1_u0028_f1_u003b((&param_55));
-            phi_1337_ = _e210;
+            phi_1342_ = _e210;
         }
-        let _e212 = phi_1337_;
+        let _e212 = phi_1342_;
         let _e213 = currentLinear;
         let _e216 = priorLinear;
         let _e218 = ((_e212 && (_e213 > 0f)) && (_e216 > 0f));
-        phi_1352_ = _e218;
+        phi_1357_ = _e218;
         if _e218 {
             let _e219 = currentLinear;
             let _e220 = priorLinear;
             let _e223 = depthLimit;
-            phi_1352_ = (abs((_e219 - _e220)) <= _e223);
+            phi_1357_ = (abs((_e219 - _e220)) <= _e223);
         }
-        let _e226 = phi_1352_;
+        let _e226 = phi_1357_;
         if _e226 {
             let _e227 = previousTexel;
             param_56 = _e227;
@@ -1162,7 +1167,7 @@ fn main_1() {
             let _e229 = prior;
             param_57 = _e229;
             let _e230 = finite4_u0028_vf4_u003b((&param_57));
-            phi_1373_ = _e230;
+            phi_1378_ = _e230;
             if _e230 {
                 let _e231 = pixel_2;
                 param_58 = _e231;
@@ -1171,9 +1176,9 @@ fn main_1() {
                 clipMin_1 = _e233;
                 let _e234 = param_60;
                 clipMax_1 = _e234;
-                phi_1373_ = _e232;
+                phi_1378_ = _e232;
             }
-            let _e236 = phi_1373_;
+            let _e236 = phi_1378_;
             if _e236 {
                 let _e237 = prior;
                 let _e239 = clipMin_1;
@@ -1206,20 +1211,20 @@ fn main_1() {
     }
     let _e262 = usedHistory;
     let _e263 = !(_e262);
-    phi_1419_ = _e263;
+    phi_1424_ = _e263;
     if _e263 {
         let _e264 = current;
         param_66 = _e264;
         let _e265 = finite4_u0028_vf4_u003b((&param_66));
-        phi_1419_ = _e265;
+        phi_1424_ = _e265;
     }
-    let _e267 = phi_1419_;
-    phi_1427_ = _e267;
+    let _e267 = phi_1424_;
+    phi_1432_ = _e267;
     if _e267 {
         let _e269 = pc.qualityFlags;
-        phi_1427_ = ((_e269 & 4u) != 0u);
+        phi_1432_ = ((_e269 & 4u) != 0u);
     }
-    let _e273 = phi_1427_;
+    let _e273 = phi_1432_;
     if _e273 {
         let _e274 = pixel_2;
         param_67 = _e274;
