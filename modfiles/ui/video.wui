@@ -247,7 +247,8 @@ menuDef {
 							grow 0
 						}
 						// r_aa is the post-process anti-aliasing mode (TAA by default; SMAA is the fallback for players who see temporal
-						// ghosting). Renderers without a post chain (OpenGL, WebGPU) say so in the log and ignore it.
+						// ghosting). Renderers without a post chain (OpenGL, WebGPU) say so in the log and ignore it. MSAA is retired on the Vulkan and
+						// Metal renderers (r_ext_multisample only belongs to the deprecated legacy GL renderer), so the menu offers one AA choice.
 						itemDef {
 							name "row_aa"
 							type segmented
@@ -259,20 +260,6 @@ menuDef {
 							forecolor $bone
 							cvar "r_aa"
 							cvarFloatList { "Off" 0 "TAA" 1 "SMAA" 2 }
-							visible 1
-							grow 0
-						}
-						itemDef {
-							name "row_msaa"
-							type segmented
-							height FIXED 38px
-							width PERCENT 1
-							text "MSAA"
-							textalign 0
-							font $font_sans 13
-							forecolor $bone
-							cvar "r_ext_multisample"
-							cvarFloatList { "Off" 0 "2x" 2 "4x" 4 "8x" 8 }
 							visible 1
 							grow 0
 						}
