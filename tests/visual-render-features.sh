@@ -2822,7 +2822,11 @@ tcmodghost)
         CAP_POST_CMD="exec vrf_tg.cfg" capture_fixed_cam arena1 "$pos" "$tag" +set r_aa "$aa" >/dev/null || return 1
     }
     PNG2RAW_BIN="${PNG2RAW:-$WIRED_SOURCE/tools/png2raw/png2raw}"
-    for entry in "${VPS[@]}"; do
+    # TG_VIEWS overrides the view list ("arena1 x y z yaw id" entries separated by '|'): the default views are the five fixed ones.
+    # Example: TG_VIEWS="arena1 400 2096 40 180 shards" looks at three armor shards (translucent, animated shell) at a static camera.
+    TG_LIST=("${VPS[@]}")
+    [ -n "${TG_VIEWS:-}" ] && IFS='|' read -r -a TG_LIST <<< "$TG_VIEWS"
+    for entry in "${TG_LIST[@]}"; do
         set -- $entry; map="$1" x="$2" y="$3" z="$4" yaw="$5" id="$6"
         [ "$map" = arena1 ] || continue
         pos="$x $y $z $yaw"
