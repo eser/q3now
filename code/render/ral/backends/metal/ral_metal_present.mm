@@ -225,7 +225,6 @@ qboolean effectParity;
 	id<MTLDepthStencilState> worldDepthState;
 	id<MTLDepthStencilState> worldDepthReadState;
 	id<MTLRenderPipelineState> taaMaskPipeline;   /* entity coverage into the TAA effect mask */
-	id<MTLRenderPipelineState> weatherMaskPipeline, particleMaskAlphaPipeline, particleMaskAdditivePipeline;   /* weather and particle quads, same mask */
 	id<MTLBuffer> taaMaskMaterial;                 /* zeroed material block the world vertex function reads */
 	id<MTLDepthStencilState> worldDepthEqualState;
 	id<MTLDepthStencilState> worldDepthEqualReadState;
@@ -2964,36 +2963,16 @@ static MTLVertexDescriptor *WorldVertexDescriptor( void ) {
 	return vertices;
 }
 
-static qboolean EnsureUiLibrary( ralMetalPresent_t *present, id<MTLDevice> device ) {
-	NSError *error = nil;
-	if ( present->uiLibrary ) return qtrue;
-	dispatch_data_t data = dispatch_data_create( ral_metal_ui_metallib, ral_metal_ui_metallib_size,
-		dispatch_get_global_queue( QOS_CLASS_DEFAULT, 0 ), ^{} );
-	if ( !data ) return qfalse;
-	present->uiLibrary = [device newLibraryWithData:data error:&error];
-	return present->uiLibrary && !error ? qtrue : qfalse;
-}
-
 /* TAA effect mask. The Metal scene pass has no velocity attachment, so every pixel of the frame would otherwise be reprojected as static
  * world. Entities (their motion is not tracked), the first-person weapon (it moves with the camera), and translucent or decal batches
  * (they never own the depth beneath them) must not inherit history that way; the Vulkan renderer invalidates exactly these classes of
  * draw. The batches are drawn again with the SAME world vertex function (bit-identical positions) against the finished scene depth,
  * writing 1 into an R8 mask where they are the visible surface; the motion kernel then marks those pixels invalid. */
-typedef struct {
-	/* Weather quads (instanced, vertex state is the weather frame plus the pool the scene pass drew). */
-	uint32_t weatherInstances, weatherPool;
-	const ralMetalWeatherFrame_t *weatherFrame;
-	/* WiredFX particle quads: the scene pass's vertex argument buffer and the pool/class/frame buffers it indexes. */
-	id<MTLBuffer> particleArguments, particleClasses, particleFrames;
-	uint32_t particlePool;
-} ralMetalTaaMaskEffects_t;
-
 static qboolean EncodeTaaEffectMask( id<MTLCommandBuffer> command, ralMetalPresent_t *present,
 		id<MTLTexture> mask, id<MTLTexture> depth, id<MTLBuffer> entityVertices,
 		id<MTLBuffer> entityIndices, const ralMetalEntityBatch_t *entityBatches,
 		uint32_t entityBatchCount, const renderWorldSnapshot_t *sceneView,
-		const ralMetalWorldViewParams_t *viewParams, uint32_t width, uint32_t height,
-		const ralMetalTaaMaskEffects_t *effects ) {
+		const ralMetalWorldViewParams_t *viewParams, uint32_t width, uint32_t height ) {
 	if ( !present->taaMaskPipeline || !present->taaMaskMaterial ) {
 		id<MTLDevice> device = RalMetal_CoreNativeDevice( present->core );
 		id<MTLFunction> vertex = [present->uiLibrary newFunctionWithName:@"wired_world_vertex"];
@@ -3057,32 +3036,6 @@ static qboolean EncodeTaaEffectMask( id<MTLCommandBuffer> command, ralMetalPrese
 				indexType:MTLIndexTypeUInt32 indexBuffer:entityIndices
 				indexBufferOffset:(NSUInteger)batch->firstIndex * sizeof( uint32_t )];
 		}
-	}
-	if ( effects && effects->weatherInstances && effects->weatherFrame && present->weatherMaskPipeline ) {
-		[encoder setCullMode:MTLCullModeNone];
-		[encoder setRenderPipelineState:present->weatherMaskPipeline];
-		[encoder setDepthStencilState:present->worldDepthReadState];
-		[encoder setVertexBytes:effects->weatherFrame length:sizeof( *effects->weatherFrame ) atIndex:1u];
-		[encoder setVertexBuffer:present->weatherPools[effects->weatherPool] offset:0u atIndex:2u];
-		[encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0u vertexCount:6u
-			instanceCount:effects->weatherInstances];
-	}
-	if ( effects && effects->particleArguments && effects->particleClasses && effects->particleFrames
-			&& effects->particlePool < 2u && present->particleMaskAlphaPipeline
-			&& present->particleMaskAdditivePipeline ) {
-		[encoder setCullMode:MTLCullModeNone];
-		[encoder setDepthStencilState:present->worldDepthReadState];
-		[encoder setVertexBuffer:effects->particleArguments offset:0u atIndex:0u];
-		[encoder useResource:present->effectPools[effects->particlePool] usage:MTLResourceUsageRead
-			stages:MTLRenderStageVertex];
-		[encoder useResource:effects->particleClasses usage:MTLResourceUsageRead stages:MTLRenderStageVertex];
-		[encoder useResource:effects->particleFrames usage:MTLResourceUsageRead stages:MTLRenderStageVertex];
-		[encoder setRenderPipelineState:present->particleMaskAlphaPipeline];
-		[encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0u vertexCount:6u
-			instanceCount:RAL_PARTICLE_POOL_CAPACITY];
-		[encoder setRenderPipelineState:present->particleMaskAdditivePipeline];
-		[encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0u vertexCount:6u
-			instanceCount:RAL_PARTICLE_POOL_CAPACITY];
 	}
 	[encoder endEncoding];
 	return qtrue;
@@ -4475,16 +4428,6 @@ static qboolean EnsureWeatherPipeline( ralMetalPresent_t *present,
 		if ( !present->weatherRenderPipeline || error ) {
 			[pipeline release]; goto fail;
 		}
-		{
-			id<MTLFunction> flat = [present->uiLibrary newFunctionWithName:@"wired_taa_mask_flat_fragment"];
-			pipeline.fragmentFunction = flat;
-			pipeline.colorAttachments[0].pixelFormat = MTLPixelFormatR8Unorm;
-			pipeline.colorAttachments[0].blendingEnabled = NO;
-			[present->weatherMaskPipeline release];
-			present->weatherMaskPipeline = flat ? [device newRenderPipelineStateWithDescriptor:pipeline error:&error] : nil;
-			[flat release];
-			if ( !present->weatherMaskPipeline || error ) { [pipeline release]; goto fail; }
-		}
 		[pipeline release];
 	}
 	if ( !present->weatherRenderPipeline || error ) goto fail;
@@ -4746,22 +4689,6 @@ static qboolean EnsureParticlePipeline( ralMetalPresent_t *present,
 		present->particleAdditivePipeline = [device
 			newRenderPipelineStateWithDescriptor:pipeline error:&error];
 		if ( !present->particleAdditivePipeline || error ) goto fail;
-		/* Coverage-only twins for the TAA effect mask (same vertex functions, no fragment inputs). */
-		{
-			id<MTLFunction> flat = EnsureUiLibrary( present, device )
-				? [present->uiLibrary newFunctionWithName:@"wired_taa_mask_flat_fragment"] : nil;
-			pipeline.fragmentFunction = flat;
-			pipeline.colorAttachments[0].pixelFormat = MTLPixelFormatR8Unorm;
-			pipeline.colorAttachments[0].blendingEnabled = NO;
-			pipeline.vertexFunction = alphaVertex;
-			[present->particleMaskAlphaPipeline release];
-			present->particleMaskAlphaPipeline = flat ? [device newRenderPipelineStateWithDescriptor:pipeline error:&error] : nil;
-			pipeline.vertexFunction = additiveVertex;
-			[present->particleMaskAdditivePipeline release];
-			present->particleMaskAdditivePipeline = flat ? [device newRenderPipelineStateWithDescriptor:pipeline error:&error] : nil;
-			[flat release];
-			if ( !present->particleMaskAlphaPipeline || !present->particleMaskAdditivePipeline || error ) goto fail;
-		}
 	}
 	[present->particleIntegrateArguments release];
 	present->particleIntegrateArguments = [integrate
@@ -5482,9 +5409,6 @@ void RalMetal_PresentDestroy( ralMetalPresent_t *present ) {
 	[present->worldDepthEqualReadState release];
 	[present->taaMaskPipeline release];
 	[present->taaMaskMaterial release];
-	[present->weatherMaskPipeline release];
-	[present->particleMaskAlphaPipeline release];
-	[present->particleMaskAdditivePipeline release];
 	for ( i = 0u; i < MAX_RENDER_WORLDS; ++i ) {
 		[present->worldCaches[i].vertices release];
 		[present->worldCaches[i].indices release];
@@ -6184,7 +6108,6 @@ static qboolean RenderAndSubmit( ralMetalPresent_t *present,
 	uint32_t genericEffectDroppedCount = 0u;
 	float genericEffectActiveUntil = 0.0f;
 	id<MTLBuffer> effectParticleFrameBuffer = nil;
-	id<MTLBuffer> taaMaskParticleArguments = nil;   /* retained past the effect pass for the TAA effect mask */
 	id<MTLBuffer> effectParticleClassBuffer = nil;
 	uint32_t effectParticleRenderedPool = 0u;
 	renderEffectParticlePlanState_t effectParticleCandidate;
@@ -7488,7 +7411,6 @@ static qboolean RenderAndSubmit( ralMetalPresent_t *present,
 			[encoder setRenderPipelineState:present->particleAdditivePipeline];
 			[encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0u
 				vertexCount:6u instanceCount:RAL_PARTICLE_POOL_CAPACITY];
-			if ( taaActive ) taaMaskParticleArguments = [vertexArguments retain];
 			[vertexArguments release]; [fragmentArguments release];
 			receipt.effectParticleDrawCount = genericEffectParticleCount;
 		}
@@ -7522,24 +7444,8 @@ static qboolean RenderAndSubmit( ralMetalPresent_t *present,
 				taaFrame.historyValid = taaPlan.historyValid; taaFrame.readIndex = taaPlan.historyReadIndex;
 				taaFrame.writeIndex = taaPlan.historyWriteIndex;
 				id<MTLTexture> effectMask = RalMetal_TaaEffectMask( present->taa, present->sceneColorCache );
-				ralMetalTaaMaskEffects_t maskEffects;
-				memset( &maskEffects, 0, sizeof( maskEffects ) );
-				if ( !weatherPlan.zeroWork ) {
-					maskEffects.weatherInstances = weatherPlan.activeParticleCount;
-					maskEffects.weatherPool = present->weatherParity ? 0u : 1u;
-					maskEffects.weatherFrame = &weatherFrame;
-				}
-				if ( taaMaskParticleArguments ) {
-					maskEffects.particleArguments = taaMaskParticleArguments;
-					maskEffects.particleClasses = effectParticleClassBuffer;
-					maskEffects.particleFrames = effectParticleFrameBuffer;
-					maskEffects.particlePool = effectParticleRenderedPool;
-				}
-				const bool maskOk = effectMask && EncodeTaaEffectMask( command, present, effectMask, worldDepth,
-					entityVertices, entityIndices, entityBatches, entityBatchCount, &sceneView, &worldViewParams,
-					receipt.width, receipt.height, &maskEffects );
-				[taaMaskParticleArguments release]; taaMaskParticleArguments = nil;
-				if ( !maskOk ) {
+				if ( !effectMask || !EncodeTaaEffectMask( command, present, effectMask, worldDepth, entityVertices, entityIndices,
+						entityBatches, entityBatchCount, &sceneView, &worldViewParams, receipt.width, receipt.height ) ) {
 					[worldVertices release]; [worldIndices release]; [worldDepth release];
 					[entityVertices release]; [entityIndices release]; free( entityBatches );
 					[uiVertices release]; [readback release];
