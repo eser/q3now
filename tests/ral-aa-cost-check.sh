@@ -101,7 +101,7 @@ set vm_game 0
 set vm_cgame 0
 set sv_cheats 1
 set sv_pure 0
-set aacSetup "cg_draw2D 0; cg_drawGun 0; cg_thirdPerson 0; con_notifytime 0; sv_fps 125; timescale 1; fixedtime 0; r_pinShaderTime 2.0; r_pinFrameTime 2.0; wait 512; noclip; setviewpos 888 -768 434 180 0; r_temporalInputTest 0; ${AAC_PAN:+cl_yawspeed 60; +right; }wait 64; vstr aacSeg0"
+set aacSetup "cg_draw2D 0; cg_drawGun 0; cg_thirdPerson 0; con_notifytime 0; sv_fps 125; timescale 1; fixedtime 0; r_pinShaderTime 2.0; r_pinFrameTime 2.0; wait 512; noclip; wait 150; setviewpos 888 -768 434 180 0; r_temporalInputTest 0; ${AAC_PAN:+cl_yawspeed 60; +right; }wait 64; vstr aacSeg0"
 CFGEOF
 	for (( i = 0; i <= LAST; i++ )); do
 		arm="${ORDER[$i]}"; tag="ARM${arm}_$i"
