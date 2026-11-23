@@ -2808,9 +2808,17 @@ tcmodghost)
     # frame at the same time. Controls: the region must be non-empty (otherwise the view has nothing animated and says nothing); the mask must
     # never make the region deviate more; a repeat of mask 1 gives the noise floor.
     TG_FRAMES="${TG_FRAMES:-6}"
+    # The shader time is stepped by the script, one console `set` per frame, instead of running on the wall clock: with the clock the
+    # repeat of an identical capture differed by more than the effect being measured (repeat noise 2-36 mean abs).
+    TG_DT="${TG_DT:-0.05}"
     tg() {  # tag pos aa mask
-        local tag="$1" pos="$2" aa="$3" mask="$4"
-        { printf 'set cg_draw2D 0\nset cg_drawGun 0\nset fixedtime 8\nset r_pinShaderTime 0\nset r_pinFrameTime 0\nset r_dbgTemporalEffectMask %s\nwait 80\nscreenshot vrf_%s_f0\nwait %s\nscreenshot vrf_%s_f1\nwait 4\n' "$mask" "$tag" "$TG_FRAMES" "$tag"; } > "$SMOKE_HOME/base/vrf_tg.cfg"
+        local tag="$1" pos="$2" aa="$3" mask="$4" k n=84
+        { printf 'set cg_draw2D 0\nset cg_drawGun 0\nset fixedtime 8\nset r_pinFrameTime 1.0\nset r_dbgTemporalEffectMask %s\n' "$mask"
+          for (( k = 0; k <= n + TG_FRAMES; k++ )); do
+              printf 'set r_pinShaderTime %s\nwait 1\n' "$(awk -v k="$k" -v dt="$TG_DT" 'BEGIN{printf "%.4f", 2.0 + k * dt}')"
+              [ "$k" = "$n" ] && printf 'screenshot vrf_%s_f0\n' "$tag"
+          done
+          printf 'screenshot vrf_%s_f1\nwait 4\n' "$tag"; } > "$SMOKE_HOME/base/vrf_tg.cfg"
         CAP_POST_CMD="exec vrf_tg.cfg" capture_fixed_cam arena1 "$pos" "$tag" +set r_aa "$aa" >/dev/null || return 1
     }
     PNG2RAW_BIN="${PNG2RAW:-$WIRED_SOURCE/tools/png2raw/png2raw}"
