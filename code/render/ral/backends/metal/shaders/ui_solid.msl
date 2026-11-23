@@ -1514,6 +1514,11 @@ fragment float4 wired_taa_mask_fragment(WorldVertexOut in [[stage_in]]) {
     return float4(1.0, 0.0, 0.0, 0.0);
 }
 
+// The same coverage write without vertex inputs, for the weather and particle quads whose vertex functions have their own output layout.
+fragment float4 wired_taa_mask_flat_fragment() {
+    return float4(1.0, 0.0, 0.0, 0.0);
+}
+
 kernel void wired_taa_motion_compute(
         depth2d<float, access::read> sceneDepth [[texture(0)]],
         texture2d<float, access::write> velocity [[texture(1)]],
