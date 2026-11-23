@@ -50,6 +50,7 @@ enum {
 	GL_DEPTH_TEST_VALUE = 0x0b71,
 	GL_LEQUAL_VALUE = 0x0203,
 	GL_COLOR_BUFFER_BIT_VALUE = 0x00004000,
+	GL_COLOR_VALUE = 0x1800,
 	GL_DEPTH_BUFFER_BIT_VALUE = 0x00000100,
 	GL_SRC_ALPHA_VALUE = 0x0302,
 	GL_ONE_MINUS_SRC_ALPHA_VALUE = 0x0303,
@@ -129,6 +130,8 @@ typedef struct {
 	bindTextureUnitFn BindTextureUnit;
 	bindVertexArrayFn BindVertexArray;
 	useProgramFn UseProgram;
+	void ( RAL_GL_APIENTRY *ClearBufferfv )( glEnum_t, glInt_t, const float * );
+	void ( RAL_GL_APIENTRY *ColorMaski )( unsigned int, unsigned char, unsigned char, unsigned char, unsigned char );
 	drawElementsFn DrawElements;
 	drawArraysInstancedFn DrawArraysInstanced;
 	enableFn Enable;
@@ -178,6 +181,21 @@ typedef struct {
 	uint32_t flags[4]; /* [0] beam draw, [1] MSDF text (ProductMaterialFactors.beamFlags in ral_opengl_product.frag) */
 } productBeamParams_t;
 
+/* Entity and effect draws mark the TAA coverage target (beamFlags.z); see ral_opengl_product.frag. */
+static const productBeamParams_t s_coverageParams = { { 0.0f }, { 0.0f }, { 0.0f }, { 0u, 0u, 1u, 0u } };
+
+/* Folds the TAA sub-pixel jitter into the view axes: the product vertex stage computes clip.x = -dot(d, left) * px and
+ * clip.y = dot(d, up) * py over w = dot(d, forward), so adding jitter * w is left -= forward * jx / px, up += forward * jy / py. Only
+ * the world pass calls this; the lens projection and the UI stay unjittered. */
+static void JitterWorldView( productDrawUniforms_t *uniforms, const float jitterNdc[2] ) {
+	if ( ( jitterNdc[0] == 0.0f && jitterNdc[1] == 0.0f ) || uniforms->projectionLightmap[0] == 0.0f
+			|| uniforms->projectionLightmap[1] == 0.0f ) return;
+	for ( uint32_t axis = 0u; axis < 3u; ++axis ) {
+		uniforms->viewLeft[axis] -= uniforms->viewForward[axis] * jitterNdc[0] / uniforms->projectionLightmap[0];
+		uniforms->viewUp[axis] += uniforms->viewForward[axis] * jitterNdc[1] / uniforms->projectionLightmap[1];
+	}
+}
+
 typedef struct {
 	float materialBaseColor[4];
 	/* metallic, roughness, occlusion strength, previous-to-current blend;
@@ -218,6 +236,14 @@ static qboolean LoadDispatch( const ralOpenGlCore_t *core,
 	LOAD_GL( BindTextureUnit, "glBindTextureUnit", bindTextureUnitFn );
 	LOAD_GL( BindVertexArray, "glBindVertexArray", bindVertexArrayFn );
 	LOAD_GL( UseProgram, "glUseProgram", useProgramFn );
+	{
+		ralOpenGlProc_t proc = RalOpenGl_CoreResolve( core, "glClearBufferfv" );
+		if ( !proc ) return qfalse;
+		memcpy( &gl->ClearBufferfv, &proc, sizeof( proc ) );
+		proc = RalOpenGl_CoreResolve( core, "glColorMaski" );
+		if ( !proc ) return qfalse;
+		memcpy( &gl->ColorMaski, &proc, sizeof( proc ) );
+	}
 	LOAD_GL( DrawElements, "glDrawElements", drawElementsFn );
 	LOAD_GL( DrawArraysInstanced, "glDrawArraysInstanced",
 		drawArraysInstancedFn );
@@ -536,8 +562,11 @@ static qboolean DrawSkyBatch( const worldDispatch_t *gl,
 	gl->BindTextureUnit( 8u, owner );
 	gl->BindTextureUnit( 9u, info->physicalSkyTextureName );
 	gl->UseProgram( info->skyProgramName );
+	/* The sky program writes no coverage output: keep it off the TAA coverage target. */
+	if ( info->coverageActive ) gl->ColorMaski( 1u, 0u, 0u, 0u, 0u );
 	gl->DrawElements( GL_TRIANGLES_VALUE, (glSize_t)batch->indexCount,
 		GL_UNSIGNED_INT_VALUE, (const void *)(uintptr_t)(batch->firstIndex * sizeof(uint32_t)) );
+	if ( info->coverageActive ) gl->ColorMaski( 1u, 1u, 1u, 1u, 1u );
 	// Restore the product's global inputs; later world/entity/FX draws own 0..4.
 	gl->UseProgram( info->programName );
 	gl->BindTextureUnit( 5u, info->physicalSkyTextureName );
@@ -755,7 +784,7 @@ static qboolean DrawModelEntity( const worldDispatch_t *gl,
 		float entityColor[4];
 		EntityStageColor( frontend, material, &command->entity, entityColor );
 		gl->BindTextureUnit( 0u, MaterialTexture( frontend, textures, material ) );
-		ApplyRaster( gl, uniformBuffer, materialUniformBuffer, uniforms, NULL,
+		ApplyRaster( gl, uniformBuffer, materialUniformBuffer, uniforms, &s_coverageParams,
 			RENDER_ALPHA_OPAQUE,
 			0.5f, qtrue, 0.0f, qfalse, command, NULL, NULL, NULL,
 			NULL, 1.0f, entityColor );
@@ -825,7 +854,7 @@ static qboolean DrawPrimitiveEntity( const worldDispatch_t *gl,
 	gl->BindVertexArray( geometry.vao );
 	gl->BindTextureUnit( 0u, MaterialTexture( frontend, textures,
 		entity->customShader ) );
-	ApplyRaster( gl, uniformBuffer, materialUniformBuffer, uniforms, NULL,
+	ApplyRaster( gl, uniformBuffer, materialUniformBuffer, uniforms, &s_coverageParams,
 		RENDER_ALPHA_BLEND,
 		0.5f, qfalse, 0.0f, qfalse, command, NULL, NULL, NULL,
 		NULL, 1.0f, NULL );
@@ -1353,11 +1382,16 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 	/* Clear owns its write state; the preceding frame may end in UI/alpha. */
 	gl.DepthMask( 1u );
 	gl.Clear( GL_COLOR_BUFFER_BIT_VALUE | GL_DEPTH_BUFFER_BIT_VALUE );
+	if ( info->coverageActive ) {
+		static const float noCoverage[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+		gl.ClearBufferfv( GL_COLOR_VALUE, 1, noCoverage );
+	}
 	gl.Enable( GL_DEPTH_TEST_VALUE );
 	gl.DepthFunc( GL_LEQUAL_VALUE );
 	if ( ( world.batchCount || effectVertexCount || entityCount )
 			&& ( !ApplyWorldView( &uniforms, &world )
 				|| !ApplyAtmosphere( &uniforms, frontend, info ) ) ) goto cleanup;
+	JitterWorldView( &uniforms, info->jitterNdc );
 	if ( distant ) {
 		/* Main authored/physical sky is the background authority.  Distant
 		 * geometry is composited over it, then its depth is discarded so the
@@ -1372,6 +1406,7 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 		}
 		if ( !ApplyWorldView( &uniforms, &distant->world )
 				|| !ApplyAtmosphere( &uniforms, frontend, info ) ) goto cleanup;
+		JitterWorldView( &uniforms, info->jitterNdc );
 		gl.BindVertexArray( vaos[2] );
 		for ( uint32_t i = 0u; i < distant->drawPlan.admittedCount; ++i ) {
 			const uint32_t source = distant->drawPlan.selections[i].sourceDrawIndex;
@@ -1385,6 +1420,7 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 		gl.Clear( GL_DEPTH_BUFFER_BIT_VALUE );
 		if ( !ApplyWorldView( &uniforms, &world )
 				|| !ApplyAtmosphere( &uniforms, frontend, info ) ) goto cleanup;
+		JitterWorldView( &uniforms, info->jitterNdc );
 		if ( world.batchCount ) gl.BindVertexArray( vaos[0] );
 		for ( uint32_t i = 0u; i < world.batchCount; ++i ) {
 			const renderWorldBatch_t *batch = &world.batches[i];
@@ -1435,7 +1471,7 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 				gl.Enable( GL_DEPTH_TEST_VALUE );
 			gl.BindTextureUnit( 0u, MaterialTexture( frontend, textures,
 				sprite->shader ) );
-			ApplyRaster( &gl, uniformBuffer, materialUniformBuffer, &uniforms, NULL,
+			ApplyRaster( &gl, uniformBuffer, materialUniformBuffer, &uniforms, &s_coverageParams,
 				( sprite->flags & PRIM_FLAG_ADDITIVE )
 					? RENDER_ALPHA_ALPHA_ADDITIVE : RENDER_ALPHA_BLEND,
 				0.5f, qfalse, 0.0f, qfalse, NULL, NULL, NULL, NULL,
@@ -1451,7 +1487,7 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 			gl.Enable( GL_DEPTH_TEST_VALUE );
 			gl.BindTextureUnit( 0u, MaterialTexture( frontend, textures,
 				slot->decal.shader ) );
-			ApplyRaster( &gl, uniformBuffer, materialUniformBuffer, &uniforms, NULL,
+			ApplyRaster( &gl, uniformBuffer, materialUniformBuffer, &uniforms, &s_coverageParams,
 				RENDER_ALPHA_BLEND, 0.5f, qfalse, 0.0f, qfalse,
 				NULL, NULL, NULL, NULL, NULL, 1.0f, NULL );
 			gl.DrawElements( GL_TRIANGLES_VALUE, 6, GL_UNSIGNED_INT_VALUE,
@@ -1468,7 +1504,7 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 				gl.Enable( GL_DEPTH_TEST_VALUE );
 			gl.BindTextureUnit( 0u, MaterialTexture( frontend, textures,
 				ribbon->material ) );
-			ApplyRaster( &gl, uniformBuffer, materialUniformBuffer, &uniforms, NULL,
+			ApplyRaster( &gl, uniformBuffer, materialUniformBuffer, &uniforms, &s_coverageParams,
 				( ribbon->flags & PRIM_FLAG_ADDITIVE )
 					? RENDER_ALPHA_ALPHA_ADDITIVE : RENDER_ALPHA_BLEND,
 				0.5f, qfalse, 0.0f, qfalse, NULL, NULL, NULL, NULL,
@@ -1498,6 +1534,7 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 				memcpy(params.endColor, slot->beam.endColor, sizeof(params.endColor));
 				params.startColor[3] *= fade; params.endColor[3] *= fade;
 				params.flags[0] = 1u;
+				params.flags[2] = 1u;   /* TAA coverage */
 				params.scaleOffset[0] = params.scaleOffset[1] = 1.0f;
 				for (uint32_t a = 0u; a < 2u; ++a)
 					params.scaleOffset[2u+a] = slot->beam.uvScroll[a] * clock;
@@ -1568,8 +1605,11 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 		gl.Enable( GL_BLEND_VALUE );
 		gl.BlendFunc( GL_SRC_ALPHA_VALUE, GL_ONE_MINUS_SRC_ALPHA_VALUE );
 		gl.DepthMask( 0u );
+		/* Weather writes no coverage output and stays out of the TAA coverage, as on Metal. */
+		if ( info->coverageActive ) gl.ColorMaski( 1u, 0u, 0u, 0u, 0u );
 		gl.DrawArraysInstanced( GL_TRIANGLES_VALUE, 0, 6,
 			(glSize_t)info->weatherParticleCount );
+		if ( info->coverageActive ) gl.ColorMaski( 1u, 1u, 1u, 1u, 1u );
 		gl.DeleteVertexArrays( 1, &weatherVao );
 		receipt.weatherDrawCount = 1u;
 		receipt.weatherInstanceCount = info->weatherParticleCount;

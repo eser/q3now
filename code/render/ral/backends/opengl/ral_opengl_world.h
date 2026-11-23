@@ -44,6 +44,10 @@ typedef struct {
 	ralDisplayVisibilityPlan_t displayVisibility;
 	float aerialHaze; /* r_atmosphereAerialHaze weight, 0..1 */
 	float lightmapBoost; /* r_lightmapBoost, linear world-lightmap overbright (1..24) */
+	/* TAA: the sub-pixel jitter (NDC) folded into the world view axes, and colour attachment 1 (the R8 coverage target) being bound:
+	 * the pass clears it, entity and effect draws mark it, and programs that do not write it are masked off it. */
+	float jitterNdc[2];
+	qboolean coverageActive;
 	const renderDistantWorldSubmission_t *distantWorld;
 	const renderEffectDecalPool_t *effectDecalPool;
 	renderEffectDecalPoolReceipt_t effectDecalPoolReceipt;

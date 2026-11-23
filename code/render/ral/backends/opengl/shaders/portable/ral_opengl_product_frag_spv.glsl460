@@ -42,6 +42,7 @@ layout(binding = 4) uniform sampler2DArray staticVisibilityTexture;
 layout(binding = 1) uniform sampler2D lightmapTexture;
 
 layout(location = 3) in vec3 worldPosition;
+layout(location = 1) out vec4 outCoverage;
 layout(location = 0) in vec2 texCoord;
 layout(location = 2) in vec4 color;
 layout(location = 0) out vec4 outColor;
@@ -263,6 +264,8 @@ vec3 wired_lighting_directional_static_indirect(vec3 radiance, vec2 encodedDirec
 
 void main()
 {
+    float coverage = float(productMaterial.beamFlags.z != 0u);
+    outCoverage = vec4(coverage, 0.0, 0.0, coverage);
     vec4 base = texture(baseTexture, texCoord);
     if (productMaterial.beamFlags.y != 0u)
     {
@@ -276,17 +279,17 @@ void main()
         outColor = vec4((base.xyz * linearColor) * wired_atmosphere_sample().w, base.w * color.w);
         return;
     }
-    bool _805 = productDraw.atmosphereHeightSky.w > 0.5;
-    bool _812;
-    if (_805)
+    bool _814 = productDraw.atmosphereHeightSky.w > 0.5;
+    bool _821;
+    if (_814)
     {
-        _812 = productDraw.emissiveRadiance.w >= 0.0;
+        _821 = productDraw.emissiveRadiance.w >= 0.0;
     }
     else
     {
-        _812 = _805;
+        _821 = _814;
     }
-    if (_812)
+    if (_821)
     {
         vec3 direction = normalize(worldPosition - productDraw.atmosphereEyeDensity.xyz);
         vec3 param = direction;
@@ -297,17 +300,17 @@ void main()
         vec3 previous = wired_sample_sky_radiance(previousSkyRadianceTexture, param_2, param_3);
         base = vec4(mix(previous, current, vec3(clamp(productDraw.emissiveRadiance.w, 0.0, 1.0))), 1.0);
     }
-    bool _847 = productDraw.atmosphereHeightSky.w > 0.5;
-    bool _853;
-    if (_847)
+    bool _856 = productDraw.atmosphereHeightSky.w > 0.5;
+    bool _862;
+    if (_856)
     {
-        _853 = productDraw.atmosphereHeightSky.z > 0.0;
+        _862 = productDraw.atmosphereHeightSky.z > 0.0;
     }
     else
     {
-        _853 = _847;
+        _862 = _856;
     }
-    if (_853)
+    if (_862)
     {
         vec3 direction_1 = normalize(worldPosition - productDraw.atmosphereEyeDensity.xyz);
         vec2 physicalUv = vec2((atan(direction_1.y, direction_1.x) / 6.283185482025146484375) + 0.5, (asin(clamp(direction_1.z, -1.0, 1.0)) / 3.1415927410125732421875) + 0.5);
@@ -319,17 +322,17 @@ void main()
         outColor = vec4(wired_display_visibility(param_7), 1.0);
         return;
     }
-    bool _904 = productDraw.atmosphereHeightSky.w > 0.5;
-    bool _910;
-    if (_904)
+    bool _913 = productDraw.atmosphereHeightSky.w > 0.5;
+    bool _919;
+    if (_913)
     {
-        _910 = productDraw.emissiveRadiance.w >= 0.0;
+        _919 = productDraw.emissiveRadiance.w >= 0.0;
     }
     else
     {
-        _910 = _904;
+        _919 = _913;
     }
-    if (_910)
+    if (_919)
     {
         vec3 param_8 = base.xyz;
         outColor = vec4(wired_display_visibility(param_8), 1.0);
@@ -337,17 +340,17 @@ void main()
     }
     int alphaMode = int(productDraw.viewportAlpha.z + 0.5);
     base *= productMaterial.baseColor;
-    bool _932 = alphaMode == 1;
-    bool _940;
-    if (_932)
+    bool _941 = alphaMode == 1;
+    bool _949;
+    if (_941)
     {
-        _940 = base.w < productDraw.viewportAlpha.w;
+        _949 = base.w < productDraw.viewportAlpha.w;
     }
     else
     {
-        _940 = _932;
+        _949 = _941;
     }
-    if (_940)
+    if (_949)
     {
         discard;
     }
@@ -373,30 +376,30 @@ void main()
     }
     else
     {
-        bool _1040 = productDraw.staticLighting.x == 1u;
-        bool _1048;
-        if (!_1040)
+        bool _1049 = productDraw.staticLighting.x == 1u;
+        bool _1057;
+        if (!_1049)
         {
-            _1048 = productDraw.projectionLightmap.w >= 0.5;
+            _1057 = productDraw.projectionLightmap.w >= 0.5;
         }
         else
         {
-            _1048 = _1040;
+            _1057 = _1049;
         }
-        if (_1048)
+        if (_1057)
         {
             vec3 boosted = texture(lightmapTexture, lightmapCoord).xyz * max(productDraw.projectionLightmap.w, 1.0);
             float peak = max(boosted.x, max(boosted.y, boosted.z));
-            vec3 _1075;
+            vec3 _1084;
             if (peak > 1.0)
             {
-                _1075 = boosted / vec3(peak);
+                _1084 = boosted / vec3(peak);
             }
             else
             {
-                _1075 = boosted;
+                _1084 = boosted;
             }
-            lighting = _1075;
+            lighting = _1084;
         }
         else
         {
@@ -426,16 +429,16 @@ void main()
         lit += (specularIbl * occlusion);
     }
     vec4 media = wired_atmosphere_sample();
-    vec3 _1220;
+    vec3 _1229;
     if ((alphaMode == 3) || (alphaMode == 4))
     {
-        _1220 = vec3(0.0);
+        _1229 = vec3(0.0);
     }
     else
     {
-        _1220 = media.xyz;
+        _1229 = media.xyz;
     }
-    lit = (lit * media.w) + _1220;
+    lit = (lit * media.w) + _1229;
     if (productDraw.viewOriginDrawSpace.w < 0.5)
     {
         vec3 param_16 = lit;

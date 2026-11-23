@@ -34,6 +34,15 @@ const MODULES = [
 	{ symbol: 'exposure_comp_spv', name: 'Exposure' },
 	{ symbol: 'gamma_vert_spv', name: 'FullscreenVertex' },
 	{ symbol: 'tonemap_tonemap_frag_spv', name: 'Tonemap' },
+	// Anti-aliasing (r_aa): TAA compute and the three SMAA passes, as on Vulkan, Metal and WebGPU.
+	{ symbol: 'temporal_bootstrap_aa_comp_spv', name: 'TemporalBootstrap' },
+	{ symbol: 'temporal_resolve_comp_spv', name: 'TemporalResolve' },
+	{ symbol: 'smaa_edge_vert_spv', name: 'SmaaEdgeVertex' },
+	{ symbol: 'smaa_edge_frag_spv', name: 'SmaaEdgeFragment' },
+	{ symbol: 'smaa_blend_vert_spv', name: 'SmaaBlendVertex' },
+	{ symbol: 'smaa_blend_frag_spv', name: 'SmaaBlendFragment' },
+	{ symbol: 'smaa_resolve_vert_spv', name: 'SmaaResolveVertex' },
+	{ symbol: 'smaa_resolve_frag_spv', name: 'SmaaResolveFragment' },
 ];
 
 function parseArgs(argv) {

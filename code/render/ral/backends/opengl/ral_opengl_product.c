@@ -3,6 +3,8 @@
 
 #include "ral_opengl_product.h"
 #include "ral_opengl_internal.h"
+#include "ral_opengl_aa.h"
+#include "ral_temporal.h"
 #include "ral_sky_radiance.h"
 #include "../../../frontend/render_material_stage_gpu.h"
 #include "../../../frontend/render_atmosphere_gpu.h"
@@ -444,6 +446,14 @@ struct ralOpenGlProduct_s {
 	ralDisplayVisibilityPlan_t displayVisibility;
 	float aerialHaze; /* r_atmosphereAerialHaze weight, 0..1 */
 	float lightmapBoost; /* r_lightmapBoost, linear world-lightmap overbright */
+	/* Anti-aliasing (r_aa 0 off, 1 TAA, 2 SMAA; r_smaa preset), created on first use. */
+	ralOpenGlAa_t *aa;
+	int aaMode, smaaQuality;
+	ralTemporalState_t taaState;
+	uint64_t taaFrameId, taaWorldGeneration;
+	uint32_t taaTopologyEpoch;
+	ralOpenGlAaCamera_t taaPreviousCamera;
+	uint32_t taaResolvedFrames, taaBootstrapFrames, smaaFrames;
 	productMaterialEntry_t materials[RENDER_SUBMISSION_MAX_TEXTURE_RESOURCES];
 	uint32_t materialTextureNames[RENDER_SUBMISSION_MAX_TEXTURE_RESOURCES];
 	uint32_t cookedMaterialTextureNames[RENDER_SUBMISSION_MAX_MATERIALS];
@@ -724,6 +734,9 @@ static qboolean FrameValid( const ralOpenGlProductFrameReceipt_t *receipt )
 		   receipt->backendType == RAL_BACKEND_OPENGL && receipt->productGeneration && receipt->frameGeneration &&
 		   receipt->postprocessDrawCount == 1u &&
 		   (receipt->exposureDispatchCount == 0u || receipt->exposureDispatchCount == 2u) &&
+		   (receipt->aaDispatchCount == 0u || receipt->aaDispatchCount == 2u) &&
+		   (receipt->aaDrawCount == 0u || receipt->aaDrawCount == 3u) &&
+		   !(receipt->aaDispatchCount && receipt->aaDrawCount) &&
 		   (receipt->exposureHistoryReset == qfalse || receipt->exposureHistoryReset == qtrue) &&
 		   (!receipt->exposureHistoryReset || receipt->exposureDispatchCount == 2u) &&
 		   receipt->vertexShaderByteCount == ralOpenGlProductVertexByteCount &&
@@ -1031,6 +1044,8 @@ void RalOpenGl_ProductDestroy( ralOpenGlProduct_t *product )
 	uint64_t ignoredRevision = 0u;
 	if ( !product )
 		return;
+	RalOpenGl_AaDestroy( product->aa );
+	product->aa = NULL;
 	if ( product->skyCaptureFramebuffer ) product->gl.DeleteFramebuffers(1,&product->skyCaptureFramebuffer);
 	if ( product->skyCaptureVao ) product->gl.DeleteVertexArrays(1,&product->skyCaptureVao);
 	product->gl.DeleteBuffers(3,product->skyCaptureBuffers);
@@ -1282,6 +1297,8 @@ typedef struct {
 	glBool_t outputSrgbEnabled;
 	uint64_t worldDigest;
 	qboolean sceneRendered, completed, metered;
+	const ralOpenGlAaTaaFrame_t *taa;   /* TAA planned for this frame (r_aa 1) */
+	qboolean smaa;                      /* SMAA for this frame (r_aa 2) */
 } productSceneComplete_t;
 
 static void RestoreOutputFramebuffer( productSceneComplete_t *frame ) {
@@ -1294,6 +1311,7 @@ static qboolean CompleteHdrScene( void *context ) {
 	productSceneComplete_t *frame = context;
 	ralOpenGlProduct_t *product = frame->product;
 	productDispatch_t *gl = &product->gl;
+	glName_t sceneSource = product->hdrTextures[0];
 	const ralExposureSettings_t *s = &product->exposureSettings;
 	ralExposureBlock_t block = {0};
 	const uint32_t next = product->exposureParity ^ 1u;
@@ -1307,6 +1325,22 @@ static qboolean CompleteHdrScene( void *context ) {
 	/* Read scene depth while the HDR framebuffer is still bound, never UI depth. */
 	if ( !EncodeLensVisibility( product, frame->frontend, frame->view, frame->receipt ) )
 		return qfalse;
+	/* Anti-aliasing on the HDR scene, before exposure metering and tone mapping (as on Vulkan, Metal and WebGPU): both read the
+	 * anti-aliased colour. The scene pass is over, so the HDR framebuffer draws to attachment 0 only again. */
+	if ( frame->taa || frame->smaa ) {
+		uint32_t resolved = 0u;
+		if ( frame->taa ) {
+			if ( !RalOpenGl_AaAttachCoverage( product->aa, product->hdrFramebuffer, 0u )
+					|| !RalOpenGl_AaTaa( product->aa, product->hdrTextures[0], product->hdrTextures[1], frame->taa, &resolved ) )
+				return qfalse;
+			frame->receipt->aaDispatchCount = 2u;
+		} else {
+			if ( !RalOpenGl_AaSmaa( product->aa, product->hdrTextures[0], product->outputWidth, product->outputHeight,
+					product->smaaQuality, &resolved ) ) return qfalse;
+			frame->receipt->aaDrawCount = 3u;
+		}
+		sceneSource = (glName_t)resolved;
+	}
 	block.exposure_bias = product->displayVisibility.exposureScale;
 	block.key = s->key; block.pctLow = s->pctLow; block.pctHigh = s->pctHigh;
 	block.rateUp = s->rateUp; block.rateDown = s->rateDown;
@@ -1333,7 +1367,7 @@ static qboolean CompleteHdrScene( void *context ) {
 			GL_RED_INTEGER_VALUE, GL_UNSIGNED_INT_VALUE, &zero );
 		gl->NamedBufferSubData( product->hdrBuffers[4], 0, sizeof(dims), dims );
 		gl->UseProgram( product->hdrPrograms[0] );
-		gl->BindTextureUnit( 0, product->hdrTextures[0] );
+		gl->BindTextureUnit( 0, sceneSource );
 		gl->BindBufferBase( GL_SHADER_STORAGE_BUFFER_VALUE, 0, product->hdrBuffers[0] );
 		gl->BindBufferBase( GL_UNIFORM_BUFFER_VALUE, 3, product->hdrBuffers[4] );
 		gl->DispatchCompute( (product->outputWidth + 15u) / 16u,
@@ -1354,7 +1388,7 @@ static qboolean CompleteHdrScene( void *context ) {
 	 * attachment, with UI blending performed in linear space by OpenGL. */
 	gl->Enable( GL_FRAMEBUFFER_SRGB_VALUE );
 	gl->UseProgram( product->hdrPrograms[2] );
-	gl->BindTextureUnit( 0, product->hdrTextures[0] );
+	gl->BindTextureUnit( 0, sceneSource );
 	gl->BindBufferBase( GL_UNIFORM_BUFFER_VALUE, 0, product->hdrBuffers[3] );
 	gl->Disable( GL_BLEND_VALUE ); gl->Disable( GL_DEPTH_TEST_VALUE );
 	gl->Disable( GL_CULL_FACE_VALUE ); gl->DepthMask( 0 );
@@ -1828,6 +1862,35 @@ qboolean RalOpenGl_ProductSetDisplayVisibility( ralOpenGlProduct_t *product,
 	if ( !product || !Ral_DisplayVisibilityPlanValid( visibility ) ) return qfalse;
 	product->displayVisibility = *visibility;
 	return qtrue;
+}
+
+qboolean RalOpenGl_ProductSetAntiAliasing( ralOpenGlProduct_t *product, int mode, int smaaQuality ) {
+	if ( !product || mode < 0 || mode > 2 || smaaQuality < 0 || smaaQuality > 4 ) return qfalse;
+	product->aaMode = mode;
+	product->smaaQuality = smaaQuality;
+	return qtrue;
+}
+
+void RalOpenGl_ProductAntiAliasingCounts( const ralOpenGlProduct_t *product, uint32_t *taaResolved, uint32_t *taaBootstrap,
+		uint32_t *smaa ) {
+	if ( taaResolved ) *taaResolved = product ? product->taaResolvedFrames : 0u;
+	if ( taaBootstrap ) *taaBootstrap = product ? product->taaBootstrapFrames : 0u;
+	if ( smaa ) *smaa = product ? product->smaaFrames : 0u;
+}
+
+/* The AA owner is created on the first frame that asks for anti-aliasing; its shaders are the catalog modules embedded here. */
+static qboolean EnsureAa( ralOpenGlProduct_t *product ) {
+	ralOpenGlAaSources_t sources;
+	if ( product->aa ) return qtrue;
+#define AA_SOURCE( field, name ) sources.field = (ralOpenGlAaSource_t){ ralOpenGlProduct##name##Source, ralOpenGlProduct##name##ByteCount }
+	AA_SOURCE( temporalBootstrap, TemporalBootstrap ); AA_SOURCE( temporalResolve, TemporalResolve );
+	AA_SOURCE( smaaEdgeVertex, SmaaEdgeVertex ); AA_SOURCE( smaaEdgeFragment, SmaaEdgeFragment );
+	AA_SOURCE( smaaBlendVertex, SmaaBlendVertex ); AA_SOURCE( smaaBlendFragment, SmaaBlendFragment );
+	AA_SOURCE( smaaResolveVertex, SmaaResolveVertex ); AA_SOURCE( smaaResolveFragment, SmaaResolveFragment );
+#undef AA_SOURCE
+	Ral_TemporalInit( &product->taaState );
+	product->taaFrameId = 0u;
+	return RalOpenGl_AaCreate( product->core, &sources, &product->aa );
 }
 
 qboolean RalOpenGl_ProductSetLightmapBoost( ralOpenGlProduct_t *product,
@@ -2937,6 +3000,8 @@ qboolean RalOpenGl_ProductRender( ralOpenGlProduct_t *product, renderSubmissionS
 	renderDistantWorldSubmission_t distantWorld;
 	qboolean distantWorldReady = qfalse;
 	productSceneComplete_t sceneComplete = {0};
+	ralOpenGlAaTaaFrame_t taaFrame;
+	uint64_t taaPlanFrame = 0u;
 	if ( !product || !frontend || !submission || !outReceipt || !frameGeneration || frameGeneration == UINT64_MAX ||
 		 !product->outputWidth || !product->outputHeight || frameGeneration <= product->lastFrameGeneration ||
 		 !RalOpenGl_CoreMatchesReceipt( product->core, &product->coreReceipt ) )
@@ -3071,6 +3136,62 @@ qboolean RalOpenGl_ProductRender( ralOpenGlProduct_t *product, renderSubmissionS
 	sceneComplete.worldDigest = submission->worldDigest;
 	sceneComplete.sceneRendered = submission->sceneRendered
 		&& !( effectView.rdflags & RDF_NOWORLDMODEL );
+	/* Anti-aliasing plan. A plan left pending by a failed frame is cancelled first; leaving TAA drops its history. TAA jitters the
+	 * world view (folded into the view axes by the world pass) and binds the coverage target as attachment 1 of the HDR scene. */
+	if ( product->taaState.pending )
+		(void)Ral_TemporalCancelFrame( &product->taaState, product->taaState.pendingPlan.frameId );
+	if ( product->aaMode != 1 && product->taaState.active ) { Ral_TemporalInit( &product->taaState ); product->taaFrameId = 0u; }
+	memset( &taaFrame, 0, sizeof( taaFrame ) );
+	{
+		const qboolean anti = sceneComplete.sceneRendered && frontend->activeWorldIndex >= 0 && product->aaMode != 0;
+		uint32_t coverage = 0u;
+		if ( anti && !EnsureAa( product ) ) return qfalse;
+		if ( anti && product->aaMode == 1 && isfinite( effectView.fovX ) && isfinite( effectView.fovY )
+				&& effectView.fovX > 1.0f && effectView.fovX < 179.0f && effectView.fovY > 1.0f && effectView.fovY < 179.0f ) {
+			ralTemporalFrameInput_t input;
+			ralTemporalFramePlan_t plan;
+			const uint64_t lifecycle = frontend->worlds[frontend->activeWorldIndex].lifecycleGeneration;
+			memset( &input, 0, sizeof( input ) );
+			if ( product->taaWorldGeneration != lifecycle ) {
+				product->taaWorldGeneration = lifecycle;
+				if ( !++product->taaTopologyEpoch ) product->taaTopologyEpoch = 1u;
+			}
+			input.frameId = product->taaFrameId + 1u;
+			input.width = product->outputWidth; input.height = product->outputHeight;
+			input.topologyEpoch = product->taaTopologyEpoch; input.enabled = 1u;
+			input.cameraCut = ( effectView.rdflags & ( RDF_CAMERA_CUT | RDF_HYPERSPACE ) ) ? 1u : 0u;
+			if ( Ral_TemporalBeginFrame( &product->taaState, &input, &plan ) ) {
+				const float w = (float)product->outputWidth, h = (float)product->outputHeight;
+				for ( int axis = 0; axis < 3; ++axis ) {
+					taaFrame.current.origin[axis] = effectView.viewOrigin[axis];
+					taaFrame.current.forward[axis] = effectView.viewAxis[0][axis];
+					taaFrame.current.left[axis] = effectView.viewAxis[1][axis];
+					taaFrame.current.up[axis] = effectView.viewAxis[2][axis];
+				}
+				taaFrame.current.projectionX = 1.0f / tanf( effectView.fovX * 0.00872664625997164788f );
+				taaFrame.current.projectionY = 1.0f / tanf( effectView.fovY * 0.00872664625997164788f );
+				taaFrame.previous = product->taaPreviousCamera;
+				taaFrame.width = product->outputWidth; taaFrame.height = product->outputHeight;
+				/* GL texture space has row 0 at NDC y = -1, so the image-space jitter maps to NDC and uv with the same sign. */
+				taaFrame.jitterNdc[0] = 2.0f * plan.sceneJitterPixels[0] / w;
+				taaFrame.jitterNdc[1] = 2.0f * plan.sceneJitterPixels[1] / h;
+				taaFrame.currentJitterUv[0] = plan.sceneJitterPixels[0] / w;
+				taaFrame.currentJitterUv[1] = plan.sceneJitterPixels[1] / h;
+				taaFrame.previousJitterUv[0] = plan.previousJitterPixels[0] / w;
+				taaFrame.previousJitterUv[1] = plan.previousJitterPixels[1] / h;
+				taaFrame.historyValid = plan.historyValid ? qtrue : qfalse;
+				taaFrame.readIndex = plan.historyReadIndex; taaFrame.writeIndex = plan.historyWriteIndex;
+				coverage = RalOpenGl_AaCoverageTexture( product->aa, product->outputWidth, product->outputHeight );
+				if ( !coverage ) return qfalse;
+				lower.jitterNdc[0] = taaFrame.jitterNdc[0]; lower.jitterNdc[1] = taaFrame.jitterNdc[1];
+				lower.coverageActive = qtrue;
+				sceneComplete.taa = &taaFrame;
+				taaPlanFrame = plan.frameId;
+			}
+		}
+		sceneComplete.smaa = anti && product->aaMode == 2 ? qtrue : qfalse;
+		if ( product->aa && !RalOpenGl_AaAttachCoverage( product->aa, product->hdrFramebuffer, coverage ) ) return qfalse;
+	}
 	product->gl.GetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING_VALUE, &sceneComplete.drawFramebuffer );
 	product->gl.GetIntegerv( GL_READ_FRAMEBUFFER_BINDING_VALUE, &sceneComplete.readFramebuffer );
 	{
@@ -3115,6 +3236,13 @@ qboolean RalOpenGl_ProductRender( ralOpenGlProduct_t *product, renderSubmissionS
 	product->effectDecalPool = decalPoolCandidate;
 	product->effectBeamPool = beamPoolCandidate;
 	product->lastFrameGeneration = frameGeneration;
+	if ( taaPlanFrame && receipt.aaDispatchCount == 2u
+			&& Ral_TemporalCommitFrame( &product->taaState, taaPlanFrame ) ) {
+		product->taaFrameId = taaPlanFrame;
+		product->taaPreviousCamera = taaFrame.current;
+		if ( taaFrame.historyValid ) product->taaResolvedFrames++; else product->taaBootstrapFrames++;
+	}
+	if ( receipt.aaDrawCount ) product->smaaFrames++;
 	*outReceipt					 = receipt;
 	return qtrue;
 }

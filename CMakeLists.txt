@@ -2329,6 +2329,7 @@ SET_TESTS_PROPERTIES(ral_frame_shell_source_policy_contract PROPERTIES
 	LABELS "host-only;infrastructure;owner.ral;failure.contract;feature.always" TIMEOUT 30)
 
 ADD_LIBRARY(ral_opengl STATIC
+	code/render/ral/backends/opengl/ral_opengl_aa.c
 	code/render/ral/backends/opengl/ral_opengl_core.c
 	code/render/ral/backends/opengl/ral_opengl_command.c
 	code/render/ral/backends/opengl/ral_opengl_frontend.c
@@ -2337,6 +2338,7 @@ ADD_LIBRARY(ral_opengl STATIC
 	code/render/ral/backends/opengl/ral_opengl_product.c
 	code/render/ral/backends/opengl/ral_opengl_world.c
 	code/render/frontend/render_material_runtime_catalog.c
+	code/render/ral/core/ral_temporal.c
 	code/render/ral/core/ral_allocation.c
 	code/render/ral/core/ral_atmosphere.c
 	code/render/ral/core/ral_sky_radiance.c

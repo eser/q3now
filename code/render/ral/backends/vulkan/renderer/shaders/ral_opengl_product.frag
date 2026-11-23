@@ -14,7 +14,7 @@ layout(set = 2, binding = 1, std140) uniform ProductMaterialFactors {
 	vec4 beamStartColor;
 	vec4 beamEndColor;
 	vec4 beamScaleOffset;
-	uvec4 beamFlags; // x: beam draw, y: MSDF text (the base texture is a multi-channel distance atlas)
+	uvec4 beamFlags; // x: beam draw, y: MSDF text (the base texture is a multi-channel distance atlas), z: TAA coverage
 } productMaterial;
 
 layout(set = 1, binding = 0) uniform texture2D baseTexture;
@@ -43,6 +43,7 @@ layout(location = 2) in vec4 color;
 layout(location = 3) in vec3 worldPosition;
 layout(location = 4) in vec3 worldNormal;
 layout(location = 0) out vec4 outColor;
+layout(location = 1) out vec4 outCoverage;
 
 
 vec3 wired_sample_sky_radiance(texture2DArray skyTexture,
@@ -125,6 +126,11 @@ vec4 wired_atmosphere_sample() {
 }
 
 void main() {
+	// TAA coverage (attachment 1, bound only while TAA runs): entity and effect draws (beamFlags.z) mark their pixels so the resolve
+	// drops history there, like the Metal / WebGPU effect mask. (f, 0, 0, f) replaces under opaque draws and leaves blended
+	// non-marking draws untouched under every blend mode.
+	float coverage = productMaterial.beamFlags.z != 0u ? 1.0 : 0.0;
+	outCoverage = vec4(coverage, 0.0, 0.0, coverage);
 	vec4 base = texture(sampler2D(baseTexture, baseSampler), texCoord);
 	if (productMaterial.beamFlags.y != 0u) {
 		// MSDF text, as the Metal UI MSDF fragment: the median of the three channels is the signed distance; coverage is its

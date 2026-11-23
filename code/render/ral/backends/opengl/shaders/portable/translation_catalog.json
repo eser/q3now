@@ -6,8 +6,8 @@
     "generation": 1,
     "byteCount": 1165154,
     "digest": {
-      "lane0": "5ecfaa2416d86009",
-      "lane1": "c4b3cb43233f9b15"
+      "lane0": "4d53580751f01e40",
+      "lane1": "67ec050e4fe14c34"
     }
   },
   "requiredTargets": [
@@ -6465,19 +6465,19 @@
       "symbol": "ral_opengl_product_frag_spv",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 30816,
+        "byteCount": 31076,
         "digest": {
-          "lane0": "88fa0e8de708de5f",
-          "lane1": "1093e4cbcf424ae3"
+          "lane0": "8bd0fed47be30c22",
+          "lane1": "1fe42608c08605e9"
         }
       },
       "artifacts": [
         {
           "target": "glsl460",
-          "byteCount": 15611,
+          "byteCount": 15771,
           "digest": {
-            "lane0": "31f2527d51ce7193",
-            "lane1": "aff5f3830928427b"
+            "lane0": "2b2887fca30f481f",
+            "lane1": "1a2be71dea352e95"
           }
         }
       ]

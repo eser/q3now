@@ -791,24 +791,44 @@ fail:
 	return qfalse;
 }
 
-/* r_aa (0 off, 1 TAA, 2 SMAA) is registered so the cvar exists and is documented here, but this renderer has no anti-aliasing yet
- * (TASK-257; Vulkan has TAA and SMAA, Metal has SMAA). A non-zero value is said to be ignored once instead of being silently dropped. */
-static void NoteAntiAliasingUnavailable( void ) {
+/* r_aa (0 off, 1 TAA default, 2 SMAA) and r_smaa: the same cvars, defaults and ranges as the Vulkan, Metal and WebGPU renderers. */
+static void RegisterAntiAliasing( void ) {
 	static qboolean noted;
 	cvar_t *aa;
-	/* Published for the video menu: this renderer has no anti-aliasing, so the Anti-Aliasing row is replaced by a note. */
-	if ( ri.Cvar_Get && ri.Cvar_Set ) { ri.Cvar_Get( "r_aaSupported", "0", CVAR_TEMP ); ri.Cvar_Set( "r_aaSupported", "0" ); }
+	/* Published for the video menu. */
+	if ( ri.Cvar_Get && ri.Cvar_Set ) { ri.Cvar_Get( "r_aaSupported", "1", CVAR_TEMP ); ri.Cvar_Set( "r_aaSupported", "1" ); }
 	if ( noted || !ri.Cvar_Get || !ri.Cvar_CheckRange ) return;
 	aa = ri.Cvar_Get( "r_aa", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	if ( !aa ) return;
 	ri.Cvar_CheckRange( aa, "0", "2", CV_INTEGER );
 	if ( ri.Cvar_SetDescription ) ri.Cvar_SetDescription( aa,
-		"Anti-aliasing: 0 off, 1 TAA, 2 SMAA. Not available on this renderer yet; the frame is not anti-aliased." );
+		"Anti-aliasing: 0 off, 1 TAA (default), 2 SMAA (only if TAA ghosting bothers you; r_smaa selects its preset)." );
 	if ( ri.Cvar_SetGroup ) ri.Cvar_SetGroup( aa, CVG_RENDERER );
 	noted = qtrue;
-	if ( aa->integer && s_module.imports.LogCh && s_module.logChannel >= 0 )
+	{
+		cvar_t *smaa = ri.Cvar_Get( "r_smaa", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
+		if ( smaa ) {
+			ri.Cvar_CheckRange( smaa, "0", "4", CV_INTEGER );
+			if ( ri.Cvar_SetDescription ) ri.Cvar_SetDescription( smaa,
+				"SMAA quality preset 1 low .. 4 ultra; 0 uses preset 3 (high) when r_aa selects SMAA." );
+		}
+	}
+}
+
+/* r_aa follows live; one line per 1000 anti-aliased frames is the gameplay evidence (TAA resolved vs bootstrap, SMAA). */
+static qboolean ApplyAntiAliasing( void ) {
+	static uint32_t lastLoggedFrames;
+	cvar_t *aa = ri.Cvar_Get ? ri.Cvar_Get( "r_aa", "1", CVAR_ARCHIVE | CVAR_NODEFAULT ) : NULL;
+	cvar_t *smaa = ri.Cvar_Get ? ri.Cvar_Get( "r_smaa", "0", CVAR_ARCHIVE | CVAR_NODEFAULT ) : NULL;
+	uint32_t resolved = 0u, bootstrap = 0u, smaaFrames = 0u;
+	if ( !RalOpenGl_ProductSetAntiAliasing( s_module.product, aa ? aa->integer : 0, smaa ? smaa->integer : 0 ) ) return qfalse;
+	RalOpenGl_ProductAntiAliasingCounts( s_module.product, &resolved, &bootstrap, &smaaFrames );
+	if ( resolved + bootstrap + smaaFrames >= lastLoggedFrames + 1000u && s_module.imports.LogCh && s_module.logChannel >= 0 ) {
+		lastLoggedFrames = resolved + bootstrap + smaaFrames;
 		s_module.imports.LogCh( s_module.logChannel, SEV_INFO,
-			"Wired native OpenGL RAL: r_aa %d requested; anti-aliasing is not available on this renderer yet (TASK-257), the frame is not anti-aliased\n", aa->integer );
+			"Wired native OpenGL RAL: aa frames taa-resolved=%u taa-bootstrap=%u smaa=%u\n", resolved, bootstrap, smaaFrames );
+	}
+	return qtrue;
 }
 
 static void BeginRegistration( glconfig_t *config )
@@ -827,7 +847,7 @@ static void BeginRegistration( glconfig_t *config )
 		LogFailure( "owner-initialization" );
 		return;
 	}
-	NoteAntiAliasingUnavailable();
+	RegisterAntiAliasing();
 	if ( !s_module.brightness ) {
 		if ( !ri.Cvar_Get || !ri.Cvar_CheckRange ) {
 			memset( &s_module.brightnessFallback, 0,
@@ -1037,6 +1057,7 @@ static void EndFrame( int *frontEndMsec, int *backEndMsec )
 			|| !RalOpenGl_ProductSetAerialHaze( s_module.product, s_module.aerialHaze->value )
 			|| !s_module.lightmapBoost
 			|| !RalOpenGl_ProductSetLightmapBoost( s_module.product, s_module.lightmapBoost->value )
+			|| !ApplyAntiAliasing()
 			|| !s_module.skyPhysicalBlend
 			|| !Ral_SkySurfaceSetPhysicalBlendScale( s_module.skyPhysicalBlend->value ) ) {
 		s_module.frameOpen = qfalse;

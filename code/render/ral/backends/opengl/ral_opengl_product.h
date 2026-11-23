@@ -13,7 +13,7 @@
 extern "C" {
 #endif
 
-#define RAL_OPENGL_PRODUCT_SCHEMA_VERSION 11u
+#define RAL_OPENGL_PRODUCT_SCHEMA_VERSION 12u
 
 typedef struct ralOpenGlProduct_s ralOpenGlProduct_t;
 
@@ -27,6 +27,8 @@ typedef struct {
 	uint64_t frameGeneration;
 	uint32_t postprocessDrawCount;
 	uint32_t exposureDispatchCount;
+	uint32_t aaDispatchCount;   /* TAA: motion + resolve (or bootstrap) = 2, else 0 */
+	uint32_t aaDrawCount;       /* SMAA: edge + blend + resolve = 3, else 0 */
 	qboolean exposureHistoryReset;
 	uint32_t vertexShaderByteCount;
 	uint32_t fragmentShaderByteCount;
@@ -71,6 +73,12 @@ qboolean RalOpenGl_ProductSetDisplayVisibility( ralOpenGlProduct_t *product,
 	const ralDisplayVisibilityPlan_t *visibility );
 qboolean RalOpenGl_ProductSetAerialHaze( ralOpenGlProduct_t *product,
 	float aerialHaze );
+/* r_aa (0 off, 1 TAA, 2 SMAA) and r_smaa (preset 1..4, 0 = 3). Takes effect on the next frame; switching away from TAA drops its
+ * history, so switching back starts from the bootstrap frame. */
+qboolean RalOpenGl_ProductSetAntiAliasing( ralOpenGlProduct_t *product, int mode, int smaaQuality );
+/* Frames completed per anti-aliasing path since the product was created (r_aa diagnostics). */
+void RalOpenGl_ProductAntiAliasingCounts( const ralOpenGlProduct_t *product, uint32_t *taaResolved, uint32_t *taaBootstrap,
+	uint32_t *smaa );
 /* r_lightmapBoost: world-lightmap overbright in linear space (1..24, default 4.6), as on every RAL backend. */
 qboolean RalOpenGl_ProductSetLightmapBoost( ralOpenGlProduct_t *product,
 	float lightmapBoost );
