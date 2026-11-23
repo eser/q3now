@@ -98,6 +98,11 @@ static volatile int vk_swapchain_recreate_requested;
 static vkTemporalEntMatRuntime_t vk_temporal_entmat_runtime;
 static vkTemporalMotionMaterialization_t vk_temporal_motion_materialization;
 static vkTemporalGenericRecipeTable_t vk_temporal_generic_recipe_table;
+// Topology epoch the generic recipe and pipeline tables were armed with: a pipeline created later (the sun-shadow receiver variants are
+// created on first use) materializes its exact3 siblings with it at once instead of waiting for the next reconcile.
+static uint32_t vk_temporal_armed_topology_epoch;
+static void vk_temporal_materialize_late_generic_slot( uint32_t slot );
+
 static vkTemporalGenericPipelineTable_t vk_temporal_generic_pipeline_table;
 static vkTemporalMotionRecordingOwner_t vk_temporal_motion_recording;
 static vkTemporalMainActivationOwner_t vk_temporal_main_activation;
@@ -1447,13 +1452,23 @@ static void vk_temporal_motion_readback_collect_all_after_idle( void ) {
 		vk_temporal_motion_readback_collect_slot( i, qtrue );
 }
 
+// Pipeline types whose shader pair has a temporal sibling in the generic catalog: the generic range, plus the sun-shadow receiver
+// variants of the multi-texture pipelines, which sit outside it (no env pairing) but have their own catalog pairs.
+static qboolean vk_temporal_type_has_generic_cohort( uint32_t shaderType ) {
+	if ( shaderType >= TYPE_GENERIC_BEGIN && shaderType <= TYPE_GENERIC_END ) return qtrue;
+#if FEAT_SHADOW_MAPPING
+	if ( shaderType >= TYPE_MULTI_TEXTURE_MUL2_SHADOW
+			&& shaderType <= TYPE_MULTI_TEXTURE_MUL2_FIXED_COLOR_SHADOW ) return qtrue;
+#endif
+	return qfalse;
+}
+
 void vk_temporal_motion_readback_arm( void ) {
 	uint32_t slot, genericMain = 0, recipeAttempted = 0;
 	uint32_t recipeReady = 0, exact3Ready = 0;
 	for ( slot = 0; slot < vk.pipelines_count; ++slot ) {
 		qboolean attempted = qfalse, valid = qfalse;
-		if ( vk.pipelines[slot].def.shader_type >= TYPE_GENERIC_BEGIN
-				&& vk.pipelines[slot].def.shader_type <= TYPE_GENERIC_END
+		if ( vk_temporal_type_has_generic_cohort( (uint32_t)vk.pipelines[slot].def.shader_type )
 				&& vk.pipelines[slot].ral_handle[RENDER_PASS_MAIN] )
 			genericMain++;
 		if ( vk_temporal_generic_recipe_table.records
@@ -28407,15 +28422,30 @@ static void create_pipeline( const Vk_Pipeline_Def *def,
 				&& vk.pipelines[ def_index ].ral_handle[ renderPassIndex ] != NULL
 				&& vk_temporal_generic_recipe_table.armed )
 			vk_temporal_capture_generic_main_recipe( def_index, &create_info );
+		if ( renderPassIndex == RENDER_PASS_MAIN )
+			vk_temporal_materialize_late_generic_slot( def_index );
 	}
+}
+
+// A pipeline created after the tables were armed (the sun-shadow receiver variants are created on first use) builds its exact3
+// siblings at once. A draw that reaches a captured recipe whose siblings do not exist yet poisons the motion recording for the frame.
+static void vk_temporal_materialize_late_generic_slot( uint32_t slot ) {
+	qboolean factoryAttempted = qfalse;
+	// Materialization rejects a slot without a captured recipe before any factory work, so no separate receipt read is needed here.
+	if ( !vk_temporal_armed_topology_epoch || !vk_temporal_generic_pipeline_table.slots
+			|| VK_TemporalGenericPipelineTableSlotReady(
+				&vk_temporal_generic_pipeline_table, slot ) ) return;
+	if ( !vk_temporal_materialize_generic_recipe_slot( slot,
+			vk_temporal_armed_topology_epoch, NULL, &factoryAttempted ) )
+		(void)VK_TemporalGenericRecipeTableMarkAttempted(
+			&vk_temporal_generic_recipe_table, slot );
 }
 
 static qboolean vk_temporal_cached_main_needs_recipe( uint32_t slot ) {
 	qboolean attempted = qfalse, valid = qfalse;
 	if ( slot >= vk.pipelines_count
 			|| !vk.pipelines[slot].ral_handle[RENDER_PASS_MAIN]
-			|| vk.pipelines[slot].def.shader_type < TYPE_GENERIC_BEGIN
-			|| vk.pipelines[slot].def.shader_type > TYPE_GENERIC_END
+			|| !vk_temporal_type_has_generic_cohort( (uint32_t)vk.pipelines[slot].def.shader_type )
 			|| !vk_temporal_generic_recipe_table.records
 			|| !vk_temporal_generic_recipe_table.armed ) return qfalse;
 	if ( !VK_TemporalGenericRecipeTableGetSlotState(
@@ -29979,7 +30009,7 @@ static qboolean vk_temporal_motion_prepare_bound_draw( uint32_t pipelineSlot )
 	if ( pipelineSlot >= vk.pipelines_count || vk.renderPassIndex != RENDER_PASS_MAIN
 			|| !shader ) return qfalse;
 	def = &vk.pipelines[pipelineSlot].def;
-	if ( def->shader_type < TYPE_GENERIC_BEGIN || def->shader_type > TYPE_GENERIC_END
+	if ( !vk_temporal_type_has_generic_cohort( (uint32_t)def->shader_type )
 			|| vk.pipelines[pipelineSlot].depthFade
 			|| !vk.pipelines[pipelineSlot].ral_handle[RENDER_PASS_MAIN] ) return qfalse;
 	if ( !VK_TemporalGenericPipelineTableSlotReady(
@@ -34167,6 +34197,8 @@ void vk_begin_frame( const temporalBatchRequest_t *temporalRequest )
 									MAX_VK_PIPELINES,
 									&vk_temporal_motion_materialization.pipelineLayout,
 									&memoryOps ) ) {
+								vk_temporal_armed_topology_epoch =
+									materializationReceipt.topologyEpoch;
 								vk_temporal_reconcile_generic_main_pipelines(
 									materializationReceipt.topologyEpoch );
 								{

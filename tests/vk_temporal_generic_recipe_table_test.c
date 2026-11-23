@@ -8,7 +8,7 @@
 
 #define CHECK(x) do { if (!(x)) { fprintf(stderr,"FAIL recipe table %d: %s\n",__LINE__,#x); return 1; } } while (0)
 #define VK_TEMPORAL_BLOB(name, size) const unsigned char name[size] = { 0 };
-#define VK_TEMPORAL_PAIR(tx, family, env, fog, ordinaryVS, ordinaryFS, temporalVS, writeFS, invalidateFS)
+#define VK_TEMPORAL_PAIR(tx, family, env, fog, shadow, ordinaryVS, ordinaryFS, temporalVS, writeFS, invalidateFS)
 #include "../code/render/ral/backends/vulkan/renderer/shaders/spirv/temporal_generic_catalog.inc"
 #undef VK_TEMPORAL_PAIR
 #undef VK_TEMPORAL_BLOB
@@ -221,7 +221,8 @@ int main( void ) {
 					&&crossId==99); }
 			accepted++;
 		}
-	CHECK(accepted==VK_TEMPORAL_GENERIC_CATALOG_COUNT);
+	// This loop walks the 40 non-shadow keys; the 18 sun-shadow receiver pairs are covered by vk_temporal_generic_catalog_test.
+	CHECK(accepted+18u==VK_TEMPORAL_GENERIC_CATALOG_COUNT);
 	{ vkTemporalGenericKey_t fixedKey={0,VK_TEMPORAL_GENERIC_FIXED,qfalse,qfalse};
 		vkTemporalGenericCatalogEntry_t fixedEntry;vkTemporalGenericKey_t untouched={9,(vkTemporalGenericFamily_t)9,9,9};
 		uint32_t untouchedId=99;CHECK(VK_TemporalGenericCatalogSelect(&fixedKey,&fixedEntry));

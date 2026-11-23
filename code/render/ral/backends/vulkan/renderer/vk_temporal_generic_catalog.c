@@ -4,7 +4,7 @@
 #include <string.h>
 
 #define VK_TEMPORAL_BLOB(name, size) extern const unsigned char name[size]; enum { name##_size = size };
-#define VK_TEMPORAL_PAIR(tx, fam, env, fog, ordinaryVS, ordinaryFS, temporalVS, writeFS, invalidateFS)
+#define VK_TEMPORAL_PAIR(tx, fam, env, fog, shadow, ordinaryVS, ordinaryFS, temporalVS, writeFS, invalidateFS)
 #include "shaders/spirv/temporal_generic_catalog.inc"
 #undef VK_TEMPORAL_PAIR
 #undef VK_TEMPORAL_BLOB
@@ -23,13 +23,15 @@ qboolean VK_TemporalGenericCatalogSelect( const vkTemporalGenericKey_t *key,
 			|| key->family < VK_TEMPORAL_GENERIC_PLAIN
 			|| key->family > VK_TEMPORAL_GENERIC_CL
 			|| ( key->environment != qfalse && key->environment != qtrue )
-			|| ( key->shaderFog != qfalse && key->shaderFog != qtrue ) ) return qfalse;
+			|| ( key->shaderFog != qfalse && key->shaderFog != qtrue )
+			|| ( key->shadowReceiver != qfalse && key->shadowReceiver != qtrue ) ) return qfalse;
 	memset( &candidate, 0, sizeof(candidate) );
 	candidate.key = *key;
 #define VK_TEMPORAL_BLOB(name, size)
-#define VK_TEMPORAL_PAIR(tx, fam, env, fog, ordinaryVS, ordinaryFS, temporalVS, writeFS, invalidateFS) \
+#define VK_TEMPORAL_PAIR(tx, fam, env, fog, shadow, ordinaryVS, ordinaryFS, temporalVS, writeFS, invalidateFS) \
 	if ( key->textureCount == (tx) && key->family == VK_TEMPORAL_GENERIC_##fam \
-			&& key->environment == (env) && key->shaderFog == (fog) ) { \
+			&& key->environment == (env) && key->shaderFog == (fog) \
+			&& key->shadowReceiver == (shadow) ) { \
 		candidate.ordinaryVertex = (vkTemporalShaderBlob_t)VK_TEMPORAL_BLOB_VALUE(ordinaryVS); \
 		candidate.ordinaryFragment = (vkTemporalShaderBlob_t)VK_TEMPORAL_BLOB_VALUE(ordinaryFS); \
 		candidate.temporalVertex = (vkTemporalShaderBlob_t)VK_TEMPORAL_BLOB_VALUE(temporalVS); \
@@ -52,7 +54,7 @@ qboolean VK_TemporalGenericCatalogIdentify( vkTemporalShaderBlob_t ordinaryVerte
 			|| !ordinaryFragment.bytes || !ordinaryFragment.size
 			|| !outKey || !outCatalogId ) return qfalse;
 #define VK_TEMPORAL_BLOB(name, size)
-#define VK_TEMPORAL_PAIR(tx, fam, env, fog, ordinaryVS, ordinaryFS, temporalVS, writeFS, invalidateFS) \
+#define VK_TEMPORAL_PAIR(tx, fam, env, fog, shadow, ordinaryVS, ordinaryFS, temporalVS, writeFS, invalidateFS) \
 	do { \
 		const vkTemporalShaderBlob_t vs = VK_TEMPORAL_BLOB_VALUE( ordinaryVS ); \
 		const vkTemporalShaderBlob_t fs = VK_TEMPORAL_BLOB_VALUE( ordinaryFS ); \
@@ -61,6 +63,7 @@ qboolean VK_TemporalGenericCatalogIdentify( vkTemporalShaderBlob_t ordinaryVerte
 			foundKey.family = VK_TEMPORAL_GENERIC_##fam; \
 			foundKey.environment = (env) ? qtrue : qfalse; \
 			foundKey.shaderFog = (fog) ? qtrue : qfalse; \
+			foundKey.shadowReceiver = (shadow) ? qtrue : qfalse; \
 			foundId = id + 1u; matches++; \
 		} \
 		id++; \
@@ -85,7 +88,8 @@ qboolean VK_TemporalGenericCatalogKeyId( const vkTemporalGenericKey_t *key,
 			|| identified.textureCount != key->textureCount
 			|| identified.family != key->family
 			|| identified.environment != key->environment
-			|| identified.shaderFog != key->shaderFog ) return qfalse;
+			|| identified.shaderFog != key->shaderFog
+			|| identified.shadowReceiver != key->shadowReceiver ) return qfalse;
 	*outCatalogId = id;
 	return qtrue;
 }

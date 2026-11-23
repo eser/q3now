@@ -60,7 +60,7 @@ for file in "$inv" "$iqm"; do
 done
 
 # Exhaust every manifest-owned temporal generic blob, rather than treating the
-# representative pair above as proof for the generated 40-pair catalog.
+# representative pair above as proof for the generated 58-pair catalog.
 (cd "$shader_dir" && node --input-type=module -e '
 	const m=await import("./shaders.manifest.mjs");
 	const byOutput=new Map(m.default.map(e=>[e.output,e])); const emitted=new Set();
@@ -129,6 +129,8 @@ while IFS='|' read -r stage output defines ordinary_output ordinary_defines; do
 	grep --color=never -E 'OpDecorate .* SpecId ' "$tmp/$variant_count.dis" | sort > "$tmp/current.spec"
 	grep --color=never -E 'OpDecorate .* SpecId ' "$tmp/$variant_count.ordinary.dis" | sort > "$tmp/ordinary.spec"
 	case "$ordinary_output" in
+		# The sun-shadow receiver tx0 fragments are not ATEST-capable: they carry no SpecId 0/1, and their siblings must match them exactly.
+		frag_tx0*shadow*_bindless) cmp "$tmp/current.spec" "$tmp/ordinary.spec";;
 		frag_tx0*_bindless)
 			grep -Eq 'SpecId 0$' "$tmp/ordinary.spec"
 			grep -Eq 'SpecId 1$' "$tmp/ordinary.spec"
@@ -168,8 +170,8 @@ while IFS='|' read -r stage output defines ordinary_output ordinary_defines; do
 		*) exit 1;;
 	esac
 done < "$tmp/temporal-variants.txt"
-test "$variant_count" -eq 76
-test "$vertex_count" -eq 36
-test "$write_count" -eq 20
-test "$invalidate_count" -eq 20
+test "$variant_count" -eq 130
+test "$vertex_count" -eq 54
+test "$write_count" -eq 38
+test "$invalidate_count" -eq 38
 echo 'vk temporal shader reflection contract: PASS'

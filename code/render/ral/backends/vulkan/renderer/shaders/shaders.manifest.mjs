@@ -35,47 +35,63 @@ function familyDefines(family, tx) {
 		: family === 'cl' ? [tx === 2 ? 'USE_CL2' : 'USE_CL1']
 		: [];
 }
-function stem(stage, tx, family, env, fog) {
+function stem(stage, tx, family, env, fog, shadow) {
 	const vertexFamily = stage === 'vert' && family === 'ent' ? 'fixed' : family;
 	return `${stage}_tx${tx}${vertexFamily === 'plain' ? '' : vertexFamily === 'ident' ? '_ident1' : `_${vertexFamily}`}`
-		+ `${stage === 'vert' && env ? '_env' : ''}${fog ? '_fog' : ''}`;
+		+ `${stage === 'vert' && env ? '_env' : ''}${shadow ? '_shadow' : ''}${fog ? '_fog' : ''}`;
 }
-function ordinaryName(stage, tx, family, env, fog) {
-	return stem(stage, tx, family, env, fog) + (stage === 'frag' ? '_bindless' : '');
+function ordinaryName(stage, tx, family, env, fog, shadow) {
+	return stem(stage, tx, family, env, fog, shadow) + (stage === 'frag' ? '_bindless' : '');
 }
-function temporalName(kind, stage, tx, family, env, fog) {
-	return stem(stage, tx, family, env, fog)
+function temporalName(kind, stage, tx, family, env, fog, shadow) {
+	return stem(stage, tx, family, env, fog, shadow)
 		+ (kind === 'vertex' ? '_temporal_motion' : kind === 'write' ? '_temporal_write_bindless' : '_temporal_invalidate_bindless');
 }
 
+// Sun-shadow receiver cohort (USE_SHADOWMAP). Appended after the sealed generic cohort: these ordinary modules exist already
+// (vert_tx*_shadow*, frag_tx*_shadow*_bindless); only their temporal siblings are new. There is no environment-mapped shadow
+// variant, and tx0 has no cl family.
+const temporalShadowTxFamilies = [
+	{ tx: 0, families: ['plain', 'ident', 'fixed'] },
+	{ tx: 1, families: ['plain', 'cl', 'ident', 'fixed'] },
+	{ tx: 2, families: ['plain', 'cl'] },
+];
+
 export const temporalGenericPairs = [];
 const temporalGenericShaderEntries = [];
+const temporalShadowShaderEntries = [];
 const temporalSeen = new Set();
-for (const { tx, families } of temporalTxFamilies) {
-	for (const family of families) for (const env of [false, true]) for (const fog of [false, true]) {
-		const vertexFamily = family === 'ent' ? 'fixed' : family;
-		const vDefines = [...txDefines(tx), ...familyDefines(vertexFamily, tx), ...(env ? ['USE_ENV'] : []), ...(fog ? ['USE_FOG'] : [])];
-		// The ordinary tx0 fragment cohort is ATEST-capable and carries SpecId
-		// 0/1. Keep the temporal sibling on that exact specialization ABI: alpha
-		// testing is draw state, not a second catalog key.
-		const fDefines = [...txDefines(tx), ...familyDefines(family, tx),
-			...(tx === 0 ? ['USE_ATEST'] : []), ...(fog ? ['USE_FOG'] : [])];
-		const ordinaryVertex = ordinaryName('vert', tx, family, env, fog);
-		const ordinaryFragment = ordinaryName('frag', tx, family, false, fog);
-		const temporalVertex = temporalName('vertex', 'vert', tx, family, env, fog);
-		const temporalWriteFragment = temporalName('write', 'frag', tx, family, false, fog);
-		const temporalInvalidateFragment = temporalName('invalidate', 'frag', tx, family, false, fog);
-		temporalGenericPairs.push({ tx, family, env, shaderFog: fog, ordinaryVertex, ordinaryFragment,
-			temporalVertex, temporalWriteFragment, temporalInvalidateFragment });
-		for (const entry of [
-			{ stage: 'vert', source: 'gen_vert.tmpl', defines: [...vDefines, 'USE_TEMPORAL_MOTION'], output: temporalVertex },
-			{ stage: 'frag', source: 'gen_frag.tmpl', defines: [...fDefines, 'USE_TEMPORAL_MOTION'], output: temporalWriteFragment },
-			{ stage: 'frag', source: 'gen_frag.tmpl', defines: [...fDefines, 'USE_TEMPORAL_MOTION', 'USE_TEMPORAL_INVALIDATE'], output: temporalInvalidateFragment },
-		]) if (!temporalSeen.has(entry.output)) { temporalSeen.add(entry.output); temporalGenericShaderEntries.push(entry); }
+function addCohort(cohort, shadow, entriesOut) {
+	for (const { tx, families } of cohort) {
+		for (const family of families) for (const env of (shadow ? [false] : [false, true])) for (const fog of [false, true]) {
+			const vertexFamily = family === 'ent' ? 'fixed' : family;
+			const vDefines = [...txDefines(tx), ...familyDefines(vertexFamily, tx), ...(env ? ['USE_ENV'] : []), ...(fog ? ['USE_FOG'] : []),
+				...(shadow ? ['USE_SHADOWMAP'] : [])];
+			// The ordinary tx0 fragment cohort is ATEST-capable and carries SpecId
+			// 0/1. Keep the temporal sibling on that exact specialization ABI: alpha
+			// testing is draw state, not a second catalog key. The shadow receiver
+			// fragments are not ATEST-capable, so their siblings are not either.
+			const fDefines = [...txDefines(tx), ...familyDefines(family, tx),
+				...(tx === 0 && !shadow ? ['USE_ATEST'] : []), ...(fog ? ['USE_FOG'] : []), ...(shadow ? ['USE_SHADOWMAP'] : [])];
+			const ordinaryVertex = ordinaryName('vert', tx, family, env, fog, shadow);
+			const ordinaryFragment = ordinaryName('frag', tx, family, false, fog, shadow);
+			const temporalVertex = temporalName('vertex', 'vert', tx, family, env, fog, shadow);
+			const temporalWriteFragment = temporalName('write', 'frag', tx, family, false, fog, shadow);
+			const temporalInvalidateFragment = temporalName('invalidate', 'frag', tx, family, false, fog, shadow);
+			temporalGenericPairs.push({ tx, family, env, shaderFog: fog, shadow, ordinaryVertex, ordinaryFragment,
+				temporalVertex, temporalWriteFragment, temporalInvalidateFragment });
+			for (const entry of [
+				{ stage: 'vert', source: 'gen_vert.tmpl', defines: [...vDefines, 'USE_TEMPORAL_MOTION'], output: temporalVertex },
+				{ stage: 'frag', source: 'gen_frag.tmpl', defines: [...fDefines, 'USE_TEMPORAL_MOTION'], output: temporalWriteFragment },
+				{ stage: 'frag', source: 'gen_frag.tmpl', defines: [...fDefines, 'USE_TEMPORAL_MOTION', 'USE_TEMPORAL_INVALIDATE'], output: temporalInvalidateFragment },
+			]) if (!temporalSeen.has(entry.output)) { temporalSeen.add(entry.output); entriesOut.push(entry); }
+		}
 	}
 }
+addCohort(temporalTxFamilies, false, temporalGenericShaderEntries);
+addCohort(temporalShadowTxFamilies, true, temporalShadowShaderEntries);
 
-if (temporalGenericPairs.length !== 40 || temporalGenericShaderEntries.length !== 76)
+if (temporalGenericPairs.length !== 58 || temporalGenericShaderEntries.length !== 76 || temporalShadowShaderEntries.length !== 54)
 	throw new Error('temporal generic cohort cardinality drift');
 
 export default [
@@ -448,4 +464,8 @@ export default [
 
 	// First-frame spatial anti-aliasing for the temporal history bootstrap. Appended: the sealed corpus is never reordered.
 	{ stage: 'comp', source: 'temporal_bootstrap_aa.comp', output: 'temporal_bootstrap_aa_comp_spv' },
+
+	// Temporal siblings of the sun-shadow receiver generic pipelines (the shadow-receiver cohort). Appended: the sealed corpus is never
+	// reordered.
+	...temporalShadowShaderEntries,
 ];

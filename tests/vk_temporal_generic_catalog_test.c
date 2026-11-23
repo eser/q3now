@@ -7,7 +7,7 @@
 #define CHECK(x) do { if (!(x)) { fprintf(stderr,"CHECK failed: %s:%d: %s\n",__FILE__,__LINE__,#x); return 1; } } while (0)
 
 #define VK_TEMPORAL_BLOB(name, size) const unsigned char name[size] = { 0 };
-#define VK_TEMPORAL_PAIR(tx, family, env, fog, ordinaryVS, ordinaryFS, temporalVS, writeFS, invalidateFS)
+#define VK_TEMPORAL_PAIR(tx, family, env, fog, shadow, ordinaryVS, ordinaryFS, temporalVS, writeFS, invalidateFS)
 #include "../code/render/ral/backends/vulkan/renderer/shaders/spirv/temporal_generic_catalog.inc"
 #undef VK_TEMPORAL_PAIR
 #undef VK_TEMPORAL_BLOB
@@ -32,7 +32,7 @@ int main( void ) {
 		for ( env = 0; env < 2; ++env ) for ( fog = 0; fog < 2; ++fog ) {
 			qboolean expected = Expected( tx, (vkTemporalGenericFamily_t)family );
 			key.textureCount=tx; key.family=(vkTemporalGenericFamily_t)family;
-			key.environment=(qboolean)env; key.shaderFog=(qboolean)fog;
+			key.environment=(qboolean)env; key.shaderFog=(qboolean)fog; key.shadowReceiver=qfalse;
 			memset(&out,0xA5,sizeof(out)); before=out;
 			CHECK( VK_TemporalGenericCatalogSelect(&key,&out) == expected );
 			if ( !expected ) { CHECK(memcmp(&out,&before,sizeof(out))==0); continue; }
@@ -44,6 +44,35 @@ int main( void ) {
 			CHECK(out.temporalWriteFragment.bytes != out.temporalInvalidateFragment.bytes);
 		}
 	CHECK(accepted == 40u);
+	// Sun-shadow receiver cohort: no environment variant; tx0 has plain/ident/fixed, tx1 plain/cl/ident/fixed, tx2 plain/cl.
+	accepted = 0;
+	for ( tx = 0; tx < 3; ++tx ) for ( family = 0; family < 5; ++family )
+		for ( env = 0; env < 2; ++env ) for ( fog = 0; fog < 2; ++fog ) {
+			qboolean expected = env == 0 && family != VK_TEMPORAL_GENERIC_ENT
+				&& ( tx == 0 ? family != VK_TEMPORAL_GENERIC_CL
+					: tx == 1 ? qtrue
+					: ( family == VK_TEMPORAL_GENERIC_PLAIN || family == VK_TEMPORAL_GENERIC_CL ) );
+			key.textureCount=tx; key.family=(vkTemporalGenericFamily_t)family;
+			key.environment=(qboolean)env; key.shaderFog=(qboolean)fog; key.shadowReceiver=qtrue;
+			memset(&out,0xA5,sizeof(out)); before=out;
+			CHECK( VK_TemporalGenericCatalogSelect(&key,&out) == expected );
+			if ( !expected ) { CHECK(memcmp(&out,&before,sizeof(out))==0); continue; }
+			accepted++;
+			CHECK(memcmp(&out.key,&key,sizeof(key))==0);
+			CHECK(BlobGood(out.ordinaryVertex) && BlobGood(out.ordinaryFragment));
+			CHECK(BlobGood(out.temporalVertex) && BlobGood(out.temporalWriteFragment) && BlobGood(out.temporalInvalidateFragment));
+			CHECK(out.temporalWriteFragment.bytes != out.temporalInvalidateFragment.bytes);
+		}
+	CHECK(accepted == 18u);
+	// A shadow receiver is a different pipeline from its plain sibling.
+	{
+		vkTemporalGenericCatalogEntry_t plain, shadow; vkTemporalGenericKey_t a2;
+		memset(&a2,0,sizeof(a2)); a2.textureCount=1; a2.family=VK_TEMPORAL_GENERIC_IDENT;
+		CHECK(VK_TemporalGenericCatalogSelect(&a2,&plain)); a2.shadowReceiver=qtrue;
+		CHECK(VK_TemporalGenericCatalogSelect(&a2,&shadow));
+		CHECK(plain.ordinaryVertex.bytes!=shadow.ordinaryVertex.bytes && plain.ordinaryFragment.bytes!=shadow.ordinaryFragment.bytes);
+		CHECK(plain.temporalVertex.bytes!=shadow.temporalVertex.bytes && plain.temporalWriteFragment.bytes!=shadow.temporalWriteFragment.bytes);
+	}
 
 	key=(vkTemporalGenericKey_t){0,VK_TEMPORAL_GENERIC_FIXED,qfalse,qfalse};
 	CHECK(VK_TemporalGenericCatalogSelect(&key,&fixed));

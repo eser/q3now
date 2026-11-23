@@ -22,12 +22,12 @@ const exact = (bytes, digest) => {
 
 assert.equal(catalog.schemaVersion, 2);
 assert.deepEqual(catalog.requiredTargets, ['glsl460']);
-assert.equal(catalog.entries.length, 322);
-assert.equal(manifest.entries.length, 322);
+assert.equal(catalog.entries.length, 376);
+assert.equal(manifest.entries.length, 376);
 assert.equal(catalog.portableManifest.byteCount, Buffer.byteLength(manifestText));
 assert.ok(exact(Buffer.from(manifestText), catalog.portableManifest.digest));
-assert.equal(readdirSync(root).filter((name) => name.endsWith('.glsl460')).length, 322);
-for (let ordinal = 0; ordinal < 322; ++ordinal) {
+assert.equal(readdirSync(root).filter((name) => name.endsWith('.glsl460')).length, 376);
+for (let ordinal = 0; ordinal < 376; ++ordinal) {
 	const entry = catalog.entries[ordinal];
 	const portable = manifest.entries[ordinal];
 	const artifact = entry.artifacts[0];
@@ -42,26 +42,26 @@ for (let ordinal = 0; ordinal < 322; ++ordinal) {
 	assert.doesNotMatch(source, /layout\([^)]*set\s*=|push_constant|nonuniformEXT|GL_EXT_nonuniform_qualifier|#version 3/);
 }
 assert.deepEqual(catalog.entries.slice(-20).map((entry) => entry.symbol), [
-	'project_sky_sh_comp_spv',
-	'sky_surface_composite_comp_spv',
-	'ral_sky_material_frag_spv',
-	'ral_sky_capture_frag_spv',
-	'vert_tx1_ident1_ibl',
-	'vert_tx1_ident1_ibl_fog',
-	'vert_tx1_fixed_ibl',
-	'vert_tx1_fixed_ibl_fog',
-	'frag_tx1_ident1_ibl_bindless',
-	'frag_tx1_ident1_ibl_fog_bindless',
-	'frag_tx1_fixed_ibl_bindless',
-	'frag_tx1_fixed_ibl_fog_bindless',
-	'gtao_prefilter_comp_spv',
-	'shadow_depth_dither_vert_spv',
-	'shadow_depth_dither_frag_spv',
-	'shadow_depth_skinned_dither_vert_spv',
-	'hiz_reduce_comp_spv',
-	'hiz_test_comp_spv',
-	'hiz_audit_comp_spv',
-	'temporal_bootstrap_aa_comp_spv',
+	'frag_tx1_ident1_shadow_fog_temporal_write_bindless',
+	'frag_tx1_ident1_shadow_fog_temporal_invalidate_bindless',
+	'vert_tx1_fixed_shadow_temporal_motion',
+	'frag_tx1_fixed_shadow_temporal_write_bindless',
+	'frag_tx1_fixed_shadow_temporal_invalidate_bindless',
+	'vert_tx1_fixed_shadow_fog_temporal_motion',
+	'frag_tx1_fixed_shadow_fog_temporal_write_bindless',
+	'frag_tx1_fixed_shadow_fog_temporal_invalidate_bindless',
+	'vert_tx2_shadow_temporal_motion',
+	'frag_tx2_shadow_temporal_write_bindless',
+	'frag_tx2_shadow_temporal_invalidate_bindless',
+	'vert_tx2_shadow_fog_temporal_motion',
+	'frag_tx2_shadow_fog_temporal_write_bindless',
+	'frag_tx2_shadow_fog_temporal_invalidate_bindless',
+	'vert_tx2_cl_shadow_temporal_motion',
+	'frag_tx2_cl_shadow_temporal_write_bindless',
+	'frag_tx2_cl_shadow_temporal_invalidate_bindless',
+	'vert_tx2_cl_shadow_fog_temporal_motion',
+	'frag_tx2_cl_shadow_fog_temporal_write_bindless',
+	'frag_tx2_cl_shadow_fog_temporal_invalidate_bindless',
 ]);
 generateProductShaderCatalog({ portable: root, output: productCatalogPath, check: true });
 // Check the actual translated product shaders, not only host-side uploads.
@@ -98,4 +98,4 @@ const first = catalog.entries[0].artifacts[0];
 const bad = Buffer.from(readFileSync(join(root, `${catalog.entries[0].symbol}.glsl460`)));
 bad[bad.length - 1] ^= 1;
 assert.equal(exact(bad, first.digest), false);
-console.log('RAL OpenGL GLSL 4.60 catalog: PASS (322 modules; product artifact selected)');
+console.log('RAL OpenGL GLSL 4.60 catalog: PASS (376 modules; product artifact selected)');

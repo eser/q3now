@@ -24,7 +24,7 @@ static vkTemporalGenericCatalogEntry_t s_splitLookupEntry;
 static vkTemporalIqmPipelineCatalog_t s_iqmCatalog;
 static const unsigned char b0[4]={0},b1[8]={1},b2[12]={2},b3[16]={3},b4[20]={4},b5[24]={5},b6[28]={6},b7[32]={7};
 #define VK_TEMPORAL_BLOB(name, size) const unsigned char name[size] = { 0 };
-#define VK_TEMPORAL_PAIR(tx, family, env, fog, ordinaryVS, ordinaryFS, temporalVS, writeFS, invalidateFS)
+#define VK_TEMPORAL_PAIR(tx, family, env, fog, shadow, ordinaryVS, ordinaryFS, temporalVS, writeFS, invalidateFS)
 #include "../code/render/ral/backends/vulkan/renderer/shaders/spirv/temporal_generic_catalog.inc"
 #undef VK_TEMPORAL_PAIR
 #undef VK_TEMPORAL_BLOB

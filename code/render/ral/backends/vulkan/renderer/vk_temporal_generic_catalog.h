@@ -21,6 +21,8 @@ typedef struct {
 	vkTemporalGenericFamily_t family;
 	qboolean environment;
 	qboolean shaderFog;
+	// Sun-shadow receiver variant (USE_SHADOWMAP) of the generic pipeline; never environment-mapped.
+	qboolean shadowReceiver;
 } vkTemporalGenericKey_t;
 
 typedef struct {
@@ -33,7 +35,7 @@ typedef struct {
 } vkTemporalGenericCatalogEntry_t;
 
 enum {
-	VK_TEMPORAL_GENERIC_CATALOG_COUNT = 40,
+	VK_TEMPORAL_GENERIC_CATALOG_COUNT = 58,
 	VK_TEMPORAL_GENERIC_CATALOG_GENERATION = 1
 };
 
