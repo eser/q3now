@@ -92,7 +92,7 @@ require_text(SHADER "sampler2D(motionVelocity, nearestSampler)"
 	"motion velocity must use nearest sampling")
 require_text(SHADER "sampler2D(motionValidity, nearestSampler), pixel, 0).r;"
 	"motion validity must use integer texel fetch")
-require_text(SHADER "sampler2D(currentDeviceDepth, nearestSampler), pixel, 0).r;"
+require_text(SHADER "sampler2D(currentDeviceDepth, nearestSampler), q, 0).r;"
 	"current depth must use integer texel fetch")
 require_text(SHADER "max(pc.depthThresholdAbsolute,"
 	"depth rejection must use max absolute/relative threshold")
