@@ -307,6 +307,8 @@ struct WorldVertexIn {
     float4 materialPosition [[attribute(5)]];
 };
 
+// The .w components of forward and left carry the temporal anti-aliasing sub-pixel jitter in NDC (x right, y up); every other user of
+// this struct ignores .w, and the frame without TAA leaves them zero.
 struct WorldViewParams {
     float4 viewOrigin;
     float4 forward;
@@ -983,6 +985,7 @@ vertex WorldVertexOut wired_world_vertex(WorldVertexIn in [[stage_in]],
     float up = dot(delta, view.up.xyz);
     out.position = float4(-left * view.projection.x, up * view.projection.y,
         forward - view.projection.z, forward);
+    out.position.xy += float2(view.forward.w, view.left.w) * forward;   // TAA jitter (zero when TAA is off)
     out.worldPosition = in.worldPosition.xyz;
     out.color = in.color;
     out.texCoord = in.texCoord;
@@ -1485,4 +1488,51 @@ fragment float4 wired_world_fragment(WorldVertexOut in [[stage_in]],
 	}
 	return float4(lit * media.w + (additiveMedia ? float3(0.0) : media.xyz),
 		stageProgramApplied ? base.a : base.a * in.color.a);
+}
+
+
+// ---- Temporal anti-aliasing motion (native Metal) ---------------------------------------------------------------------------------
+// The Metal scene pass has no velocity attachment, so the camera-induced motion of every pixel is rebuilt from the depth buffer and the
+// current and previous view parameters (the exact inverse of wired_world_vertex), and written in the layout the shared temporal resolve
+// reads: UV-space velocity (current - previous, both unjittered), validity, and a reversed device depth (larger = closer). Moving entities
+// are treated as static here; their disocclusion is left to the resolve's depth test and variance clip.
+struct TaaMotionParams {
+    WorldViewParams current;
+    WorldViewParams previous;
+    float2 jitterNdc;
+    uint2 extent;
+};
+
+static float3 wiredTaaWorldFromNdc(constant WorldViewParams &v, float2 ndc, float forward) {
+    const float left = -ndc.x * forward / v.projection.x;
+    const float up = ndc.y * forward / v.projection.y;
+    return v.viewOrigin.xyz + v.forward.xyz * forward + v.left.xyz * left + v.up.xyz * up;
+}
+
+kernel void wired_taa_motion_compute(
+        depth2d<float, access::read> sceneDepth [[texture(0)]],
+        texture2d<float, access::write> velocity [[texture(1)]],
+        texture2d<float, access::write> validity [[texture(2)]],
+        texture2d<float, access::write> reverseDepth [[texture(3)]],
+        constant TaaMotionParams &p [[buffer(0)]],
+        uint2 gid [[thread_position_in_grid]]) {
+    if (gid.x >= p.extent.x || gid.y >= p.extent.y) return;
+    const float2 extent = float2(p.extent);
+    const float depth = sceneDepth.read(gid);
+    const float rd = clamp(1.0 - depth, 1.0e-6, 1.0);                 // reversed device depth, 1 = at the near plane
+    const float forward = p.current.projection.z / rd;                  // inverse of d = (f - near) / f
+    const float2 centre = float2((float(gid.x) + 0.5) / extent.x * 2.0 - 1.0,
+        1.0 - (float(gid.y) + 0.5) / extent.y * 2.0);
+    const float2 ndc = centre - p.jitterNdc;                            // the unjittered position this sample belongs to
+    const float3 world = wiredTaaWorldFromNdc(p.current, ndc, forward);
+    const float3 delta = world - p.previous.viewOrigin.xyz;
+    const float previousForward = dot(delta, p.previous.forward.xyz);
+    const bool ok = previousForward > 1.0e-3;
+    const float2 previousNdc = ok ? float2(-dot(delta, p.previous.left.xyz) * p.previous.projection.x,
+        dot(delta, p.previous.up.xyz) * p.previous.projection.y) / previousForward : ndc;
+    const float2 uvCurrent = float2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    const float2 uvPrevious = float2(previousNdc.x * 0.5 + 0.5, 0.5 - previousNdc.y * 0.5);
+    velocity.write(float4(uvCurrent - uvPrevious, 0.0, 0.0), gid);
+    validity.write(float4(ok ? 1.0 : 0.0, 0.0, 0.0, 0.0), gid);
+    reverseDepth.write(float4(rd, 0.0, 0.0, 0.0), gid);
 }
