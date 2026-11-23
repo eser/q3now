@@ -5,6 +5,8 @@
 // cg_view.c -- setup all the parameters (position, angle, etc)
 // for a 3D rendering
 #include "cg_local.h"
+#include "../qcommon/wired/render/primitives.h"
+#include "../qcommon/wired/render/traps.h"
 LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 
 
@@ -125,6 +127,43 @@ void CG_TestModelPrevSkin_f (void) {
 		cg.testModelEntity.skinNum = 0;
 	}
 	Com_Log( SEV_INFO, LOG_CH(ch_cgame), "skin %i\n", cg.testModelEntity.skinNum );
+}
+
+/*
+=================
+CG_TestBeam_f
+
+Dev / visual-gate command: `testbeam 1` puts a vertical beam in front of the view that sweeps sideways with the game time,
+`testbeam 0` removes it. The beam moves on screen while the world stays still, which is what a ray or a rail trail does to the
+temporal resolve. Cheat-gated like testmodel.
+=================
+*/
+void CG_TestBeam_f( void ) {
+	cg.testBeam = trap_Argc() > 1 ? atoi( CG_Argv( 1 ) ) : 1;
+}
+
+static void CG_AddTestBeam( void ) {
+	beamDesc_t bd;
+	vec3_t center, side, a, b;
+	const float phase = cg.time * 0.003f;
+	VectorMA( cg.refdef.vieworg, 220, cg.refdef.viewaxis[0], center );
+	VectorScale( cg.refdef.viewaxis[1], -90.0f * sinf( phase ), side );
+	VectorAdd( center, side, center );
+	VectorMA( center, 70, cg.refdef.viewaxis[2], a );
+	VectorMA( center, -70, cg.refdef.viewaxis[2], b );
+	memset( &bd, 0, sizeof( bd ) );
+	VectorCopy( a, bd.start );
+	VectorCopy( b, bd.end );
+	bd.startWidth = bd.endWidth = 6.0f;
+	bd.startColor[0] = bd.startColor[1] = bd.startColor[2] = bd.startColor[3] = 1.0f;
+	bd.endColor[0] = bd.endColor[1] = bd.endColor[2] = bd.endColor[3] = 1.0f;
+	bd.shader = cgs.media.lightningShaderPrim;
+	bd.duration = 0.050f;
+	bd.fadeOut = 0.020f;
+	bd.axialCopies = 1;
+	bd.startEntityNum = -1;
+	bd.endEntityNum = -1;
+	trap_R_AddBeamToScene( &bd );
 }
 
 static void CG_AddTestModel (void) {
@@ -1258,6 +1297,9 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 	// finish up the rest of the refdef
 	if ( cg.testModelEntity.hModel ) {
 		CG_AddTestModel();
+	}
+	if ( cg.testBeam ) {
+		CG_AddTestBeam();
 	}
 	cg.refdef.time = cg.time;
 	memcpy( cg.refdef.areamask, cg.snap->areamask, sizeof( cg.refdef.areamask ) );

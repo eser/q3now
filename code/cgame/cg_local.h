@@ -755,6 +755,7 @@ typedef struct {
 	refEntity_t testModelEntity;
 	char		testModelName[MAX_QPATH];
 	qboolean	testGun;
+	int			testBeam;		// testbeam: nonzero = a view-attached beam sweeps sideways (dev/visual-gate only)
 
 #if FEAT_THIRD_PERSON
 	qboolean thirdPersonHeld;			// +thirdperson key held (XOR inverts cg_thirdPerson cvar)
@@ -1596,6 +1597,7 @@ void CG_BuildSpectatorString( void );
 //
 void CG_TestModel_f( void );
 void CG_TestGun_f( void );
+void CG_TestBeam_f( void );
 void CG_TestModelNextFrame_f( void );
 void CG_TestModelPrevFrame_f( void );
 void CG_TestModelNextSkin_f( void );
