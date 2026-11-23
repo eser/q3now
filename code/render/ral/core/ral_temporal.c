@@ -85,7 +85,12 @@ int Ral_TemporalBeginFrame( ralTemporalState_t *state,
 		plan.historyWriteIndex = plan.historyValid
 			? (uint8_t)( state->lastWriteIndex ^ 1u ) : 0u;
 		plan.jitterPhase = resetHistory ? 0u : state->nextJitterPhase;
-		Ral_TemporalJitter( plan.jitterPhase, plan.sceneJitterPixels );
+		/* A frame without history is the bootstrap: the resolve shows it as rendered and seeds the history with it, so it is drawn
+		 * unjittered, on the pixel grid the history keeps. The phase sequence is unchanged (the next frame uses phase 1). */
+		if ( state->historyValid && !resetHistory )
+			Ral_TemporalJitter( plan.jitterPhase, plan.sceneJitterPixels );
+		else
+			plan.sceneJitterPixels[0] = plan.sceneJitterPixels[1] = 0.0f;
 		plan.sceneJitterUv[0] = plan.sceneJitterPixels[0] / (float)input->width;
 		plan.sceneJitterUv[1] = plan.sceneJitterPixels[1] / (float)input->height;
 		if ( plan.historyValid ) {

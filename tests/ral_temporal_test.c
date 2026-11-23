@@ -257,10 +257,11 @@ int main( void ) {
 	CHECK( plan.resetMask == RAL_TEMPORAL_RESET_ACTIVATED );
 	CHECK( plan.generation == 1 && plan.jitterPhase == 0 );
 	CHECK( plan.historyWriteIndex == 0 );
+	/* The bootstrap frame (no history) is unjittered. */
 	CHECK( CLOSE( plan.sceneJitterPixels[0], 0.0f ) );
-	CHECK( CLOSE( plan.sceneJitterPixels[1], -1.0f / 6.0f ) );
+	CHECK( CLOSE( plan.sceneJitterPixels[1], 0.0f ) );
 	CHECK( CLOSE( plan.sceneJitterUv[0], 0.0f ) );
-	CHECK( CLOSE( plan.sceneJitterUv[1], plan.sceneJitterPixels[1] / 1080.0f ) );
+	CHECK( CLOSE( plan.sceneJitterUv[1], 0.0f ) );
 	firstJitter[0] = plan.sceneJitterPixels[0];
 	firstJitter[1] = plan.sceneJitterPixels[1];
 	before = state;
@@ -358,15 +359,19 @@ int main( void ) {
 	CHECK( memcmp( &plan, &untouched, sizeof( plan ) ) == 0 );
 
 	Ral_TemporalInit( &state );
-	for ( uint64_t frame = 1; frame <= RAL_TEMPORAL_JITTER_PHASES + 1u; ++frame ) {
+	/* Frame 1 is the unjittered bootstrap; the jitter sequence then repeats every RAL_TEMPORAL_JITTER_PHASES frames. */
+	for ( uint64_t frame = 1; frame <= RAL_TEMPORAL_JITTER_PHASES + 2u; ++frame ) {
 		input = Input( frame, 1024, 512, 1, 1, 1, 0 );
 		CHECK( Ral_TemporalBeginFrame( &state, &input, &plan ) );
 		CHECK( plan.sceneJitterPixels[0] >= -0.5f && plan.sceneJitterPixels[0] < 0.5f );
 		CHECK( plan.sceneJitterPixels[1] >= -0.5f && plan.sceneJitterPixels[1] < 0.5f );
 		if ( frame == 1 ) {
+			CHECK( !plan.historyValid && CLOSE( plan.sceneJitterPixels[0], 0.0f )
+				&& CLOSE( plan.sceneJitterPixels[1], 0.0f ) );
+		} else if ( frame == 2 ) {
 			firstJitter[0] = plan.sceneJitterPixels[0];
 			firstJitter[1] = plan.sceneJitterPixels[1];
-		} else if ( frame == RAL_TEMPORAL_JITTER_PHASES + 1u ) {
+		} else if ( frame == RAL_TEMPORAL_JITTER_PHASES + 2u ) {
 			CHECK( CLOSE( plan.sceneJitterPixels[0], firstJitter[0] ) );
 			CHECK( CLOSE( plan.sceneJitterPixels[1], firstJitter[1] ) );
 		}
