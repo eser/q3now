@@ -224,6 +224,8 @@ qboolean RalMetal_PresentSetSmaaQuality( ralMetalPresent_t *present, int quality
 /* Temporal anti-aliasing (r_aa 1) on 3D scene frames: jitters the projection, rebuilds camera motion from the depth buffer and resolves
  * against a history, after the scene pass and before bloom. */
 qboolean RalMetal_PresentSetTaa( ralMetalPresent_t *present, qboolean enabled );
+/* Frames whose TAA pass ran the resolve (history valid) and the bootstrap copy (no history) since the presenter was created. */
+void RalMetal_PresentTaaFrameCounts( const ralMetalPresent_t *present, uint32_t *resolved, uint32_t *bootstrap );
 qboolean RalMetal_PresentSetExposure( ralMetalPresent_t *present,
 	const ralExposureSettings_t *settings );
 qboolean RalMetal_PresentPrepareMaterialResources(

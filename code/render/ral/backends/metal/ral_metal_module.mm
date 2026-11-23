@@ -1950,6 +1950,17 @@ static void EndFrame( int *frontEndMsec, int *backEndMsec ) {
 	}
 	logContent = ( worldChanged || ( completeContent
 		&& !s_module.loggedCompleteContentReceipt ) ) ? qtrue : qfalse;
+	{
+		/* One line per 1000 TAA frames: the gameplay check reads the resolved / bootstrap ratio from it. */
+		static uint32_t lastLoggedTaaFrames;
+		uint32_t taaResolved = 0u, taaBootstrap = 0u;
+		RalMetal_PresentTaaFrameCounts( s_module.presentation, &taaResolved, &taaBootstrap );
+		if ( taaResolved + taaBootstrap >= lastLoggedTaaFrames + 1000u && s_module.imports.LogCh && s_module.initLogChannel >= 0 ) {
+			lastLoggedTaaFrames = taaResolved + taaBootstrap;
+			s_module.imports.LogCh( s_module.initLogChannel, SEV_INFO,
+				"Wired native Metal RAL: taa frames resolved=%u bootstrap=%u\n", taaResolved, taaBootstrap );
+		}
+	}
 	if ( published.frontend.worldLoaded == qtrue
 			&& published.frontend.sceneRendered == qtrue
 			&& logContent

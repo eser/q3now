@@ -319,6 +319,7 @@ qboolean effectParity;
 	qboolean taaEnabled;
 	ralTemporalState_t taaState;
 	uint64_t taaFrameId;
+	uint32_t taaResolvedFrames, taaBootstrapFrames;   /* evidence that TAA resolves in real play, not only the bootstrap copy */
 	uint32_t taaTopologyEpoch;
 	uint64_t taaWorldDigest;
 	float taaPreviousView[20];
@@ -5659,6 +5660,11 @@ qboolean RalMetal_PresentSetBloom( ralMetalPresent_t *present,
 	return qtrue;
 }
 
+void RalMetal_PresentTaaFrameCounts( const ralMetalPresent_t *present, uint32_t *resolved, uint32_t *bootstrap ) {
+	*resolved = present ? present->taaResolvedFrames : 0u;
+	*bootstrap = present ? present->taaBootstrapFrames : 0u;
+}
+
 qboolean RalMetal_PresentSetTaa( ralMetalPresent_t *present, qboolean enabled ) {
 	if ( !present ) return qfalse;
 	present->taaEnabled = enabled;
@@ -7459,6 +7465,7 @@ static qboolean RenderAndSubmit( ralMetalPresent_t *present,
 				}
 				memcpy( present->taaPreviousView, taaFrame.currentView, sizeof( present->taaPreviousView ) );
 				present->taaFrameId = taaPlan.frameId;
+				if ( taaFrame.historyValid ) present->taaResolvedFrames++; else present->taaBootstrapFrames++;
 				(void)Ral_TemporalCommitFrame( &present->taaState, taaPlan.frameId );
 			}
 			if ( present->bloomSettings.enabled ) {
