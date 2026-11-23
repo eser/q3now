@@ -286,7 +286,7 @@ set vm_game 0
 set vm_cgame 0
 set sv_cheats 1
 set sv_pure 0
-set tqSetup "cg_draw2D 0; cg_drawGun 0; cg_thirdPerson 0; con_notifytime 0; cl_yawspeed 90; sv_fps 125; timescale 1; fixedtime 0; r_pinShaderTime 2.0; r_pinFrameTime 2.0; wait 512; noclip; echo Q3_TEMPORAL_QUALITY_BEGIN; setviewpos 888 -768 434 180 0; r_temporalInputTest 0; wait 96; screenshot temporal_off_a png silent; wait 8; screenshot temporal_off_a_2 png silent; +right; wait 12; -right; wait 8; screenshot temporal_off_b png silent; vstr tqTemporalA"
+set tqSetup "cg_draw2D 0; cg_drawGun 0; cg_thirdPerson 0; con_notifytime 0; cl_yawspeed 90; sv_fps 125; timescale 1; fixedtime 0; r_pinShaderTime 2.0; r_pinFrameTime 2.0; wait 512; noclip; wait 150; echo Q3_TEMPORAL_QUALITY_BEGIN; setviewpos 888 -768 434 180 0; r_temporalInputTest 0; wait 96; screenshot temporal_off_a png silent; wait 8; screenshot temporal_off_a_2 png silent; +right; wait 12; -right; wait 8; screenshot temporal_off_b png silent; vstr tqTemporalA"
 set tqTemporalA "r_temporalInputTest 1; setviewpos 888 -768 434 180 0; wait 96; screenshot temporal_taa_a_1 png silent; wait 8; screenshot temporal_taa_a_2 png silent; +right; wait 12; -right; wait 4; screenshot temporal_taa_b_first png silent; wait 96; screenshot temporal_taa_b_steady png silent; echo Q3_TEMPORAL_QUALITY_CAPTURED; vstr tqPerfOff1"
 set tqPerfOff1 "r_temporalInputTest 0; wait 96; set r_gpuSpeeds 0; wait 4; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_OFF_1_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_OFF_1_END; set r_gpuSpeeds 0; wait 16; vstr tqPerfOn1"
 set tqPerfOn1 "r_temporalInputTest 1; wait 96; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_ON_1_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_ON_1_END; set r_gpuSpeeds 0; wait 16; vstr tqPerfOn2"
