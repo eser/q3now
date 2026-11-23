@@ -219,6 +219,8 @@ qboolean RalMetal_PresentSetToneMap( ralMetalPresent_t *present,
 #include "../../core/ral_bloom.h"
 qboolean RalMetal_PresentSetBloom( ralMetalPresent_t *present,
 	const ralBloomSettings_t *settings );
+/* SMAA preset 1..4 applied to the offscreen scene after bloom and before exposure/tone mapping; 0 = off. */
+qboolean RalMetal_PresentSetSmaaQuality( ralMetalPresent_t *present, int quality );
 qboolean RalMetal_PresentSetExposure( ralMetalPresent_t *present,
 	const ralExposureSettings_t *settings );
 qboolean RalMetal_PresentPrepareMaterialResources(

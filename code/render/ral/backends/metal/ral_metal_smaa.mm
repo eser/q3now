@@ -199,6 +199,10 @@ static bool wired_smaa_pass(id<MTLCommandBuffer> command, id<MTLRenderPipelineSt
     if (!e) return false;
     e.label = @"wired.smaa";
     [e setRenderPipelineState:pipeline];
+    /* The catalog vertex shaders derive clip space from the Vulkan convention (framebuffer y down). Metal's clip y points up, so each
+     * pass would write its target flipped; a negative-height viewport restores the Vulkan mapping. */
+    MTLViewport viewport = { 0.0, (double)target.height, (double)target.width, -(double)target.height, 0.0, 1.0 };
+    [e setViewport:viewport];
     [e setVertexBuffer:vsArgs offset:0 atIndex:3];
     for (unsigned i = 0; i < fsCount; ++i) [e setFragmentBuffer:fsArgs[i] offset:0 atIndex:fsSlots[i]];
     for (unsigned i = 0; i < resourceCount; ++i)

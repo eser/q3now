@@ -11,6 +11,7 @@
 #include "ral_metal_internal.h"
 #include "ral_metal_exposure.h"
 #include "ral_metal_bloom.h"
+#include "ral_metal_smaa.h"
 #include "ral_metal_atmosphere.h"
 #include "ral_metal_ui_metallib.h"
 #include "ral_metal_particle_compute_metallib.h"
@@ -305,6 +306,8 @@ qboolean effectParity;
 	ralExposureSettings_t exposureSettings;
 	ralBloomSettings_t bloomSettings;
 	ralMetalBloom_t *bloom;
+	ralMetalSmaa_t *smaa;
+	int smaaQuality;
 	qboolean exposureHistoryValid;
 	int exposureTimeMs;
 	uint64_t exposureWorldDigest;
@@ -5263,6 +5266,7 @@ void RalMetal_PresentDestroy( ralMetalPresent_t *present ) {
 	[present->toneMapPipeline release];
 	RalMetal_ExposureDestroy( present->exposure );
 	RalMetal_BloomDestroy( present->bloom );
+	RalMetal_SmaaDestroy( present->smaa );
 	[present->worldPipeline release];
 	[present->skyCapturePipeline release];
 	[present->worldBlendPipeline release];
@@ -5405,6 +5409,7 @@ qboolean RalMetal_PresentResetRegistrationAssets( ralMetalPresent_t *present,
 		present->weatherHeightgridDigests[slot] = 0u;
 	}
 	RalMetal_BloomDestroy( present->bloom ); present->bloom = NULL;
+	RalMetal_SmaaDestroy( present->smaa ); present->smaa = NULL;
 	wired_clear_present_upload_caches( present );
 	for ( uint32_t i = 0u; i < RENDER_SUBMISSION_MAX_TEXTURE_RESOURCES; ++i )
 		[present->uiMaterials[i].texture release];
@@ -5552,6 +5557,12 @@ qboolean RalMetal_PresentSetBloom( ralMetalPresent_t *present,
 		const ralBloomSettings_t *settings ) {
 	if ( !present || !Ral_BloomSettingsValid( settings ) ) return qfalse;
 	present->bloomSettings = *settings;
+	return qtrue;
+}
+
+qboolean RalMetal_PresentSetSmaaQuality( ralMetalPresent_t *present, int quality ) {
+	if ( !present || quality < 0 || quality > RAL_METAL_SMAA_QUALITY_ULTRA ) return qfalse;
+	present->smaaQuality = quality;
 	return qtrue;
 }
 
@@ -7283,6 +7294,16 @@ static qboolean RenderAndSubmit( ralMetalPresent_t *present,
 					[entityVertices release]; [entityIndices release]; free( entityBatches );
 					[uiVertices release]; [readback release];
 					return PresentFailure( "bloom" );
+				}
+			}
+			if ( present->smaaQuality > 0 ) {
+				if ( !present->smaa ) present->smaa =
+					RalMetal_SmaaCreate( RalMetal_CoreNativeDevice( present->core ) );
+				if ( !RalMetal_SmaaEncode( present->smaa, command, present->sceneColorCache, present->smaaQuality ) ) {
+					[worldVertices release]; [worldIndices release]; [worldDepth release];
+					[entityVertices release]; [entityIndices release]; free( entityBatches );
+					[uiVertices release]; [readback release];
+					return PresentFailure( "smaa" );
 				}
 			}
 			if ( present->exposureSettings.enabled ) {

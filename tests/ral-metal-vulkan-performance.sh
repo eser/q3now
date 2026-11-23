@@ -147,6 +147,7 @@ capture() {
     +set r_renderScale 0 \
     +set r_ext_supersample 0 \
     +set r_fbo 1 \
+    +set r_aa 0 \
     +set r_hdr 1 \
     +set r_hdrDisplay 0 \
     +set r_hdrAutoExposure 0 \

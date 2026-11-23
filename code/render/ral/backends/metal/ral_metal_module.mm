@@ -107,6 +107,9 @@ typedef struct {
 	cvar_t *toneMap;
 	cvar_t *bloomCvars[5];
 	cvar_t bloomFallback[5];
+	cvar_t *aa, *smaa;                   /* r_aa (0 off, 1 TAA, 2 SMAA) and the r_smaa preset */
+	cvar_t aaFallback, smaaFallback;
+	qboolean aaTaaNoticeLogged;
 	cvar_t toneMapFallback;
 	cvar_t *toneMapExposure;
 	cvar_t toneMapExposureFallback;
@@ -1493,6 +1496,12 @@ static void BeginRegistration( glconfig_t *config ) {
 				bloom[i].description, &s_module.bloomFallback[i] );
 			if ( !s_module.bloomCvars[i] ) { MarkFailed( "bloom-cvars" ); return; }
 		}
+		s_module.aa = RegisterMetalRenderCvar( "r_aa", "1", "0", "2", qtrue,
+			"Anti-aliasing: 0 off, 1 TAA (default technique; the Metal renderer does not have it yet and uses SMAA), 2 SMAA.",
+			&s_module.aaFallback );
+		s_module.smaa = RegisterMetalRenderCvar( "r_smaa", "0", "0", "4", qtrue,
+			"SMAA quality preset 1 low .. 4 ultra; 0 uses preset 3 (high) when r_aa selects SMAA.", &s_module.smaaFallback );
+		if ( !s_module.aa || !s_module.smaa ) { MarkFailed( "aa-cvars" ); return; }
 		s_module.toneMap = RegisterMetalRenderCvar( "r_tonemap", "3", "0", "4",
 			qtrue, "HDR tone mapping operator: 0 identity, 1 PBR Neutral, 2 AgX, 3 Lottes, 4 Reinhard.",
 			&s_module.toneMapFallback );
@@ -1720,6 +1729,18 @@ static void EndFrame( int *frontEndMsec, int *backEndMsec ) {
 	ralExposureSettings_t exposure = {};
 	ralBloomSettings_t bloom = {};
 	qboolean bloomReady = qtrue;
+	int smaaQuality = 0;
+	if ( s_module.aa && s_module.smaa ) {
+		/* r_aa 0 leaves r_smaa as a developer override; 1 (TAA) and 2 (SMAA) both run SMAA here: the Metal renderer has no jittered
+		 * velocity-carrying scene pass or history yet (TASK-257), so a TAA request degrades to SMAA instead of to no anti-aliasing. */
+		const int mode = s_module.aa->integer, preset = s_module.smaa->integer;
+		smaaQuality = mode == 0 ? preset : ( preset ? preset : 3 );
+		if ( mode == 1 && !s_module.aaTaaNoticeLogged && ri.LogCh && s_module.initLogChannel >= 0 ) {
+			s_module.aaTaaNoticeLogged = qtrue;
+			ri.LogCh( s_module.initLogChannel, SEV_INFO,
+				"Wired metal: r_aa 1 (TAA) is not available on this renderer yet; using SMAA preset %d\n", smaaQuality );
+		}
+	}
 	for ( unsigned i = 0; i < ARRAY_LEN( s_module.bloomCvars ); ++i )
 		if ( !s_module.bloomCvars[i] ) bloomReady = qfalse;
 	if ( bloomReady ) {
@@ -1765,6 +1786,7 @@ static void EndFrame( int *frontEndMsec, int *backEndMsec ) {
 	}
 	if ( !samplingApplied
 			|| !bloomReady || !RalMetal_PresentSetBloom( s_module.presentation, &bloom )
+			|| !RalMetal_PresentSetSmaaQuality( s_module.presentation, smaaQuality )
 			|| !exposureReady || !RalMetal_PresentSetExposure( s_module.presentation, &exposure )
 			|| !s_module.brightness
 			|| !Ral_DisplayVisibilityPlanBuild( s_module.brightness->value, &visibility )

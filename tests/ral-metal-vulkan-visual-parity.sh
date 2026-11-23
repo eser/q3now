@@ -150,6 +150,7 @@ capture() {
 	"set con_notifytime 0" \
 	"set s_volume 0" \
 	"set s_musicVolume 0" \
+	"set r_aa 0" \
 	"log renderer.init info" \
 	"log renderer.ral ${RAL_PARITY_RAL_LOG_LEVEL:-info}" \
 	"log renderer.hdr info" \
