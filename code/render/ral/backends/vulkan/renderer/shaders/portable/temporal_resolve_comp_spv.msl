@@ -136,197 +136,54 @@ struct spvDescriptorSetBuffer0
 };
 
 static inline __attribute__((always_inline))
-void accumulateTap(thread const int& index, thread const float& weight, thread float3& sum, thread float3& lo, thread float3& hi, thread float3& moments, thread float3& squares, threadgroup spvUnsafeArray<float4, 100>& tileColor)
+float4 reconstructCurrent(thread const int2& pixel, thread const int& tileIndex, constant TemporalResolvePush& pc, texture2d<float> currentColor, sampler nearestSampler, threadgroup spvUnsafeArray<float4, 100>& tileColor)
 {
-    float3 c = tileColor[index].xyz;
-    sum += (c * weight);
-    lo = fast::min(lo, c);
-    hi = fast::max(hi, c);
-    moments += c;
-    squares += (c * c);
-}
-
-static inline __attribute__((always_inline))
-float4 reconstructCurrent(thread const int& tileIndex, thread float3& boxMin, thread float3& boxMax, constant TemporalResolvePush& pc, threadgroup spvUnsafeArray<float4, 100>& tileColor)
-{
-    float2 t = pc.currentEffectiveJitterUv * float2(pc.extent);
-    float3 wx = float3((0.5 * t.x) * (t.x - 1.0), 1.0 - (t.x * t.x), (0.5 * t.x) * (t.x + 1.0));
-    float3 wy = float3((0.5 * t.y) * (t.y - 1.0), 1.0 - (t.y * t.y), (0.5 * t.y) * (t.y + 1.0));
-    float3 sum = float3(0.0);
-    float3 neighborhoodMin = float3(3.4028234663852885981170418348452e+38);
-    float3 neighborhoodMax = float3(-3.4028234663852885981170418348452e+38);
-    float3 momentSum = float3(0.0);
-    float3 momentSquares = float3(0.0);
-    int param = (tileIndex - 10) - 1;
-    float param_1 = wx.x * wy.x;
-    float3 param_2 = sum;
-    float3 param_3 = neighborhoodMin;
-    float3 param_4 = neighborhoodMax;
-    float3 param_5 = momentSum;
-    float3 param_6 = momentSquares;
-    accumulateTap(param, param_1, param_2, param_3, param_4, param_5, param_6, tileColor);
-    sum = param_2;
-    neighborhoodMin = param_3;
-    neighborhoodMax = param_4;
-    momentSum = param_5;
-    momentSquares = param_6;
-    int param_7 = tileIndex - 10;
-    float param_8 = wx.y * wy.x;
-    float3 param_9 = sum;
-    float3 param_10 = neighborhoodMin;
-    float3 param_11 = neighborhoodMax;
-    float3 param_12 = momentSum;
-    float3 param_13 = momentSquares;
-    accumulateTap(param_7, param_8, param_9, param_10, param_11, param_12, param_13, tileColor);
-    sum = param_9;
-    neighborhoodMin = param_10;
-    neighborhoodMax = param_11;
-    momentSum = param_12;
-    momentSquares = param_13;
-    int param_14 = (tileIndex - 10) + 1;
-    float param_15 = wx.z * wy.x;
-    float3 param_16 = sum;
-    float3 param_17 = neighborhoodMin;
-    float3 param_18 = neighborhoodMax;
-    float3 param_19 = momentSum;
-    float3 param_20 = momentSquares;
-    accumulateTap(param_14, param_15, param_16, param_17, param_18, param_19, param_20, tileColor);
-    sum = param_16;
-    neighborhoodMin = param_17;
-    neighborhoodMax = param_18;
-    momentSum = param_19;
-    momentSquares = param_20;
-    int param_21 = tileIndex - 1;
-    float param_22 = wx.x * wy.y;
-    float3 param_23 = sum;
-    float3 param_24 = neighborhoodMin;
-    float3 param_25 = neighborhoodMax;
-    float3 param_26 = momentSum;
-    float3 param_27 = momentSquares;
-    accumulateTap(param_21, param_22, param_23, param_24, param_25, param_26, param_27, tileColor);
-    sum = param_23;
-    neighborhoodMin = param_24;
-    neighborhoodMax = param_25;
-    momentSum = param_26;
-    momentSquares = param_27;
-    int param_28 = tileIndex;
-    float param_29 = wx.y * wy.y;
-    float3 param_30 = sum;
-    float3 param_31 = neighborhoodMin;
-    float3 param_32 = neighborhoodMax;
-    float3 param_33 = momentSum;
-    float3 param_34 = momentSquares;
-    accumulateTap(param_28, param_29, param_30, param_31, param_32, param_33, param_34, tileColor);
-    sum = param_30;
-    neighborhoodMin = param_31;
-    neighborhoodMax = param_32;
-    momentSum = param_33;
-    momentSquares = param_34;
-    int param_35 = tileIndex + 1;
-    float param_36 = wx.z * wy.y;
-    float3 param_37 = sum;
-    float3 param_38 = neighborhoodMin;
-    float3 param_39 = neighborhoodMax;
-    float3 param_40 = momentSum;
-    float3 param_41 = momentSquares;
-    accumulateTap(param_35, param_36, param_37, param_38, param_39, param_40, param_41, tileColor);
-    sum = param_37;
-    neighborhoodMin = param_38;
-    neighborhoodMax = param_39;
-    momentSum = param_40;
-    momentSquares = param_41;
-    int param_42 = (tileIndex + 10) - 1;
-    float param_43 = wx.x * wy.z;
-    float3 param_44 = sum;
-    float3 param_45 = neighborhoodMin;
-    float3 param_46 = neighborhoodMax;
-    float3 param_47 = momentSum;
-    float3 param_48 = momentSquares;
-    accumulateTap(param_42, param_43, param_44, param_45, param_46, param_47, param_48, tileColor);
-    sum = param_44;
-    neighborhoodMin = param_45;
-    neighborhoodMax = param_46;
-    momentSum = param_47;
-    momentSquares = param_48;
-    int param_49 = tileIndex + 10;
-    float param_50 = wx.y * wy.z;
-    float3 param_51 = sum;
-    float3 param_52 = neighborhoodMin;
-    float3 param_53 = neighborhoodMax;
-    float3 param_54 = momentSum;
-    float3 param_55 = momentSquares;
-    accumulateTap(param_49, param_50, param_51, param_52, param_53, param_54, param_55, tileColor);
-    sum = param_51;
-    neighborhoodMin = param_52;
-    neighborhoodMax = param_53;
-    momentSum = param_54;
-    momentSquares = param_55;
-    int param_56 = (tileIndex + 10) + 1;
-    float param_57 = wx.z * wy.z;
-    float3 param_58 = sum;
-    float3 param_59 = neighborhoodMin;
-    float3 param_60 = neighborhoodMax;
-    float3 param_61 = momentSum;
-    float3 param_62 = momentSquares;
-    accumulateTap(param_56, param_57, param_58, param_59, param_60, param_61, param_62, tileColor);
-    sum = param_58;
-    neighborhoodMin = param_59;
-    neighborhoodMax = param_60;
-    momentSum = param_61;
-    momentSquares = param_62;
-    boxMin = neighborhoodMin;
-    boxMax = neighborhoodMax;
-    if ((pc.qualityFlags & 1u) != 0u)
-    {
-        float3 momentMean = momentSum * 0.111111111938953399658203125;
-        float3 momentSigma = sqrt(fast::max((momentSquares * 0.111111111938953399658203125) - (momentMean * momentMean), float3(0.0)));
-        boxMin = fast::max(neighborhoodMin, momentMean - (momentSigma * 1.25));
-        boxMax = fast::min(neighborhoodMax, momentMean + (momentSigma * 1.25));
-    }
-    return float4(fast::clamp(sum, neighborhoodMin, neighborhoodMax), ((threadgroup float*)&tileColor[tileIndex])[3u]);
+    float2 extent = float2(pc.extent);
+    float2 sampleAt = ((float2(pixel) + float2(0.5)) * rsqrt(extent * extent)) + pc.currentEffectiveJitterUv;
+    return float4(currentColor.sample(nearestSampler, sampleAt, level(0.0)).xyz, ((threadgroup float*)&tileColor[tileIndex])[3u]);
 }
 
 static inline __attribute__((always_inline))
 bool finite2(thread const float2& v)
 {
-    bool _131 = all(v == v);
-    bool _139;
-    if (_131)
+    bool _126 = all(v == v);
+    bool _134;
+    if (_126)
     {
-        _139 = all(abs(v) <= float2(3.4028234663852885981170418348452e+38));
+        _134 = all(abs(v) <= float2(3.4028234663852885981170418348452e+38));
     }
     else
     {
-        _139 = _131;
+        _134 = _126;
     }
-    return _139;
+    return _134;
 }
 
 static inline __attribute__((always_inline))
 float2 dlMotionVelocity(thread const int2& px, thread const int& tileIndex, thread const float& centerValid, constant TemporalResolvePush& pc, sampler nearestSampler, texture2d<float> motionVelocity, threadgroup spvUnsafeArray<float, 100>& tileDepth, texture2d<float> motionValidity)
 {
     float2 centerVelocity = motionVelocity.read(uint2(px), 0).xy;
-    bool _1135 = (pc.qualityFlags & 2u) == 0u;
-    bool _1142;
-    if (!_1135)
+    bool _1130 = (pc.qualityFlags & 2u) == 0u;
+    bool _1137;
+    if (!_1130)
     {
-        _1142 = !(centerValid > 0.0);
+        _1137 = !(centerValid > 0.0);
     }
     else
     {
-        _1142 = _1135;
+        _1137 = _1130;
     }
-    bool _1150;
-    if (!_1142)
+    bool _1145;
+    if (!_1137)
     {
         float2 param = centerVelocity;
-        _1150 = !finite2(param);
+        _1145 = !finite2(param);
     }
     else
     {
-        _1150 = _1142;
+        _1145 = _1137;
     }
-    if (_1150)
+    if (_1145)
     {
         return centerVelocity;
     }
@@ -362,33 +219,33 @@ float2 dlMotionVelocity(thread const int2& px, thread const int& tileIndex, thre
 static inline __attribute__((always_inline))
 bool finite4(thread const float4& v)
 {
-    bool _161 = all(v == v);
-    bool _169;
-    if (_161)
+    bool _156 = all(v == v);
+    bool _164;
+    if (_156)
     {
-        _169 = all(abs(v) <= float4(3.4028234663852885981170418348452e+38));
+        _164 = all(abs(v) <= float4(3.4028234663852885981170418348452e+38));
     }
     else
     {
-        _169 = _161;
+        _164 = _156;
     }
-    return _169;
+    return _164;
 }
 
 static inline __attribute__((always_inline))
 bool finite1(thread const float& v)
 {
-    bool _117 = v == v;
-    bool _124;
-    if (_117)
+    bool _112 = v == v;
+    bool _119;
+    if (_112)
     {
-        _124 = abs(v) <= 3.4028234663852885981170418348452e+38;
+        _119 = abs(v) <= 3.4028234663852885981170418348452e+38;
     }
     else
     {
-        _124 = _117;
+        _119 = _112;
     }
-    return _124;
+    return _119;
 }
 
 static inline __attribute__((always_inline))
@@ -453,12 +310,12 @@ float4 samplePreviousColor(thread const float2& texel, constant TemporalResolveP
     float2 uv0 = ((baseFloat - float2(1.0)) + float2(0.5)) * invExtent;
     float2 uv12 = ((baseFloat + offset12) + float2(0.5)) * invExtent;
     float2 uv3 = ((baseFloat + float2(2.0)) + float2(0.5)) * invExtent;
-    spvUnsafeArray<float, 5> _407 = spvUnsafeArray<float, 5>({ uv12.x, uv0.x, uv3.x, uv12.x, uv12.x });
-    spvUnsafeArray<float, 5> ux = _407;
-    spvUnsafeArray<float, 5> _420 = spvUnsafeArray<float, 5>({ uv12.y, uv12.y, uv12.y, uv0.y, uv3.y });
-    spvUnsafeArray<float, 5> uy = _420;
-    spvUnsafeArray<float, 5> _447 = spvUnsafeArray<float, 5>({ w12.x * w12.y, w0.x * w12.y, w3.x * w12.y, w12.x * w0.y, w12.x * w3.y });
-    spvUnsafeArray<float, 5> w = _447;
+    spvUnsafeArray<float, 5> _402 = spvUnsafeArray<float, 5>({ uv12.x, uv0.x, uv3.x, uv12.x, uv12.x });
+    spvUnsafeArray<float, 5> ux = _402;
+    spvUnsafeArray<float, 5> _415 = spvUnsafeArray<float, 5>({ uv12.y, uv12.y, uv12.y, uv0.y, uv3.y });
+    spvUnsafeArray<float, 5> uy = _415;
+    spvUnsafeArray<float, 5> _442 = spvUnsafeArray<float, 5>({ w12.x * w12.y, w0.x * w12.y, w3.x * w12.y, w12.x * w0.y, w12.x * w3.y });
+    spvUnsafeArray<float, 5> w = _442;
     float4 sum = float4(0.0);
     float total = 0.0;
     for (int i = 0; i < 5; i++)
@@ -472,17 +329,63 @@ float4 samplePreviousColor(thread const float2& texel, constant TemporalResolveP
 static inline __attribute__((always_inline))
 bool finite3(thread const float3& v)
 {
-    bool _146 = all(v == v);
-    bool _154;
-    if (_146)
+    bool _141 = all(v == v);
+    bool _149;
+    if (_141)
     {
-        _154 = all(abs(v) <= float3(3.4028234663852885981170418348452e+38));
+        _149 = all(abs(v) <= float3(3.4028234663852885981170418348452e+38));
     }
     else
     {
-        _154 = _146;
+        _149 = _141;
     }
-    return _154;
+    return _149;
+}
+
+static inline __attribute__((always_inline))
+bool neighborhoodBox(thread const int& tileIndex, thread float3& boxMin, thread float3& boxMax, constant TemporalResolvePush& pc, threadgroup spvUnsafeArray<float4, 100>& tileColor)
+{
+    float3 neighborhoodMin = float3(3.4028234663852885981170418348452e+38);
+    float3 neighborhoodMax = float3(-3.4028234663852885981170418348452e+38);
+    float3 momentSum = float3(0.0);
+    float3 momentSquares = float3(0.0);
+    for (int y = -1; y <= 1; y++)
+    {
+        for (int x = -1; x <= 1; x++)
+        {
+            float3 c = tileColor[(tileIndex + (y * 10)) + x].xyz;
+            neighborhoodMin = fast::min(neighborhoodMin, c);
+            neighborhoodMax = fast::max(neighborhoodMax, c);
+            momentSum += c;
+            momentSquares += (c * c);
+        }
+    }
+    float3 param = neighborhoodMin;
+    bool _1339 = finite3(param);
+    bool _1345;
+    if (_1339)
+    {
+        float3 param_1 = neighborhoodMax;
+        _1345 = finite3(param_1);
+    }
+    else
+    {
+        _1345 = _1339;
+    }
+    if (!_1345)
+    {
+        return false;
+    }
+    boxMin = neighborhoodMin;
+    boxMax = neighborhoodMax;
+    if ((pc.qualityFlags & 1u) != 0u)
+    {
+        float3 momentMean = momentSum * 0.111111111938953399658203125;
+        float3 momentSigma = sqrt(fast::max((momentSquares * 0.111111111938953399658203125) - (momentMean * momentMean), float3(0.0)));
+        boxMin = fast::max(neighborhoodMin, momentMean - (momentSigma * 1.25));
+        boxMax = fast::min(neighborhoodMax, momentMean + (momentSigma * 1.25));
+    }
+    return true;
 }
 
 static inline __attribute__((always_inline))
@@ -594,16 +497,16 @@ float4 fxSpatialAa(thread const int2& px, thread const float4& centerColor, cons
     float fxGradHi = fxHiSide - fxM;
     bool fxLoSteeper = abs(fxGradLo) >= abs(fxGradHi);
     float fxGradient = fast::max(abs(fxGradLo), abs(fxGradHi));
-    float _895;
+    float _890;
     if (fxLoSteeper)
     {
-        _895 = fxLoSide + fxM;
+        _890 = fxLoSide + fxM;
     }
     else
     {
-        _895 = fxHiSide + fxM;
+        _890 = fxHiSide + fxM;
     }
-    float fxPair = _895;
+    float fxPair = _890;
     int2 fxAcross = select(int2(1, 0), int2(0, 1), bool2(fxHorzSpan));
     int2 fxAlong = select(int2(0, 1), int2(1, 0), bool2(fxHorzSpan));
     if (fxLoSteeper)
@@ -655,16 +558,16 @@ float4 fxSpatialAa(thread const int2& px, thread const float4& centerColor, cons
     bool fxGoodSpan = (fxEndG < 0.0) != fxMidNegative;
     float fxSpanLen = float(fxStepsN + fxStepsP);
     float fxNear = float(fxTowardN ? fxStepsN : fxStepsP);
-    float _1078;
+    float _1073;
     if (fxGoodSpan)
     {
-        _1078 = 0.5 - (fxNear * rsqrt(fxSpanLen * fxSpanLen));
+        _1073 = 0.5 - (fxNear * rsqrt(fxSpanLen * fxSpanLen));
     }
     else
     {
-        _1078 = 0.0;
+        _1073 = 0.0;
     }
-    float fxEdgeBlend = _1078;
+    float fxEdgeBlend = _1073;
     float fxBlend = fast::clamp(fast::max(fxEdgeBlend, fxSubpixel), 0.0, 1.0);
     int2 param_17 = px + fxAcross;
     float3 fxAcrossColor = sampleCurrent(param_17, pc, currentColor, nearestSampler).xyz;
@@ -697,125 +600,118 @@ kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buff
         return;
     }
     int tileIndex = (((int(gl_LocalInvocationID.y) + 1) * 10) + int(gl_LocalInvocationID.x)) + 1;
-    int param = tileIndex;
-    float3 param_1;
-    float3 param_2;
-    float4 _1712 = reconstructCurrent(param, param_1, param_2, pc, tileColor);
-    float3 clipMin = param_1;
-    float3 clipMax = param_2;
-    float4 current = _1712;
+    float3 clipMin = float3(0.0);
+    float3 clipMax = float3(0.0);
+    int2 param = pixel;
+    int param_1 = tileIndex;
+    float4 current = reconstructCurrent(param, param_1, pc, spvDescriptorSet0.currentColor, spvDescriptorSet0.nearestSampler, tileColor);
     float4 result = current;
     float4 displayed = current;
     bool usedHistory = false;
     float valid = spvDescriptorSet0.motionValidity.read(uint2(pixel), 0).x;
-    int2 param_3 = pixel;
-    int param_4 = tileIndex;
-    float param_5 = valid;
-    float2 velocity = dlMotionVelocity(param_3, param_4, param_5, pc, spvDescriptorSet0.nearestSampler, spvDescriptorSet0.motionVelocity, tileDepth, spvDescriptorSet0.motionValidity);
+    int2 param_2 = pixel;
+    int param_3 = tileIndex;
+    float param_4 = valid;
+    float2 velocity = dlMotionVelocity(param_2, param_3, param_4, pc, spvDescriptorSet0.nearestSampler, spvDescriptorSet0.motionVelocity, tileDepth, spvDescriptorSet0.motionValidity);
     float2 motionTexel = spvFMul(velocity, float2(pc.extent));
     float2 previousTexel = spvFSub(float2(pixel), motionTexel);
     float2 previousCenter = spvFAdd(previousTexel, float2(0.5));
-    bool _1756 = all(previousCenter >= float2(0.0));
-    bool _1765;
-    if (_1756)
+    bool _1524 = all(previousCenter >= float2(0.0));
+    bool _1533;
+    if (_1524)
     {
-        _1765 = all(previousCenter < float2(pc.extent));
+        _1533 = all(previousCenter < float2(pc.extent));
     }
     else
     {
-        _1765 = _1756;
+        _1533 = _1524;
     }
-    bool inside = _1765;
-    float4 param_6 = current;
-    bool _1768 = finite4(param_6);
-    bool _1774;
-    if (_1768)
+    bool inside = _1533;
+    float4 param_5 = current;
+    bool _1536 = finite4(param_5);
+    bool _1542;
+    if (_1536)
     {
-        float param_7 = valid;
-        _1774 = finite1(param_7);
+        float param_6 = valid;
+        _1542 = finite1(param_6);
     }
     else
     {
-        _1774 = _1768;
+        _1542 = _1536;
     }
-    bool _1777 = _1774 && (valid > 0.0);
-    bool _1783;
-    if (_1777)
+    bool _1545 = _1542 && (valid > 0.0);
+    bool _1551;
+    if (_1545)
     {
-        float2 param_8 = velocity;
-        _1783 = finite2(param_8);
+        float2 param_7 = velocity;
+        _1551 = finite2(param_7);
     }
     else
     {
-        _1783 = _1777;
+        _1551 = _1545;
     }
-    bool _1789;
-    if (_1783)
+    bool _1557;
+    if (_1551)
     {
-        float2 param_9 = previousTexel;
-        _1789 = finite2(param_9);
+        float2 param_8 = previousTexel;
+        _1557 = finite2(param_8);
     }
     else
     {
-        _1789 = _1783;
+        _1557 = _1551;
     }
-    if (_1789 && inside)
+    if (_1557 && inside)
     {
         float currentDevice = tileDepth[tileIndex];
-        float param_10 = currentDevice;
-        float currentLinear = linearizeDepth(param_10, pc);
-        float2 param_11 = previousTexel;
-        float priorLinear = samplePreviousDepthLinear(param_11, pc, spvDescriptorSet0.nearestSampler, spvDescriptorSet0.previousLinearDepth);
+        float param_9 = currentDevice;
+        float currentLinear = linearizeDepth(param_9, pc);
+        float2 param_10 = previousTexel;
+        float priorLinear = samplePreviousDepthLinear(param_10, pc, spvDescriptorSet0.nearestSampler, spvDescriptorSet0.previousLinearDepth);
         float depthLimit = fast::max(pc.depthThresholdAbsolute, pc.depthThresholdRelative * fast::max(currentLinear, priorLinear));
-        float param_12 = currentLinear;
-        bool _1819 = finite1(param_12);
-        bool _1825;
-        if (_1819)
+        float param_11 = currentLinear;
+        bool _1587 = finite1(param_11);
+        bool _1593;
+        if (_1587)
         {
-            float param_13 = priorLinear;
-            _1825 = finite1(param_13);
+            float param_12 = priorLinear;
+            _1593 = finite1(param_12);
         }
         else
         {
-            _1825 = _1819;
+            _1593 = _1587;
         }
-        bool _1831 = (_1825 && (currentLinear > 0.0)) && (priorLinear > 0.0);
-        bool _1840;
-        if (_1831)
+        bool _1599 = (_1593 && (currentLinear > 0.0)) && (priorLinear > 0.0);
+        bool _1608;
+        if (_1599)
         {
-            _1840 = abs(currentLinear - priorLinear) <= depthLimit;
+            _1608 = abs(currentLinear - priorLinear) <= depthLimit;
         }
         else
         {
-            _1840 = _1831;
+            _1608 = _1599;
         }
-        if (_1840)
+        if (_1608)
         {
-            float2 param_14 = previousTexel;
-            float4 prior = samplePreviousColor(param_14, pc, spvDescriptorSet0.nearestSampler, spvDescriptorSet0.previousColor);
-            float4 param_15 = prior;
-            bool _1849 = finite4(param_15);
-            bool _1855;
-            if (_1849)
+            float2 param_13 = previousTexel;
+            float4 prior = samplePreviousColor(param_13, pc, spvDescriptorSet0.nearestSampler, spvDescriptorSet0.previousColor);
+            float4 param_14 = prior;
+            bool _1617 = finite4(param_14);
+            bool _1627;
+            if (_1617)
             {
-                float3 param_16 = clipMin;
-                _1855 = finite3(param_16);
+                int param_15 = tileIndex;
+                float3 param_16;
+                float3 param_17;
+                bool _1624 = neighborhoodBox(param_15, param_16, param_17, pc, tileColor);
+                clipMin = param_16;
+                clipMax = param_17;
+                _1627 = _1624;
             }
             else
             {
-                _1855 = _1849;
+                _1627 = _1617;
             }
-            bool _1861;
-            if (_1855)
-            {
-                float3 param_17 = clipMax;
-                _1861 = finite3(param_17);
-            }
-            else
-            {
-                _1861 = _1855;
-            }
-            if (_1861)
+            if (_1627)
             {
                 float3 clampedPrior = fast::clamp(prior.xyz, clipMin, clipMax);
                 float confidence = fast::clamp(valid, 0.0, 1.0);
@@ -832,33 +728,33 @@ kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buff
                 {
                     float2 param_23 = previousTexel;
                     float3 detail = prior.xyz - samplePreviousBlur(param_23, pc, spvDescriptorSet0.nearestSampler, spvDescriptorSet0.previousColor);
-                    displayed = float4(fast::clamp(resolvedRgb + (detail * (0.5 * confidence)), fast::min(resolvedRgb, clipMin), fast::max(resolvedRgb, clipMax)), current.w);
+                    displayed = float4(fast::clamp(resolvedRgb + (detail * (1.0 * confidence)), fast::min(resolvedRgb, clipMin), fast::max(resolvedRgb, clipMax)), current.w);
                 }
                 usedHistory = true;
             }
         }
     }
-    bool _1935 = !usedHistory;
-    bool _1941;
-    if (_1935)
+    bool _1700 = !usedHistory;
+    bool _1706;
+    if (_1700)
     {
         float4 param_24 = current;
-        _1941 = finite4(param_24);
+        _1706 = finite4(param_24);
     }
     else
     {
-        _1941 = _1935;
+        _1706 = _1700;
     }
-    bool _1949;
-    if (_1941)
+    bool _1714;
+    if (_1706)
     {
-        _1949 = (pc.qualityFlags & 4u) != 0u;
+        _1714 = (pc.qualityFlags & 4u) != 0u;
     }
     else
     {
-        _1949 = _1941;
+        _1714 = _1706;
     }
-    if (_1949)
+    if (_1714)
     {
         int2 param_25 = pixel;
         float4 param_26 = current;
@@ -869,18 +765,18 @@ kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buff
     {
         result = float4(0.0);
     }
-    bool _1964 = !usedHistory;
-    bool _1972;
-    if (!_1964)
+    bool _1729 = !usedHistory;
+    bool _1737;
+    if (!_1729)
     {
         float4 param_28 = displayed;
-        _1972 = !finite4(param_28);
+        _1737 = !finite4(param_28);
     }
     else
     {
-        _1972 = _1964;
+        _1737 = _1729;
     }
-    if (_1972)
+    if (_1737)
     {
         displayed = result;
     }

@@ -80,10 +80,10 @@ require_text(SHADER "precise vec2 previousTexel = vec2(pixel) - motionTexel;"
 	"history lives on the fixed pixel grid: the previous texel is the pixel minus the motion only")
 require_count(SHADER "previousEffectiveJitterUv - " 0
 	"the history must not be shifted by the jitter delta (it would put the output on the jittered grid)")
-require_text(SHADER "vec4 current = reconstructCurrent(tileIndex, clipMin, clipMax);"
-	"the current frame must be reconstructed at the pixel centre from the jittered tile")
-require_text(SHADER "vec2 t = pc.currentEffectiveJitterUv * vec2(pc.extent);"
-	"the reconstruction must use the current effective jitter in texels")
+require_text(SHADER "vec4 current = reconstructCurrent(pixel, tileIndex);"
+	"the current frame must be reconstructed at the pixel centre (one bilinear fetch at pixel + jitter)")
+require_text(SHADER "vec2 sampleAt = (vec2(pixel) + 0.5) * inversesqrt(extent * extent) + pc.currentEffectiveJitterUv;"
+	"the reconstruction samples the current frame at the pixel centre shifted by the current effective jitter")
 require_text(SHADER "float samplePreviousDepthLinear(vec2 texel)"
 	"manual bilinear previous-depth helper missing")
 require_text(SHADER "vec4 samplePreviousColor(vec2 texel)"
@@ -148,10 +148,10 @@ require_count(SHADER "previousTexel\\." 0
 	"no post-declaration reprojection component or swizzle mutation is admitted")
 require_count(SHADER "currentUv" 0
 	"color path must not normalize current coordinates")
-# Exactly two filtered fetch sites, both on the history: the bicubic history taps and the output-only sharpening blur. Every other
-# input is an integer texel fetch.
-require_count(SHADER "textureLod" 2
-	"exactly two filtered history fetch sites: the bicubic history taps and the output-only sharpening blur")
+# Exactly three filtered fetch sites: the bicubic history taps, the output-only sharpening blur (both on the history) and the
+# pixel-centre reconstruction of the current frame. Every other input is an integer texel fetch.
+require_count(SHADER "textureLod" 3
+	"exactly three filtered fetch sites: bicubic history, output sharpening blur, current-frame reconstruction")
 require_count(SHADER "velocity\\." 0
 	"no component-wise velocity transform is admitted")
 require_count(SHADER "velocity[ \t]*(\\+|-|\\*|/)?=" 1
