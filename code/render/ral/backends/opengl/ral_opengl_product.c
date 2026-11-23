@@ -2440,7 +2440,9 @@ static qboolean PlanAtmosphere( ralOpenGlProduct_t *product, const renderSubmiss
 	if ( !EncodeSkyPhysical( product, &snapshot,
 			receipt.skyEnvironment.admittedWorkMask,
 			frameGeneration ) ) return qfalse;
-	if ( !EncodeSkyRadiance( product, frontend, &receipt.skyEnvironment,
+	/* Sky radiance needs the per-world resources (EnsureSkyRadianceResources above); a frame without a world (menu, loading) has
+	 * none and nothing to encode. */
+	if ( product->skyResourcesReady && !EncodeSkyRadiance( product, frontend, &receipt.skyEnvironment,
 			receipt.selectedTier, skyRuntimeRequest.eventMask,
 			snapshot.state.timelineSeconds ) ) return qfalse;
 	if ( !Ral_SkyEnvironmentRuntimeSchedule( &skyRuntimeCandidate,
