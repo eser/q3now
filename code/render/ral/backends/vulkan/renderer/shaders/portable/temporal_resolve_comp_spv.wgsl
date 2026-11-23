@@ -75,7 +75,7 @@ fn finite1_u0028_f1_u003b(v: ptr<function, f32>) -> bool {
     phi_117_ = _e84;
     if _e84 {
         let _e85 = (*v);
-        phi_117_ = (abs(_e85) <= 340282350000000000000000000000000000000f);
+        phi_117_ = (abs(_e85) <= 0x1.fffffep+127f);
     }
     let _e89 = phi_117_;
     return _e89;
@@ -516,7 +516,7 @@ fn finite3_u0028_vf3_u003b(v_1: ptr<function, vec3<f32>>) -> bool {
     phi_147_ = _e85;
     if _e85 {
         let _e86 = (*v_1);
-        phi_147_ = all((abs(_e86) <= vec3<f32>(340282350000000000000000000000000000000f, 340282350000000000000000000000000000000f, 340282350000000000000000000000000000000f)));
+        phi_147_ = all((abs(_e86) <= vec3<f32>(0x1.fffffep+127f, 0x1.fffffep+127f, 0x1.fffffep+127f)));
     }
     let _e91 = phi_147_;
     return _e91;
@@ -538,8 +538,8 @@ fn neighborhoodBox_u0028_i1_u003b_vf3_u003b_vf3_u003b_vf3_u003b(tileIndex: ptr<f
     var momentSigma: vec3<f32>;
     var phi_1136_: bool;
 
-    neighborhoodMin = vec3<f32>(340282350000000000000000000000000000000f, 340282350000000000000000000000000000000f, 340282350000000000000000000000000000000f);
-    neighborhoodMax = vec3<f32>(-340282350000000000000000000000000000000f, -340282350000000000000000000000000000000f, -340282350000000000000000000000000000000f);
+    neighborhoodMin = vec3<f32>(0x1.fffffep+127f, 0x1.fffffep+127f, 0x1.fffffep+127f);
+    neighborhoodMax = vec3<f32>(-0x1.fffffep+127f, -0x1.fffffep+127f, -0x1.fffffep+127f);
     momentSum = vec3<f32>(0f, 0f, 0f);
     momentSquares = vec3<f32>(0f, 0f, 0f);
     y_1 = -1i;
@@ -825,7 +825,7 @@ fn finite2_u0028_vf2_u003b(v_2: ptr<function, vec2<f32>>) -> bool {
     phi_132_ = _e85;
     if _e85 {
         let _e86 = (*v_2);
-        phi_132_ = all((abs(_e86) <= vec2<f32>(340282350000000000000000000000000000000f, 340282350000000000000000000000000000000f)));
+        phi_132_ = all((abs(_e86) <= vec2<f32>(0x1.fffffep+127f, 0x1.fffffep+127f)));
     }
     let _e91 = phi_132_;
     return _e91;
@@ -840,7 +840,7 @@ fn finite4_u0028_vf4_u003b(v_3: ptr<function, vec4<f32>>) -> bool {
     phi_162_ = _e85;
     if _e85 {
         let _e86 = (*v_3);
-        phi_162_ = all((abs(_e86) <= vec4<f32>(340282350000000000000000000000000000000f, 340282350000000000000000000000000000000f, 340282350000000000000000000000000000000f, 340282350000000000000000000000000000000f)));
+        phi_162_ = all((abs(_e86) <= vec4<f32>(0x1.fffffep+127f, 0x1.fffffep+127f, 0x1.fffffep+127f, 0x1.fffffep+127f)));
     }
     let _e91 = phi_162_;
     return _e91;

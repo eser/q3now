@@ -55,7 +55,7 @@ fn finite1_u0028_f1_u003b(v: ptr<function, f32>) -> bool {
     phi_59_ = _e49;
     if _e49 {
         let _e50 = (*v);
-        phi_59_ = (abs(_e50) <= 340282350000000000000000000000000000000f);
+        phi_59_ = (abs(_e50) <= 0x1.fffffep+127f);
     }
     let _e54 = phi_59_;
     return _e54;
@@ -465,7 +465,7 @@ fn finite4_u0028_vf4_u003b(v_1: ptr<function, vec4<f32>>) -> bool {
     phi_74_ = _e50;
     if _e50 {
         let _e51 = (*v_1);
-        phi_74_ = all((abs(_e51) <= vec4<f32>(340282350000000000000000000000000000000f, 340282350000000000000000000000000000000f, 340282350000000000000000000000000000000f, 340282350000000000000000000000000000000f)));
+        phi_74_ = all((abs(_e51) <= vec4<f32>(0x1.fffffep+127f, 0x1.fffffep+127f, 0x1.fffffep+127f, 0x1.fffffep+127f)));
     }
     let _e56 = phi_74_;
     return _e56;

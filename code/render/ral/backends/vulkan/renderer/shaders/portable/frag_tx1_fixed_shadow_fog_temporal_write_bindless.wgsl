@@ -85,7 +85,7 @@ fn wiredTemporalFinite2_u0028_vf2_u003b(value: ptr<function, vec2<f32>>) -> bool
     phi_97_ = _e100;
     if _e100 {
         let _e101 = (*value);
-        phi_97_ = all((abs(_e101) <= vec2<f32>(340282350000000000000000000000000000000f, 340282350000000000000000000000000000000f)));
+        phi_97_ = all((abs(_e101) <= vec2<f32>(0x1.fffffep+127f, 0x1.fffffep+127f)));
     }
     let _e106 = phi_97_;
     return _e106;
@@ -100,7 +100,7 @@ fn wiredTemporalFinite4_u0028_vf4_u003b(value_1: ptr<function, vec4<f32>>) -> bo
     phi_82_ = _e100;
     if _e100 {
         let _e101 = (*value_1);
-        phi_82_ = all((abs(_e101) <= vec4<f32>(340282350000000000000000000000000000000f, 340282350000000000000000000000000000000f, 340282350000000000000000000000000000000f, 340282350000000000000000000000000000000f)));
+        phi_82_ = all((abs(_e101) <= vec4<f32>(0x1.fffffep+127f, 0x1.fffffep+127f, 0x1.fffffep+127f, 0x1.fffffep+127f)));
     }
     let _e106 = phi_82_;
     return _e106;

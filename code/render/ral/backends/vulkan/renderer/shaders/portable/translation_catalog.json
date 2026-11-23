@@ -2060,10 +2060,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 41197,
+          "byteCount": 40813,
           "digest": {
-            "lane0": "f9e35275cf708023",
-            "lane1": "a4b806393b8c9fbe"
+            "lane0": "9d0d9c5f49111f48",
+            "lane1": "0f1f45e88d98e326"
           }
         }
       ]
@@ -5366,10 +5366,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 5866,
+          "byteCount": 5722,
           "digest": {
-            "lane0": "26d546fc46a76116",
-            "lane1": "e07216c95844532d"
+            "lane0": "3583952db6ec0dee",
+            "lane1": "1dcc0b9eefe359f1"
           }
         }
       ]
@@ -5974,10 +5974,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 14795,
+          "byteCount": 14651,
           "digest": {
-            "lane0": "10715729c4d3a977",
-            "lane1": "4f35a8dfc19ecf50"
+            "lane0": "494d680162df593f",
+            "lane1": "717157b68a1dd23a"
           }
         }
       ]
@@ -6088,10 +6088,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 17297,
+          "byteCount": 17153,
           "digest": {
-            "lane0": "5c36fb3eae5a79cb",
-            "lane1": "7afc85a57059f176"
+            "lane0": "72a73a04324c5b03",
+            "lane1": "097c8829dd5da7d0"
           }
         }
       ]
@@ -6278,10 +6278,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 14355,
+          "byteCount": 14211,
           "digest": {
-            "lane0": "5f13dfea60cb3157",
-            "lane1": "fe7e531b7569630b"
+            "lane0": "75fd8c1d4d3a98bc",
+            "lane1": "5c2222eff2e62d88"
           }
         }
       ]
@@ -6392,10 +6392,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 16846,
+          "byteCount": 16702,
           "digest": {
-            "lane0": "fd1b396b2f731d0b",
-            "lane1": "5e83225465768221"
+            "lane0": "880f542fb9556d63",
+            "lane1": "2accb2fccd4207a2"
           }
         }
       ]
@@ -6582,10 +6582,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 14662,
+          "byteCount": 14518,
           "digest": {
-            "lane0": "77d9e9f734bf4bd5",
-            "lane1": "509d3c6c248d5e92"
+            "lane0": "f306d26d68ffa206",
+            "lane1": "f3ece4411f33d418"
           }
         }
       ]
@@ -6696,10 +6696,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 17162,
+          "byteCount": 17018,
           "digest": {
-            "lane0": "bf375c6b2e7724bd",
-            "lane1": "c54800b50d8524e9"
+            "lane0": "d374f1351a9e5a0e",
+            "lane1": "19ec0981bb60cc2d"
           }
         }
       ]
@@ -6848,10 +6848,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 14406,
+          "byteCount": 14262,
           "digest": {
-            "lane0": "208ce8aa1e5cd7db",
-            "lane1": "d2ff4a4d32ef3f91"
+            "lane0": "58225cb2923682d6",
+            "lane1": "13d2c97a8d5050ec"
           }
         }
       ]
@@ -6924,10 +6924,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 16897,
+          "byteCount": 16753,
           "digest": {
-            "lane0": "2f04c97d992a9138",
-            "lane1": "4008b8e3d21cf7c3"
+            "lane0": "bdd398522b3fcf4f",
+            "lane1": "700e23bba11232c4"
           }
         }
       ]
@@ -7038,10 +7038,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 14715,
+          "byteCount": 14571,
           "digest": {
-            "lane0": "34abd340a6e5692f",
-            "lane1": "9be432b85b9ba1a4"
+            "lane0": "190e36a4bc2cabb2",
+            "lane1": "0df10c9a8c595b36"
           }
         }
       ]
@@ -7152,10 +7152,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 17201,
+          "byteCount": 17057,
           "digest": {
-            "lane0": "d70159ddca400bb8",
-            "lane1": "e11e28e14345b1c9"
+            "lane0": "30b920aa350d93e5",
+            "lane1": "9d1ae44678c861c9"
           }
         }
       ]
@@ -7342,10 +7342,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 14219,
+          "byteCount": 14075,
           "digest": {
-            "lane0": "dd9832d77a53cffa",
-            "lane1": "6b301055dabf6346"
+            "lane0": "e7ca081687a8df13",
+            "lane1": "6df0672327ebff31"
           }
         }
       ]
@@ -7456,10 +7456,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 16711,
+          "byteCount": 16567,
           "digest": {
-            "lane0": "b736c8ff8c84ee67",
-            "lane1": "430ae2e9b862b4ea"
+            "lane0": "81f9c262a760d5ce",
+            "lane1": "b58e93f1a36fcefb"
           }
         }
       ]
@@ -7646,10 +7646,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 14629,
+          "byteCount": 14485,
           "digest": {
-            "lane0": "628e9e91b0f4d60b",
-            "lane1": "6b9f8e2c518b6680"
+            "lane0": "9e5c31f33a5e4916",
+            "lane1": "981a58188ca3519a"
           }
         }
       ]
@@ -7760,10 +7760,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 17110,
+          "byteCount": 16966,
           "digest": {
-            "lane0": "95b78bb4551dd961",
-            "lane1": "25d4dc4b8892b721"
+            "lane0": "002ac4973639b119",
+            "lane1": "9cf723248c18b8ca"
           }
         }
       ]
@@ -7950,10 +7950,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 18225,
+          "byteCount": 18081,
           "digest": {
-            "lane0": "313fa995955b695c",
-            "lane1": "24a3fe5a82da5a82"
+            "lane0": "2d2d8299b56d5749",
+            "lane1": "e570ac83e1abf8fe"
           }
         }
       ]
@@ -8064,10 +8064,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 20721,
+          "byteCount": 20577,
           "digest": {
-            "lane0": "2e46b2cecb2ff524",
-            "lane1": "3e143a858269d212"
+            "lane0": "62e4c54840147d9c",
+            "lane1": "bc2e4f97ac58848f"
           }
         }
       ]
@@ -8254,10 +8254,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 15814,
+          "byteCount": 15670,
           "digest": {
-            "lane0": "28c61b1d5df849ac",
-            "lane1": "111df18cec5de510"
+            "lane0": "a5e58011539c0fc4",
+            "lane1": "5cc38598752d1689"
           }
         }
       ]
@@ -8368,10 +8368,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 18289,
+          "byteCount": 18145,
           "digest": {
-            "lane0": "b9afd1042161d217",
-            "lane1": "7b67e2da3ed2b206"
+            "lane0": "82a148806b5d33d2",
+            "lane1": "46568e82a8757f45"
           }
         }
       ]
@@ -8558,10 +8558,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 21313,
+          "byteCount": 21169,
           "digest": {
-            "lane0": "3fb6b1f11a0135c2",
-            "lane1": "8cad2acaf4cf8369"
+            "lane0": "ef90a3384e2288cb",
+            "lane1": "bfefe40e5d8d771c"
           }
         }
       ]
@@ -8672,10 +8672,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 23810,
+          "byteCount": 23666,
           "digest": {
-            "lane0": "4eb550fc63ac0c00",
-            "lane1": "be3e41d7d0db5e7b"
+            "lane0": "227f22f64724790f",
+            "lane1": "4c865b62f6bf3e91"
           }
         }
       ]
@@ -12244,10 +12244,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 15629,
+          "byteCount": 15509,
           "digest": {
-            "lane0": "beec65a0d6bf0d5d",
-            "lane1": "15f035a09a15ebf1"
+            "lane0": "d17e01250d17a6cc",
+            "lane1": "54fd50efedb92fea"
           }
         }
       ]
@@ -12320,10 +12320,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 23148,
+          "byteCount": 23004,
           "digest": {
-            "lane0": "2f8b02240307d04d",
-            "lane1": "e0064bad413bac83"
+            "lane0": "116abf7de1f007c8",
+            "lane1": "f1f59552c9b48608"
           }
         }
       ]
@@ -12434,10 +12434,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 25672,
+          "byteCount": 25528,
           "digest": {
-            "lane0": "2de305502b064d5d",
-            "lane1": "81a4306d761d66e0"
+            "lane0": "df798a4774d4f0e8",
+            "lane1": "44523fab0837bfbf"
           }
         }
       ]
@@ -12548,10 +12548,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 22700,
+          "byteCount": 22556,
           "digest": {
-            "lane0": "01f9d0177805118d",
-            "lane1": "ce0dcf0fea3c9bfd"
+            "lane0": "9a93983f15411c15",
+            "lane1": "5a2fbd83c09ed97a"
           }
         }
       ]
@@ -12662,10 +12662,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 25226,
+          "byteCount": 25082,
           "digest": {
-            "lane0": "1ce26443ab5cb38f",
-            "lane1": "4a37f63aa83145c2"
+            "lane0": "e7bdf57e87ec80ce",
+            "lane1": "485d649012bb67d4"
           }
         }
       ]
@@ -12776,10 +12776,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 23028,
+          "byteCount": 22884,
           "digest": {
-            "lane0": "15696f8355a5dacf",
-            "lane1": "8a11d938322688ab"
+            "lane0": "b660cac4506207e7",
+            "lane1": "b324455b31aa162b"
           }
         }
       ]
@@ -12890,10 +12890,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 25537,
+          "byteCount": 25393,
           "digest": {
-            "lane0": "d4027a406f8f2aad",
-            "lane1": "4eb30ba9a8bd81e8"
+            "lane0": "f2a6c2b51d40e135",
+            "lane1": "080cd9cd77f42e66"
           }
         }
       ]
@@ -13004,10 +13004,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 25372,
+          "byteCount": 25228,
           "digest": {
-            "lane0": "c449f13aecfdc420",
-            "lane1": "78c9fe3be8ad7793"
+            "lane0": "d05d0ee37e8101af",
+            "lane1": "3864bb7f9a89b4c3"
           }
         }
       ]
@@ -13118,10 +13118,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 27893,
+          "byteCount": 27749,
           "digest": {
-            "lane0": "7b6214f9111887f7",
-            "lane1": "bbc19b55f4cd2fce"
+            "lane0": "e3329464add95ebf",
+            "lane1": "207659a0d8aaefdd"
           }
         }
       ]
@@ -13232,10 +13232,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 28919,
+          "byteCount": 28775,
           "digest": {
-            "lane0": "53753dd78e6db00f",
-            "lane1": "99a46d5a64be8c58"
+            "lane0": "6386f1073aa04a07",
+            "lane1": "7e511dc990dacefd"
           }
         }
       ]
@@ -13346,10 +13346,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 31393,
+          "byteCount": 31249,
           "digest": {
-            "lane0": "2f35dd56486a1597",
-            "lane1": "52e6734a0bcb0f87"
+            "lane0": "095f597bddba1a6f",
+            "lane1": "391cf6bdf80d8917"
           }
         }
       ]
@@ -13460,10 +13460,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 24878,
+          "byteCount": 24734,
           "digest": {
-            "lane0": "b4b2337bb801140f",
-            "lane1": "f67031fa6f7de0f0"
+            "lane0": "15b928845daffd50",
+            "lane1": "aa31420d7db2cf93"
           }
         }
       ]
@@ -13574,10 +13574,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 27401,
+          "byteCount": 27257,
           "digest": {
-            "lane0": "dec5f83171e6008f",
-            "lane1": "b1006e8bf18d9ffa"
+            "lane0": "4d734e4f46421f06",
+            "lane1": "5951b02bc84aec0f"
           }
         }
       ]
@@ -13688,10 +13688,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 25287,
+          "byteCount": 25143,
           "digest": {
-            "lane0": "0bf891f4e99db3b3",
-            "lane1": "7753e690c2e2cbb1"
+            "lane0": "467bb993acfbe28b",
+            "lane1": "ab6ea5d27045d041"
           }
         }
       ]
@@ -13802,10 +13802,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 27808,
+          "byteCount": 27664,
           "digest": {
-            "lane0": "64e990f68f4941c9",
-            "lane1": "ca71f823864fd217"
+            "lane0": "85bbd749fd96a381",
+            "lane1": "faf78b54fc44ece6"
           }
         }
       ]
@@ -13916,10 +13916,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 26861,
+          "byteCount": 26717,
           "digest": {
-            "lane0": "fb80629bf0eb9566",
-            "lane1": "2ea06cb3d0b24d01"
+            "lane0": "bd48bea2c17b3c3e",
+            "lane1": "73aa87d37d724a0a"
           }
         }
       ]
@@ -14030,10 +14030,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 29383,
+          "byteCount": 29239,
           "digest": {
-            "lane0": "149df5e1c2e1311a",
-            "lane1": "4e2f6a8ce6dd3664"
+            "lane0": "2d8766c793c3da92",
+            "lane1": "57542ec552a547d7"
           }
         }
       ]
@@ -14144,10 +14144,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 32398,
+          "byteCount": 32254,
           "digest": {
-            "lane0": "e6dc88ef9cd56054",
-            "lane1": "ca49d334379d791c"
+            "lane0": "85a8721c7fe28ad1",
+            "lane1": "26e2377b092275df"
           }
         }
       ]
@@ -14258,10 +14258,10 @@
         },
         {
           "target": "wgsl",
-          "byteCount": 34858,
+          "byteCount": 34714,
           "digest": {
-            "lane0": "b692d71199451589",
-            "lane1": "9ae9318347328fec"
+            "lane0": "618ae7defcf95610",
+            "lane1": "44af927161529827"
           }
         }
       ]

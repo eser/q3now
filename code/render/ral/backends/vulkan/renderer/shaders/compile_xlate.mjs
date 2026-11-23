@@ -277,7 +277,11 @@ function runTranslator(translator, item, portableEntry, workDir, targets, requir
 		if (!bytes.length) throw new Error(`translator emitted empty ${target}: ${item.symbol}`);
 		if (target === 'glsl460') bytes = lowerGlsl460(bytes, portableEntry);
 		if (target === 'wgsl') {
-			const source = bytes.toString('utf8').replace(/[ \t]+$/gm, '');
+			// naga prints FLT_MAX (the finite() guards' bound) as the shortest round-trip decimal 3.4028235e38, which as an exact
+			// decimal lies above FLT_MAX; Tint/Dawn then rejects the module ("value cannot be represented as 'f32'") and every
+			// temporal shader fails to compile in Chrome. The hexadecimal literal is the same f32 bit pattern and is exact.
+			const source = bytes.toString('utf8').replace(/[ \t]+$/gm, '')
+				.replace(/\b340282350000000000000000000000000000000f\b/g, '0x1.fffffep+127f');
 			bytes = Buffer.from(source);
 		}
 		artifacts.push({ target, bytes, digest: ralShaderArtifactDigest(bytes) });
