@@ -141,6 +141,7 @@ capture() {
 	"set fixedtime $FIXED_TIME_MS" \
 	"set r_pinShaderTime 1.0" \
 	"set r_pinFrameTime 0" \
+	"set r_aa 0" \
 	${EXTRA_CFG:+"$EXTRA_CFG"} \
 	"set cg_drawGun $DRAW_GUN" \
 	"set cg_lensFlare $CGAME_LENS" \
@@ -150,7 +151,6 @@ capture() {
 	"set con_notifytime 0" \
 	"set s_volume 0" \
 	"set s_musicVolume 0" \
-	"set r_aa 0" \
 	"log renderer.init info" \
 	"log renderer.ral ${RAL_PARITY_RAL_LOG_LEVEL:-info}" \
 	"log renderer.hdr info" \

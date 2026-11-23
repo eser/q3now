@@ -221,6 +221,9 @@ qboolean RalMetal_PresentSetBloom( ralMetalPresent_t *present,
 	const ralBloomSettings_t *settings );
 /* SMAA preset 1..4 applied to the offscreen scene after bloom and before exposure/tone mapping; 0 = off. */
 qboolean RalMetal_PresentSetSmaaQuality( ralMetalPresent_t *present, int quality );
+/* Temporal anti-aliasing (r_aa 1) on 3D scene frames: jitters the projection, rebuilds camera motion from the depth buffer and resolves
+ * against a history, after the scene pass and before bloom. */
+qboolean RalMetal_PresentSetTaa( ralMetalPresent_t *present, qboolean enabled );
 qboolean RalMetal_PresentSetExposure( ralMetalPresent_t *present,
 	const ralExposureSettings_t *settings );
 qboolean RalMetal_PresentPrepareMaterialResources(

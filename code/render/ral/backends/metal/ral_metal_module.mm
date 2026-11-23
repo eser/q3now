@@ -1730,16 +1730,13 @@ static void EndFrame( int *frontEndMsec, int *backEndMsec ) {
 	ralBloomSettings_t bloom = {};
 	qboolean bloomReady = qtrue;
 	int smaaQuality = 0;
+	qboolean taaEnabled = qfalse;
 	if ( s_module.aa && s_module.smaa ) {
 		/* r_aa 0 leaves r_smaa as a developer override; 1 (TAA) and 2 (SMAA) both run SMAA here: the Metal renderer has no jittered
 		 * velocity-carrying scene pass or history yet (TASK-257), so a TAA request degrades to SMAA instead of to no anti-aliasing. */
 		const int mode = s_module.aa->integer, preset = s_module.smaa->integer;
-		smaaQuality = mode == 0 ? preset : ( preset ? preset : 3 );
-		if ( mode == 1 && !s_module.aaTaaNoticeLogged && ri.LogCh && s_module.initLogChannel >= 0 ) {
-			s_module.aaTaaNoticeLogged = qtrue;
-			ri.LogCh( s_module.initLogChannel, SEV_INFO,
-				"Wired metal: r_aa 1 (TAA) is not available on this renderer yet; using SMAA preset %d\n", smaaQuality );
-		}
+		smaaQuality = mode == 0 ? preset : ( mode == 2 ? ( preset ? preset : 3 ) : 0 );
+		taaEnabled = mode == 1 ? qtrue : qfalse;
 	}
 	for ( unsigned i = 0; i < ARRAY_LEN( s_module.bloomCvars ); ++i )
 		if ( !s_module.bloomCvars[i] ) bloomReady = qfalse;
@@ -1787,6 +1784,7 @@ static void EndFrame( int *frontEndMsec, int *backEndMsec ) {
 	if ( !samplingApplied
 			|| !bloomReady || !RalMetal_PresentSetBloom( s_module.presentation, &bloom )
 			|| !RalMetal_PresentSetSmaaQuality( s_module.presentation, smaaQuality )
+			|| !RalMetal_PresentSetTaa( s_module.presentation, taaEnabled )
 			|| !exposureReady || !RalMetal_PresentSetExposure( s_module.presentation, &exposure )
 			|| !s_module.brightness
 			|| !Ral_DisplayVisibilityPlanBuild( s_module.brightness->value, &visibility )

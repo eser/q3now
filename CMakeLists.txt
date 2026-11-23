@@ -3323,7 +3323,8 @@ IF(APPLE)
 		code/render/ral/core/ral_texture_stream.c
 		code/render/ral/core/ral_texture_transcode.c
 		code/render/ral/core/ral_texture_upload.c
-		code/render/ral/core/ral_transfer.c)
+		code/render/ral/core/ral_transfer.c
+		code/render/ral/core/ral_temporal.c)
 	TARGET_INCLUDE_DIRECTORIES(ral_metal PUBLIC
 		code/qcommon code/render/ral/core code/render/ral/backends/metal code/render/frontend)
 	TARGET_INCLUDE_DIRECTORIES(ral_metal PRIVATE ${RAL_METAL_PRODUCT_SHADER_DIR})

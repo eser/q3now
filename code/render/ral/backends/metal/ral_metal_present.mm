@@ -12,6 +12,10 @@
 #include "ral_metal_exposure.h"
 #include "ral_metal_bloom.h"
 #include "ral_metal_smaa.h"
+#include "ral_metal_taa.h"
+extern "C" {
+#include "../../core/ral_temporal.h"
+}
 #include "ral_metal_atmosphere.h"
 #include "ral_metal_ui_metallib.h"
 #include "ral_metal_particle_compute_metallib.h"
@@ -308,6 +312,14 @@ qboolean effectParity;
 	ralMetalBloom_t *bloom;
 	ralMetalSmaa_t *smaa;
 	int smaaQuality;
+	/* Temporal AA (r_aa 1). The plan state machine is the backend-neutral RAL one (jitter phase, history ping-pong, resets). */
+	ralMetalTaa_t *taa;
+	qboolean taaEnabled;
+	ralTemporalState_t taaState;
+	uint64_t taaFrameId;
+	uint32_t taaTopologyEpoch;
+	uint64_t taaWorldDigest;
+	float taaPreviousView[20];
 	qboolean exposureHistoryValid;
 	int exposureTimeMs;
 	uint64_t exposureWorldDigest;
@@ -5113,6 +5125,8 @@ static qboolean BuildOwnedLayer( ralMetalCore_t *core,
 
 static void InitializeToneMapDefaults( ralMetalPresent_t *present ) {
 	present->bloomSettings = { 0u, 2u, 0u, 0.32f, 0.5f };
+	Ral_TemporalInit( &present->taaState );
+	present->taaTopologyEpoch = 1u;
 	present->toneMap.mode = 3u;
 	present->toneMap.exposure = 1.0f;
 	present->toneMap.lottesContrast = 1.6f;
@@ -5267,6 +5281,7 @@ void RalMetal_PresentDestroy( ralMetalPresent_t *present ) {
 	RalMetal_ExposureDestroy( present->exposure );
 	RalMetal_BloomDestroy( present->bloom );
 	RalMetal_SmaaDestroy( present->smaa );
+	RalMetal_TaaDestroy( present->taa );
 	[present->worldPipeline release];
 	[present->skyCapturePipeline release];
 	[present->worldBlendPipeline release];
@@ -5410,6 +5425,8 @@ qboolean RalMetal_PresentResetRegistrationAssets( ralMetalPresent_t *present,
 	}
 	RalMetal_BloomDestroy( present->bloom ); present->bloom = NULL;
 	RalMetal_SmaaDestroy( present->smaa ); present->smaa = NULL;
+	RalMetal_TaaDestroy( present->taa ); present->taa = NULL;
+	Ral_TemporalInit( &present->taaState ); present->taaFrameId = 0u;
 	wired_clear_present_upload_caches( present );
 	for ( uint32_t i = 0u; i < RENDER_SUBMISSION_MAX_TEXTURE_RESOURCES; ++i )
 		[present->uiMaterials[i].texture release];
@@ -5557,6 +5574,12 @@ qboolean RalMetal_PresentSetBloom( ralMetalPresent_t *present,
 		const ralBloomSettings_t *settings ) {
 	if ( !present || !Ral_BloomSettingsValid( settings ) ) return qfalse;
 	present->bloomSettings = *settings;
+	return qtrue;
+}
+
+qboolean RalMetal_PresentSetTaa( ralMetalPresent_t *present, qboolean enabled ) {
+	if ( !present ) return qfalse;
+	present->taaEnabled = enabled;
 	return qtrue;
 }
 
@@ -6285,6 +6308,37 @@ static qboolean RenderAndSubmit( ralMetalPresent_t *present,
 		&& !( sceneView.rdflags & RDF_NOWORLDMODEL ) ? qtrue : qfalse;
 	worldColorFormat = offscreenScene ? MTLPixelFormatRGBA16Float
 		: present->layer.pixelFormat;
+	/* Temporal AA: plan the frame (jitter, history slots, resets) and bake the sub-pixel jitter into the world view parameters before
+	 * any pass uses them. A plan abandoned by an earlier failed frame is cancelled first. */
+	qboolean taaActive = qfalse;
+	ralTemporalFramePlan_t taaPlan;
+	float taaJitterNdc[2] = { 0.0f, 0.0f };
+	memset( &taaPlan, 0, sizeof( taaPlan ) );
+	if ( present->taaState.pending )
+		(void)Ral_TemporalCancelFrame( &present->taaState, present->taaState.pendingPlan.frameId );
+	if ( present->taaEnabled && offscreenScene && receipt.width && receipt.height ) {
+		ralTemporalFrameInput_t taaInput;
+		memset( &taaInput, 0, sizeof( taaInput ) );
+		if ( present->taaWorldDigest != frontend->worldDigest ) {
+			present->taaWorldDigest = frontend->worldDigest;
+			++present->taaTopologyEpoch;
+			if ( !present->taaTopologyEpoch ) present->taaTopologyEpoch = 1u;
+		}
+		taaInput.frameId = present->taaFrameId + 1u;
+		taaInput.width = receipt.width; taaInput.height = receipt.height;
+		taaInput.viewId = 0u; taaInput.topologyEpoch = present->taaTopologyEpoch;
+		taaInput.enabled = 1u;
+		taaInput.cameraCut = ( sceneView.rdflags & ( RDF_CAMERA_CUT | RDF_HYPERSPACE ) ) ? 1u : 0u;
+		if ( Ral_TemporalBeginFrame( &present->taaState, &taaInput, &taaPlan ) ) {
+			taaActive = qtrue;
+			taaJitterNdc[0] = 2.0f * taaPlan.sceneJitterPixels[0] / (float)receipt.width;
+			taaJitterNdc[1] = -2.0f * taaPlan.sceneJitterPixels[1] / (float)receipt.height;
+			worldViewParams.forward[3] = taaJitterNdc[0];
+			worldViewParams.left[3] = taaJitterNdc[1];
+			distantWorldViewParams.forward[3] = taaJitterNdc[0];
+			distantWorldViewParams.left[3] = taaJitterNdc[1];
+		}
+	}
 	@autoreleasepool {
 		wiredMetalSplitSubmission split;
 		/* Phase filters draw each main/distant world and entity batch at most
@@ -6530,7 +6584,7 @@ static qboolean RenderAndSubmit( ralMetalPresent_t *present,
 			/* Stored whenever a later pass samples the opaque depth: WiredFX
 			 * soft particles, the lens oracle, and the weather quads (fogged
 			 * and faded at the scene depth behind them). */
-			pass.depthAttachment.storeAction = ( genericEffectParticleCount
+			pass.depthAttachment.storeAction = ( genericEffectParticleCount || taaActive
 				|| lensSnapshot.count || !weatherPlan.zeroWork || translucentEntityCount )
 				? MTLStoreActionStore : MTLStoreActionDontCare;
 			pass.depthAttachment.clearDepth = 1.0;
@@ -6633,7 +6687,7 @@ static qboolean RenderAndSubmit( ralMetalPresent_t *present,
 					foregroundPass.colorAttachments[0].storeAction = MTLStoreActionStore;
 					foregroundPass.depthAttachment.texture = worldDepth;
 					foregroundPass.depthAttachment.loadAction = MTLLoadActionClear;
-					foregroundPass.depthAttachment.storeAction = ( genericEffectParticleCount
+					foregroundPass.depthAttachment.storeAction = ( genericEffectParticleCount || taaActive
 						|| lensSnapshot.count )
 						? MTLStoreActionStore : MTLStoreActionDontCare;
 					foregroundPass.depthAttachment.clearDepth = 1.0;
@@ -7285,6 +7339,33 @@ static qboolean RenderAndSubmit( ralMetalPresent_t *present,
 		[encoder endEncoding];
 		if ( offscreenScene ) {
 			id<MTLBuffer> adaptedExposure = nil;
+			if ( taaActive ) {
+				if ( !present->taa ) present->taa = RalMetal_TaaCreate(
+					RalMetal_CoreNativeDevice( present->core ), present->uiLibrary );
+				ralMetalTaaFrame_t taaFrame;
+				memset( &taaFrame, 0, sizeof( taaFrame ) );
+				taaFrame.width = receipt.width; taaFrame.height = receipt.height;
+				memcpy( taaFrame.currentView, &worldViewParams, sizeof( taaFrame.currentView ) );
+				memcpy( taaFrame.previousView, present->taaPreviousView, sizeof( taaFrame.previousView ) );
+				/* The view parameters carry the jitter in two .w slots; the motion kernel gets the unjittered camera. */
+				taaFrame.currentView[7] = 0.0f; taaFrame.currentView[11] = 0.0f;
+				taaFrame.jitterNdc[0] = taaJitterNdc[0]; taaFrame.jitterNdc[1] = taaJitterNdc[1];
+				taaFrame.currentJitterUv[0] = taaPlan.sceneJitterPixels[0] / (float)receipt.width;
+				taaFrame.currentJitterUv[1] = taaPlan.sceneJitterPixels[1] / (float)receipt.height;
+				taaFrame.previousJitterUv[0] = taaPlan.previousJitterPixels[0] / (float)receipt.width;
+				taaFrame.previousJitterUv[1] = taaPlan.previousJitterPixels[1] / (float)receipt.height;
+				taaFrame.historyValid = taaPlan.historyValid; taaFrame.readIndex = taaPlan.historyReadIndex;
+				taaFrame.writeIndex = taaPlan.historyWriteIndex;
+				if ( !RalMetal_TaaEncode( present->taa, command, present->sceneColorCache, worldDepth, &taaFrame ) ) {
+					[worldVertices release]; [worldIndices release]; [worldDepth release];
+					[entityVertices release]; [entityIndices release]; free( entityBatches );
+					[uiVertices release]; [readback release];
+					return PresentFailure( "taa" );
+				}
+				memcpy( present->taaPreviousView, taaFrame.currentView, sizeof( present->taaPreviousView ) );
+				present->taaFrameId = taaPlan.frameId;
+				(void)Ral_TemporalCommitFrame( &present->taaState, taaPlan.frameId );
+			}
 			if ( present->bloomSettings.enabled ) {
 				if ( !present->bloom ) present->bloom =
 					RalMetal_BloomCreate( RalMetal_CoreNativeDevice( present->core ) );
