@@ -38,7 +38,7 @@ CFG="$HOME_DIR/base/ral-brightness-sweep.cfg"
 	printf '%s\n' 'set r_fullscreen 0' 'set r_mode -1' 'set r_customwidth 1280' 'set r_customheight 720'
 	printf '%s\n' 'set vm_game 0' 'set vm_cgame 0' 'set sv_cheats 1' 'set sv_pure 0'
 	printf '%s\n' 'set fixedtime 16' 'set r_pinShaderTime 1.0' 'set cg_draw2D 0' 'set cg_drawGun 0' 'set r_hdr 1' 'set r_fbo 1' 'set r_hdrAutoExposure 0'
-	printf '%s\n' 'set r_dither 0' 'set r_bloom 0' 'set r_ao 0' 'set r_forwardPlus 0' 'set r_dynamiclight 0'
+	printf '%s\n' 'set r_dither 0' 'set r_bloom 0' 'set r_ao 0' 'set r_aa 0' 'set r_forwardPlus 0' 'set r_dynamiclight 0'
 	printf '%s\n' 'set r_gpuSpeeds 0' 'log renderer.timing debug'
 	printf '%s\n' 'set r_drawSunRays 0' 'set r_shadows 0' 'set r_lens 0' 'set r_gpuDecals 0' 'set r_particles 0'
 	printf '%s\n' 'set scalarSweep "wait 180; noclip; setviewpos 1052 1432 50 135; wait 90; vstr scalar0"'

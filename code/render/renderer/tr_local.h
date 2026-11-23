@@ -1726,6 +1726,7 @@ extern cvar_t	*r_dbgTemporalRepeatStore;
 extern cvar_t	*r_dbgTemporalFold;
 extern cvar_t	*r_dbgTemporalQuality;
 extern cvar_t	*r_dbgTemporalBootstrap;
+extern cvar_t	*r_dbgTemporalEffectMask;
 extern cvar_t	*r_dbgExactHold;            // exact temporal pass: 1 (default) held open across consecutive exact draws, 0 the older close-and-reopen per draw, 2 leak control for tests
 extern cvar_t	*r_dbgWorldPhase;           // measurement: split eligible world batches into two phases (1 even/odd items, 2 all in phase 2, 3 all in phase 1)
 extern cvar_t	*r_dbgWorldCoverage;        // measurement: per-view world coverage counters (listed / invoked / queued / issued BSP surfaces), logged every 600 views

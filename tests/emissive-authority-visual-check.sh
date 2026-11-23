@@ -40,7 +40,7 @@ python3 "$WATCHDOG" --timeout 90 --kill-after 15 --cwd "$(dirname "$ENGINE")" --
   +set s_initsound 0 +set sv_pure 0 +set sv_cheats 1 +set vm_game 0 +set vm_cgame 0 \
   +set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 \
   +set r_renderScale 1 +set r_emissiveAuthorityFixture 1 +set r_dynamiclight 2 \
-  +set r_pinShaderTime 1.0 +set r_pinFrameTime 1.0 +set r_bloom 0 \
+  +set r_pinShaderTime 1.0 +set r_pinFrameTime 1.0 +set r_bloom 0 +set r_aa 0 \
   +set con_notifytime 0 +set cg_draw2D 0 +log renderer.init info \
   +exec emissive-authority.cfg
 

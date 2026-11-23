@@ -154,6 +154,9 @@ temporalMotionOutcome_t R_TemporalMotionClassify(
 		const temporalMotionDrawFacts_t *facts ) {
 	qboolean supportedGeometry;
 	if ( !facts || !facts->visible ) return TEMPORAL_MOTION_PRESERVE;
+	if ( facts->effectMask && !facts->ui && !facts->crosshair && !facts->sky
+			&& ( facts->transparent || facts->decal || facts->depthHack ) )
+		return TEMPORAL_MOTION_INVALIDATE_OPAQUE;
 	if ( facts->ui || facts->transparent || facts->blended || facts->decal
 			|| facts->additive || !facts->opaque || facts->polygonOffset
 			|| facts->depthHack || facts->crosshair ) return TEMPORAL_MOTION_PRESERVE;

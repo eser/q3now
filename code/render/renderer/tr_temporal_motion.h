@@ -36,6 +36,10 @@ typedef struct {
 	qboolean polygonOffset;
 	qboolean depthHack;
 	qboolean crosshair;
+	// Effect mask: draws of translucent surfaces (sort after opaque: water, glass, sprites, beams, explosion models), decals and
+	// first-person (depthHack) draws do not inherit the history of the opaque surface beneath them. A blended STAGE of an opaque
+	// surface (a lightmap multiply, a detail overlay) is not an effect and stays PRESERVE; they invalidate it, so the resolve filters those pixels spatially instead of reprojecting them.
+	qboolean effectMask;
 } temporalMotionDrawFacts_t;
 
 typedef struct {

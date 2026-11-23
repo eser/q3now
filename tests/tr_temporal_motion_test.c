@@ -128,6 +128,38 @@ static int TestClassification( void ) {
 	EXPECT_INVALIDATE( sky );
 #undef EXPECT_INVALIDATE
 
+	// Effect mask: without it translucent draws keep the opaque history (PRESERVE); with it they invalidate it, except UI, the crosshair
+	// and sky. An opaque draw is unaffected by the flag.
+	facts = WritableFacts( TEMPORAL_MOTION_GEOMETRY_WORLD_STATIC );
+	facts.effectMask = qtrue;
+	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_WRITE_VALID );
+#define EXPECT_EFFECT(field) do { \
+	facts = WritableFacts( TEMPORAL_MOTION_GEOMETRY_WORLD_STATIC ); \
+	facts.field = qtrue; \
+	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_PRESERVE ); \
+	facts.effectMask = qtrue; \
+	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_INVALIDATE_OPAQUE ); \
+	facts.depthAuthoritative = qfalse; facts.opaque = qfalse; \
+	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_INVALIDATE_OPAQUE ); \
+	facts.ui = qtrue; \
+	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_PRESERVE ); \
+	facts.ui = qfalse; facts.crosshair = qtrue; \
+	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_PRESERVE ); \
+	facts.crosshair = qfalse; facts.visible = qfalse; \
+	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_PRESERVE ); \
+} while (0)
+	EXPECT_EFFECT( transparent );
+	EXPECT_EFFECT( decal );
+	EXPECT_EFFECT( depthHack );
+#undef EXPECT_EFFECT
+	// A blended or additive stage of an opaque surface is not an effect.
+	facts = WritableFacts( TEMPORAL_MOTION_GEOMETRY_WORLD_STATIC );
+	facts.effectMask = facts.blended = facts.additive = qtrue;
+	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_PRESERVE );
+	facts = WritableFacts( TEMPORAL_MOTION_GEOMETRY_WORLD_STATIC );
+	facts.effectMask = facts.blended = facts.sky = qtrue;
+	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_PRESERVE );
+
 	facts = WritableFacts( TEMPORAL_MOTION_GEOMETRY_WORLD_STATIC );
 	facts.alphaTested = qtrue;
 	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_WRITE_VALID );

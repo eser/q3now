@@ -30015,6 +30015,7 @@ static qboolean vk_temporal_motion_prepare_bound_draw( uint32_t pipelineSlot )
 	facts.ui = backEnd.projection2D;
 	facts.sky = shader->isSky;
 	facts.polygonOffset = def->polygon_offset;
+	facts.effectMask = r_dbgTemporalEffectMask && r_dbgTemporalEffectMask->integer ? qtrue : qfalse;
 	if ( entity ) {
 		facts.depthHack = ( entity->e.renderfx & RF_DEPTHHACK ) ? qtrue : qfalse;
 		facts.crosshair = ( entity->e.renderfx & RF_CROSSHAIR ) ? qtrue : qfalse;
