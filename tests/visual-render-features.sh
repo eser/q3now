@@ -2864,6 +2864,57 @@ PYEOF
     done
     ;;
 
+beamghost)
+    # Trail of a moving beam (rays, rail trails, ribbons never write temporal validity). `testbeam 1` sweeps a vertical beam sideways in
+    # front of a static camera. Frames f0 and f1 (BG_FRAMES apart, shader time and game time deterministic) are captured with AA off and
+    # with TAA, and once more with no beam (the reference). Beam mask = pixels where the AA-off frame differs from the reference;
+    # old-only mask = pixels the beam covered in f0 but not in f1. In the old-only region the AA-off frame equals the reference, so any
+    # deviation of the TAA frame there is the beam's trail. Controls: the beam region must be non-empty; a repeat of the TAA capture gives
+    # the noise floor; the trail must exceed it, or the view says nothing.
+    BG_POS="${BG_POS:-1052 1432 50 135}"; BG_FRAMES="${BG_FRAMES:-3}"; BG_DT="${BG_DT:-0.05}"
+    bgh() {  # tag aa beam(0/1)
+        local tag="$1" aa="$2" beam="$3" k n=84
+        { printf 'set cg_draw2D 0\nset cg_drawGun 0\nset fixedtime 8\nset r_pinFrameTime 1.0\n'
+          [ "$beam" = 1 ] && printf 'testbeam 1\n'
+          for (( k = 0; k <= n + BG_FRAMES; k++ )); do
+              printf 'set r_pinShaderTime %s\nwait 1\n' "$(awk -v k="$k" -v dt="$BG_DT" 'BEGIN{printf "%.4f", 2.0 + k * dt}')"
+              [ "$k" = "$n" ] && printf 'screenshot vrf_%s_f0\n' "$tag"
+          done
+          printf 'screenshot vrf_%s_f1\nwait 4\n' "$tag"; } > "$SMOKE_HOME/base/vrf_bg.cfg"
+        CAP_POST_CMD="exec vrf_bg.cfg" capture_fixed_cam arena1 "$BG_POS" "$tag" +set r_aa "$aa" >/dev/null || return 1
+    }
+    PNG2RAW_BIN="${PNG2RAW:-$WIRED_SOURCE/tools/png2raw/png2raw}"
+    bgh bg_ref 0 0 || FAIL=1
+    bgh bg_off 0 1 || FAIL=1
+    bgh bg_taa 1 1 || FAIL=1
+    bgh bg_taab 1 1 || FAIL=1
+    res="$(python3 - "$SHOTDIR" "$PNG2RAW_BIN" <<'PYEOF'
+import subprocess, struct, sys
+d, dec = sys.argv[1:3]
+def load(n):
+    p = f"{d}/vrf_{n}.png"
+    w, h = struct.unpack(">II", open(p, "rb").read(24)[16:24])
+    return w, h, subprocess.check_output([dec, p])
+w, h, r1 = load("bg_ref_f1"); _, _, o0 = load("bg_off_f0"); _, _, o1 = load("bg_off_f1")
+_, _, t1 = load("bg_taa_f1"); _, _, u1 = load("bg_taab_f1")
+step = 2
+pix = [(y * w + x) * 3 for y in range(0, h, step) for x in range(0, w, step)]
+def diff(a, b, i): return max(abs(a[i] - b[i]), abs(a[i+1] - b[i+1]), abs(a[i+2] - b[i+2]))
+beam = [i for i in pix if diff(o1, r1, i) > 24]
+old = [i for i in pix if diff(o0, r1, i) > 24 and diff(o1, r1, i) <= 6]
+def dev(a, b, idx): return sum(diff(a, b, i) for i in idx) / len(idx) if idx else 0.0
+print("%d %d %.3f %.3f" % (len(beam), len(old), dev(t1, o1, old), dev(u1, t1, old)))
+PYEOF
+)"
+    set -- $res
+    v="$(awk -v nb="$1" -v no="$2" -v tr="$3" -v nz="$4" 'BEGIN{
+        if (nb < 100 || no < 100) print "FAIL(no beam footprint: beam " nb " px, old-only " no " px; the fixture says nothing)";
+        else if (tr > nz + 1.0) print "OK(trail present: " tr " mean abs in the beam\x27s old position vs noise " nz ")";
+        else print "OK(no measurable trail: " tr " vs noise " nz ")" }')"
+    [ "${v:0:2}" = "OK" ] || FAIL=1
+    printf "  beamghost: beam %s px, old-only region %s px, TAA deviation there=%s repeat-noise=%s -> %s\n" "$1" "$2" "$3" "$4" "$v"
+    ;;
+
 worldphase)
     # r_dbgWorldPhase splits the opaque world batches of the main view into two phases and draws
     # the second one later (at the opaque -> transparent crossing) through the replay mechanism
