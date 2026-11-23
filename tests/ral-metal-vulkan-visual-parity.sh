@@ -42,6 +42,7 @@ SKY_MODE="${RAL_PARITY_SKY_MODE:-}"
 FILTER_RELOAD="${RAL_PARITY_FILTER_RELOAD:-0}"
 REPEAT="${RAL_PARITY_REPEAT:-1}"
 EXTRA_CFG="${RAL_PARITY_EXTRA_CFG:-}"
+PRE_SHOT="${RAL_PARITY_PRE_SHOT:-}"   # console commands run just before the screenshot (e.g. a yaw sweep for temporal checks)
 # Deterministic game clock: fixedtime advances cg.time by a constant per frame,
 # so HUD timers, weather/sky timelines and game-time animations reach the same
 # state at the capture frame regardless of wall-clock FPS (same-backend repeat
@@ -174,6 +175,7 @@ capture() {
 	'wait 30' \
 	'cmd where' \
 	"$([ "$backend" = vulkan ] && echo gfxinfo || echo 'echo RAL_METAL_NATIVE_SCENE')" \
+    ${PRE_SHOT:+"$PRE_SHOT"} \
     'log cgame info; viewpos' \
 	'r_bloom; r_drawSunRays; r_flares; r_lens; cg_lensFlare; cg_powerupFlares; cg_halo' \
     "screenshot ral_parity_${map}_${backend} png silent" \
