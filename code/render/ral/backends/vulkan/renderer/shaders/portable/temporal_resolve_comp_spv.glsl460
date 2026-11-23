@@ -31,43 +31,43 @@ shared vec4 tileColor[100];
 
 bool finite2(vec2 v)
 {
-    bool _124 = all(equal(v, v));
-    bool _132;
-    if (_124)
+    bool _117 = all(equal(v, v));
+    bool _125;
+    if (_117)
     {
-        _132 = all(lessThanEqual(abs(v), vec2(3.4028234663852885981170418348452e+38)));
+        _125 = all(lessThanEqual(abs(v), vec2(3.4028234663852885981170418348452e+38)));
     }
     else
     {
-        _132 = _124;
+        _125 = _117;
     }
-    return _132;
+    return _125;
 }
 
 vec2 dlMotionVelocity(ivec2 px, int tileIndex, float centerValid)
 {
     vec2 centerVelocity = texelFetch(sampler2D(motionVelocity, nearestSampler), px, 0).xy;
-    bool _953 = (pc.qualityFlags & 2u) == 0u;
-    bool _960;
-    if (!_953)
+    bool _1071 = (pc.qualityFlags & 2u) == 0u;
+    bool _1078;
+    if (!_1071)
     {
-        _960 = !(centerValid > 0.0);
+        _1078 = !(centerValid > 0.0);
     }
     else
     {
-        _960 = _953;
+        _1078 = _1071;
     }
-    bool _968;
-    if (!_960)
+    bool _1086;
+    if (!_1078)
     {
         vec2 param = centerVelocity;
-        _968 = !finite2(param);
+        _1086 = !finite2(param);
     }
     else
     {
-        _968 = _960;
+        _1086 = _1078;
     }
-    if (_968)
+    if (_1086)
     {
         return centerVelocity;
     }
@@ -102,46 +102,46 @@ vec2 dlMotionVelocity(ivec2 px, int tileIndex, float centerValid)
 
 bool finite4(vec4 v)
 {
-    bool _154 = all(equal(v, v));
-    bool _162;
-    if (_154)
+    bool _147 = all(equal(v, v));
+    bool _155;
+    if (_147)
     {
-        _162 = all(lessThanEqual(abs(v), vec4(3.4028234663852885981170418348452e+38)));
+        _155 = all(lessThanEqual(abs(v), vec4(3.4028234663852885981170418348452e+38)));
     }
     else
     {
-        _162 = _154;
+        _155 = _147;
     }
-    return _162;
+    return _155;
 }
 
 bool finite1(float v)
 {
-    bool _110 = v == v;
-    bool _117;
-    if (_110)
+    bool _103 = v == v;
+    bool _110;
+    if (_103)
     {
-        _117 = abs(v) <= 3.4028234663852885981170418348452e+38;
+        _110 = abs(v) <= 3.4028234663852885981170418348452e+38;
     }
     else
     {
-        _117 = _110;
+        _110 = _103;
     }
-    return _117;
+    return _110;
 }
 
 float linearizeDepth(float z)
 {
-    precise float _178 = pc.zFar - pc.zNear;
-    float range = _178;
-    precise float _182 = z * range;
-    float scaled = _182;
-    precise float _187 = pc.zNear + scaled;
-    float denominator = _187;
-    precise float _193 = pc.zNear * pc.zFar;
-    float numerator = _193;
-    precise float _197 = numerator / denominator;
-    float result = _197;
+    precise float _171 = pc.zFar - pc.zNear;
+    float range = _171;
+    precise float _175 = z * range;
+    float scaled = _175;
+    precise float _180 = pc.zNear + scaled;
+    float denominator = _180;
+    precise float _186 = pc.zNear * pc.zFar;
+    float numerator = _186;
+    precise float _190 = numerator / denominator;
+    float result = _190;
     return result;
 }
 
@@ -154,8 +154,8 @@ float samplePreviousDepthLinear(vec2 texel)
 {
     vec2 baseFloat = floor(texel);
     ivec2 base = ivec2(baseFloat);
-    precise vec2 _370 = texel - baseFloat;
-    vec2 f = _370;
+    precise vec2 _489 = texel - baseFloat;
+    vec2 f = _489;
     ivec2 hi = ivec2(pc.extent) - ivec2(1);
     float d00 = texelFetch(sampler2D(previousLinearDepth, nearestSampler), clamp(base, ivec2(0), hi), 0).x;
     float d10 = texelFetch(sampler2D(previousLinearDepth, nearestSampler), clamp(base + ivec2(1, 0), ivec2(0), hi), 0).x;
@@ -175,52 +175,58 @@ float samplePreviousDepthLinear(vec2 texel)
     return mixFast(param_6, param_7, param_8);
 }
 
-vec4 mixFast(vec4 x, vec4 y, float a)
-{
-    return (x * (1.0 - a)) + (y * a);
-}
-
-vec4 samplePreviousColorLinear(vec2 texel)
+vec4 samplePreviousColor(vec2 texel)
 {
     vec2 baseFloat = floor(texel);
-    ivec2 base = ivec2(baseFloat);
-    precise vec2 _283 = texel - baseFloat;
-    vec2 f = _283;
-    ivec2 hi = ivec2(pc.extent) - ivec2(1);
-    vec4 c00 = texelFetch(sampler2D(previousColor, nearestSampler), clamp(base, ivec2(0), hi), 0);
-    vec4 c10 = texelFetch(sampler2D(previousColor, nearestSampler), clamp(base + ivec2(1, 0), ivec2(0), hi), 0);
-    vec4 c01 = texelFetch(sampler2D(previousColor, nearestSampler), clamp(base + ivec2(0, 1), ivec2(0), hi), 0);
-    vec4 c11 = texelFetch(sampler2D(previousColor, nearestSampler), clamp(base + ivec2(1), ivec2(0), hi), 0);
-    vec4 param = c00;
-    vec4 param_1 = c10;
-    float param_2 = f.x;
-    vec4 top = mixFast(param, param_1, param_2);
-    vec4 param_3 = c01;
-    vec4 param_4 = c11;
-    float param_5 = f.x;
-    vec4 bottom = mixFast(param_3, param_4, param_5);
-    vec4 param_6 = top;
-    vec4 param_7 = bottom;
-    float param_8 = f.y;
-    return mixFast(param_6, param_7, param_8);
+    precise vec2 _263 = texel - baseFloat;
+    vec2 f = _263;
+    precise vec2 _267 = vec2(1.0) + f;
+    vec2 d0 = _267;
+    vec2 d1 = f;
+    precise vec2 _273 = vec2(1.0) - f;
+    vec2 d2 = _273;
+    precise vec2 _278 = vec2(2.0) - f;
+    vec2 d3 = _278;
+    vec2 w0 = (((((d0 * (-0.75)) - vec2(-3.75)) * d0) + vec2(-6.0)) * d0) - vec2(-3.0);
+    vec2 w1 = ((((d1 * 1.25) - vec2(2.25)) * d1) * d1) + vec2(1.0);
+    vec2 w2 = ((((d2 * 1.25) - vec2(2.25)) * d2) * d2) + vec2(1.0);
+    vec2 w3 = (((((d3 * (-0.75)) - vec2(-3.75)) * d3) + vec2(-6.0)) * d3) - vec2(-3.0);
+    vec2 w12 = w1 + w2;
+    vec2 offset12 = w2 * inversesqrt(w12 * w12);
+    vec2 extent = vec2(pc.extent);
+    vec2 invExtent = inversesqrt(extent * extent);
+    vec2 uv0 = ((baseFloat - vec2(1.0)) + vec2(0.5)) * invExtent;
+    vec2 uv12 = ((baseFloat + offset12) + vec2(0.5)) * invExtent;
+    vec2 uv3 = ((baseFloat + vec2(2.0)) + vec2(0.5)) * invExtent;
+    float ux[5] = float[](uv12.x, uv0.x, uv3.x, uv12.x, uv12.x);
+    float uy[5] = float[](uv12.y, uv12.y, uv12.y, uv0.y, uv3.y);
+    float w[5] = float[](w12.x * w12.y, w0.x * w12.y, w3.x * w12.y, w12.x * w0.y, w12.x * w3.y);
+    vec4 sum = vec4(0.0);
+    float total = 0.0;
+    for (int i = 0; i < 5; i++)
+    {
+        sum += (textureLod(sampler2D(previousColor, nearestSampler), vec2(ux[i], uy[i]), 0.0) * w[i]);
+        total += w[i];
+    }
+    return sum * inversesqrt(total * total);
 }
 
 bool finite3(vec3 v)
 {
-    bool _139 = all(equal(v, v));
-    bool _147;
-    if (_139)
+    bool _132 = all(equal(v, v));
+    bool _140;
+    if (_132)
     {
-        _147 = all(lessThanEqual(abs(v), vec3(3.4028234663852885981170418348452e+38)));
+        _140 = all(lessThanEqual(abs(v), vec3(3.4028234663852885981170418348452e+38)));
     }
     else
     {
-        _147 = _139;
+        _140 = _132;
     }
-    return _147;
+    return _140;
 }
 
-bool neighborhoodBox(int tileIndex, inout vec3 boxMin, inout vec3 boxMax, inout vec3 boxMean)
+bool neighborhoodBox(int tileIndex, inout vec3 boxMin, inout vec3 boxMax)
 {
     vec3 neighborhoodMin = vec3(3.4028234663852885981170418348452e+38);
     vec3 neighborhoodMax = vec3(-3.4028234663852885981170418348452e+38);
@@ -238,18 +244,18 @@ bool neighborhoodBox(int tileIndex, inout vec3 boxMin, inout vec3 boxMax, inout 
         }
     }
     vec3 param = neighborhoodMin;
-    bool _1130 = finite3(param);
-    bool _1136;
-    if (_1130)
+    bool _1248 = finite3(param);
+    bool _1254;
+    if (_1248)
     {
         vec3 param_1 = neighborhoodMax;
-        _1136 = finite3(param_1);
+        _1254 = finite3(param_1);
     }
     else
     {
-        _1136 = _1130;
+        _1254 = _1248;
     }
-    if (!_1136)
+    if (!_1254)
     {
         return false;
     }
@@ -264,27 +270,26 @@ bool neighborhoodBox(int tileIndex, inout vec3 boxMin, inout vec3 boxMax, inout 
     }
     boxMin = clipMin;
     boxMax = clipMax;
-    boxMean = momentSum * 0.111111111938953399658203125;
     return true;
 }
 
 float scalePrecise(float weight, float confidence)
 {
-    precise float _223 = weight * confidence;
-    float scaled = _223;
+    precise float _216 = weight * confidence;
+    float scaled = _216;
     return scaled;
 }
 
 vec3 mixPrecise(vec3 x, vec3 y, float a)
 {
-    precise float _204 = 1.0 - a;
-    float oneMinus = _204;
-    precise vec3 _208 = x * oneMinus;
-    vec3 left = _208;
-    precise vec3 _212 = y * a;
-    vec3 right = _212;
-    precise vec3 _216 = left + right;
-    vec3 result = _216;
+    precise float _197 = 1.0 - a;
+    float oneMinus = _197;
+    precise vec3 _201 = x * oneMinus;
+    vec3 left = _201;
+    precise vec3 _205 = y * a;
+    vec3 right = _205;
+    precise vec3 _209 = left + right;
+    vec3 result = _209;
     return result;
 }
 
@@ -361,16 +366,16 @@ vec4 fxSpatialAa(ivec2 px, vec4 centerColor)
     float fxGradHi = fxHiSide - fxM;
     bool fxLoSteeper = abs(fxGradLo) >= abs(fxGradHi);
     float fxGradient = max(abs(fxGradLo), abs(fxGradHi));
-    float _711;
+    float _829;
     if (fxLoSteeper)
     {
-        _711 = fxLoSide + fxM;
+        _829 = fxLoSide + fxM;
     }
     else
     {
-        _711 = fxHiSide + fxM;
+        _829 = fxHiSide + fxM;
     }
-    float fxPair = _711;
+    float fxPair = _829;
     ivec2 fxAcross = mix(ivec2(1, 0), ivec2(0, 1), bvec2(fxHorzSpan));
     ivec2 fxAlong = mix(ivec2(0, 1), ivec2(1, 0), bvec2(fxHorzSpan));
     if (fxLoSteeper)
@@ -422,16 +427,16 @@ vec4 fxSpatialAa(ivec2 px, vec4 centerColor)
     bool fxGoodSpan = (fxEndG < 0.0) != fxMidNegative;
     float fxSpanLen = float(fxStepsN + fxStepsP);
     float fxNear = float(fxTowardN ? fxStepsN : fxStepsP);
-    float _896;
+    float _1014;
     if (fxGoodSpan)
     {
-        _896 = 0.5 - (fxNear * inversesqrt(fxSpanLen * fxSpanLen));
+        _1014 = 0.5 - (fxNear * inversesqrt(fxSpanLen * fxSpanLen));
     }
     else
     {
-        _896 = 0.0;
+        _1014 = 0.0;
     }
-    float fxEdgeBlend = _896;
+    float fxEdgeBlend = _1014;
     float fxBlend = clamp(max(fxEdgeBlend, fxSubpixel), 0.0, 1.0);
     ivec2 param_17 = px + fxAcross;
     vec3 fxAcrossColor = sampleCurrent(param_17).xyz;
@@ -469,63 +474,63 @@ void main()
     int param_1 = tileIndex;
     float param_2 = valid;
     vec2 velocity = dlMotionVelocity(param, param_1, param_2);
-    precise vec2 _1303 = pc.previousEffectiveJitterUv - pc.currentEffectiveJitterUv;
-    vec2 jitterDelta = _1303;
-    precise vec2 _1309 = jitterDelta * vec2(pc.extent);
-    vec2 jitterTexel = _1309;
-    precise vec2 _1315 = velocity * vec2(pc.extent);
-    vec2 motionTexel = _1315;
-    precise vec2 _1320 = vec2(pixel) - motionTexel;
-    vec2 unjitteredPreviousTexel = _1320;
-    precise vec2 _1324 = unjitteredPreviousTexel + jitterTexel;
-    vec2 previousTexel = _1324;
-    precise vec2 _1328 = previousTexel + vec2(0.5);
-    vec2 previousCenter = _1328;
-    bool _1333 = all(greaterThanEqual(previousCenter, vec2(0.0)));
-    bool _1342;
-    if (_1333)
+    precise vec2 _1418 = pc.previousEffectiveJitterUv - pc.currentEffectiveJitterUv;
+    vec2 jitterDelta = _1418;
+    precise vec2 _1424 = jitterDelta * vec2(pc.extent);
+    vec2 jitterTexel = _1424;
+    precise vec2 _1430 = velocity * vec2(pc.extent);
+    vec2 motionTexel = _1430;
+    precise vec2 _1435 = vec2(pixel) - motionTexel;
+    vec2 unjitteredPreviousTexel = _1435;
+    precise vec2 _1439 = unjitteredPreviousTexel + jitterTexel;
+    vec2 previousTexel = _1439;
+    precise vec2 _1443 = previousTexel + vec2(0.5);
+    vec2 previousCenter = _1443;
+    bool _1448 = all(greaterThanEqual(previousCenter, vec2(0.0)));
+    bool _1457;
+    if (_1448)
     {
-        _1342 = all(lessThan(previousCenter, vec2(pc.extent)));
+        _1457 = all(lessThan(previousCenter, vec2(pc.extent)));
     }
     else
     {
-        _1342 = _1333;
+        _1457 = _1448;
     }
-    bool inside = _1342;
+    bool inside = _1457;
     vec4 param_3 = current;
-    bool _1345 = finite4(param_3);
-    bool _1351;
-    if (_1345)
+    bool _1460 = finite4(param_3);
+    bool _1466;
+    if (_1460)
     {
         float param_4 = valid;
-        _1351 = finite1(param_4);
+        _1466 = finite1(param_4);
     }
     else
     {
-        _1351 = _1345;
+        _1466 = _1460;
     }
-    bool _1354 = _1351 && (valid > 0.0);
-    bool _1360;
-    if (_1354)
+    bool _1469 = _1466 && (valid > 0.0);
+    bool _1475;
+    if (_1469)
     {
         vec2 param_5 = velocity;
-        _1360 = finite2(param_5);
+        _1475 = finite2(param_5);
     }
     else
     {
-        _1360 = _1354;
+        _1475 = _1469;
     }
-    bool _1366;
-    if (_1360)
+    bool _1481;
+    if (_1475)
     {
         vec2 param_6 = previousTexel;
-        _1366 = finite2(param_6);
+        _1481 = finite2(param_6);
     }
     else
     {
-        _1366 = _1360;
+        _1481 = _1475;
     }
-    if (_1366 && inside)
+    if (_1481 && inside)
     {
         float currentDevice = tileDepth[tileIndex];
         float param_7 = currentDevice;
@@ -534,104 +539,101 @@ void main()
         float priorLinear = samplePreviousDepthLinear(param_8);
         float depthLimit = max(pc.depthThresholdAbsolute, pc.depthThresholdRelative * max(currentLinear, priorLinear));
         float param_9 = currentLinear;
-        bool _1397 = finite1(param_9);
-        bool _1403;
-        if (_1397)
+        bool _1511 = finite1(param_9);
+        bool _1517;
+        if (_1511)
         {
             float param_10 = priorLinear;
-            _1403 = finite1(param_10);
+            _1517 = finite1(param_10);
         }
         else
         {
-            _1403 = _1397;
+            _1517 = _1511;
         }
-        bool _1409 = (_1403 && (currentLinear > 0.0)) && (priorLinear > 0.0);
-        bool _1418;
-        if (_1409)
+        bool _1523 = (_1517 && (currentLinear > 0.0)) && (priorLinear > 0.0);
+        bool _1532;
+        if (_1523)
         {
-            _1418 = abs(currentLinear - priorLinear) <= depthLimit;
+            _1532 = abs(currentLinear - priorLinear) <= depthLimit;
         }
         else
         {
-            _1418 = _1409;
+            _1532 = _1523;
         }
-        if (_1418)
+        if (_1532)
         {
             vec2 param_11 = previousTexel;
-            vec4 prior = samplePreviousColorLinear(param_11);
+            vec4 prior = samplePreviousColor(param_11);
             vec4 param_12 = prior;
-            bool _1427 = finite4(param_12);
+            bool _1541 = finite4(param_12);
             vec3 clipMin;
             vec3 clipMax;
-            vec3 clipMean;
-            bool _1442;
-            if (_1427)
+            bool _1553;
+            if (_1541)
             {
                 int param_13 = tileIndex;
                 vec3 param_14;
                 vec3 param_15;
-                vec3 param_16;
-                bool _1438 = neighborhoodBox(param_13, param_14, param_15, param_16);
+                bool _1550 = neighborhoodBox(param_13, param_14, param_15);
                 clipMin = param_14;
                 clipMax = param_15;
-                clipMean = param_16;
-                _1442 = _1438;
+                _1553 = _1550;
             }
             else
             {
-                _1442 = _1427;
+                _1553 = _1541;
             }
-            if (_1442)
+            if (_1553)
             {
                 vec3 clampedPrior = clamp(prior.xyz, clipMin, clipMax);
                 float confidence = clamp(valid, 0.0, 1.0);
                 float baseWeight = clamp(pc.historyWeight, 0.0, 1.0);
-                float param_17 = baseWeight;
-                float param_18 = confidence;
-                float weight = scalePrecise(param_17, param_18);
-                vec3 param_19 = current.xyz;
-                vec3 param_20 = clampedPrior;
-                float param_21 = weight;
-                vec3 resolvedRgb = mixPrecise(param_19, param_20, param_21);
-                result = vec4(clamp(resolvedRgb + ((current.xyz - clipMean) * 0.60000002384185791015625), clipMin, clipMax), current.w);
+                float param_16 = baseWeight;
+                float param_17 = confidence;
+                float weight = scalePrecise(param_16, param_17);
+                vec3 param_18 = current.xyz;
+                vec3 param_19 = clampedPrior;
+                float param_20 = weight;
+                vec3 resolvedRgb = mixPrecise(param_18, param_19, param_20);
+                result = vec4(resolvedRgb, current.w);
                 usedHistory = true;
             }
         }
     }
-    bool _1492 = !usedHistory;
-    bool _1498;
-    if (_1492)
+    bool _1593 = !usedHistory;
+    bool _1599;
+    if (_1593)
     {
-        vec4 param_22 = current;
-        _1498 = finite4(param_22);
+        vec4 param_21 = current;
+        _1599 = finite4(param_21);
     }
     else
     {
-        _1498 = _1492;
+        _1599 = _1593;
     }
-    bool _1506;
-    if (_1498)
+    bool _1607;
+    if (_1599)
     {
-        _1506 = (pc.qualityFlags & 4u) != 0u;
+        _1607 = (pc.qualityFlags & 4u) != 0u;
     }
     else
     {
-        _1506 = _1498;
+        _1607 = _1599;
     }
-    if (_1506)
+    if (_1607)
     {
-        ivec2 param_23 = pixel;
-        vec4 param_24 = current;
-        result = fxSpatialAa(param_23, param_24);
+        ivec2 param_22 = pixel;
+        vec4 param_23 = current;
+        result = fxSpatialAa(param_22, param_23);
     }
-    vec4 param_25 = result;
-    if (!finite4(param_25))
+    vec4 param_24 = result;
+    if (!finite4(param_24))
     {
         result = vec4(0.0);
     }
     imageStore(resolvedColor, pixel, result);
     imageStore(historyOutColor, pixel, result);
-    float param_26 = tileDepth[tileIndex];
-    imageStore(historyOutLinearDepth, pixel, vec4(storeLinearDepth(param_26)));
+    float param_25 = tileDepth[tileIndex];
+    imageStore(historyOutLinearDepth, pixel, vec4(storeLinearDepth(param_25)));
 }
 

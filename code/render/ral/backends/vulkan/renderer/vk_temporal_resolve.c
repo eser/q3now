@@ -289,7 +289,8 @@ qboolean VK_TemporalResolveEnsureAfterFence( vkTemporalResolveOwner_t *owner,
 	if ( !candidate.currentDepthView ) goto fail;
 
 	memset( &sci, 0, sizeof( sci ) );
-	sci.minFilter = sci.magFilter = RAL_FILTER_NEAREST;
+	/* Linear: the resolve's bicubic history fetch uses bilinear taps; every other read is a texelFetch (no filtering). */
+	sci.minFilter = sci.magFilter = RAL_FILTER_LINEAR;
 	sci.mipmapMode = RAL_MIPMAP_NEAREST;
 	sci.addressU = sci.addressV = sci.addressW = RAL_ADDRESS_CLAMP_TO_EDGE;
 	sci.maxAnisotropy = 1.0f;

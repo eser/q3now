@@ -86,7 +86,7 @@ ralMetalTaa_t *RalMetal_TaaCreate(id<MTLDevice> device, id<MTLLibrary> motionLib
 	s->resolve = wired_taa_compute(device, s->resolveLibrary, @"main0");
 	s->bootstrap = wired_taa_compute(device, s->bootstrapLibrary, @"main0");
 	MTLSamplerDescriptor *sd = [[[MTLSamplerDescriptor alloc] init] autorelease];
-	sd.minFilter = sd.magFilter = MTLSamplerMinMagFilterNearest;
+	sd.minFilter = sd.magFilter = MTLSamplerMinMagFilterLinear;   /* the resolve's bicubic history fetch uses bilinear taps; all else is read() */
 	sd.sAddressMode = sd.tAddressMode = MTLSamplerAddressModeClampToEdge;
 	sd.supportArgumentBuffers = YES;
 	s->nearest = [device newSamplerStateWithDescriptor:sd];

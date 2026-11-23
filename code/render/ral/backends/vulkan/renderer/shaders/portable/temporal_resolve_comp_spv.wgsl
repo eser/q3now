@@ -43,88 +43,88 @@ var historyOutLinearDepth: texture_storage_2d<r32float,write>;
 fn storeLinearDepth_u0028_f1_u003b(z: ptr<function, f32>) -> f32 {
     var denominator: f32;
 
-    let _e83 = pc.zNear;
-    let _e84 = (*z);
-    let _e86 = pc.zFar;
     let _e88 = pc.zNear;
-    denominator = (_e83 + (_e84 * (_e86 - _e88)));
+    let _e89 = (*z);
+    let _e91 = pc.zFar;
     let _e93 = pc.zNear;
-    let _e95 = pc.zFar;
-    let _e97 = denominator;
-    let _e98 = denominator;
-    return ((_e93 * _e95) * inverseSqrt((_e97 * _e98)));
+    denominator = (_e88 + (_e89 * (_e91 - _e93)));
+    let _e98 = pc.zNear;
+    let _e100 = pc.zFar;
+    let _e102 = denominator;
+    let _e103 = denominator;
+    return ((_e98 * _e100) * inverseSqrt((_e102 * _e103)));
 }
 
 fn sampleCurrent_u0028_vi2_u003b(pixel: ptr<function, vec2<i32>>) -> vec4<f32> {
     var bounded: vec2<i32>;
 
-    let _e82 = (*pixel);
-    let _e84 = pc.extent;
-    bounded = clamp(_e82, vec2<i32>(0i, 0i), (bitcast<vec2<i32>>(_e84) - vec2<i32>(1i, 1i)));
-    let _e88 = bounded;
-    let _e89 = textureLoad(currentColor, _e88, 0i);
-    return _e89;
+    let _e87 = (*pixel);
+    let _e89 = pc.extent;
+    bounded = clamp(_e87, vec2<i32>(0i, 0i), (bitcast<vec2<i32>>(_e89) - vec2<i32>(1i, 1i)));
+    let _e93 = bounded;
+    let _e94 = textureLoad(currentColor, _e93, 0i);
+    return _e94;
 }
 
 fn finite1_u0028_f1_u003b(v: ptr<function, f32>) -> bool {
-    var phi_117_: bool;
+    var phi_110_: bool;
 
-    let _e81 = (*v);
-    let _e82 = (*v);
-    let _e83 = (_e81 == _e82);
-    phi_117_ = _e83;
-    if _e83 {
-        let _e84 = (*v);
-        phi_117_ = (abs(_e84) <= 0x1.fffffep+127f);
+    let _e86 = (*v);
+    let _e87 = (*v);
+    let _e88 = (_e86 == _e87);
+    phi_110_ = _e88;
+    if _e88 {
+        let _e89 = (*v);
+        phi_110_ = (abs(_e89) <= 0x1.fffffep+127f);
     }
-    let _e88 = phi_117_;
-    return _e88;
+    let _e93 = phi_110_;
+    return _e93;
 }
 
 fn fxLuma_u0028_vf3_u003b(c: ptr<function, vec3<f32>>) -> f32 {
     var l: f32;
     var param: f32;
 
-    let _e83 = (*c);
-    l = dot(_e83, vec3<f32>(0.2126f, 0.7152f, 0.0722f));
-    let _e85 = l;
-    param = _e85;
-    let _e86 = finite1_u0028_f1_u003b((&param));
-    if !(_e86) {
+    let _e88 = (*c);
+    l = dot(_e88, vec3<f32>(0.2126f, 0.7152f, 0.0722f));
+    let _e90 = l;
+    param = _e90;
+    let _e91 = finite1_u0028_f1_u003b((&param));
+    if !(_e91) {
         return 0f;
     }
-    let _e88 = l;
-    l = clamp(_e88, 0f, 10000f);
-    let _e90 = l;
-    let _e91 = l;
-    let _e92 = l;
-    return (_e90 * inverseSqrt((1f + (_e91 * _e92))));
+    let _e93 = l;
+    l = clamp(_e93, 0f, 10000f);
+    let _e95 = l;
+    let _e96 = l;
+    let _e97 = l;
+    return (_e95 * inverseSqrt((1f + (_e96 * _e97))));
 }
 
 fn fxLumaAt_u0028_vi2_u003b(p: ptr<function, vec2<i32>>) -> f32 {
     var param_1: vec2<i32>;
     var param_2: vec3<f32>;
 
-    let _e83 = (*p);
-    param_1 = _e83;
-    let _e84 = sampleCurrent_u0028_vi2_u003b((&param_1));
-    param_2 = _e84.xyz;
-    let _e86 = fxLuma_u0028_vf3_u003b((&param_2));
-    return _e86;
+    let _e88 = (*p);
+    param_1 = _e88;
+    let _e89 = sampleCurrent_u0028_vi2_u003b((&param_1));
+    param_2 = _e89.xyz;
+    let _e91 = fxLuma_u0028_vf3_u003b((&param_2));
+    return _e91;
 }
 
 fn fxEdgeLuma_u0028_vi2_u003b_vi2_u003b(base: ptr<function, vec2<i32>>, across: ptr<function, vec2<i32>>) -> f32 {
     var param_3: vec2<i32>;
     var param_4: vec2<i32>;
 
-    let _e84 = (*base);
-    param_3 = _e84;
-    let _e85 = fxLumaAt_u0028_vi2_u003b((&param_3));
-    let _e86 = (*base);
-    let _e87 = (*across);
-    param_4 = (_e86 + _e87);
-    let _e89 = fxLumaAt_u0028_vi2_u003b((&param_4));
-    return (0.5f * (_e85 + _e89));
+    let _e89 = (*base);
+    param_3 = _e89;
+    let _e90 = fxLumaAt_u0028_vi2_u003b((&param_3));
+    let _e91 = (*base);
+    let _e92 = (*across);
+    param_4 = (_e91 + _e92);
+    let _e94 = fxLumaAt_u0028_vi2_u003b((&param_4));
+    return (0.5f * (_e90 + _e94));
 }
 
 fn fxSpatialAa_u0028_vi2_u003b_vf4_u003b(px: ptr<function, vec2<i32>>, centerColor: ptr<function, vec4<f32>>) -> vec4<f32> {
@@ -200,226 +200,226 @@ fn fxSpatialAa_u0028_vi2_u003b_vf4_u003b(px: ptr<function, vec2<i32>>, centerCol
     var fxAcrossColor: vec3<f32>;
     var param_22: vec2<i32>;
 
-    let _e153 = (*centerColor);
-    param_5 = _e153.xyz;
-    let _e155 = fxLuma_u0028_vf3_u003b((&param_5));
-    fxM = _e155;
-    let _e156 = (*px);
-    param_6 = (_e156 + vec2<i32>(0i, -1i));
-    let _e158 = fxLumaAt_u0028_vi2_u003b((&param_6));
-    fxN = _e158;
-    let _e159 = (*px);
-    param_7 = (_e159 + vec2<i32>(0i, 1i));
-    let _e161 = fxLumaAt_u0028_vi2_u003b((&param_7));
-    fxS = _e161;
-    let _e162 = (*px);
-    param_8 = (_e162 + vec2<i32>(-1i, 0i));
-    let _e164 = fxLumaAt_u0028_vi2_u003b((&param_8));
-    fxW = _e164;
-    let _e165 = (*px);
-    param_9 = (_e165 + vec2<i32>(1i, 0i));
-    let _e167 = fxLumaAt_u0028_vi2_u003b((&param_9));
-    fxE = _e167;
-    let _e168 = fxN;
-    let _e169 = fxS;
-    let _e171 = fxW;
-    let _e172 = fxE;
-    let _e174 = fxM;
-    fxHi = max(max(_e168, _e169), max(max(_e171, _e172), _e174));
-    let _e177 = fxN;
-    let _e178 = fxS;
-    let _e180 = fxW;
-    let _e181 = fxE;
-    let _e183 = fxM;
-    fxLo = min(min(_e177, _e178), min(min(_e180, _e181), _e183));
-    let _e186 = fxHi;
-    let _e187 = fxLo;
-    fxSpan = (_e186 - _e187);
-    let _e189 = fxSpan;
-    let _e190 = fxHi;
-    if (_e189 < max(0.0312f, (_e190 * 0.125f))) {
-        let _e194 = (*centerColor);
-        return _e194;
+    let _e158 = (*centerColor);
+    param_5 = _e158.xyz;
+    let _e160 = fxLuma_u0028_vf3_u003b((&param_5));
+    fxM = _e160;
+    let _e161 = (*px);
+    param_6 = (_e161 + vec2<i32>(0i, -1i));
+    let _e163 = fxLumaAt_u0028_vi2_u003b((&param_6));
+    fxN = _e163;
+    let _e164 = (*px);
+    param_7 = (_e164 + vec2<i32>(0i, 1i));
+    let _e166 = fxLumaAt_u0028_vi2_u003b((&param_7));
+    fxS = _e166;
+    let _e167 = (*px);
+    param_8 = (_e167 + vec2<i32>(-1i, 0i));
+    let _e169 = fxLumaAt_u0028_vi2_u003b((&param_8));
+    fxW = _e169;
+    let _e170 = (*px);
+    param_9 = (_e170 + vec2<i32>(1i, 0i));
+    let _e172 = fxLumaAt_u0028_vi2_u003b((&param_9));
+    fxE = _e172;
+    let _e173 = fxN;
+    let _e174 = fxS;
+    let _e176 = fxW;
+    let _e177 = fxE;
+    let _e179 = fxM;
+    fxHi = max(max(_e173, _e174), max(max(_e176, _e177), _e179));
+    let _e182 = fxN;
+    let _e183 = fxS;
+    let _e185 = fxW;
+    let _e186 = fxE;
+    let _e188 = fxM;
+    fxLo = min(min(_e182, _e183), min(min(_e185, _e186), _e188));
+    let _e191 = fxHi;
+    let _e192 = fxLo;
+    fxSpan = (_e191 - _e192);
+    let _e194 = fxSpan;
+    let _e195 = fxHi;
+    if (_e194 < max(0.0312f, (_e195 * 0.125f))) {
+        let _e199 = (*centerColor);
+        return _e199;
     }
-    let _e195 = (*px);
-    param_10 = (_e195 + vec2<i32>(-1i, -1i));
-    let _e197 = fxLumaAt_u0028_vi2_u003b((&param_10));
-    fxNW = _e197;
-    let _e198 = (*px);
-    param_11 = (_e198 + vec2<i32>(1i, -1i));
-    let _e200 = fxLumaAt_u0028_vi2_u003b((&param_11));
-    fxNE = _e200;
-    let _e201 = (*px);
-    param_12 = (_e201 + vec2<i32>(-1i, 1i));
-    let _e203 = fxLumaAt_u0028_vi2_u003b((&param_12));
-    fxSW = _e203;
-    let _e204 = (*px);
-    param_13 = (_e204 + vec2<i32>(1i, 1i));
-    let _e206 = fxLumaAt_u0028_vi2_u003b((&param_13));
-    fxSE = _e206;
-    let _e207 = fxN;
-    let _e208 = fxS;
-    fxNS = (_e207 + _e208);
-    let _e210 = fxW;
-    let _e211 = fxE;
-    fxWE = (_e210 + _e211);
-    let _e213 = fxNW;
-    let _e214 = fxSW;
-    fxNWSW = (_e213 + _e214);
-    let _e216 = fxNE;
-    let _e217 = fxSE;
-    fxNESE = (_e216 + _e217);
-    let _e219 = fxW;
-    let _e221 = fxNWSW;
-    let _e224 = fxM;
-    let _e226 = fxNS;
-    let _e230 = fxE;
-    let _e232 = fxNESE;
-    fxHorz = (abs(((-2f * _e219) + _e221)) + ((abs(((-2f * _e224) + _e226)) * 2f) + abs(((-2f * _e230) + _e232))));
-    let _e237 = fxS;
-    let _e239 = fxSW;
-    let _e240 = fxSE;
-    let _e244 = fxM;
-    let _e246 = fxWE;
-    let _e250 = fxN;
-    let _e252 = fxNW;
-    let _e253 = fxNE;
-    fxVert = (abs(((-2f * _e237) + (_e239 + _e240))) + ((abs(((-2f * _e244) + _e246)) * 2f) + abs(((-2f * _e250) + (_e252 + _e253)))));
-    let _e259 = fxHorz;
-    let _e260 = fxVert;
-    fxHorzSpan = (_e259 >= _e260);
-    let _e262 = fxNS;
-    let _e263 = fxWE;
-    let _e266 = fxNWSW;
-    let _e267 = fxNESE;
-    fxAround = (((_e262 + _e263) * 2f) + (_e266 + _e267));
-    let _e270 = fxHorzSpan;
-    let _e271 = fxN;
-    let _e272 = fxW;
-    fxLoSide = select(_e272, _e271, _e270);
-    let _e274 = fxHorzSpan;
-    let _e275 = fxS;
-    let _e276 = fxE;
-    fxHiSide = select(_e276, _e275, _e274);
-    let _e278 = fxLoSide;
-    let _e279 = fxM;
-    fxGradLo = (_e278 - _e279);
-    let _e281 = fxHiSide;
-    let _e282 = fxM;
-    fxGradHi = (_e281 - _e282);
-    let _e284 = fxGradLo;
-    let _e286 = fxGradHi;
-    fxLoSteeper = (abs(_e284) >= abs(_e286));
+    let _e200 = (*px);
+    param_10 = (_e200 + vec2<i32>(-1i, -1i));
+    let _e202 = fxLumaAt_u0028_vi2_u003b((&param_10));
+    fxNW = _e202;
+    let _e203 = (*px);
+    param_11 = (_e203 + vec2<i32>(1i, -1i));
+    let _e205 = fxLumaAt_u0028_vi2_u003b((&param_11));
+    fxNE = _e205;
+    let _e206 = (*px);
+    param_12 = (_e206 + vec2<i32>(-1i, 1i));
+    let _e208 = fxLumaAt_u0028_vi2_u003b((&param_12));
+    fxSW = _e208;
+    let _e209 = (*px);
+    param_13 = (_e209 + vec2<i32>(1i, 1i));
+    let _e211 = fxLumaAt_u0028_vi2_u003b((&param_13));
+    fxSE = _e211;
+    let _e212 = fxN;
+    let _e213 = fxS;
+    fxNS = (_e212 + _e213);
+    let _e215 = fxW;
+    let _e216 = fxE;
+    fxWE = (_e215 + _e216);
+    let _e218 = fxNW;
+    let _e219 = fxSW;
+    fxNWSW = (_e218 + _e219);
+    let _e221 = fxNE;
+    let _e222 = fxSE;
+    fxNESE = (_e221 + _e222);
+    let _e224 = fxW;
+    let _e226 = fxNWSW;
+    let _e229 = fxM;
+    let _e231 = fxNS;
+    let _e235 = fxE;
+    let _e237 = fxNESE;
+    fxHorz = (abs(((-2f * _e224) + _e226)) + ((abs(((-2f * _e229) + _e231)) * 2f) + abs(((-2f * _e235) + _e237))));
+    let _e242 = fxS;
+    let _e244 = fxSW;
+    let _e245 = fxSE;
+    let _e249 = fxM;
+    let _e251 = fxWE;
+    let _e255 = fxN;
+    let _e257 = fxNW;
+    let _e258 = fxNE;
+    fxVert = (abs(((-2f * _e242) + (_e244 + _e245))) + ((abs(((-2f * _e249) + _e251)) * 2f) + abs(((-2f * _e255) + (_e257 + _e258)))));
+    let _e264 = fxHorz;
+    let _e265 = fxVert;
+    fxHorzSpan = (_e264 >= _e265);
+    let _e267 = fxNS;
+    let _e268 = fxWE;
+    let _e271 = fxNWSW;
+    let _e272 = fxNESE;
+    fxAround = (((_e267 + _e268) * 2f) + (_e271 + _e272));
+    let _e275 = fxHorzSpan;
+    let _e276 = fxN;
+    let _e277 = fxW;
+    fxLoSide = select(_e277, _e276, _e275);
+    let _e279 = fxHorzSpan;
+    let _e280 = fxS;
+    let _e281 = fxE;
+    fxHiSide = select(_e281, _e280, _e279);
+    let _e283 = fxLoSide;
+    let _e284 = fxM;
+    fxGradLo = (_e283 - _e284);
+    let _e286 = fxHiSide;
+    let _e287 = fxM;
+    fxGradHi = (_e286 - _e287);
     let _e289 = fxGradLo;
     let _e291 = fxGradHi;
-    fxGradient = max(abs(_e289), abs(_e291));
-    let _e294 = fxLoSteeper;
-    if _e294 {
-        let _e295 = fxLoSide;
-        let _e296 = fxM;
-        local = (_e295 + _e296);
+    fxLoSteeper = (abs(_e289) >= abs(_e291));
+    let _e294 = fxGradLo;
+    let _e296 = fxGradHi;
+    fxGradient = max(abs(_e294), abs(_e296));
+    let _e299 = fxLoSteeper;
+    if _e299 {
+        let _e300 = fxLoSide;
+        let _e301 = fxM;
+        local = (_e300 + _e301);
     } else {
-        let _e298 = fxHiSide;
-        let _e299 = fxM;
-        local = (_e298 + _e299);
+        let _e303 = fxHiSide;
+        let _e304 = fxM;
+        local = (_e303 + _e304);
     }
-    let _e301 = local;
-    fxPair = _e301;
-    let _e302 = fxHorzSpan;
-    fxAcross = select(vec2<i32>(1i, 0i), vec2<i32>(0i, 1i), vec2(_e302));
-    let _e305 = fxHorzSpan;
-    fxAlong = select(vec2<i32>(0i, 1i), vec2<i32>(1i, 0i), vec2(_e305));
-    let _e308 = fxLoSteeper;
-    if _e308 {
-        let _e309 = fxAcross;
-        fxAcross = -(_e309);
+    let _e306 = local;
+    fxPair = _e306;
+    let _e307 = fxHorzSpan;
+    fxAcross = select(vec2<i32>(1i, 0i), vec2<i32>(0i, 1i), vec2(_e307));
+    let _e310 = fxHorzSpan;
+    fxAlong = select(vec2<i32>(0i, 1i), vec2<i32>(1i, 0i), vec2(_e310));
+    let _e313 = fxLoSteeper;
+    if _e313 {
+        let _e314 = fxAcross;
+        fxAcross = -(_e314);
     }
-    let _e311 = fxSpan;
-    let _e312 = fxSpan;
-    fxInvSpan = inverseSqrt((_e311 * _e312));
-    let _e315 = fxAround;
-    let _e317 = fxM;
-    let _e320 = fxInvSpan;
-    fxBlendC = clamp((abs(((_e315 * 0.083333336f) - _e317)) * _e320), 0f, 1f);
-    let _e323 = fxBlendC;
-    let _e326 = fxBlendC;
-    let _e327 = fxBlendC;
-    fxBlendF = (((-2f * _e323) + 3f) * (_e326 * _e327));
-    let _e330 = fxBlendF;
-    let _e331 = fxBlendF;
-    fxSubpixel = ((_e330 * _e331) * 0.75f);
-    let _e334 = fxPair;
-    fxHalfPair = (_e334 * 0.5f);
-    let _e336 = fxGradient;
-    fxScaled = (_e336 * 0.25f);
-    let _e338 = fxM;
-    let _e339 = fxHalfPair;
-    fxMidNegative = ((_e338 - _e339) < 0f);
-    let _e342 = (*px);
-    let _e343 = fxAlong;
-    param_14 = (_e342 - _e343);
-    let _e345 = fxAcross;
-    param_15 = _e345;
-    let _e346 = fxEdgeLuma_u0028_vi2_u003b_vi2_u003b((&param_14), (&param_15));
-    let _e347 = fxHalfPair;
-    fxEndN = (_e346 - _e347);
-    let _e349 = (*px);
-    let _e350 = fxAlong;
-    param_16 = (_e349 + _e350);
-    let _e352 = fxAcross;
-    param_17 = _e352;
-    let _e353 = fxEdgeLuma_u0028_vi2_u003b_vi2_u003b((&param_16), (&param_17));
-    let _e354 = fxHalfPair;
-    fxEndP = (_e353 - _e354);
-    let _e356 = fxEndN;
-    let _e358 = fxScaled;
-    fxDoneN = (abs(_e356) >= _e358);
-    let _e360 = fxEndP;
-    let _e362 = fxScaled;
-    fxDoneP = (abs(_e360) >= _e362);
+    let _e316 = fxSpan;
+    let _e317 = fxSpan;
+    fxInvSpan = inverseSqrt((_e316 * _e317));
+    let _e320 = fxAround;
+    let _e322 = fxM;
+    let _e325 = fxInvSpan;
+    fxBlendC = clamp((abs(((_e320 * 0.083333336f) - _e322)) * _e325), 0f, 1f);
+    let _e328 = fxBlendC;
+    let _e331 = fxBlendC;
+    let _e332 = fxBlendC;
+    fxBlendF = (((-2f * _e328) + 3f) * (_e331 * _e332));
+    let _e335 = fxBlendF;
+    let _e336 = fxBlendF;
+    fxSubpixel = ((_e335 * _e336) * 0.75f);
+    let _e339 = fxPair;
+    fxHalfPair = (_e339 * 0.5f);
+    let _e341 = fxGradient;
+    fxScaled = (_e341 * 0.25f);
+    let _e343 = fxM;
+    let _e344 = fxHalfPair;
+    fxMidNegative = ((_e343 - _e344) < 0f);
+    let _e347 = (*px);
+    let _e348 = fxAlong;
+    param_14 = (_e347 - _e348);
+    let _e350 = fxAcross;
+    param_15 = _e350;
+    let _e351 = fxEdgeLuma_u0028_vi2_u003b_vi2_u003b((&param_14), (&param_15));
+    let _e352 = fxHalfPair;
+    fxEndN = (_e351 - _e352);
+    let _e354 = (*px);
+    let _e355 = fxAlong;
+    param_16 = (_e354 + _e355);
+    let _e357 = fxAcross;
+    param_17 = _e357;
+    let _e358 = fxEdgeLuma_u0028_vi2_u003b_vi2_u003b((&param_16), (&param_17));
+    let _e359 = fxHalfPair;
+    fxEndP = (_e358 - _e359);
+    let _e361 = fxEndN;
+    let _e363 = fxScaled;
+    fxDoneN = (abs(_e361) >= _e363);
+    let _e365 = fxEndP;
+    let _e367 = fxScaled;
+    fxDoneP = (abs(_e365) >= _e367);
     fxStepsN = 1i;
     fxStepsP = 1i;
     i = 2i;
     loop {
-        let _e364 = i;
-        if (_e364 <= 12i) {
-            let _e366 = fxDoneN;
-            if !(_e366) {
-                let _e368 = (*px);
-                let _e369 = fxAlong;
-                let _e370 = i;
-                param_18 = (_e368 - (_e369 * vec2(_e370)));
-                let _e374 = fxAcross;
-                param_19 = _e374;
-                let _e375 = fxEdgeLuma_u0028_vi2_u003b_vi2_u003b((&param_18), (&param_19));
-                let _e376 = fxHalfPair;
-                fxEndN = (_e375 - _e376);
-                let _e378 = fxEndN;
-                let _e380 = fxScaled;
-                fxDoneN = (abs(_e378) >= _e380);
-                let _e382 = i;
-                fxStepsN = _e382;
-            }
-            let _e383 = fxDoneP;
-            if !(_e383) {
-                let _e385 = (*px);
-                let _e386 = fxAlong;
+        let _e369 = i;
+        if (_e369 <= 12i) {
+            let _e371 = fxDoneN;
+            if !(_e371) {
+                let _e373 = (*px);
+                let _e374 = fxAlong;
+                let _e375 = i;
+                param_18 = (_e373 - (_e374 * vec2(_e375)));
+                let _e379 = fxAcross;
+                param_19 = _e379;
+                let _e380 = fxEdgeLuma_u0028_vi2_u003b_vi2_u003b((&param_18), (&param_19));
+                let _e381 = fxHalfPair;
+                fxEndN = (_e380 - _e381);
+                let _e383 = fxEndN;
+                let _e385 = fxScaled;
+                fxDoneN = (abs(_e383) >= _e385);
                 let _e387 = i;
-                param_20 = (_e385 + (_e386 * vec2(_e387)));
-                let _e391 = fxAcross;
-                param_21 = _e391;
-                let _e392 = fxEdgeLuma_u0028_vi2_u003b_vi2_u003b((&param_20), (&param_21));
-                let _e393 = fxHalfPair;
-                fxEndP = (_e392 - _e393);
-                let _e395 = fxEndP;
-                let _e397 = fxScaled;
-                fxDoneP = (abs(_e395) >= _e397);
-                let _e399 = i;
-                fxStepsP = _e399;
+                fxStepsN = _e387;
             }
-            let _e400 = fxDoneN;
-            let _e401 = fxDoneP;
-            if (_e400 && _e401) {
+            let _e388 = fxDoneP;
+            if !(_e388) {
+                let _e390 = (*px);
+                let _e391 = fxAlong;
+                let _e392 = i;
+                param_20 = (_e390 + (_e391 * vec2(_e392)));
+                let _e396 = fxAcross;
+                param_21 = _e396;
+                let _e397 = fxEdgeLuma_u0028_vi2_u003b_vi2_u003b((&param_20), (&param_21));
+                let _e398 = fxHalfPair;
+                fxEndP = (_e397 - _e398);
+                let _e400 = fxEndP;
+                let _e402 = fxScaled;
+                fxDoneP = (abs(_e400) >= _e402);
+                let _e404 = i;
+                fxStepsP = _e404;
+            }
+            let _e405 = fxDoneN;
+            let _e406 = fxDoneP;
+            if (_e405 && _e406) {
                 break;
             }
             continue;
@@ -427,53 +427,53 @@ fn fxSpatialAa_u0028_vi2_u003b_vf4_u003b(px: ptr<function, vec2<i32>>, centerCol
             break;
         }
         continuing {
-            let _e403 = i;
-            i = (_e403 + 1i);
+            let _e408 = i;
+            i = (_e408 + 1i);
         }
     }
-    let _e405 = fxStepsN;
-    let _e406 = fxStepsP;
-    fxTowardN = (_e405 < _e406);
-    let _e408 = fxTowardN;
-    let _e409 = fxEndN;
-    let _e410 = fxEndP;
-    fxEndG = select(_e410, _e409, _e408);
-    let _e412 = fxEndG;
-    let _e414 = fxMidNegative;
-    fxGoodSpan = ((_e412 < 0f) != _e414);
-    let _e416 = fxStepsN;
-    let _e417 = fxStepsP;
-    fxSpanLen = f32((_e416 + _e417));
-    let _e420 = fxTowardN;
+    let _e410 = fxStepsN;
+    let _e411 = fxStepsP;
+    fxTowardN = (_e410 < _e411);
+    let _e413 = fxTowardN;
+    let _e414 = fxEndN;
+    let _e415 = fxEndP;
+    fxEndG = select(_e415, _e414, _e413);
+    let _e417 = fxEndG;
+    let _e419 = fxMidNegative;
+    fxGoodSpan = ((_e417 < 0f) != _e419);
     let _e421 = fxStepsN;
     let _e422 = fxStepsP;
-    fxNear = f32(select(_e422, _e421, _e420));
-    let _e425 = fxGoodSpan;
-    if _e425 {
-        let _e426 = fxNear;
-        let _e427 = fxSpanLen;
-        let _e428 = fxSpanLen;
-        local_1 = (0.5f - (_e426 * inverseSqrt((_e427 * _e428))));
+    fxSpanLen = f32((_e421 + _e422));
+    let _e425 = fxTowardN;
+    let _e426 = fxStepsN;
+    let _e427 = fxStepsP;
+    fxNear = f32(select(_e427, _e426, _e425));
+    let _e430 = fxGoodSpan;
+    if _e430 {
+        let _e431 = fxNear;
+        let _e432 = fxSpanLen;
+        let _e433 = fxSpanLen;
+        local_1 = (0.5f - (_e431 * inverseSqrt((_e432 * _e433))));
     } else {
         local_1 = 0f;
     }
-    let _e433 = local_1;
-    fxEdgeBlend = _e433;
-    let _e434 = fxEdgeBlend;
-    let _e435 = fxSubpixel;
-    fxBlend = clamp(max(_e434, _e435), 0f, 1f);
-    let _e438 = (*px);
-    let _e439 = fxAcross;
-    param_22 = (_e438 + _e439);
-    let _e441 = sampleCurrent_u0028_vi2_u003b((&param_22));
-    fxAcrossColor = _e441.xyz;
-    let _e443 = (*centerColor);
-    let _e445 = fxBlend;
-    let _e448 = fxAcrossColor;
-    let _e449 = fxBlend;
-    let _e451 = ((_e443.xyz * (1f - _e445)) + (_e448 * _e449));
-    let _e453 = (*centerColor)[3u];
-    return vec4<f32>(_e451.x, _e451.y, _e451.z, _e453);
+    let _e438 = local_1;
+    fxEdgeBlend = _e438;
+    let _e439 = fxEdgeBlend;
+    let _e440 = fxSubpixel;
+    fxBlend = clamp(max(_e439, _e440), 0f, 1f);
+    let _e443 = (*px);
+    let _e444 = fxAcross;
+    param_22 = (_e443 + _e444);
+    let _e446 = sampleCurrent_u0028_vi2_u003b((&param_22));
+    fxAcrossColor = _e446.xyz;
+    let _e448 = (*centerColor);
+    let _e450 = fxBlend;
+    let _e453 = fxAcrossColor;
+    let _e454 = fxBlend;
+    let _e456 = ((_e448.xyz * (1f - _e450)) + (_e453 * _e454));
+    let _e458 = (*centerColor)[3u];
+    return vec4<f32>(_e456.x, _e456.y, _e456.z, _e458);
 }
 
 fn mixPrecise_u0028_vf3_u003b_vf3_u003b_f1_u003b(x: ptr<function, vec3<f32>>, y: ptr<function, vec3<f32>>, a: ptr<function, f32>) -> vec3<f32> {
@@ -482,47 +482,47 @@ fn mixPrecise_u0028_vf3_u003b_vf3_u003b_f1_u003b(x: ptr<function, vec3<f32>>, y:
     var right: vec3<f32>;
     var result: vec3<f32>;
 
-    let _e87 = (*a);
-    oneMinus = (1f - _e87);
-    let _e89 = (*x);
-    let _e90 = oneMinus;
-    left = (_e89 * _e90);
-    let _e92 = (*y);
-    let _e93 = (*a);
-    right = (_e92 * _e93);
-    let _e95 = left;
-    let _e96 = right;
-    result = (_e95 + _e96);
-    let _e98 = result;
-    return _e98;
+    let _e92 = (*a);
+    oneMinus = (1f - _e92);
+    let _e94 = (*x);
+    let _e95 = oneMinus;
+    left = (_e94 * _e95);
+    let _e97 = (*y);
+    let _e98 = (*a);
+    right = (_e97 * _e98);
+    let _e100 = left;
+    let _e101 = right;
+    result = (_e100 + _e101);
+    let _e103 = result;
+    return _e103;
 }
 
 fn scalePrecise_u0028_f1_u003b_f1_u003b(weight: ptr<function, f32>, confidence: ptr<function, f32>) -> f32 {
     var scaled: f32;
 
-    let _e83 = (*weight);
-    let _e84 = (*confidence);
-    scaled = (_e83 * _e84);
-    let _e86 = scaled;
-    return _e86;
+    let _e88 = (*weight);
+    let _e89 = (*confidence);
+    scaled = (_e88 * _e89);
+    let _e91 = scaled;
+    return _e91;
 }
 
 fn finite3_u0028_vf3_u003b(v_1: ptr<function, vec3<f32>>) -> bool {
-    var phi_147_: bool;
+    var phi_140_: bool;
 
-    let _e81 = (*v_1);
-    let _e82 = (*v_1);
-    let _e84 = all((_e81 == _e82));
-    phi_147_ = _e84;
-    if _e84 {
-        let _e85 = (*v_1);
-        phi_147_ = all((abs(_e85) <= vec3<f32>(0x1.fffffep+127f, 0x1.fffffep+127f, 0x1.fffffep+127f)));
+    let _e86 = (*v_1);
+    let _e87 = (*v_1);
+    let _e89 = all((_e86 == _e87));
+    phi_140_ = _e89;
+    if _e89 {
+        let _e90 = (*v_1);
+        phi_140_ = all((abs(_e90) <= vec3<f32>(0x1.fffffep+127f, 0x1.fffffep+127f, 0x1.fffffep+127f)));
     }
-    let _e90 = phi_147_;
-    return _e90;
+    let _e95 = phi_140_;
+    return _e95;
 }
 
-fn neighborhoodBox_u0028_i1_u003b_vf3_u003b_vf3_u003b_vf3_u003b(tileIndex: ptr<function, i32>, boxMin: ptr<function, vec3<f32>>, boxMax: ptr<function, vec3<f32>>, boxMean: ptr<function, vec3<f32>>) -> bool {
+fn neighborhoodBox_u0028_i1_u003b_vf3_u003b_vf3_u003b(tileIndex: ptr<function, i32>, boxMin: ptr<function, vec3<f32>>, boxMax: ptr<function, vec3<f32>>) -> bool {
     var neighborhoodMin: vec3<f32>;
     var neighborhoodMax: vec3<f32>;
     var momentSum: vec3<f32>;
@@ -536,7 +536,7 @@ fn neighborhoodBox_u0028_i1_u003b_vf3_u003b_vf3_u003b_vf3_u003b(tileIndex: ptr<f
     var clipMax: vec3<f32>;
     var momentMean: vec3<f32>;
     var momentSigma: vec3<f32>;
-    var phi_1136_: bool;
+    var phi_1254_: bool;
 
     neighborhoodMin = vec3<f32>(0x1.fffffep+127f, 0x1.fffffep+127f, 0x1.fffffep+127f);
     neighborhoodMax = vec3<f32>(-0x1.fffffep+127f, -0x1.fffffep+127f, -0x1.fffffep+127f);
@@ -544,37 +544,37 @@ fn neighborhoodBox_u0028_i1_u003b_vf3_u003b_vf3_u003b_vf3_u003b(tileIndex: ptr<f
     momentSquares = vec3<f32>(0f, 0f, 0f);
     y_1 = -1i;
     loop {
-        let _e97 = y_1;
-        if (_e97 <= 1i) {
+        let _e101 = y_1;
+        if (_e101 <= 1i) {
             x_1 = -1i;
             loop {
-                let _e99 = x_1;
-                if (_e99 <= 1i) {
-                    let _e101 = (*tileIndex);
-                    let _e102 = y_1;
-                    let _e105 = x_1;
-                    let _e108 = tileColor[((_e101 + (_e102 * 10i)) + _e105)];
-                    c_1 = _e108.xyz;
-                    let _e110 = neighborhoodMin;
-                    let _e111 = c_1;
-                    neighborhoodMin = min(_e110, _e111);
-                    let _e113 = neighborhoodMax;
-                    let _e114 = c_1;
-                    neighborhoodMax = max(_e113, _e114);
-                    let _e116 = c_1;
-                    let _e117 = momentSum;
-                    momentSum = (_e117 + _e116);
-                    let _e119 = c_1;
+                let _e103 = x_1;
+                if (_e103 <= 1i) {
+                    let _e105 = (*tileIndex);
+                    let _e106 = y_1;
+                    let _e109 = x_1;
+                    let _e112 = tileColor[((_e105 + (_e106 * 10i)) + _e109)];
+                    c_1 = _e112.xyz;
+                    let _e114 = neighborhoodMin;
+                    let _e115 = c_1;
+                    neighborhoodMin = min(_e114, _e115);
+                    let _e117 = neighborhoodMax;
+                    let _e118 = c_1;
+                    neighborhoodMax = max(_e117, _e118);
                     let _e120 = c_1;
-                    let _e122 = momentSquares;
-                    momentSquares = (_e122 + (_e119 * _e120));
+                    let _e121 = momentSum;
+                    momentSum = (_e121 + _e120);
+                    let _e123 = c_1;
+                    let _e124 = c_1;
+                    let _e126 = momentSquares;
+                    momentSquares = (_e126 + (_e123 * _e124));
                     continue;
                 } else {
                     break;
                 }
                 continuing {
-                    let _e124 = x_1;
-                    x_1 = (_e124 + 1i);
+                    let _e128 = x_1;
+                    x_1 = (_e128 + 1i);
                 }
             }
             continue;
@@ -582,212 +582,263 @@ fn neighborhoodBox_u0028_i1_u003b_vf3_u003b_vf3_u003b_vf3_u003b(tileIndex: ptr<f
             break;
         }
         continuing {
-            let _e126 = y_1;
-            y_1 = (_e126 + 1i);
+            let _e130 = y_1;
+            y_1 = (_e130 + 1i);
         }
     }
-    let _e128 = neighborhoodMin;
-    param_23 = _e128;
-    let _e129 = finite3_u0028_vf3_u003b((&param_23));
-    phi_1136_ = _e129;
-    if _e129 {
-        let _e130 = neighborhoodMax;
-        param_24 = _e130;
-        let _e131 = finite3_u0028_vf3_u003b((&param_24));
-        phi_1136_ = _e131;
+    let _e132 = neighborhoodMin;
+    param_23 = _e132;
+    let _e133 = finite3_u0028_vf3_u003b((&param_23));
+    phi_1254_ = _e133;
+    if _e133 {
+        let _e134 = neighborhoodMax;
+        param_24 = _e134;
+        let _e135 = finite3_u0028_vf3_u003b((&param_24));
+        phi_1254_ = _e135;
     }
-    let _e133 = phi_1136_;
-    if !(_e133) {
+    let _e137 = phi_1254_;
+    if !(_e137) {
         return false;
     }
-    let _e135 = neighborhoodMin;
-    clipMin = _e135;
-    let _e136 = neighborhoodMax;
-    clipMax = _e136;
-    let _e138 = pc.qualityFlags;
-    if ((_e138 & 1u) != 0u) {
-        let _e141 = momentSum;
-        momentMean = (_e141 * 0.11111111f);
-        let _e143 = momentSquares;
-        let _e145 = momentMean;
-        let _e146 = momentMean;
-        momentSigma = sqrt(max(((_e143 * 0.11111111f) - (_e145 * _e146)), vec3<f32>(0f, 0f, 0f)));
-        let _e151 = neighborhoodMin;
-        let _e152 = momentMean;
-        let _e153 = momentSigma;
-        clipMin = max(_e151, (_e152 - (_e153 * 1.25f)));
-        let _e157 = neighborhoodMax;
-        let _e158 = momentMean;
-        let _e159 = momentSigma;
-        clipMax = min(_e157, (_e158 + (_e159 * 1.25f)));
+    let _e139 = neighborhoodMin;
+    clipMin = _e139;
+    let _e140 = neighborhoodMax;
+    clipMax = _e140;
+    let _e142 = pc.qualityFlags;
+    if ((_e142 & 1u) != 0u) {
+        let _e145 = momentSum;
+        momentMean = (_e145 * 0.11111111f);
+        let _e147 = momentSquares;
+        let _e149 = momentMean;
+        let _e150 = momentMean;
+        momentSigma = sqrt(max(((_e147 * 0.11111111f) - (_e149 * _e150)), vec3<f32>(0f, 0f, 0f)));
+        let _e155 = neighborhoodMin;
+        let _e156 = momentMean;
+        let _e157 = momentSigma;
+        clipMin = max(_e155, (_e156 - (_e157 * 1.25f)));
+        let _e161 = neighborhoodMax;
+        let _e162 = momentMean;
+        let _e163 = momentSigma;
+        clipMax = min(_e161, (_e162 + (_e163 * 1.25f)));
     }
-    let _e163 = clipMin;
-    (*boxMin) = _e163;
-    let _e164 = clipMax;
-    (*boxMax) = _e164;
-    let _e165 = momentSum;
-    (*boxMean) = (_e165 * 0.11111111f);
+    let _e167 = clipMin;
+    (*boxMin) = _e167;
+    let _e168 = clipMax;
+    (*boxMax) = _e168;
     return true;
 }
 
-fn mixFast_u0028_vf4_u003b_vf4_u003b_f1_u003b(x_2: ptr<function, vec4<f32>>, y_2: ptr<function, vec4<f32>>, a_1: ptr<function, f32>) -> vec4<f32> {
-    let _e83 = (*x_2);
-    let _e84 = (*a_1);
-    let _e87 = (*y_2);
-    let _e88 = (*a_1);
-    return ((_e83 * (1f - _e84)) + (_e87 * _e88));
-}
-
-fn samplePreviousColorLinear_u0028_vf2_u003b(texel: ptr<function, vec2<f32>>) -> vec4<f32> {
+fn samplePreviousColor_u0028_vf2_u003b(texel: ptr<function, vec2<f32>>) -> vec4<f32> {
     var baseFloat: vec2<f32>;
-    var base_1: vec2<i32>;
     var f: vec2<f32>;
-    var hi: vec2<i32>;
-    var c00_: vec4<f32>;
-    var c10_: vec4<f32>;
-    var c01_: vec4<f32>;
-    var c11_: vec4<f32>;
-    var top: vec4<f32>;
-    var param_25: vec4<f32>;
-    var param_26: vec4<f32>;
-    var param_27: f32;
-    var bottom: vec4<f32>;
-    var param_28: vec4<f32>;
-    var param_29: vec4<f32>;
-    var param_30: f32;
-    var param_31: vec4<f32>;
-    var param_32: vec4<f32>;
-    var param_33: f32;
+    var d0_: vec2<f32>;
+    var d1_: vec2<f32>;
+    var d2_: vec2<f32>;
+    var d3_: vec2<f32>;
+    var w0_: vec2<f32>;
+    var w1_: vec2<f32>;
+    var w2_: vec2<f32>;
+    var w3_: vec2<f32>;
+    var w12_: vec2<f32>;
+    var offset12_: vec2<f32>;
+    var extent: vec2<f32>;
+    var invExtent: vec2<f32>;
+    var uv0_: vec2<f32>;
+    var uv12_: vec2<f32>;
+    var uv3_: vec2<f32>;
+    var ux: array<f32, 5>;
+    var uy: array<f32, 5>;
+    var w: array<f32, 5>;
+    var sum: vec4<f32>;
+    var total: f32;
+    var i_1: i32;
 
-    let _e100 = (*texel);
-    baseFloat = floor(_e100);
-    let _e102 = baseFloat;
-    base_1 = vec2<i32>(_e102);
-    let _e104 = (*texel);
-    let _e105 = baseFloat;
-    f = (_e104 - _e105);
-    let _e108 = pc.extent;
-    hi = (bitcast<vec2<i32>>(_e108) - vec2<i32>(1i, 1i));
-    let _e111 = base_1;
-    let _e112 = hi;
-    let _e114 = textureLoad(previousColor, clamp(_e111, vec2<i32>(0i, 0i), _e112), 0i);
-    c00_ = _e114;
-    let _e115 = base_1;
-    let _e117 = hi;
-    let _e119 = textureLoad(previousColor, clamp((_e115 + vec2<i32>(1i, 0i)), vec2<i32>(0i, 0i), _e117), 0i);
-    c10_ = _e119;
-    let _e120 = base_1;
-    let _e122 = hi;
-    let _e124 = textureLoad(previousColor, clamp((_e120 + vec2<i32>(0i, 1i)), vec2<i32>(0i, 0i), _e122), 0i);
-    c01_ = _e124;
-    let _e125 = base_1;
-    let _e127 = hi;
-    let _e129 = textureLoad(previousColor, clamp((_e125 + vec2<i32>(1i, 1i)), vec2<i32>(0i, 0i), _e127), 0i);
-    c11_ = _e129;
-    let _e130 = c00_;
-    param_25 = _e130;
-    let _e131 = c10_;
-    param_26 = _e131;
-    let _e133 = f[0u];
-    param_27 = _e133;
-    let _e134 = mixFast_u0028_vf4_u003b_vf4_u003b_f1_u003b((&param_25), (&param_26), (&param_27));
-    top = _e134;
-    let _e135 = c01_;
-    param_28 = _e135;
-    let _e136 = c11_;
-    param_29 = _e136;
-    let _e138 = f[0u];
-    param_30 = _e138;
-    let _e139 = mixFast_u0028_vf4_u003b_vf4_u003b_f1_u003b((&param_28), (&param_29), (&param_30));
-    bottom = _e139;
-    let _e140 = top;
-    param_31 = _e140;
-    let _e141 = bottom;
-    param_32 = _e141;
-    let _e143 = f[1u];
-    param_33 = _e143;
-    let _e144 = mixFast_u0028_vf4_u003b_vf4_u003b_f1_u003b((&param_31), (&param_32), (&param_33));
-    return _e144;
+    let _e109 = (*texel);
+    baseFloat = floor(_e109);
+    let _e111 = (*texel);
+    let _e112 = baseFloat;
+    f = (_e111 - _e112);
+    let _e114 = f;
+    d0_ = (vec2(1f) + _e114);
+    let _e117 = f;
+    d1_ = _e117;
+    let _e118 = f;
+    d2_ = (vec2(1f) - _e118);
+    let _e121 = f;
+    d3_ = (vec2(2f) - _e121);
+    let _e124 = d0_;
+    let _e128 = d0_;
+    let _e132 = d0_;
+    w0_ = ((((((_e124 * -0.75f) - vec2(-3.75f)) * _e128) + vec2(-6f)) * _e132) - vec2(-3f));
+    let _e136 = d1_;
+    let _e140 = d1_;
+    let _e142 = d1_;
+    w1_ = (((((_e136 * 1.25f) - vec2(2.25f)) * _e140) * _e142) + vec2(1f));
+    let _e146 = d2_;
+    let _e150 = d2_;
+    let _e152 = d2_;
+    w2_ = (((((_e146 * 1.25f) - vec2(2.25f)) * _e150) * _e152) + vec2(1f));
+    let _e156 = d3_;
+    let _e160 = d3_;
+    let _e164 = d3_;
+    w3_ = ((((((_e156 * -0.75f) - vec2(-3.75f)) * _e160) + vec2(-6f)) * _e164) - vec2(-3f));
+    let _e168 = w1_;
+    let _e169 = w2_;
+    w12_ = (_e168 + _e169);
+    let _e171 = w2_;
+    let _e172 = w12_;
+    let _e173 = w12_;
+    offset12_ = (_e171 * inverseSqrt((_e172 * _e173)));
+    let _e178 = pc.extent;
+    extent = vec2<f32>(_e178);
+    let _e180 = extent;
+    let _e181 = extent;
+    invExtent = inverseSqrt((_e180 * _e181));
+    let _e184 = baseFloat;
+    let _e189 = invExtent;
+    uv0_ = (((_e184 - vec2(1f)) + vec2(0.5f)) * _e189);
+    let _e191 = baseFloat;
+    let _e192 = offset12_;
+    let _e196 = invExtent;
+    uv12_ = (((_e191 + _e192) + vec2(0.5f)) * _e196);
+    let _e198 = baseFloat;
+    let _e203 = invExtent;
+    uv3_ = (((_e198 + vec2(2f)) + vec2(0.5f)) * _e203);
+    let _e206 = uv12_[0u];
+    let _e208 = uv0_[0u];
+    let _e210 = uv3_[0u];
+    let _e212 = uv12_[0u];
+    let _e214 = uv12_[0u];
+    ux = array<f32, 5>(_e206, _e208, _e210, _e212, _e214);
+    let _e217 = uv12_[1u];
+    let _e219 = uv12_[1u];
+    let _e221 = uv12_[1u];
+    let _e223 = uv0_[1u];
+    let _e225 = uv3_[1u];
+    uy = array<f32, 5>(_e217, _e219, _e221, _e223, _e225);
+    let _e228 = w12_[0u];
+    let _e230 = w12_[1u];
+    let _e233 = w0_[0u];
+    let _e235 = w12_[1u];
+    let _e238 = w3_[0u];
+    let _e240 = w12_[1u];
+    let _e243 = w12_[0u];
+    let _e245 = w0_[1u];
+    let _e248 = w12_[0u];
+    let _e250 = w3_[1u];
+    w = array<f32, 5>((_e228 * _e230), (_e233 * _e235), (_e238 * _e240), (_e243 * _e245), (_e248 * _e250));
+    sum = vec4<f32>(0f, 0f, 0f, 0f);
+    total = 0f;
+    i_1 = 0i;
+    loop {
+        let _e253 = i_1;
+        if (_e253 < 5i) {
+            let _e255 = i_1;
+            let _e257 = w[_e255];
+            let _e258 = i_1;
+            let _e260 = ux[_e258];
+            let _e261 = i_1;
+            let _e263 = uy[_e261];
+            let _e265 = textureSampleLevel(previousColor, nearestSampler, vec2<f32>(_e260, _e263), 0f);
+            let _e267 = sum;
+            sum = (_e267 + (_e265 * _e257));
+            let _e269 = i_1;
+            let _e271 = w[_e269];
+            let _e272 = total;
+            total = (_e272 + _e271);
+            continue;
+        } else {
+            break;
+        }
+        continuing {
+            let _e274 = i_1;
+            i_1 = (_e274 + 1i);
+        }
+    }
+    let _e276 = sum;
+    let _e277 = total;
+    let _e278 = total;
+    return (_e276 * inverseSqrt((_e277 * _e278)));
 }
 
-fn mixFast_u0028_f1_u003b_f1_u003b_f1_u003b(x_3: ptr<function, f32>, y_3: ptr<function, f32>, a_2: ptr<function, f32>) -> f32 {
-    let _e83 = (*x_3);
-    let _e84 = (*a_2);
-    let _e87 = (*y_3);
-    let _e88 = (*a_2);
-    return ((_e83 * (1f - _e84)) + (_e87 * _e88));
+fn mixFast_u0028_f1_u003b_f1_u003b_f1_u003b(x_2: ptr<function, f32>, y_2: ptr<function, f32>, a_1: ptr<function, f32>) -> f32 {
+    let _e88 = (*x_2);
+    let _e89 = (*a_1);
+    let _e92 = (*y_2);
+    let _e93 = (*a_1);
+    return ((_e88 * (1f - _e89)) + (_e92 * _e93));
 }
 
 fn samplePreviousDepthLinear_u0028_vf2_u003b(texel_1: ptr<function, vec2<f32>>) -> f32 {
     var baseFloat_1: vec2<f32>;
-    var base_2: vec2<i32>;
+    var base_1: vec2<i32>;
     var f_1: vec2<f32>;
-    var hi_1: vec2<i32>;
+    var hi: vec2<i32>;
     var d00_: f32;
     var d10_: f32;
     var d01_: f32;
     var d11_: f32;
-    var top_1: f32;
-    var param_34: f32;
-    var param_35: f32;
-    var param_36: f32;
-    var bottom_1: f32;
-    var param_37: f32;
-    var param_38: f32;
-    var param_39: f32;
-    var param_40: f32;
-    var param_41: f32;
-    var param_42: f32;
+    var top: f32;
+    var param_25: f32;
+    var param_26: f32;
+    var param_27: f32;
+    var bottom: f32;
+    var param_28: f32;
+    var param_29: f32;
+    var param_30: f32;
+    var param_31: f32;
+    var param_32: f32;
+    var param_33: f32;
 
-    let _e100 = (*texel_1);
-    baseFloat_1 = floor(_e100);
-    let _e102 = baseFloat_1;
-    base_2 = vec2<i32>(_e102);
-    let _e104 = (*texel_1);
-    let _e105 = baseFloat_1;
-    f_1 = (_e104 - _e105);
-    let _e108 = pc.extent;
-    hi_1 = (bitcast<vec2<i32>>(_e108) - vec2<i32>(1i, 1i));
-    let _e111 = base_2;
-    let _e112 = hi_1;
-    let _e114 = textureLoad(previousLinearDepth, clamp(_e111, vec2<i32>(0i, 0i), _e112), 0i);
-    d00_ = _e114.x;
-    let _e116 = base_2;
-    let _e118 = hi_1;
-    let _e120 = textureLoad(previousLinearDepth, clamp((_e116 + vec2<i32>(1i, 0i)), vec2<i32>(0i, 0i), _e118), 0i);
-    d10_ = _e120.x;
-    let _e122 = base_2;
-    let _e124 = hi_1;
-    let _e126 = textureLoad(previousLinearDepth, clamp((_e122 + vec2<i32>(0i, 1i)), vec2<i32>(0i, 0i), _e124), 0i);
-    d01_ = _e126.x;
-    let _e128 = base_2;
-    let _e130 = hi_1;
-    let _e132 = textureLoad(previousLinearDepth, clamp((_e128 + vec2<i32>(1i, 1i)), vec2<i32>(0i, 0i), _e130), 0i);
-    d11_ = _e132.x;
-    let _e134 = d00_;
-    param_34 = _e134;
-    let _e135 = d10_;
-    param_35 = _e135;
-    let _e137 = f_1[0u];
-    param_36 = _e137;
-    let _e138 = mixFast_u0028_f1_u003b_f1_u003b_f1_u003b((&param_34), (&param_35), (&param_36));
-    top_1 = _e138;
-    let _e139 = d01_;
-    param_37 = _e139;
-    let _e140 = d11_;
-    param_38 = _e140;
+    let _e105 = (*texel_1);
+    baseFloat_1 = floor(_e105);
+    let _e107 = baseFloat_1;
+    base_1 = vec2<i32>(_e107);
+    let _e109 = (*texel_1);
+    let _e110 = baseFloat_1;
+    f_1 = (_e109 - _e110);
+    let _e113 = pc.extent;
+    hi = (bitcast<vec2<i32>>(_e113) - vec2<i32>(1i, 1i));
+    let _e116 = base_1;
+    let _e117 = hi;
+    let _e119 = textureLoad(previousLinearDepth, clamp(_e116, vec2<i32>(0i, 0i), _e117), 0i);
+    d00_ = _e119.x;
+    let _e121 = base_1;
+    let _e123 = hi;
+    let _e125 = textureLoad(previousLinearDepth, clamp((_e121 + vec2<i32>(1i, 0i)), vec2<i32>(0i, 0i), _e123), 0i);
+    d10_ = _e125.x;
+    let _e127 = base_1;
+    let _e129 = hi;
+    let _e131 = textureLoad(previousLinearDepth, clamp((_e127 + vec2<i32>(0i, 1i)), vec2<i32>(0i, 0i), _e129), 0i);
+    d01_ = _e131.x;
+    let _e133 = base_1;
+    let _e135 = hi;
+    let _e137 = textureLoad(previousLinearDepth, clamp((_e133 + vec2<i32>(1i, 1i)), vec2<i32>(0i, 0i), _e135), 0i);
+    d11_ = _e137.x;
+    let _e139 = d00_;
+    param_25 = _e139;
+    let _e140 = d10_;
+    param_26 = _e140;
     let _e142 = f_1[0u];
-    param_39 = _e142;
-    let _e143 = mixFast_u0028_f1_u003b_f1_u003b_f1_u003b((&param_37), (&param_38), (&param_39));
-    bottom_1 = _e143;
-    let _e144 = top_1;
-    param_40 = _e144;
-    let _e145 = bottom_1;
-    param_41 = _e145;
-    let _e147 = f_1[1u];
-    param_42 = _e147;
-    let _e148 = mixFast_u0028_f1_u003b_f1_u003b_f1_u003b((&param_40), (&param_41), (&param_42));
-    return _e148;
+    param_27 = _e142;
+    let _e143 = mixFast_u0028_f1_u003b_f1_u003b_f1_u003b((&param_25), (&param_26), (&param_27));
+    top = _e143;
+    let _e144 = d01_;
+    param_28 = _e144;
+    let _e145 = d11_;
+    param_29 = _e145;
+    let _e147 = f_1[0u];
+    param_30 = _e147;
+    let _e148 = mixFast_u0028_f1_u003b_f1_u003b_f1_u003b((&param_28), (&param_29), (&param_30));
+    bottom = _e148;
+    let _e149 = top;
+    param_31 = _e149;
+    let _e150 = bottom;
+    param_32 = _e150;
+    let _e152 = f_1[1u];
+    param_33 = _e152;
+    let _e153 = mixFast_u0028_f1_u003b_f1_u003b_f1_u003b((&param_31), (&param_32), (&param_33));
+    return _e153;
 }
 
 fn linearizeDepth_u0028_f1_u003b(z_1: ptr<function, f32>) -> f32 {
@@ -797,131 +848,131 @@ fn linearizeDepth_u0028_f1_u003b(z_1: ptr<function, f32>) -> f32 {
     var numerator: f32;
     var result_1: f32;
 
-    let _e87 = pc.zFar;
-    let _e89 = pc.zNear;
-    range = (_e87 - _e89);
-    let _e91 = (*z_1);
-    let _e92 = range;
-    scaled_1 = (_e91 * _e92);
-    let _e95 = pc.zNear;
-    let _e96 = scaled_1;
-    denominator_1 = (_e95 + _e96);
-    let _e99 = pc.zNear;
-    let _e101 = pc.zFar;
-    numerator = (_e99 * _e101);
-    let _e103 = numerator;
-    let _e104 = denominator_1;
-    result_1 = (_e103 / _e104);
-    let _e106 = result_1;
-    return _e106;
+    let _e92 = pc.zFar;
+    let _e94 = pc.zNear;
+    range = (_e92 - _e94);
+    let _e96 = (*z_1);
+    let _e97 = range;
+    scaled_1 = (_e96 * _e97);
+    let _e100 = pc.zNear;
+    let _e101 = scaled_1;
+    denominator_1 = (_e100 + _e101);
+    let _e104 = pc.zNear;
+    let _e106 = pc.zFar;
+    numerator = (_e104 * _e106);
+    let _e108 = numerator;
+    let _e109 = denominator_1;
+    result_1 = (_e108 / _e109);
+    let _e111 = result_1;
+    return _e111;
 }
 
 fn finite2_u0028_vf2_u003b(v_2: ptr<function, vec2<f32>>) -> bool {
-    var phi_132_: bool;
+    var phi_125_: bool;
 
-    let _e81 = (*v_2);
-    let _e82 = (*v_2);
-    let _e84 = all((_e81 == _e82));
-    phi_132_ = _e84;
-    if _e84 {
-        let _e85 = (*v_2);
-        phi_132_ = all((abs(_e85) <= vec2<f32>(0x1.fffffep+127f, 0x1.fffffep+127f)));
+    let _e86 = (*v_2);
+    let _e87 = (*v_2);
+    let _e89 = all((_e86 == _e87));
+    phi_125_ = _e89;
+    if _e89 {
+        let _e90 = (*v_2);
+        phi_125_ = all((abs(_e90) <= vec2<f32>(0x1.fffffep+127f, 0x1.fffffep+127f)));
     }
-    let _e90 = phi_132_;
-    return _e90;
+    let _e95 = phi_125_;
+    return _e95;
 }
 
 fn finite4_u0028_vf4_u003b(v_3: ptr<function, vec4<f32>>) -> bool {
-    var phi_162_: bool;
+    var phi_155_: bool;
 
-    let _e81 = (*v_3);
-    let _e82 = (*v_3);
-    let _e84 = all((_e81 == _e82));
-    phi_162_ = _e84;
-    if _e84 {
-        let _e85 = (*v_3);
-        phi_162_ = all((abs(_e85) <= vec4<f32>(0x1.fffffep+127f, 0x1.fffffep+127f, 0x1.fffffep+127f, 0x1.fffffep+127f)));
+    let _e86 = (*v_3);
+    let _e87 = (*v_3);
+    let _e89 = all((_e86 == _e87));
+    phi_155_ = _e89;
+    if _e89 {
+        let _e90 = (*v_3);
+        phi_155_ = all((abs(_e90) <= vec4<f32>(0x1.fffffep+127f, 0x1.fffffep+127f, 0x1.fffffep+127f, 0x1.fffffep+127f)));
     }
-    let _e90 = phi_162_;
-    return _e90;
+    let _e95 = phi_155_;
+    return _e95;
 }
 
 fn dlMotionVelocity_u0028_vi2_u003b_i1_u003b_f1_u003b(px_1: ptr<function, vec2<i32>>, tileIndex_1: ptr<function, i32>, centerValid: ptr<function, f32>) -> vec2<f32> {
     var centerVelocity: vec2<f32>;
-    var param_43: vec2<f32>;
-    var hi_2: vec2<i32>;
+    var param_34: vec2<f32>;
+    var hi_1: vec2<i32>;
     var best: vec2<i32>;
     var bestDepth: f32;
-    var y_4: i32;
-    var x_4: i32;
+    var y_3: i32;
+    var x_3: i32;
     var d: f32;
     var v_4: f32;
     var dv: vec2<f32>;
-    var param_44: vec2<f32>;
-    var phi_960_: bool;
-    var phi_968_: bool;
+    var param_35: vec2<f32>;
+    var phi_1078_: bool;
+    var phi_1086_: bool;
 
-    let _e94 = (*px_1);
-    let _e95 = textureLoad(motionVelocity, _e94, 0i);
-    centerVelocity = _e95.xy;
-    let _e98 = pc.qualityFlags;
-    let _e100 = ((_e98 & 2u) == 0u);
-    phi_960_ = _e100;
-    if !(_e100) {
-        let _e102 = (*centerValid);
-        phi_960_ = !((_e102 > 0f));
+    let _e99 = (*px_1);
+    let _e100 = textureLoad(motionVelocity, _e99, 0i);
+    centerVelocity = _e100.xy;
+    let _e103 = pc.qualityFlags;
+    let _e105 = ((_e103 & 2u) == 0u);
+    phi_1078_ = _e105;
+    if !(_e105) {
+        let _e107 = (*centerValid);
+        phi_1078_ = !((_e107 > 0f));
     }
-    let _e106 = phi_960_;
-    phi_968_ = _e106;
-    if !(_e106) {
-        let _e108 = centerVelocity;
-        param_43 = _e108;
-        let _e109 = finite2_u0028_vf2_u003b((&param_43));
-        phi_968_ = !(_e109);
-    }
-    let _e112 = phi_968_;
-    if _e112 {
+    let _e111 = phi_1078_;
+    phi_1086_ = _e111;
+    if !(_e111) {
         let _e113 = centerVelocity;
-        return _e113;
+        param_34 = _e113;
+        let _e114 = finite2_u0028_vf2_u003b((&param_34));
+        phi_1086_ = !(_e114);
     }
-    let _e115 = pc.extent;
-    hi_2 = (bitcast<vec2<i32>>(_e115) - vec2<i32>(1i, 1i));
-    let _e118 = (*px_1);
-    best = _e118;
-    let _e119 = (*tileIndex_1);
-    let _e121 = tileDepth[_e119];
-    bestDepth = _e121;
-    y_4 = -1i;
+    let _e117 = phi_1086_;
+    if _e117 {
+        let _e118 = centerVelocity;
+        return _e118;
+    }
+    let _e120 = pc.extent;
+    hi_1 = (bitcast<vec2<i32>>(_e120) - vec2<i32>(1i, 1i));
+    let _e123 = (*px_1);
+    best = _e123;
+    let _e124 = (*tileIndex_1);
+    let _e126 = tileDepth[_e124];
+    bestDepth = _e126;
+    y_3 = -1i;
     loop {
-        let _e122 = y_4;
-        if (_e122 <= 1i) {
-            x_4 = -1i;
+        let _e127 = y_3;
+        if (_e127 <= 1i) {
+            x_3 = -1i;
             loop {
-                let _e124 = x_4;
-                if (_e124 <= 1i) {
-                    let _e126 = (*tileIndex_1);
-                    let _e127 = y_4;
-                    let _e130 = x_4;
-                    let _e133 = tileDepth[((_e126 + (_e127 * 10i)) + _e130)];
-                    d = _e133;
-                    let _e134 = d;
-                    let _e135 = bestDepth;
-                    if (_e134 > _e135) {
-                        let _e137 = d;
-                        bestDepth = _e137;
-                        let _e138 = (*px_1);
-                        let _e139 = x_4;
-                        let _e140 = y_4;
-                        let _e143 = hi_2;
-                        best = clamp((_e138 + vec2<i32>(_e139, _e140)), vec2<i32>(0i, 0i), _e143);
+                let _e129 = x_3;
+                if (_e129 <= 1i) {
+                    let _e131 = (*tileIndex_1);
+                    let _e132 = y_3;
+                    let _e135 = x_3;
+                    let _e138 = tileDepth[((_e131 + (_e132 * 10i)) + _e135)];
+                    d = _e138;
+                    let _e139 = d;
+                    let _e140 = bestDepth;
+                    if (_e139 > _e140) {
+                        let _e142 = d;
+                        bestDepth = _e142;
+                        let _e143 = (*px_1);
+                        let _e144 = x_3;
+                        let _e145 = y_3;
+                        let _e148 = hi_1;
+                        best = clamp((_e143 + vec2<i32>(_e144, _e145)), vec2<i32>(0i, 0i), _e148);
                     }
                     continue;
                 } else {
                     break;
                 }
                 continuing {
-                    let _e145 = x_4;
-                    x_4 = (_e145 + 1i);
+                    let _e150 = x_3;
+                    x_3 = (_e150 + 1i);
                 }
             }
             continue;
@@ -929,40 +980,40 @@ fn dlMotionVelocity_u0028_vi2_u003b_i1_u003b_f1_u003b(px_1: ptr<function, vec2<i
             break;
         }
         continuing {
-            let _e147 = y_4;
-            y_4 = (_e147 + 1i);
+            let _e152 = y_3;
+            y_3 = (_e152 + 1i);
         }
     }
-    let _e149 = best;
-    let _e150 = (*px_1);
-    if all((_e149 == _e150)) {
-        let _e153 = centerVelocity;
-        return _e153;
-    }
     let _e154 = best;
-    let _e155 = textureLoad(motionValidity, _e154, 0i);
-    v_4 = _e155.x;
-    let _e157 = v_4;
-    if !((_e157 > 0f)) {
-        let _e160 = centerVelocity;
-        return _e160;
+    let _e155 = (*px_1);
+    if all((_e154 == _e155)) {
+        let _e158 = centerVelocity;
+        return _e158;
     }
-    let _e161 = best;
-    let _e162 = textureLoad(motionVelocity, _e161, 0i);
-    dv = _e162.xy;
-    let _e164 = dv;
-    param_44 = _e164;
-    let _e165 = finite2_u0028_vf2_u003b((&param_44));
-    let _e166 = dv;
-    let _e167 = centerVelocity;
-    return select(_e167, _e166, vec2(_e165));
+    let _e159 = best;
+    let _e160 = textureLoad(motionValidity, _e159, 0i);
+    v_4 = _e160.x;
+    let _e162 = v_4;
+    if !((_e162 > 0f)) {
+        let _e165 = centerVelocity;
+        return _e165;
+    }
+    let _e166 = best;
+    let _e167 = textureLoad(motionVelocity, _e166, 0i);
+    dv = _e167.xy;
+    let _e169 = dv;
+    param_35 = _e169;
+    let _e170 = finite2_u0028_vf2_u003b((&param_35));
+    let _e171 = dv;
+    let _e172 = centerVelocity;
+    return select(_e172, _e171, vec2(_e170));
 }
 
 fn main_1() {
     var pixel_1: vec2<i32>;
     var tileOrigin: vec2<i32>;
     var imageHi: vec2<i32>;
-    var i_1: u32;
+    var i_2: u32;
     var q: vec2<i32>;
     var tileIndex_2: i32;
     var current: vec4<f32>;
@@ -970,9 +1021,9 @@ fn main_1() {
     var usedHistory: bool;
     var valid: f32;
     var velocity: vec2<f32>;
-    var param_45: vec2<i32>;
-    var param_46: i32;
-    var param_47: f32;
+    var param_36: vec2<i32>;
+    var param_37: i32;
+    var param_38: f32;
     var jitterDelta: vec2<f32>;
     var jitterTexel: vec2<f32>;
     var motionTexel: vec2<f32>;
@@ -980,307 +1031,298 @@ fn main_1() {
     var previousTexel: vec2<f32>;
     var previousCenter: vec2<f32>;
     var inside: bool;
-    var param_48: vec4<f32>;
-    var param_49: f32;
-    var param_50: vec2<f32>;
-    var param_51: vec2<f32>;
+    var param_39: vec4<f32>;
+    var param_40: f32;
+    var param_41: vec2<f32>;
+    var param_42: vec2<f32>;
     var currentDevice: f32;
     var currentLinear: f32;
-    var param_52: f32;
+    var param_43: f32;
     var priorLinear: f32;
-    var param_53: vec2<f32>;
+    var param_44: vec2<f32>;
     var depthLimit: f32;
-    var param_54: f32;
-    var param_55: f32;
+    var param_45: f32;
+    var param_46: f32;
     var prior: vec4<f32>;
-    var param_56: vec2<f32>;
-    var param_57: vec4<f32>;
+    var param_47: vec2<f32>;
+    var param_48: vec4<f32>;
     var clipMin_1: vec3<f32>;
     var clipMax_1: vec3<f32>;
-    var clipMean: vec3<f32>;
-    var param_58: i32;
-    var param_59: vec3<f32>;
-    var param_60: vec3<f32>;
-    var param_61: vec3<f32>;
+    var param_49: i32;
+    var param_50: vec3<f32>;
+    var param_51: vec3<f32>;
     var clampedPrior: vec3<f32>;
     var confidence_1: f32;
     var baseWeight: f32;
     var weight_1: f32;
-    var param_62: f32;
-    var param_63: f32;
+    var param_52: f32;
+    var param_53: f32;
     var resolvedRgb: vec3<f32>;
-    var param_64: vec3<f32>;
-    var param_65: vec3<f32>;
-    var param_66: f32;
-    var param_67: vec4<f32>;
-    var param_68: vec2<i32>;
-    var param_69: vec4<f32>;
-    var param_70: vec4<f32>;
-    var param_71: f32;
-    var phi_1342_: bool;
-    var phi_1351_: bool;
-    var phi_1360_: bool;
-    var phi_1366_: bool;
-    var phi_1403_: bool;
-    var phi_1418_: bool;
-    var phi_1442_: bool;
-    var phi_1498_: bool;
-    var phi_1506_: bool;
+    var param_54: vec3<f32>;
+    var param_55: vec3<f32>;
+    var param_56: f32;
+    var param_57: vec4<f32>;
+    var param_58: vec2<i32>;
+    var param_59: vec4<f32>;
+    var param_60: vec4<f32>;
+    var param_61: f32;
+    var phi_1457_: bool;
+    var phi_1466_: bool;
+    var phi_1475_: bool;
+    var phi_1481_: bool;
+    var phi_1517_: bool;
+    var phi_1532_: bool;
+    var phi_1553_: bool;
+    var phi_1599_: bool;
+    var phi_1607_: bool;
 
-    let _e138 = gl_GlobalInvocationID_1;
-    pixel_1 = bitcast<vec2<i32>>(_e138.xy);
-    let _e141 = gl_WorkGroupID_1;
-    tileOrigin = ((bitcast<vec2<i32>>(_e141.xy) * vec2(8i)) - vec2<i32>(1i, 1i));
-    let _e148 = pc.extent;
-    imageHi = (bitcast<vec2<i32>>(_e148) - vec2<i32>(1i, 1i));
-    let _e151 = gl_LocalInvocationIndex_1;
-    i_1 = _e151;
+    let _e141 = gl_GlobalInvocationID_1;
+    pixel_1 = bitcast<vec2<i32>>(_e141.xy);
+    let _e144 = gl_WorkGroupID_1;
+    tileOrigin = ((bitcast<vec2<i32>>(_e144.xy) * vec2(8i)) - vec2<i32>(1i, 1i));
+    let _e151 = pc.extent;
+    imageHi = (bitcast<vec2<i32>>(_e151) - vec2<i32>(1i, 1i));
+    let _e154 = gl_LocalInvocationIndex_1;
+    i_2 = _e154;
     loop {
-        let _e152 = i_1;
-        if (_e152 < 100u) {
-            let _e154 = tileOrigin;
-            let _e155 = i_1;
-            let _e158 = i_1;
-            let _e163 = imageHi;
-            q = clamp((_e154 + vec2<i32>(bitcast<i32>((_e155 % 10u)), bitcast<i32>((_e158 / 10u)))), vec2<i32>(0i, 0i), _e163);
-            let _e165 = i_1;
-            let _e166 = q;
-            let _e167 = textureLoad(currentColor, _e166, 0i);
-            tileColor[_e165] = _e167;
-            let _e169 = i_1;
-            let _e170 = q;
-            let _e171 = textureLoad(currentDeviceDepth, _e170, 0i);
-            tileDepth[_e169] = _e171.x;
+        let _e155 = i_2;
+        if (_e155 < 100u) {
+            let _e157 = tileOrigin;
+            let _e158 = i_2;
+            let _e161 = i_2;
+            let _e166 = imageHi;
+            q = clamp((_e157 + vec2<i32>(bitcast<i32>((_e158 % 10u)), bitcast<i32>((_e161 / 10u)))), vec2<i32>(0i, 0i), _e166);
+            let _e168 = i_2;
+            let _e169 = q;
+            let _e170 = textureLoad(currentColor, _e169, 0i);
+            tileColor[_e168] = _e170;
+            let _e172 = i_2;
+            let _e173 = q;
+            let _e174 = textureLoad(currentDeviceDepth, _e173, 0i);
+            tileDepth[_e172] = _e174.x;
             continue;
         } else {
             break;
         }
         continuing {
-            let _e174 = i_1;
-            i_1 = (_e174 + 64u);
+            let _e177 = i_2;
+            i_2 = (_e177 + 64u);
         }
     }
     workgroupBarrier();
-    let _e176 = pixel_1;
-    let _e178 = pc.extent;
-    if any((_e176 >= bitcast<vec2<i32>>(_e178))) {
+    let _e179 = pixel_1;
+    let _e181 = pc.extent;
+    if any((_e179 >= bitcast<vec2<i32>>(_e181))) {
         return;
     }
-    let _e183 = gl_LocalInvocationID_1[1u];
-    let _e188 = gl_LocalInvocationID_1[0u];
-    tileIndex_2 = ((((bitcast<i32>(_e183) + 1i) * 10i) + bitcast<i32>(_e188)) + 1i);
-    let _e192 = tileIndex_2;
-    let _e194 = tileColor[_e192];
-    current = _e194;
-    let _e195 = current;
-    result_2 = _e195;
+    let _e186 = gl_LocalInvocationID_1[1u];
+    let _e191 = gl_LocalInvocationID_1[0u];
+    tileIndex_2 = ((((bitcast<i32>(_e186) + 1i) * 10i) + bitcast<i32>(_e191)) + 1i);
+    let _e195 = tileIndex_2;
+    let _e197 = tileColor[_e195];
+    current = _e197;
+    let _e198 = current;
+    result_2 = _e198;
     usedHistory = false;
-    let _e196 = pixel_1;
-    let _e197 = textureLoad(motionValidity, _e196, 0i);
-    valid = _e197.x;
     let _e199 = pixel_1;
-    param_45 = _e199;
-    let _e200 = tileIndex_2;
-    param_46 = _e200;
-    let _e201 = valid;
-    param_47 = _e201;
-    let _e202 = dlMotionVelocity_u0028_vi2_u003b_i1_u003b_f1_u003b((&param_45), (&param_46), (&param_47));
-    velocity = _e202;
-    let _e204 = pc.previousEffectiveJitterUv;
-    let _e206 = pc.currentEffectiveJitterUv;
-    jitterDelta = (_e204 - _e206);
-    let _e208 = jitterDelta;
-    let _e210 = pc.extent;
-    jitterTexel = (_e208 * vec2<f32>(_e210));
-    let _e213 = velocity;
-    let _e215 = pc.extent;
-    motionTexel = (_e213 * vec2<f32>(_e215));
-    let _e218 = pixel_1;
-    let _e220 = motionTexel;
-    unjitteredPreviousTexel = (vec2<f32>(_e218) - _e220);
-    let _e222 = unjitteredPreviousTexel;
-    let _e223 = jitterTexel;
-    previousTexel = (_e222 + _e223);
-    let _e225 = previousTexel;
-    previousCenter = (_e225 + vec2(0.5f));
-    let _e228 = previousCenter;
-    let _e230 = all((_e228 >= vec2<f32>(0f, 0f)));
-    phi_1342_ = _e230;
-    if _e230 {
-        let _e231 = previousCenter;
-        let _e233 = pc.extent;
-        phi_1342_ = all((_e231 < vec2<f32>(_e233)));
+    let _e200 = textureLoad(motionValidity, _e199, 0i);
+    valid = _e200.x;
+    let _e202 = pixel_1;
+    param_36 = _e202;
+    let _e203 = tileIndex_2;
+    param_37 = _e203;
+    let _e204 = valid;
+    param_38 = _e204;
+    let _e205 = dlMotionVelocity_u0028_vi2_u003b_i1_u003b_f1_u003b((&param_36), (&param_37), (&param_38));
+    velocity = _e205;
+    let _e207 = pc.previousEffectiveJitterUv;
+    let _e209 = pc.currentEffectiveJitterUv;
+    jitterDelta = (_e207 - _e209);
+    let _e211 = jitterDelta;
+    let _e213 = pc.extent;
+    jitterTexel = (_e211 * vec2<f32>(_e213));
+    let _e216 = velocity;
+    let _e218 = pc.extent;
+    motionTexel = (_e216 * vec2<f32>(_e218));
+    let _e221 = pixel_1;
+    let _e223 = motionTexel;
+    unjitteredPreviousTexel = (vec2<f32>(_e221) - _e223);
+    let _e225 = unjitteredPreviousTexel;
+    let _e226 = jitterTexel;
+    previousTexel = (_e225 + _e226);
+    let _e228 = previousTexel;
+    previousCenter = (_e228 + vec2(0.5f));
+    let _e231 = previousCenter;
+    let _e233 = all((_e231 >= vec2<f32>(0f, 0f)));
+    phi_1457_ = _e233;
+    if _e233 {
+        let _e234 = previousCenter;
+        let _e236 = pc.extent;
+        phi_1457_ = all((_e234 < vec2<f32>(_e236)));
     }
-    let _e238 = phi_1342_;
-    inside = _e238;
-    let _e239 = current;
-    param_48 = _e239;
-    let _e240 = finite4_u0028_vf4_u003b((&param_48));
-    phi_1351_ = _e240;
-    if _e240 {
-        let _e241 = valid;
-        param_49 = _e241;
-        let _e242 = finite1_u0028_f1_u003b((&param_49));
-        phi_1351_ = _e242;
+    let _e241 = phi_1457_;
+    inside = _e241;
+    let _e242 = current;
+    param_39 = _e242;
+    let _e243 = finite4_u0028_vf4_u003b((&param_39));
+    phi_1466_ = _e243;
+    if _e243 {
+        let _e244 = valid;
+        param_40 = _e244;
+        let _e245 = finite1_u0028_f1_u003b((&param_40));
+        phi_1466_ = _e245;
     }
-    let _e244 = phi_1351_;
-    let _e245 = valid;
-    let _e247 = (_e244 && (_e245 > 0f));
-    phi_1360_ = _e247;
-    if _e247 {
-        let _e248 = velocity;
-        param_50 = _e248;
-        let _e249 = finite2_u0028_vf2_u003b((&param_50));
-        phi_1360_ = _e249;
+    let _e247 = phi_1466_;
+    let _e248 = valid;
+    let _e250 = (_e247 && (_e248 > 0f));
+    phi_1475_ = _e250;
+    if _e250 {
+        let _e251 = velocity;
+        param_41 = _e251;
+        let _e252 = finite2_u0028_vf2_u003b((&param_41));
+        phi_1475_ = _e252;
     }
-    let _e251 = phi_1360_;
-    phi_1366_ = _e251;
-    if _e251 {
-        let _e252 = previousTexel;
-        param_51 = _e252;
-        let _e253 = finite2_u0028_vf2_u003b((&param_51));
-        phi_1366_ = _e253;
+    let _e254 = phi_1475_;
+    phi_1481_ = _e254;
+    if _e254 {
+        let _e255 = previousTexel;
+        param_42 = _e255;
+        let _e256 = finite2_u0028_vf2_u003b((&param_42));
+        phi_1481_ = _e256;
     }
-    let _e255 = phi_1366_;
-    let _e256 = inside;
-    if (_e255 && _e256) {
-        let _e258 = tileIndex_2;
-        let _e260 = tileDepth[_e258];
-        currentDevice = _e260;
-        let _e261 = currentDevice;
-        param_52 = _e261;
-        let _e262 = linearizeDepth_u0028_f1_u003b((&param_52));
-        currentLinear = _e262;
-        let _e263 = previousTexel;
-        param_53 = _e263;
-        let _e264 = samplePreviousDepthLinear_u0028_vf2_u003b((&param_53));
-        priorLinear = _e264;
-        let _e266 = pc.depthThresholdAbsolute;
-        let _e268 = pc.depthThresholdRelative;
-        let _e269 = currentLinear;
-        let _e270 = priorLinear;
-        depthLimit = max(_e266, (_e268 * max(_e269, _e270)));
-        let _e274 = currentLinear;
-        param_54 = _e274;
-        let _e275 = finite1_u0028_f1_u003b((&param_54));
-        phi_1403_ = _e275;
-        if _e275 {
-            let _e276 = priorLinear;
-            param_55 = _e276;
-            let _e277 = finite1_u0028_f1_u003b((&param_55));
-            phi_1403_ = _e277;
+    let _e258 = phi_1481_;
+    let _e259 = inside;
+    if (_e258 && _e259) {
+        let _e261 = tileIndex_2;
+        let _e263 = tileDepth[_e261];
+        currentDevice = _e263;
+        let _e264 = currentDevice;
+        param_43 = _e264;
+        let _e265 = linearizeDepth_u0028_f1_u003b((&param_43));
+        currentLinear = _e265;
+        let _e266 = previousTexel;
+        param_44 = _e266;
+        let _e267 = samplePreviousDepthLinear_u0028_vf2_u003b((&param_44));
+        priorLinear = _e267;
+        let _e269 = pc.depthThresholdAbsolute;
+        let _e271 = pc.depthThresholdRelative;
+        let _e272 = currentLinear;
+        let _e273 = priorLinear;
+        depthLimit = max(_e269, (_e271 * max(_e272, _e273)));
+        let _e277 = currentLinear;
+        param_45 = _e277;
+        let _e278 = finite1_u0028_f1_u003b((&param_45));
+        phi_1517_ = _e278;
+        if _e278 {
+            let _e279 = priorLinear;
+            param_46 = _e279;
+            let _e280 = finite1_u0028_f1_u003b((&param_46));
+            phi_1517_ = _e280;
         }
-        let _e279 = phi_1403_;
-        let _e280 = currentLinear;
-        let _e283 = priorLinear;
-        let _e285 = ((_e279 && (_e280 > 0f)) && (_e283 > 0f));
-        phi_1418_ = _e285;
-        if _e285 {
-            let _e286 = currentLinear;
-            let _e287 = priorLinear;
-            let _e290 = depthLimit;
-            phi_1418_ = (abs((_e286 - _e287)) <= _e290);
+        let _e282 = phi_1517_;
+        let _e283 = currentLinear;
+        let _e286 = priorLinear;
+        let _e288 = ((_e282 && (_e283 > 0f)) && (_e286 > 0f));
+        phi_1532_ = _e288;
+        if _e288 {
+            let _e289 = currentLinear;
+            let _e290 = priorLinear;
+            let _e293 = depthLimit;
+            phi_1532_ = (abs((_e289 - _e290)) <= _e293);
         }
-        let _e293 = phi_1418_;
-        if _e293 {
-            let _e294 = previousTexel;
-            param_56 = _e294;
-            let _e295 = samplePreviousColorLinear_u0028_vf2_u003b((&param_56));
-            prior = _e295;
-            let _e296 = prior;
-            param_57 = _e296;
-            let _e297 = finite4_u0028_vf4_u003b((&param_57));
-            phi_1442_ = _e297;
-            if _e297 {
-                let _e298 = tileIndex_2;
-                param_58 = _e298;
-                let _e299 = neighborhoodBox_u0028_i1_u003b_vf3_u003b_vf3_u003b_vf3_u003b((&param_58), (&param_59), (&param_60), (&param_61));
-                let _e300 = param_59;
-                clipMin_1 = _e300;
-                let _e301 = param_60;
-                clipMax_1 = _e301;
-                let _e302 = param_61;
-                clipMean = _e302;
-                phi_1442_ = _e299;
+        let _e296 = phi_1532_;
+        if _e296 {
+            let _e297 = previousTexel;
+            param_47 = _e297;
+            let _e298 = samplePreviousColor_u0028_vf2_u003b((&param_47));
+            prior = _e298;
+            let _e299 = prior;
+            param_48 = _e299;
+            let _e300 = finite4_u0028_vf4_u003b((&param_48));
+            phi_1553_ = _e300;
+            if _e300 {
+                let _e301 = tileIndex_2;
+                param_49 = _e301;
+                let _e302 = neighborhoodBox_u0028_i1_u003b_vf3_u003b_vf3_u003b((&param_49), (&param_50), (&param_51));
+                let _e303 = param_50;
+                clipMin_1 = _e303;
+                let _e304 = param_51;
+                clipMax_1 = _e304;
+                phi_1553_ = _e302;
             }
-            let _e304 = phi_1442_;
-            if _e304 {
-                let _e305 = prior;
-                let _e307 = clipMin_1;
-                let _e308 = clipMax_1;
-                clampedPrior = clamp(_e305.xyz, _e307, _e308);
-                let _e310 = valid;
-                confidence_1 = clamp(_e310, 0f, 1f);
-                let _e313 = pc.historyWeight;
-                baseWeight = clamp(_e313, 0f, 1f);
-                let _e315 = baseWeight;
-                param_62 = _e315;
-                let _e316 = confidence_1;
-                param_63 = _e316;
-                let _e317 = scalePrecise_u0028_f1_u003b_f1_u003b((&param_62), (&param_63));
-                weight_1 = _e317;
-                let _e318 = current;
-                param_64 = _e318.xyz;
-                let _e320 = clampedPrior;
-                param_65 = _e320;
-                let _e321 = weight_1;
-                param_66 = _e321;
-                let _e322 = mixPrecise_u0028_vf3_u003b_vf3_u003b_f1_u003b((&param_64), (&param_65), (&param_66));
-                resolvedRgb = _e322;
-                let _e323 = resolvedRgb;
-                let _e324 = current;
-                let _e326 = clipMean;
-                let _e330 = clipMin_1;
-                let _e331 = clipMax_1;
-                let _e332 = clamp((_e323 + ((_e324.xyz - _e326) * 0.6f)), _e330, _e331);
-                let _e334 = current[3u];
-                result_2 = vec4<f32>(_e332.x, _e332.y, _e332.z, _e334);
+            let _e306 = phi_1553_;
+            if _e306 {
+                let _e307 = prior;
+                let _e309 = clipMin_1;
+                let _e310 = clipMax_1;
+                clampedPrior = clamp(_e307.xyz, _e309, _e310);
+                let _e312 = valid;
+                confidence_1 = clamp(_e312, 0f, 1f);
+                let _e315 = pc.historyWeight;
+                baseWeight = clamp(_e315, 0f, 1f);
+                let _e317 = baseWeight;
+                param_52 = _e317;
+                let _e318 = confidence_1;
+                param_53 = _e318;
+                let _e319 = scalePrecise_u0028_f1_u003b_f1_u003b((&param_52), (&param_53));
+                weight_1 = _e319;
+                let _e320 = current;
+                param_54 = _e320.xyz;
+                let _e322 = clampedPrior;
+                param_55 = _e322;
+                let _e323 = weight_1;
+                param_56 = _e323;
+                let _e324 = mixPrecise_u0028_vf3_u003b_vf3_u003b_f1_u003b((&param_54), (&param_55), (&param_56));
+                resolvedRgb = _e324;
+                let _e325 = resolvedRgb;
+                let _e327 = current[3u];
+                result_2 = vec4<f32>(_e325.x, _e325.y, _e325.z, _e327);
                 usedHistory = true;
             }
         }
     }
-    let _e339 = usedHistory;
-    let _e340 = !(_e339);
-    phi_1498_ = _e340;
-    if _e340 {
-        let _e341 = current;
-        param_67 = _e341;
-        let _e342 = finite4_u0028_vf4_u003b((&param_67));
-        phi_1498_ = _e342;
+    let _e332 = usedHistory;
+    let _e333 = !(_e332);
+    phi_1599_ = _e333;
+    if _e333 {
+        let _e334 = current;
+        param_57 = _e334;
+        let _e335 = finite4_u0028_vf4_u003b((&param_57));
+        phi_1599_ = _e335;
     }
-    let _e344 = phi_1498_;
-    phi_1506_ = _e344;
-    if _e344 {
-        let _e346 = pc.qualityFlags;
-        phi_1506_ = ((_e346 & 4u) != 0u);
+    let _e337 = phi_1599_;
+    phi_1607_ = _e337;
+    if _e337 {
+        let _e339 = pc.qualityFlags;
+        phi_1607_ = ((_e339 & 4u) != 0u);
     }
-    let _e350 = phi_1506_;
-    if _e350 {
-        let _e351 = pixel_1;
-        param_68 = _e351;
-        let _e352 = current;
-        param_69 = _e352;
-        let _e353 = fxSpatialAa_u0028_vi2_u003b_vf4_u003b((&param_68), (&param_69));
-        result_2 = _e353;
+    let _e343 = phi_1607_;
+    if _e343 {
+        let _e344 = pixel_1;
+        param_58 = _e344;
+        let _e345 = current;
+        param_59 = _e345;
+        let _e346 = fxSpatialAa_u0028_vi2_u003b_vf4_u003b((&param_58), (&param_59));
+        result_2 = _e346;
     }
-    let _e354 = result_2;
-    param_70 = _e354;
-    let _e355 = finite4_u0028_vf4_u003b((&param_70));
-    if !(_e355) {
+    let _e347 = result_2;
+    param_60 = _e347;
+    let _e348 = finite4_u0028_vf4_u003b((&param_60));
+    if !(_e348) {
         result_2 = vec4<f32>(0f, 0f, 0f, 0f);
     }
-    let _e357 = pixel_1;
-    let _e358 = result_2;
-    textureStore(resolvedColor, _e357, _e358);
-    let _e359 = pixel_1;
-    let _e360 = result_2;
-    textureStore(historyOutColor, _e359, _e360);
-    let _e361 = pixel_1;
-    let _e362 = tileIndex_2;
-    let _e364 = tileDepth[_e362];
-    param_71 = _e364;
-    let _e365 = storeLinearDepth_u0028_f1_u003b((&param_71));
-    textureStore(historyOutLinearDepth, _e361, vec4(_e365));
+    let _e350 = pixel_1;
+    let _e351 = result_2;
+    textureStore(resolvedColor, _e350, _e351);
+    let _e352 = pixel_1;
+    let _e353 = result_2;
+    textureStore(historyOutColor, _e352, _e353);
+    let _e354 = pixel_1;
+    let _e355 = tileIndex_2;
+    let _e357 = tileDepth[_e355];
+    param_61 = _e357;
+    let _e358 = storeLinearDepth_u0028_f1_u003b((&param_61));
+    textureStore(historyOutLinearDepth, _e354, vec4(_e358));
     return;
 }
 

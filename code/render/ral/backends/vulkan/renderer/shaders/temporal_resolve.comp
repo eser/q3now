@@ -92,33 +92,52 @@ float scalePrecise(float weight, float confidence) {
 	return scaled;
 }
 
-// Plain (contractable) lerps for the bilinear taps of the history. The reprojected POSITION stays precise (jitter, motion, fraction f);
-// the weights applied to already-fetched texels need no bit-exactness, and every `precise` operation costs a non-inlined optnone
-// call after SPIRV-Cross (24 of them per pixel in the two bilinear taps). The final history blend keeps mixPrecise.
+// Plain (contractable) lerp for the bilinear taps of the history depth. The reprojected POSITION stays precise (jitter, motion,
+// fraction f); the weights applied to already-fetched texels need no bit-exactness, and every `precise` operation costs a non-inlined
+// optnone call after SPIRV-Cross. The final history blend keeps mixPrecise.
 float mixFast(float x, float y, float a) { return x * (1.0 - a) + y * a; }
-vec4 mixFast(vec4 x, vec4 y, float a) { return x * (1.0 - a) + y * a; }
 
 vec4 sampleCurrent(ivec2 pixel) {
 	ivec2 bounded = clamp(pixel, ivec2(0), ivec2(pc.extent) - ivec2(1));
 	return texelFetch(sampler2D(currentColor, nearestSampler), bounded, 0);
 }
 
-vec4 samplePreviousColorLinear(vec2 texel) {
+// Bicubic (Keys a = -0.75) resampling of the history. Bilinear history taps are a low-pass applied again every frame: they left TAA
+// with about half of the AA-off edge energy. Injecting the current frame's high frequency instead put the JITTERED frame's detail back
+// every frame, which made a static scene shimmer (measured: 2.5 % of the pixels moved by more than 8/255 between frames). A sharp
+// history kernel keeps the detail without touching the current frame; its overshoot is removed by the neighbourhood clamp.
+// The 4x4 kernel is evaluated with bilinear fetches: the two middle taps of each axis (both weights positive) collapse into one
+// fetch at w2 / (w1 + w2). `nearestSampler` is therefore a LINEAR clamp-to-edge sampler; every other read in this shader is a
+// texelFetch, which ignores filtering. Reciprocals use inversesqrt (the reflection contract admits one non-precise division).
+vec4 samplePreviousColor(vec2 texel) {
 	vec2 baseFloat = floor(texel);
-	ivec2 base = ivec2(baseFloat);
 	precise vec2 f = texel - baseFloat;
-	ivec2 hi = ivec2(pc.extent) - ivec2(1);
-	vec4 c00 = texelFetch(sampler2D(previousColor, nearestSampler),
-		clamp(base, ivec2(0), hi), 0);
-	vec4 c10 = texelFetch(sampler2D(previousColor, nearestSampler),
-		clamp(base + ivec2(1, 0), ivec2(0), hi), 0);
-	vec4 c01 = texelFetch(sampler2D(previousColor, nearestSampler),
-		clamp(base + ivec2(0, 1), ivec2(0), hi), 0);
-	vec4 c11 = texelFetch(sampler2D(previousColor, nearestSampler),
-		clamp(base + ivec2(1, 1), ivec2(0), hi), 0);
-	vec4 top = mixFast(c00, c10, f.x);
-	vec4 bottom = mixFast(c01, c11, f.x);
-	return mixFast(top, bottom, f.y);
+	const float A = -0.75;
+	vec2 d0 = 1.0 + f, d1 = f, d2 = 1.0 - f, d3 = 2.0 - f;
+	vec2 w0 = ((A * d0 - 5.0 * A) * d0 + 8.0 * A) * d0 - 4.0 * A;
+	vec2 w1 = ((A + 2.0) * d1 - (A + 3.0)) * d1 * d1 + 1.0;
+	vec2 w2 = ((A + 2.0) * d2 - (A + 3.0)) * d2 * d2 + 1.0;
+	vec2 w3 = ((A * d3 - 5.0 * A) * d3 + 8.0 * A) * d3 - 4.0 * A;
+	vec2 w12 = w1 + w2;
+	vec2 offset12 = w2 * inversesqrt(w12 * w12);
+	vec2 extent = vec2(pc.extent);
+	vec2 invExtent = inversesqrt(extent * extent);
+	// UV of texel centres: (texel + 0.5) / extent.
+	vec2 uv0 = (baseFloat - 1.0 + 0.5) * invExtent;
+	vec2 uv12 = (baseFloat + offset12 + 0.5) * invExtent;
+	vec2 uv3 = (baseFloat + 2.0 + 0.5) * invExtent;
+	// Five of the nine fetches: the four corner products (w0 or w3 on both axes) are below 1 % of the kernel, so they are dropped
+	// and the remaining weights renormalized (the usual 5-tap bicubic history fetch).
+	float ux[5] = float[5](uv12.x, uv0.x, uv3.x, uv12.x, uv12.x);
+	float uy[5] = float[5](uv12.y, uv12.y, uv12.y, uv0.y, uv3.y);
+	float w[5] = float[5](w12.x * w12.y, w0.x * w12.y, w3.x * w12.y, w12.x * w0.y, w12.x * w3.y);
+	vec4 sum = vec4(0.0);
+	float total = 0.0;
+	for (int i = 0; i < 5; ++i) {
+		sum += w[i] * textureLod(sampler2D(previousColor, nearestSampler), vec2(ux[i], uy[i]), 0.0);
+		total += w[i];
+	}
+	return sum * inversesqrt(total * total);
 }
 
 float samplePreviousDepthLinear(vec2 texel) {
@@ -282,7 +301,7 @@ vec2 dlMotionVelocity(ivec2 px, int tileIndex, float centerValid) {
 // that feeds a precise result, and each such operation is emitted by SPIRV-Cross as an optnone spvFAdd/spvFMul call that the
 // Metal compiler does not inline: measured at ~0.9 ms of this pass at 1280x720. The box needs no bit-exact arithmetic (it only
 // bounds a clamp), whereas the reprojection and the final blend keep their precise chains.
-bool neighborhoodBox(int tileIndex, out vec3 boxMin, out vec3 boxMax, out vec3 boxMean) {
+bool neighborhoodBox(int tileIndex, out vec3 boxMin, out vec3 boxMax) {
 	vec3 neighborhoodMin = vec3(3.402823466e+38);
 	vec3 neighborhoodMax = vec3(-3.402823466e+38);
 	vec3 momentSum = vec3(0.0);
@@ -310,7 +329,6 @@ bool neighborhoodBox(int tileIndex, out vec3 boxMin, out vec3 boxMax, out vec3 b
 	}
 	boxMin = clipMin;
 	boxMax = clipMax;
-	boxMean = momentSum * (1.0 / 9.0);
 	return true;
 }
 
@@ -363,11 +381,10 @@ void main() {
 		if (finite1(currentLinear) && finite1(priorLinear)
 				&& currentLinear > 0.0 && priorLinear > 0.0
 				&& abs(currentLinear - priorLinear) <= depthLimit) {
-			vec4 prior = samplePreviousColorLinear(previousTexel);
+			vec4 prior = samplePreviousColor(previousTexel);
 			vec3 clipMin;
 			vec3 clipMax;
-			vec3 clipMean;
-			if (finite4(prior) && neighborhoodBox(tileIndex, clipMin, clipMax, clipMean)) {
+			if (finite4(prior) && neighborhoodBox(tileIndex, clipMin, clipMax)) {
 				vec3 clampedPrior = clamp(prior.rgb, clipMin, clipMax);
 				// Scale the history weight by the pixel's confidence. At
 				// valid == 1 this is exactly the previous behaviour
@@ -381,10 +398,7 @@ void main() {
 				float weight = scalePrecise(baseWeight, confidence);
 				precise vec3 resolvedRgb = mixPrecise(current.rgb, clampedPrior,
 					weight);
-				// Detail restoration. Every frame resamples the history bilinearly at a fractional offset, a low-pass that leaves about half of
-				// the AA-off edge energy (measured on Vulkan and Metal). A fraction of the current frame's own high frequency (its pixel
-				// minus its 3x3 mean) is added back, clamped into the neighbourhood box so it cannot overshoot or ring.
-				result = vec4(clamp(resolvedRgb + 0.6 * (current.rgb - clipMean), clipMin, clipMax), current.a);
+				result = vec4(resolvedRgb, current.a);
 				usedHistory = true;
 			}
 		}

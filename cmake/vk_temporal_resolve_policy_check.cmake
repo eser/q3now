@@ -82,12 +82,16 @@ require_text(SHADER "pc.previousEffectiveJitterUv - pc.currentEffectiveJitterUv"
 	"previous UV must remove current and add prior effective jitter")
 require_text(SHADER "float samplePreviousDepthLinear(vec2 texel)"
 	"manual bilinear previous-depth helper missing")
-require_text(SHADER "vec4 samplePreviousColorLinear(vec2 texel)"
-	"manual bilinear previous-color helper missing")
+require_text(SHADER "vec4 samplePreviousColor(vec2 texel)"
+	"bicubic previous-color helper missing")
+require_text(SHADER "vec2 w1 = ((A + 2.0) * d1 - (A + 3.0)) * d1 * d1 + 1.0;"
+	"previous-color resampling must stay bicubic (bilinear history taps lose half the edge energy)")
 require_text(SHADER "texelFetch(sampler2D(previousLinearDepth, nearestSampler)"
 	"previous depth bilinear must be built from nearest texel fetches")
-require_text(SHADER "texelFetch(sampler2D(previousColor, nearestSampler)"
-	"previous color bilinear must be built from nearest texel fetches")
+require_text(SHADER "textureLod(sampler2D(previousColor, nearestSampler), vec2(ux[i], uy[i]), 0.0)"
+	"previous color must be the 5-tap bilinear evaluation of the bicubic kernel (the sampler is linear for this fetch only)")
+require_text(SHADER "vec2 offset12 = w2 * inversesqrt(w12 * w12);"
+	"the middle bicubic taps must collapse into one bilinear fetch")
 require_text(SHADER "sampler2D(motionVelocity, nearestSampler)"
 	"motion velocity must use nearest sampling")
 require_text(SHADER "sampler2D(motionValidity, nearestSampler), pixel, 0).r;"
@@ -140,8 +144,9 @@ require_count(SHADER "previousTexel\\." 0
 	"no post-declaration reprojection component or swizzle mutation is admitted")
 require_count(SHADER "currentUv" 0
 	"color path must not normalize current coordinates")
-require_count(SHADER "textureLod" 0
-	"resolve inputs must use integer texel fetches")
+# Exactly one filtered fetch: the 9-tap bilinear evaluation of the bicubic history kernel. Every other input is an integer texel fetch.
+require_count(SHADER "textureLod" 1
+	"resolve inputs must use integer texel fetches (except the one bicubic history fetch)")
 require_count(SHADER "velocity\\." 0
 	"no component-wise velocity transform is admitted")
 require_count(SHADER "velocity[ \t]*(\\+|-|\\*|/)?=" 1
