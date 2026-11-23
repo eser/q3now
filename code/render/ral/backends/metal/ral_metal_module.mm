@@ -1501,6 +1501,7 @@ static void BeginRegistration( glconfig_t *config ) {
 		s_module.smaa = RegisterMetalRenderCvar( "r_smaa", "0", "0", "4", qtrue,
 			"SMAA quality preset 1 low .. 4 ultra; 0 uses preset 3 (high) when r_aa selects SMAA.", &s_module.smaaFallback );
 		if ( !s_module.aa || !s_module.smaa ) { MarkFailed( "aa-cvars" ); return; }
+		if ( ri.Cvar_Get && ri.Cvar_Set ) { ri.Cvar_Get( "r_aaSupported", "1", CVAR_TEMP ); ri.Cvar_Set( "r_aaSupported", "1" ); }
 		s_module.toneMap = RegisterMetalRenderCvar( "r_tonemap", "3", "0", "4",
 			qtrue, "HDR tone mapping operator: 0 identity, 1 PBR Neutral, 2 AgX, 3 Lottes, 4 Reinhard.",
 			&s_module.toneMapFallback );

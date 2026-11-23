@@ -3091,6 +3091,9 @@ static void R_Register( void )
 	// 0. The decision logic lives in tr_antialiasing.c; every SMAA / temporal enable check reads R_AntialiasingPlan() rather than
 	// these cvars. In CVG_RENDERER so a change re-runs vk_update_post_process_pipelines like r_smaa does.
 	r_aa = ri.Cvar_Get( "r_aa", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	// Published for the video menu (renderers without anti-aliasing publish 0 and the menu replaces the row with a note).
+	ri.Cvar_Get( "r_aaSupported", "1", CVAR_TEMP );
+	ri.Cvar_Set( "r_aaSupported", "1" );
 	ri.Cvar_CheckRange( r_aa, "0", "2", CV_INTEGER );
 	ri.Cvar_SetDescription( r_aa, "Anti-aliasing technique:\n"
 								  " 0 - off. r_smaa, if set, still applies as a developer override\n"

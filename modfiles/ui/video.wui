@@ -262,6 +262,23 @@ menuDef {
 							cvarFloatList { "Off" 0 "TAA" 1 "SMAA" 2 }
 							visible 1
 							grow 0
+							cvarTest "r_aaSupported"
+							showCvar { "1" }
+						}
+						itemDef {
+							name "row_aa_unavailable"
+							type 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Anti-Aliasing: not available on this renderer"
+							textalign 0
+							font $font_sans 13
+							forecolor $boneDim
+							decoration
+							visible 1
+							grow 0
+							cvarTest "r_aaSupported"
+							showCvar { "0" }
 						}
 					}
 

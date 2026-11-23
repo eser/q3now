@@ -792,6 +792,8 @@ fail:
 static void NoteAntiAliasingUnavailable( void ) {
 	static qboolean noted;
 	cvar_t *aa;
+	/* Published for the video menu: this renderer has no anti-aliasing, so the Anti-Aliasing row is replaced by a note. */
+	if ( ri.Cvar_Get && ri.Cvar_Set ) { ri.Cvar_Get( "r_aaSupported", "0", CVAR_TEMP ); ri.Cvar_Set( "r_aaSupported", "0" ); }
 	if ( noted || !ri.Cvar_Get || !ri.Cvar_CheckRange ) return;
 	aa = ri.Cvar_Get( "r_aa", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	if ( !aa ) return;
