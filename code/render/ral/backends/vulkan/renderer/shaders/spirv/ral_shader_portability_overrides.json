@@ -5798,8 +5798,8 @@
     {
       "symbol": "ral_opengl_product_frag_spv",
       "spirvDigest": {
-        "lane0": "d022d12ef7a52896",
-        "lane1": "ef91998510813adf"
+        "lane0": "d1d59f42812e5f8f",
+        "lane1": "b110b9ed1d4ebcd1"
       },
       "samplerKinds": [
         {

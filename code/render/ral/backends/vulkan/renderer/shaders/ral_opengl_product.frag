@@ -14,7 +14,7 @@ layout(set = 2, binding = 1, std140) uniform ProductMaterialFactors {
 	vec4 beamStartColor;
 	vec4 beamEndColor;
 	vec4 beamScaleOffset;
-	uvec4 beamFlags;
+	uvec4 beamFlags; // x: beam draw, y: MSDF text (the base texture is a multi-channel distance atlas)
 } productMaterial;
 
 layout(set = 1, binding = 0) uniform texture2D baseTexture;
@@ -126,6 +126,13 @@ vec4 wired_atmosphere_sample() {
 
 void main() {
 	vec4 base = texture(sampler2D(baseTexture, baseSampler), texCoord);
+	if (productMaterial.beamFlags.y != 0u) {
+		// MSDF text, as the Metal UI MSDF fragment: the median of the three channels is the signed distance; coverage is its
+		// screen-space anti-aliased step. The flag is per draw, so the derivative stays in uniform control flow.
+		float signedDistance = max(min(base.r, base.g), min(max(base.r, base.g), base.b)) - 0.5;
+		float screenWidth = max(fwidth(signedDistance), 1.0 / 1024.0);
+		base = vec4(1.0, 1.0, 1.0, clamp(signedDistance / screenWidth + 0.5, 0.0, 1.0));
+	}
 	if (productMaterial.beamFlags.x != 0u) {
 		// Canonical beam.frag: interpolate authored colour first; apply
 		// texture/descriptor coverage once in the native SRC_ALPHA blend.

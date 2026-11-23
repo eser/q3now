@@ -175,7 +175,7 @@ typedef struct {
 
 typedef struct {
 	float startColor[4], endColor[4], scaleOffset[4];
-	uint32_t flags[4];
+	uint32_t flags[4]; /* [0] beam draw, [1] MSDF text (ProductMaterialFactors.beamFlags in ral_opengl_product.frag) */
 } productBeamParams_t;
 
 typedef struct {
@@ -814,7 +814,8 @@ static qboolean DrawUiPrimitive( const worldDispatch_t *gl,
 		glName_t uniformBuffer, glName_t materialUniformBuffer,
 		productDrawUniforms_t *uniforms,
 		const renderSubmissionState_t *frontend, const glName_t *textures,
-		const renderUiPrimitive_t *ui ) {
+		const renderUiPrimitive_t *ui, qboolean msdf ) {
+	productBeamParams_t materialParams;
 	effectVertex_t vertices[4];
 	const uint32_t indices[6] = { 0u, 1u, 2u, 2u, 1u, 3u };
 	transientGeometry_t geometry;
@@ -834,10 +835,12 @@ static qboolean DrawUiPrimitive( const worldDispatch_t *gl,
 				: value > 255.0f ? 255u : (unsigned int)value );
 		}
 	}
+	memset( &materialParams, 0, sizeof( materialParams ) );
+	materialParams.flags[1] = msdf ? 1u : 0u;
 	if ( !TransientCreate( gl, vertices, 4u, indices, 6u, &geometry ) ) return qfalse;
 	gl->BindVertexArray( geometry.vao );
 	gl->BindTextureUnit( 0u, MaterialTexture( frontend, textures, ui->material ) );
-	ApplyRaster( gl, uniformBuffer, materialUniformBuffer, uniforms, NULL,
+	ApplyRaster( gl, uniformBuffer, materialUniformBuffer, uniforms, &materialParams,
 		RENDER_ALPHA_BLEND,
 		0.5f, qfalse, qfalse, qfalse, NULL, NULL, NULL, NULL,
 		NULL, 1.0f );
@@ -1572,7 +1575,7 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 		if ( !RenderSubmission_MaterialSnapshot( frontend, ui[i].material, &material )
 				|| !DrawUiPrimitive( &gl, uniformBuffer, materialUniformBuffer,
 					&uniforms, frontend, textures,
-					&ui[i] ) ) goto cleanup;
+					&ui[i], material.msdf ) ) goto cleanup;
 		receipt.uiPrimitiveCount++; receipt.texturedUiPrimitiveCount++;
 		if ( material.msdf ) receipt.msdfUiPrimitiveCount++;
 		receipt.uiDrawCount++;
