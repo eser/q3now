@@ -172,7 +172,7 @@ vec3 skinDirection(uint recordIndex, vec3 direction)
 
 void main()
 {
-    uint recordIndex = uint(gl_InstanceIndex);
+    uint recordIndex = uint((gl_InstanceID + gl_BaseInstance));
     if (recordIndex >= 256u)
     {
         gl_Position = vec4(0.0, 0.0, -2.0, 1.0);

@@ -20,6 +20,6 @@ void main()
 {
     out_texcoord = in_texcoord;
     out_packed = floatBitsToUint(in_packed);
-    gl_Position = (_29.cascadeMVP * _36.matrices[gl_InstanceIndex]) * vec4(in_position, 1.0);
+    gl_Position = (_29.cascadeMVP * _36.matrices[(gl_InstanceID + gl_BaseInstance)]) * vec4(in_position, 1.0);
 }
 

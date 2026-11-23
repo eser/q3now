@@ -192,8 +192,8 @@ float parmEval(ParticleParm p, inout float fraction, float jitterPick)
 
 void main()
 {
-    uint particleIdx = uint(gl_InstanceIndex);
-    uint vertInQuad = uint(gl_VertexIndex) % 6u;
+    uint particleIdx = uint((gl_InstanceID + gl_BaseInstance));
+    uint vertInQuad = uint(gl_VertexID) % 6u;
     if (particleIdx >= _197.poolSize)
     {
         emitDegenerate();

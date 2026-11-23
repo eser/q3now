@@ -34,7 +34,7 @@ void main()
     mat4 _16;
     if (_15)
     {
-        _16 = _22.entMat[gl_InstanceIndex * 2];
+        _16 = _22.entMat[(gl_InstanceID + gl_BaseInstance) * 2];
     }
     else
     {
@@ -49,7 +49,7 @@ void main()
     mat4 _90;
     if (_89)
     {
-        _90 = _22.entMat[(gl_InstanceIndex * 2) + 1];
+        _90 = _22.entMat[((gl_InstanceID + gl_BaseInstance) * 2) + 1];
     }
     else
     {

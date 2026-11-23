@@ -14,6 +14,6 @@ layout(location = 0) in vec3 in_position;
 
 void main()
 {
-    gl_Position = (_16.cascadeMVP * _23.matrices[gl_InstanceIndex]) * vec4(in_position, 1.0);
+    gl_Position = (_16.cascadeMVP * _23.matrices[(gl_InstanceID + gl_BaseInstance)]) * vec4(in_position, 1.0);
 }
 

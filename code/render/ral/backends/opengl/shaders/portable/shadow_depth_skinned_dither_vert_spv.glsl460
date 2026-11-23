@@ -51,7 +51,7 @@ void main()
         vec3 param_7 = in_position;
         pos += (transformByBone(param_6, param_7) * in_bone_weights.w);
     }
-    mat4 m = _141.matrices[gl_InstanceIndex];
+    mat4 m = _141.matrices[(gl_InstanceID + gl_BaseInstance)];
     out_opacity = m[0].w;
     m[0].w = 0.0;
     gl_Position = (_159.cascadeMVP * m) * vec4(pos, 1.0);

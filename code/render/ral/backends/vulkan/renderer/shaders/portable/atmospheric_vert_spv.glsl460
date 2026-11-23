@@ -69,8 +69,8 @@ void emitDegenerate()
 
 void main()
 {
-    uint idx = uint(gl_InstanceIndex);
-    uint vertInQuad = uint(gl_VertexIndex) % 6u;
+    uint idx = uint((gl_InstanceID + gl_BaseInstance));
+    uint vertInQuad = uint(gl_VertexID) % 6u;
     bool _54 = idx >= _49.poolSize;
     bool _72;
     if (!_54)

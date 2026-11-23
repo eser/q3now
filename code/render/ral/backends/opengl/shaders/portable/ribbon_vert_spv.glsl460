@@ -44,13 +44,13 @@ layout(location = 2) flat out uint fragShaderHandle;
 void main()
 {
     RibbonHeader hdr;
-    hdr.pointOffset = _16.headers[gl_InstanceIndex].pointOffset;
-    hdr.pointCount = _16.headers[gl_InstanceIndex].pointCount;
-    hdr.shaderHandle = _16.headers[gl_InstanceIndex].shaderHandle;
-    hdr.flags = _16.headers[gl_InstanceIndex].flags;
-    hdr.uvScroll = _16.headers[gl_InstanceIndex].uvScroll;
-    uint vertInQuad = uint(gl_VertexIndex) % 6u;
-    uint segIdx = uint(gl_VertexIndex) / 6u;
+    hdr.pointOffset = _16.headers[(gl_InstanceID + gl_BaseInstance)].pointOffset;
+    hdr.pointCount = _16.headers[(gl_InstanceID + gl_BaseInstance)].pointCount;
+    hdr.shaderHandle = _16.headers[(gl_InstanceID + gl_BaseInstance)].shaderHandle;
+    hdr.flags = _16.headers[(gl_InstanceID + gl_BaseInstance)].flags;
+    hdr.uvScroll = _16.headers[(gl_InstanceID + gl_BaseInstance)].uvScroll;
+    uint vertInQuad = uint(gl_VertexID) % 6u;
+    uint segIdx = uint(gl_VertexID) / 6u;
     uint pi = (hdr.pointOffset + segIdx) + _59[vertInQuad];
     float sgn = _71[vertInQuad];
     RibbonPoint p;

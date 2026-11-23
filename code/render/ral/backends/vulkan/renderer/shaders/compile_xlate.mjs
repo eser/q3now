@@ -182,20 +182,39 @@ export function lowerGlsl460(bytes, portableEntry) {
 		if (lowered === source) break;
 		source = lowered;
 	}
-	const computeSampler = {
-		// Exact compute inputs; no substitute texture or fallback shader.
-		lens_occlusion_comp_spv: ['depthTex', 'depthSampler'],
-		hdr_histogram_comp_spv: ['colorImage', 'colorSampler'],
+	// Vulkan vertex built-ins: gl_VertexIndex already includes the base vertex (as gl_VertexID does in GL); gl_InstanceIndex includes the
+	// base instance, which GL 4.6 core exposes separately as gl_BaseInstance.
+	source = source.replace(/\bgl_VertexIndex\b/g, 'gl_VertexID')
+		.replace(/\bgl_InstanceIndex\b/g, '(gl_InstanceID + gl_BaseInstance)');
+	// OpenGL GLSL has no separate texture / sampler objects (the GL_KHR_vulkan_glsl `textureXD` + `sampler` types): every compute
+	// input the OpenGL product samples is lowered to a combined sampler at the texture's binding (= its texture unit; the backend binds
+	// texture units only, the sampling state is the texture's). Exact per module: every listed texture, the sampler and each
+	// constructor pair must be present, and no separate declaration may remain. No substitute texture or fallback shader.
+	const computeSamplers = {
+		lens_occlusion_comp_spv: { sampler: 'depthSampler', textures: [['depthTex', 'texture2D', 'sampler2D']] },
+		hdr_histogram_comp_spv: { sampler: 'colorSampler', textures: [['colorImage', 'texture2D', 'sampler2D']] },
+		source_sky_comp_spv: { sampler: 'authoredSampler', textures: ['authoredRt', 'authoredBk', 'authoredLf', 'authoredFt',
+			'authoredUp', 'authoredDn'].map((name) => [name, 'texture2D', 'sampler2D']) },
+		project_sky_sh_comp_spv: { sampler: 'srcSamp', textures: [['srcTex', 'texture2DArray', 'sampler2DArray']] },
+		convolve_irradiance_comp_spv: { sampler: 'srcSamp', textures: [['srcTex', 'texture2DArray', 'sampler2DArray']] },
+		prefilter_radiance_comp_spv: { sampler: 'srcSamp', textures: [['srcTex', 'texture2DArray', 'sampler2DArray']] },
 	}[portableEntry.symbol];
-	if (computeSampler) {
-		const [textureName, samplerName] = computeSampler;
-		const texture = `layout(binding = 0) uniform texture2D ${textureName};`;
-		const sampler = `layout(binding = 0) uniform sampler ${samplerName};`;
-		const pair = `sampler2D(${textureName}, ${samplerName})`;
-		if (!source.includes(texture) || !source.includes(sampler) || !source.includes(pair))
-			throw new Error(`GLSL compute combined-sampler lowering failed: ${portableEntry.symbol}`);
-		source = source.replace(texture, `layout(binding = 0) uniform sampler2D ${textureName};`)
-			.replace(`${sampler}\n`, '').replaceAll(pair, textureName);
+	if (computeSamplers) {
+		const { sampler: samplerName, textures } = computeSamplers;
+		const samplerDecl = new RegExp(`layout\\(binding = \\d+\\) uniform sampler ${samplerName};\\n`);
+		if (!samplerDecl.test(source))
+			throw new Error(`GLSL compute combined-sampler lowering failed: ${portableEntry.symbol} (sampler ${samplerName})`);
+		for (const [textureName, textureType, combinedType] of textures) {
+			const decl = new RegExp(`layout\\(binding = (\\d+)\\) uniform ${textureType} ${textureName};`);
+			const pair = `${combinedType}(${textureName}, ${samplerName})`;
+			if (!decl.test(source) || !source.includes(pair))
+				throw new Error(`GLSL compute combined-sampler lowering failed: ${portableEntry.symbol} (${textureName})`);
+			source = source.replace(decl, (_m, binding) => `layout(binding = ${binding}) uniform ${combinedType} ${textureName};`)
+				.replaceAll(pair, textureName);
+		}
+		source = source.replace(samplerDecl, '');
+		if (/uniform (?:texture\w+|sampler) \w+;/.test(source))
+			throw new Error(`GLSL compute combined-sampler lowering left a separate texture or sampler: ${portableEntry.symbol}`);
 	}
 	if (portableEntry.symbol === 'ral_opengl_product_frag_spv') {
 		const skyHelperSignature =

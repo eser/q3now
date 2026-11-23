@@ -35,7 +35,7 @@ void main()
     mat4 _16;
     if (_15)
     {
-        _16 = _22.entMat[gl_InstanceIndex * 2];
+        _16 = _22.entMat[(gl_InstanceID + gl_BaseInstance) * 2];
     }
     else
     {

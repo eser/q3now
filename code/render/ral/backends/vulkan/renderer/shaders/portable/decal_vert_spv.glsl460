@@ -55,8 +55,8 @@ void emitDegenerate()
 
 void main()
 {
-    uint decalIdx = uint(gl_InstanceIndex);
-    uint vertInQuad = uint(gl_VertexIndex) % 6u;
+    uint decalIdx = uint((gl_InstanceID + gl_BaseInstance));
+    uint vertInQuad = uint(gl_VertexID) % 6u;
     if (float(decalIdx) >= _57.timeCount.y)
     {
         emitDegenerate();

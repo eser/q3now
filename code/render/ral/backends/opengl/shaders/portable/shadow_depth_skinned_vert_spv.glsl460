@@ -50,6 +50,6 @@ void main()
         vec3 param_7 = in_position;
         pos += (transformByBone(param_6, param_7) * in_bone_weights.w);
     }
-    gl_Position = (_141.cascadeMVP * _148.matrices[gl_InstanceIndex]) * vec4(pos, 1.0);
+    gl_Position = (_141.cascadeMVP * _148.matrices[(gl_InstanceID + gl_BaseInstance)]) * vec4(pos, 1.0);
 }
 

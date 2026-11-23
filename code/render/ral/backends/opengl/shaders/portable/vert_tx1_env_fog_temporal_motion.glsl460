@@ -51,7 +51,7 @@ void main()
     mat4 _16;
     if (_15)
     {
-        _16 = _22.entMat[gl_InstanceIndex * 2];
+        _16 = _22.entMat[(gl_InstanceID + gl_BaseInstance) * 2];
     }
     else
     {
@@ -60,9 +60,9 @@ void main()
     mat4 mvp = _16;
     gl_Position = mvp * vec4(in_position, 1.0);
     TemporalPayloadRecord temporal;
-    temporal.currentMvp = temporalPayloads.temporalPayload[gl_InstanceIndex].currentMvp;
-    temporal.previousMvp = temporalPayloads.temporalPayload[gl_InstanceIndex].previousMvp;
-    temporal.outcomeReserved = temporalPayloads.temporalPayload[gl_InstanceIndex].outcomeReserved;
+    temporal.currentMvp = temporalPayloads.temporalPayload[(gl_InstanceID + gl_BaseInstance)].currentMvp;
+    temporal.previousMvp = temporalPayloads.temporalPayload[(gl_InstanceID + gl_BaseInstance)].previousMvp;
+    temporal.outcomeReserved = temporalPayloads.temporalPayload[(gl_InstanceID + gl_BaseInstance)].outcomeReserved;
     vec4 temporalLocalPosition = vec4(in_position, 1.0);
     temporalCurrentClip = temporal.currentMvp * temporalLocalPosition;
     temporalPreviousClip = temporal.previousMvp * temporalLocalPosition;

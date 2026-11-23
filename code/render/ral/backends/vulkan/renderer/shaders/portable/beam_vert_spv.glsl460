@@ -64,8 +64,8 @@ void emitDegenerate()
 
 void main()
 {
-    uint beamIdx = uint(gl_InstanceIndex);
-    uint vertexIdx = uint(gl_VertexIndex);
+    uint beamIdx = uint((gl_InstanceID + gl_BaseInstance));
+    uint vertexIdx = uint(gl_VertexID);
     uint copyIdx = vertexIdx / 6u;
     uint localIdx = vertexIdx % 6u;
     BeamHeader hdr;

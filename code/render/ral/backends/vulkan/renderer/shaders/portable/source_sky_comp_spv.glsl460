@@ -9,13 +9,12 @@ layout(std140, binding = 8) uniform Push
     vec4 sunRadianceExposure;
 } p;
 
-layout(binding = 0) uniform texture2D authoredRt;
-layout(binding = 0) uniform sampler authoredSampler;
-layout(binding = 2) uniform texture2D authoredLf;
-layout(binding = 1) uniform texture2D authoredBk;
-layout(binding = 3) uniform texture2D authoredFt;
-layout(binding = 4) uniform texture2D authoredUp;
-layout(binding = 5) uniform texture2D authoredDn;
+layout(binding = 0) uniform sampler2D authoredRt;
+layout(binding = 2) uniform sampler2D authoredLf;
+layout(binding = 1) uniform sampler2D authoredBk;
+layout(binding = 3) uniform sampler2D authoredFt;
+layout(binding = 4) uniform sampler2D authoredUp;
+layout(binding = 5) uniform sampler2D authoredDn;
 layout(binding = 0, rgba16f) uniform writeonly image2DArray skyImage;
 
 vec3 wired_sky_cube_direction(uint face, vec2 uv)
@@ -122,25 +121,25 @@ vec3 authoredSky(vec3 dir)
     vec2 uv = vec2((st.x * 0.5) + 0.5, 0.5 - (st.y * 0.5));
     if (axis == 0u)
     {
-        return textureLod(sampler2D(authoredRt, authoredSampler), uv, 0.0).xyz;
+        return textureLod(authoredRt, uv, 0.0).xyz;
     }
     if (axis == 1u)
     {
-        return textureLod(sampler2D(authoredLf, authoredSampler), uv, 0.0).xyz;
+        return textureLod(authoredLf, uv, 0.0).xyz;
     }
     if (axis == 2u)
     {
-        return textureLod(sampler2D(authoredBk, authoredSampler), uv, 0.0).xyz;
+        return textureLod(authoredBk, uv, 0.0).xyz;
     }
     if (axis == 3u)
     {
-        return textureLod(sampler2D(authoredFt, authoredSampler), uv, 0.0).xyz;
+        return textureLod(authoredFt, uv, 0.0).xyz;
     }
     if (axis == 4u)
     {
-        return textureLod(sampler2D(authoredUp, authoredSampler), uv, 0.0).xyz;
+        return textureLod(authoredUp, uv, 0.0).xyz;
     }
-    return textureLod(sampler2D(authoredDn, authoredSampler), uv, 0.0).xyz;
+    return textureLod(authoredDn, uv, 0.0).xyz;
 }
 
 vec3 analyticSky(vec3 dir)

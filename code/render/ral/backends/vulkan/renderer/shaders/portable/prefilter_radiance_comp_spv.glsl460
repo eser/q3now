@@ -7,8 +7,7 @@ layout(std140, binding = 3) uniform Push
     uint roughnessMips;
 } _441;
 
-layout(binding = 0) uniform texture2DArray srcTex;
-layout(binding = 0) uniform sampler srcSamp;
+layout(binding = 0) uniform sampler2DArray srcTex;
 layout(binding = 0, rgba16f) uniform writeonly image2DArray dstRadiance;
 
 vec3 wired_sky_cube_direction(uint face, vec2 uv)
@@ -118,7 +117,7 @@ vec3 wired_sky_cube_uv_layer(vec3 dir)
 vec3 sampleSource(vec3 dir)
 {
     vec3 param = dir;
-    return textureLod(sampler2DArray(srcTex, srcSamp), wired_sky_cube_uv_layer(param), 0.0).xyz;
+    return textureLod(srcTex, wired_sky_cube_uv_layer(param), 0.0).xyz;
 }
 
 float radicalInverse_VdC(inout uint bits)

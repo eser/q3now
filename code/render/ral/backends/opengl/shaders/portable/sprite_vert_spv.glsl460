@@ -33,13 +33,13 @@ layout(location = 1) out vec4 fragColor;
 void main()
 {
     SpriteHeader hdr;
-    hdr.originW = _16.sprites[gl_InstanceIndex].originW;
-    hdr.rgba = _16.sprites[gl_InstanceIndex].rgba;
-    hdr.shaderHandle = _16.sprites[gl_InstanceIndex].shaderHandle;
-    hdr.flags = _16.sprites[gl_InstanceIndex].flags;
-    hdr.pad0 = _16.sprites[gl_InstanceIndex].pad0;
-    hdr.pad1 = _16.sprites[gl_InstanceIndex].pad1;
-    uint vertInQuad = uint(gl_VertexIndex) % 6u;
+    hdr.originW = _16.sprites[(gl_InstanceID + gl_BaseInstance)].originW;
+    hdr.rgba = _16.sprites[(gl_InstanceID + gl_BaseInstance)].rgba;
+    hdr.shaderHandle = _16.sprites[(gl_InstanceID + gl_BaseInstance)].shaderHandle;
+    hdr.flags = _16.sprites[(gl_InstanceID + gl_BaseInstance)].flags;
+    hdr.pad0 = _16.sprites[(gl_InstanceID + gl_BaseInstance)].pad0;
+    hdr.pad1 = _16.sprites[(gl_InstanceID + gl_BaseInstance)].pad1;
+    uint vertInQuad = uint(gl_VertexID) % 6u;
     float sx = _55[vertInQuad];
     float uy = _62[vertInQuad];
     float radius = hdr.originW.w;
