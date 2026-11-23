@@ -18,6 +18,14 @@ layout(rgba16f, set = 0, binding = 7) uniform writeonly image2D resolvedColor;
 layout(rgba16f, set = 0, binding = 8) uniform writeonly image2D historyOutColor;
 layout(r32f, set = 0, binding = 9) uniform writeonly image2D historyOutLinearDepth;
 
+// One 8x8 workgroup reads a 10x10 tile (its pixels plus a one texel halo) of the current colour and device depth once. The 3x3
+// neighbourhood box, the velocity dilation and the stored history depth read workgroup memory instead of issuing nine texture
+// fetches per pixel. Halo texels outside the image are clamped, exactly like the per-fetch clamp they replace.
+const int tileSide = 10;
+const uint tileCount = 100u;
+shared vec4 tileColor[100];
+shared float tileDepth[100];
+
 layout(push_constant) uniform TemporalResolvePush {
 	uvec2 extent;
 	vec2 currentEffectiveJitterUv;
@@ -247,19 +255,18 @@ vec4 fxSpatialAa(ivec2 px, vec4 centerColor) {
 // Velocity dilation: at a foreground edge the centre pixel often belongs to the background while the edge belongs to the object in
 // front, so reprojecting it with the background velocity drags a ghost behind the object. Taking the velocity of the closest pixel
 // of the 3x3 neighbourhood moves the whole edge with the object. The depth range is reversed (a larger device depth is closer).
-vec2 dlMotionVelocity(ivec2 px, float centerValid) {
+vec2 dlMotionVelocity(ivec2 px, int tileIndex, float centerValid) {
 	vec2 centerVelocity = texelFetch(
 		sampler2D(motionVelocity, nearestSampler), px, 0).xy;
 	if ((pc.qualityFlags & 2u) == 0u || !(centerValid > 0.0) || !finite2(centerVelocity))
 		return centerVelocity;
 	ivec2 hi = ivec2(pc.extent) - ivec2(1);
 	ivec2 best = px;
-	float bestDepth = texelFetch(sampler2D(currentDeviceDepth, nearestSampler), px, 0).r;
+	float bestDepth = tileDepth[tileIndex];
 	for (int y = -1; y <= 1; ++y) {
 		for (int x = -1; x <= 1; ++x) {
-			ivec2 q = clamp(px + ivec2(x, y), ivec2(0), hi);
-			float d = texelFetch(sampler2D(currentDeviceDepth, nearestSampler), q, 0).r;
-			if (d > bestDepth) { bestDepth = d; best = q; }
+			float d = tileDepth[tileIndex + y * tileSide + x];
+			if (d > bestDepth) { bestDepth = d; best = clamp(px + ivec2(x, y), ivec2(0), hi); }
 		}
 	}
 	if (best == px) return centerVelocity;
@@ -275,14 +282,14 @@ vec2 dlMotionVelocity(ivec2 px, float centerValid) {
 // that feeds a precise result, and each such operation is emitted by SPIRV-Cross as an optnone spvFAdd/spvFMul call that the
 // Metal compiler does not inline: measured at ~0.9 ms of this pass at 1280x720. The box needs no bit-exact arithmetic (it only
 // bounds a clamp), whereas the reprojection and the final blend keep their precise chains.
-bool neighborhoodBox(ivec2 pixel, out vec3 boxMin, out vec3 boxMax) {
+bool neighborhoodBox(int tileIndex, out vec3 boxMin, out vec3 boxMax) {
 	vec3 neighborhoodMin = vec3(3.402823466e+38);
 	vec3 neighborhoodMax = vec3(-3.402823466e+38);
 	vec3 momentSum = vec3(0.0);
 	vec3 momentSquares = vec3(0.0);
 	for (int y = -1; y <= 1; ++y) {
 		for (int x = -1; x <= 1; ++x) {
-			vec3 c = sampleCurrent(pixel + ivec2(x, y)).rgb;
+			vec3 c = tileColor[tileIndex + y * tileSide + x].rgb;
 			neighborhoodMin = min(neighborhoodMin, c);
 			neighborhoodMax = max(neighborhoodMax, c);
 			momentSum += c;
@@ -308,14 +315,23 @@ bool neighborhoodBox(ivec2 pixel, out vec3 boxMin, out vec3 boxMax) {
 
 void main() {
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+	ivec2 tileOrigin = ivec2(gl_WorkGroupID.xy) * 8 - ivec2(1);
+	ivec2 imageHi = ivec2(pc.extent) - ivec2(1);
+	// Every invocation joins the cooperative load and the barrier, including those past the image edge.
+	for (uint i = gl_LocalInvocationIndex; i < tileCount; i += 64u) {
+		ivec2 q = clamp(tileOrigin + ivec2(int(i % 10u), int(i / 10u)), ivec2(0), imageHi);
+		tileColor[i] = texelFetch(sampler2D(currentColor, nearestSampler), q, 0);
+		tileDepth[i] = texelFetch(sampler2D(currentDeviceDepth, nearestSampler), q, 0).r;
+	}
+	barrier();
 	if (any(greaterThanEqual(pixel, ivec2(pc.extent)))) return;
-	vec4 current = texelFetch(
-		sampler2D(currentColor, nearestSampler), pixel, 0);
+	int tileIndex = (int(gl_LocalInvocationID.y) + 1) * tileSide + int(gl_LocalInvocationID.x) + 1;
+	vec4 current = tileColor[tileIndex];
 	vec4 result = current;
 	bool usedHistory = false;
 	float valid = texelFetch(
 		sampler2D(motionValidity, nearestSampler), pixel, 0).r;
-	vec2 velocity = dlMotionVelocity(pixel, valid);
+	vec2 velocity = dlMotionVelocity(pixel, tileIndex, valid);
 	precise vec2 jitterDelta =
 		pc.previousEffectiveJitterUv - pc.currentEffectiveJitterUv;
 	precise vec2 jitterTexel = jitterDelta * vec2(pc.extent);
@@ -338,8 +354,7 @@ void main() {
 	// right: all-in ghosts, all-out loses the anti-aliasing.
 	if (finite4(current) && finite1(valid) && valid > 0.0
 			&& finite2(velocity) && finite2(previousTexel) && inside) {
-		float currentDevice = texelFetch(
-			sampler2D(currentDeviceDepth, nearestSampler), pixel, 0).r;
+		float currentDevice = tileDepth[tileIndex];
 		float currentLinear = linearizeDepth(currentDevice);
 		float priorLinear = samplePreviousDepthLinear(previousTexel);
 		float depthLimit = max(pc.depthThresholdAbsolute,
@@ -350,7 +365,7 @@ void main() {
 			vec4 prior = samplePreviousColorLinear(previousTexel);
 			vec3 clipMin;
 			vec3 clipMax;
-			if (finite4(prior) && neighborhoodBox(pixel, clipMin, clipMax)) {
+			if (finite4(prior) && neighborhoodBox(tileIndex, clipMin, clipMax)) {
 				vec3 clampedPrior = clamp(prior.rgb, clipMin, clipMax);
 				// Scale the history weight by the pixel's confidence. At
 				// valid == 1 this is exactly the previous behaviour
@@ -373,6 +388,5 @@ void main() {
 	if (!finite4(result)) result = vec4(0.0);
 	imageStore(resolvedColor, pixel, result);
 	imageStore(historyOutColor, pixel, result);
-	imageStore(historyOutLinearDepth, pixel, vec4(storeLinearDepth(texelFetch(
-		sampler2D(currentDeviceDepth, nearestSampler), pixel, 0).r)));
+	imageStore(historyOutLinearDepth, pixel, vec4(storeLinearDepth(tileDepth[tileIndex])));
 }
