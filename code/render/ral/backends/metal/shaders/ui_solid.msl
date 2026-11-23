@@ -1509,11 +1509,17 @@ static float3 wiredTaaWorldFromNdc(constant WorldViewParams &v, float2 ndc, floa
     return v.viewOrigin.xyz + v.forward.xyz * forward + v.left.xyz * left + v.up.xyz * up;
 }
 
+// Writes 1 where an entity batch is the visible surface; drawn with the world vertex function (identical positions) against the scene depth.
+fragment float4 wired_taa_mask_fragment(WorldVertexOut in [[stage_in]]) {
+    return float4(1.0, 0.0, 0.0, 0.0);
+}
+
 kernel void wired_taa_motion_compute(
         depth2d<float, access::read> sceneDepth [[texture(0)]],
         texture2d<float, access::write> velocity [[texture(1)]],
         texture2d<float, access::write> validity [[texture(2)]],
         texture2d<float, access::write> reverseDepth [[texture(3)]],
+        texture2d<float, access::read> effectMask [[texture(4)]],
         constant TaaMotionParams &p [[buffer(0)]],
         uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= p.extent.x || gid.y >= p.extent.y) return;
@@ -1533,6 +1539,10 @@ kernel void wired_taa_motion_compute(
     const float2 uvCurrent = float2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
     const float2 uvPrevious = float2(previousNdc.x * 0.5 + 0.5, 0.5 - previousNdc.y * 0.5);
     velocity.write(float4(uvCurrent - uvPrevious, 0.0, 0.0), gid);
-    validity.write(float4(ok ? 1.0 : 0.0, 0.0, 0.0, 0.0), gid);
+    // Effect mask (same contract as the Vulkan renderer's INVALIDATE_OPAQUE / translucent / decal / depth-hack draws): pixels covered by an
+    // entity, a first-person weapon or a translucent or decal surface have no trustworthy camera-only reprojection, so they take the
+    // resolve's spatial fallback instead of a history that would trail behind them.
+    const bool covered = effectMask.read(gid).r > 0.5;
+    validity.write(float4((ok && !covered) ? 1.0 : 0.0, 0.0, 0.0, 0.0), gid);
     reverseDepth.write(float4(rd, 0.0, 0.0, 0.0), gid);
 }

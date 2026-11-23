@@ -24,6 +24,10 @@ typedef struct {
 /* `motionLibrary` is the product library that holds wired_taa_motion_compute. */
 ralMetalTaa_t *RalMetal_TaaCreate(id<MTLDevice> device, id<MTLLibrary> motionLibrary);
 void RalMetal_TaaDestroy(ralMetalTaa_t *state);
+/* The R8Unorm effect-mask render target of the cohort for `scene` (allocated on demand). The caller clears it to 0 and draws 1 where
+ * a pixel must not inherit history by camera reprojection (entities, first-person weapon, translucent and decal batches); the motion
+ * kernel turns those pixels invalid, as the Vulkan renderer does for the same classes of draw. */
+id<MTLTexture> RalMetal_TaaEffectMask(ralMetalTaa_t *state, id<MTLTexture> scene);
 /* Encodes motion, resolve (or the bootstrap when there is no history) and the copy of the result back into `scene`, in place, before
  * bloom and tone mapping. `depth` is the Depth32Float scene depth of the frame. On false the caller must discard the command. */
 bool RalMetal_TaaEncode(ralMetalTaa_t *state, id<MTLCommandBuffer> command, id<MTLTexture> scene, id<MTLTexture> depth,

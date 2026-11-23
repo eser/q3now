@@ -224,6 +224,8 @@ qboolean effectParity;
 	MTLPixelFormat particlePixelFormat;
 	id<MTLDepthStencilState> worldDepthState;
 	id<MTLDepthStencilState> worldDepthReadState;
+	id<MTLRenderPipelineState> taaMaskPipeline;   /* entity coverage into the TAA effect mask */
+	id<MTLBuffer> taaMaskMaterial;                 /* zeroed material block the world vertex function reads */
 	id<MTLDepthStencilState> worldDepthEqualState;
 	id<MTLDepthStencilState> worldDepthEqualReadState;
 	ralMetalWorldCacheSlot_t worldCaches[MAX_RENDER_WORLDS];
@@ -2961,6 +2963,84 @@ static MTLVertexDescriptor *WorldVertexDescriptor( void ) {
 	return vertices;
 }
 
+/* TAA effect mask. The Metal scene pass has no velocity attachment, so every pixel of the frame would otherwise be reprojected as static
+ * world. Entities (their motion is not tracked), the first-person weapon (it moves with the camera), and translucent or decal batches
+ * (they never own the depth beneath them) must not inherit history that way; the Vulkan renderer invalidates exactly these classes of
+ * draw. The batches are drawn again with the SAME world vertex function (bit-identical positions) against the finished scene depth,
+ * writing 1 into an R8 mask where they are the visible surface; the motion kernel then marks those pixels invalid. */
+static qboolean EncodeTaaEffectMask( id<MTLCommandBuffer> command, ralMetalPresent_t *present,
+		id<MTLTexture> mask, id<MTLTexture> depth, id<MTLBuffer> entityVertices,
+		id<MTLBuffer> entityIndices, const ralMetalEntityBatch_t *entityBatches,
+		uint32_t entityBatchCount, const renderWorldSnapshot_t *sceneView,
+		const ralMetalWorldViewParams_t *viewParams, uint32_t width, uint32_t height ) {
+	if ( !present->taaMaskPipeline || !present->taaMaskMaterial ) {
+		id<MTLDevice> device = RalMetal_CoreNativeDevice( present->core );
+		id<MTLFunction> vertex = [present->uiLibrary newFunctionWithName:@"wired_world_vertex"];
+		id<MTLFunction> fragment = [present->uiLibrary newFunctionWithName:@"wired_taa_mask_fragment"];
+		NSError *error = nil;
+		if ( vertex && fragment ) {
+			MTLRenderPipelineDescriptor *pipeline = [[[MTLRenderPipelineDescriptor alloc] init] autorelease];
+			pipeline.vertexFunction = vertex; pipeline.fragmentFunction = fragment;
+			pipeline.vertexDescriptor = WorldVertexDescriptor();
+			pipeline.colorAttachments[0].pixelFormat = MTLPixelFormatR8Unorm;
+			pipeline.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
+			present->taaMaskPipeline = [device newRenderPipelineStateWithDescriptor:pipeline error:&error];
+			present->taaMaskMaterial = [device newBufferWithLength:sizeof( ralMetalWorldMaterialParams_t )
+				options:MTLResourceStorageModeShared];
+			if ( present->taaMaskMaterial )
+				memset( [present->taaMaskMaterial contents], 0, sizeof( ralMetalWorldMaterialParams_t ) );
+		}
+		[vertex release]; [fragment release];
+		if ( !present->taaMaskPipeline || !present->taaMaskMaterial || error ) return qfalse;
+	}
+	MTLRenderPassDescriptor *pass = [MTLRenderPassDescriptor renderPassDescriptor];
+	pass.colorAttachments[0].texture = mask;
+	pass.colorAttachments[0].loadAction = MTLLoadActionClear;
+	pass.colorAttachments[0].clearColor = MTLClearColorMake( 0.0, 0.0, 0.0, 0.0 );
+	pass.colorAttachments[0].storeAction = MTLStoreActionStore;
+	pass.depthAttachment.texture = depth;
+	pass.depthAttachment.loadAction = MTLLoadActionLoad;
+	pass.depthAttachment.storeAction = MTLStoreActionDontCare;
+	id<MTLRenderCommandEncoder> encoder = [command renderCommandEncoderWithDescriptor:pass];
+	if ( !encoder ) return qfalse;
+	encoder.label = @"wired.taa.effect-mask";
+	if ( entityBatchCount && entityVertices && entityIndices ) {
+		const uint32_t viewportX = sceneView->viewportX > 0 ? (uint32_t)sceneView->viewportX : 0u;
+		const uint32_t viewportY = sceneView->viewportY > 0 ? (uint32_t)sceneView->viewportY : 0u;
+		const uint32_t viewportWidth = sceneView->viewportWidth && viewportX < width
+			? MIN( sceneView->viewportWidth, width - viewportX ) : width;
+		const uint32_t viewportHeight = sceneView->viewportHeight && viewportY < height
+			? MIN( sceneView->viewportHeight, height - viewportY ) : height;
+		MTLViewport viewport = { (double)viewportX, (double)viewportY, (double)viewportWidth, (double)viewportHeight, 0.0, 1.0 };
+		MTLScissorRect scissor = { viewportX, viewportY, viewportWidth, viewportHeight };
+		[encoder setRenderPipelineState:present->taaMaskPipeline];
+		[encoder setDepthStencilState:present->worldDepthReadState];
+		[encoder setViewport:viewport];
+		[encoder setScissorRect:scissor];
+		[encoder setVertexBuffer:entityVertices offset:0u atIndex:0u];
+		[encoder setVertexBytes:viewParams length:sizeof( *viewParams ) atIndex:1u];
+		[encoder setVertexBuffer:present->taaMaskMaterial offset:0u atIndex:2u];
+		MTLCullMode cullState = MTLCullModeNone;
+		[encoder setCullMode:cullState];
+		for ( uint32_t batchIndex = 0u; batchIndex < entityBatchCount; ++batchIndex ) {
+			const ralMetalEntityBatch_t *batch = &entityBatches[batchIndex];
+			if ( !batch->visible || !batch->indexCount ) continue;
+			const MTLCullMode cull = ( sceneView->rdflags & RDF_NOWORLDMODEL )
+				|| batch->cullMode == RENDER_CULL_NONE ? MTLCullModeNone
+				: ( batch->cullMode == RENDER_CULL_FRONT ? MTLCullModeFront : MTLCullModeBack );
+			if ( cull != cullState ) { cullState = cull; [encoder setCullMode:cull]; }
+			/* First-person weapons compress only their depth range, exactly like the scene pass. */
+			const double depthFar = batch->depthHack ? 0.3 : 1.0;
+			if ( viewport.zfar != depthFar ) { viewport.zfar = depthFar; [encoder setViewport:viewport]; }
+			[encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:batch->indexCount
+				indexType:MTLIndexTypeUInt32 indexBuffer:entityIndices
+				indexBufferOffset:(NSUInteger)batch->firstIndex * sizeof( uint32_t )];
+		}
+	}
+	[encoder endEncoding];
+	return qtrue;
+}
+
 static qboolean EnsureWorldPipeline( ralMetalPresent_t *present,
 		MTLPixelFormat colorFormat ) {
 	id<MTLDevice> device;
@@ -5327,6 +5407,8 @@ void RalMetal_PresentDestroy( ralMetalPresent_t *present ) {
 	[present->worldDepthReadState release];
 	[present->worldDepthEqualState release];
 	[present->worldDepthEqualReadState release];
+	[present->taaMaskPipeline release];
+	[present->taaMaskMaterial release];
 	for ( i = 0u; i < MAX_RENDER_WORLDS; ++i ) {
 		[present->worldCaches[i].vertices release];
 		[present->worldCaches[i].indices release];
@@ -7361,6 +7443,14 @@ static qboolean RenderAndSubmit( ralMetalPresent_t *present,
 				taaFrame.previousJitterUv[1] = taaPlan.previousJitterPixels[1] / (float)receipt.height;
 				taaFrame.historyValid = taaPlan.historyValid; taaFrame.readIndex = taaPlan.historyReadIndex;
 				taaFrame.writeIndex = taaPlan.historyWriteIndex;
+				id<MTLTexture> effectMask = RalMetal_TaaEffectMask( present->taa, present->sceneColorCache );
+				if ( !effectMask || !EncodeTaaEffectMask( command, present, effectMask, worldDepth, entityVertices, entityIndices,
+						entityBatches, entityBatchCount, &sceneView, &worldViewParams, receipt.width, receipt.height ) ) {
+					[worldVertices release]; [worldIndices release]; [worldDepth release];
+					[entityVertices release]; [entityIndices release]; free( entityBatches );
+					[uiVertices release]; [readback release];
+					return PresentFailure( "taa-effect-mask" );
+				}
 				if ( !RalMetal_TaaEncode( present->taa, command, present->sceneColorCache, worldDepth, &taaFrame ) ) {
 					[worldVertices release]; [worldIndices release]; [worldDepth release];
 					[entityVertices release]; [entityIndices release]; free( entityBatches );

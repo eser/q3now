@@ -27,7 +27,7 @@ typedef struct { float current[20], previous[20], jitterNdc[2]; uint32_t extent[
 struct wiredTaaCohort {
 	id<MTLTexture> scene;
 	uint32_t width, height;
-	id<MTLTexture> velocity, validity, reverseDepth, output, historyColor[2], historyDepth[2];
+	id<MTLTexture> velocity, validity, reverseDepth, effectMask, output, historyColor[2], historyDepth[2];
 	id<MTLBuffer> resolveArgs[2];     /* indexed by the history read slot */
 	id<MTLBuffer> bootstrapArgs[2];   /* indexed by the history write slot */
 };
@@ -41,7 +41,7 @@ struct ralMetalTaa_s {
 
 static void wired_taa_release(wiredTaaCohort *c) {
 	if (!c) return;
-	[c->scene release]; [c->velocity release]; [c->validity release]; [c->reverseDepth release]; [c->output release];
+	[c->scene release]; [c->velocity release]; [c->validity release]; [c->reverseDepth release]; [c->effectMask release]; [c->output release];
 	for (int i = 0; i < 2; ++i) {
 		[c->historyColor[i] release]; [c->historyDepth[i] release]; [c->resolveArgs[i] release]; [c->bootstrapArgs[i] release];
 	}
@@ -129,12 +129,18 @@ static bool wired_taa_prepare(ralMetalTaa_t *s, id<MTLTexture> scene) {
 		c->velocity = wired_taa_texture(s, MTLPixelFormatRG16Float, w, h);
 		c->validity = wired_taa_texture(s, MTLPixelFormatR8Unorm, w, h);
 		c->reverseDepth = wired_taa_texture(s, MTLPixelFormatR32Float, w, h);
+		{
+			MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatR8Unorm width:w height:h mipmapped:NO];
+			td.storageMode = MTLStorageModePrivate;
+			td.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+			c->effectMask = [s->device newTextureWithDescriptor:td];
+		}
 		c->output = wired_taa_texture(s, MTLPixelFormatRGBA16Float, w, h);
 		for (int i = 0; i < 2; ++i) {
 			c->historyColor[i] = wired_taa_texture(s, MTLPixelFormatRGBA16Float, w, h);
 			c->historyDepth[i] = wired_taa_texture(s, MTLPixelFormatR32Float, w, h);
 		}
-		if (!c->velocity || !c->validity || !c->reverseDepth || !c->output || !c->historyColor[0] || !c->historyColor[1]
+		if (!c->velocity || !c->validity || !c->reverseDepth || !c->effectMask || !c->output || !c->historyColor[0] || !c->historyColor[1]
 				|| !c->historyDepth[0] || !c->historyDepth[1]) break;
 		bool argsOk = true;
 		for (int r = 0; r < 2 && argsOk; ++r) {
@@ -159,6 +165,10 @@ static bool wired_taa_prepare(ralMetalTaa_t *s, id<MTLTexture> scene) {
 static void wired_taa_dispatch(id<MTLComputeCommandEncoder> e, NSUInteger w, NSUInteger h) {
 	[e dispatchThreadgroups:MTLSizeMake((w + 7u) / 8u, (h + 7u) / 8u, 1) threadsPerThreadgroup:MTLSizeMake(8, 8, 1)];
 }
+id<MTLTexture> RalMetal_TaaEffectMask(ralMetalTaa_t *s, id<MTLTexture> scene) {
+	if (!s || !scene || scene.pixelFormat != MTLPixelFormatRGBA16Float || !wired_taa_prepare(s, scene)) return nil;
+	return s->cohort->effectMask;
+}
 bool RalMetal_TaaEncode(ralMetalTaa_t *s, id<MTLCommandBuffer> command, id<MTLTexture> scene, id<MTLTexture> depth,
 		const ralMetalTaaFrame_t *frame) {
 	if (!s || !command || !scene || !depth || !frame || command.device != s->device || scene.device != s->device
@@ -180,7 +190,7 @@ bool RalMetal_TaaEncode(ralMetalTaa_t *s, id<MTLCommandBuffer> command, id<MTLTe
 		e.label = @"wired.taa.motion";
 		[e setComputePipelineState:s->motion];
 		[e setTexture:depth atIndex:0]; [e setTexture:c->velocity atIndex:1];
-		[e setTexture:c->validity atIndex:2]; [e setTexture:c->reverseDepth atIndex:3];
+		[e setTexture:c->validity atIndex:2]; [e setTexture:c->reverseDepth atIndex:3]; [e setTexture:c->effectMask atIndex:4];
 		[e setBytes:&mp length:sizeof(mp) atIndex:0];
 		wired_taa_dispatch(e, scene.width, scene.height);
 		[e endEncoding];
