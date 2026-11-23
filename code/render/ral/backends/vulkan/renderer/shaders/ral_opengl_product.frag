@@ -195,8 +195,12 @@ void main() {
 				staticVisibilitySampler), address).r;
 	} else if (productDraw.staticLighting.x == 1u
 			|| productDraw.projectionLightmap.w >= 0.5) {
-		lighting = min(texture(sampler2D(lightmapTexture, lightmapSampler),
-			lightmapCoord).rgb * 2.0, vec3(1.0));
+		// r_lightmapBoost (projectionLightmap.w) in linear space with the established hue-preserving overflow, as the Metal
+		// wired_boost_legacy_lightmap: scale, then normalise all channels by the peak when it exceeds one.
+		vec3 boosted = texture(sampler2D(lightmapTexture, lightmapSampler), lightmapCoord).rgb
+			* max(productDraw.projectionLightmap.w, 1.0);
+		float peak = max(boosted.r, max(boosted.g, boosted.b));
+		lighting = peak > 1.0 ? boosted / peak : boosted;
 	} else lighting = productDraw.localSh[0].w >= 0.5
 		? localSh : vec3(1.0);
 	vec3 lit = base.rgb * lighting * color.rgb

@@ -43,6 +43,7 @@ typedef struct {
 	const ralOpenGlLightingReceipt_t *directionalLighting;
 	ralDisplayVisibilityPlan_t displayVisibility;
 	float aerialHaze; /* r_atmosphereAerialHaze weight, 0..1 */
+	float lightmapBoost; /* r_lightmapBoost, linear world-lightmap overbright (1..24) */
 	const renderDistantWorldSubmission_t *distantWorld;
 	const renderEffectDecalPool_t *effectDecalPool;
 	renderEffectDecalPoolReceipt_t effectDecalPoolReceipt;

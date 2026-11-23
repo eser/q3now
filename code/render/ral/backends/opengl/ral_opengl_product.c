@@ -443,6 +443,7 @@ struct ralOpenGlProduct_s {
 	qboolean                 hasDirectionalLighting;
 	ralDisplayVisibilityPlan_t displayVisibility;
 	float aerialHaze; /* r_atmosphereAerialHaze weight, 0..1 */
+	float lightmapBoost; /* r_lightmapBoost, linear world-lightmap overbright */
 	productMaterialEntry_t materials[RENDER_SUBMISSION_MAX_TEXTURE_RESOURCES];
 	uint32_t materialTextureNames[RENDER_SUBMISSION_MAX_TEXTURE_RESOURCES];
 	uint32_t cookedMaterialTextureNames[RENDER_SUBMISSION_MAX_MATERIALS];
@@ -828,6 +829,7 @@ qboolean RalOpenGl_ProductCreate( ralOpenGlCore_t *core, const ralOpenGlCoreRece
 	RenderEffectDecalPool_Reset( &product->effectDecalPool );
 	if ( !LoadDispatch( core, &product->gl ) )
 		goto fail;
+	product->lightmapBoost = 4.6f; /* r_lightmapBoost default; the module overrides it every frame */
 	product->gl.GenQueries( 2, product->skyTimingQueries );
 	if ( !product->skyTimingQueries[0] || !product->skyTimingQueries[1]
 			|| product->gl.GetError() != GL_NO_ERROR_VALUE ) goto fail;
@@ -1825,6 +1827,14 @@ qboolean RalOpenGl_ProductSetDisplayVisibility( ralOpenGlProduct_t *product,
 		const ralDisplayVisibilityPlan_t *visibility ) {
 	if ( !product || !Ral_DisplayVisibilityPlanValid( visibility ) ) return qfalse;
 	product->displayVisibility = *visibility;
+	return qtrue;
+}
+
+qboolean RalOpenGl_ProductSetLightmapBoost( ralOpenGlProduct_t *product,
+		float lightmapBoost ) {
+	if ( !product || !isfinite( lightmapBoost ) || lightmapBoost < 1.0f || lightmapBoost > 24.0f )
+		return qfalse;
+	product->lightmapBoost = lightmapBoost;
 	return qtrue;
 }
 
@@ -3023,6 +3033,7 @@ qboolean RalOpenGl_ProductRender( ralOpenGlProduct_t *product, renderSubmissionS
 	lower.atmosphere		   = receipt.atmosphere;
 	if ( !Ral_DisplayVisibilityPlanBuild( 1.0f, &lower.displayVisibility ) ) return qfalse;
 	lower.aerialHaze = product->aerialHaze;
+	lower.lightmapBoost = product->lightmapBoost;
 	lower.atmosphereBufferName = product->atmosphereBuffers[receipt.atmosphere.computeDispatchCount != 0u
 												? RAL_OPENGL_ATMOSPHERE_INTEGRATED
 												: RAL_OPENGL_ATMOSPHERE_FALLBACK];

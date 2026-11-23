@@ -424,7 +424,18 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
         }
         if (_1048)
         {
-            lighting = fast::min(spvDescriptorSet1.lightmapTexture.sample(spvDescriptorSet1.lightmapSampler, in.lightmapCoord).xyz * 2.0, float3(1.0));
+            float3 boosted = spvDescriptorSet1.lightmapTexture.sample(spvDescriptorSet1.lightmapSampler, in.lightmapCoord).xyz * fast::max(productDraw.projectionLightmap.w, 1.0);
+            float peak = fast::max(boosted.x, fast::max(boosted.y, boosted.z));
+            float3 _1075;
+            if (peak > 1.0)
+            {
+                _1075 = boosted / float3(peak);
+            }
+            else
+            {
+                _1075 = boosted;
+            }
+            lighting = _1075;
         }
         else
         {
@@ -454,16 +465,16 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
         lit += (specularIbl * occlusion);
     }
     float4 media = wired_atmosphere_sample(productDraw, spvDescriptorSet1.physicalSkyTexture, spvDescriptorSet1.physicalSkySampler, spvDescriptorSet1.currentSkyRadianceTexture, spvDescriptorSet1.currentSkyRadianceSampler, gl_FragCoord, in.worldPosition, (*spvDescriptorSet2.atmosphereFroxels));
-    float3 _1196;
+    float3 _1220;
     if ((alphaMode == 3) || (alphaMode == 4))
     {
-        _1196 = float3(0.0);
+        _1220 = float3(0.0);
     }
     else
     {
-        _1196 = media.xyz;
+        _1220 = media.xyz;
     }
-    lit = (lit * media.w) + _1196;
+    lit = (lit * media.w) + _1220;
     if (productDraw.viewOriginDrawSpace.w < 0.5)
     {
         float3 param_16 = lit;

@@ -71,6 +71,9 @@ qboolean RalOpenGl_ProductSetDisplayVisibility( ralOpenGlProduct_t *product,
 	const ralDisplayVisibilityPlan_t *visibility );
 qboolean RalOpenGl_ProductSetAerialHaze( ralOpenGlProduct_t *product,
 	float aerialHaze );
+/* r_lightmapBoost: world-lightmap overbright in linear space (1..24, default 4.6), as on every RAL backend. */
+qboolean RalOpenGl_ProductSetLightmapBoost( ralOpenGlProduct_t *product,
+	float lightmapBoost );
 qboolean RalOpenGl_ProductResetLevelResources( ralOpenGlProduct_t *product );
 /* Registration boundary, after all worlds unload; retains device/programs. */
 qboolean RalOpenGl_ProductResetRegistrationAssets( ralOpenGlProduct_t *product,

@@ -309,7 +309,7 @@ static void ApplyRaster( const worldDispatch_t *gl, glName_t uniformBuffer,
 		glName_t materialUniformBuffer,
 		productDrawUniforms_t *uniforms, const productBeamParams_t *beamParams,
 		renderAlphaMode_t alpha, float alphaCutoff, qboolean depthWrite,
-		qboolean hasLightmap, qboolean skySurface,
+		float lightmapBoost, qboolean skySurface,
 		const renderEntityCommand_t *entityCommand,
 		const ralLightingSurfaceBindingReceipt_t *surfaceLighting,
 		const ralLightingRuntimePlan_t *lightingPlan,
@@ -330,7 +330,8 @@ static void ApplyRaster( const worldDispatch_t *gl, glName_t uniformBuffer,
 		gl->BlendFunc( GL_ONE_VALUE, GL_ONE_VALUE );
 	} else gl->Disable( GL_BLEND_VALUE );
 	gl->DepthMask( depthWrite ? 1u : 0u );
-	uniforms->projectionLightmap[3] = hasLightmap ? 1.0f : 0.0f;
+	/* > 0 selects the legacy lightmap and carries its overbright (>= 1, so the shader's >= 0.5 test is unchanged). */
+	uniforms->projectionLightmap[3] = lightmapBoost;
 	uniforms->atmosphereHeightSky[3] = skySurface ? 1.0f : 0.0f;
 	memset( uniforms->staticLighting, 0, sizeof( uniforms->staticLighting ) );
 	if ( surfaceLighting ) {
@@ -528,7 +529,7 @@ static qboolean DrawSkyBatch( const worldDispatch_t *gl,
 		if (!images[i]) return qfalse;
 	}
 	ApplyRaster( gl, uniformBuffer, materialUniformBuffer, uniforms, NULL,
-		RENDER_ALPHA_OPAQUE, 0.0f, qfalse, qfalse, qtrue,
+		RENDER_ALPHA_OPAQUE, 0.0f, qfalse, 0.0f, qtrue,
 		NULL, NULL, NULL, NULL, NULL, 0.0f, NULL );
 	gl->NamedBufferSubData( materialUniformBuffer, 0, sizeof( params ), &params );
 	for ( uint32_t i = 0u; i < 8u; ++i ) gl->BindTextureUnit( i, images[i] );
@@ -605,7 +606,7 @@ static qboolean DrawWorldBatch( const worldDispatch_t *gl,
 	}
 	ApplyRaster( gl, uniformBuffer, materialUniformBuffer, uniforms, NULL,
 		batch->alphaMode, batch->alphaCutoff, batch->depthWrite,
-		binding && binding->legacyLightmapBound, batch->sky, NULL, binding,
+		( binding && binding->legacyLightmapBound ) ? info->lightmapBoost : 0.0f, batch->sky, NULL, binding,
 		lightingPlan, emissiveRadiance,
 		frontend->pbrEnabled && info->skyRadianceConsumer.ready
 			? &materialSnapshot.factors : NULL,
@@ -756,7 +757,7 @@ static qboolean DrawModelEntity( const worldDispatch_t *gl,
 		gl->BindTextureUnit( 0u, MaterialTexture( frontend, textures, material ) );
 		ApplyRaster( gl, uniformBuffer, materialUniformBuffer, uniforms, NULL,
 			RENDER_ALPHA_OPAQUE,
-			0.5f, qtrue, qfalse, qfalse, command, NULL, NULL, NULL,
+			0.5f, qtrue, 0.0f, qfalse, command, NULL, NULL, NULL,
 			NULL, 1.0f, entityColor );
 		gl->DrawElements( GL_TRIANGLES_VALUE, (glSize_t)model.batches[i].indexCount,
 			GL_UNSIGNED_INT_VALUE, (const void *)(uintptr_t)( model.batches[i].firstIndex
@@ -826,7 +827,7 @@ static qboolean DrawPrimitiveEntity( const worldDispatch_t *gl,
 		entity->customShader ) );
 	ApplyRaster( gl, uniformBuffer, materialUniformBuffer, uniforms, NULL,
 		RENDER_ALPHA_BLEND,
-		0.5f, qfalse, qfalse, qfalse, command, NULL, NULL, NULL,
+		0.5f, qfalse, 0.0f, qfalse, command, NULL, NULL, NULL,
 		NULL, 1.0f, NULL );
 	gl->DrawElements( GL_TRIANGLES_VALUE, (glSize_t)indexCount,
 		GL_UNSIGNED_INT_VALUE, NULL );
@@ -867,7 +868,7 @@ static qboolean DrawUiPrimitive( const worldDispatch_t *gl,
 	gl->BindTextureUnit( 0u, MaterialTexture( frontend, textures, ui->material ) );
 	ApplyRaster( gl, uniformBuffer, materialUniformBuffer, uniforms, &materialParams,
 		RENDER_ALPHA_BLEND,
-		0.5f, qfalse, qfalse, qfalse, NULL, NULL, NULL, NULL,
+		0.5f, qfalse, 0.0f, qfalse, NULL, NULL, NULL, NULL,
 		NULL, 1.0f, NULL );
 	gl->DrawElements( GL_TRIANGLES_VALUE, 6, GL_UNSIGNED_INT_VALUE, NULL );
 	TransientDestroy( gl, &geometry );
@@ -1409,7 +1410,7 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 				polygons[i].material ) );
 			ApplyRaster( &gl, uniformBuffer, materialUniformBuffer, &uniforms, NULL,
 				RENDER_ALPHA_BLEND, 0.5f,
-				qfalse, qfalse, qfalse, NULL, NULL, NULL, NULL,
+				qfalse, 0.0f, qfalse, NULL, NULL, NULL, NULL,
 				NULL, 1.0f, NULL );
 			gl.DrawElements( GL_TRIANGLES_VALUE, (glSize_t)count,
 				GL_UNSIGNED_INT_VALUE, (const void *)(uintptr_t)( firstIndex
@@ -1420,7 +1421,7 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 			gl.BindTextureUnit( 0u, 0u );
 			ApplyRaster( &gl, uniformBuffer, materialUniformBuffer, &uniforms, NULL,
 				RENDER_ALPHA_BLEND, 0.5f,
-				qfalse, qfalse, qfalse, NULL, NULL, NULL, NULL,
+				qfalse, 0.0f, qfalse, NULL, NULL, NULL, NULL,
 				NULL, 1.0f, NULL );
 			gl.DrawElements( GL_TRIANGLES_VALUE, 6, GL_UNSIGNED_INT_VALUE,
 				(const void *)(uintptr_t)( firstIndex * sizeof( uint32_t ) ) );
@@ -1437,7 +1438,7 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 			ApplyRaster( &gl, uniformBuffer, materialUniformBuffer, &uniforms, NULL,
 				( sprite->flags & PRIM_FLAG_ADDITIVE )
 					? RENDER_ALPHA_ALPHA_ADDITIVE : RENDER_ALPHA_BLEND,
-				0.5f, qfalse, qfalse, qfalse, NULL, NULL, NULL, NULL,
+				0.5f, qfalse, 0.0f, qfalse, NULL, NULL, NULL, NULL,
 				NULL, 1.0f, NULL );
 			gl.DrawElements( GL_TRIANGLES_VALUE, 6, GL_UNSIGNED_INT_VALUE,
 				(const void *)(uintptr_t)( firstIndex * sizeof( uint32_t ) ) );
@@ -1451,7 +1452,7 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 			gl.BindTextureUnit( 0u, MaterialTexture( frontend, textures,
 				slot->decal.shader ) );
 			ApplyRaster( &gl, uniformBuffer, materialUniformBuffer, &uniforms, NULL,
-				RENDER_ALPHA_BLEND, 0.5f, qfalse, qfalse, qfalse,
+				RENDER_ALPHA_BLEND, 0.5f, qfalse, 0.0f, qfalse,
 				NULL, NULL, NULL, NULL, NULL, 1.0f, NULL );
 			gl.DrawElements( GL_TRIANGLES_VALUE, 6, GL_UNSIGNED_INT_VALUE,
 				(const void *)(uintptr_t)( firstIndex * sizeof( uint32_t ) ) );
@@ -1470,7 +1471,7 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 			ApplyRaster( &gl, uniformBuffer, materialUniformBuffer, &uniforms, NULL,
 				( ribbon->flags & PRIM_FLAG_ADDITIVE )
 					? RENDER_ALPHA_ALPHA_ADDITIVE : RENDER_ALPHA_BLEND,
-				0.5f, qfalse, qfalse, qfalse, NULL, NULL, NULL, NULL,
+				0.5f, qfalse, 0.0f, qfalse, NULL, NULL, NULL, NULL,
 				NULL, 1.0f, NULL );
 			gl.DrawElements( GL_TRIANGLES_VALUE, (glSize_t)count,
 				GL_UNSIGNED_INT_VALUE,
@@ -1521,7 +1522,7 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 				ApplyRaster(&gl, uniformBuffer, materialUniformBuffer, &uniforms, &params,
 					(material.stageCount || (slot->beam.flags & PRIM_FLAG_ADDITIVE))
 						? RENDER_ALPHA_ALPHA_ADDITIVE : RENDER_ALPHA_BLEND,
-					0.5f, qfalse, qfalse, qfalse, NULL, NULL, NULL, NULL, NULL, 1.0f, NULL);
+					0.5f, qfalse, 0.0f, qfalse, NULL, NULL, NULL, NULL, NULL, 1.0f, NULL);
 				gl.DrawElements(GL_TRIANGLES_VALUE, (glSize_t)count, GL_UNSIGNED_INT_VALUE,
 					(const void *)(uintptr_t)(firstIndex * sizeof(uint32_t)));
 				receipt.effectBeamStageDrawCount++;

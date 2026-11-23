@@ -489,6 +489,9 @@ fn main_1() {
     var param_17: vec3<f32>;
     var param_18: vec2<f32>;
     var param_19: vec3<f32>;
+    var boosted: vec3<f32>;
+    var peak: f32;
+    var local_1: vec3<f32>;
     var lit: vec3<f32>;
     var metallic: f32;
     var roughness: f32;
@@ -508,7 +511,7 @@ fn main_1() {
     var fresnel: vec3<f32>;
     var specularIbl: vec3<f32>;
     var media: vec4<f32>;
-    var local_1: vec3<f32>;
+    var local_2: vec3<f32>;
     var param_24: vec3<f32>;
     var phi_812_: bool;
     var phi_853_: bool;
@@ -516,271 +519,287 @@ fn main_1() {
     var phi_940_: bool;
     var phi_1048_: bool;
 
-    let _e149 = texCoord_1;
-    let _e150 = textureSample(baseTexture, baseSampler, _e149);
-    base = _e150;
-    let _e153 = productMaterial.beamFlags[1u];
-    if (_e153 != 0u) {
-        let _e156 = base[0u];
-        let _e158 = base[1u];
-        let _e161 = base[0u];
-        let _e163 = base[1u];
-        let _e166 = base[2u];
-        signedDistance = (max(min(_e156, _e158), min(max(_e161, _e163), _e166)) - 0.5f);
-        let _e170 = signedDistance;
-        let _e171 = fwidth(_e170);
-        screenWidth = max(_e171, 0.0009765625f);
+    let _e152 = texCoord_1;
+    let _e153 = textureSample(baseTexture, baseSampler, _e152);
+    base = _e153;
+    let _e156 = productMaterial.beamFlags[1u];
+    if (_e156 != 0u) {
+        let _e159 = base[0u];
+        let _e161 = base[1u];
+        let _e164 = base[0u];
+        let _e166 = base[1u];
+        let _e169 = base[2u];
+        signedDistance = (max(min(_e159, _e161), min(max(_e164, _e166), _e169)) - 0.5f);
         let _e173 = signedDistance;
-        let _e174 = screenWidth;
-        base = vec4<f32>(1f, 1f, 1f, clamp(((_e173 / _e174) + 0.5f), 0f, 1f));
+        let _e174 = fwidth(_e173);
+        screenWidth = max(_e174, 0.0009765625f);
+        let _e176 = signedDistance;
+        let _e177 = screenWidth;
+        base = vec4<f32>(1f, 1f, 1f, clamp(((_e176 / _e177) + 0.5f), 0f, 1f));
     }
-    let _e181 = productMaterial.beamFlags[0u];
-    if (_e181 != 0u) {
-        let _e183 = color_1;
-        let _e190 = color_1;
-        let _e194 = color_1;
-        linearColor = select(pow(((_e183.xyz + vec3(0.055f)) / vec3(1.055f)), vec3<f32>(2.4f, 2.4f, 2.4f)), (_e190.xyz / vec3(12.92f)), (_e194.xyz <= vec3<f32>(0.04045f, 0.04045f, 0.04045f)));
-        let _e198 = base;
-        let _e200 = linearColor;
-        let _e202 = wired_atmosphere_sample_u0028_();
-        let _e204 = ((_e198.xyz * _e200) * _e202.w);
-        let _e206 = base[3u];
-        let _e208 = color_1[3u];
-        outColor = vec4<f32>(_e204.x, _e204.y, _e204.z, (_e206 * _e208));
+    let _e184 = productMaterial.beamFlags[0u];
+    if (_e184 != 0u) {
+        let _e186 = color_1;
+        let _e193 = color_1;
+        let _e197 = color_1;
+        linearColor = select(pow(((_e186.xyz + vec3(0.055f)) / vec3(1.055f)), vec3<f32>(2.4f, 2.4f, 2.4f)), (_e193.xyz / vec3(12.92f)), (_e197.xyz <= vec3<f32>(0.04045f, 0.04045f, 0.04045f)));
+        let _e201 = base;
+        let _e203 = linearColor;
+        let _e205 = wired_atmosphere_sample_u0028_();
+        let _e207 = ((_e201.xyz * _e203) * _e205.w);
+        let _e209 = base[3u];
+        let _e211 = color_1[3u];
+        outColor = vec4<f32>(_e207.x, _e207.y, _e207.z, (_e209 * _e211));
         return;
     }
-    let _e216 = productDraw.atmosphereHeightSky[3u];
-    let _e217 = (_e216 > 0.5f);
-    phi_812_ = _e217;
-    if _e217 {
-        let _e220 = productDraw.emissiveRadiance[3u];
-        phi_812_ = (_e220 >= 0f);
+    let _e219 = productDraw.atmosphereHeightSky[3u];
+    let _e220 = (_e219 > 0.5f);
+    phi_812_ = _e220;
+    if _e220 {
+        let _e223 = productDraw.emissiveRadiance[3u];
+        phi_812_ = (_e223 >= 0f);
     }
-    let _e223 = phi_812_;
-    if _e223 {
-        let _e224 = worldPosition_1;
-        let _e226 = productDraw.atmosphereEyeDensity;
-        direction_1 = normalize((_e224 - _e226.xyz));
-        let _e230 = direction_1;
-        param_8 = _e230;
+    let _e226 = phi_812_;
+    if _e226 {
+        let _e227 = worldPosition_1;
+        let _e229 = productDraw.atmosphereEyeDensity;
+        direction_1 = normalize((_e227 - _e229.xyz));
+        let _e233 = direction_1;
+        param_8 = _e233;
         param_9 = 0f;
-        let _e231 = wired_sample_sky_radiance_u0028_tA21_u003b_p1_u003b_vf3_u003b_f1_u003b(currentSkyRadianceTexture, currentSkyRadianceSampler, (&param_8), (&param_9));
-        current = _e231;
-        let _e232 = direction_1;
-        param_10 = _e232;
+        let _e234 = wired_sample_sky_radiance_u0028_tA21_u003b_p1_u003b_vf3_u003b_f1_u003b(currentSkyRadianceTexture, currentSkyRadianceSampler, (&param_8), (&param_9));
+        current = _e234;
+        let _e235 = direction_1;
+        param_10 = _e235;
         param_11 = 0f;
-        let _e233 = wired_sample_sky_radiance_u0028_tA21_u003b_p1_u003b_vf3_u003b_f1_u003b(previousSkyRadianceTexture, previousSkyRadianceSampler, (&param_10), (&param_11));
-        previous = _e233;
-        let _e234 = previous;
-        let _e235 = current;
-        let _e238 = productDraw.emissiveRadiance[3u];
-        let _e241 = mix(_e234, _e235, vec3(clamp(_e238, 0f, 1f)));
-        base = vec4<f32>(_e241.x, _e241.y, _e241.z, 1f);
+        let _e236 = wired_sample_sky_radiance_u0028_tA21_u003b_p1_u003b_vf3_u003b_f1_u003b(previousSkyRadianceTexture, previousSkyRadianceSampler, (&param_10), (&param_11));
+        previous = _e236;
+        let _e237 = previous;
+        let _e238 = current;
+        let _e241 = productDraw.emissiveRadiance[3u];
+        let _e244 = mix(_e237, _e238, vec3(clamp(_e241, 0f, 1f)));
+        base = vec4<f32>(_e244.x, _e244.y, _e244.z, 1f);
     }
-    let _e248 = productDraw.atmosphereHeightSky[3u];
-    let _e249 = (_e248 > 0.5f);
-    phi_853_ = _e249;
-    if _e249 {
-        let _e252 = productDraw.atmosphereHeightSky[2u];
-        phi_853_ = (_e252 > 0f);
+    let _e251 = productDraw.atmosphereHeightSky[3u];
+    let _e252 = (_e251 > 0.5f);
+    phi_853_ = _e252;
+    if _e252 {
+        let _e255 = productDraw.atmosphereHeightSky[2u];
+        phi_853_ = (_e255 > 0f);
     }
-    let _e255 = phi_853_;
-    if _e255 {
-        let _e256 = worldPosition_1;
-        let _e258 = productDraw.atmosphereEyeDensity;
-        direction_2 = normalize((_e256 - _e258.xyz));
-        let _e263 = direction_2[1u];
-        let _e265 = direction_2[0u];
-        let _e270 = direction_2[2u];
-        physicalUv = vec2<f32>(((atan2(_e263, _e265) / 6.2831855f) + 0.5f), ((asin(clamp(_e270, -1f, 1f)) / 3.1415927f) + 0.5f));
-        let _e276 = physicalUv;
-        let _e277 = textureSample(physicalSkyTexture, physicalSkySampler, _e276);
-        physical_1 = _e277.xyz;
-        let _e281 = productDraw.atmosphereHeightSky[2u];
-        let _e283 = base;
-        param_12 = _e283.xyz;
-        let _e285 = physical_1;
-        param_13 = _e285;
-        param_14 = clamp(_e281, 0f, 1f);
-        let _e286 = wired_compose_authored_physical_sky_u0028_vf3_u003b_vf3_u003b_f1_u003b((&param_12), (&param_13), (&param_14));
-        param_15 = _e286;
-        let _e287 = wired_display_visibility_u0028_vf3_u003b((&param_15));
-        outColor = vec4<f32>(_e287.x, _e287.y, _e287.z, 1f);
+    let _e258 = phi_853_;
+    if _e258 {
+        let _e259 = worldPosition_1;
+        let _e261 = productDraw.atmosphereEyeDensity;
+        direction_2 = normalize((_e259 - _e261.xyz));
+        let _e266 = direction_2[1u];
+        let _e268 = direction_2[0u];
+        let _e273 = direction_2[2u];
+        physicalUv = vec2<f32>(((atan2(_e266, _e268) / 6.2831855f) + 0.5f), ((asin(clamp(_e273, -1f, 1f)) / 3.1415927f) + 0.5f));
+        let _e279 = physicalUv;
+        let _e280 = textureSample(physicalSkyTexture, physicalSkySampler, _e279);
+        physical_1 = _e280.xyz;
+        let _e284 = productDraw.atmosphereHeightSky[2u];
+        let _e286 = base;
+        param_12 = _e286.xyz;
+        let _e288 = physical_1;
+        param_13 = _e288;
+        param_14 = clamp(_e284, 0f, 1f);
+        let _e289 = wired_compose_authored_physical_sky_u0028_vf3_u003b_vf3_u003b_f1_u003b((&param_12), (&param_13), (&param_14));
+        param_15 = _e289;
+        let _e290 = wired_display_visibility_u0028_vf3_u003b((&param_15));
+        outColor = vec4<f32>(_e290.x, _e290.y, _e290.z, 1f);
         return;
     }
-    let _e294 = productDraw.atmosphereHeightSky[3u];
-    let _e295 = (_e294 > 0.5f);
-    phi_910_ = _e295;
-    if _e295 {
-        let _e298 = productDraw.emissiveRadiance[3u];
-        phi_910_ = (_e298 >= 0f);
+    let _e297 = productDraw.atmosphereHeightSky[3u];
+    let _e298 = (_e297 > 0.5f);
+    phi_910_ = _e298;
+    if _e298 {
+        let _e301 = productDraw.emissiveRadiance[3u];
+        phi_910_ = (_e301 >= 0f);
     }
-    let _e301 = phi_910_;
-    if _e301 {
-        let _e302 = base;
-        param_16 = _e302.xyz;
-        let _e304 = wired_display_visibility_u0028_vf3_u003b((&param_16));
-        outColor = vec4<f32>(_e304.x, _e304.y, _e304.z, 1f);
+    let _e304 = phi_910_;
+    if _e304 {
+        let _e305 = base;
+        param_16 = _e305.xyz;
+        let _e307 = wired_display_visibility_u0028_vf3_u003b((&param_16));
+        outColor = vec4<f32>(_e307.x, _e307.y, _e307.z, 1f);
         return;
     }
-    let _e311 = productDraw.viewportAlpha[2u];
-    alphaMode = i32((_e311 + 0.5f));
-    let _e315 = productMaterial.baseColor;
-    let _e316 = base;
-    base = (_e316 * _e315);
-    let _e318 = alphaMode;
-    let _e319 = (_e318 == 1i);
-    phi_940_ = _e319;
-    if _e319 {
-        let _e321 = base[3u];
-        let _e324 = productDraw.viewportAlpha[3u];
-        phi_940_ = (_e321 < _e324);
+    let _e314 = productDraw.viewportAlpha[2u];
+    alphaMode = i32((_e314 + 0.5f));
+    let _e318 = productMaterial.baseColor;
+    let _e319 = base;
+    base = (_e319 * _e318);
+    let _e321 = alphaMode;
+    let _e322 = (_e321 == 1i);
+    phi_940_ = _e322;
+    if _e322 {
+        let _e324 = base[3u];
+        let _e327 = productDraw.viewportAlpha[3u];
+        phi_940_ = (_e324 < _e327);
     }
-    let _e327 = phi_940_;
-    if _e327 {
+    let _e330 = phi_940_;
+    if _e330 {
         discard;
     }
-    let _e330 = productDraw.localSh[0i];
-    let _e334 = productDraw.localSh[1i];
-    let _e337 = worldNormal_1[0u];
-    let _e342 = productDraw.localSh[2i];
-    let _e345 = worldNormal_1[1u];
-    let _e350 = productDraw.localSh[3i];
-    let _e353 = worldNormal_1[2u];
-    localSh = max((((_e330.xyz + (_e334.xyz * _e337)) + (_e342.xyz * _e345)) + (_e350.xyz * _e353)), vec3<f32>(0f, 0f, 0f));
-    let _e359 = productDraw.staticLighting[0u];
-    if (_e359 == 2u) {
-        let _e361 = lightmapCoord_1;
-        let _e364 = productDraw.staticLighting[1u];
-        address = vec3<f32>(_e361.x, _e361.y, f32(_e364));
-        let _e369 = address;
-        let _e375 = textureSample(staticRadianceTexture, staticRadianceSampler, vec2<f32>(_e369.x, _e369.y), i32(_e369.z));
-        radiance_1 = _e375.xyz;
-        let _e377 = address;
-        let _e383 = textureSample(staticDirectionTexture, staticDirectionSampler, vec2<f32>(_e377.x, _e377.y), i32(_e377.z));
-        encodedDirection_1 = _e383.xy;
-        let _e387 = productDraw.staticLighting[2u];
-        if (_e387 == 2u) {
-            let _e389 = encodedDirection_1;
-            encodedDirection_1 = ((_e389 * 0.5f) + vec2(0.5f));
+    let _e333 = productDraw.localSh[0i];
+    let _e337 = productDraw.localSh[1i];
+    let _e340 = worldNormal_1[0u];
+    let _e345 = productDraw.localSh[2i];
+    let _e348 = worldNormal_1[1u];
+    let _e353 = productDraw.localSh[3i];
+    let _e356 = worldNormal_1[2u];
+    localSh = max((((_e333.xyz + (_e337.xyz * _e340)) + (_e345.xyz * _e348)) + (_e353.xyz * _e356)), vec3<f32>(0f, 0f, 0f));
+    let _e362 = productDraw.staticLighting[0u];
+    if (_e362 == 2u) {
+        let _e364 = lightmapCoord_1;
+        let _e367 = productDraw.staticLighting[1u];
+        address = vec3<f32>(_e364.x, _e364.y, f32(_e367));
+        let _e372 = address;
+        let _e378 = textureSample(staticRadianceTexture, staticRadianceSampler, vec2<f32>(_e372.x, _e372.y), i32(_e372.z));
+        radiance_1 = _e378.xyz;
+        let _e380 = address;
+        let _e386 = textureSample(staticDirectionTexture, staticDirectionSampler, vec2<f32>(_e380.x, _e380.y), i32(_e380.z));
+        encodedDirection_1 = _e386.xy;
+        let _e390 = productDraw.staticLighting[2u];
+        if (_e390 == 2u) {
+            let _e392 = encodedDirection_1;
+            encodedDirection_1 = ((_e392 * 0.5f) + vec2(0.5f));
         }
-        let _e393 = radiance_1;
-        param_17 = _e393;
-        let _e394 = encodedDirection_1;
-        param_18 = _e394;
-        let _e395 = worldNormal_1;
-        param_19 = _e395;
-        let _e396 = wired_lighting_directional_static_indirect_u0028_vf3_u003b_vf2_u003b_vf3_u003b((&param_17), (&param_18), (&param_19));
-        lighting = _e396;
-        let _e399 = productDraw.staticLighting[3u];
-        if (_e399 != 0u) {
-            let _e401 = address;
-            let _e407 = textureSample(staticVisibilityTexture, staticVisibilitySampler, vec2<f32>(_e401.x, _e401.y), i32(_e401.z));
-            let _e409 = lighting;
-            lighting = (_e409 * _e407.x);
+        let _e396 = radiance_1;
+        param_17 = _e396;
+        let _e397 = encodedDirection_1;
+        param_18 = _e397;
+        let _e398 = worldNormal_1;
+        param_19 = _e398;
+        let _e399 = wired_lighting_directional_static_indirect_u0028_vf3_u003b_vf2_u003b_vf3_u003b((&param_17), (&param_18), (&param_19));
+        lighting = _e399;
+        let _e402 = productDraw.staticLighting[3u];
+        if (_e402 != 0u) {
+            let _e404 = address;
+            let _e410 = textureSample(staticVisibilityTexture, staticVisibilitySampler, vec2<f32>(_e404.x, _e404.y), i32(_e404.z));
+            let _e412 = lighting;
+            lighting = (_e412 * _e410.x);
         }
     } else {
-        let _e413 = productDraw.staticLighting[0u];
-        let _e414 = (_e413 == 1u);
-        phi_1048_ = _e414;
-        if !(_e414) {
-            let _e418 = productDraw.projectionLightmap[3u];
-            phi_1048_ = (_e418 >= 0.5f);
+        let _e416 = productDraw.staticLighting[0u];
+        let _e417 = (_e416 == 1u);
+        phi_1048_ = _e417;
+        if !(_e417) {
+            let _e421 = productDraw.projectionLightmap[3u];
+            phi_1048_ = (_e421 >= 0.5f);
         }
-        let _e421 = phi_1048_;
-        if _e421 {
-            let _e422 = lightmapCoord_1;
-            let _e423 = textureSample(lightmapTexture, lightmapSampler, _e422);
-            lighting = min((_e423.xyz * 2f), vec3<f32>(1f, 1f, 1f));
+        let _e424 = phi_1048_;
+        if _e424 {
+            let _e425 = lightmapCoord_1;
+            let _e426 = textureSample(lightmapTexture, lightmapSampler, _e425);
+            let _e430 = productDraw.projectionLightmap[3u];
+            boosted = (_e426.xyz * max(_e430, 1f));
+            let _e434 = boosted[0u];
+            let _e436 = boosted[1u];
+            let _e438 = boosted[2u];
+            peak = max(_e434, max(_e436, _e438));
+            let _e441 = peak;
+            if (_e441 > 1f) {
+                let _e443 = boosted;
+                let _e444 = peak;
+                local_1 = (_e443 / vec3(_e444));
+            } else {
+                let _e447 = boosted;
+                local_1 = _e447;
+            }
+            let _e448 = local_1;
+            lighting = _e448;
         } else {
-            let _e430 = productDraw.localSh[0i][3u];
-            let _e432 = localSh;
-            lighting = select(vec3<f32>(1f, 1f, 1f), _e432, vec3((_e430 >= 0.5f)));
+            let _e452 = productDraw.localSh[0i][3u];
+            let _e454 = localSh;
+            lighting = select(vec3<f32>(1f, 1f, 1f), _e454, vec3((_e452 >= 0.5f)));
         }
     }
-    let _e435 = base;
-    let _e437 = lighting;
-    let _e439 = color_1;
-    let _e442 = base;
-    let _e445 = productDraw.emissiveRadiance;
-    lit = (((_e435.xyz * _e437) * _e439.xyz) + (_e442.xyz * _e445.xyz));
-    let _e451 = productMaterial.factors[0u];
-    if (_e451 >= 0f) {
-        let _e455 = productMaterial.factors[0u];
-        metallic = clamp(_e455, 0f, 1f);
-        let _e459 = productMaterial.factors[1u];
-        roughness = clamp(_e459, 0f, 1f);
-        let _e463 = productMaterial.factors[2u];
-        occlusion = clamp(_e463, 0f, 1f);
-        let _e467 = productMaterial.factors[3u];
-        environmentBlend = clamp(_e467, 0f, 1f);
-        let _e469 = worldNormal_1;
-        normal = normalize(_e469);
-        let _e472 = productDraw.atmosphereEyeDensity;
-        let _e474 = worldPosition_1;
-        viewDirection = normalize((_e472.xyz - _e474));
-        let _e477 = viewDirection;
-        let _e479 = normal;
-        reflected = reflect(-(_e477), _e479);
-        let _e481 = roughness;
-        let _e482 = textureNumLevels(currentSkyRadianceTexture);
-        let _e487 = reflected;
-        param_20 = _e487;
-        param_21 = (_e481 * f32((i32(_e482) - 1i)));
-        let _e488 = wired_sample_sky_radiance_u0028_tA21_u003b_p1_u003b_vf3_u003b_f1_u003b(currentSkyRadianceTexture, currentSkyRadianceSampler, (&param_20), (&param_21));
-        currentSpecular = _e488;
-        let _e489 = roughness;
-        let _e490 = textureNumLevels(previousSkyRadianceTexture);
-        let _e495 = reflected;
-        param_22 = _e495;
-        param_23 = (_e489 * f32((i32(_e490) - 1i)));
-        let _e496 = wired_sample_sky_radiance_u0028_tA21_u003b_p1_u003b_vf3_u003b_f1_u003b(previousSkyRadianceTexture, previousSkyRadianceSampler, (&param_22), (&param_23));
-        previousSpecular = _e496;
-        let _e497 = base;
-        let _e499 = metallic;
-        f0_ = mix(vec3<f32>(0.04f, 0.04f, 0.04f), _e497.xyz, vec3(_e499));
-        let _e502 = normal;
-        let _e503 = viewDirection;
-        nDotV = max(dot(_e502, _e503), 0f);
-        let _e506 = f0_;
-        let _e507 = f0_;
-        let _e510 = nDotV;
-        fresnel = (_e506 + ((vec3(1f) - _e507) * pow((1f - _e510), 5f)));
-        let _e515 = previousSpecular;
-        let _e516 = currentSpecular;
-        let _e517 = environmentBlend;
-        let _e520 = fresnel;
-        specularIbl = (mix(_e515, _e516, vec3(_e517)) * _e520);
-        let _e522 = specularIbl;
-        let _e523 = occlusion;
-        let _e525 = lit;
-        lit = (_e525 + (_e522 * _e523));
+    let _e457 = base;
+    let _e459 = lighting;
+    let _e461 = color_1;
+    let _e464 = base;
+    let _e467 = productDraw.emissiveRadiance;
+    lit = (((_e457.xyz * _e459) * _e461.xyz) + (_e464.xyz * _e467.xyz));
+    let _e473 = productMaterial.factors[0u];
+    if (_e473 >= 0f) {
+        let _e477 = productMaterial.factors[0u];
+        metallic = clamp(_e477, 0f, 1f);
+        let _e481 = productMaterial.factors[1u];
+        roughness = clamp(_e481, 0f, 1f);
+        let _e485 = productMaterial.factors[2u];
+        occlusion = clamp(_e485, 0f, 1f);
+        let _e489 = productMaterial.factors[3u];
+        environmentBlend = clamp(_e489, 0f, 1f);
+        let _e491 = worldNormal_1;
+        normal = normalize(_e491);
+        let _e494 = productDraw.atmosphereEyeDensity;
+        let _e496 = worldPosition_1;
+        viewDirection = normalize((_e494.xyz - _e496));
+        let _e499 = viewDirection;
+        let _e501 = normal;
+        reflected = reflect(-(_e499), _e501);
+        let _e503 = roughness;
+        let _e504 = textureNumLevels(currentSkyRadianceTexture);
+        let _e509 = reflected;
+        param_20 = _e509;
+        param_21 = (_e503 * f32((i32(_e504) - 1i)));
+        let _e510 = wired_sample_sky_radiance_u0028_tA21_u003b_p1_u003b_vf3_u003b_f1_u003b(currentSkyRadianceTexture, currentSkyRadianceSampler, (&param_20), (&param_21));
+        currentSpecular = _e510;
+        let _e511 = roughness;
+        let _e512 = textureNumLevels(previousSkyRadianceTexture);
+        let _e517 = reflected;
+        param_22 = _e517;
+        param_23 = (_e511 * f32((i32(_e512) - 1i)));
+        let _e518 = wired_sample_sky_radiance_u0028_tA21_u003b_p1_u003b_vf3_u003b_f1_u003b(previousSkyRadianceTexture, previousSkyRadianceSampler, (&param_22), (&param_23));
+        previousSpecular = _e518;
+        let _e519 = base;
+        let _e521 = metallic;
+        f0_ = mix(vec3<f32>(0.04f, 0.04f, 0.04f), _e519.xyz, vec3(_e521));
+        let _e524 = normal;
+        let _e525 = viewDirection;
+        nDotV = max(dot(_e524, _e525), 0f);
+        let _e528 = f0_;
+        let _e529 = f0_;
+        let _e532 = nDotV;
+        fresnel = (_e528 + ((vec3(1f) - _e529) * pow((1f - _e532), 5f)));
+        let _e537 = previousSpecular;
+        let _e538 = currentSpecular;
+        let _e539 = environmentBlend;
+        let _e542 = fresnel;
+        specularIbl = (mix(_e537, _e538, vec3(_e539)) * _e542);
+        let _e544 = specularIbl;
+        let _e545 = occlusion;
+        let _e547 = lit;
+        lit = (_e547 + (_e544 * _e545));
     }
-    let _e527 = wired_atmosphere_sample_u0028_();
-    media = _e527;
-    let _e528 = lit;
-    let _e530 = media[3u];
-    let _e532 = alphaMode;
-    let _e534 = alphaMode;
-    if ((_e532 == 3i) || (_e534 == 4i)) {
-        local_1 = vec3<f32>(0f, 0f, 0f);
+    let _e549 = wired_atmosphere_sample_u0028_();
+    media = _e549;
+    let _e550 = lit;
+    let _e552 = media[3u];
+    let _e554 = alphaMode;
+    let _e556 = alphaMode;
+    if ((_e554 == 3i) || (_e556 == 4i)) {
+        local_2 = vec3<f32>(0f, 0f, 0f);
     } else {
-        let _e537 = media;
-        local_1 = _e537.xyz;
+        let _e559 = media;
+        local_2 = _e559.xyz;
     }
-    let _e539 = local_1;
-    lit = ((_e528 * _e530) + _e539);
-    let _e543 = productDraw.viewOriginDrawSpace[3u];
-    if (_e543 < 0.5f) {
-        let _e545 = lit;
-        param_24 = _e545;
-        let _e546 = wired_display_visibility_u0028_vf3_u003b((&param_24));
-        lit = _e546;
+    let _e561 = local_2;
+    lit = ((_e550 * _e552) + _e561);
+    let _e565 = productDraw.viewOriginDrawSpace[3u];
+    if (_e565 < 0.5f) {
+        let _e567 = lit;
+        param_24 = _e567;
+        let _e568 = wired_display_visibility_u0028_vf3_u003b((&param_24));
+        lit = _e568;
     }
-    let _e547 = lit;
-    let _e549 = base[3u];
-    let _e551 = color_1[3u];
-    outColor = vec4<f32>(_e547.x, _e547.y, _e547.z, (_e549 * _e551));
+    let _e569 = lit;
+    let _e571 = base[3u];
+    let _e573 = color_1[3u];
+    outColor = vec4<f32>(_e569.x, _e569.y, _e569.z, (_e571 * _e573));
     return;
 }
 

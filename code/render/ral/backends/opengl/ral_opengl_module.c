@@ -72,6 +72,8 @@ typedef struct {
 	cvar_t						  brightnessFallback;
 	cvar_t *aerialHaze;
 	cvar_t aerialHazeFallback;
+	cvar_t *lightmapBoost;
+	cvar_t lightmapBoostFallback;
 	cvar_t *skyPhysicalBlend;
 	cvar_t skyPhysicalBlendFallback;
 	cvar_t *lens;
@@ -865,6 +867,22 @@ static void BeginRegistration( glconfig_t *config )
 			if ( ri.Cvar_SetGroup ) ri.Cvar_SetGroup( s_module.aerialHaze, CVG_RENDERER );
 		}
 	}
+	/* r_lightmapBoost is shared with the Vulkan, Metal and WebGPU renderers (same name, default and range). */
+	if ( !s_module.lightmapBoost ) {
+		if ( !ri.Cvar_Get || !ri.Cvar_CheckRange ) {
+			memset( &s_module.lightmapBoostFallback, 0, sizeof( s_module.lightmapBoostFallback ) );
+			s_module.lightmapBoostFallback.value = 4.6f;
+			s_module.lightmapBoostFallback.integer = 4;
+			s_module.lightmapBoost = &s_module.lightmapBoostFallback;
+		} else {
+			s_module.lightmapBoost = ri.Cvar_Get( "r_lightmapBoost", "4.6", CVAR_ARCHIVE | CVAR_NODEFAULT );
+			if ( !s_module.lightmapBoost ) {
+				LogFailure( "lightmap-boost-cvar" );
+				return;
+			}
+			ri.Cvar_CheckRange( s_module.lightmapBoost, "1", "24", CV_FLOAT );
+		}
+	}
 	/* r_lens gates the lens occlusion oracle exactly like Vulkan (default off);
 	 * a host without cvars (contract tests) keeps the oracle enabled. */
 	if ( !s_module.lens ) {
@@ -1017,6 +1035,8 @@ static void EndFrame( int *frontEndMsec, int *backEndMsec )
 			|| !RalOpenGl_ProductSetDisplayVisibility( s_module.product, &visibility )
 			|| !s_module.aerialHaze
 			|| !RalOpenGl_ProductSetAerialHaze( s_module.product, s_module.aerialHaze->value )
+			|| !s_module.lightmapBoost
+			|| !RalOpenGl_ProductSetLightmapBoost( s_module.product, s_module.lightmapBoost->value )
 			|| !s_module.skyPhysicalBlend
 			|| !Ral_SkySurfaceSetPhysicalBlendScale( s_module.skyPhysicalBlend->value ) ) {
 		s_module.frameOpen = qfalse;
