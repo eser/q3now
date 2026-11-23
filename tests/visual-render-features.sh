@@ -2571,6 +2571,26 @@ aacompare)
         a="$SHOTDIR/vrf_ac_none_$yaw.png"; b="$SHOTDIR/vrf_ac_smaa_$yaw.png"; c="$SHOTDIR/vrf_ac_taa_$yaw.png"
         printf "  aacompare case=%s: worst-tile none-vs-smaa=%s none-vs-taa=%s smaa-vs-taa=%s (images in %s)\n" "$yaw" \
             "$(worst_tile_diff_nohud "$a" "$b")" "$(worst_tile_diff_nohud "$a" "$c")" "$(worst_tile_diff_nohud "$b" "$c")" "$SHOTDIR"
+        if [ "$yaw" = 0 ]; then
+            # Sharpness: TAA must keep the AA-off edge energy like SMAA does (a uniformly softer technique shows no ghost and no shimmer, so
+            # no other gate sees it; the history resample alone left TAA at ~0.55). World-area mean |dx|+|dy| of the red channel.
+            sharp="$(python3 - "$a" "$b" "$c" "${PNG2RAW:-$WIRED_SOURCE/tools/png2raw/png2raw}" <<'PYEOF'
+import subprocess, struct, sys
+dec = sys.argv[4]
+def energy(p):
+    w, h = struct.unpack(">II", open(p, "rb").read(24)[16:24]); img = subprocess.check_output([dec, p]); t = n = 0
+    for y in range(160, h - 300, 3):
+        for x in range(1, w - 1, 3):
+            i = (y * w + x) * 3; t += abs(img[i] - img[i + 3]) + abs(img[i] - img[i + w * 3]); n += 1
+    return t / n
+o, m, t = energy(sys.argv[1]), energy(sys.argv[2]), energy(sys.argv[3])
+print("%.3f %.3f" % (m / o, t / o))
+PYEOF
+)"
+            set -- $sharp
+            if awk -v t="$2" 'BEGIN{exit !(t < 0.85)}'; then echo "  aacompare sharpness: FAIL(TAA keeps only $2 of the AA-off edge energy, SMAA $1; TAA is visibly softer than SMAA)"; FAIL=1;
+            else echo "  aacompare sharpness: OK(edge energy vs AA off: SMAA $1, TAA $2)"; fi
+        fi
     done
     ;;
 
