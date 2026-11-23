@@ -381,7 +381,9 @@ static qhandle_t RegisterImageSource( renderAssetKind_t kind, const char *name, 
 		return handle;
 	}
 	if ( imageName && RenderImage_DecodeRgba8( imageName, &pixels, &width, &height, resolved ) ) {
-		const char *identityName = scripted.name[0] ? name : resolved;
+		/* Decoding may resolve an extension or a VFS alias, but the material identity stays the authored name the BSP and model
+		 * batches look up (as on Metal and WebGPU). */
+		const char *identityName = name && name[0] ? name : resolved;
 		handle = RenderSubmission_RegisterMaterialImage( &s_module.frontend, kind,
 			identityName, clamp, pixels, width, height );
 		if ( handle && !PublishDecodedMaterialIdentity( handle, kind, resolved,

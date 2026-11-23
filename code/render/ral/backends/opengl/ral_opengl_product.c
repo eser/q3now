@@ -1544,6 +1544,19 @@ qboolean RalOpenGl_ProductUnloadSkyRadianceResources(
 		&product->skyRadiance );
 }
 
+/* Entries whose images share a texture cache key share one GL texture (as the Metal renderer shares the canonical image), so the
+ * name is deleted only when no other entry still holds it. */
+static void ReleaseMaterialTexture( ralOpenGlProduct_t *product, productMaterialEntry_t *entry ) {
+	if ( !entry->texture ) return;
+	for ( uint32_t i = 0u; i < RENDER_SUBMISSION_MAX_TEXTURE_RESOURCES; ++i )
+		if ( &product->materials[i] != entry && product->materials[i].texture == entry->texture ) {
+			entry->texture = 0u;
+			return;
+		}
+	product->gl.DeleteTextures( 1, &entry->texture );
+	entry->texture = 0u;
+}
+
 static qboolean SyncTexture( ralOpenGlProduct_t *product,
 		const renderTextureSnapshot_t *texture, productMaterialEntry_t *entry ) {
 		glName_t candidate = 0u;
@@ -1564,6 +1577,28 @@ static qboolean SyncTexture( ralOpenGlProduct_t *product,
 			entry->generation = texture->generation;
 			entry->digest = texture->digest;
 			return qtrue;
+		}
+		/* The cache key covers the image content and creation options but not the wrap mode, which GL keeps on the texture: share
+		 * only with an entry that wraps the same way. */
+		if ( texture->textureCacheKeyReady ) {
+			for ( uint32_t i = 0u; i < RENDER_SUBMISSION_MAX_TEXTURE_RESOURCES; ++i ) {
+				const productMaterialEntry_t *shared = &product->materials[i];
+				glName_t sharedTexture;
+				ralTextureResourceReceipt_t sharedResource;
+				ralMaterialRuntimeResource_t sharedRuntimeResource;
+				if ( shared == entry || !shared->texture || shared->clampToEdge != texture->clampToEdge
+						|| !RenderSubmission_TextureResourceMatches( texture, &shared->runtimeResource ) ) continue;
+				sharedTexture = shared->texture;
+				sharedResource = shared->resource;
+				sharedRuntimeResource = shared->runtimeResource;
+				ReleaseMaterialTexture( product, entry );
+				memset( entry, 0, sizeof( *entry ) );
+				entry->handle = texture->handle; entry->generation = texture->generation;
+				entry->digest = texture->digest; entry->texture = sharedTexture;
+				entry->clampToEdge = texture->clampToEdge;
+				entry->resource = sharedResource; entry->runtimeResource = sharedRuntimeResource;
+				return qtrue;
+			}
 		}
 		if ( product->materialResourceGeneration == UINT64_MAX - 1u ) return qfalse;
 		product->gl.CreateTextures( GL_TEXTURE_2D_VALUE, 1, &candidate );
@@ -1607,7 +1642,7 @@ static qboolean SyncTexture( ralOpenGlProduct_t *product,
 		}
 		if ( !texture->textureCacheKeyReady )
 			memset( &runtimeResource, 0, sizeof( runtimeResource ) );
-		if ( entry->texture ) product->gl.DeleteTextures( 1, &entry->texture );
+		ReleaseMaterialTexture( product, entry );
 		memset( entry, 0, sizeof( *entry ) );
 		entry->handle = texture->handle; entry->generation = texture->generation;
 		entry->digest = texture->digest; entry->texture = candidate;
@@ -1642,8 +1677,7 @@ static qboolean SyncMaterialTextures( ralOpenGlProduct_t *product,
 				&product->materials[resourceIndex] ) ) return qfalse;
 	}
 	for ( uint32_t i = nextCount; i < product->textureResourceCount; ++i ) {
-		if ( product->materials[i].texture )
-			product->gl.DeleteTextures( 1, &product->materials[i].texture );
+		ReleaseMaterialTexture( product, &product->materials[i] );
 		memset( &product->materials[i], 0, sizeof( product->materials[i] ) );
 	}
 	for ( uint32_t i = frontend->materialCount; i < product->materialCount; ++i ) {
@@ -1672,6 +1706,8 @@ qboolean RalOpenGl_ProductResolveMaterialRuntimeResource( void *opaque,
 		const ralMaterialRuntimeResource_t *resource =
 			&product->materials[i].runtimeResource;
 		if ( resource->cacheKeyHash != cacheKeyHash ) continue;
+		/* Entries sharing one texture (see ReleaseMaterialTexture) carry the exact same receipt. */
+		if ( match && Ral_TextureResourceReceiptExact( &match->resource, &resource->resource ) ) continue;
 		if ( match || !Ral_TextureResourceReceiptValid( &resource->resource ) )
 			return qfalse;
 		match = resource;
