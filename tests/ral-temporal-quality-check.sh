@@ -56,7 +56,8 @@ if not any(message.startswith("temporal-history-feedback ") for message in messa
 
 names = (
     "temporal_off_a", "temporal_off_a_2", "temporal_off_a_3", "temporal_off_b", "temporal_taa_a_1",
-    "temporal_taa_a_2", "temporal_taa_a_3", "temporal_taa_b_first", "temporal_taa_b_steady",
+    "temporal_taa_a_2", "temporal_taa_a_3", "temporal_taa_a_4", "temporal_taa_a_5", "temporal_taa_a_6", "temporal_taa_a_7",
+    "temporal_taa_a_8", "temporal_taa_a_9", "temporal_taa_a_10", "temporal_taa_b_first", "temporal_taa_b_steady",
 )
 
 def load(name):
@@ -151,6 +152,11 @@ def changed_share(a, b, threshold=8):
                 changed += 1
     return changed / total if total else 0.0
 consecutive_share = changed_share("temporal_taa_a_2", "temporal_taa_a_3")
+# a_2 .. a_10 are nine consecutive frames, so their eight transitions cover every jitter phase once: the mean is the stable
+# frame-to-frame figure (a single pair depends on which two phases it happened to catch).
+phase_pairs = [(f"temporal_taa_a_{i}", f"temporal_taa_a_{i + 1}") for i in range(2, 10)]
+cycle_delta = statistics.mean(mae(a, b) for a, b in phase_pairs)
+cycle_share = statistics.mean(changed_share(a, b) for a, b in phase_pairs)
 consecutive_baseline = mae("temporal_off_a_2", "temporal_off_a_3")
 motion_delta = mae("temporal_taa_a_2", "temporal_taa_b_steady")
 first_settled_delta = mae("temporal_taa_b_first", "temporal_taa_b_steady")
@@ -219,7 +225,7 @@ delta_percent = delta_ms / off_ms * 100.0
 print(
     f"PASS temporal quality: static AA-off={static_baseline_delta:.3f} TAA={static_delta:.3f} "
     f"excess={static_excess:.3f}, consecutive AA-off={consecutive_baseline:.3f} TAA={consecutive_delta:.3f} "
-    f"({consecutive_share:.2%} px >8/255), "
+    f"({consecutive_share:.2%} px >8/255), jitter-cycle mean TAA={cycle_delta:.3f} ({cycle_share:.2%} px >8/255), "
     f"pan={motion_delta:.3f}, "
     f"first-settled={first_settled_delta:.3f}, old-frame-residual={ghost_ratio:.2%}, "
     f"edge-ratio={edge_ratio:.3f}, AA-off-reference-delta={reference_delta:.3f}")
@@ -314,7 +320,7 @@ set vm_cgame 0
 set sv_cheats 1
 set sv_pure 0
 set tqSetup "cg_draw2D 0; cg_drawGun 0; cg_thirdPerson 0; con_notifytime 0; cl_yawspeed 90; sv_fps 125; timescale 1; fixedtime 0; r_pinShaderTime 2.0; r_pinFrameTime 2.0; wait 512; noclip; wait 150; echo Q3_TEMPORAL_QUALITY_BEGIN; setviewpos 888 -768 434 180 0; r_temporalInputTest 0; wait 96; screenshot temporal_off_a png silent; wait 8; screenshot temporal_off_a_2 png silent; wait 1; screenshot temporal_off_a_3 png silent; wait 4; +right; wait 12; -right; wait 8; screenshot temporal_off_b png silent; vstr tqTemporalA"
-set tqTemporalA "r_temporalInputTest 1; setviewpos 888 -768 434 180 0; wait 96; screenshot temporal_taa_a_1 png silent; wait 8; screenshot temporal_taa_a_2 png silent; wait 1; screenshot temporal_taa_a_3 png silent; wait 4; +right; wait 12; -right; wait 4; screenshot temporal_taa_b_first png silent; wait 96; screenshot temporal_taa_b_steady png silent; echo Q3_TEMPORAL_QUALITY_CAPTURED; vstr tqPerfOff1"
+set tqTemporalA "r_temporalInputTest 1; setviewpos 888 -768 434 180 0; wait 96; screenshot temporal_taa_a_1 png silent; wait 8; screenshot temporal_taa_a_2 png silent; wait 1; screenshot temporal_taa_a_3 png silent; wait 1; screenshot temporal_taa_a_4 png silent; wait 1; screenshot temporal_taa_a_5 png silent; wait 1; screenshot temporal_taa_a_6 png silent; wait 1; screenshot temporal_taa_a_7 png silent; wait 1; screenshot temporal_taa_a_8 png silent; wait 1; screenshot temporal_taa_a_9 png silent; wait 1; screenshot temporal_taa_a_10 png silent; wait 4; +right; wait 12; -right; wait 4; screenshot temporal_taa_b_first png silent; wait 96; screenshot temporal_taa_b_steady png silent; echo Q3_TEMPORAL_QUALITY_CAPTURED; vstr tqPerfOff1"
 set tqPerfOff1 "r_temporalInputTest 0; wait 96; set r_gpuSpeeds 0; wait 4; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_OFF_1_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_OFF_1_END; set r_gpuSpeeds 0; wait 16; vstr tqPerfOn1"
 set tqPerfOn1 "r_temporalInputTest 1; wait 96; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_ON_1_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_ON_1_END; set r_gpuSpeeds 0; wait 16; vstr tqPerfOn2"
 set tqPerfOn2 "wait 96; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_ON_2_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_ON_2_END; set r_gpuSpeeds 0; wait 16; vstr tqPerfOff2"
