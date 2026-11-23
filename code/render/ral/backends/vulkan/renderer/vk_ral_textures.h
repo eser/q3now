@@ -120,13 +120,15 @@ struct ralPipeline_s       *vk_ral_lookup_pipeline       ( VkPipeline       vkPi
 // VkImage → adopted-wrapper reverse lookup for the typed image command
 // migration. Query pools are native RAL resources and need no reverse lookup.
 
-// Boot-time adoption of the renderer's internal-image
-// VkImage handles (depth_image / color_image / tonemapped_image) into
-// ralTexture_t* sibling fields. Called
+// Boot-time adoption of the renderer's 6 internal-image
+// VkImage handles (depth_image / color_image / tonemapped_image + 3 inside
+// vk.smaa.{input,edges,blend}_image) into ralTexture_t* sibling fields. Called
 // from vk_ral_adopt_static_bindgroups's tail AFTER the render-pass + framebuffer
 // adoption sweep. Idempotent on re-init.
 //
-// The full-teardown destroy helper mirrors vk_ral_destroy_adopted_render_passes_and_framebuffers.
+// The SMAA siblings are gated on vk.fboActive (matching the smaa-image
+// alloc lifecycle in vk_smaa_alloc_resources). The full-teardown destroy
+// helper mirrors vk_ral_destroy_adopted_render_passes_and_framebuffers.
 void vk_ral_refresh_internal_texture_dependents( void );
 void vk_ral_release_internal_texture_dependents( void );
 

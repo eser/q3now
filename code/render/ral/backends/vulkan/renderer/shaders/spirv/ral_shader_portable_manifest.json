@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "generation": 1,
   "toolchainIdentity": "wired-shader-xlate/2 spirv-cross/ad1118591a3150a2a871bf1de66884ddccbffd1d naga/30.0.0+wired-portable-v1",
-  "sourceCount": 370,
+  "sourceCount": 376,
   "entries": [
     {
       "ordinal": 0,
@@ -11461,6 +11461,448 @@
     },
     {
       "ordinal": 130,
+      "symbol": "smaa_edge_vert_spv",
+      "stage": "RAL_STAGE_VERTEX",
+      "sourceDigest": {
+        "lane0": "1bdffbbd5f38595f",
+        "lane1": "2ef3bbbd6032e6d1"
+      },
+      "spirv": {
+        "byteCount": 2012,
+        "digest": {
+          "lane0": "632e117d35425e6c",
+          "lane1": "b806e7c7fb20dc35"
+        }
+      },
+      "reflection": {
+        "schemaVersion": 1,
+        "entryPoint": "main",
+        "stage": "RAL_STAGE_VERTEX",
+        "bindings": [
+          {
+            "set": 3,
+            "binding": 0,
+            "bindingClass": "RAL_SHADER_BIND_UNIFORM_BUFFER",
+            "arrayCount": 1,
+            "stageFlags": "RAL_STAGE_VERTEX",
+            "minBufferBindingSize": 16,
+            "viewDimension": 0,
+            "sampleType": 0,
+            "storageTextureFormat": "RAL_FORMAT_UNDEFINED",
+            "dynamicOffset": false
+          }
+        ],
+        "vertexInputs": [],
+        "inlineData": {
+          "byteSize": 0,
+          "stageFlags": 0,
+          "webgpuUniformSet": 0,
+          "webgpuUniformBinding": 0
+        },
+        "specConstants": [],
+        "portable": true,
+        "loweringRequirements": []
+      }
+    },
+    {
+      "ordinal": 131,
+      "symbol": "smaa_edge_frag_spv",
+      "stage": "RAL_STAGE_FRAGMENT",
+      "sourceDigest": {
+        "lane0": "53b7aa994d7e8204",
+        "lane1": "ea71cff4daefcf90"
+      },
+      "spirv": {
+        "byteCount": 4260,
+        "digest": {
+          "lane0": "61417079674dc5a4",
+          "lane1": "77e201f699619a4e"
+        }
+      },
+      "reflection": {
+        "schemaVersion": 1,
+        "entryPoint": "main",
+        "stage": "RAL_STAGE_FRAGMENT",
+        "bindings": [
+          {
+            "set": 0,
+            "binding": 0,
+            "bindingClass": "RAL_SHADER_BIND_SAMPLED_TEXTURE",
+            "arrayCount": 1,
+            "stageFlags": "RAL_STAGE_FRAGMENT",
+            "minBufferBindingSize": 0,
+            "viewDimension": "RAL_SHADER_VIEW_2D",
+            "sampleType": "RAL_SHADER_SAMPLE_FLOAT",
+            "storageTextureFormat": "RAL_FORMAT_UNDEFINED",
+            "dynamicOffset": false
+          },
+          {
+            "set": 0,
+            "binding": 32,
+            "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER",
+            "arrayCount": 1,
+            "stageFlags": "RAL_STAGE_FRAGMENT",
+            "minBufferBindingSize": 0,
+            "viewDimension": 0,
+            "sampleType": 0,
+            "storageTextureFormat": "RAL_FORMAT_UNDEFINED",
+            "dynamicOffset": false
+          },
+          {
+            "set": 3,
+            "binding": 0,
+            "bindingClass": "RAL_SHADER_BIND_UNIFORM_BUFFER",
+            "arrayCount": 1,
+            "stageFlags": "RAL_STAGE_FRAGMENT",
+            "minBufferBindingSize": 16,
+            "viewDimension": 0,
+            "sampleType": 0,
+            "storageTextureFormat": "RAL_FORMAT_UNDEFINED",
+            "dynamicOffset": false
+          }
+        ],
+        "vertexInputs": [],
+        "inlineData": {
+          "byteSize": 0,
+          "stageFlags": 0,
+          "webgpuUniformSet": 0,
+          "webgpuUniformBinding": 0
+        },
+        "specConstants": [
+          {
+            "constantId": 0,
+            "stageFlags": "RAL_STAGE_FRAGMENT",
+            "defaultValue": 1036831949
+          }
+        ],
+        "portable": true,
+        "loweringRequirements": []
+      }
+    },
+    {
+      "ordinal": 132,
+      "symbol": "smaa_blend_vert_spv",
+      "stage": "RAL_STAGE_VERTEX",
+      "sourceDigest": {
+        "lane0": "4211427ad8aabbe2",
+        "lane1": "ed885601f8519f01"
+      },
+      "spirv": {
+        "byteCount": 2456,
+        "digest": {
+          "lane0": "0782d4693e3b4e20",
+          "lane1": "43d61c1a094a5e98"
+        }
+      },
+      "reflection": {
+        "schemaVersion": 1,
+        "entryPoint": "main",
+        "stage": "RAL_STAGE_VERTEX",
+        "bindings": [
+          {
+            "set": 3,
+            "binding": 0,
+            "bindingClass": "RAL_SHADER_BIND_UNIFORM_BUFFER",
+            "arrayCount": 1,
+            "stageFlags": "RAL_STAGE_VERTEX",
+            "minBufferBindingSize": 16,
+            "viewDimension": 0,
+            "sampleType": 0,
+            "storageTextureFormat": "RAL_FORMAT_UNDEFINED",
+            "dynamicOffset": false
+          }
+        ],
+        "vertexInputs": [],
+        "inlineData": {
+          "byteSize": 0,
+          "stageFlags": 0,
+          "webgpuUniformSet": 0,
+          "webgpuUniformBinding": 0
+        },
+        "specConstants": [
+          {
+            "constantId": 0,
+            "stageFlags": "RAL_STAGE_VERTEX",
+            "defaultValue": 16
+          }
+        ],
+        "portable": true,
+        "loweringRequirements": []
+      }
+    },
+    {
+      "ordinal": 133,
+      "symbol": "smaa_blend_frag_spv",
+      "stage": "RAL_STAGE_FRAGMENT",
+      "sourceDigest": {
+        "lane0": "ce9b4f43b6c13341",
+        "lane1": "3578de7d92d7da20"
+      },
+      "spirv": {
+        "byteCount": 28932,
+        "digest": {
+          "lane0": "3ed6931678eb1e61",
+          "lane1": "46a23e8a446aa54b"
+        }
+      },
+      "reflection": {
+        "schemaVersion": 1,
+        "entryPoint": "main",
+        "stage": "RAL_STAGE_FRAGMENT",
+        "bindings": [
+          {
+            "set": 0,
+            "binding": 0,
+            "bindingClass": "RAL_SHADER_BIND_SAMPLED_TEXTURE",
+            "arrayCount": 1,
+            "stageFlags": "RAL_STAGE_FRAGMENT",
+            "minBufferBindingSize": 0,
+            "viewDimension": "RAL_SHADER_VIEW_2D",
+            "sampleType": "RAL_SHADER_SAMPLE_FLOAT",
+            "storageTextureFormat": "RAL_FORMAT_UNDEFINED",
+            "dynamicOffset": false
+          },
+          {
+            "set": 0,
+            "binding": 32,
+            "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER",
+            "arrayCount": 1,
+            "stageFlags": "RAL_STAGE_FRAGMENT",
+            "minBufferBindingSize": 0,
+            "viewDimension": 0,
+            "sampleType": 0,
+            "storageTextureFormat": "RAL_FORMAT_UNDEFINED",
+            "dynamicOffset": false
+          },
+          {
+            "set": 1,
+            "binding": 0,
+            "bindingClass": "RAL_SHADER_BIND_SAMPLED_TEXTURE",
+            "arrayCount": 1,
+            "stageFlags": "RAL_STAGE_FRAGMENT",
+            "minBufferBindingSize": 0,
+            "viewDimension": "RAL_SHADER_VIEW_2D",
+            "sampleType": "RAL_SHADER_SAMPLE_FLOAT",
+            "storageTextureFormat": "RAL_FORMAT_UNDEFINED",
+            "dynamicOffset": false
+          },
+          {
+            "set": 1,
+            "binding": 32,
+            "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER",
+            "arrayCount": 1,
+            "stageFlags": "RAL_STAGE_FRAGMENT",
+            "minBufferBindingSize": 0,
+            "viewDimension": 0,
+            "sampleType": 0,
+            "storageTextureFormat": "RAL_FORMAT_UNDEFINED",
+            "dynamicOffset": false
+          },
+          {
+            "set": 2,
+            "binding": 0,
+            "bindingClass": "RAL_SHADER_BIND_SAMPLED_TEXTURE",
+            "arrayCount": 1,
+            "stageFlags": "RAL_STAGE_FRAGMENT",
+            "minBufferBindingSize": 0,
+            "viewDimension": "RAL_SHADER_VIEW_2D",
+            "sampleType": "RAL_SHADER_SAMPLE_FLOAT",
+            "storageTextureFormat": "RAL_FORMAT_UNDEFINED",
+            "dynamicOffset": false
+          },
+          {
+            "set": 2,
+            "binding": 32,
+            "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER",
+            "arrayCount": 1,
+            "stageFlags": "RAL_STAGE_FRAGMENT",
+            "minBufferBindingSize": 0,
+            "viewDimension": 0,
+            "sampleType": 0,
+            "storageTextureFormat": "RAL_FORMAT_UNDEFINED",
+            "dynamicOffset": false
+          },
+          {
+            "set": 3,
+            "binding": 0,
+            "bindingClass": "RAL_SHADER_BIND_UNIFORM_BUFFER",
+            "arrayCount": 1,
+            "stageFlags": "RAL_STAGE_FRAGMENT",
+            "minBufferBindingSize": 16,
+            "viewDimension": 0,
+            "sampleType": 0,
+            "storageTextureFormat": "RAL_FORMAT_UNDEFINED",
+            "dynamicOffset": false
+          }
+        ],
+        "vertexInputs": [],
+        "inlineData": {
+          "byteSize": 0,
+          "stageFlags": 0,
+          "webgpuUniformSet": 0,
+          "webgpuUniformBinding": 0
+        },
+        "specConstants": [
+          {
+            "constantId": 0,
+            "stageFlags": "RAL_STAGE_FRAGMENT",
+            "defaultValue": 16
+          },
+          {
+            "constantId": 1,
+            "stageFlags": "RAL_STAGE_FRAGMENT",
+            "defaultValue": 8
+          },
+          {
+            "constantId": 2,
+            "stageFlags": "RAL_STAGE_FRAGMENT",
+            "defaultValue": 25
+          }
+        ],
+        "portable": true,
+        "loweringRequirements": []
+      }
+    },
+    {
+      "ordinal": 134,
+      "symbol": "smaa_resolve_vert_spv",
+      "stage": "RAL_STAGE_VERTEX",
+      "sourceDigest": {
+        "lane0": "4037be6319082d47",
+        "lane1": "a5bce592c90c73e8"
+      },
+      "spirv": {
+        "byteCount": 1468,
+        "digest": {
+          "lane0": "e54ecc6ff0b92493",
+          "lane1": "d4aca0a4f52bca7f"
+        }
+      },
+      "reflection": {
+        "schemaVersion": 1,
+        "entryPoint": "main",
+        "stage": "RAL_STAGE_VERTEX",
+        "bindings": [
+          {
+            "set": 3,
+            "binding": 0,
+            "bindingClass": "RAL_SHADER_BIND_UNIFORM_BUFFER",
+            "arrayCount": 1,
+            "stageFlags": "RAL_STAGE_VERTEX",
+            "minBufferBindingSize": 16,
+            "viewDimension": 0,
+            "sampleType": 0,
+            "storageTextureFormat": "RAL_FORMAT_UNDEFINED",
+            "dynamicOffset": false
+          }
+        ],
+        "vertexInputs": [],
+        "inlineData": {
+          "byteSize": 0,
+          "stageFlags": 0,
+          "webgpuUniformSet": 0,
+          "webgpuUniformBinding": 0
+        },
+        "specConstants": [],
+        "portable": true,
+        "loweringRequirements": []
+      }
+    },
+    {
+      "ordinal": 135,
+      "symbol": "smaa_resolve_frag_spv",
+      "stage": "RAL_STAGE_FRAGMENT",
+      "sourceDigest": {
+        "lane0": "71a1ea55ded537b7",
+        "lane1": "52b70e48cdfa8c06"
+      },
+      "spirv": {
+        "byteCount": 3356,
+        "digest": {
+          "lane0": "968e5f467f015fc1",
+          "lane1": "9470a67211aae5f5"
+        }
+      },
+      "reflection": {
+        "schemaVersion": 1,
+        "entryPoint": "main",
+        "stage": "RAL_STAGE_FRAGMENT",
+        "bindings": [
+          {
+            "set": 0,
+            "binding": 0,
+            "bindingClass": "RAL_SHADER_BIND_SAMPLED_TEXTURE",
+            "arrayCount": 1,
+            "stageFlags": "RAL_STAGE_FRAGMENT",
+            "minBufferBindingSize": 0,
+            "viewDimension": "RAL_SHADER_VIEW_2D",
+            "sampleType": "RAL_SHADER_SAMPLE_FLOAT",
+            "storageTextureFormat": "RAL_FORMAT_UNDEFINED",
+            "dynamicOffset": false
+          },
+          {
+            "set": 0,
+            "binding": 32,
+            "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER",
+            "arrayCount": 1,
+            "stageFlags": "RAL_STAGE_FRAGMENT",
+            "minBufferBindingSize": 0,
+            "viewDimension": 0,
+            "sampleType": 0,
+            "storageTextureFormat": "RAL_FORMAT_UNDEFINED",
+            "dynamicOffset": false
+          },
+          {
+            "set": 1,
+            "binding": 0,
+            "bindingClass": "RAL_SHADER_BIND_SAMPLED_TEXTURE",
+            "arrayCount": 1,
+            "stageFlags": "RAL_STAGE_FRAGMENT",
+            "minBufferBindingSize": 0,
+            "viewDimension": "RAL_SHADER_VIEW_2D",
+            "sampleType": "RAL_SHADER_SAMPLE_FLOAT",
+            "storageTextureFormat": "RAL_FORMAT_UNDEFINED",
+            "dynamicOffset": false
+          },
+          {
+            "set": 1,
+            "binding": 32,
+            "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER",
+            "arrayCount": 1,
+            "stageFlags": "RAL_STAGE_FRAGMENT",
+            "minBufferBindingSize": 0,
+            "viewDimension": 0,
+            "sampleType": 0,
+            "storageTextureFormat": "RAL_FORMAT_UNDEFINED",
+            "dynamicOffset": false
+          },
+          {
+            "set": 3,
+            "binding": 0,
+            "bindingClass": "RAL_SHADER_BIND_UNIFORM_BUFFER",
+            "arrayCount": 1,
+            "stageFlags": "RAL_STAGE_FRAGMENT",
+            "minBufferBindingSize": 16,
+            "viewDimension": 0,
+            "sampleType": 0,
+            "storageTextureFormat": "RAL_FORMAT_UNDEFINED",
+            "dynamicOffset": false
+          }
+        ],
+        "vertexInputs": [],
+        "inlineData": {
+          "byteSize": 0,
+          "stageFlags": 0,
+          "webgpuUniformSet": 0,
+          "webgpuUniformBinding": 0
+        },
+        "specConstants": [],
+        "portable": true,
+        "loweringRequirements": []
+      }
+    },
+    {
+      "ordinal": 136,
       "symbol": "iqm_skinning_vert_spv",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -11542,7 +11984,7 @@
       }
     },
     {
-      "ordinal": 131,
+      "ordinal": 137,
       "symbol": "iqm_skinning_frag_spv",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -11599,7 +12041,7 @@
       }
     },
     {
-      "ordinal": 132,
+      "ordinal": 138,
       "symbol": "iqm_skinning_temporal_invalidate_frag_spv",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -11656,7 +12098,7 @@
       }
     },
     {
-      "ordinal": 133,
+      "ordinal": 139,
       "symbol": "iqm_temporal_exact3_vert_spv",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -11738,7 +12180,7 @@
       }
     },
     {
-      "ordinal": 134,
+      "ordinal": 140,
       "symbol": "iqm_temporal_exact3_write_frag_spv",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -11807,7 +12249,7 @@
       }
     },
     {
-      "ordinal": 135,
+      "ordinal": 141,
       "symbol": "iqm_temporal_exact3_invalidate_frag_spv",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -11876,7 +12318,7 @@
       }
     },
     {
-      "ordinal": 136,
+      "ordinal": 142,
       "symbol": "msdf_vert_spv",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -11940,7 +12382,7 @@
       }
     },
     {
-      "ordinal": 137,
+      "ordinal": 143,
       "symbol": "msdf_frag_spv",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -12015,7 +12457,7 @@
       }
     },
     {
-      "ordinal": 138,
+      "ordinal": 144,
       "symbol": "menubg_frag_spv",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -12060,7 +12502,7 @@
       }
     },
     {
-      "ordinal": 139,
+      "ordinal": 145,
       "symbol": "frag_tx0_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -12160,7 +12602,7 @@
       }
     },
     {
-      "ordinal": 140,
+      "ordinal": 146,
       "symbol": "frag_tx0_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -12265,7 +12707,7 @@
       }
     },
     {
-      "ordinal": 141,
+      "ordinal": 147,
       "symbol": "frag_tx0_ident1_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -12365,7 +12807,7 @@
       }
     },
     {
-      "ordinal": 142,
+      "ordinal": 148,
       "symbol": "frag_tx0_ident1_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -12470,7 +12912,7 @@
       }
     },
     {
-      "ordinal": 143,
+      "ordinal": 149,
       "symbol": "frag_tx0_fixed_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -12580,7 +13022,7 @@
       }
     },
     {
-      "ordinal": 144,
+      "ordinal": 150,
       "symbol": "frag_tx0_fixed_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -12695,7 +13137,7 @@
       }
     },
     {
-      "ordinal": 145,
+      "ordinal": 151,
       "symbol": "frag_tx0_ent_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -12795,7 +13237,7 @@
       }
     },
     {
-      "ordinal": 146,
+      "ordinal": 152,
       "symbol": "frag_tx0_ent_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -12900,7 +13342,7 @@
       }
     },
     {
-      "ordinal": 147,
+      "ordinal": 153,
       "symbol": "frag_tx0_df_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -13005,7 +13447,7 @@
       }
     },
     {
-      "ordinal": 148,
+      "ordinal": 154,
       "symbol": "frag_tx1_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -13100,7 +13542,7 @@
       }
     },
     {
-      "ordinal": 149,
+      "ordinal": 155,
       "symbol": "vert_tx0_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -13194,7 +13636,7 @@
       }
     },
     {
-      "ordinal": 150,
+      "ordinal": 156,
       "symbol": "frag_tx0_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -13294,7 +13736,7 @@
       }
     },
     {
-      "ordinal": 151,
+      "ordinal": 157,
       "symbol": "frag_tx0_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -13394,7 +13836,7 @@
       }
     },
     {
-      "ordinal": 152,
+      "ordinal": 158,
       "symbol": "vert_tx0_fog_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -13488,7 +13930,7 @@
       }
     },
     {
-      "ordinal": 153,
+      "ordinal": 159,
       "symbol": "frag_tx0_fog_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -13593,7 +14035,7 @@
       }
     },
     {
-      "ordinal": 154,
+      "ordinal": 160,
       "symbol": "frag_tx0_fog_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -13698,7 +14140,7 @@
       }
     },
     {
-      "ordinal": 155,
+      "ordinal": 161,
       "symbol": "vert_tx0_env_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -13792,7 +14234,7 @@
       }
     },
     {
-      "ordinal": 156,
+      "ordinal": 162,
       "symbol": "vert_tx0_env_fog_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -13886,7 +14328,7 @@
       }
     },
     {
-      "ordinal": 157,
+      "ordinal": 163,
       "symbol": "vert_tx0_ident1_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -13974,7 +14416,7 @@
       }
     },
     {
-      "ordinal": 158,
+      "ordinal": 164,
       "symbol": "frag_tx0_ident1_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -14074,7 +14516,7 @@
       }
     },
     {
-      "ordinal": 159,
+      "ordinal": 165,
       "symbol": "frag_tx0_ident1_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -14174,7 +14616,7 @@
       }
     },
     {
-      "ordinal": 160,
+      "ordinal": 166,
       "symbol": "vert_tx0_ident1_fog_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -14262,7 +14704,7 @@
       }
     },
     {
-      "ordinal": 161,
+      "ordinal": 167,
       "symbol": "frag_tx0_ident1_fog_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -14367,7 +14809,7 @@
       }
     },
     {
-      "ordinal": 162,
+      "ordinal": 168,
       "symbol": "frag_tx0_ident1_fog_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -14472,7 +14914,7 @@
       }
     },
     {
-      "ordinal": 163,
+      "ordinal": 169,
       "symbol": "vert_tx0_ident1_env_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -14560,7 +15002,7 @@
       }
     },
     {
-      "ordinal": 164,
+      "ordinal": 170,
       "symbol": "vert_tx0_ident1_env_fog_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -14648,7 +15090,7 @@
       }
     },
     {
-      "ordinal": 165,
+      "ordinal": 171,
       "symbol": "vert_tx0_fixed_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -14736,7 +15178,7 @@
       }
     },
     {
-      "ordinal": 166,
+      "ordinal": 172,
       "symbol": "frag_tx0_fixed_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -14846,7 +15288,7 @@
       }
     },
     {
-      "ordinal": 167,
+      "ordinal": 173,
       "symbol": "frag_tx0_fixed_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -14956,7 +15398,7 @@
       }
     },
     {
-      "ordinal": 168,
+      "ordinal": 174,
       "symbol": "vert_tx0_fixed_fog_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -15044,7 +15486,7 @@
       }
     },
     {
-      "ordinal": 169,
+      "ordinal": 175,
       "symbol": "frag_tx0_fixed_fog_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -15159,7 +15601,7 @@
       }
     },
     {
-      "ordinal": 170,
+      "ordinal": 176,
       "symbol": "frag_tx0_fixed_fog_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -15274,7 +15716,7 @@
       }
     },
     {
-      "ordinal": 171,
+      "ordinal": 177,
       "symbol": "vert_tx0_fixed_env_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -15362,7 +15804,7 @@
       }
     },
     {
-      "ordinal": 172,
+      "ordinal": 178,
       "symbol": "vert_tx0_fixed_env_fog_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -15450,7 +15892,7 @@
       }
     },
     {
-      "ordinal": 173,
+      "ordinal": 179,
       "symbol": "frag_tx0_ent_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -15550,7 +15992,7 @@
       }
     },
     {
-      "ordinal": 174,
+      "ordinal": 180,
       "symbol": "frag_tx0_ent_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -15650,7 +16092,7 @@
       }
     },
     {
-      "ordinal": 175,
+      "ordinal": 181,
       "symbol": "frag_tx0_ent_fog_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -15755,7 +16197,7 @@
       }
     },
     {
-      "ordinal": 176,
+      "ordinal": 182,
       "symbol": "frag_tx0_ent_fog_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -15860,7 +16302,7 @@
       }
     },
     {
-      "ordinal": 177,
+      "ordinal": 183,
       "symbol": "vert_tx1_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -15960,7 +16402,7 @@
       }
     },
     {
-      "ordinal": 178,
+      "ordinal": 184,
       "symbol": "frag_tx1_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -16055,7 +16497,7 @@
       }
     },
     {
-      "ordinal": 179,
+      "ordinal": 185,
       "symbol": "frag_tx1_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -16150,7 +16592,7 @@
       }
     },
     {
-      "ordinal": 180,
+      "ordinal": 186,
       "symbol": "vert_tx1_fog_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -16250,7 +16692,7 @@
       }
     },
     {
-      "ordinal": 181,
+      "ordinal": 187,
       "symbol": "frag_tx1_fog_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -16350,7 +16792,7 @@
       }
     },
     {
-      "ordinal": 182,
+      "ordinal": 188,
       "symbol": "frag_tx1_fog_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -16450,7 +16892,7 @@
       }
     },
     {
-      "ordinal": 183,
+      "ordinal": 189,
       "symbol": "vert_tx1_env_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -16550,7 +16992,7 @@
       }
     },
     {
-      "ordinal": 184,
+      "ordinal": 190,
       "symbol": "vert_tx1_env_fog_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -16650,7 +17092,7 @@
       }
     },
     {
-      "ordinal": 185,
+      "ordinal": 191,
       "symbol": "vert_tx1_ident1_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -16744,7 +17186,7 @@
       }
     },
     {
-      "ordinal": 186,
+      "ordinal": 192,
       "symbol": "frag_tx1_ident1_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -16839,7 +17281,7 @@
       }
     },
     {
-      "ordinal": 187,
+      "ordinal": 193,
       "symbol": "frag_tx1_ident1_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -16934,7 +17376,7 @@
       }
     },
     {
-      "ordinal": 188,
+      "ordinal": 194,
       "symbol": "vert_tx1_ident1_fog_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -17028,7 +17470,7 @@
       }
     },
     {
-      "ordinal": 189,
+      "ordinal": 195,
       "symbol": "frag_tx1_ident1_fog_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -17128,7 +17570,7 @@
       }
     },
     {
-      "ordinal": 190,
+      "ordinal": 196,
       "symbol": "frag_tx1_ident1_fog_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -17228,7 +17670,7 @@
       }
     },
     {
-      "ordinal": 191,
+      "ordinal": 197,
       "symbol": "vert_tx1_ident1_env_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -17322,7 +17764,7 @@
       }
     },
     {
-      "ordinal": 192,
+      "ordinal": 198,
       "symbol": "vert_tx1_ident1_env_fog_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -17416,7 +17858,7 @@
       }
     },
     {
-      "ordinal": 193,
+      "ordinal": 199,
       "symbol": "vert_tx1_fixed_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -17510,7 +17952,7 @@
       }
     },
     {
-      "ordinal": 194,
+      "ordinal": 200,
       "symbol": "frag_tx1_fixed_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -17615,7 +18057,7 @@
       }
     },
     {
-      "ordinal": 195,
+      "ordinal": 201,
       "symbol": "frag_tx1_fixed_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -17720,7 +18162,7 @@
       }
     },
     {
-      "ordinal": 196,
+      "ordinal": 202,
       "symbol": "vert_tx1_fixed_fog_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -17814,7 +18256,7 @@
       }
     },
     {
-      "ordinal": 197,
+      "ordinal": 203,
       "symbol": "frag_tx1_fixed_fog_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -17924,7 +18366,7 @@
       }
     },
     {
-      "ordinal": 198,
+      "ordinal": 204,
       "symbol": "frag_tx1_fixed_fog_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -18034,7 +18476,7 @@
       }
     },
     {
-      "ordinal": 199,
+      "ordinal": 205,
       "symbol": "vert_tx1_fixed_env_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -18128,7 +18570,7 @@
       }
     },
     {
-      "ordinal": 200,
+      "ordinal": 206,
       "symbol": "vert_tx1_fixed_env_fog_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -18222,7 +18664,7 @@
       }
     },
     {
-      "ordinal": 201,
+      "ordinal": 207,
       "symbol": "vert_tx1_cl_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -18328,7 +18770,7 @@
       }
     },
     {
-      "ordinal": 202,
+      "ordinal": 208,
       "symbol": "frag_tx1_cl_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -18423,7 +18865,7 @@
       }
     },
     {
-      "ordinal": 203,
+      "ordinal": 209,
       "symbol": "frag_tx1_cl_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -18518,7 +18960,7 @@
       }
     },
     {
-      "ordinal": 204,
+      "ordinal": 210,
       "symbol": "vert_tx1_cl_fog_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -18624,7 +19066,7 @@
       }
     },
     {
-      "ordinal": 205,
+      "ordinal": 211,
       "symbol": "frag_tx1_cl_fog_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -18724,7 +19166,7 @@
       }
     },
     {
-      "ordinal": 206,
+      "ordinal": 212,
       "symbol": "frag_tx1_cl_fog_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -18824,7 +19266,7 @@
       }
     },
     {
-      "ordinal": 207,
+      "ordinal": 213,
       "symbol": "vert_tx1_cl_env_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -18930,7 +19372,7 @@
       }
     },
     {
-      "ordinal": 208,
+      "ordinal": 214,
       "symbol": "vert_tx1_cl_env_fog_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -19036,7 +19478,7 @@
       }
     },
     {
-      "ordinal": 209,
+      "ordinal": 215,
       "symbol": "vert_tx2_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -19142,7 +19584,7 @@
       }
     },
     {
-      "ordinal": 210,
+      "ordinal": 216,
       "symbol": "frag_tx2_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -19237,7 +19679,7 @@
       }
     },
     {
-      "ordinal": 211,
+      "ordinal": 217,
       "symbol": "frag_tx2_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -19332,7 +19774,7 @@
       }
     },
     {
-      "ordinal": 212,
+      "ordinal": 218,
       "symbol": "vert_tx2_fog_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -19438,7 +19880,7 @@
       }
     },
     {
-      "ordinal": 213,
+      "ordinal": 219,
       "symbol": "frag_tx2_fog_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -19538,7 +19980,7 @@
       }
     },
     {
-      "ordinal": 214,
+      "ordinal": 220,
       "symbol": "frag_tx2_fog_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -19638,7 +20080,7 @@
       }
     },
     {
-      "ordinal": 215,
+      "ordinal": 221,
       "symbol": "vert_tx2_env_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -19744,7 +20186,7 @@
       }
     },
     {
-      "ordinal": 216,
+      "ordinal": 222,
       "symbol": "vert_tx2_env_fog_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -19850,7 +20292,7 @@
       }
     },
     {
-      "ordinal": 217,
+      "ordinal": 223,
       "symbol": "vert_tx2_cl_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -19968,7 +20410,7 @@
       }
     },
     {
-      "ordinal": 218,
+      "ordinal": 224,
       "symbol": "frag_tx2_cl_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -20063,7 +20505,7 @@
       }
     },
     {
-      "ordinal": 219,
+      "ordinal": 225,
       "symbol": "frag_tx2_cl_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -20158,7 +20600,7 @@
       }
     },
     {
-      "ordinal": 220,
+      "ordinal": 226,
       "symbol": "vert_tx2_cl_fog_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -20276,7 +20718,7 @@
       }
     },
     {
-      "ordinal": 221,
+      "ordinal": 227,
       "symbol": "frag_tx2_cl_fog_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -20376,7 +20818,7 @@
       }
     },
     {
-      "ordinal": 222,
+      "ordinal": 228,
       "symbol": "frag_tx2_cl_fog_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -20476,7 +20918,7 @@
       }
     },
     {
-      "ordinal": 223,
+      "ordinal": 229,
       "symbol": "vert_tx2_cl_env_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -20594,7 +21036,7 @@
       }
     },
     {
-      "ordinal": 224,
+      "ordinal": 230,
       "symbol": "vert_tx2_cl_env_fog_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -20712,7 +21154,7 @@
       }
     },
     {
-      "ordinal": 225,
+      "ordinal": 231,
       "symbol": "frag_tx1_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -20812,7 +21254,7 @@
       }
     },
     {
-      "ordinal": 226,
+      "ordinal": 232,
       "symbol": "frag_tx1_ident1_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -20907,7 +21349,7 @@
       }
     },
     {
-      "ordinal": 227,
+      "ordinal": 233,
       "symbol": "frag_tx1_ident1_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -21007,7 +21449,7 @@
       }
     },
     {
-      "ordinal": 228,
+      "ordinal": 234,
       "symbol": "frag_tx1_fixed_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -21112,7 +21554,7 @@
       }
     },
     {
-      "ordinal": 229,
+      "ordinal": 235,
       "symbol": "frag_tx1_fixed_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -21222,7 +21664,7 @@
       }
     },
     {
-      "ordinal": 230,
+      "ordinal": 236,
       "symbol": "frag_tx1_cl_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -21317,7 +21759,7 @@
       }
     },
     {
-      "ordinal": 231,
+      "ordinal": 237,
       "symbol": "frag_tx1_cl_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -21417,7 +21859,7 @@
       }
     },
     {
-      "ordinal": 232,
+      "ordinal": 238,
       "symbol": "frag_tx2_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -21512,7 +21954,7 @@
       }
     },
     {
-      "ordinal": 233,
+      "ordinal": 239,
       "symbol": "frag_tx2_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -21612,7 +22054,7 @@
       }
     },
     {
-      "ordinal": 234,
+      "ordinal": 240,
       "symbol": "frag_tx2_cl_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -21707,7 +22149,7 @@
       }
     },
     {
-      "ordinal": 235,
+      "ordinal": 241,
       "symbol": "frag_tx2_cl_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -21807,7 +22249,7 @@
       }
     },
     {
-      "ordinal": 236,
+      "ordinal": 242,
       "symbol": "frag_tx0_dfade_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -21912,7 +22354,7 @@
       }
     },
     {
-      "ordinal": 237,
+      "ordinal": 243,
       "symbol": "frag_tx0_dfade_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -22022,7 +22464,7 @@
       }
     },
     {
-      "ordinal": 238,
+      "ordinal": 244,
       "symbol": "frag_tx0_ident1_dfade_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -22127,7 +22569,7 @@
       }
     },
     {
-      "ordinal": 239,
+      "ordinal": 245,
       "symbol": "frag_tx0_ident1_dfade_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -22237,7 +22679,7 @@
       }
     },
     {
-      "ordinal": 240,
+      "ordinal": 246,
       "symbol": "frag_tx0_fixed_dfade_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -22352,7 +22794,7 @@
       }
     },
     {
-      "ordinal": 241,
+      "ordinal": 247,
       "symbol": "frag_tx0_fixed_dfade_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -22472,7 +22914,7 @@
       }
     },
     {
-      "ordinal": 242,
+      "ordinal": 248,
       "symbol": "frag_tx0_ent_dfade_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -22577,7 +23019,7 @@
       }
     },
     {
-      "ordinal": 243,
+      "ordinal": 249,
       "symbol": "frag_tx0_ent_dfade_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -22687,7 +23129,7 @@
       }
     },
     {
-      "ordinal": 244,
+      "ordinal": 250,
       "symbol": "frag_tx1_shadow_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -22816,7 +23258,7 @@
       }
     },
     {
-      "ordinal": 245,
+      "ordinal": 251,
       "symbol": "frag_tx1_shadow_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -22950,7 +23392,7 @@
       }
     },
     {
-      "ordinal": 246,
+      "ordinal": 252,
       "symbol": "frag_tx1_cl_shadow_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -23079,7 +23521,7 @@
       }
     },
     {
-      "ordinal": 247,
+      "ordinal": 253,
       "symbol": "frag_tx1_cl_shadow_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -23213,7 +23655,7 @@
       }
     },
     {
-      "ordinal": 248,
+      "ordinal": 254,
       "symbol": "frag_tx2_shadow_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -23342,7 +23784,7 @@
       }
     },
     {
-      "ordinal": 249,
+      "ordinal": 255,
       "symbol": "frag_tx2_shadow_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -23476,7 +23918,7 @@
       }
     },
     {
-      "ordinal": 250,
+      "ordinal": 256,
       "symbol": "frag_tx2_cl_shadow_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -23605,7 +24047,7 @@
       }
     },
     {
-      "ordinal": 251,
+      "ordinal": 257,
       "symbol": "frag_tx2_cl_shadow_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -23739,7 +24181,7 @@
       }
     },
     {
-      "ordinal": 252,
+      "ordinal": 258,
       "symbol": "frag_tx1_ident1_shadow_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -23868,7 +24310,7 @@
       }
     },
     {
-      "ordinal": 253,
+      "ordinal": 259,
       "symbol": "frag_tx1_ident1_shadow_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -24002,7 +24444,7 @@
       }
     },
     {
-      "ordinal": 254,
+      "ordinal": 260,
       "symbol": "frag_tx1_fixed_shadow_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -24141,7 +24583,7 @@
       }
     },
     {
-      "ordinal": 255,
+      "ordinal": 261,
       "symbol": "frag_tx1_fixed_shadow_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -24285,7 +24727,7 @@
       }
     },
     {
-      "ordinal": 256,
+      "ordinal": 262,
       "symbol": "frag_tx0_shadow_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -24409,7 +24851,7 @@
       }
     },
     {
-      "ordinal": 257,
+      "ordinal": 263,
       "symbol": "frag_tx0_shadow_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -24538,7 +24980,7 @@
       }
     },
     {
-      "ordinal": 258,
+      "ordinal": 264,
       "symbol": "frag_tx0_ident1_shadow_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -24662,7 +25104,7 @@
       }
     },
     {
-      "ordinal": 259,
+      "ordinal": 265,
       "symbol": "frag_tx0_ident1_shadow_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -24791,7 +25233,7 @@
       }
     },
     {
-      "ordinal": 260,
+      "ordinal": 266,
       "symbol": "frag_tx0_fixed_shadow_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -24925,7 +25367,7 @@
       }
     },
     {
-      "ordinal": 261,
+      "ordinal": 267,
       "symbol": "frag_tx0_fixed_shadow_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -25064,7 +25506,7 @@
       }
     },
     {
-      "ordinal": 262,
+      "ordinal": 268,
       "symbol": "frag_tx1_ibl_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -25260,7 +25702,7 @@
       }
     },
     {
-      "ordinal": 263,
+      "ordinal": 269,
       "symbol": "frag_tx1_ibl_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -25461,7 +25903,7 @@
       }
     },
     {
-      "ordinal": 264,
+      "ordinal": 270,
       "symbol": "frag_tx1_cl_ibl_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -25657,7 +26099,7 @@
       }
     },
     {
-      "ordinal": 265,
+      "ordinal": 271,
       "symbol": "frag_tx1_cl_ibl_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -25858,7 +26300,7 @@
       }
     },
     {
-      "ordinal": 266,
+      "ordinal": 272,
       "symbol": "frag_tx2_ibl_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -26054,7 +26496,7 @@
       }
     },
     {
-      "ordinal": 267,
+      "ordinal": 273,
       "symbol": "frag_tx2_ibl_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -26255,7 +26697,7 @@
       }
     },
     {
-      "ordinal": 268,
+      "ordinal": 274,
       "symbol": "frag_tx2_cl_ibl_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -26451,7 +26893,7 @@
       }
     },
     {
-      "ordinal": 269,
+      "ordinal": 275,
       "symbol": "frag_tx2_cl_ibl_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -26652,7 +27094,7 @@
       }
     },
     {
-      "ordinal": 270,
+      "ordinal": 276,
       "symbol": "frag_light_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -26747,7 +27189,7 @@
       }
     },
     {
-      "ordinal": 271,
+      "ordinal": 277,
       "symbol": "frag_light_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -26842,7 +27284,7 @@
       }
     },
     {
-      "ordinal": 272,
+      "ordinal": 278,
       "symbol": "frag_light_line_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -26937,7 +27379,7 @@
       }
     },
     {
-      "ordinal": 273,
+      "ordinal": 279,
       "symbol": "frag_light_line_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -27032,7 +27474,7 @@
       }
     },
     {
-      "ordinal": 274,
+      "ordinal": 280,
       "symbol": "frag_light_parallax_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -27142,7 +27584,7 @@
       }
     },
     {
-      "ordinal": 275,
+      "ordinal": 281,
       "symbol": "frag_light_parallax_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -27252,7 +27694,7 @@
       }
     },
     {
-      "ordinal": 276,
+      "ordinal": 282,
       "symbol": "frag_light_parallax_line_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -27362,7 +27804,7 @@
       }
     },
     {
-      "ordinal": 277,
+      "ordinal": 283,
       "symbol": "frag_light_parallax_line_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -27472,7 +27914,7 @@
       }
     },
     {
-      "ordinal": 278,
+      "ordinal": 284,
       "symbol": "frag_light_shadow_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -27601,7 +28043,7 @@
       }
     },
     {
-      "ordinal": 279,
+      "ordinal": 285,
       "symbol": "frag_light_shadow_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -27730,7 +28172,7 @@
       }
     },
     {
-      "ordinal": 280,
+      "ordinal": 286,
       "symbol": "frag_light_shadow_line_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -27859,7 +28301,7 @@
       }
     },
     {
-      "ordinal": 281,
+      "ordinal": 287,
       "symbol": "frag_light_shadow_line_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -27988,7 +28430,7 @@
       }
     },
     {
-      "ordinal": 282,
+      "ordinal": 288,
       "symbol": "frag_light_pbr_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -28083,7 +28525,7 @@
       }
     },
     {
-      "ordinal": 283,
+      "ordinal": 289,
       "symbol": "frag_light_pbr_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -28178,7 +28620,7 @@
       }
     },
     {
-      "ordinal": 284,
+      "ordinal": 290,
       "symbol": "frag_light_pbr_line_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -28273,7 +28715,7 @@
       }
     },
     {
-      "ordinal": 285,
+      "ordinal": 291,
       "symbol": "frag_light_pbr_line_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -28368,7 +28810,7 @@
       }
     },
     {
-      "ordinal": 286,
+      "ordinal": 292,
       "symbol": "ral_opengl_product_vert_spv",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -28456,7 +28898,7 @@
       }
     },
     {
-      "ordinal": 287,
+      "ordinal": 293,
       "symbol": "ral_opengl_product_frag_spv",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -28717,7 +29159,7 @@
       }
     },
     {
-      "ordinal": 288,
+      "ordinal": 294,
       "symbol": "atmosphere_froxel_inject_comp_spv",
       "stage": "RAL_STAGE_COMPUTE",
       "sourceDigest": {
@@ -28786,7 +29228,7 @@
       }
     },
     {
-      "ordinal": 289,
+      "ordinal": 295,
       "symbol": "atmosphere_froxel_light_comp_spv",
       "stage": "RAL_STAGE_COMPUTE",
       "sourceDigest": {
@@ -28879,7 +29321,7 @@
       }
     },
     {
-      "ordinal": 290,
+      "ordinal": 296,
       "symbol": "atmosphere_froxel_integrate_comp_spv",
       "stage": "RAL_STAGE_COMPUTE",
       "sourceDigest": {
@@ -28972,7 +29414,7 @@
       }
     },
     {
-      "ordinal": 291,
+      "ordinal": 297,
       "symbol": "atmosphere_composite_comp_spv",
       "stage": "RAL_STAGE_COMPUTE",
       "sourceDigest": {
@@ -29113,7 +29555,7 @@
       }
     },
     {
-      "ordinal": 292,
+      "ordinal": 298,
       "symbol": "atmosphere_froxel_cloud_comp_spv",
       "stage": "RAL_STAGE_COMPUTE",
       "sourceDigest": {
@@ -29182,7 +29624,7 @@
       }
     },
     {
-      "ordinal": 293,
+      "ordinal": 299,
       "symbol": "sky_transmittance_comp_spv",
       "stage": "RAL_STAGE_COMPUTE",
       "sourceDigest": {
@@ -29239,7 +29681,7 @@
       }
     },
     {
-      "ordinal": 294,
+      "ordinal": 300,
       "symbol": "sky_multiscatter_comp_spv",
       "stage": "RAL_STAGE_COMPUTE",
       "sourceDigest": {
@@ -29320,7 +29762,7 @@
       }
     },
     {
-      "ordinal": 295,
+      "ordinal": 301,
       "symbol": "sky_view_comp_spv",
       "stage": "RAL_STAGE_COMPUTE",
       "sourceDigest": {
@@ -29425,7 +29867,7 @@
       }
     },
     {
-      "ordinal": 296,
+      "ordinal": 302,
       "symbol": "project_sky_sh_comp_spv",
       "stage": "RAL_STAGE_COMPUTE",
       "sourceDigest": {
@@ -29506,7 +29948,7 @@
       }
     },
     {
-      "ordinal": 297,
+      "ordinal": 303,
       "symbol": "sky_surface_composite_comp_spv",
       "stage": "RAL_STAGE_COMPUTE",
       "sourceDigest": {
@@ -29683,7 +30125,7 @@
       }
     },
     {
-      "ordinal": 298,
+      "ordinal": 304,
       "symbol": "ral_sky_material_frag_spv",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -29980,7 +30422,7 @@
       }
     },
     {
-      "ordinal": 299,
+      "ordinal": 305,
       "symbol": "ral_sky_capture_frag_spv",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -30337,7 +30779,7 @@
       }
     },
     {
-      "ordinal": 300,
+      "ordinal": 306,
       "symbol": "vert_tx1_ident1_ibl",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -30425,7 +30867,7 @@
       }
     },
     {
-      "ordinal": 301,
+      "ordinal": 307,
       "symbol": "vert_tx1_ident1_ibl_fog",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -30513,7 +30955,7 @@
       }
     },
     {
-      "ordinal": 302,
+      "ordinal": 308,
       "symbol": "vert_tx1_fixed_ibl",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -30601,7 +31043,7 @@
       }
     },
     {
-      "ordinal": 303,
+      "ordinal": 309,
       "symbol": "vert_tx1_fixed_ibl_fog",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -30689,7 +31131,7 @@
       }
     },
     {
-      "ordinal": 304,
+      "ordinal": 310,
       "symbol": "frag_tx1_ident1_ibl_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -30885,7 +31327,7 @@
       }
     },
     {
-      "ordinal": 305,
+      "ordinal": 311,
       "symbol": "frag_tx1_ident1_ibl_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -31086,7 +31528,7 @@
       }
     },
     {
-      "ordinal": 306,
+      "ordinal": 312,
       "symbol": "frag_tx1_fixed_ibl_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -31292,7 +31734,7 @@
       }
     },
     {
-      "ordinal": 307,
+      "ordinal": 313,
       "symbol": "frag_tx1_fixed_ibl_fog_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -31503,7 +31945,7 @@
       }
     },
     {
-      "ordinal": 308,
+      "ordinal": 314,
       "symbol": "gtao_prefilter_comp_spv",
       "stage": "RAL_STAGE_COMPUTE",
       "sourceDigest": {
@@ -31632,7 +32074,7 @@
       }
     },
     {
-      "ordinal": 309,
+      "ordinal": 315,
       "symbol": "shadow_depth_dither_vert_spv",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -31696,7 +32138,7 @@
       }
     },
     {
-      "ordinal": 310,
+      "ordinal": 316,
       "symbol": "shadow_depth_dither_frag_spv",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -31728,7 +32170,7 @@
       }
     },
     {
-      "ordinal": 311,
+      "ordinal": 317,
       "symbol": "shadow_depth_skinned_dither_vert_spv",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -31834,7 +32276,7 @@
       }
     },
     {
-      "ordinal": 312,
+      "ordinal": 318,
       "symbol": "hiz_reduce_comp_spv",
       "stage": "RAL_STAGE_COMPUTE",
       "sourceDigest": {
@@ -31927,7 +32369,7 @@
       }
     },
     {
-      "ordinal": 313,
+      "ordinal": 319,
       "symbol": "hiz_test_comp_spv",
       "stage": "RAL_STAGE_COMPUTE",
       "sourceDigest": {
@@ -32044,7 +32486,7 @@
       }
     },
     {
-      "ordinal": 314,
+      "ordinal": 320,
       "symbol": "hiz_audit_comp_spv",
       "stage": "RAL_STAGE_COMPUTE",
       "sourceDigest": {
@@ -32161,7 +32603,7 @@
       }
     },
     {
-      "ordinal": 315,
+      "ordinal": 321,
       "symbol": "temporal_bootstrap_aa_comp_spv",
       "stage": "RAL_STAGE_COMPUTE",
       "sourceDigest": {
@@ -32278,7 +32720,7 @@
       }
     },
     {
-      "ordinal": 316,
+      "ordinal": 322,
       "symbol": "vert_tx0_shadow_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -32372,7 +32814,7 @@
       }
     },
     {
-      "ordinal": 317,
+      "ordinal": 323,
       "symbol": "frag_tx0_shadow_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -32496,7 +32938,7 @@
       }
     },
     {
-      "ordinal": 318,
+      "ordinal": 324,
       "symbol": "frag_tx0_shadow_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -32620,7 +33062,7 @@
       }
     },
     {
-      "ordinal": 319,
+      "ordinal": 325,
       "symbol": "vert_tx0_shadow_fog_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -32714,7 +33156,7 @@
       }
     },
     {
-      "ordinal": 320,
+      "ordinal": 326,
       "symbol": "frag_tx0_shadow_fog_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -32843,7 +33285,7 @@
       }
     },
     {
-      "ordinal": 321,
+      "ordinal": 327,
       "symbol": "frag_tx0_shadow_fog_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -32972,7 +33414,7 @@
       }
     },
     {
-      "ordinal": 322,
+      "ordinal": 328,
       "symbol": "vert_tx0_ident1_shadow_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -33060,7 +33502,7 @@
       }
     },
     {
-      "ordinal": 323,
+      "ordinal": 329,
       "symbol": "frag_tx0_ident1_shadow_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -33184,7 +33626,7 @@
       }
     },
     {
-      "ordinal": 324,
+      "ordinal": 330,
       "symbol": "frag_tx0_ident1_shadow_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -33308,7 +33750,7 @@
       }
     },
     {
-      "ordinal": 325,
+      "ordinal": 331,
       "symbol": "vert_tx0_ident1_shadow_fog_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -33396,7 +33838,7 @@
       }
     },
     {
-      "ordinal": 326,
+      "ordinal": 332,
       "symbol": "frag_tx0_ident1_shadow_fog_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -33525,7 +33967,7 @@
       }
     },
     {
-      "ordinal": 327,
+      "ordinal": 333,
       "symbol": "frag_tx0_ident1_shadow_fog_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -33654,7 +34096,7 @@
       }
     },
     {
-      "ordinal": 328,
+      "ordinal": 334,
       "symbol": "vert_tx0_fixed_shadow_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -33742,7 +34184,7 @@
       }
     },
     {
-      "ordinal": 329,
+      "ordinal": 335,
       "symbol": "frag_tx0_fixed_shadow_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -33876,7 +34318,7 @@
       }
     },
     {
-      "ordinal": 330,
+      "ordinal": 336,
       "symbol": "frag_tx0_fixed_shadow_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -34010,7 +34452,7 @@
       }
     },
     {
-      "ordinal": 331,
+      "ordinal": 337,
       "symbol": "vert_tx0_fixed_shadow_fog_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -34098,7 +34540,7 @@
       }
     },
     {
-      "ordinal": 332,
+      "ordinal": 338,
       "symbol": "frag_tx0_fixed_shadow_fog_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -34237,7 +34679,7 @@
       }
     },
     {
-      "ordinal": 333,
+      "ordinal": 339,
       "symbol": "frag_tx0_fixed_shadow_fog_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -34376,7 +34818,7 @@
       }
     },
     {
-      "ordinal": 334,
+      "ordinal": 340,
       "symbol": "vert_tx1_shadow_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -34476,7 +34918,7 @@
       }
     },
     {
-      "ordinal": 335,
+      "ordinal": 341,
       "symbol": "frag_tx1_shadow_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -34605,7 +35047,7 @@
       }
     },
     {
-      "ordinal": 336,
+      "ordinal": 342,
       "symbol": "frag_tx1_shadow_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -34734,7 +35176,7 @@
       }
     },
     {
-      "ordinal": 337,
+      "ordinal": 343,
       "symbol": "vert_tx1_shadow_fog_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -34834,7 +35276,7 @@
       }
     },
     {
-      "ordinal": 338,
+      "ordinal": 344,
       "symbol": "frag_tx1_shadow_fog_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -34968,7 +35410,7 @@
       }
     },
     {
-      "ordinal": 339,
+      "ordinal": 345,
       "symbol": "frag_tx1_shadow_fog_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -35102,7 +35544,7 @@
       }
     },
     {
-      "ordinal": 340,
+      "ordinal": 346,
       "symbol": "vert_tx1_cl_shadow_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -35208,7 +35650,7 @@
       }
     },
     {
-      "ordinal": 341,
+      "ordinal": 347,
       "symbol": "frag_tx1_cl_shadow_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -35337,7 +35779,7 @@
       }
     },
     {
-      "ordinal": 342,
+      "ordinal": 348,
       "symbol": "frag_tx1_cl_shadow_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -35466,7 +35908,7 @@
       }
     },
     {
-      "ordinal": 343,
+      "ordinal": 349,
       "symbol": "vert_tx1_cl_shadow_fog_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -35572,7 +36014,7 @@
       }
     },
     {
-      "ordinal": 344,
+      "ordinal": 350,
       "symbol": "frag_tx1_cl_shadow_fog_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -35706,7 +36148,7 @@
       }
     },
     {
-      "ordinal": 345,
+      "ordinal": 351,
       "symbol": "frag_tx1_cl_shadow_fog_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -35840,7 +36282,7 @@
       }
     },
     {
-      "ordinal": 346,
+      "ordinal": 352,
       "symbol": "vert_tx1_ident1_shadow_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -35934,7 +36376,7 @@
       }
     },
     {
-      "ordinal": 347,
+      "ordinal": 353,
       "symbol": "frag_tx1_ident1_shadow_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -36063,7 +36505,7 @@
       }
     },
     {
-      "ordinal": 348,
+      "ordinal": 354,
       "symbol": "frag_tx1_ident1_shadow_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -36192,7 +36634,7 @@
       }
     },
     {
-      "ordinal": 349,
+      "ordinal": 355,
       "symbol": "vert_tx1_ident1_shadow_fog_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -36286,7 +36728,7 @@
       }
     },
     {
-      "ordinal": 350,
+      "ordinal": 356,
       "symbol": "frag_tx1_ident1_shadow_fog_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -36420,7 +36862,7 @@
       }
     },
     {
-      "ordinal": 351,
+      "ordinal": 357,
       "symbol": "frag_tx1_ident1_shadow_fog_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -36554,7 +36996,7 @@
       }
     },
     {
-      "ordinal": 352,
+      "ordinal": 358,
       "symbol": "vert_tx1_fixed_shadow_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -36648,7 +37090,7 @@
       }
     },
     {
-      "ordinal": 353,
+      "ordinal": 359,
       "symbol": "frag_tx1_fixed_shadow_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -36787,7 +37229,7 @@
       }
     },
     {
-      "ordinal": 354,
+      "ordinal": 360,
       "symbol": "frag_tx1_fixed_shadow_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -36926,7 +37368,7 @@
       }
     },
     {
-      "ordinal": 355,
+      "ordinal": 361,
       "symbol": "vert_tx1_fixed_shadow_fog_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -37020,7 +37462,7 @@
       }
     },
     {
-      "ordinal": 356,
+      "ordinal": 362,
       "symbol": "frag_tx1_fixed_shadow_fog_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -37164,7 +37606,7 @@
       }
     },
     {
-      "ordinal": 357,
+      "ordinal": 363,
       "symbol": "frag_tx1_fixed_shadow_fog_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -37308,7 +37750,7 @@
       }
     },
     {
-      "ordinal": 358,
+      "ordinal": 364,
       "symbol": "vert_tx2_shadow_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -37414,7 +37856,7 @@
       }
     },
     {
-      "ordinal": 359,
+      "ordinal": 365,
       "symbol": "frag_tx2_shadow_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -37543,7 +37985,7 @@
       }
     },
     {
-      "ordinal": 360,
+      "ordinal": 366,
       "symbol": "frag_tx2_shadow_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -37672,7 +38114,7 @@
       }
     },
     {
-      "ordinal": 361,
+      "ordinal": 367,
       "symbol": "vert_tx2_shadow_fog_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -37778,7 +38220,7 @@
       }
     },
     {
-      "ordinal": 362,
+      "ordinal": 368,
       "symbol": "frag_tx2_shadow_fog_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -37912,7 +38354,7 @@
       }
     },
     {
-      "ordinal": 363,
+      "ordinal": 369,
       "symbol": "frag_tx2_shadow_fog_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -38046,7 +38488,7 @@
       }
     },
     {
-      "ordinal": 364,
+      "ordinal": 370,
       "symbol": "vert_tx2_cl_shadow_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -38164,7 +38606,7 @@
       }
     },
     {
-      "ordinal": 365,
+      "ordinal": 371,
       "symbol": "frag_tx2_cl_shadow_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -38293,7 +38735,7 @@
       }
     },
     {
-      "ordinal": 366,
+      "ordinal": 372,
       "symbol": "frag_tx2_cl_shadow_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -38422,7 +38864,7 @@
       }
     },
     {
-      "ordinal": 367,
+      "ordinal": 373,
       "symbol": "vert_tx2_cl_shadow_fog_temporal_motion",
       "stage": "RAL_STAGE_VERTEX",
       "sourceDigest": {
@@ -38540,7 +38982,7 @@
       }
     },
     {
-      "ordinal": 368,
+      "ordinal": 374,
       "symbol": "frag_tx2_cl_shadow_fog_temporal_write_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
@@ -38674,7 +39116,7 @@
       }
     },
     {
-      "ordinal": 369,
+      "ordinal": 375,
       "symbol": "frag_tx2_cl_shadow_fog_temporal_invalidate_bindless",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {

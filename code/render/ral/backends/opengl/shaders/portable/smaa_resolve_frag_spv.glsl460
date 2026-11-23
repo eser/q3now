@@ -1,0 +1,41 @@
+#version 460
+
+layout(binding = 0, std140) uniform RtMetrics
+{
+    vec4 rtMetrics;
+} _105;
+
+layout(binding = 1) uniform sampler2D blendTex;
+layout(binding = 0) uniform sampler2D colorTex;
+
+layout(location = 1) in vec4 offset;
+layout(location = 0) in vec2 texcoord;
+layout(location = 0) out vec4 out_color;
+
+void main()
+{
+    vec4 a;
+    a.x = texture(blendTex, offset.xy).w;
+    a.y = texture(blendTex, offset.zw).y;
+    vec2 _39 = texture(blendTex, texcoord).xz;
+    a.w = _39.x;
+    a.z = _39.y;
+    if (dot(a, vec4(1.0)) < 9.9999997473787516355514526367188e-06)
+    {
+        out_color = textureLod(colorTex, texcoord, 0.0);
+        return;
+    }
+    bool h = max(a.x, a.z) > max(a.y, a.w);
+    vec4 blendingOffset = vec4(0.0, a.y, 0.0, a.w);
+    vec2 blendingWeight = a.yw;
+    if (h)
+    {
+        blendingOffset = vec4(a.x, 0.0, a.z, 0.0);
+        blendingWeight = a.xz;
+    }
+    blendingWeight /= vec2(dot(blendingWeight, vec2(1.0)));
+    vec4 blendingCoord = (blendingOffset * vec4(_105.rtMetrics.xy, -_105.rtMetrics.xy)) + texcoord.xyxy;
+    out_color = textureLod(colorTex, blendingCoord.xy, 0.0) * blendingWeight.x;
+    out_color += (textureLod(colorTex, blendingCoord.zw, 0.0) * blendingWeight.y);
+}
+

@@ -89,8 +89,8 @@ qboolean vk_publish_menubg_shadow( uint32_t commandSlot );
 // Width of the shared set_layouts[] scratch array used to build every
 // pipeline layout in the vk_initialize pipeline-layout block. It must be
 // >= the largest setLayoutCount of any layout built there. The widest
-// layouts are 4-set: the entity-matrices (main), MSDF, AO and sunrays
-// layouts (set 0..3). 4 covers them; bump this if a wider layout is
+// layouts are 4-set: the entity-matrices (main), MSDF, AO, sunrays, and
+// SMAA layouts (set 0..3). 4 covers them; bump this if a wider layout is
 // ever added. (The retired bloom-blend layout was also 4 sets, but its
 // removal did not lower this — the layouts above still need 4.)
 #define VK_MAX_PIPELINE_LAYOUT_SETS 4
@@ -758,6 +758,9 @@ void vk_update_attachment_descriptors( void );
 // Releases the portable sampling-view + arena bind-group cohort before an
 // attachment generation or descriptor-arena generation is retired.
 void vk_ral_release_attachment_sampler_cohorts( void );
+// Releases the five SMAA sampling groups, views and adopted texture wrappers
+// before either their arena generation or raw Vulkan image parents retire.
+void vk_ral_release_smaa_sampler_cohorts( void );
 void vk_register_black_sentinel( void );	/* sun-mask decline sentinel into bindless slot 4094 */
 void vk_register_white_sentinel( void );	/* unused-texture-role sentinel into bindless slot 4093 */
 void vk_destroy_samplers( void );
@@ -807,6 +810,7 @@ void vk_temporal_history_store_shutdown( void );
 // True when an active scene-depth consumer draws BEFORE the SS_FOG copy point,
 // so the backend must force the copy earlier than the natural SS_FOG boundary.
 qboolean vk_scene_depth_early_produce( void );
+void vk_smaa( void );
 
 void vk_bind_pipeline( uint32_t pipeline );
 void vk_bind_index( void );
@@ -839,10 +843,16 @@ qboolean vk_bloom( void );
 //
 // vk_open_ui_pass(clear) — opens one RAL dynamic-rendering pass on img 265.
 //                       qtrue CLEARs the pure-2D target after closing any open
-//                       scene pass; qfalse LOADs the tonemap result. On
+//                       scene pass; qfalse LOADs the tonemap/SMAA result. On
 //                       return the UI pass is open and renderPassIndex remains
 //                       RENDER_PASS_MAIN so world/UI dynamic pipeline formats
 //                       share the same typed cache cohort.
+//
+// vk_smaa()           — self-gated on r_smaa; precondition and
+//                       postcondition: no render pass open. Reads/writes
+//                       img 265. Dispatched only from the transition
+//                       gameplay branch, between vk_tonemap() and
+//                       vk_open_ui_pass(qfalse).
 void vk_tonemap( void );
 qboolean vk_atmosphere_full_execute( void );
 void vk_atmosphere_fixture_smoke_receipt( void );
@@ -1071,7 +1081,7 @@ typedef struct vk_tess_s {
 		// vk_bind_descriptor_sets folds it into the per-draw exact RAL set
 		// transaction — Vulkan's pipeline-layout-compat
 		// rule disturbs set 7 whenever an incompatible layout is bound
-		// (particle compute, MSDF, post-process, shadow CSM), so a
+		// (particle compute, MSDF, SMAA, post-process, shadow CSM), so a
 		// once-per-frame bind is insufficient; the rebind must follow the
 		// per-draw rotating-set discipline.
 		VkDescriptorSet	current[WIRED_MSDF_SET + 1]; // 0:uniform, 1:bindless-main, 2:engine-resources, 3:MSDF per-draw UBO (set 3 used by the MSDF layout only)
@@ -1667,6 +1677,10 @@ typedef struct {
 	// ral_bgl_uniform this carries one dynamic-offset uniform binding and is
 	// therefore the portable layout authority for ribbon/rail/beam/sprite.
 	struct ralBindGroupLayout_s *ral_bgl_effects_ubo;
+	// Exact non-dynamic VS|FS UBO layout used by SMAA set 3. Kept
+	// separate from ral_bgl_uniform (dynamic UBO) so the portable layout
+	// shape matches set_layout_smaa_rtmetrics exactly.
+	struct ralBindGroupLayout_s *ral_bgl_smaa_rtmetrics;
 	// Exact set-layout identities consumed by main/MSDF world pipelines.
 	struct ralBindGroupLayout_s *ral_bgl_engine_resources;
 	struct ralBindGroupLayout_s *ral_bgl_entmat;
@@ -1674,11 +1688,13 @@ typedef struct {
 
 	VkPipelineLayout pipeline_layout;			// default shaders
 	VkPipelineLayout pipeline_layout_post_process;	// post-processing
+	VkPipelineLayout pipeline_layout_smaa;		// SMAA (push constants + 3 samplers)
 	VkPipelineLayout pipeline_layout_msdf;		// MSDF text (112-byte push constant range)
 	// Typed RAL owners. Their native mirrors above are obtained from the direct
 	// RAL-created layouts and consumed by the legacy Vulkan command surface.
 	struct ralPipelineLayout_s *ral_pipeline_layout;
 	struct ralPipelineLayout_s *ral_pipeline_layout_post_process;
+	struct ralPipelineLayout_s *ral_pipeline_layout_smaa;
 	struct ralPipelineLayout_s *ral_pipeline_layout_msdf;
 
 	// ── primitive ribbon infrastructure ──────────────────────────────
@@ -2287,6 +2303,18 @@ typedef struct {
 		uint32_t        offset[NUM_COMMAND_BUFFERS];     // running per-draw alloc cursor; reset at frame begin
 	} effectsUbo;
 
+	// SMAA rtMetrics per-frame UBO. One host-coherent slot per in-flight
+	// frame (vec4 {1/w,1/h,w,h}, written once per frame), bound at set 3 of
+	// vk.pipeline_layout_smaa for all 3 passes. Replaces the retired rtMetrics push.
+	// Non-dynamic UNIFORM_BUFFER (no per-draw offset) — exposure-style, not a ring.
+	VkDescriptorSetLayout set_layout_smaa_rtmetrics;
+	struct {
+		void           *ptr[NUM_COMMAND_BUFFERS];
+		VkDescriptorSet descriptor[NUM_COMMAND_BUFFERS];
+		struct ralBuffer_s *ral_buffer[NUM_COMMAND_BUFFERS];
+		struct ralBindGroup_s *ral_descriptor[NUM_COMMAND_BUFFERS];
+	} smaaRt;
+
 	// LDR-linear scene image, written by tonemap pass,
 	// sampled by the gamma/capture passes downstream. Format is
 	// R8G8B8A8_UNORM (sRGB encoding lives in gamma.frag; a later change may
@@ -2615,9 +2643,8 @@ typedef struct {
 	// Dedicated LINEAR + CLAMP_TO_EDGE + LINEAR-mipmap sampler the engine-resources
 	// descriptor writes bind alongside the BRDF LUT + probe cube views (set 2,
 	// bindings 1/2/3). Created unconditionally with the BRDF LUT (NOT borrowed from
-	// another pass's sampler: that one can be NULL when the FBO is off, which
-	// silently dropped the IBL bindings, and its maxLod=0 clamped the radiance
-	// cube to mip 0). LINEAR
+	// SMAA — that sampler is NULL when SMAA/FBO is off, which silently dropped the
+	// IBL bindings; and its maxLod=0 clamped the radiance cube to mip 0). LINEAR
 	// mipmap + full LOD range so the radiance specular reads its roughness mips.
 	struct ralSampler_s         *ral_ibl_sampler;
 
@@ -2894,6 +2921,45 @@ typedef struct {
 	} dlightShadow;
 #endif
 
+	// SMAA anti-aliasing
+	struct {
+		qboolean        active;
+		int             quality;        // 1-4
+
+		// LUT textures (static within the active SMAA cohort)
+		VkDescriptorSet area_descriptor;
+		struct ralBindGroup_s *ral_area_descriptor;
+		struct ralTexture_s *ral_area_image;
+		struct ralTextureView_s *ral_area_view;
+
+		VkDescriptorSet search_descriptor;
+		struct ralBindGroup_s *ral_search_descriptor;
+		struct ralTexture_s *ral_search_image;
+		struct ralTextureView_s *ral_search_view;
+
+		// Direct RAL intermediate textures (resolution-dependent). Their independent
+		// ownership is load-bearing for live r_smaa disable/re-enable.
+		VkDescriptorSet edges_descriptor;
+		struct ralBindGroup_s *ral_edges_descriptor;
+		struct ralTexture_s *ral_edges_image;  // R8G8
+		struct ralTextureView_s *ral_edges_view;
+
+		VkDescriptorSet blend_descriptor;
+		struct ralBindGroup_s *ral_blend_descriptor;
+		struct ralTexture_s *ral_blend_image;  // RGBA8
+		struct ralTextureView_s *ral_blend_view;
+
+		VkDescriptorSet input_descriptor;
+		struct ralBindGroup_s *ral_input_descriptor;
+		struct ralTexture_s *ral_input_image;  // color_format copy of color_image
+		struct ralTextureView_s *ral_input_view;
+
+		VkSampler       point_sampler;
+		VkSampler       linear_sampler;
+		struct ralSampler_s *ral_point_sampler;
+		struct ralSampler_s *ral_linear_sampler;
+	} smaa;
+
 	// Blue-noise dither tile (gamma.frag ditherMode 2). The complete texture/view/
 	// sampler/bind-group cohort is RAL-owned so the same lifetime and binding shape
 	// lowers to Vulkan, Metal and WebGPU. `descriptor` is only the transitional
@@ -3045,6 +3111,13 @@ typedef struct {
 		VkShaderModule gen_ibl_frag[3][4][2];
 #endif
 
+		VkShaderModule smaa_edge_vs;
+		VkShaderModule smaa_edge_fs;
+		VkShaderModule smaa_blend_vs;
+		VkShaderModule smaa_blend_fs;
+		VkShaderModule smaa_resolve_vs;
+		VkShaderModule smaa_resolve_fs;
+
 		// Q1 4-style lightmap blend
 		VkShaderModule q1_ls_vs;
 		VkShaderModule q1_ls_fs;
@@ -3139,8 +3212,8 @@ typedef struct {
 	// passthrough/default tonemap (no feature defines set); tonemap_variants[]
 	// holds the feature-combinatorial pipelines indexed by TONEMAP_VAR_*
 	// bits.
-	// FXAA (was bit 3) was removed; TAA is the only AA
-	// technique. SUNRAYS renumbered down from bit 4 to bit 3 to
+	// FXAA (was bit 3) was removed; SMAA is the AA path
+	// going forward. SUNRAYS renumbered down from bit 4 to bit 3 to
 	// keep the bitmap contiguous and shrink the variant array by half.
 	// GAMMA_VAR_* renamed to TONEMAP_VAR_* to
 	// reflect that the variant bits gate features in tonemap.frag, not
@@ -3190,6 +3263,12 @@ typedef struct {
 	struct ralPipelineLayout_s *ral_pipeline_layout_ao;
 	struct ralPipelineLayout_s *ral_pipeline_layout_sunrays;
 	// capture / bloom_extract / blur / bloom_blend are dynamic-rendering only (ral_* siblings).
+
+	// Dynamic-rendering SMAA pipelines. Recreated on r_smaa / r_smaa_threshold
+	// rebake so their cvar-baked specialization constants stay in sync.
+	struct ralPipeline_s *ral_smaa_edge_pipeline;
+	struct ralPipeline_s *ral_smaa_blend_pipeline;
+	struct ralPipeline_s *ral_smaa_resolve_pipeline;
 
 	uint32_t frame_count;
 	qboolean active;

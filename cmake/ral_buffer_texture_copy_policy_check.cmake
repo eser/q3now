@@ -128,11 +128,9 @@ endforeach()
 
 forbid_regex("${product}" "qvkCmdCopyBufferToImage|PFN_vkCmdCopyBufferToImage|VkBufferImageCopy"
 	"renderer-local raw buffer-image command authority")
-forbid_regex("${product}" "vk_smaa_alloc_resources|SMAA LUT portable upload"
-	"retired SMAA LUT upload transaction")
 require_count("${product}" "vk_ral_copy_buffer_to_texture_exact[(]" 2
 	"exact helper definition/call inventory drifted")
-require_count("${product}" "vk_ral_stage_texture_copy[(]" 4
+require_count("${product}" "vk_ral_stage_texture_copy[(]" 6
 	"portable staging texture-copy inventory drifted")
 foreach(needle IN ITEMS
 		"static qboolean vk_ral_stage_texture_copy( ralTexture_t *destination,"
@@ -145,8 +143,11 @@ foreach(needle IN ITEMS
 		"transition.before = copyState;"
 		"transition.after = sampledState;"
 		"uploadRecorded = vk_ral_stage_texture_copy("
+		"vk_smaa_alloc_resources area LUT"
+		"vk_smaa_alloc_resources search LUT"
 		"portable compressed upload transaction rejected image"
-		"portable 3D upload transaction rejected image")
+		"portable 3D upload transaction rejected image"
+		"SMAA LUT portable upload declined; disabling SMAA resources")
 	require_text("${product}" "${needle}" "product transaction")
 endforeach()
 foreach(needle IN ITEMS

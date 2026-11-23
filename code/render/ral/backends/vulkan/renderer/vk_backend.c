@@ -1617,7 +1617,7 @@ RB_TransitionToUI — Block 8 (Delta 2)
 
 3D→2D handoff, called from every transition site (RB_StretchPic /
 RB_RotatedPic / RB_DrawLine / RB_FinishBloom). Decoupled tonemap
-(vk_tonemap, UI-agnostic) + UI pass (vk_open_ui_pass). Once-guarded
+(vk_tonemap, UI-agnostic) + UI pass (vk_open_ui_pass) + SMAA. Once-guarded
 by backEnd.doneUIPass — the single "the orchestrator already ran this
 frame" flag (replaces the old doneTonemap once-guard).
 =============
@@ -1648,9 +1648,9 @@ static void RB_TransitionToUI( void )
 	}
 
 	// Gameplay frame, scene finished: temporal history ingest → bloom →
-	// tonemap → open the
+	// tonemap → SMAA → open the
 	// LOAD-mode UI pass on img 265 so the HUD blends on top of the
-	// tonemapped scene.
+	// tonemapped (+ anti-aliased) scene.
 	// Seal the command-wide motion/activation receipt before any history or
 	// postprocess consumer can inspect it. vk_end_frame repeats this as an
 	// idempotent fallback for gameplay frames that never transition to UI.
@@ -1663,6 +1663,8 @@ static void RB_TransitionToUI( void )
 	if ( r_bloom->integer )
 		vk_bloom();
 	vk_tonemap();
+	if ( R_AntialiasingSmaaQuality() > 0 )
+		vk_smaa();
 	vk_open_ui_pass( qfalse );
 	backEnd.doneUIPass = qtrue;
 }

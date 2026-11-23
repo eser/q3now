@@ -96,7 +96,7 @@ if (temporalGenericPairs.length !== 58 || temporalGenericShaderEntries.length !=
 
 export default [
 	// ── Auto-discovered single-file shaders (legacy compile.sh
-	//    `for f in *.vert/*.frag` loops, after filtering
+	//    `for f in *.vert/*.frag` loops, after filtering smaa_*,
 	//    msdf.*, iqm_skinning.*) ─────────────────────────────
 	{ stage: 'vert', source: 'color.vert',        output: 'color_vert_spv'        },
 	{ stage: 'vert', source: 'fog.vert',          output: 'fog_vert_spv'          },
@@ -285,6 +285,14 @@ export default [
 	// (29 base + dfade entries) are gone. gen_frag.tmpl compiles
 	// unconditionally as bindless; the `_bindless` outputs further below are
 	// the canonical SPIR-V modules.
+
+	// ── SMAA ──────────────────────────────────────────────────
+	{ stage: 'vert', source: 'smaa_edge.vert',    output: 'smaa_edge_vert_spv'    },
+	{ stage: 'frag', source: 'smaa_edge.frag',    output: 'smaa_edge_frag_spv'    },
+	{ stage: 'vert', source: 'smaa_blend.vert',   output: 'smaa_blend_vert_spv'   },
+	{ stage: 'frag', source: 'smaa_blend.frag',   output: 'smaa_blend_frag_spv'   },
+	{ stage: 'vert', source: 'smaa_resolve.vert', output: 'smaa_resolve_vert_spv' },
+	{ stage: 'frag', source: 'smaa_resolve.frag', output: 'smaa_resolve_frag_spv' },
 
 	// ── IQM GPU skinning ──────────────────────────────────────
 	{ stage: 'vert', source: 'iqm_skinning.vert', output: 'iqm_skinning_vert_spv' },

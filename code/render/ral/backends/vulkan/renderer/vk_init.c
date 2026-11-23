@@ -239,6 +239,8 @@ cvar_t *r_sunRayIntensity;
 cvar_t *r_sunRayDecay;
 #endif
 cvar_t *r_aa;
+cvar_t *r_smaa;
+cvar_t *r_smaa_threshold;
 cvar_t *r_lerpLightstyles;
 #endif // USE_VULKAN
 
@@ -1669,9 +1671,10 @@ qboolean R_ShadowDlightActive( void )
 ===============
 R_AntialiasingPlan
 
-Resolves r_aa / r_temporalInputTest into one plan (tr_antialiasing.c).  Called
-per primary view from the temporal prepare, so it only reads two cached cvar
-values.
+Resolves r_aa / r_smaa / r_temporalInputTest / the entity-matrix path into one
+plan (tr_antialiasing.c).  Called per frame from the SMAA gate and per primary
+view from the temporal prepare, so it only reads four cached cvar values.
+Reports a refused TAA mode once per transition, not once per frame.
 ===============
 */
 void R_AntialiasingPlan( rAntialiasingPlan_t *outPlan )
@@ -1680,12 +1683,20 @@ void R_AntialiasingPlan( rAntialiasingPlan_t *outPlan )
 	rAntialiasingPlan_t plan;
 
 	input.mode = r_aa ? r_aa->integer : R_AA_MODE_OFF;
+	input.smaaPreset = r_smaa ? r_smaa->integer : 0;
 	input.temporalDiagnostic = r_temporalInputTest && r_temporalInputTest->integer ? 1 : 0;
 	R_AntialiasingResolve( &input, &plan );
 
 	if ( outPlan ) {
 		*outPlan = plan;
 	}
+}
+
+int R_AntialiasingSmaaQuality( void )
+{
+	rAntialiasingPlan_t plan;
+	R_AntialiasingPlan( &plan );
+	return plan.smaaQuality;
 }
 
 int R_AntialiasingTemporalRequested( void )
@@ -3036,20 +3047,77 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_sunRayDecay, "Sun-ray per-sample falloff along the sun march." );
 #endif
 
-	// r_aa — the user-facing anti-aliasing switch. TAA (temporal) is the only
-	// technique: 0 is off, 1 and 2 both select TAA (scripts and docs pass either
-	// value). The r_temporalInputTest diagnostic still forces the temporal path
-	// regardless. The decision logic lives in tr_antialiasing.c; every temporal
-	// enable check reads R_AntialiasingPlan() rather than these cvars. In
-	// CVG_RENDERER so a change re-runs vk_update_post_process_pipelines.
+	// live conversion. Previously this was CVAR_LATCH because SMAA
+	// resources (input/edges/blend images + descriptors + pipelines)
+	// were lifecycle-tied to r_smaa->integer. Resources are now allocated
+	// unconditionally when r_fbo 1 (vk.c:9114 — vk.smaa.active = fboActive),
+	// and r_smaa is just the per-frame dispatch gate + quality preset
+	// selector for pipeline rebuild. CVG_RENDERER group membership wires
+	// changes into vk_update_post_process_pipelines.
+	// no SMAA re-tune needed for the linear pipeline.
+	// The edge-detection threshold (preset, or r_smaa_threshold override)
+	// is a *relative-luma delta* (delta / max(L, eps)) — unitless, so it
+	// reads the same at any input magnitude (the design point); the
+	// neighbourhood-blend pass (smaa_resolve.frag) is a weight-normalised
+	// bilinear blend that becomes *more* correct once vk.color_image holds
+	// linear radiance. SMAA thus needs no re-tune for the linear pipeline;
+	// its defaults are unchanged (unlike the bloom threshold, which is an
+	// absolute level and was rebased).
+	// SMAA output route: it reads and
+	// writes the tonemapped image (img 265), dispatched from the 3D->2D
+	// transition (RB_TransitionToUI, tr_backend.c) between vk_tonemap()
+	// and vk_open_ui_pass(qfalse) — i.e. after tonemap, before the HUD
+	// pass. The HUD composes on top of the anti-aliased scene and is
+	// itself left un-AA'd. (vk_tonemap() is also decoupled from the
+	// UI pass — pure-2D frames skip tonemap entirely via render_pass.ui_clear.)
+	r_smaa = ri.Cvar_Get( "r_smaa", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( r_smaa, "0", "4", CV_INTEGER );
+	ri.Cvar_SetDescription( r_smaa, "SMAA anti-aliasing quality:\n"
+									" 0 - disabled\n"
+									" 1 - low     (threshold 0.15, 4-step search)\n"
+									" 2 - medium  (threshold 0.10, 8-step search)\n"
+									" 3 - high    (threshold 0.10, 16-step search + diagonal + corner rounding)\n"
+									" 4 - ultra   (threshold 0.05, 32-step search + diagonal + corner rounding)\n"
+									"Threshold is a relative-luma delta (same semantic at LDR and HDR).\n"
+									"Override the preset threshold via r_smaa_threshold.\n"
+									"Anti-aliases the tonemapped scene (img 265) before the HUD pass —\n"
+									"the HUD stays sharp. Requires r_fbo 1. Live: takes effect on next\n"
+									"frame via the renderer post-process pipeline group." );
+	ri.Cvar_SetGroup( r_smaa, CVG_RENDERER );
+
+	// r_aa — the user-facing anti-aliasing technique: 0 off, 1 TAA (default), 2 SMAA. TAA is the technique the renderer is built
+	// around; SMAA stays as an option for the cases where TAA ghosting affects the player, and is discouraged otherwise. The two
+	// are mutually exclusive. r_smaa (the SMAA preset) and the r_temporalInputTest diagnostic remain developer overrides when r_aa is
+	// 0. The decision logic lives in tr_antialiasing.c; every SMAA / temporal enable check reads R_AntialiasingPlan() rather than
+	// these cvars. In CVG_RENDERER so a change re-runs vk_update_post_process_pipelines like r_smaa does.
 	r_aa = ri.Cvar_Get( "r_aa", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_aa, "0", "2", CV_INTEGER );
 	ri.Cvar_SetDescription( r_aa, "Anti-aliasing technique:\n"
-								  " 0 - off\n"
-								  " 1 or 2 - temporal anti-aliasing (TAA) (default)\n"
+								  " 0 - off. r_smaa, if set, still applies as a developer override\n"
+								  " 1 - TAA (temporal), the default and recommended technique\n"
+								  " 2 - SMAA, using the r_smaa preset, or preset 3 (high) when r_smaa is 0. Use it if TAA ghosting\n"
+								  "     bothers you; TAA is off while SMAA is active.\n"
 								  "Requires r_fbo 1. Live: takes effect on next frame via the\n"
 								  "renderer post-process pipeline group." );
 	ri.Cvar_SetGroup( r_aa, CVG_RENDERER );
+
+	// r_smaa_threshold — Overrides the quality preset
+	// edge threshold when > 0; default 0 means "use r_smaa preset".
+	// Live via CVG_RENDERER (rebakes the SMAA edge pipeline's spec
+	// constant on cvar change). Range [0, 0.5] matches sane relative-
+	// luma deltas: 0.5 means "neighbour must be at least 50% off-center"
+	// which only catches the sharpest discontinuities; 0.001 catches
+	// everything.
+	r_smaa_threshold = ri.Cvar_Get( "r_smaa_threshold", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( r_smaa_threshold, "0", "0.5", CV_FLOAT );
+	ri.Cvar_SetDescription( r_smaa_threshold, "SMAA edge detection threshold override (relative-luma delta).\n"
+											  " 0       - use r_smaa quality preset (default)\n"
+											  " 0.001+  - explicit threshold value; overrides preset\n"
+											  "Higher = fewer edges detected (less smoothing).\n"
+											  "Lower  = more edges detected (more smoothing).\n"
+											  "Live: takes effect on next frame via the renderer\n"
+											  "post-process pipeline group." );
+	ri.Cvar_SetGroup( r_smaa_threshold, CVG_RENDERER );
 
 	r_lerpLightstyles = ri.Cvar_Get( "r_lerpLightstyles", "1", CVAR_ARCHIVE );
 	ri.Cvar_SetDescription(

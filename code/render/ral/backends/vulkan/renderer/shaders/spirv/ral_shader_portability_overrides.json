@@ -6297,6 +6297,96 @@
       ]
     },
     {
+      "symbol": "smaa_blend_frag_spv",
+      "spirvDigest": {
+        "lane0": "3ed6931678eb1e61",
+        "lane1": "46a23e8a446aa54b"
+      },
+      "combinedSamplers": [
+        {
+          "set": 0,
+          "binding": 0,
+          "samplerSet": 0,
+          "samplerBinding": 32,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 1,
+          "binding": 0,
+          "samplerSet": 1,
+          "samplerBinding": 32,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 2,
+          "binding": 0,
+          "samplerSet": 2,
+          "samplerBinding": 32,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        }
+      ]
+    },
+    {
+      "symbol": "smaa_blend_vert_spv",
+      "spirvDigest": {
+        "lane0": "0782d4693e3b4e20",
+        "lane1": "43d61c1a094a5e98"
+      }
+    },
+    {
+      "symbol": "smaa_edge_frag_spv",
+      "spirvDigest": {
+        "lane0": "61417079674dc5a4",
+        "lane1": "77e201f699619a4e"
+      },
+      "combinedSamplers": [
+        {
+          "set": 0,
+          "binding": 0,
+          "samplerSet": 0,
+          "samplerBinding": 32,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        }
+      ]
+    },
+    {
+      "symbol": "smaa_edge_vert_spv",
+      "spirvDigest": {
+        "lane0": "632e117d35425e6c",
+        "lane1": "b806e7c7fb20dc35"
+      }
+    },
+    {
+      "symbol": "smaa_resolve_frag_spv",
+      "spirvDigest": {
+        "lane0": "968e5f467f015fc1",
+        "lane1": "9470a67211aae5f5"
+      },
+      "combinedSamplers": [
+        {
+          "set": 0,
+          "binding": 0,
+          "samplerSet": 0,
+          "samplerBinding": 32,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        },
+        {
+          "set": 1,
+          "binding": 0,
+          "samplerSet": 1,
+          "samplerBinding": 32,
+          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        }
+      ]
+    },
+    {
+      "symbol": "smaa_resolve_vert_spv",
+      "spirvDigest": {
+        "lane0": "e54ecc6ff0b92493",
+        "lane1": "d4aca0a4f52bca7f"
+      }
+    },
+    {
       "symbol": "source_sky_comp_spv",
       "spirvDigest": {
         "lane0": "82bc9f20e69ae3f2",

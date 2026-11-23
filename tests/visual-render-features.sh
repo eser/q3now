@@ -2519,7 +2519,7 @@ worlddecal)
 
 exacthold)
     # r_dbgExactHold 1 keeps the exact temporal pass open across consecutive exact draws instead of closing and
-    # reopening it per draw. Pass structure only: with TAA on (r_aa 2) and fixedtime 8 the frame must equal the
+    # reopening it per draw. Pass structure only: with TAA on (r_aa 1) and fixedtime 8 the frame must equal the
     # frame with the hold off, for a still camera AND after a yaw (a still camera has zero velocity, which would
     # hide a broken velocity buffer). Mode 2 (a leak control that skips the close for ordinary draws) must NOT.
     EH_FLOOR="${EH_FLOOR:-2.0}"; EH_POS="${EH_POS:-1052 1432 50 135}"
@@ -2527,7 +2527,7 @@ exacthold)
         local tag="$1" hold="$2" yaw="$3"
         { printf 'set cg_draw2D 0\nset cg_drawGun 0\nset fixedtime 8\nset r_dbgExactHold %s\n' "$hold"
           if [ "$yaw" = 1 ]; then printf 'cl_yawspeed 60\n+right\nwait 24\n-right\nwait 40\n'; else printf 'wait 40\n'; fi; } > "$SMOKE_HOME/base/vrf_eh.cfg"
-        CAP_POST_CMD="exec vrf_eh.cfg" capture_fixed_cam arena1 "$EH_POS" "$tag" +set r_aa 2 >/dev/null || return 1
+        CAP_POST_CMD="exec vrf_eh.cfg" capture_fixed_cam arena1 "$EH_POS" "$tag" +set r_aa 1 >/dev/null || return 1
         echo "$SHOTDIR/vrf_$tag.png"
     }
     for yaw in 0 1; do
@@ -2546,54 +2546,54 @@ exacthold)
     ;;
 
 aacompare)
-    # Same camera, fixedtime 8: no AA (r_aa 0) / TAA (r_aa 2). Still, after a yaw, and 3 frames after a teleport (a cut: no valid
-    # history). The frames differ by construction (TAA accumulates); this mode produces the images and the tile difference
-    # for a human to judge. It never fails on image content, only when a capture is missing or TAA is not active.
+    # Same camera, fixedtime 8: no AA / SMAA preset 3 / TAA. Still, after a yaw, and 3 frames after a teleport (a cut: no valid
+    # history). The frames differ by construction (SMAA is spatial, TAA accumulates); this mode produces the images and the pairwise
+    # tile differences for a human to judge. It never fails on image content, only when a capture is missing or TAA is not active.
     AC_POS="${AC_POS:-1052 1432 50 135}"; AC_CUT_POS="${AC_CUT_POS:-300 300 200 45}"
     ac() {
-        local tag="$1" aa="$2" yaw="$3"
+        local tag="$1" aa="$2" smaa="$3" yaw="$4"
         { printf 'set cg_draw2D 0\nset cg_drawGun 0\nset fixedtime 8\n'
           case "$yaw" in
             0) printf 'wait 40\n' ;;
             1) printf 'cl_yawspeed 60\n+right\nwait 24\n-right\nwait 40\n' ;;
             2) printf 'wait 40\nsetviewpos %s 0\nwait 3\nscreenshot vrf_%s_cut\nwait 3\n' "$AC_CUT_POS" "$tag" ;;
           esac; } > "$SMOKE_HOME/base/vrf_ac.cfg"
-        CAP_POST_CMD="exec vrf_ac.cfg" capture_fixed_cam arena1 "$AC_POS" "$tag" +set r_aa "$aa" >/dev/null || return 1
+        CAP_POST_CMD="exec vrf_ac.cfg" capture_fixed_cam arena1 "$AC_POS" "$tag" +set r_aa "$aa" +set r_smaa "$smaa" >/dev/null || return 1
     }
     for yaw in 0 1 2; do
-        for cfg in "none 0" "taa 2"; do
+        for cfg in "none 0 0" "smaa 2 3" "taa 1 0"; do
             set -- $cfg
-            ac "ac_$1_$yaw" "$2" "$yaw" || FAIL=1
+            ac "ac_$1_$yaw" "$2" "$3" "$yaw" || FAIL=1
         done
         if ! grep -q 'temporal-resolved-hdr' "$VRF_TMP/vrf-ac_taa_$yaw.log"; then
             echo "  aacompare yaw=$yaw: FAIL(TAA was not active: no temporal-resolved lines)"; FAIL=1
         fi
-        a="$SHOTDIR/vrf_ac_none_$yaw.png"; c="$SHOTDIR/vrf_ac_taa_$yaw.png"
-        printf "  aacompare case=%s: worst-tile none-vs-taa=%s (images in %s)\n" "$yaw" \
-            "$(worst_tile_diff_nohud "$a" "$c")" "$SHOTDIR"
+        a="$SHOTDIR/vrf_ac_none_$yaw.png"; b="$SHOTDIR/vrf_ac_smaa_$yaw.png"; c="$SHOTDIR/vrf_ac_taa_$yaw.png"
+        printf "  aacompare case=%s: worst-tile none-vs-smaa=%s none-vs-taa=%s smaa-vs-taa=%s (images in %s)\n" "$yaw" \
+            "$(worst_tile_diff_nohud "$a" "$b")" "$(worst_tile_diff_nohud "$a" "$c")" "$(worst_tile_diff_nohud "$b" "$c")" "$SHOTDIR"
     done
     ;;
 
 aalatency)
-    # How many frames after a teleport does the captured image show the NEW view, for no AA / TAA? Each capture teleports,
+    # How many frames after a teleport does the captured image show the NEW view, for no AA / SMAA / TAA? Each capture teleports,
     # waits N frames and takes a screenshot; it is compared to a settled capture at the destination (N=40) taken in the same
     # configuration. A configuration that needs more frames than the others adds presentation latency.
     AL_POS="${AL_POS:-1052 1432 50 135}"; AL_DEST="${AL_DEST:-300 300 200 45}"
     al() {
-        local tag="$1" aa="$2" n="$3" hold="${4:-1}"
+        local tag="$1" aa="$2" smaa="$3" n="$4" hold="${5:-1}"
         { printf 'set cg_draw2D 0\nset cg_drawGun 0\nset fixedtime 8\nset r_dbgExactHold %s\nwait 40\nsetviewpos %s 0\nwait %s\nscreenshot vrf_%s_n\nwait 40\n' "$hold" "$AL_DEST" "$n" "$tag"; } > "$SMOKE_HOME/base/vrf_al.cfg"
-        CAP_POST_CMD="exec vrf_al.cfg" capture_fixed_cam arena1 "$AL_POS" "$tag" +set r_aa "$aa" >/dev/null || return 1
+        CAP_POST_CMD="exec vrf_al.cfg" capture_fixed_cam arena1 "$AL_POS" "$tag" +set r_aa "$aa" +set r_smaa "$smaa" >/dev/null || return 1
     }
     while read -r -u 3 cfg; do
         [ -n "$cfg" ] || continue
         set -- $cfg
         line="  aalatency $1: diff to settled destination by frames after teleport:"
         for n in ${AL_NS:-1 2 3 5}; do
-            al "al_$1_$n" "$2" "$n" "$3" || { FAIL=1; continue; }
+            al "al_$1_$n" "$2" "$3" "$n" "$4" || { FAIL=1; continue; }
             line="$line N=$n:$(worst_tile_diff_nohud "$SHOTDIR/vrf_al_$1_${n}_n.png" "$SHOTDIR/vrf_al_$1_$n.png")"
         done
         echo "$line"
-    done 3<<<"${AL_CFGS:-$'none 0 1\ntaa 2 1'}"
+    done 3<<<"${AL_CFGS:-$'none 0 0 1\nsmaa 2 3 1\ntaa 1 0 1'}"
     ;;
 
 temporalfold)
@@ -2610,7 +2610,7 @@ temporalfold)
             0) printf 'wait 60\n' ;;
             1) printf 'cl_yawspeed 60\n+right\nwait 24\n-right\nwait 12\n+left\nwait 30\n-left\nwait 40\n' ;;
           esac; } > "$SMOKE_HOME/base/vrf_tf.cfg"
-        CAP_POST_CMD="exec vrf_tf.cfg" capture_fixed_cam arena1 "$TF_POS" "$tag" +set r_aa 2 >/dev/null || return 1
+        CAP_POST_CMD="exec vrf_tf.cfg" capture_fixed_cam arena1 "$TF_POS" "$tag" +set r_aa 1 >/dev/null || return 1
         echo "$SHOTDIR/vrf_$tag.png"
     }
     for yaw in 0 1; do
@@ -2631,25 +2631,27 @@ temporalfold)
 
 aaportal)
     # AA coverage of a portal view: q3dm7 has a misc_portal_surface at (1078 -832 -384). Four approach points look at it from
-    # each side; each is captured with no AA / TAA at fixedtime 8 (PORTAL_MAP / AP_VIEWS override). Images only.
+    # each side; each is captured with no AA / SMAA preset 3 / TAA at fixedtime 8 (PORTAL_MAP / AP_VIEWS override). Images only.
     AP_MAP="${AP_MAP:-q3dm7}"
     AP_VIEWS="${AP_VIEWS:-1082 -700 -395 270 0}"   # "x y z yaw pitch" per view, separated by |
     ap() {
-        local tag="$1" aa="$2" pos="$3"
+        local tag="$1" aa="$2" smaa="$3" pos="$4"
         { printf 'set cg_draw2D 0\nset cg_drawGun 0\nset fixedtime 8\nwait 60\n'
           # AP_YAW=1: a short yaw sweep so a portal view reprojected with the wrong velocity shows as ghosting.
           [ "${AP_YAW:-0}" = 1 ] && printf 'cl_yawspeed 30\n+left\nwait 14\n-left\nwait 2\n'; } > "$SMOKE_HOME/base/vrf_ap.cfg"
-        CAP_POST_CMD="exec vrf_ap.cfg" capture_fixed_cam "$AP_MAP" "$pos" "$tag" +set r_aa "$aa" ${AP_EXTRA:-} >/dev/null || return 1
+        CAP_POST_CMD="exec vrf_ap.cfg" capture_fixed_cam "$AP_MAP" "$pos" "$tag" +set r_aa "$aa" +set r_smaa "$smaa" ${AP_EXTRA:-} >/dev/null || return 1
     }
     n=0
     IFS='|' read -r -a APV <<< "$AP_VIEWS"
     for pos in "${APV[@]}"; do
-        for cfg in "none 0" "taa 2"; do
+        for cfg in "none 0 0" "smaa 2 3" "taa 1 0"; do
             set -- $cfg
-            ap "ap_$1_$n" "$2" "$pos" || FAIL=1
+            ap "ap_$1_$n" "$2" "$3" "$pos" || FAIL=1
         done
-        printf "  aaportal view %s (%s): worst-tile none-vs-taa=%s\n" "$n" "$pos" \
-            "$(worst_tile_diff_nohud "$SHOTDIR/vrf_ap_none_$n.png" "$SHOTDIR/vrf_ap_taa_$n.png")"
+        printf "  aaportal view %s (%s): worst-tile none-vs-smaa=%s none-vs-taa=%s smaa-vs-taa=%s\n" "$n" "$pos" \
+            "$(worst_tile_diff_nohud "$SHOTDIR/vrf_ap_none_$n.png" "$SHOTDIR/vrf_ap_smaa_$n.png")" \
+            "$(worst_tile_diff_nohud "$SHOTDIR/vrf_ap_none_$n.png" "$SHOTDIR/vrf_ap_taa_$n.png")" \
+            "$(worst_tile_diff_nohud "$SHOTDIR/vrf_ap_smaa_$n.png" "$SHOTDIR/vrf_ap_taa_$n.png")"
         n=$((n+1))
     done
     ;;
@@ -2684,7 +2686,7 @@ PYEOF
     ;;
 
 bootstrapaa)
-    # The first frame of a temporal history (here: r_aa switched from 0 to 2) used to be an unfiltered copy of the scene. With
+    # The first frame of a temporal history (here: r_aa switched from 0 to 1) used to be an unfiltered copy of the scene. With
     # r_dbgTemporalBootstrap 1 it goes through the spatial filter. Frames are captured on consecutive frames after the switch
     # (a0 is the bootstrap frame, a1/a2 the first reprojected ones) and compared with a settled TAA frame of the same camera.
     # The filtered bootstrap frame must be closer to the settled frame than the unfiltered one, and the filter must not smear
@@ -2693,7 +2695,7 @@ bootstrapaa)
     ba() {
         local tag="$1" boot="$2"
         { printf 'set cg_draw2D 0\nset cg_drawGun 0\nset fixedtime 8\nset r_dbgTemporalBootstrap %s\nset r_aa 0\nwait 40\n' "$boot"
-          printf 'set r_aa 2\nscreenshot vrf_%s_a0\nwait 1\nscreenshot vrf_%s_a1\nwait 1\nscreenshot vrf_%s_a2\nwait 60\n' "$tag" "$tag" "$tag"; } > "$SMOKE_HOME/base/vrf_ba.cfg"
+          printf 'set r_aa 1\nscreenshot vrf_%s_a0\nwait 1\nscreenshot vrf_%s_a1\nwait 1\nscreenshot vrf_%s_a2\nwait 60\n' "$tag" "$tag" "$tag"; } > "$SMOKE_HOME/base/vrf_ba.cfg"
         CAP_POST_CMD="exec vrf_ba.cfg" capture_fixed_cam arena1 "$BA_POS" "$tag" +set r_aa 0 >/dev/null || return 1
     }
     ba ba_on 1 || FAIL=1
@@ -2808,7 +2810,7 @@ worldphase)
     WP_RATIO="${WP_RATIO:-1.5}"; WP_MARGIN="${WP_MARGIN:-1.0}"; WP_FLOOR="${WP_FLOOR:-2.0}"
     WP_REPLAY="${WP_REPLAY:-1}"
     WP_INFORMATIVE=0
-    # WP_EXTRA adds launch cvars to every capture (e.g. '+set r_aa 2' for the temporal exact route,
+    # WP_EXTRA adds launch cvars to every capture (e.g. '+set r_aa 1' for the temporal exact route,
     # '+set r_forwardPlus 1' for the fp-lit route); cg_draw2D 0 also removes the HUD fps counter.
     WP_EXTRA="${WP_EXTRA:-}"
     set -- ${VPS[0]}; capture "$1" "$2" "$3" "$4" "$5" "wp_warm" +set cg_drawGun 0 +set cg_draw2D 0 +set fixedtime 8 $WP_EXTRA +set r_dbgWorldPhase 0 >/dev/null 2>&1 || true

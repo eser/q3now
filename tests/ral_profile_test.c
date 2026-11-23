@@ -10,7 +10,7 @@ int main( void ) {
 	ralProfileSnapshot_t snapshot, snapshotBefore;
 	double history[ RAL_PROFILE_HISTORY_CAPACITY ][ RAL_PROFILE_MAX_LANES ];
 	const char *baseLabels[] = { "world", "present" };
-	const char *changedLabels[] = { "world", "bloom" };
+	const char *changedLabels[] = { "world", "smaa" };
 	const char *oneLabel[] = { "present" };
 	const char *badLabels[] = { "" };
 	double first[] = { 1.25, 0.50 };
@@ -39,7 +39,7 @@ int main( void ) {
 
 	CHECK( Ral_ProfileAccumulatorAdd( &acc, changedLabels, second, 2 ) == 1 );
 	CHECK( acc.topologyEpoch == 2 && acc.sampleFrames == 1 && acc.laneCount == 2 );
-	CHECK( strcmp( acc.labels[1], "bloom" ) == 0 && acc.totalMs[0] == 0.75 );
+	CHECK( strcmp( acc.labels[1], "smaa" ) == 0 && acc.totalMs[0] == 0.75 );
 	CHECK( Ral_ProfileAccumulatorSnapshot( &acc, &snapshot ) == 1 );
 	CHECK( snapshot.topologyEpoch == 2 && snapshot.sampleCount == 1 );
 	CHECK( Ral_ProfileAccumulatorAdd( &acc, oneLabel, one, 1 ) == 1 );

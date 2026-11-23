@@ -1203,8 +1203,8 @@ void vk_world_ring_sample( uint32_t entMatSlots, uint32_t uniformReadOffset )
 		static uint64_t lastEnds; static uint32_t frames;
 		if ( ++frames == 100u ) {
 			const uint64_t ends = Ral_DebugRenderingEndCount();
-			R_LOG( rch_ral, SEV_INFO, "render passes per frame (100 frames): %.2f r_aa=%d\n",
-				(double)( ends - lastEnds ) / 100.0, r_aa ? r_aa->integer : -1 );
+			R_LOG( rch_ral, SEV_INFO, "render passes per frame (100 frames): %.2f r_aa=%d r_smaa=%d\n",
+				(double)( ends - lastEnds ) / 100.0, r_aa ? r_aa->integer : -1, r_smaa ? r_smaa->integer : -1 );
 			lastEnds = ends; frames = 0u;
 		}
 	}

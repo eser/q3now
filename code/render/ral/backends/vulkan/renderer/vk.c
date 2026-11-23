@@ -44,6 +44,8 @@
 #ifndef _WIN32
 #include <pthread.h>
 #endif
+#include "smaa_area_texture.h"
+#include "smaa_search_texture.h"
 #include "blue_noise_texture.h"
 #include "../../../../../qcommon/q_feats.h"
 
@@ -75,8 +77,9 @@ enum {
 	VK_PM_UI                    = 1ull << 3,
 	VK_PM_SCENE_DEPTH_RESUME    = 1ull << 4,
 	VK_PM_FORWARDPLUS_RESUME    = 1ull << 5,
-	// Bits 6..8 are retired; the remaining bit values are stable and
-	// deliberately not renumbered.
+	VK_PM_SMAA_EDGES            = 1ull << 6,
+	VK_PM_SMAA_BLEND            = 1ull << 7,
+	VK_PM_SMAA_RESOLVE          = 1ull << 8,
 	VK_PM_BLOOM_EXTRACT         = 1ull << 9,
 	VK_PM_BLOOM_MIP             = 1ull << 10,
 	VK_PM_SCREENMAP             = 1ull << 11,
@@ -2675,6 +2678,9 @@ typedef enum {
 	RPFMT_CAPTURE,
 	RPFMT_BLOOM_EXTRACT,
 	RPFMT_BLUR,
+	RPFMT_SMAA_EDGE,
+	RPFMT_SMAA_BLEND,
+	RPFMT_SMAA_RESOLVE,
 	RPFMT_DEPTH_FADE,
 	RPFMT_SHADOWMAP,
 	RPFMT_COUNT
@@ -2782,6 +2788,9 @@ static void vk_populate_render_pass_formats( void ) {
 	vk_set_rpfmt( RPFMT_CAPTURE,       captureFmt,                    qtrue,  RAL_FORMAT_UNDEFINED );
 	vk_set_rpfmt( RPFMT_BLOOM_EXTRACT, bloomFmt,                      qtrue,  RAL_FORMAT_UNDEFINED );
 	vk_set_rpfmt( RPFMT_BLUR,          bloomFmt,                      qtrue,  RAL_FORMAT_UNDEFINED );
+	vk_set_rpfmt( RPFMT_SMAA_EDGE,     RAL_FORMAT_R8G8_UNORM,         qtrue,  RAL_FORMAT_UNDEFINED );
+	vk_set_rpfmt( RPFMT_SMAA_BLEND,    RAL_FORMAT_R8G8B8A8_UNORM,     qtrue,  RAL_FORMAT_UNDEFINED );
+	vk_set_rpfmt( RPFMT_SMAA_RESOLVE,  colorFmt,                      qtrue,  RAL_FORMAT_UNDEFINED );
 	// depth_fade is depth-copy only (gated by vk.sceneDepth.active); documented
 	// here as a no-color, depth-format entry for the later site.
 	vk_set_rpfmt( RPFMT_DEPTH_FADE,    RAL_FORMAT_UNDEFINED,          qfalse, depthFmt );
@@ -3021,6 +3030,7 @@ static vkRalBufferShadow_t vk_overlay_shadows[NUM_COMMAND_BUFFERS];
 static vkRalBufferShadow_t vk_menubg_shadows[NUM_COMMAND_BUFFERS];
 static vkRalBufferShadow_t vk_msdf_shadows[NUM_COMMAND_BUFFERS];
 static vkRalBufferShadow_t vk_effects_ubo_shadows[NUM_COMMAND_BUFFERS];
+static vkRalBufferShadow_t vk_smaa_rt_shadows[NUM_COMMAND_BUFFERS];
 static vkRalBufferShadow_t vk_ribbon_points_shadows[NUM_COMMAND_BUFFERS];
 static vkRalBufferShadow_t vk_ribbon_headers_shadows[NUM_COMMAND_BUFFERS];
 static vkRalBufferShadow_t vk_rail_ribbon_shadows[NUM_COMMAND_BUFFERS];
@@ -4728,6 +4738,88 @@ void vk_ral_release_attachment_sampler_cohorts( void ) {
 	#undef RELEASE_ATTACHMENT_SAMPLE
 }
 
+void vk_ral_release_smaa_sampler_cohorts( void ) {
+	#define RELEASE_SMAA_SAMPLE( group, view, native ) do { \
+		if ( (group) ) { Ral_DestroyBindGroup( (group) ); (group) = NULL; } \
+		if ( (view) ) { Ral_DestroyTextureView( (view) ); (view) = NULL; } \
+		(native) = VK_NULL_HANDLE; \
+	} while ( 0 )
+	RELEASE_SMAA_SAMPLE( vk.smaa.ral_edges_descriptor,
+		vk.smaa.ral_edges_view, vk.smaa.edges_descriptor );
+	RELEASE_SMAA_SAMPLE( vk.smaa.ral_blend_descriptor,
+		vk.smaa.ral_blend_view, vk.smaa.blend_descriptor );
+	RELEASE_SMAA_SAMPLE( vk.smaa.ral_input_descriptor,
+		vk.smaa.ral_input_view, vk.smaa.input_descriptor );
+	RELEASE_SMAA_SAMPLE( vk.smaa.ral_area_descriptor,
+		vk.smaa.ral_area_view, vk.smaa.area_descriptor );
+	RELEASE_SMAA_SAMPLE( vk.smaa.ral_search_descriptor,
+		vk.smaa.ral_search_view, vk.smaa.search_descriptor );
+	#undef RELEASE_SMAA_SAMPLE
+}
+
+static qboolean vk_ral_refresh_smaa_sampler_cohorts( void ) {
+	if ( !vk.smaa.active ) return qtrue;
+	if ( vk.smaa.ral_edges_image && vk.smaa.ral_edges_view
+			&& vk.smaa.ral_edges_descriptor
+			&& vk.smaa.ral_blend_image && vk.smaa.ral_blend_view
+			&& vk.smaa.ral_blend_descriptor
+			&& vk.smaa.ral_input_image && vk.smaa.ral_input_view
+			&& vk.smaa.ral_input_descriptor
+			&& vk.smaa.ral_area_image && vk.smaa.ral_area_view
+			&& vk.smaa.ral_area_descriptor
+			&& vk.smaa.ral_search_image && vk.smaa.ral_search_view
+			&& vk.smaa.ral_search_descriptor
+			&& Ral_GetTextureViewHandle( vk.smaa.ral_edges_view ) != NULL
+			&& Ral_GetTextureViewHandle( vk.smaa.ral_blend_view ) != NULL
+			&& Ral_GetTextureViewHandle( vk.smaa.ral_input_view ) != NULL
+			&& Ral_GetTextureViewHandle( vk.smaa.ral_area_view ) != NULL
+			&& Ral_GetTextureViewHandle( vk.smaa.ral_search_view ) != NULL
+			&& Ral_GetBindGroupHandle( vk.smaa.ral_edges_descriptor ) == (void *)vk.smaa.edges_descriptor
+			&& Ral_GetBindGroupHandle( vk.smaa.ral_blend_descriptor ) == (void *)vk.smaa.blend_descriptor
+			&& Ral_GetBindGroupHandle( vk.smaa.ral_input_descriptor ) == (void *)vk.smaa.input_descriptor
+			&& Ral_GetBindGroupHandle( vk.smaa.ral_area_descriptor ) == (void *)vk.smaa.area_descriptor
+			&& Ral_GetBindGroupHandle( vk.smaa.ral_search_descriptor ) == (void *)vk.smaa.search_descriptor )
+		return qtrue;
+
+	// Arena resets and live r_smaa recreation converge here. Texture parents are
+	// direct RAL owners and survive arena-only child refreshes.
+	if ( !vk.smaa.ral_edges_image || !vk.smaa.ral_blend_image
+			|| !vk.smaa.ral_input_image || !vk.smaa.ral_area_image
+			|| !vk.smaa.ral_search_image ) goto fail;
+
+	if ( !vk_ral_refresh_texture_sampler_group( vk.smaa.ral_edges_image,
+			&vk.smaa.ral_edges_view, &vk.smaa.ral_edges_descriptor,
+			vk.smaa.ral_point_sampler, "wired-smaa-edges-bg" )
+			|| !vk_ral_refresh_texture_sampler_group( vk.smaa.ral_blend_image,
+				&vk.smaa.ral_blend_view, &vk.smaa.ral_blend_descriptor,
+				vk.smaa.ral_linear_sampler, "wired-smaa-blend-bg" )
+			|| !vk_ral_refresh_texture_sampler_group( vk.smaa.ral_input_image,
+				&vk.smaa.ral_input_view, &vk.smaa.ral_input_descriptor,
+				vk.smaa.ral_linear_sampler, "wired-smaa-input-bg" )
+			|| !vk_ral_refresh_texture_sampler_group( vk.smaa.ral_area_image,
+				&vk.smaa.ral_area_view, &vk.smaa.ral_area_descriptor,
+				vk.smaa.ral_linear_sampler, "wired-smaa-area-bg" )
+			|| !vk_ral_refresh_texture_sampler_group( vk.smaa.ral_search_image,
+				&vk.smaa.ral_search_view, &vk.smaa.ral_search_descriptor,
+				vk.smaa.ral_point_sampler, "wired-smaa-search-bg" ) ) goto fail;
+
+	vk.smaa.edges_descriptor = Ral_GetBindGroupHandle(
+		vk.smaa.ral_edges_descriptor );
+	vk.smaa.blend_descriptor = Ral_GetBindGroupHandle(
+		vk.smaa.ral_blend_descriptor );
+	vk.smaa.input_descriptor = Ral_GetBindGroupHandle(
+		vk.smaa.ral_input_descriptor );
+	vk.smaa.area_descriptor = Ral_GetBindGroupHandle(
+		vk.smaa.ral_area_descriptor );
+	vk.smaa.search_descriptor = Ral_GetBindGroupHandle(
+		vk.smaa.ral_search_descriptor );
+	return qtrue;
+
+fail:
+	vk_ral_release_smaa_sampler_cohorts();
+	return qfalse;
+}
+
 
 void vk_update_attachment_descriptors( void ) {
 
@@ -4884,6 +4976,12 @@ void vk_update_attachment_descriptors( void ) {
 		if ( !vk_ral_refresh_engine_resources_bindgroup() )
 			R_LOG( rch_ral, SEV_WARN,
 				"engine-resources: attachment refresh declined\n" );
+
+		// SMAA's five combined texture/sampler groups are direct RAL arena
+		// children. The VkDescriptorSet fields are compatibility mirrors only.
+		if ( vk.smaa.active && !vk_ral_refresh_smaa_sampler_cohorts() )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: failed to create SMAA RAL sampler cohorts" );
 	}
 }
 
@@ -5041,6 +5139,52 @@ void vk_init_descriptors( void )
 				vk.effectsUbo.ral_descriptor[i] );
 		}
 	}
+
+	// SMAA rtMetrics per-frame UBO. One 16-byte host-coherent slot per in-flight
+	// frame (vec4 {1/w,1/h,w,h}), bound at set 3 of pipeline_layout_smaa.
+	// Allocated unconditionally (the layout exists unconditionally; the buffer is
+	// tiny). Buffers survive the pool reset; descriptor SETS re-allocated each pass.
+	{
+		ralBindingValue_t        rtValue;
+		ralBindGroupCreateInfo_t rtCreate;
+		const VkDeviceSize       rtBytes = 16; // vec4
+
+		for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ )
+		{
+			if ( !vk.smaaRt.ral_buffer[i] )
+			{
+				if ( vk_smaa_rt_shadows[i].schemaVersion == 0u )
+					VK_RalBufferShadowInit( &vk_smaa_rt_shadows[i] );
+				if ( !VK_RalBufferShadowEnsure( &vk_smaa_rt_shadows[i],
+						vk_ral_get_backend(), rtBytes, RAL_BUFFER_UNIFORM,
+						"wired-smaa-rtmetrics-ubo" ) )
+					ri.Terminate( TERM_UNRECOVERABLE,
+						"Vulkan: failed to create SMAA metrics RAL buffer %u", i );
+				vk.smaaRt.ral_buffer[i] = vk_smaa_rt_shadows[i].buffer;
+				vk.smaaRt.ptr[i] = vk_smaa_rt_shadows[i].bytes;
+			}
+			memset( &rtValue, 0, sizeof( rtValue ) );
+			rtValue.binding = 0u;
+			rtValue.type = RAL_BIND_UNIFORM_BUFFER;
+			rtValue.buffer = vk.smaaRt.ral_buffer[i];
+			rtValue.bufferRange = rtBytes;
+			memset( &rtCreate, 0, sizeof( rtCreate ) );
+			rtCreate.layout = vk.ral_bgl_smaa_rtmetrics;
+			rtCreate.values = &rtValue;
+			rtCreate.numValues = 1u;
+			rtCreate.debugName = va( "smaa rtMetrics UBO set %u", i );
+			rtCreate.arena = vk.ral_descriptor_arena;
+			rtCreate.arenaReceipt = &vk.ral_descriptor_arena_receipt;
+			vk.smaaRt.ral_descriptor[i] = Ral_CreateBindGroup(
+				vk_ral_get_backend(), &rtCreate );
+			if ( !vk.smaaRt.ral_buffer[i] || !vk.smaaRt.ral_descriptor[i] )
+				ri.Terminate( TERM_UNRECOVERABLE,
+					"Vulkan: failed to create SMAA rtMetrics RAL bind group %u", i );
+			vk.smaaRt.descriptor[i] = (VkDescriptorSet)Ral_GetBindGroupHandle(
+				vk.smaaRt.ral_descriptor[i] );
+		}
+	}
+	// End arena-owned SMAA rtMetrics cohort.
 
 	if ( vk.ral_color_image )
 	{
@@ -13897,6 +14041,24 @@ static void vk_create_shader_modules( void )
 		vk.modules.frag.dfade_ent[0][1] = SHADER_MODULE( frag_tx0_ent_dfade_fog_bindless );
 	}
 
+	// SMAA shader modules. Loaded unconditionally: vk.smaa.active is the
+	// "intermediate images allocated" flag, owned by vk_smaa_alloc_resources
+	// / vk_smaa_release_resources, and is still qfalse here — vk_create_attachments
+	// (which calls vk_smaa_alloc_resources, flipping it to qtrue) runs *after*
+	// this function. Gating module creation on vk.smaa.active left the handles
+	// VK_NULL_HANDLE while vk_update_post_process_pipelines still saw .active and
+	// fed them to vk_create_smaa_pipelines (VUID-VkGraphicsPipelineCreateInfo
+	// triple-NULL at boot when r_smaa > 0). r_smaa is also live-toggleable
+	// (CVG_RENDERER), so the modules must exist even if SMAA is off at boot. The
+	// six SMAA shaders are tiny — always-present is cheaper than re-introducing an
+	// ordering dependency. Destroyed unconditionally (NULL-guarded) in vk_shutdown.
+	vk.modules.smaa_edge_vs    = SHADER_MODULE( smaa_edge_vert_spv );
+	vk.modules.smaa_edge_fs    = SHADER_MODULE( smaa_edge_frag_spv );
+	vk.modules.smaa_blend_vs   = SHADER_MODULE( smaa_blend_vert_spv );
+	vk.modules.smaa_blend_fs   = SHADER_MODULE( smaa_blend_frag_spv );
+	vk.modules.smaa_resolve_vs = SHADER_MODULE( smaa_resolve_vert_spv );
+	vk.modules.smaa_resolve_fs = SHADER_MODULE( smaa_resolve_frag_spv );
+
 	vk.modules.vert.light[0] = SHADER_MODULE( vert_light );
 	vk.modules.vert.light[1] = SHADER_MODULE( vert_light_fog );
 	SET_OBJECT_NAME( vk.modules.vert.light[0], "light vertex module", RAL_VULKAN_OBJECT_ROLE_SHADER_MODULE );
@@ -14064,7 +14226,7 @@ static void vk_create_shader_modules( void )
 #if FEAT_COLOR_GRADING
 	vk.tonemap_variant_fs[ TONEMAP_VAR_CG ] = SHADER_MODULE( tonemap_colorgrade_frag_spv );
 #endif
-	// FXAA variants removed (TAA is the only anti-aliasing technique).
+	// FXAA variants removed (SMAA replaces it).
 #if FEAT_TONEMAP && FEAT_COLOR_GRADING
 	vk.tonemap_variant_fs[ TONEMAP_VAR_BASE | TONEMAP_VAR_CG ] = SHADER_MODULE( tonemap_tonemap_cg_frag_spv );
 #endif
@@ -14398,6 +14560,174 @@ void vk_create_bloom_dual_composite_pipeline( void );
 void vk_create_overlay_pipeline( void );
 static void set_shader_stage_desc(VkPipelineShaderStageCreateInfo *desc, VkShaderStageFlagBits stage, VkShaderModule shader_module, const char *entry);
 
+static void vk_create_smaa_pipelines( void )
+{
+	// Quality presets: Low(1), Medium(2), High(3), Ultra(4). Threshold
+	// values come from the Jorge Jimenez et al. SMAA paper — kept as
+	// authored. smaa_edge.frag's threshold check uses
+	// relative luma delta, so these values are now HDR-magnitude-
+	// independent (same edge sensitivity at r_hdr 0 / 1 / 2).
+	static const float thresholds[] = { 0.0f, 0.15f, 0.10f, 0.10f, 0.05f };
+	static const int searchSteps[] = { 0, 4, 8, 16, 32 };
+	static const int searchStepsDiag[] = { 0, 0, 0, 8, 16 };
+	static const int cornerRounding[] = { 0, 0, 0, 25, 25 };
+
+	// The effective SMAA preset (r_aa / r_smaa) is live (CVG_RENDERER), so
+	// re-read it at every rebuild instead of reusing the init-time cache.
+	// vk.smaa.quality stays in sync for the SEV_INFO log path elsewhere.
+	int q = R_AntialiasingSmaaQuality();
+	vk.smaa.quality = q;
+
+	float edge_threshold;
+
+	struct SmaaBlendFragSpec {
+		int max_search_steps;
+		int max_search_steps_diag;
+		int corner_rounding;
+	} blend_frag_spec_data;
+	if ( !vk.smaa.active )
+		return;
+
+	// r_smaa toggled off live. Resources stay allocated per the always-alloc
+	// design; only the three RAL dynamic-rendering pipelines come and go.
+	if ( q == 0 ) {
+		if ( vk.ral_smaa_edge_pipeline    ) { Ral_DestroyPipeline( vk.ral_smaa_edge_pipeline    ); vk.ral_smaa_edge_pipeline    = NULL; }
+		if ( vk.ral_smaa_blend_pipeline   ) { Ral_DestroyPipeline( vk.ral_smaa_blend_pipeline   ); vk.ral_smaa_blend_pipeline   = NULL; }
+		if ( vk.ral_smaa_resolve_pipeline ) { Ral_DestroyPipeline( vk.ral_smaa_resolve_pipeline ); vk.ral_smaa_resolve_pipeline = NULL; }
+		return;
+	}
+
+	// --- Edge detection pipeline ---
+	// r_smaa_threshold > 0 overrides the quality preset.
+	// Default value 0 means "use r_smaa preset" so existing user
+	// configs continue to behave as before. The override only swaps
+	// the threshold constant; searchSteps / searchStepsDiag /
+	// cornerRounding stay preset-keyed (they're quality knobs, not
+	// sensitivity knobs).
+	if ( r_smaa_threshold->value > 0.0f ) {
+		edge_threshold = r_smaa_threshold->value;
+	} else {
+		edge_threshold = thresholds[q];
+	}
+	// SMAA cluster (shared RAL pipeline_layout_smaa).
+	// Binding contract per smaa_edge.{vert,frag}: set 0 is colorTex and set 3 is
+	// the per-frame rtMetrics UBO. The shared layout also declares sampler sets
+	// 1/2 for blend/resolve; this shader variant statically ignores them.
+	// The edge pipeline is dynamic-rendering only. Rebuilt here
+	// on every r_smaa / r_smaa_threshold change (the spec threshold is cvar-baked).
+	{
+		vk_ral_special_pipeline_params_t p;
+		ralSpecConstant_t edgeSpec[1];
+		const renderPassFmtEntry_t *fmt = &s_renderPassFmt[ RPFMT_SMAA_EDGE ];
+		floatint_t fi;
+		fi.f = edge_threshold;
+		edgeSpec[0].constantId = 0;
+		edgeSpec[0].value      = fi.u;
+		memset( &p, 0, sizeof( p ) );
+		p.vs_module          = vk.modules.smaa_edge_vs;
+		p.fs_module          = vk.modules.smaa_edge_fs;
+		p.topology           = RAL_TOPOLOGY_TRIANGLE_LIST;
+		p.cullMode           = RAL_CULL_NONE;
+		p.depthTestEnable    = qfalse;
+		p.depthWriteEnable   = qfalse;
+		p.blendEnable        = qfalse;
+		if ( vk.ral_bgl_sampler && vk.ral_bgl_smaa_rtmetrics ) {
+			p.bgls[ p.numBgls++ ] = vk.ral_bgl_sampler;
+			p.bgls[ p.numBgls++ ] = vk.ral_bgl_sampler;
+			p.bgls[ p.numBgls++ ] = vk.ral_bgl_sampler;
+			p.bgls[ p.numBgls++ ] = vk.ral_bgl_smaa_rtmetrics;
+		}
+		p.optionalBindGroupMask = ( 1u << 1 ) | ( 1u << 2 );
+		p.specConstants      = edgeSpec;
+		p.numSpecConstants   = 1;
+		p.colorFormat        = fmt->colorFormats[0];
+		p.numColorAttachments = fmt->numColorFormats;
+		p.depthFormat        = fmt->depthFormat;
+		p.debugName          = "ral-smaa-edge";
+		p.externalLayout     = vk.ral_pipeline_layout_smaa;
+		// destroy-then-create: vk_create_smaa_pipelines re-runs on r_smaa toggle /
+		// resize / rebake, so drop the predecessor before replacing it.
+		if ( vk.ral_smaa_edge_pipeline ) { Ral_DestroyPipeline( vk.ral_smaa_edge_pipeline ); vk.ral_smaa_edge_pipeline = NULL; }
+		vk.ral_smaa_edge_pipeline = vk_ral_create_special_pipeline( &p );
+	}
+
+	// --- Blend weight calculation pipeline ---
+	blend_frag_spec_data.max_search_steps = searchSteps[q];
+	blend_frag_spec_data.max_search_steps_diag = searchStepsDiag[q];
+	blend_frag_spec_data.corner_rounding = cornerRounding[q];
+
+	// SMAA blend (same pipeline_layout_smaa).
+	// Contract: sampler sets 0/1/2 (edges + area LUT + search LUT) and the
+	// per-frame rtMetrics UBO at set 3.
+	// RAL applies one spec list to both stages; id 0 carries the SAME value the
+	// vertex and fragment shaders both want (searchSteps[q]), so a single 3-entry
+	// list serves both — the vertex shader declares only id 0 and ignores 1/2.
+	{
+		vk_ral_special_pipeline_params_t p;
+		ralSpecConstant_t blendSpec[3];
+		const renderPassFmtEntry_t *fmt = &s_renderPassFmt[ RPFMT_SMAA_BLEND ];
+		blendSpec[0].constantId = 0; blendSpec[0].value = (uint32_t)blend_frag_spec_data.max_search_steps;
+		blendSpec[1].constantId = 1; blendSpec[1].value = (uint32_t)blend_frag_spec_data.max_search_steps_diag;
+		blendSpec[2].constantId = 2; blendSpec[2].value = (uint32_t)blend_frag_spec_data.corner_rounding;
+		memset( &p, 0, sizeof( p ) );
+		p.vs_module          = vk.modules.smaa_blend_vs;
+		p.fs_module          = vk.modules.smaa_blend_fs;
+		p.topology           = RAL_TOPOLOGY_TRIANGLE_LIST;
+		p.cullMode           = RAL_CULL_NONE;
+		p.depthTestEnable    = qfalse;
+		p.depthWriteEnable   = qfalse;
+		p.blendEnable        = qfalse;
+		if ( vk.ral_bgl_sampler && vk.ral_bgl_smaa_rtmetrics ) {
+			p.bgls[ p.numBgls++ ] = vk.ral_bgl_sampler;
+			p.bgls[ p.numBgls++ ] = vk.ral_bgl_sampler;
+			p.bgls[ p.numBgls++ ] = vk.ral_bgl_sampler;
+			p.bgls[ p.numBgls++ ] = vk.ral_bgl_smaa_rtmetrics;
+		}
+		p.specConstants      = blendSpec;
+		p.numSpecConstants   = 3;
+		p.colorFormat        = fmt->colorFormats[0];
+		p.numColorAttachments = fmt->numColorFormats;
+		p.depthFormat        = fmt->depthFormat;
+		p.debugName          = "ral-smaa-blend";
+		p.externalLayout     = vk.ral_pipeline_layout_smaa;
+		if ( vk.ral_smaa_blend_pipeline ) { Ral_DestroyPipeline( vk.ral_smaa_blend_pipeline ); vk.ral_smaa_blend_pipeline = NULL; }
+		vk.ral_smaa_blend_pipeline = vk_ral_create_special_pipeline( &p );
+	}
+
+	// --- Resolve (neighborhood blending) pipeline ---
+	// SMAA resolve (same pipeline_layout_smaa).
+	// Contract: sampler sets 0/1 plus the per-frame rtMetrics UBO at set 3;
+	// sampler set 2 is a statically-unused shared-layout slot.
+	// Dynamic-rendering resolve pipeline (no spec constants).
+	{
+		vk_ral_special_pipeline_params_t p;
+		const renderPassFmtEntry_t *fmt = &s_renderPassFmt[ RPFMT_SMAA_RESOLVE ];
+		memset( &p, 0, sizeof( p ) );
+		p.vs_module          = vk.modules.smaa_resolve_vs;
+		p.fs_module          = vk.modules.smaa_resolve_fs;
+		p.topology           = RAL_TOPOLOGY_TRIANGLE_LIST;
+		p.cullMode           = RAL_CULL_NONE;
+		p.depthTestEnable    = qfalse;
+		p.depthWriteEnable   = qfalse;
+		p.blendEnable        = qfalse;
+		if ( vk.ral_bgl_sampler && vk.ral_bgl_smaa_rtmetrics ) {
+			p.bgls[ p.numBgls++ ] = vk.ral_bgl_sampler;
+			p.bgls[ p.numBgls++ ] = vk.ral_bgl_sampler;
+			p.bgls[ p.numBgls++ ] = vk.ral_bgl_sampler;
+			p.bgls[ p.numBgls++ ] = vk.ral_bgl_smaa_rtmetrics;
+		}
+		p.optionalBindGroupMask = 1u << 2;
+		p.colorFormat        = fmt->colorFormats[0];
+		p.numColorAttachments = fmt->numColorFormats;
+		p.depthFormat        = fmt->depthFormat;
+		p.debugName          = "ral-smaa-resolve";
+		p.externalLayout     = vk.ral_pipeline_layout_smaa;
+		if ( vk.ral_smaa_resolve_pipeline ) { Ral_DestroyPipeline( vk.ral_smaa_resolve_pipeline ); vk.ral_smaa_resolve_pipeline = NULL; }
+		vk.ral_smaa_resolve_pipeline = vk_ral_create_special_pipeline( &p );
+	}
+}
+
+
 // Forward declarations for the static helpers vk_rebuild_fbo_for_hdr_change
 // and vk_rebuild_for_fbo_change reach across. Definitions live further down
 // in this file; vk_initialize and vk_restart_swapchain use the same set.
@@ -14411,10 +14741,17 @@ static void vk_create_sync_primitives( void );
 static void vk_destroy_sync_primitives( void );
 static void vk_destroy_swapchain( qboolean preserveRal );  // preserveRal=qtrue preserves vk.ral_swapchain for atomic-handoff recreate; qfalse destroys it (fresh teardown).
 static void vk_recreate_swapchain_generation( void );
+// SMAA option (ii) live release / re-alloc.
+// Bodies live near vk_create_attachments so all of SMAA's lifecycle
+// is together. Called from vk_create_attachments / vk_destroy_attachments
+// for cold start + r_fbo flip, and from vk_update_post_process_pipelines
+// for r_smaa live toggle.
+static void vk_smaa_alloc_resources( void );
+static void vk_smaa_release_resources( void );
 static void vk_create_bluenoise_texture( void );
 static void vk_shutdown_entmat_buffers( void );
-// shadow-map resource lifecycle. Bodies live near
-// vk_create_attachments. Called from vk_create_
+// shadow-map resource lifecycle, same shape as
+// SMAA's. Bodies live near vk_create_attachments. Called from vk_create_
 // attachments / vk_destroy_attachments (cold start + r_fbo / r_hdr flip) and
 // from vk_update_post_process_pipelines for the live r_shadows /
 // r_shadowMapSize toggle. Sampling is owned by the engine-resources RAL bind
@@ -14446,7 +14783,7 @@ vk_recreate_main_pass_primitive_pipelines
 
 The ribbon / beam / sprite / particle / iqmGpu primitive systems each create
 their own RAL graphics pipeline(s) outside vk.pipelines[] and the static
-post-process pipeline list (gamma / tonemap / capture / bloom). Those
+post-process pipeline list (gamma / tonemap / capture / bloom / SMAA). Those
 pipelines bake the active MAIN dynamic-rendering attachment formats. When
 r_hdr live-flips and replaces the color attachment with a different format,
 the standalone pipelines must be rebuilt against the new typed format cohort.
@@ -15196,7 +15533,7 @@ the color attachment format changes. Three pipeline cohorts exist:
      destroyed by vk_destroy_pipelines(qfalse), rebuilt lazily at
      next draw via vk_gen_pipeline's null-handle check.
   2. Static post-process pipelines (gamma / tonemap / tonemap_variants
-     / capture / bloom_extract / bloom_blend / blur):
+     / capture / bloom_extract / bloom_blend / blur / SMAA):
      destroyed by vk_destroy_pipelines(qfalse), rebuilt eagerly by
      vk_update_post_process_pipelines() after this returns.
   3. Standalone main-pass primitive pipelines (ribbon / beam / sprite
@@ -15389,7 +15726,7 @@ static void vk_rebuild_for_fbo_change( void )
 
 	// A session that booted at r_fbo 0 has no live engine-resources arena child.
 	// A first 0->1 transition must therefore reset and repopulate the arena.
-	// Direct RAL attachment groups do not gate this test.
+	// Direct RAL attachment/SMAA groups do not gate this test.
 	if ( vk.fboActive && vk.ral_color_image
 			&& vk.engineResources.descriptor == VK_NULL_HANDLE ) {
 		vk_forwardplus_lit_invalidate_sets();
@@ -15457,6 +15794,8 @@ void vk_update_post_process_pipelines( void )
 	// real r_hdr change.
 	static int s_r_fbo_value = -1;
 	static int s_r_hdr_value = -1;
+	// r_smaa live alloc / release.
+	static int s_r_smaa_value = -1;
 	// r_hdrDisplay live conversion + HDR10 mastering-metadata
 	// re-issue on r_hdrPeakLuminance / r_hdrMinLuminance change.
 	static int   s_r_hdrDisplay_value = -1;
@@ -15480,7 +15819,8 @@ void vk_update_post_process_pipelines( void )
 	// SET, so nothing in the main framebuffers / render passes / pipelines refers
 	// to them. The descriptor SET was allocated by vk_init_descriptors (whenever
 	// vk.fboActive) and persists across release/realloc; vk_update_attachment_
-	// descriptors rebinds it to the fresh RAL array view.
+	// descriptors rebinds it to the fresh RAL array view. (Mirrors the r_smaa
+	// live hook below.)
 	{
 		cvar_t *c_size = ri.Cvar_Get( "r_shadowMapSize", "2048", 0 );
 		// watch the EFFECTIVE CSM-on state: r_shadows AND
@@ -15513,6 +15853,11 @@ void vk_update_post_process_pipelines( void )
 		// the FBO chain (including color_format) was rebuilt against
 		// the current r_hdr value during the r_fbo rebuild path.
 		s_r_hdr_value = r_hdr->integer;
+		// Reseed the r_smaa cache too: vk_create_attachments inside
+		// the rebuild already called vk_smaa_alloc_resources iff
+		// (vk.fboActive && effective SMAA preset > 0), so smaa.active is now in
+		// agreement with the effective preset for whatever fbo state we landed in.
+		s_r_smaa_value = R_AntialiasingSmaaQuality();
 		// Reseed r_hdrDisplay too — the rebuild re-ran vk_select_surface_
 		// format, which re-negotiated the swapchain colorspace.
 		s_r_hdrDisplay_value = r_hdrDisplay->integer;
@@ -15531,6 +15876,7 @@ void vk_update_post_process_pipelines( void )
 		vk_rebuild_for_fbo_change();
 		s_r_hdrDisplay_value = r_hdrDisplay->integer;
 		s_r_hdr_value  = r_hdr->integer;   // reseed — rebuilt against current r_hdr
+		s_r_smaa_value = R_AntialiasingSmaaQuality();  // reseed
 	}
 
 	if ( vk.fboActive ) {
@@ -15556,6 +15902,36 @@ void vk_update_post_process_pipelines( void )
 		vk_apply_hdr_metadata();
 		s_hdr_peak_nits = r_hdrPeakLuminance->integer;
 		s_hdr_min_nits  = r_hdrMinLuminance->value;
+	}
+
+	// r_smaa live alloc / release. Runs after the r_fbo/r_hdr rebuilds
+	// above so we see the post-rebuild vk.fboActive state. Crossing the
+	// 0/non-0 boundary either frees ~tens of MB of SMAA images (drop to
+	// 0) or reallocates them (rise from 0). Same-side bumps (e.g. 1->4)
+	// don't change resource lifetime — only pipeline-side spec constants
+	// react, which the existing vk_create_smaa_pipelines path handles.
+	if ( vk.fboActive ) {
+		const int smaaQuality = R_AntialiasingSmaaQuality();
+		if ( s_r_smaa_value == -1 ) {
+			s_r_smaa_value = smaaQuality;
+		} else if ( ( s_r_smaa_value == 0 ) != ( smaaQuality == 0 ) ) {
+			vk_wait_idle();
+			if ( smaaQuality == 0 ) {
+				vk_smaa_release_resources();
+				R_LOG( rch_fbo, SEV_INFO, "r_smaa live: 0, released SMAA resources\n" );
+			} else {
+				vk_smaa_alloc_resources();
+				// Rebind the SMAA descriptors to the freshly-allocated
+				// image views. The descriptor sets themselves persist
+				// across release/realloc cycles (allocated eagerly in
+				// vk_init_descriptors when vk.fboActive).
+				vk_update_attachment_descriptors();
+				R_LOG( rch_fbo, SEV_INFO, "r_smaa live: %d, allocated SMAA resources\n", smaaQuality );
+			}
+			s_r_smaa_value = smaaQuality;
+		} else {
+			s_r_smaa_value = smaaQuality;
+		}
 	}
 
 #if FEAT_SHADOW_MAPPING
@@ -15633,6 +16009,9 @@ void vk_update_post_process_pipelines( void )
 				}
 				vk_create_bloom_dual_composite_pipeline();
 			}
+		}
+		if ( vk.smaa.active ) {
+			vk_create_smaa_pipelines();
 		}
 		// Tear down any previously-active tonemap variant RAL siblings.
 		// Variant slots in vk.ral_tonemap_variants[] are indexed by varIdx
@@ -15723,6 +16102,33 @@ static ralTexture_t *vk_create_depth_attachment_texture( uint32_t width,
 		debugName );
 }
 
+
+/*
+================
+vk_smaa_create_texture
+
+Creates one independently owned SMAA texture through RAL so live r_smaa
+disable can retire the five-resource cohort without rebuilding the attachment
+pool. Views remain arena-generation children created by the sampler cohort.
+================
+*/
+static ralTexture_t *vk_smaa_create_texture( uint32_t width, uint32_t height,
+	ralFormat_t format, ralTextureUsage_t usage, const char *debugName )
+{
+	ralTextureCreateInfo_t createInfo;
+	memset( &createInfo, 0, sizeof( createInfo ) );
+	createInfo.type = RAL_TEXTURE_2D;
+	createInfo.format = format;
+	createInfo.width = width;
+	createInfo.height = height;
+	createInfo.depthOrArrayLayers = 1u;
+	createInfo.mipLevels = 1u;
+	createInfo.sampleCount = 1u;
+	createInfo.usage = usage;
+	createInfo.memory = RAL_MEMORY_DEVICE_LOCAL;
+	createInfo.debugName = debugName;
+	return Ral_CreateTexture( vk_ral_get_backend(), &createInfo );
+}
 
 static qboolean vk_ral_copy_buffer_to_texture_exact(
 		ralCommandBuffer_t *command, ralBuffer_t *source,
@@ -15821,6 +16227,168 @@ static qboolean vk_ral_stage_texture_copy( ralTexture_t *destination,
 	}
 	Ral_SubmitAndDispose( command );
 	return recorded && restored ? qtrue : qfalse;
+}
+
+static qboolean vk_ral_seed_smaa_intermediate_states(
+		ralCommandBuffer_t *command )
+{
+	ralTexture_t *textures[3] = {
+		vk.smaa.ral_edges_image,
+		vk.smaa.ral_blend_image,
+		vk.smaa.ral_input_image
+	};
+	ralTextureTransition_t transitions[3];
+	ralResourceTransitionBatch_t batch;
+	const ralResourceState_t undefinedState = {
+		RAL_RESOURCE_USAGE_UNDEFINED, 0u
+	};
+	const ralResourceState_t sampledState = {
+		RAL_RESOURCE_USAGE_SAMPLED_TEXTURE, RAL_STAGE_FRAGMENT
+	};
+	uint32_t i;
+	if ( !command ) return qfalse;
+	memset( transitions, 0, sizeof( transitions ) );
+	for ( i = 0u; i < ARRAY_LEN( transitions ); ++i ) {
+		if ( !textures[i] ) return qfalse;
+		transitions[i].texture = textures[i];
+		transitions[i].aspects = RAL_TEXTURE_ASPECT_COLOR;
+		transitions[i].mipLevelCount = 1u;
+		transitions[i].arrayLayerCount = 1u;
+		transitions[i].before = undefinedState;
+		transitions[i].after = sampledState;
+		transitions[i].sourceQueue = RAL_QUEUE_GRAPHICS;
+		transitions[i].destinationQueue = RAL_QUEUE_GRAPHICS;
+	}
+	memset( &batch, 0, sizeof( batch ) );
+	batch.textureTransitions = transitions;
+	batch.textureTransitionCount = ARRAY_LEN( transitions );
+	return Ral_CmdTransitionResources( command, &batch ) == ralSuccess
+		? qtrue : qfalse;
+}
+
+
+/*
+================
+vk_smaa_alloc_resources
+
+Allocates every SMAA-owned RAL resource:
+  - edges (R8G8), blend (RGBA8), input (color_format)
+  - area (R8G8 LUT 160x560), search (R8 LUT 64x16)
+  - point_sampler / linear_sampler
+  - one-shot LUT byte upload via a temporary staging buffer
+
+Idempotent (early-out if already allocated). The five sampled
+Texture/view/bind-group cohorts are created directly through RAL; their
+VkDescriptorSet fields are compatibility mirrors only.
+
+Sets vk.smaa.active = qtrue on success. Callers invoke
+vk_update_attachment_descriptors() after this returns so the current
+RAL arena generation receives groups for the fresh image-view handles.
+
+Called from:
+  - vk_create_attachments (cold start + r_fbo flip rebuild)
+  - vk_update_post_process_pipelines via the r_smaa live hook
+================
+*/
+static void vk_smaa_alloc_resources( void )
+{
+	ralSamplerCreateInfo_t sampler_desc;
+	ralBufferTextureCopy_t region;
+	qboolean lutUploadReady = qfalse;
+
+	if ( vk.smaa.ral_area_image ) {
+		// already allocated
+		return;
+	}
+
+	// ── Intermediate attachment textures (resolution-dependent) ────
+	vk.smaa.ral_edges_image = vk_smaa_create_texture(
+		glConfig.vidWidth, glConfig.vidHeight, RAL_FORMAT_R8G8_UNORM,
+		RAL_TEXTURE_USAGE_COLOR_ATTACHMENT | RAL_TEXTURE_USAGE_SAMPLED,
+		"wired-img-smaa-edges" );
+	vk.smaa.ral_blend_image = vk_smaa_create_texture(
+		glConfig.vidWidth, glConfig.vidHeight, RAL_FORMAT_R8G8B8A8_UNORM,
+		RAL_TEXTURE_USAGE_COLOR_ATTACHMENT | RAL_TEXTURE_USAGE_SAMPLED,
+		"wired-img-smaa-blend" );
+	vk.smaa.ral_input_image = vk_smaa_create_texture(
+		glConfig.vidWidth, glConfig.vidHeight,
+		vk_attachment_format_to_ral( vk.color_format ),
+		RAL_TEXTURE_USAGE_TRANSFER_DST | RAL_TEXTURE_USAGE_SAMPLED,
+		"wired-img-smaa-input" );
+
+	// ── LUT textures (resolution-independent, static once uploaded) ─
+	vk.smaa.ral_area_image = vk_smaa_create_texture(
+		AREATEX_WIDTH, AREATEX_HEIGHT, RAL_FORMAT_R8G8_UNORM,
+		RAL_TEXTURE_USAGE_TRANSFER_DST | RAL_TEXTURE_USAGE_SAMPLED,
+		"wired-img-smaa-area" );
+	vk.smaa.ral_search_image = vk_smaa_create_texture(
+		SEARCHTEX_WIDTH, SEARCHTEX_HEIGHT, RAL_FORMAT_R8_UNORM,
+		RAL_TEXTURE_USAGE_TRANSFER_DST | RAL_TEXTURE_USAGE_SAMPLED,
+		"wired-img-smaa-search" );
+	if ( !vk.smaa.ral_edges_image || !vk.smaa.ral_blend_image
+			|| !vk.smaa.ral_input_image || !vk.smaa.ral_area_image
+			|| !vk.smaa.ral_search_image ) {
+		vk_smaa_release_resources();
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"Vulkan: failed to create direct RAL SMAA texture cohort" );
+		return;
+	}
+
+	// ── Samplers ────────────────────────────────────────────────────
+	memset( &sampler_desc, 0, sizeof( sampler_desc ) );
+	sampler_desc.addressU = RAL_ADDRESS_CLAMP_TO_EDGE;
+	sampler_desc.addressV = RAL_ADDRESS_CLAMP_TO_EDGE;
+	sampler_desc.addressW = RAL_ADDRESS_CLAMP_TO_EDGE;
+	sampler_desc.magFilter = RAL_FILTER_NEAREST;
+	sampler_desc.minFilter = RAL_FILTER_NEAREST;
+	sampler_desc.mipmapMode = RAL_MIPMAP_NEAREST;
+	sampler_desc.maxAnisotropy = 1.0f;
+	sampler_desc.compareOp = RAL_COMPARE_ALWAYS;
+	sampler_desc.borderColor = RAL_BORDER_TRANSPARENT_BLACK;
+	sampler_desc.debugName = "SMAA point sampler";
+	vk.smaa.point_sampler = vk_create_ral_sampler( &sampler_desc,
+		&vk.smaa.ral_point_sampler );
+	sampler_desc.magFilter = RAL_FILTER_LINEAR;
+	sampler_desc.minFilter = RAL_FILTER_LINEAR;
+	sampler_desc.debugName = "SMAA linear sampler";
+	vk.smaa.linear_sampler = vk_create_ral_sampler( &sampler_desc,
+		&vk.smaa.ral_linear_sampler );
+
+	// ── LUT data upload via the shared portable staging transaction ─
+	memset( &region, 0, sizeof( region ) );
+	region.aspects = RAL_TEXTURE_ASPECT_COLOR;
+	region.imageRect.width = AREATEX_WIDTH;
+	region.imageRect.height = AREATEX_HEIGHT;
+	lutUploadReady = vk_ral_stage_texture_copy( vk.smaa.ral_area_image,
+		qfalse, 1u, &region, areaTexBytes, AREATEX_SIZE,
+		"vk_smaa_alloc_resources area LUT" );
+	region.imageRect.width = SEARCHTEX_WIDTH;
+	region.imageRect.height = SEARCHTEX_HEIGHT;
+	lutUploadReady = lutUploadReady && vk_ral_stage_texture_copy(
+		vk.smaa.ral_search_image, qfalse, 1u, &region,
+		searchTexBytes, SEARCHTEX_SIZE,
+		"vk_smaa_alloc_resources search LUT" );
+
+	if ( lutUploadReady ) {
+		ralCommandBuffer_t *rcmd = Ral_AcquireBegunCommandBuffer(
+			vk_ral_get_backend(), RAL_QUEUE_GRAPHICS );
+		if ( !rcmd ) {
+			lutUploadReady = qfalse;
+		} else {
+			lutUploadReady = vk_ral_seed_smaa_intermediate_states( rcmd );
+			Ral_SubmitAndDispose( rcmd );
+		}
+	}
+	if ( !lutUploadReady ) {
+		R_LOG( rch_ral, SEV_ERROR,
+			"SMAA LUT portable upload declined; disabling SMAA resources\n" );
+		vk_wait_idle();
+		vk_smaa_release_resources();
+		return;
+	}
+
+	vk.smaa.active = qtrue;
+
 }
 
 // Create + upload the baked blue-noise dither tile (gamma.frag ditherMode 2).
@@ -15950,6 +16518,52 @@ resource_fail:
 	ri.Terminate( TERM_UNRECOVERABLE,
 		"Vulkan: failed to create blue-noise RAL resource cohort" );
 	return;
+}
+
+
+/*
+================
+vk_smaa_release_resources
+
+Inverse of vk_smaa_alloc_resources: destroys bind groups/views first, then the
+five direct texture parents and RAL samplers. Idempotent; no sampled child
+survives its texture or arena generation.
+
+Callers must vk_wait_idle() before entering this function so no
+in-flight command buffer is still referencing the resources.
+
+Called from:
+  - vk_destroy_attachments (full FBO chain teardown)
+  - vk_update_post_process_pipelines via the r_smaa live hook
+================
+*/
+static void vk_smaa_release_resources( void )
+{
+	vk_ral_release_smaa_sampler_cohorts();
+
+	#define RELEASE_SMAA_TEXTURE( texture ) do { \
+		if ( (texture) ) Ral_DestroyTexture( (texture) ); \
+		(texture) = NULL; \
+	} while ( 0 )
+	RELEASE_SMAA_TEXTURE( vk.smaa.ral_edges_image );
+	RELEASE_SMAA_TEXTURE( vk.smaa.ral_blend_image );
+	RELEASE_SMAA_TEXTURE( vk.smaa.ral_input_image );
+	RELEASE_SMAA_TEXTURE( vk.smaa.ral_area_image );
+	RELEASE_SMAA_TEXTURE( vk.smaa.ral_search_image );
+	#undef RELEASE_SMAA_TEXTURE
+
+	if ( vk.smaa.ral_point_sampler ) {
+		Ral_DestroySampler( vk.smaa.ral_point_sampler );
+		vk.smaa.ral_point_sampler = NULL;
+		vk.smaa.point_sampler = VK_NULL_HANDLE;
+	}
+	if ( vk.smaa.ral_linear_sampler ) {
+		Ral_DestroySampler( vk.smaa.ral_linear_sampler );
+		vk.smaa.ral_linear_sampler = NULL;
+		vk.smaa.linear_sampler = VK_NULL_HANDLE;
+	}
+
+	vk.smaa.active = qfalse;
 }
 
 
@@ -17082,8 +17696,9 @@ static void vk_create_attachments( void )
 		// the wider format preserves them into the gamma pass. Also the
 		// HDR10 prerequisite. Read by the gamma and capture passes
 		// downstream (sampling a wider format is transparent to them).
-		// TRANSFER_SRC_BIT — the native-resolution UI composite blits
-		// this image (vk_upscale_scene_to_ui_composite).
+		// Block 8: TRANSFER_SRC_BIT — vk_smaa() copies this image into
+		// the RAL-owned SMAA input texture before edge/blend/resolve passes write
+		// the resolved result back through dynamic rendering.
 		vk.ral_tonemapped_image = vk_create_attachment_texture(
 			glConfig.vidWidth, glConfig.vidHeight, vk.color_format,
 			RAL_TEXTURE_USAGE_COLOR_ATTACHMENT | RAL_TEXTURE_USAGE_SAMPLED
@@ -17178,6 +17793,16 @@ static void vk_create_attachments( void )
 	vk_dlight_shadow_alloc_resources();
 #endif
 
+	// SMAA intermediates have a separate live-toggle RAL lifecycle.
+
+	// SMAA images / LUTs / samplers + LUT upload
+	// all live in vk_smaa_alloc_resources now. Allocate when the FBO is
+	// on and the user wants SMAA; the helper is idempotent so calling
+	// it twice (e.g. cold start + r_fbo rebuild while already allocated)
+	// is safe.
+	if ( vk.fboActive && R_AntialiasingSmaaQuality() > 0 ) {
+		vk_smaa_alloc_resources();
+	}
 }
 
 
@@ -22246,7 +22871,7 @@ void vk_brdf_lut_init( ralBackend_t *backend )
 	// reads (BRDF LUT 2D + the two probe cubes). LINEAR filter + LINEAR mipmap +
 	// CLAMP_TO_EDGE, full LOD range so the radiance cube's roughness mips sample
 	// correctly. Owned here (alongside the LUT) so it exists whenever the probe
-	// images do — independent of the FBO toggle. maxLod spans the radiance
+	// images do — independent of the SMAA/FBO toggle. maxLod spans the radiance
 	// cube's mip count (the deepest IBL consumer; the LUT + irradiance are mip-0).
 	memset( &sci, 0, sizeof( sci ) );
 	sci.minFilter     = RAL_FILTER_LINEAR;
@@ -23070,7 +23695,7 @@ qboolean vk_initialize( void )
 	} else {
 		vk.fboActive = qfalse;
 	}
-	// MSAA retired (TAA covers
+	// MSAA retired (SMAA + future TAA cover
 	// AA needs; r_ext_multisample cvar removed). vk.msaaActive stays at its
 	// initialized qfalse permanently — the dead-but-present branches below
 	// (render_pass.main 3-attachment-with-resolve variant, vk.msaa_image
@@ -23090,6 +23715,19 @@ qboolean vk_initialize( void )
 		if ( vk.shadowMap.size > 4096 ) vk.shadowMap.size = 4096;
 	}
 #endif
+
+	// option (ii) memory-release SMAA. vk.smaa.active
+	// is owned by vk_smaa_alloc_resources (sets qtrue) and
+	// vk_smaa_release_resources (sets qfalse). r_smaa = 0 at boot leaves
+	// .active false and no SMAA Vulkan resources allocated; r_smaa > 0
+	// at boot has vk_create_attachments call alloc, which flips .active
+	// to qtrue. Live toggling routes through vk_update_post_process_pipelines.
+	vk.smaa.active = qfalse;
+	vk.smaa.quality = R_AntialiasingSmaaQuality();
+	if ( vk.fboActive && vk.smaa.quality > 0 ) {
+		const char *names[] = { "", "Low", "Medium", "High", "Ultra" };
+		R_LOG( rch_vk, SEV_INFO, "...SMAA: %s quality\n", names[vk.smaa.quality] );
+	}
 
 	// Multisampling is retired. vkSamples and vk.screenMapSamples remain fixed
 	// at one sample; there is no renderer-local physical-device query.
@@ -23299,6 +23937,7 @@ qboolean vk_initialize( void )
 		                             + 1 /* vk.screenMap.color_descriptor — screenmap (env capture) */
 		                             + 1 /* vk.sceneDepth.descriptor — RAL-owned depth-fade sampler */
 		                             + VK_NUM_BLOOM_PASSES * 2 /* vk.bloom_image_descriptor[i] — ping-pong per pass */
+			                             + 5 /* direct RAL SMAA sampler groups: edges/blend/input/area/search */
 		                             + 5 /* direct RAL engine-resources group: shadowMap + BRDF-LUT + irradiance + radiance + AO */
 		                             + 12 /* atmosphere heightgrid + scene-depth + particle collision-heightgrid allocations */
 		                             // Particle render owns two ping-pong groups per
@@ -23369,10 +24008,12 @@ qboolean vk_initialize( void )
 		// (vk.exposure.descriptor[], set 1 of pipeline_layout_post_process).
 		// + NUM_COMMAND_BUFFERS for the per-frame WiredUI SCENE backdrop UBO sets
 		// (vk.menubg.descriptor[], set 2 of pipeline_layout_post_process).
+		// + NUM_COMMAND_BUFFERS for the SMAA rtMetrics per-frame UBO sets
+		// (vk.smaaRt.descriptor[], set 3 of pipeline_layout_smaa).
 		// + the atmospheric weather per-frame UBO sets: compute + render
 		// descriptor sets (2 × NUM_COMMAND_BUFFERS), double-allocated
 		// (vk_init_atmospheric + vid-restart re-alloc) = NUM_COMMAND_BUFFERS * 4.
-		pool_size[4].count = NUM_COMMAND_BUFFERS + 8 + NUM_COMMAND_BUFFERS + NUM_COMMAND_BUFFERS
+		pool_size[4].count = NUM_COMMAND_BUFFERS + 8 + NUM_COMMAND_BUFFERS + NUM_COMMAND_BUFFERS + NUM_COMMAND_BUFFERS
 		                             + ( NUM_COMMAND_BUFFERS * 4 );
 
 		pool_size[5].type = RAL_BIND_TEXTURE_ARRAY;
@@ -23430,6 +24071,13 @@ qboolean vk_initialize( void )
 		VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT,
 		&vk.ral_bgl_effects_ubo, &vk.set_layout_effects_ubo,
 		"wired-set-layout-effects-ubo" );
+	// SMAA rtMetrics per-frame UBO set layout — single UNIFORM_BUFFER binding, VS|FS.
+	// Set 3 of vk.pipeline_layout_smaa (shared by edge/blend/resolve); replaces the
+	// 16-byte rtMetrics push. Non-dynamic (per-frame screen size, one slot per frame).
+	vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+		VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT,
+		&vk.ral_bgl_smaa_rtmetrics, &vk.set_layout_smaa_rtmetrics,
+		"wired-set-layout-smaa-rtmetrics" );
 	// Scene-exposure uniform read by tonemap.frag (set 1, binding 0 of
 	// vk.pipeline_layout_post_process). Plain (non-dynamic) UNIFORM_BUFFER,
 	// FRAGMENT stage — one host-coherent buffer per in-flight frame.
@@ -23546,7 +24194,7 @@ qboolean vk_initialize( void )
 		//                                              so nothing samples it)
 		// msdf.frag uses vk.pipeline_layout_msdf which shares this shape.
 		// vk.set_layout_sampler stays in use for other layouts
-		// (per-image sets; screenMap is direct RAL), but is
+		// (SMAA and per-image sets; screenMap is direct RAL), but is
 		// no longer referenced by vk.pipeline_layout itself.
 		set_layouts[0]                    = vk.set_layout_uniform;
 		set_layouts[WIRED_BINDLESS_SET]   = (VkDescriptorSetLayout)Ral_GetBindGroupLayoutHandle( vk_ral_get_bindless_layout() );
@@ -23675,6 +24323,41 @@ qboolean vk_initialize( void )
 		}
 #endif
 
+		// SMAA pipeline layout: 3 sampler sets + push constants (vec4 rtMetrics).
+		// Created unconditionally for the same reason the SMAA shader modules are
+		// (see vk_create_shader_modules): vk.smaa.active is still qfalse at this
+		// point in vk_initialize, and r_smaa is live-toggleable, so the layout has
+		// to exist whenever vk_create_smaa_pipelines might run. Destroyed
+		// NULL-guarded in vk_shutdown.
+		{
+			// the 16-byte rtMetrics VS|FS push retired → a per-frame UBO at
+			// set 3 (vk.set_layout_smaa_rtmetrics), shared by all 3 passes (edge/
+			// blend/resolve) — they keep sharing this one layout. rtMetrics is screen
+			// size, written once per frame, so a single-slot per-frame UBO suffices
+			// (NOT a per-draw ring). The 3 sampler sets (0/1/2) are unchanged.
+			set_layouts[0] = vk.set_layout_sampler;
+			set_layouts[1] = vk.set_layout_sampler;
+			set_layouts[2] = vk.set_layout_sampler;
+			set_layouts[3] = vk.set_layout_smaa_rtmetrics;
+			ral_layouts[0] = vk.ral_bgl_sampler;
+			ral_layouts[1] = vk.ral_bgl_sampler;
+			ral_layouts[2] = vk.ral_bgl_sampler;
+			ral_layouts[3] = vk.ral_bgl_smaa_rtmetrics;
+
+			desc.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+			desc.pNext = NULL;
+			desc.flags = 0;
+			desc.setLayoutCount = 4;
+			desc.pSetLayouts = set_layouts;
+			desc.pushConstantRangeCount = 0;
+			desc.pPushConstantRanges = NULL;
+
+			vk_create_direct_pipeline_layout( ral_layouts, 4u, 0u, 0u,
+				"wired-pl-smaa", &vk.ral_pipeline_layout_smaa,
+				&vk.pipeline_layout_smaa );
+			SET_OBJECT_NAME( vk.pipeline_layout_smaa, "pipeline layout - smaa", RAL_VULKAN_OBJECT_ROLE_PIPELINE_LAYOUT );
+		}
+
 		SET_OBJECT_NAME( vk.pipeline_layout, "pipeline layout - main", RAL_VULKAN_OBJECT_ROLE_PIPELINE_LAYOUT );
 		SET_OBJECT_NAME( vk.pipeline_layout_post_process, "pipeline layout - post-processing", RAL_VULKAN_OBJECT_ROLE_PIPELINE_LAYOUT );
 	}
@@ -23768,17 +24451,18 @@ qboolean vk_initialize( void )
 		if ( backend ) {
 			if ( vk.ral_bgl_sampler && vk.ral_bgl_uniform
 					&& vk.ral_bgl_exposure
-					&& vk.ral_bgl_effects_ubo
+					&& vk.ral_bgl_effects_ubo && vk.ral_bgl_smaa_rtmetrics
 					&& vk.ral_bgl_engine_resources && vk.ral_bgl_entmat
 					&& vk.ral_bgl_msdf ) {
 				R_LOG( rch_ral, SEV_INFO,
-					"created 7 core descriptor layouts through RAL\n" );
+					"created 8 core descriptor layouts through RAL\n" );
 			} else {
 				R_LOG( rch_ral, SEV_WARN,
-					"direct RAL bind-group-layout cohort incomplete (sampler=%p uniform=%p exposure=%p effects=%p engine=%p entmat=%p msdf=%p)\n",
+					"direct RAL bind-group-layout cohort incomplete (sampler=%p uniform=%p exposure=%p effects=%p smaa-rt=%p engine=%p entmat=%p msdf=%p)\n",
 					(void *)vk.ral_bgl_sampler, (void *)vk.ral_bgl_uniform,
 					(void *)vk.ral_bgl_exposure,
 					(void *)vk.ral_bgl_effects_ubo,
+					(void *)vk.ral_bgl_smaa_rtmetrics,
 					(void *)vk.ral_bgl_engine_resources,
 					(void *)vk.ral_bgl_entmat, (void *)vk.ral_bgl_msdf );
 			}
@@ -23971,6 +24655,12 @@ static void vk_destroy_attachments( void )
 	vk_dlight_shadow_release_resources();
 #endif
 
+	// every SMAA resource (images / views /
+	// memory / samplers) lives on dedicated allocations now. The
+	// release helper is idempotent so the cold-path (full FBO teardown)
+	// and the live-path (r_smaa flips to 0) share this single call.
+	vk_smaa_release_resources();
+
 	if ( vk.screenMap.ral_color_image ) {
 		Ral_DestroyTexture( vk.screenMap.ral_color_image );
 		vk.screenMap.ral_color_image = NULL;
@@ -24095,6 +24785,18 @@ static void vk_destroy_pipelines( qboolean resetCounter )
 		Ral_DestroyPipeline( vk.ral_bloom_dual_composite_pipeline );
 		vk.ral_bloom_dual_composite_pipeline = NULL;
 	}
+	if ( vk.ral_smaa_edge_pipeline ) {
+		Ral_DestroyPipeline( vk.ral_smaa_edge_pipeline );
+		vk.ral_smaa_edge_pipeline = NULL;
+	}
+	if ( vk.ral_smaa_blend_pipeline ) {
+		Ral_DestroyPipeline( vk.ral_smaa_blend_pipeline );
+		vk.ral_smaa_blend_pipeline = NULL;
+	}
+	if ( vk.ral_smaa_resolve_pipeline ) {
+		Ral_DestroyPipeline( vk.ral_smaa_resolve_pipeline );
+		vk.ral_smaa_resolve_pipeline = NULL;
+	}
 
 }
 
@@ -24204,6 +24906,7 @@ void vk_shutdown( refShutdownCode_t code )
 	if ( vk.ral_bgl_uniform ) { Ral_DestroyBindGroupLayout( vk.ral_bgl_uniform ); vk.ral_bgl_uniform = NULL; }
 	if ( vk.ral_bgl_exposure ) { Ral_DestroyBindGroupLayout( vk.ral_bgl_exposure ); vk.ral_bgl_exposure = NULL; }
 	if ( vk.ral_bgl_effects_ubo ) { Ral_DestroyBindGroupLayout( vk.ral_bgl_effects_ubo ); vk.ral_bgl_effects_ubo = NULL; }
+	if ( vk.ral_bgl_smaa_rtmetrics ) { Ral_DestroyBindGroupLayout( vk.ral_bgl_smaa_rtmetrics ); vk.ral_bgl_smaa_rtmetrics = NULL; }
 	if ( vk.ral_bgl_engine_resources ) { Ral_DestroyBindGroupLayout( vk.ral_bgl_engine_resources ); vk.ral_bgl_engine_resources = NULL; }
 	if ( vk.ral_bgl_entmat ) { Ral_DestroyBindGroupLayout( vk.ral_bgl_entmat ); vk.ral_bgl_entmat = NULL; }
 	if ( vk.ral_bgl_msdf ) { Ral_DestroyBindGroupLayout( vk.ral_bgl_msdf ); vk.ral_bgl_msdf = NULL; }
@@ -24211,6 +24914,7 @@ void vk_shutdown( refShutdownCode_t code )
 	vk.set_layout_uniform = VK_NULL_HANDLE;
 	vk.set_layout_msdf = VK_NULL_HANDLE;
 	vk.set_layout_effects_ubo = VK_NULL_HANDLE;
+	vk.set_layout_smaa_rtmetrics = VK_NULL_HANDLE;
 	vk.exposureSetLayout = VK_NULL_HANDLE;
 	vk.set_layout_engine_resources = VK_NULL_HANDLE;
 	vk.set_layout_entmat = VK_NULL_HANDLE;
@@ -24240,6 +24944,11 @@ void vk_shutdown( refShutdownCode_t code )
 		vk.effectsUbo.ral_buffer[i] = NULL;
 		vk.effectsUbo.ptr[i] = NULL;
 	}
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		VK_RalBufferShadowRelease( &vk_smaa_rt_shadows[i] );
+		vk.smaaRt.ral_buffer[i] = NULL;
+		vk.smaaRt.ptr[i] = NULL;
+	}
 	// bindless-ral-consolidate — set 7 layout + set live on the RAL backend now;
 	// vk_ral_textures_shutdown owns their teardown.
 
@@ -24257,6 +24966,7 @@ void vk_shutdown( refShutdownCode_t code )
 	vk_shutdown_iqm_gpu_skinning();
 #endif
 	vk.pipeline_layout_post_process = VK_NULL_HANDLE;
+	vk.pipeline_layout_smaa = VK_NULL_HANDLE;
 #if FEAT_AO
 	// The direct RAL owner was released by the centralized core-layout sweep.
 	vk.pipeline_layout_ao = VK_NULL_HANDLE;
@@ -24422,6 +25132,20 @@ void vk_shutdown( refShutdownCode_t code )
 	vk_destroy_shader_module( vk.modules.overlay_vs );
 	vk_destroy_shader_module( vk.modules.overlay_fs );
 	vk_destroy_shader_module( vk.modules.tonemap_fs );
+
+	// SMAA shader modules
+	if ( vk.modules.smaa_edge_vs != VK_NULL_HANDLE )
+		vk_destroy_shader_module( vk.modules.smaa_edge_vs );
+	if ( vk.modules.smaa_edge_fs != VK_NULL_HANDLE )
+		vk_destroy_shader_module( vk.modules.smaa_edge_fs );
+	if ( vk.modules.smaa_blend_vs != VK_NULL_HANDLE )
+		vk_destroy_shader_module( vk.modules.smaa_blend_vs );
+	if ( vk.modules.smaa_blend_fs != VK_NULL_HANDLE )
+		vk_destroy_shader_module( vk.modules.smaa_blend_fs );
+	if ( vk.modules.smaa_resolve_vs != VK_NULL_HANDLE )
+		vk_destroy_shader_module( vk.modules.smaa_resolve_vs );
+	if ( vk.modules.smaa_resolve_fs != VK_NULL_HANDLE )
+		vk_destroy_shader_module( vk.modules.smaa_resolve_fs );
 
 #define DESTROY_SM(m) \
 	do { if ( (m) != VK_NULL_HANDLE ) { \
@@ -26507,7 +27231,7 @@ void vk_create_bloom_dual_composite_pipeline( void )
 // every frame — so the dynamic pipeline can never drift from the legacy one (and
 // e.g. depthCompareOp picks up GREATER_OR_EQUAL under reversed depth for free).
 // The post-process helper vk_ral_create_special_pipeline cannot express stencil
-// / depth-clamp / independent alpha and is left for tonemap; the main-pass
+// / depth-clamp / independent alpha and is left for tonemap/SMAA; the main-pass
 // cohort routes through this translator instead.
 
 static ralCompareOp_t vk_ral_xlate_compare_op( VkCompareOp c ) {
@@ -29436,7 +30160,7 @@ static qboolean vk_bind_descriptor_sets( void )
 		// (WIRED_ENGINE_RES_SET=2). Stable handles across the frame, but the
 		// per-draw fold is needed because Vulkan's pipeline-layout-compat
 		// rule disturbs both sets across MSDF↔main-path switches. Other
-		// layouts (storage / post-process / AO / sunrays / particle
+		// layouts (storage / post-process / SMAA / AO / sunrays / particle
 		// compute) don't declare these sets, so their bind range never
 		// extends into them — no VUID-08600 / 07988 fall-through risk.
 		// (Previously these were sets 7 and 8 respectively, and the
@@ -31812,9 +32536,9 @@ depth testing and writes disabled.
     was drawn there). 2D draws land in a fresh black img 265 with no tonemap.
 
   clear == qfalse (gameplay frames): the orchestrator already ran
-    vk_tonemap(), which left a clean state —
+    vk_tonemap() (and vk_smaa() if r_smaa>0), which left a clean state —
     no render pass open. Begin the same dynamic UI pass on img 265 with
-    loadOp=LOAD so the HUD blends on top of the tonemapped scene.
+    loadOp=LOAD so the HUD blends on top of the tonemapped (+ SMAA'd) scene.
 
 On return: a UI pass is open on img 265; renderPassIndex = RENDER_PASS_MAIN
 (the UI and MAIN RAL pipelines share the exact attachment-format cohort).
@@ -31910,7 +32634,7 @@ void vk_open_ui_pass( qboolean clear )
 	vk.renderScaleX = vk.renderScaleY = 1.0f;
 
 	// Pure-2D path: the dynamic main pass is still open (no tonemap ran) — close
-	// it first. Gameplay path: vk_tonemap() already left a clean state.
+	// it first. Gameplay path: vk_tonemap()/vk_smaa() already left a clean state.
 	if ( clear )
 		vk_end_render_pass();
 	else if ( !vk_upscale_scene_to_ui_composite() ) {
@@ -32359,6 +33083,279 @@ void vk_forwardplus_depth_copy( void )
 	// (depthValid=1). Cleared on vid_restart (shutdown) so a fresh device starts
 	// cold (full slab the first frame).
 	vk.fpDepthRetained = qtrue;
+}
+
+
+/*
+================
+vk_smaa
+
+Perform SMAA anti-aliasing as a post-process. Block 8: the source/target
+is the tonemapped image (img 265) — post-tonemap and pre-UI — instead of
+the pre-tonemap HDR scene (img 264, whose old SMAA output had no
+downstream reader). Called only from the 3D→2D transition gameplay branch
+(tr_backend.c), between vk_tonemap() and vk_open_ui_pass(qfalse).
+
+Precondition: no render pass open (vk_tonemap() ended render_pass.tonemap).
+Postcondition: no render pass open (the caller opens the dynamic UI pass next).
+
+  1. Copy tonemapped_image -> input_image
+  2. Edge detection pass (input -> edges)
+  3. Blend weight calculation (edges + area + search -> blend)
+  4. Neighborhood blending / resolve (input + blend -> tonemapped_image)
+================
+*/
+static qboolean vk_smaa_transition_copy_pair( qboolean toCopy )
+{
+	ralTextureTransition_t transitions[2];
+	ralResourceTransitionBatch_t batch;
+	uint32_t i;
+
+	memset( transitions, 0, sizeof( transitions ) );
+	transitions[0].texture = vk.ral_tonemapped_image;
+	transitions[1].texture = vk.smaa.ral_input_image;
+	for ( i = 0; i < ARRAY_LEN( transitions ); ++i ) {
+		transitions[i].aspects = RAL_TEXTURE_ASPECT_COLOR;
+		transitions[i].mipLevelCount = Ral_GetTextureMipLevelCount(
+			transitions[i].texture );
+		transitions[i].arrayLayerCount = 1u;
+		transitions[i].sourceQueue = RAL_QUEUE_GRAPHICS;
+		transitions[i].destinationQueue = RAL_QUEUE_GRAPHICS;
+	}
+	transitions[0].before.usage = toCopy
+		? RAL_RESOURCE_USAGE_SAMPLED_TEXTURE : RAL_RESOURCE_USAGE_COPY_SOURCE;
+	transitions[0].before.shaderStages = toCopy ? RAL_STAGE_FRAGMENT : 0u;
+	transitions[0].after.usage = toCopy
+		? RAL_RESOURCE_USAGE_COPY_SOURCE : RAL_RESOURCE_USAGE_SAMPLED_TEXTURE;
+	transitions[0].after.shaderStages = toCopy ? 0u : RAL_STAGE_FRAGMENT;
+	transitions[1].before.usage = toCopy
+		? RAL_RESOURCE_USAGE_SAMPLED_TEXTURE : RAL_RESOURCE_USAGE_COPY_DESTINATION;
+	transitions[1].before.shaderStages = toCopy ? RAL_STAGE_FRAGMENT : 0u;
+	transitions[1].after.usage = toCopy
+		? RAL_RESOURCE_USAGE_COPY_DESTINATION : RAL_RESOURCE_USAGE_SAMPLED_TEXTURE;
+	transitions[1].after.shaderStages = toCopy ? 0u : RAL_STAGE_FRAGMENT;
+	memset( &batch, 0, sizeof( batch ) );
+	batch.textureTransitions = transitions;
+	batch.textureTransitionCount = ARRAY_LEN( transitions );
+	return Ral_CmdTransitionResources( vk.cmd->ral_cmd, &batch ) == ralSuccess;
+}
+
+static qboolean vk_smaa_publish_attachment_sampled( ralTexture_t *texture )
+{
+	ralTextureTransition_t transition;
+	ralResourceTransitionBatch_t batch;
+	if ( !texture ) return qfalse;
+	memset( &transition, 0, sizeof( transition ) );
+	transition.texture = texture;
+	transition.aspects = RAL_TEXTURE_ASPECT_COLOR;
+	transition.mipLevelCount = Ral_GetTextureMipLevelCount( texture );
+	transition.arrayLayerCount = 1u;
+	transition.before.usage = RAL_RESOURCE_USAGE_COLOR_ATTACHMENT;
+	transition.after.usage = RAL_RESOURCE_USAGE_SAMPLED_TEXTURE;
+	transition.after.shaderStages = RAL_STAGE_FRAGMENT;
+	transition.sourceQueue = RAL_QUEUE_GRAPHICS;
+	transition.destinationQueue = RAL_QUEUE_GRAPHICS;
+	memset( &batch, 0, sizeof( batch ) );
+	batch.textureTransitions = &transition;
+	batch.textureTransitionCount = 1u;
+	return Ral_CmdTransitionResources( vk.cmd->ral_cmd, &batch ) == ralSuccess;
+}
+
+void vk_smaa( void )
+{
+	ralImageCopy_t copy_region;
+	float rtMetrics[4];
+
+	// vk.smaa.active is the resource-alloc gate. Dispatch
+	// also requires an effective SMAA preset > 0 (r_aa / r_smaa) AND the live pipelines to be
+	// built (vk_create_smaa_pipelines tears them down when r_smaa hits
+	// 0). The caller (the transition gameplay branch) is itself once-
+	// guarded by backEnd.doneUIPass, so this runs at most once per frame;
+	// this defensive guard handles r_smaa = 0 and the live-toggle /
+	// acquire-failed corner cases.
+	if ( !vk.smaa.active || R_AntialiasingSmaaQuality() == 0
+			|| !vk.ral_tonemapped_image || !vk.smaa.ral_input_image
+			|| !vk.smaa.ral_edges_image || !vk.smaa.ral_blend_image
+			|| !vk.smaa.ral_input_descriptor
+			|| !vk.smaa.ral_edges_descriptor
+			|| !vk.smaa.ral_blend_descriptor
+			|| !vk.smaa.ral_area_descriptor
+			|| !vk.smaa.ral_search_descriptor
+			|| !vk.smaaRt.ral_descriptor[ vk.cmd_index ]
+			|| !vk.ral_smaa_edge_pipeline || !vk.ral_smaa_blend_pipeline
+			|| !vk.ral_smaa_resolve_pipeline )
+		return;
+
+	rtMetrics[0] = 1.0f / (float)glConfig.vidWidth;
+	rtMetrics[1] = 1.0f / (float)glConfig.vidHeight;
+	rtMetrics[2] = (float)glConfig.vidWidth;
+	rtMetrics[3] = (float)glConfig.vidHeight;
+
+	// publish rtMetrics into this frame's UBO (set 3 of pipeline_layout_smaa),
+	// once per frame — replaces the per-pass 16-byte push. All 3 passes read it.
+	if ( vk.smaaRt.ptr[ vk.cmd_index ] ) {
+		vkRalBufferShadowWriteReceipt_t writeReceipt;
+		memcpy( vk.smaaRt.ptr[ vk.cmd_index ], rtMetrics, sizeof( rtMetrics ) );
+		if ( !VK_RalBufferShadowMarkWritten(
+				&vk_smaa_rt_shadows[vk.cmd_index], 0u, sizeof( rtMetrics ) )
+				|| !VK_RalBufferShadowPublish(
+					&vk_smaa_rt_shadows[vk.cmd_index], 0u,
+					sizeof( rtMetrics ), &writeReceipt ) ) return;
+	}
+
+	// No render pass open here — vk_tonemap() ended render_pass.tonemap
+	// before the caller invoked us.
+	vk_gpu_ts_write( "smaa" ); // outside render pass — MoltenVK timestamps only resolve at encoder boundaries
+
+	// --- Step 0: Copy tonemapped_image -> input_image ---
+
+	if ( !vk_smaa_transition_copy_pair( qtrue ) ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"Vulkan: RAL SMAA sampled-to-copy transition rejected" );
+		return;
+	}
+
+	// copy
+	memset( &copy_region, 0, sizeof( copy_region ) );
+	copy_region.srcSubresource.aspectMask = RAL_TEXTURE_ASPECT_COLOR;
+	copy_region.srcSubresource.layerCount = 1;
+	copy_region.dstSubresource.aspectMask = RAL_TEXTURE_ASPECT_COLOR;
+	copy_region.dstSubresource.layerCount = 1;
+	copy_region.extent.width = glConfig.vidWidth;
+	copy_region.extent.height = glConfig.vidHeight;
+	copy_region.extent.depth = 1;
+
+	Ral_CmdCopyImage( vk.cmd->ral_cmd, vk.ral_tonemapped_image,
+		vk.smaa.ral_input_image, 1u, &copy_region );
+	if ( !vk_smaa_transition_copy_pair( qfalse ) ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"Vulkan: RAL SMAA copy-to-sampled transition rejected" );
+		return;
+	}
+
+	// The three SMAA passes run through dynamic rendering: each writes one adopted
+	// color target (edges → blend → tonemapped), with explicit barriers between
+	// them replacing the legacy subpass dependencies (each pass samples the prior
+	// pass's output). The pipelines use dynamic viewport/scissor; push constants +
+	// sampler descriptor binds stay raw on the same command buffer that
+	// vk.cmd->ral_cmd aliases (layout-compatible via the shared pipeline layout).
+	{
+		ralRenderingInfo_t   renderingInfo;
+		ralViewport_t        vp;
+		ralRect_t            sc;
+
+		vp.x = 0.0f; vp.y = 0.0f;
+		vp.width  = (float)glConfig.vidWidth;
+		vp.height = (float)glConfig.vidHeight;
+		vp.minDepth = 0.0f; vp.maxDepth = 1.0f;
+		sc.x = 0; sc.y = 0; sc.width = glConfig.vidWidth; sc.height = glConfig.vidHeight;
+
+		// --- Pass 1: Edge detection (writes edges_image) ---
+		memset( &renderingInfo, 0, sizeof( renderingInfo ) );
+		renderingInfo.colorAttachments[0] = vk.smaa.ral_edges_image;
+		renderingInfo.colorLoadOps[0]     = RAL_LOAD_OP_CLEAR;
+		renderingInfo.colorStoreOps[0]    = RAL_STORE_OP_STORE;
+		renderingInfo.colorClears[0].color[0] = 0.0f;
+		renderingInfo.colorClears[0].color[1] = 0.0f;
+		renderingInfo.colorClears[0].color[2] = 0.0f;
+		renderingInfo.colorClears[0].color[3] = 0.0f;
+		renderingInfo.numColorAttachments = 1;
+		renderingInfo.renderArea.width    = glConfig.vidWidth;
+		renderingInfo.renderArea.height   = glConfig.vidHeight;
+		vk_profile_rendering_marker( &renderingInfo, "wired.smaa.edges", VK_PM_SMAA_EDGES );
+		Ral_BeginRendering( vk.cmd->ral_cmd, &renderingInfo );
+		Ral_CmdSetViewport( vk.cmd->ral_cmd, &vp );
+		Ral_CmdSetScissor( vk.cmd->ral_cmd, &sc );
+		Ral_CmdBindPipeline( vk.cmd->ral_cmd, vk.ral_smaa_edge_pipeline );
+		Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 0,
+			vk.smaa.ral_input_descriptor );
+		// rtMetrics now at set 3 (per-frame UBO) — replaces the 16-byte push.
+		Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 3,
+			vk.smaaRt.ral_descriptor[ vk.cmd_index ] );
+		Ral_CmdDraw( vk.cmd->ral_cmd, 3, 1, 0, 0 );
+		Ral_EndRendering( vk.cmd->ral_cmd );
+
+		// edges → blend: edge output must be readable by the blend pass's sampler.
+		if ( !vk_smaa_publish_attachment_sampled( vk.smaa.ral_edges_image ) ) {
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: RAL SMAA edges-to-sampled transition rejected" );
+			return;
+		}
+
+		// --- Pass 2: Blend weight calculation (writes blend_image) ---
+		memset( &renderingInfo, 0, sizeof( renderingInfo ) );
+		renderingInfo.colorAttachments[0] = vk.smaa.ral_blend_image;
+		renderingInfo.colorLoadOps[0]     = RAL_LOAD_OP_CLEAR;
+		renderingInfo.colorStoreOps[0]    = RAL_STORE_OP_STORE;
+		renderingInfo.colorClears[0].color[0] = 0.0f;
+		renderingInfo.colorClears[0].color[1] = 0.0f;
+		renderingInfo.colorClears[0].color[2] = 0.0f;
+		renderingInfo.colorClears[0].color[3] = 0.0f;
+		renderingInfo.numColorAttachments = 1;
+		renderingInfo.renderArea.width    = glConfig.vidWidth;
+		renderingInfo.renderArea.height   = glConfig.vidHeight;
+		vk_profile_rendering_marker( &renderingInfo, "wired.smaa.blend", VK_PM_SMAA_BLEND );
+		Ral_BeginRendering( vk.cmd->ral_cmd, &renderingInfo );
+		Ral_CmdSetViewport( vk.cmd->ral_cmd, &vp );
+		Ral_CmdSetScissor( vk.cmd->ral_cmd, &sc );
+		Ral_CmdBindPipeline( vk.cmd->ral_cmd, vk.ral_smaa_blend_pipeline );
+		Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 0,
+			vk.smaa.ral_edges_descriptor );
+		Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 1,
+			vk.smaa.ral_area_descriptor );
+		Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 2,
+			vk.smaa.ral_search_descriptor );
+		// rtMetrics at set 3 (per-frame UBO) — replaces the 16-byte push.
+		Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 3,
+			vk.smaaRt.ral_descriptor[ vk.cmd_index ] );
+		Ral_CmdDraw( vk.cmd->ral_cmd, 3, 1, 0, 0 );
+		Ral_EndRendering( vk.cmd->ral_cmd );
+
+		// blend → resolve: blend output must be readable by the resolve pass's sampler.
+		if ( !vk_smaa_publish_attachment_sampled( vk.smaa.ral_blend_image ) ) {
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: RAL SMAA blend-to-sampled transition rejected" );
+			return;
+		}
+
+		// --- Pass 3: Neighborhood blending / resolve (writes tonemapped_image) ---
+		memset( &renderingInfo, 0, sizeof( renderingInfo ) );
+		renderingInfo.colorAttachments[0] = vk.ral_tonemapped_image;
+		renderingInfo.colorLoadOps[0]     = RAL_LOAD_OP_CLEAR;
+		renderingInfo.colorStoreOps[0]    = RAL_STORE_OP_STORE;
+		renderingInfo.colorClears[0].color[0] = 0.0f;
+		renderingInfo.colorClears[0].color[1] = 0.0f;
+		renderingInfo.colorClears[0].color[2] = 0.0f;
+		renderingInfo.colorClears[0].color[3] = 0.0f;
+		renderingInfo.numColorAttachments = 1;
+		renderingInfo.renderArea.width    = glConfig.vidWidth;
+		renderingInfo.renderArea.height   = glConfig.vidHeight;
+		vk_profile_rendering_marker( &renderingInfo, "wired.smaa.resolve", VK_PM_SMAA_RESOLVE );
+		Ral_BeginRendering( vk.cmd->ral_cmd, &renderingInfo );
+		Ral_CmdSetViewport( vk.cmd->ral_cmd, &vp );
+		Ral_CmdSetScissor( vk.cmd->ral_cmd, &sc );
+		Ral_CmdBindPipeline( vk.cmd->ral_cmd, vk.ral_smaa_resolve_pipeline );
+		Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 0,
+			vk.smaa.ral_input_descriptor );
+		Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 1,
+			vk.smaa.ral_blend_descriptor );
+		Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 2,
+			vk.smaa.ral_blend_descriptor );
+		// rtMetrics at set 3 (per-frame UBO) — replaces the 16-byte push.
+		Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 3,
+			vk.smaaRt.ral_descriptor[ vk.cmd_index ] );
+		Ral_CmdDraw( vk.cmd->ral_cmd, 3, 1, 0, 0 );
+		Ral_EndRendering( vk.cmd->ral_cmd );
+
+		// resolve output lands in tonemapped_image; the ui/gamma passes sample it,
+		// so end in SHADER_READ_ONLY (the same final layout the legacy resolve
+		// render pass produced).
+		if ( !vk_smaa_publish_attachment_sampled( vk.ral_tonemapped_image ) ) {
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: RAL SMAA resolve-to-sampled transition rejected" );
+			return;
+		}
+	}
 }
 
 
@@ -34869,7 +35866,7 @@ _retry:
 	// per-draw fold (instead of a once-per-frame bind) is needed because
 	// Vulkan's pipeline-layout-compatibility rule disturbs set 7 whenever
 	// an incompatible layout is bound (RB_RunParticleCompute /
-	// vk_render_shadow_map / MSDF / post-process).
+	// vk_render_shadow_map / MSDF / SMAA / post-process).
 	// vk.useBindlessMainPath gate retired —
 	// the bindless main path is invariantly on, so the per-frame slot-7
 	// fixup runs unconditionally. RAL-owned bindless set handle.
@@ -35065,12 +36062,14 @@ void vk_end_frame( void )
 		vk.cmd->last_ral_pipeline = NULL;
 
 		// Block 8 (Delta 2): the 3D→2D transition orchestrator (tr_backend.c)
-		// owns bloom / tonemap / UI-pass sequencing now, gated by
+		// owns bloom / tonemap / SMAA / UI-pass sequencing now, gated by
 		// backEnd.doneUIPass. We only reach here with !doneUIPass when the
 		// frame had NO 2D draws at all:
 		//   - gameplay-with-no-2D (e.g. cg_draw2D 0): the 3D scene is in
 		//     dynamic MAIN pass (img 264). Tonemap it into img 265 so gamma
-		//     can read it.
+		//     can read it. (SMAA is not run here — it is dispatched only
+		//     from the transition gameplay branch; a fully-2D-less frame is
+		//     exotic and gets no AA, which is acceptable.)
 		//   - nothing-drawn frame: the dynamic MAIN pass holds only its CLEAR;
 		//     tonemap(black) → img 265 ≈ black, gamma reads black.
 		// When doneUIPass is set, the dynamic UI pass is open on img 265 with the
@@ -35095,7 +36094,7 @@ void vk_end_frame( void )
 				vk_end_render_pass(); // end the ui / ui_clear pass
 
 			// render to capture image — sample img 265 (post-tonemap, gameplay
-			// path, HUD) so captured screenshots represent the composited
+			// path, SMAA + HUD) so captured screenshots represent the composited
 			// output. Dynamic-rendering only (color-only into the capture image,
 			// CLEAR/STORE); closed by the shared vk_end_render_pass
 			// VK_DYN_PASS_CAPTURE handler, which lands the image in

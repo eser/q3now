@@ -37,8 +37,8 @@ def exact(prefix,pattern,sev,cat,count=1):
    raise SystemExit(f"FAIL ral-profile-layout {prefix} body/metadata: {value}")
  return found
 first=exact("cls.state: -> CA_ACTIVE (FIRST GAMEPLAY FRAME",r"cls\.state: -> CA_ACTIVE \(FIRST GAMEPLAY FRAME mapname=maps/arena7\.bsp serverTime=[0-9]+ numEntities=[0-9]+ framecount=[0-9]+\)","INFO","client")[0]
-markers=exact("Q0_RAL_PROFILE_LAYOUT_",r"Q0_RAL_PROFILE_LAYOUT_(?:REQUESTED|BASE_READY|TAA_ON_REQUESTED|TAA_ON_READY|TAA_OFF_REQUESTED|COMPLETE)","INFO","system",6)
-expected_markers=["Q0_RAL_PROFILE_LAYOUT_REQUESTED","Q0_RAL_PROFILE_LAYOUT_BASE_READY","Q0_RAL_PROFILE_LAYOUT_TAA_ON_REQUESTED","Q0_RAL_PROFILE_LAYOUT_TAA_ON_READY","Q0_RAL_PROFILE_LAYOUT_TAA_OFF_REQUESTED","Q0_RAL_PROFILE_LAYOUT_COMPLETE"]
+markers=exact("Q0_RAL_PROFILE_LAYOUT_",r"Q0_RAL_PROFILE_LAYOUT_(?:REQUESTED|BASE_READY|SMAA_ON_REQUESTED|SMAA_ON_READY|SMAA_OFF_REQUESTED|COMPLETE)","INFO","system",6)
+expected_markers=["Q0_RAL_PROFILE_LAYOUT_REQUESTED","Q0_RAL_PROFILE_LAYOUT_BASE_READY","Q0_RAL_PROFILE_LAYOUT_SMAA_ON_REQUESTED","Q0_RAL_PROFILE_LAYOUT_SMAA_ON_READY","Q0_RAL_PROFILE_LAYOUT_SMAA_OFF_REQUESTED","Q0_RAL_PROFILE_LAYOUT_COMPLETE"]
 if [item[2] for item in markers]!=expected_markers:raise SystemExit("FAIL ral-profile-layout marker vector")
 epochs=exact("gpuProfile: action=epoch-",r"gpuProfile: action=(?:epoch-start epoch=1|epoch-reset reason=semantic-layout-change epoch=[23]) lanes=[1-9][0-9]* labels=[a-z][a-z0-9_]*(?:,[a-z][a-z0-9_]*)*","INFO","renderer.timing",3)
 patterns=(
@@ -53,9 +53,9 @@ for item,pattern in zip(epochs,patterns):
  if len(labels)!=int(match.group(1)) or len(labels)!=len(set(labels)):raise SystemExit("FAIL ral-profile-layout lane cardinality/uniqueness")
  layouts.append(labels)
 base,enabled,reverted=layouts
-if any(label.startswith("temporal_") for label in base) or "present_prep" not in base:raise SystemExit("FAIL ral-profile-layout baseline semantic anchors")
-extra=[label for label in enabled if label not in base]
-if [label for label in enabled if label in base]!=base or not extra or any(not label.startswith("temporal_") for label in extra):raise SystemExit("FAIL ral-profile-layout TAA relation")
+if "smaa" in base or "present_prep" not in base:raise SystemExit("FAIL ral-profile-layout baseline semantic anchors")
+expected_enabled=list(base);expected_enabled.insert(expected_enabled.index("present_prep"),"smaa")
+if enabled!=expected_enabled:raise SystemExit("FAIL ral-profile-layout SMAA relation")
 if reverted!=base:raise SystemExit("FAIL ral-profile-layout reverted topology drift")
 snapshots=exact("RAL profile snapshot:",r"RAL profile snapshot: source=ral-native-query epoch=[123] lanes=[1-9][0-9]* samples=(?:[1-9]|[1-9][0-9]|1[01][0-9]|120) labels=[a-z][a-z0-9_]*(?:,[a-z][a-z0-9_]*)*","INFO","renderer.timing",3)
 snapshot_layouts=[]
@@ -86,7 +86,7 @@ for number,line in enumerate(open(manifest_path,encoding="utf-8",errors="strict"
  except Exception as exc:raise SystemExit(f"FAIL ral-profile-layout manifest JSON {number}: {exc}")
  if not isinstance(item,dict):raise SystemExit("FAIL ral-profile-layout manifest schema")
  manifest.append(item)
-scenario={"kind":"scenario","schema":1,"name":"ral-profile-layout","map":"arena7","backend":"vulkan","gpu_speeds":1,"toggle":"r_aa:0->2->0","expected_relation":"baseline + temporal lanes -> baseline","history_capacity":120,"snapshot_command":"ral_dump live profile"}
+scenario={"kind":"scenario","schema":1,"name":"ral-profile-layout","map":"arena7","backend":"vulkan","gpu_speeds":1,"toggle":"r_smaa:0->1->0","expected_relation":"baseline + smaa -> baseline","history_capacity":120,"snapshot_command":"ral_dump live profile"}
 if not manifest or manifest[0]!=scenario:raise SystemExit("FAIL ral-profile-layout scenario")
 if [x.get("role") for x in manifest[1:-1]] != ["gui","renderer","moltenvk","pax21","base","harness","bootstrap-cfg"]:raise SystemExit("FAIL ral-profile-layout provenance roles")
 for item in manifest[1:-1]:
@@ -105,34 +105,34 @@ import hashlib,json,os,sys
 log_path,manifest_path,mode=sys.argv[1:]
 def row(sev,cat,msg):return {"ts":"2026-08-13T12:00:00.000+03:00","sev":sev,"cat":cat,"msg":msg+"\n"}
 base=["dlight_shadow_start","dlight_shadow","world_done","present_prep"]
-enabled=["dlight_shadow_start","dlight_shadow","world_done","temporal_pre","temporal_resolve","temporal_store","present_prep"]
+enabled=["dlight_shadow_start","dlight_shadow","world_done","smaa","present_prep"]
 def profile(epoch,labels,samples):
  out=[row("INFO","renderer.timing",f"RAL profile snapshot: source=ral-native-query epoch={epoch} lanes={len(labels)} samples={samples} labels={','.join(labels)}")]
  for index,label in enumerate(labels):
   value=0.100+index*0.010
   out.append(row("INFO","renderer.timing",f"RAL profile lane: epoch={epoch} index={index} name={label} latest-ms={value:.3f} average-ms={value:.3f} min-ms={value-0.010:.3f} max-ms={value+0.010:.3f}"))
  return out
-R=[row("INFO","client","cls.state: -> CA_ACTIVE (FIRST GAMEPLAY FRAME mapname=maps/arena7.bsp serverTime=1 numEntities=2 framecount=3)"),row("INFO","system","Q0_RAL_PROFILE_LAYOUT_REQUESTED"),row("INFO","renderer.timing","gpuProfile: action=epoch-start epoch=1 lanes=4 labels="+",".join(base)),row("INFO","system","Q0_RAL_PROFILE_LAYOUT_BASE_READY"),*profile(1,base,80),row("INFO","system","Q0_RAL_PROFILE_LAYOUT_TAA_ON_REQUESTED"),row("INFO","renderer.timing","gpuProfile: action=epoch-reset reason=semantic-layout-change epoch=2 lanes=7 labels="+",".join(enabled)),row("INFO","system","Q0_RAL_PROFILE_LAYOUT_TAA_ON_READY"),*profile(2,enabled,120),row("INFO","system","Q0_RAL_PROFILE_LAYOUT_TAA_OFF_REQUESTED"),row("INFO","renderer.timing","gpuProfile: action=epoch-reset reason=semantic-layout-change epoch=3 lanes=4 labels="+",".join(base)),*profile(3,base,120),row("INFO","system","Q0_RAL_PROFILE_LAYOUT_COMPLETE"),row("INFO","server","----- Server Shutdown (Server quit) -----"),row("INFO","game","==== ShutdownGame ====")]
+R=[row("INFO","client","cls.state: -> CA_ACTIVE (FIRST GAMEPLAY FRAME mapname=maps/arena7.bsp serverTime=1 numEntities=2 framecount=3)"),row("INFO","system","Q0_RAL_PROFILE_LAYOUT_REQUESTED"),row("INFO","renderer.timing","gpuProfile: action=epoch-start epoch=1 lanes=4 labels="+",".join(base)),row("INFO","system","Q0_RAL_PROFILE_LAYOUT_BASE_READY"),*profile(1,base,80),row("INFO","system","Q0_RAL_PROFILE_LAYOUT_SMAA_ON_REQUESTED"),row("INFO","renderer.timing","gpuProfile: action=epoch-reset reason=semantic-layout-change epoch=2 lanes=5 labels="+",".join(enabled)),row("INFO","system","Q0_RAL_PROFILE_LAYOUT_SMAA_ON_READY"),*profile(2,enabled,120),row("INFO","system","Q0_RAL_PROFILE_LAYOUT_SMAA_OFF_REQUESTED"),row("INFO","renderer.timing","gpuProfile: action=epoch-reset reason=semantic-layout-change epoch=3 lanes=4 labels="+",".join(base)),*profile(3,base,120),row("INFO","system","Q0_RAL_PROFILE_LAYOUT_COMPLETE"),row("INFO","server","----- Server Shutdown (Server quit) -----"),row("INFO","game","==== ShutdownGame ====")]
 def find(text):return next(i for i,x in enumerate(R) if text in x["msg"])
 if mode=="missing":R.pop(find("epoch=2"))
 elif mode=="duplicate":R.insert(find("epoch=2"),dict(R[find("epoch=2")]))
-elif mode=="baseline-taa":R[find("epoch=1")]["msg"]=R[find("epoch=1")]["msg"].replace("world_done,present","world_done,temporal_pre,present").replace("lanes=4","lanes=5")
-elif mode=="enabled-missing":R[find("epoch=2")]["msg"]=R[find("epoch=2")]["msg"].replace(",temporal_pre,temporal_resolve,temporal_store","").replace("lanes=7","lanes=4")
-elif mode=="enabled-extra":R[find("epoch=2")]["msg"]=R[find("epoch=2")]["msg"].replace("temporal_store,present","temporal_store,bloom,present").replace("lanes=7","lanes=8")
-elif mode=="enabled-order":R[find("epoch=2")]["msg"]=R[find("epoch=2")]["msg"].replace("dlight_shadow_start,dlight_shadow,world_done","dlight_shadow,dlight_shadow_start,world_done")
+elif mode=="baseline-smaa":R[find("epoch=1")]["msg"]=R[find("epoch=1")]["msg"].replace("world_done,present","world_done,smaa,present").replace("lanes=4","lanes=5")
+elif mode=="enabled-missing":R[find("epoch=2")]["msg"]=R[find("epoch=2")]["msg"].replace(",smaa","").replace("lanes=5","lanes=4")
+elif mode=="enabled-extra":R[find("epoch=2")]["msg"]=R[find("epoch=2")]["msg"].replace("smaa,present","smaa,bloom,present").replace("lanes=5","lanes=6")
+elif mode=="enabled-order":R[find("epoch=2")]["msg"]=R[find("epoch=2")]["msg"].replace("world_done,smaa","smaa,world_done")
 elif mode=="revert-drift":R[find("epoch=3")]["msg"]=R[find("epoch=3")]["msg"].replace("world_done","bloom")
 elif mode=="epoch":R[find("epoch=3")]["msg"]=R[find("epoch=3")]["msg"].replace("epoch=3","epoch=4")
 elif mode=="reason":R[find("epoch=2")]["msg"]=R[find("epoch=2")]["msg"].replace("semantic-layout-change","manual")
 elif mode=="metadata":R[find("epoch=2")]["cat"]="renderer.ral"
 elif mode=="suffix":R[find("epoch=2")]["msg"]=R[find("epoch=2")]["msg"].rstrip("\n")+" extra\n"
-elif mode=="marker":R.pop(find("TAA_ON_READY"))
-elif mode=="order":a=find("TAA_ON_REQUESTED");b=find("epoch=2");R[a],R[b]=R[b],R[a]
+elif mode=="marker":R.pop(find("SMAA_ON_READY"))
+elif mode=="order":a=find("SMAA_ON_REQUESTED");b=find("epoch=2");R[a],R[b]=R[b],R[a]
 elif mode=="additive":R.append(row("INFO","renderer.timing","gpuProfile: action=epoch-reset reason=semantic-layout-change epoch=4 lanes=4 labels=dlight_shadow_start,dlight_shadow,world_done,present_prep"))
 elif mode=="smuggle":R.append(row("INFO","system","benign\rgpuProfile: action=epoch-start epoch=1 lanes=1 labels=present_prep"))
 elif mode=="vuid":R.append(row("WARN","renderer.ral","VUID-synthetic"))
 elif mode=="rejected":R.append(row("WARN","renderer.timing","gpuProfile: action=sample-rejected reason=invalid-semantic-layout"))
 elif mode=="snapshot-missing":R.pop(find("RAL profile snapshot: source=ral-native-query epoch=2"))
-elif mode=="snapshot-topology":R[find("RAL profile snapshot: source=ral-native-query epoch=2")]["msg"]=R[find("RAL profile snapshot: source=ral-native-query epoch=2")]["msg"].replace(",temporal_pre,temporal_resolve,temporal_store","").replace("lanes=7","lanes=4")
+elif mode=="snapshot-topology":R[find("RAL profile snapshot: source=ral-native-query epoch=2")]["msg"]=R[find("RAL profile snapshot: source=ral-native-query epoch=2")]["msg"].replace(",smaa","").replace("lanes=5","lanes=4")
 elif mode=="snapshot-epoch":R[find("RAL profile snapshot: source=ral-native-query epoch=2")]["msg"]=R[find("RAL profile snapshot: source=ral-native-query epoch=2")]["msg"].replace("epoch=2","epoch=3")
 elif mode=="snapshot-samples":R[find("RAL profile snapshot: source=ral-native-query epoch=2")]["msg"]=R[find("RAL profile snapshot: source=ral-native-query epoch=2")]["msg"].replace("samples=120","samples=121")
 elif mode=="snapshot-refused":R[find("RAL profile snapshot: source=ral-native-query epoch=2")]=row("WARN","renderer.timing","RAL profile snapshot: action=refused reason=no-completed-samples")
@@ -145,12 +145,12 @@ elif mode=="lane-suffix":R[find("RAL profile lane: epoch=2 index=1")]["msg"]=R[f
 with open(log_path,"w") as out:
  for item in R:out.write(json.dumps(item)+"\n")
 roles=("gui","renderer","moltenvk","pax21","base","harness","bootstrap-cfg")
-M=[{"kind":"scenario","schema":1,"name":"ral-profile-layout","map":"arena7","backend":"vulkan","gpu_speeds":1,"toggle":"r_aa:0->2->0","expected_relation":"baseline + temporal lanes -> baseline","history_capacity":120,"snapshot_command":"ral_dump live profile"}]
+M=[{"kind":"scenario","schema":1,"name":"ral-profile-layout","map":"arena7","backend":"vulkan","gpu_speeds":1,"toggle":"r_smaa:0->1->0","expected_relation":"baseline + smaa -> baseline","history_capacity":120,"snapshot_command":"ral_dump live profile"}]
 for role in roles:
  path=manifest_path+"."+role;data=("fixture-"+role).encode();open(path,"wb").write(data);M.append({"kind":"provenance","role":role,"path":os.path.abspath(path),"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()})
 M.append({"kind":"result","controller_pid":101,"rc":0,"timeout":False,"forced":False})
 if mode=="manifest":M[2]["sha256"]="0"*64
-elif mode=="scenario":M[0]["toggle"]="r_aa:0->2"
+elif mode=="scenario":M[0]["toggle"]="r_smaa:0->1"
 elif mode=="result":M[-1]["rc"]=1
 with open(manifest_path,"w") as out:
  for item in M:out.write(json.dumps(item,sort_keys=True)+"\n")
@@ -165,7 +165,7 @@ if [ "${1:-}" = --self-test ];then
  ROOT="$(mktemp -d -t ral-profile-layout-self-XXXXXX 2>/dev/null || mktemp -d)";trap 'rm -rf "$ROOT"' EXIT
  write_self "$ROOT/clean.log" "$ROOT/clean.manifest" clean || exit 1
  analyze_contract "$ROOT/clean.log" "$ROOT/clean.manifest" >/dev/null || exit 1
- defects=(missing duplicate baseline-taa enabled-missing enabled-extra enabled-order revert-drift epoch reason metadata suffix marker order additive smuggle vuid rejected snapshot-missing snapshot-topology snapshot-epoch snapshot-samples snapshot-refused lane-missing lane-name lane-index lane-metadata lane-range lane-suffix manifest scenario result)
+ defects=(missing duplicate baseline-smaa enabled-missing enabled-extra enabled-order revert-drift epoch reason metadata suffix marker order additive smuggle vuid rejected snapshot-missing snapshot-topology snapshot-epoch snapshot-samples snapshot-refused lane-missing lane-name lane-index lane-metadata lane-range lane-suffix manifest scenario result)
  for defect in "${defects[@]}";do
   write_self "$ROOT/$defect.log" "$ROOT/$defect.manifest" "$defect" || exit 1
   if analyze_contract "$ROOT/$defect.log" "$ROOT/$defect.manifest" >/dev/null 2>&1;then echo "FAIL accepted $defect";exit 1;fi
@@ -202,16 +202,16 @@ fi
 
 # Cross two 200-sample reporting resets before the first topology change:
 # clearing interval averages must not emit another epoch-start record.
-BOOT="$HOME_DIR/base/ral-profile-layout.cfg";printf '%s\n' 'log renderer.timing info' 'set activeAction "echo Q0_RAL_PROFILE_LAYOUT_REQUESTED; r_gpuSpeeds 1; wait 450; echo Q0_RAL_PROFILE_LAYOUT_BASE_READY; ral_dump live profile; echo Q0_RAL_PROFILE_LAYOUT_TAA_ON_REQUESTED; r_aa 2; wait 180; echo Q0_RAL_PROFILE_LAYOUT_TAA_ON_READY; ral_dump live profile; echo Q0_RAL_PROFILE_LAYOUT_TAA_OFF_REQUESTED; r_aa 0; wait 180; ral_dump live profile; echo Q0_RAL_PROFILE_LAYOUT_COMPLETE; quit"' 'map arena7' >"$BOOT"
+BOOT="$HOME_DIR/base/ral-profile-layout.cfg";printf '%s\n' 'log renderer.timing info' 'set activeAction "echo Q0_RAL_PROFILE_LAYOUT_REQUESTED; r_gpuSpeeds 1; wait 450; echo Q0_RAL_PROFILE_LAYOUT_BASE_READY; ral_dump live profile; echo Q0_RAL_PROFILE_LAYOUT_SMAA_ON_REQUESTED; r_smaa 1; wait 180; echo Q0_RAL_PROFILE_LAYOUT_SMAA_ON_READY; ral_dump live profile; echo Q0_RAL_PROFILE_LAYOUT_SMAA_OFF_REQUESTED; r_smaa 0; wait 180; ral_dump live profile; echo Q0_RAL_PROFILE_LAYOUT_COMPLETE; quit"' 'map arena7' >"$BOOT"
 MANIFEST="$ROOT/manifest.jsonl";python3 - "$MANIFEST" "$WIRED" "$RENDERER" "$MOLTEN" "$PACK/base/pax21.sw3z" "$BASE" "$0" "$BOOT" <<'PYEOF'
 import hashlib,json,os,sys
 with open(sys.argv[1],"w") as out:
- out.write(json.dumps({"kind":"scenario","schema":1,"name":"ral-profile-layout","map":"arena7","backend":"vulkan","gpu_speeds":1,"toggle":"r_aa:0->2->0","expected_relation":"baseline + temporal lanes -> baseline","history_capacity":120,"snapshot_command":"ral_dump live profile"},sort_keys=True)+"\n")
+ out.write(json.dumps({"kind":"scenario","schema":1,"name":"ral-profile-layout","map":"arena7","backend":"vulkan","gpu_speeds":1,"toggle":"r_smaa:0->1->0","expected_relation":"baseline + smaa -> baseline","history_capacity":120,"snapshot_command":"ral_dump live profile"},sort_keys=True)+"\n")
  for role,path in zip(("gui","renderer","moltenvk","pax21","base","harness","bootstrap-cfg"),sys.argv[2:]):
   data=open(path,"rb").read();out.write(json.dumps({"kind":"provenance","role":role,"path":os.path.abspath(path),"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()},sort_keys=True)+"\n")
 PYEOF
 QCONSOLE="$HOME_DIR/qconsole.jsonl";STDOUT="$ROOT/stdout.log"
-python3 "$TIMEOUT_RUNNER" --timeout 90 --kill-after 15 --cwd "$RUN" --stdout "$STDOUT" -- "$RUN/wired" +set fs_basepath "$HOME_DIR" +set fs_homepath "$HOME_DIR" +set fs_game base +set sv_cheats 1 +set sv_pure 0 +set com_automated 1 +set com_noHardReboot 1 +set s_initsound 0 +set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set r_vkValidate 1 +set r_gpuSpeeds 0 +set r_bloom 0 +set r_ao 0 +set r_aa 0 +set r_forwardPlus 0 +set r_drawSunRays 0 +set r_shadows 0 +set log_severity DEBUG +set log_file_severity DEBUG +set log_file_mode overwrite_synced +exec ral-profile-layout.cfg
+python3 "$TIMEOUT_RUNNER" --timeout 90 --kill-after 15 --cwd "$RUN" --stdout "$STDOUT" -- "$RUN/wired" +set fs_basepath "$HOME_DIR" +set fs_homepath "$HOME_DIR" +set fs_game base +set sv_cheats 1 +set sv_pure 0 +set com_automated 1 +set com_noHardReboot 1 +set s_initsound 0 +set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set r_vkValidate 1 +set r_gpuSpeeds 0 +set r_bloom 0 +set r_ao 0 +set r_smaa 0 +set r_forwardPlus 0 +set r_drawSunRays 0 +set r_shadows 0 +set log_severity DEBUG +set log_file_severity DEBUG +set log_file_mode overwrite_synced +exec ral-profile-layout.cfg
 RC=$?;TIMEOUT=false;[ "$RC" -eq 124 ] && TIMEOUT=true;python3 - "$MANIFEST" "$$" "$RC" "$TIMEOUT" "$FORCED" <<'PYEOF'
 import json,sys
 with open(sys.argv[1],"a") as out:out.write(json.dumps({"kind":"result","controller_pid":int(sys.argv[2]),"rc":int(sys.argv[3]),"timeout":sys.argv[4]=="true","forced":sys.argv[5]=="1"},sort_keys=True)+"\n")

@@ -1,0 +1,67 @@
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct RtMetrics
+{
+    float4 rtMetrics;
+};
+
+struct spvDescriptorSetBuffer0
+{
+    texture2d<float> colorTex [[id(0)]];
+    sampler colorTexSmplr [[id(1)]];
+};
+
+struct spvDescriptorSetBuffer1
+{
+    texture2d<float> blendTex [[id(0)]];
+    sampler blendTexSmplr [[id(1)]];
+};
+
+struct spvDescriptorSetBuffer3
+{
+    constant RtMetrics* m_105 [[id(0)]];
+};
+
+struct main0_out
+{
+    float4 out_color [[color(0)]];
+};
+
+struct main0_in
+{
+    float2 texcoord [[user(locn0)]];
+    float4 offset [[user(locn1)]];
+};
+
+fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], const device spvDescriptorSetBuffer1& spvDescriptorSet1 [[buffer(1)]], const device spvDescriptorSetBuffer3& spvDescriptorSet3 [[buffer(3)]])
+{
+    main0_out out = {};
+    float4 a;
+    a.x = spvDescriptorSet1.blendTex.sample(spvDescriptorSet1.blendTexSmplr, in.offset.xy).w;
+    a.y = spvDescriptorSet1.blendTex.sample(spvDescriptorSet1.blendTexSmplr, in.offset.zw).y;
+    float2 _39 = spvDescriptorSet1.blendTex.sample(spvDescriptorSet1.blendTexSmplr, in.texcoord).xz;
+    a.w = _39.x;
+    a.z = _39.y;
+    if (dot(a, float4(1.0)) < 9.9999997473787516355514526367188e-06)
+    {
+        out.out_color = spvDescriptorSet0.colorTex.sample(spvDescriptorSet0.colorTexSmplr, in.texcoord, level(0.0));
+        return out;
+    }
+    bool h = fast::max(a.x, a.z) > fast::max(a.y, a.w);
+    float4 blendingOffset = float4(0.0, a.y, 0.0, a.w);
+    float2 blendingWeight = a.yw;
+    if (h)
+    {
+        blendingOffset = float4(a.x, 0.0, a.z, 0.0);
+        blendingWeight = a.xz;
+    }
+    blendingWeight /= float2(dot(blendingWeight, float2(1.0)));
+    float4 blendingCoord = (blendingOffset * float4((*spvDescriptorSet3.m_105).rtMetrics.xy, -(*spvDescriptorSet3.m_105).rtMetrics.xy)) + in.texcoord.xyxy;
+    out.out_color = spvDescriptorSet0.colorTex.sample(spvDescriptorSet0.colorTexSmplr, blendingCoord.xy, level(0.0)) * blendingWeight.x;
+    out.out_color += (spvDescriptorSet0.colorTex.sample(spvDescriptorSet0.colorTexSmplr, blendingCoord.zw, level(0.0)) * blendingWeight.y);
+    return out;
+}
+
