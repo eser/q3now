@@ -2799,6 +2799,59 @@ PYEOF
     printf "  gunsmear: deviation from AA-off in the gun region (mean abs / %% pixels >10): mask0=%s/%s%% mask1=%s/%s%% repeat-noise=%s/%s%% -> %s\n" "$1" "$2" "$3" "$4" "$5" "$6" "$v"
     ;;
 
+tcmodghost)
+    # Texture-animated surfaces (tcMod scroll/rotate/stretch/turb: lava, glowing blocks, teleporters) change appearance without moving.
+    # Every other mode pins the shader time, so none of them can see a history that is reprojected onto a surface whose texture has
+    # since moved. Here the shader time runs (fixedtime 8: identical frame times between processes) and each view is captured twice,
+    # 6 frames apart, after the history has settled, with AA off, TAA with the effect mask off (mask 0) and on (mask 1).
+    # The animated region is where the two AA-off frames differ. In that region the trail is the deviation of the TAA frame from the AA-off
+    # frame at the same time. Controls: the region must be non-empty (otherwise the view has nothing animated and says nothing); the mask must
+    # never make the region deviate more; a repeat of mask 1 gives the noise floor.
+    TG_FRAMES="${TG_FRAMES:-6}"
+    tg() {  # tag pos aa mask
+        local tag="$1" pos="$2" aa="$3" mask="$4"
+        { printf 'set cg_draw2D 0\nset cg_drawGun 0\nset fixedtime 8\nset r_pinShaderTime 0\nset r_pinFrameTime 0\nset r_dbgTemporalEffectMask %s\nwait 80\nscreenshot vrf_%s_f0\nwait %s\nscreenshot vrf_%s_f1\nwait 4\n' "$mask" "$tag" "$TG_FRAMES" "$tag"; } > "$SMOKE_HOME/base/vrf_tg.cfg"
+        CAP_POST_CMD="exec vrf_tg.cfg" capture_fixed_cam arena1 "$pos" "$tag" +set r_aa "$aa" >/dev/null || return 1
+    }
+    PNG2RAW_BIN="${PNG2RAW:-$WIRED_SOURCE/tools/png2raw/png2raw}"
+    for entry in "${VPS[@]}"; do
+        set -- $entry; map="$1" x="$2" y="$3" z="$4" yaw="$5" id="$6"
+        [ "$map" = arena1 ] || continue
+        pos="$x $y $z $yaw"
+        tg "tg_off_$id" "$pos" 0 1 || { FAIL=1; continue; }
+        tg "tg_m0_$id" "$pos" 1 0 || { FAIL=1; continue; }
+        tg "tg_m1_$id" "$pos" 1 1 || { FAIL=1; continue; }
+        tg "tg_m1b_$id" "$pos" 1 1 || { FAIL=1; continue; }
+        res="$(python3 - "$SHOTDIR" "$PNG2RAW_BIN" "$id" <<'PYEOF'
+import subprocess, struct, sys
+d, dec, vid = sys.argv[1:4]
+def load(n):
+    p = f"{d}/vrf_{n}.png"
+    w, h = struct.unpack(">II", open(p, "rb").read(24)[16:24])
+    return w, h, subprocess.check_output([dec, p])
+w, h, o0 = load(f"tg_off_{vid}_f0"); _, _, o1 = load(f"tg_off_{vid}_f1")
+_, _, a1 = load(f"tg_m0_{vid}_f1"); _, _, b1 = load(f"tg_m1_{vid}_f1"); _, _, c1 = load(f"tg_m1b_{vid}_f1")
+step = 2
+pix = [(y * w + x) * 3 for y in range(0, h, step) for x in range(0, w, step)]
+mask = [i for i in pix if max(abs(o1[i] - o0[i]), abs(o1[i+1] - o0[i+1]), abs(o1[i+2] - o0[i+2])) > 6]
+def dev(a, b, idx):
+    if not idx: return 0.0
+    return sum(max(abs(a[i] - b[i]), abs(a[i+1] - b[i+1]), abs(a[i+2] - b[i+2])) for i in idx) / len(idx)
+print("%d %d %.3f %.3f %.3f" % (len(mask), len(pix), dev(a1, o1, mask), dev(b1, o1, mask), dev(c1, b1, mask)))
+PYEOF
+)"
+        set -- $res
+        v="$(awk -v n="$1" -v tot="$2" -v d0="$3" -v d1="$4" -v nz="$5" 'BEGIN{
+            frac = n / tot * 100;
+            if (n < 200) print "OK(no animated region in this view: " n " px; says nothing)";
+            else if (d1 > d0 + 0.25) print "FAIL(the effect mask made the animated region deviate MORE: " d0 " -> " d1 ")";
+            else if (d0 > d1 + 0.25 && nz < d0) print "OK(mask removes the trail: " d0 " -> " d1 ", noise " nz ", region " frac "% of pixels)";
+            else print "OK(no measurable difference: mask0 " d0 " mask1 " d1 " noise " nz ", region " frac "% of pixels)" }')"
+        [ "${v:0:2}" = "OK" ] || FAIL=1
+        printf "  tcmodghost %s: animated region %s/%s px, deviation from AA-off mask0=%s mask1=%s repeat-noise=%s -> %s\n" "$id" "$1" "$2" "$3" "$4" "$5" "$v"
+    done
+    ;;
+
 worldphase)
     # r_dbgWorldPhase splits the opaque world batches of the main view into two phases and draws
     # the second one later (at the opaque -> transparent crossing) through the replay mechanism
