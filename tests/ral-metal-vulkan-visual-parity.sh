@@ -42,6 +42,9 @@ SKY_MODE="${RAL_PARITY_SKY_MODE:-}"
 FILTER_RELOAD="${RAL_PARITY_FILTER_RELOAD:-0}"
 REPEAT="${RAL_PARITY_REPEAT:-1}"
 EXTRA_CFG="${RAL_PARITY_EXTRA_CFG:-}"
+# 1 (default) keeps the sound system for WiredFX registration (see engine_args); 0 starts without it, for runs where nothing may
+# play (the FX that need sound then drop their visual actions, equally on every backend and r_aa mode).
+INITSOUND="${RAL_PARITY_INITSOUND:-1}"
 PRE_SHOT="${RAL_PARITY_PRE_SHOT:-}"   # console commands run just before the screenshot (e.g. a yaw sweep for temporal checks)
 # Deterministic game clock: fixedtime advances cg.time by a constant per frame,
 # so HUD timers, weather/sky timelines and game-time animations reach the same
@@ -192,7 +195,7 @@ capture() {
     +set com_noHardReboot 1
     # Keep registration alive: disabling audio rejects sound-bearing WiredFX
     # profiles and removes their visual actions too. Mute in the cfg instead.
-    +set s_initsound 1
+    +set s_initsound "$INITSOUND"
     +set sv_pure 0
     +set vm_game 0
     +set vm_cgame 0
