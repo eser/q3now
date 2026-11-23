@@ -76,6 +76,25 @@ static qboolean WiredWeb_PublishPresentationResolution( uint32_t changeFlags ) {
 	return qtrue;
 }
 
+/* Console hook for browser test harnesses (A/B of r_aa on one scene, camera placement): the page writes a NUL-terminated command
+ * into this buffer through the exported wasm memory and asks the engine to append it to the command buffer. It runs exactly what the
+ * client console would run, under the same cheat rules. */
+static char s_webCommand[512];
+EMSCRIPTEN_KEEPALIVE char *WiredWeb_CommandBuffer( void ) { return s_webCommand; }
+EMSCRIPTEN_KEEPALIVE int WiredWeb_CommandBufferSize( void ) { return (int)sizeof( s_webCommand ); }
+EMSCRIPTEN_KEEPALIVE int WiredWeb_ExecuteCommandBuffer( void ) {
+#ifdef __EMSCRIPTEN__
+	if ( !s_comInitialized ) return 0;
+	s_webCommand[sizeof( s_webCommand ) - 1] = '\0';
+	Cbuf_AddText( s_webCommand );
+	Cbuf_AddText( "\n" );
+	s_webCommand[0] = '\0';
+	return 1;
+#else
+	return 0;   /* the host contract build has no command buffer */
+#endif
+}
+
 EMSCRIPTEN_KEEPALIVE int WiredWeb_ClientStart( void ) {
 	ralWebGpuBrowserModuleBorrow_t browser;
 	/* Com_Init tokenizes this buffer in place. Keep browser defaults explicit;

@@ -18,9 +18,10 @@ qboolean RalWebGpu_ExposurePrepare( ralWebGpuExposure_t *e,
     uint64_t worldGeneration, int timeMs, qboolean cameraCut,
     const ralExposureSettings_t *settings,
     const ralDisplayVisibilityPlan_t *visibility, uintptr_t *outHdr );
+/* `source` 0 (or the scene HDR) meters and tonemaps the scene; another texture of the same extent (the TAA output) replaces it. */
 qboolean RalWebGpu_ExposureRecord( ralWebGpuExposure_t *e,
     ralWebGpuCommand_t *command, ralWebGpuCommandReceipt_t *recording,
-    uintptr_t outputTarget );
+    uintptr_t outputTarget, uintptr_t source );
 void RalWebGpu_ExposureComplete( ralWebGpuExposure_t *e, qboolean success );
 void RalWebGpu_ExposureReset( ralWebGpuExposure_t *e );
 qboolean RalWebGpu_ExposureSetToneMap(ralWebGpuExposure_t *e,

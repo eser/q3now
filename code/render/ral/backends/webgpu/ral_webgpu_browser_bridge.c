@@ -525,7 +525,7 @@ qboolean RalWebGpu_BrowserBridgeCreateBindGroup(
 	memset( converted, 0, sizeof( converted ) );
 	for ( uint32_t i = 0u; i < entryCount; ++i ) {
 		if ( entries[i].kind < RAL_WEBGPU_BROWSER_BIND_RESOURCE_BUFFER
-				|| entries[i].kind > RAL_WEBGPU_BROWSER_BIND_RESOURCE_SAMPLER
+				|| entries[i].kind > RAL_WEBGPU_BROWSER_BIND_RESOURCE_SCENE_DEPTH
 				|| !entries[i].resourceIdentity ) return qfalse;
 		converted[i].binding = entries[i].binding;
 		converted[i].kind = (uint32_t)entries[i].kind;

@@ -13,7 +13,7 @@
 extern "C" {
 #endif
 
-#define RAL_WEBGPU_PRODUCT_SCHEMA_VERSION 11u
+#define RAL_WEBGPU_PRODUCT_SCHEMA_VERSION 12u
 
 /* Adapter-private std430 draw data. Record zero is an ordinary primitive;
  * beams use float endpoint colours and an unmodified [0,1] quad on the GPU. */
@@ -126,6 +126,7 @@ typedef struct {
 	uint32_t uiDrawCount;
     uint32_t toneMapDrawCount;
     uint32_t exposureDispatchCount;
+    uint32_t aaDispatchCount;      /* TAA: motion + resolve (or bootstrap) in one compute pass, 0 without TAA */
 	uint32_t atmosphereBoundDrawCount;
 	ralAtmosphereWeatherReceipt_t weather;
 	uint32_t weatherDrawCount;
@@ -144,6 +145,11 @@ qboolean RalWebGpu_ProductGetEffectParameterBuffer(
 	const ralWebGpuProduct_t *product,
 	const ralWebGpuRuntimeReceipt_t *runtimeReceipt,
 	uintptr_t *outIdentity, uint64_t *outByteSize );
+/* TAA (r_aa 1): created once with the product's owners; SetTaa follows the cvar each frame. */
+qboolean RalWebGpu_ProductEnableTaa( ralWebGpuProduct_t *product,
+	ralWebGpuRuntimeReceipt_t *rr, ralWebGpuBrowserBridge_t *bridge, uint64_t generation );
+qboolean RalWebGpu_ProductSetTaa( ralWebGpuProduct_t *product, qboolean enabled );
+void RalWebGpu_ProductTaaFrameCounts( const ralWebGpuProduct_t *product, uint32_t *resolved, uint32_t *bootstrap );
 qboolean RalWebGpu_ProductEnableExposure( ralWebGpuProduct_t *product,
     ralWebGpuRuntimeReceipt_t *rr, ralWebGpuBrowserBridge_t *bridge, uint64_t generation );
 qboolean RalWebGpu_ProductEnableSkyMaterial(ralWebGpuProduct_t *product,

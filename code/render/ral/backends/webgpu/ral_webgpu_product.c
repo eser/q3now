@@ -5,6 +5,8 @@
 #include "ral_beam_geometry.h"
 #include "ral_sky_radiance.h"
 #include "ral_webgpu_sky_material.h"
+#include "ral_webgpu_taa.h"
+#include "ral_temporal.h"
 
 #include <limits.h>
 #include <math.h>
@@ -52,6 +54,14 @@ struct ralWebGpuProduct_s {
     uintptr_t physicalSkyTexture, physicalSkySampler;
     float physicalSkyBlend;
     ralWebGpuExposure_t *exposure;
+    /* TAA (r_aa 1): the temporal plan, the camera of the last completed frame, and the plan/camera of the frame in flight. */
+    ralWebGpuTaa_t *taa;
+    qboolean taaEnabled, taaPending;
+    ralTemporalState_t taaState;
+    uint64_t taaFrameId, taaPendingFrame, taaWorldGeneration;
+    uint32_t taaTopologyEpoch, taaResolvedFrames, taaBootstrapFrames;
+    qboolean taaPendingResolved;
+    ralWebGpuTaaCamera_t taaPreviousCamera, taaPendingCamera;
     ralExposureSettings_t exposureSettings;
     ralDisplayVisibilityPlan_t exposureVisibility;
 	ralWebGpuPipelineReceipt_t worldPipeline;
@@ -269,7 +279,9 @@ static qboolean ReceiptValid( const ralWebGpuProductFrameReceipt_t *receipt ) {
         && receipt->toneMapDrawCount <= 1u
         && (receipt->exposureDispatchCount == 0u
             || (receipt->exposureDispatchCount == 2u && receipt->toneMapDrawCount == 1u))
-        && receipt->command.dispatchCount == receipt->exposureDispatchCount
+        && (receipt->aaDispatchCount == 0u
+            || (receipt->aaDispatchCount == 2u && receipt->toneMapDrawCount == 1u))
+        && receipt->command.dispatchCount == receipt->exposureDispatchCount + receipt->aaDispatchCount
 		&& receipt->atmosphereBoundDrawCount == receipt->worldDrawCount
 			+ receipt->distantWorldDrawCount
 			+ receipt->entityDrawCount + receipt->polygonDrawCount
@@ -646,9 +658,10 @@ static qboolean ProjectVerticesInPlace( const renderWorldSnapshot_t *world,
 	return qtrue;
 }
 
+/* `jitterNdc` is the TAA sub-pixel offset (zero without TAA), added in clip space (x w) to world and entity geometry only. */
 static qboolean ProjectVertices( const renderWorldSnapshot_t *world,
         const renderWorldVertex_t *source, ralWebGpuWorldVertex_t *vertices,
-        uint32_t vertexCount ) {
+        uint32_t vertexCount, const float jitterNdc[2] ) {
     float projection[4];
     if ( (vertexCount && (!vertices || !source)) || !RalWebGpu_ProductProjection(world, projection) ) return qfalse;
     const float depthScale = projection[3], depthBias = -projection[2] * depthScale;
@@ -667,8 +680,8 @@ static qboolean ProjectVertices( const renderWorldSnapshot_t *world,
 		up = delta[0] * world->viewAxis[2][0]
 			+ delta[1] * world->viewAxis[2][1]
 			+ delta[2] * world->viewAxis[2][2];
-		vertices[i].authored.position[0] = side / projection[0];
-		vertices[i].authored.position[1] = up / projection[1];
+		vertices[i].authored.position[0] = side / projection[0] + jitterNdc[0] * forward;
+		vertices[i].authored.position[1] = up / projection[1] + jitterNdc[1] * forward;
 		vertices[i].authored.position[2] = forward * depthScale + depthBias;
 		vertices[i].clipW = forward;
 		vertices[i].fogCoord[0] = sqrtf( delta[0] * delta[0]
@@ -1890,6 +1903,21 @@ qboolean RalWebGpu_ProductEnableExposure( ralWebGpuProduct_t *product,
     if (!product || product->inFlight || product->exposure) return qfalse;
     return RalWebGpu_ExposureCreate(product->runtime,rr,bridge,generation,&product->exposure);
 }
+qboolean RalWebGpu_ProductEnableTaa( ralWebGpuProduct_t *product,
+        ralWebGpuRuntimeReceipt_t *rr, ralWebGpuBrowserBridge_t *bridge, uint64_t generation ) {
+    if (!product || product->inFlight || product->taa) return qfalse;
+    Ral_TemporalInit( &product->taaState );
+    return RalWebGpu_TaaCreate(product->runtime,rr,bridge,generation,&product->taa);
+}
+qboolean RalWebGpu_ProductSetTaa( ralWebGpuProduct_t *product, qboolean enabled ) {
+    if (!product || !product->taa) return qfalse;
+    product->taaEnabled = enabled ? qtrue : qfalse;
+    return qtrue;
+}
+void RalWebGpu_ProductTaaFrameCounts( const ralWebGpuProduct_t *product, uint32_t *resolved, uint32_t *bootstrap ) {
+    *resolved = product ? product->taaResolvedFrames : 0u;
+    *bootstrap = product ? product->taaBootstrapFrames : 0u;
+}
 qboolean RalWebGpu_ProductEnableSkyMaterial(ralWebGpuProduct_t *product,
         ralWebGpuRuntimeReceipt_t *rr,ralWebGpuBrowserBridge_t *bridge,uint64_t generation) {
     if(!product||product->inFlight||product->skyMaterial) return qfalse;
@@ -2027,6 +2055,8 @@ void RalWebGpu_ProductDestroy( ralWebGpuProduct_t *product,
 	if ( resources && !product->inFlight ) {
         ralWebGpuRuntimeReceipt_t authority = *runtimeReceipt;
         RalWebGpu_ExposureDestroy(product->exposure,&authority);
+        (void)RalWebGpu_RuntimeGetReceipt(product->runtime,&authority);
+        RalWebGpu_TaaDestroy(product->taa,&authority);
         // Exposure retires pipelines, changing the exact runtime receipt.
         // Refresh before retiring the next resource owner.
         (void)RalWebGpu_RuntimeGetReceipt(product->runtime,&authority);
@@ -2067,6 +2097,7 @@ qboolean RalWebGpu_ProductUnloadWorld( ralWebGpuProduct_t *product,
     DestroySkyVertices(product,resources,worldIndex);
 	if ( worldIndex == 0 ) {
         RalWebGpu_ExposureReset(product->exposure);
+        Ral_TemporalInit( &product->taaState ); product->taaFrameId = 0u;
 		RenderEffectDecalPool_Reset( &product->effectDecalPool );
 		RenderEffectDecalPool_Reset( &product->pendingEffectDecalPool );
 		memset( &product->pendingEffectDecalPoolReceipt, 0,
@@ -2348,6 +2379,41 @@ static qboolean RecordWorldBatch( ralWebGpuProduct_t *product,
 		updated );
 }
 
+/* TAA (when planned for this frame) resolves the scene HDR, then the exposure meters and tonemaps the TAA output instead of the
+ * scene HDR. The plan and the camera wait for the submission to complete (RalWebGpu_ProductPoll) before they become history. */
+static qboolean RecordToneMap( ralWebGpuProduct_t *product, const ralWebGpuRuntimeReceipt_t *runtimeReceipt,
+		ralWebGpuCommand_t *command, ralWebGpuCommandReceipt_t *recording, uintptr_t target, uintptr_t sceneTarget,
+		const ralWebGpuTaaFrame_t *taaFrame, ralWebGpuProductFrameReceipt_t *candidate ) {
+	uintptr_t source = 0;
+	if ( taaFrame ) {
+		uint32_t dispatches = 0u;
+		if ( !RalWebGpu_TaaRecord( product->taa, runtimeReceipt, command, recording, sceneTarget, taaFrame, &source,
+				&dispatches ) ) { s_productFailureStage = 100u + RalWebGpu_TaaLastFailure(); return qfalse; }
+		candidate->aaDispatchCount = dispatches;
+		product->taaPending = qtrue; product->taaPendingFrame = product->taaState.pendingPlan.frameId;
+		product->taaPendingCamera = taaFrame->current; product->taaPendingResolved = taaFrame->historyValid ? qtrue : qfalse;
+	}
+	if ( !RalWebGpu_ExposureRecord( product->exposure, command, recording, target, source ) ) {
+		s_productFailureStage = source ? 99u : 98u; return qfalse;
+	}
+	candidate->toneMapDrawCount = 1;
+	return qtrue;
+}
+
+static void TaaFinish( ralWebGpuProduct_t *product, qboolean success ) {
+	if ( !product->taaPending ) {
+		if ( product->taaState.pending )
+			(void)Ral_TemporalCancelFrame( &product->taaState, product->taaState.pendingPlan.frameId );
+		return;
+	}
+	product->taaPending = qfalse;
+	if ( success && Ral_TemporalCommitFrame( &product->taaState, product->taaPendingFrame ) ) {
+		product->taaFrameId = product->taaPendingFrame;
+		product->taaPreviousCamera = product->taaPendingCamera;
+		if ( product->taaPendingResolved ) product->taaResolvedFrames++; else product->taaBootstrapFrames++;
+	} else (void)Ral_TemporalCancelFrame( &product->taaState, product->taaPendingFrame );
+}
+
 qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 		const ralWebGpuRuntimeReceipt_t *runtimeReceipt,
 		renderSubmissionState_t *frontend,
@@ -2394,6 +2460,11 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 	uint32_t worldMaterialEntryCount;
 	qboolean commandActive = qfalse;
     uintptr_t sceneTarget=targetIdentity;
+	ralTemporalFramePlan_t taaPlan;
+	ralWebGpuTaaFrame_t taaFrame;
+	float taaJitterNdc[2] = { 0.0f, 0.0f }, taaProjection[4];
+	qboolean taaActive = qfalse;
+	memset( &taaPlan, 0, sizeof( taaPlan ) ); memset( &taaFrame, 0, sizeof( taaFrame ) );
 	ralExposureSettings_t frameExposure;
 	s_productFailureStage = 1u;
 	if ( !product || !runtimeReceipt || !frontend || !submission || !plan
@@ -2463,6 +2534,49 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 			|| plan->worldBatchCount != world.batchCount ) return qfalse;
 	frameExposure = product->exposureSettings;
 	if ( world.rdflags & RDF_NOWORLDMODEL ) frameExposure.enabled = 0;
+	/* TAA plan before any projection: the jitter enters the world and entity vertices. A plan abandoned by an earlier failed frame
+	 * is cancelled first; switching r_aa off drops the history so a later switch-on starts from the bootstrap frame. */
+	if ( product->taaState.pending )
+		(void)Ral_TemporalCancelFrame( &product->taaState, product->taaState.pendingPlan.frameId );
+	if ( !product->taaEnabled && product->taaState.active ) { Ral_TemporalInit( &product->taaState ); product->taaFrameId = 0u; }
+	if ( product->taa && product->taaEnabled && product->exposure && submission->sceneRendered
+			&& !( world.rdflags & RDF_NOWORLDMODEL ) && product->viewportWidth && product->viewportHeight
+			&& RalWebGpu_ProductProjection( &world, taaProjection ) ) {
+		ralTemporalFrameInput_t input;
+		const uint64_t lifecycle = frontend->worlds[frontend->activeWorldIndex].lifecycleGeneration;
+		memset( &input, 0, sizeof( input ) );
+		if ( product->taaWorldGeneration != lifecycle ) {
+			product->taaWorldGeneration = lifecycle;
+			if ( !++product->taaTopologyEpoch ) product->taaTopologyEpoch = 1u;
+		}
+		input.frameId = product->taaFrameId + 1u;
+		input.width = product->viewportWidth; input.height = product->viewportHeight;
+		input.topologyEpoch = product->taaTopologyEpoch; input.enabled = 1u;
+		input.cameraCut = ( world.rdflags & ( RDF_CAMERA_CUT | RDF_HYPERSPACE ) ) ? 1u : 0u;
+		if ( Ral_TemporalBeginFrame( &product->taaState, &input, &taaPlan ) ) {
+			taaActive = qtrue;
+			taaJitterNdc[0] = 2.0f * taaPlan.sceneJitterPixels[0] / (float)product->viewportWidth;
+			taaJitterNdc[1] = -2.0f * taaPlan.sceneJitterPixels[1] / (float)product->viewportHeight;
+			for ( int axis = 0; axis < 3; ++axis ) {
+				taaFrame.current.origin[axis] = world.viewOrigin[axis];
+				taaFrame.current.forward[axis] = world.viewAxis[0][axis];
+				taaFrame.current.left[axis] = world.viewAxis[1][axis];
+				taaFrame.current.up[axis] = world.viewAxis[2][axis];
+			}
+			taaFrame.current.tanHalfX = taaProjection[0]; taaFrame.current.tanHalfY = taaProjection[1];
+			taaFrame.current.zNear = taaProjection[2];
+			taaFrame.current.zFar = taaProjection[2] * taaProjection[3] / ( taaProjection[3] - 1.0f );   /* f/(f-n) -> f */
+			taaFrame.previous = product->taaPreviousCamera;
+			taaFrame.width = product->viewportWidth; taaFrame.height = product->viewportHeight;
+			taaFrame.jitterNdc[0] = taaJitterNdc[0]; taaFrame.jitterNdc[1] = taaJitterNdc[1];
+			taaFrame.currentJitterUv[0] = taaPlan.sceneJitterPixels[0] / (float)product->viewportWidth;
+			taaFrame.currentJitterUv[1] = taaPlan.sceneJitterPixels[1] / (float)product->viewportHeight;
+			taaFrame.previousJitterUv[0] = taaPlan.previousJitterPixels[0] / (float)product->viewportWidth;
+			taaFrame.previousJitterUv[1] = taaPlan.previousJitterPixels[1] / (float)product->viewportHeight;
+			taaFrame.historyValid = taaPlan.historyValid;
+			taaFrame.readIndex = taaPlan.historyReadIndex; taaFrame.writeIndex = taaPlan.historyWriteIndex;
+		}
+	}
 	worldIndex = frontend->activeWorldIndex;
 	if ( submission->sceneRendered && ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS ) ) return qfalse;
 	memset( &distantWorld, 0, sizeof( distantWorld ) );
@@ -2612,7 +2726,7 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 					(size_t)( entityVertexCount ? entityVertexCount : 1u )
 						* sizeof( projectedEntities[0] ) ) )
 				|| !ProjectVertices( &world, entityVertices, projectedEntities,
-					entityVertexCount ) ) ) goto fail;
+					entityVertexCount, taaJitterNdc ) ) ) goto fail;
 	if ( entityDrawCount ) {
 		if ( entityDrawCount > RAL_WEBGPU_ENTITY_LIGHTING_CAPACITY ) goto fail;
 		entityLightingData = calloc( (size_t)entityDrawCount * 16u,
@@ -2739,7 +2853,7 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 			(uint64_t)world.vertexCount * sizeof( projectedWorld[0] ) );
 		if ( !projectedWorld ) goto fail;
 		if ( !ProjectVertices( &world, world.vertices, projectedWorld,
-				world.vertexCount ) ) goto fail;
+				world.vertexCount, taaJitterNdc ) ) goto fail;
 		vertexDesc.size = (uint64_t)world.vertexCount * sizeof( projectedWorld[0] );
 		vertexDesc.usage = RAL_WEBGPU_BUFFER_VERTEX | RAL_WEBGPU_BUFFER_COPY_DESTINATION;
 		vertexDesc.memoryClass = RAL_ALLOCATION_DEVICE_LOCAL;
@@ -2762,7 +2876,7 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 			(uint64_t)distant->vertexCount * sizeof( projectedDistantWorld[0] ) );
 		if ( !projectedDistantWorld ) goto fail;
 		if ( !ProjectVertices( distant, distant->vertices, projectedDistantWorld,
-				distant->vertexCount ) ) goto fail;
+				distant->vertexCount, taaJitterNdc ) ) goto fail;
 		memset( &vertexDesc, 0, sizeof( vertexDesc ) );
 		vertexDesc.size = (uint64_t)distant->vertexCount
 			* sizeof( projectedDistantWorld[0] );
@@ -2964,8 +3078,8 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 		ralWebGpuIndexedDraw_t draw;
 		if ( submission->sceneRendered && miscDraws[i].kind == RAL_WEBGPU_DRAW_UI && !candidate.uiDrawCount ) {
             if (product->exposure) {
-                if (!RalWebGpu_ExposureRecord(product->exposure,command,&recording,targetIdentity)) goto fail;
-                candidate.toneMapDrawCount=1;
+                if (!RecordToneMap(product,runtimeReceipt,command,&recording,targetIdentity,sceneTarget,
+                        taaActive?&taaFrame:NULL,&candidate)) goto fail;
                 candidate.exposureDispatchCount=frameExposure.enabled?2u:0u;
             }
 			/* BuildMiscGeometry appends UI after every scene effect. Keep UI in
@@ -3041,8 +3155,8 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 	}
 	s_productFailureStage = 11u;
     if (submission->sceneRendered && product->exposure && !candidate.toneMapDrawCount) {
-        if (!RalWebGpu_ExposureRecord(product->exposure,command,&recording,targetIdentity)) goto fail;
-        candidate.toneMapDrawCount=1;
+        if (!RecordToneMap(product,runtimeReceipt,command,&recording,targetIdentity,sceneTarget,
+                taaActive?&taaFrame:NULL,&candidate)) goto fail;
         candidate.exposureDispatchCount=frameExposure.enabled?2u:0u;
     }
 	if ( !RalWebGpu_CommandEnd( command, &recording, &executable ) ) {
@@ -3132,6 +3246,7 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 fail:
 	if ( commandActive ) RalWebGpu_CommandCancel( command, &recording );
     RalWebGpu_ExposureComplete(product->exposure,qfalse);
+	TaaFinish( product, qfalse );
 	free( entityVertices ); free( entityIndices ); free( entityDraws );
 	free( entityLightingData );
 	free( effectParameterData );
@@ -3223,11 +3338,13 @@ ralWebGpuAsyncStatus_t RalWebGpu_ProductPoll( ralWebGpuProduct_t *product,
 	status = RalWebGpu_CommandPoll( command, &receipt->submission );
 	if ( status == RAL_WEBGPU_ASYNC_READY ) {
         RalWebGpu_ExposureComplete(product->exposure,qtrue);
+		TaaFinish( product, qtrue );
 		product->effectDecalPool = product->pendingEffectDecalPool;
 		product->effectBeamPool = product->pendingEffectBeamPool;
 		DestroyFrameResources( product, resources ); product->inFlight = qfalse;
 	} else if ( status != RAL_WEBGPU_ASYNC_PENDING ) {
         RalWebGpu_ExposureComplete(product->exposure,qfalse);
+		TaaFinish( product, qfalse );
 		DestroyFrameResources( product, resources ); product->inFlight = qfalse;
 	}
 	return status;

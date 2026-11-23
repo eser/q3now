@@ -255,6 +255,10 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
             : texture.createView();
         } else if (entry.kind === 3) {
           resource = get(entry.handle, "sampler");
+        } else if (entry.kind === 4) {
+          // The canvas depth (scene depth of the frame) for compute passes that read it; it has no handle of its own.
+          if (!canvasDepthTexture) throw new RalWebGpuBrowserHostError("host-failure", "scene depth unavailable");
+          resource = canvasDepthTexture.createView({ aspect: "depth-only" });
         } else throw new RalWebGpuBrowserHostError("invalid-argument", "bind resource kind");
         return { binding: entry.binding, resource };
       });

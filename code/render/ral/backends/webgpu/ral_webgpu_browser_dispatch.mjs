@@ -55,7 +55,7 @@ const FORMATS = { 1: "r8unorm", 2: "rg8unorm", 3: "rgba8unorm", 4: "rgba8unorm-s
   35: "bc7-rgba-unorm", 36: "bc7-rgba-unorm-srgb", 37: "astc-4x4-unorm",
   38: "astc-4x4-unorm-srgb", 39: "etc2-rgba8unorm", 40: "etc2-rgba8unorm-srgb",
   51: "rgb9e5ufloat", 52: "rg16snorm" };
-const FORMAT_BYTES = { 1: 1, 2: 2, 3: 4, 4: 4, 14: 8, 51: 4, 52: 4 };
+const FORMAT_BYTES = { 1: 1, 2: 2, 3: 4, 4: 4, 14: 8, 17: 4, 51: 4, 52: 4 };
 const VERTEX_FORMATS = { 1: "unorm8", 2: "unorm8x2", 3: "unorm8x4", 12: "float16",
   13: "float16x2", 14: "float16x4", 17: "float32", 18: "float32x2",
   19: "float32x3", 20: "float32x4", 21: "uint8x4" };
@@ -366,7 +366,7 @@ export function createRalWebGpuBrowserDispatch({ host, memory, canvasIdentity = 
       if (count > 64) throw new RangeError("bind resource count");
       const offset = u64(view, 32), entries = Array.from({ length: count }, (_, i) => {
         const entry = region(offset + i * 32, 32), kind = entry.getUint32(4, true);
-        if (kind < 1 || kind > 3) throw new RangeError("bind resource kind");
+        if (kind < 1 || kind > 4) throw new RangeError("bind resource kind");
         return { binding: entry.getUint32(0, true), kind, handle: u64(entry, 8),
           offset: u64(entry, 16), size: u64(entry, 24) };
       });

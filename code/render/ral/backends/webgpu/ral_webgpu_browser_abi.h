@@ -316,7 +316,9 @@ typedef struct {
 typedef enum {
 	RAL_WEBGPU_BROWSER_BIND_RESOURCE_BUFFER = 1,
 	RAL_WEBGPU_BROWSER_BIND_RESOURCE_TEXTURE,
-	RAL_WEBGPU_BROWSER_BIND_RESOURCE_SAMPLER
+	RAL_WEBGPU_BROWSER_BIND_RESOURCE_SAMPLER,
+	/* The browser host's canvas depth texture (depth-only view). The resource identity is ignored (pass any non-zero value). */
+	RAL_WEBGPU_BROWSER_BIND_RESOURCE_SCENE_DEPTH
 } ralWebGpuBrowserBindResourceKind_t;
 
 typedef struct {

@@ -1496,6 +1496,11 @@ static qboolean InitializeOwners( void )
             &s_module.borrow.runtimeReceipt,s_module.borrow.bridge,NextGeneration())) {
         DestroyOwners(); return qfalse;
     }
+    if (!RalWebGpu_RuntimeGetReceipt(s_module.borrow.runtime,&s_module.borrow.runtimeReceipt)
+        || !RalWebGpu_ProductEnableTaa(s_module.product,
+            &s_module.borrow.runtimeReceipt,s_module.borrow.bridge,NextGeneration())) {
+        DestroyOwners(); return qfalse;
+    }
     if (!RalWebGpu_ProductEnableSkyMaterial(s_module.product,
             &s_module.borrow.runtimeReceipt,s_module.borrow.bridge,NextGeneration())) {
         DestroyOwners(); return qfalse;
@@ -2162,8 +2167,9 @@ static qboolean CookLightingProject( const char *derivedRoot )
 }
 
 
-/* r_aa (0 off, 1 TAA, 2 SMAA) is registered so the cvar exists and is documented here, but this renderer has no anti-aliasing yet
- * (TASK-257; Vulkan has TAA and SMAA, Metal has SMAA). A non-zero value is said to be ignored once instead of being silently dropped. */
+/* r_aa (0 off, 1 TAA, 2 SMAA). This renderer has TAA (ral_webgpu_taa.c, the same catalog resolve as Vulkan and Metal) but no SMAA
+ * yet (TASK-257): r_aa 2 is said to be ignored once instead of being silently dropped. r_aaSupported stays 0 until both modes exist,
+ * so the video menu does not offer a choice that would do nothing. */
 static void NoteAntiAliasingUnavailable( void ) {
 	static qboolean noted;
 	cvar_t *aa;
@@ -2174,12 +2180,12 @@ static void NoteAntiAliasingUnavailable( void ) {
 	if ( !aa ) return;
 	ri.Cvar_CheckRange( aa, "0", "2", CV_INTEGER );
 	if ( ri.Cvar_SetDescription ) ri.Cvar_SetDescription( aa,
-		"Anti-aliasing: 0 off, 1 TAA, 2 SMAA. Not available on this renderer yet; the frame is not anti-aliased." );
+		"Anti-aliasing: 0 off, 1 TAA (default), 2 SMAA (not available on this renderer yet: no anti-aliasing)." );
 	if ( ri.Cvar_SetGroup ) ri.Cvar_SetGroup( aa, CVG_RENDERER );
 	noted = qtrue;
-	if ( aa->integer && s_module.imports.LogCh && s_module.logChannel >= 0 )
+	if ( aa->integer == 2 && s_module.imports.LogCh && s_module.logChannel >= 0 )
 		s_module.imports.LogCh( s_module.logChannel, SEV_INFO,
-			"Wired WebGPU: r_aa %d requested; anti-aliasing is not available on this renderer yet (TASK-257), the frame is not anti-aliased\n", aa->integer );
+			"Wired WebGPU: r_aa 2 requested; SMAA is not available on this renderer yet (TASK-257), the frame is not anti-aliased\n" );
 }
 
 static void BeginRegistration( glconfig_t *config )
@@ -2343,6 +2349,19 @@ static void BeginFrame( stereoFrame_t stereo )
 	s_module.currentFrameGeneration = generation;
 	s_module.frameOpen				= qtrue;
 	s_module.frontend.pbrEnabled = s_module.pbr && s_module.pbr->integer != 0 ? qtrue : qfalse;
+	{
+		/* r_aa follows live; one line per 1000 TAA frames is the gameplay evidence (resolved vs bootstrap). */
+		static uint32_t lastLoggedTaaFrames;
+		cvar_t *aa = ri.Cvar_Get ? ri.Cvar_Get( "r_aa", "1", CVAR_ARCHIVE | CVAR_NODEFAULT ) : NULL;
+		uint32_t resolved = 0u, bootstrap = 0u;
+		(void)RalWebGpu_ProductSetTaa( s_module.product, aa && aa->integer == 1 ? qtrue : qfalse );
+		RalWebGpu_ProductTaaFrameCounts( s_module.product, &resolved, &bootstrap );
+		if ( resolved + bootstrap >= lastLoggedTaaFrames + 1000u && s_module.imports.LogCh && s_module.logChannel >= 0 ) {
+			lastLoggedTaaFrames = resolved + bootstrap;
+			s_module.imports.LogCh( s_module.logChannel, SEV_INFO,
+				"Wired WebGPU: taa frames resolved=%u bootstrap=%u\n", resolved, bootstrap );
+		}
+	}
 }
 
 static qboolean SubmitPendingProduct( void )

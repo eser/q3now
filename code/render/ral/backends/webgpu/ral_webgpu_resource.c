@@ -236,6 +236,7 @@ qboolean RalWebGpu_CreateTexture( ralWebGpuResourceLayer_t *layer,
 			|| desc->format == RAL_FORMAT_R8G8B8A8_SRGB
 			|| desc->format == RAL_FORMAT_E5B9G9R9_UFLOAT
 			|| desc->format == RAL_FORMAT_R16G16_SNORM ) ? 4u
+		: desc && desc->format == RAL_FORMAT_R32_SFLOAT ? 4u
 		: desc && desc->format == RAL_FORMAT_R16G16B16A16_SFLOAT ? 8u : 0u;
 	if ( !LayerReady( layer ) || !desc || !outResource || !outReceipt
 			|| !desc->width || !desc->height || !desc->depth
@@ -248,7 +249,8 @@ qboolean RalWebGpu_CreateTexture( ralWebGpuResourceLayer_t *layer,
 				&& ( desc->format == RAL_FORMAT_E5B9G9R9_UFLOAT
 					|| desc->format == RAL_FORMAT_R16G16_SNORM ) )
 			|| ( ( desc->usage & RAL_WEBGPU_TEXTURE_STORAGE )
-				&& desc->format != RAL_FORMAT_R16G16B16A16_SFLOAT )
+				&& desc->format != RAL_FORMAT_R16G16B16A16_SFLOAT
+				&& desc->format != RAL_FORMAT_R32_SFLOAT )
 			|| desc->width > layer->coreReceipt.caps.maxTextureDimension2D
 			|| desc->height > layer->coreReceipt.caps.maxTextureDimension2D
 			|| desc->depth > layer->coreReceipt.caps.maxTextureArrayLayers

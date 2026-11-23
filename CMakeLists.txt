@@ -2473,6 +2473,28 @@ ENDFOREACH()
 ADD_CUSTOM_TARGET(ral_webgpu_exposure_shaders DEPENDS ${RAL_WEBGPU_EXPOSURE_HEADERS})
 ADD_DEPENDENCIES(ral_webgpu_sky_shaders ral_webgpu_exposure_shaders)
 
+# TAA (r_aa 1): the same catalog resolve / bootstrap modules as the Vulkan and Metal renderers.
+SET(RAL_WEBGPU_TAA_HEADERS)
+FOREACH(RAL_WEBGPU_TAA_SHADER IN ITEMS resolve bootstrap)
+    IF(RAL_WEBGPU_TAA_SHADER STREQUAL "resolve")
+        SET(RAL_WEBGPU_TAA_ARTIFACT temporal_resolve_comp_spv)
+    ELSE()
+        SET(RAL_WEBGPU_TAA_ARTIFACT temporal_bootstrap_aa_comp_spv)
+    ENDIF()
+    SET(RAL_WEBGPU_TAA_INPUT "${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/shaders/portable/${RAL_WEBGPU_TAA_ARTIFACT}.wgsl")
+    SET(RAL_WEBGPU_TAA_HEADER "${RAL_WEBGPU_SKY_SHADER_DIR}/ral_webgpu_taa_${RAL_WEBGPU_TAA_SHADER}.h")
+    ADD_CUSTOM_COMMAND(OUTPUT ${RAL_WEBGPU_TAA_HEADER}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${RAL_WEBGPU_SKY_SHADER_DIR}
+        COMMAND ${CMAKE_COMMAND} -DINPUT=${RAL_WEBGPU_TAA_INPUT}
+            -DOUTPUT=${RAL_WEBGPU_TAA_HEADER}
+            -DSYMBOL=ral_webgpu_taa_${RAL_WEBGPU_TAA_SHADER}_wgsl
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake
+        DEPENDS ${RAL_WEBGPU_TAA_INPUT} ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake VERBATIM)
+    LIST(APPEND RAL_WEBGPU_TAA_HEADERS ${RAL_WEBGPU_TAA_HEADER})
+ENDFOREACH()
+ADD_CUSTOM_TARGET(ral_webgpu_taa_shaders DEPENDS ${RAL_WEBGPU_TAA_HEADERS})
+ADD_DEPENDENCIES(ral_webgpu_sky_shaders ral_webgpu_taa_shaders)
+
 SET(RAL_WEBGPU_ATMOSPHERE_HEADERS)
 FOREACH(ATMOSPHERE_SHADER IN ITEMS inject light cloud integrate tile)
     IF(ATMOSPHERE_SHADER STREQUAL "tile")
@@ -2516,6 +2538,8 @@ ADD_DEPENDENCIES(ral_webgpu_sky_shaders ral_webgpu_sky_material_shaders)
 ADD_LIBRARY(ral_webgpu STATIC
     code/render/ral/backends/webgpu/ral_webgpu_sky_material.c
     code/render/ral/backends/webgpu/ral_webgpu_exposure.c
+    code/render/ral/backends/webgpu/ral_webgpu_taa.c
+    code/render/ral/core/ral_temporal.c
 	code/render/ral/backends/webgpu/ral_webgpu_atmosphere.c
 	code/render/ral/backends/webgpu/ral_webgpu_sky.c
 	code/render/ral/backends/webgpu/ral_webgpu_lighting.c
@@ -4062,6 +4086,8 @@ IF(WIRED_EMCC_EXECUTABLE)
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_lighting.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_weather.c
             ${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_exposure.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_taa.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_temporal.c
             ${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_sky_material.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_browser_bridge.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_command.c
@@ -8616,7 +8642,7 @@ IF(WIRED_EMCC_EXECUTABLE)
 			# MAIN_MODULE=2 deliberately dead-strips dynamic dependencies. Keep the
 			# bounded union imported by gamecl/gamesv side modules explicit so a
 			# browser content update cannot silently widen the host ABI.
-			"-sEXPORTED_FUNCTIONS=['___stack_pointer','___errno_location','_stderr','___assert_fail','_acos','_atan2','_atan2f','_atof','_atoi','_cos','_cosf','_exit','_fiprintf','_qsort','_rand','_sin','_sinf','_snprintf','_srand','_sscanf','_strcat','_strchr','_strcmp','_strcpy','_strlen','_strncmp','_strncpy','_strrchr','_strstr','_strtof','_strtok','_strtol','_tan','_tolower','_toupper','_vsnprintf','_WiredWeb_ClientStart','_WiredWeb_ClientFrame','_WiredWeb_ClientShutdown','_WiredWeb_ClientStatus','_WiredWeb_ClientPresentationChanged','_WiredWeb_ContentProbe','_WiredWeb_ArenaReceiptProbe','_WiredWeb_AuthoredReceiptProbe','_WiredWeb_UiTextReceiptProbe','_WiredWeb_UiMenuReceiptProbe','_WiredWeb_UiHudReceiptProbe','_WiredWeb_UiHudExtentProbe','_WiredWeb_UiEnableServerFixture','_WiredWeb_UiServerReceiptProbe','_WiredWeb_UiServerRowCenterProbe','_WiredWeb_UiServerP99MicrosProbe','_WiredWeb_UiLayerReceiptProbe','_WiredWeb_UiActivateLayerFixture','_WiredWeb_UiRootCount','_WiredWeb_UiActivateRoot','_WiredWeb_UiRootReceiptProbe','_WiredWeb_InputKey','_WiredWeb_InputBrowserKey','_WiredWeb_InputChar','_WiredWeb_InputMouse','_WiredWeb_InputPointer','_WiredWeb_InputWheel','_RalWebGpu_BrowserModuleStart','_RalWebGpu_BrowserModulePoll','_RalWebGpu_BrowserModuleResize','_RalWebGpu_BrowserModuleStop','_GetRefAPI','_WiredWebGpu_RendererPoll','_WiredWebGpu_RendererResize','_WiredWebGpu_RendererFailureStage']"
+			"-sEXPORTED_FUNCTIONS=['___stack_pointer','___errno_location','_stderr','___assert_fail','_acos','_atan2','_atan2f','_atof','_atoi','_cos','_cosf','_exit','_fiprintf','_qsort','_rand','_sin','_sinf','_snprintf','_srand','_sscanf','_strcat','_strchr','_strcmp','_strcpy','_strlen','_strncmp','_strncpy','_strrchr','_strstr','_strtof','_strtok','_strtol','_tan','_tolower','_toupper','_vsnprintf','_WiredWeb_ClientStart','_WiredWeb_CommandBuffer','_WiredWeb_CommandBufferSize','_WiredWeb_ExecuteCommandBuffer','_WiredWeb_ClientFrame','_WiredWeb_ClientShutdown','_WiredWeb_ClientStatus','_WiredWeb_ClientPresentationChanged','_WiredWeb_ContentProbe','_WiredWeb_ArenaReceiptProbe','_WiredWeb_AuthoredReceiptProbe','_WiredWeb_UiTextReceiptProbe','_WiredWeb_UiMenuReceiptProbe','_WiredWeb_UiHudReceiptProbe','_WiredWeb_UiHudExtentProbe','_WiredWeb_UiEnableServerFixture','_WiredWeb_UiServerReceiptProbe','_WiredWeb_UiServerRowCenterProbe','_WiredWeb_UiServerP99MicrosProbe','_WiredWeb_UiLayerReceiptProbe','_WiredWeb_UiActivateLayerFixture','_WiredWeb_UiRootCount','_WiredWeb_UiActivateRoot','_WiredWeb_UiRootReceiptProbe','_WiredWeb_InputKey','_WiredWeb_InputBrowserKey','_WiredWeb_InputChar','_WiredWeb_InputMouse','_WiredWeb_InputPointer','_WiredWeb_InputWheel','_RalWebGpu_BrowserModuleStart','_RalWebGpu_BrowserModulePoll','_RalWebGpu_BrowserModuleResize','_RalWebGpu_BrowserModuleStop','_GetRefAPI','_WiredWebGpu_RendererPoll','_WiredWebGpu_RendererResize','_WiredWebGpu_RendererFailureStage']"
 			"-sEXPORTED_RUNTIME_METHODS=['FS','wasmMemory']"
 			-o ${CMAKE_BINARY_DIR}/wired_web_client.mjs
 		DEPENDS ral_webgpu_sky_shaders

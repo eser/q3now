@@ -20,6 +20,7 @@ struct ralWebGpuExposure_s {
     ralWebGpuResource_t *buffers[BUFFER_COUNT], *hdr, *sampler;
     ralWebGpuResourceReceipt_t receipts[BUFFER_COUNT], hdrReceipt, samplerReceipt;
     uintptr_t groups[5]; /* histogram, reduce, tonemap groups 0/1/2 */
+    uintptr_t sourceGroups[2], source; /* histogram and tonemap group 0 for another HDR input (the TAA output) */
     uint32_t width, height;
     uint64_t worldGeneration, pendingWorld;
     int timeMs, pendingTime;
@@ -179,7 +180,15 @@ qboolean RalWebGpu_ExposureSetToneMap(ralWebGpuExposure_t *e,int mode,float expo
      * No frame is outstanding here; neither HDR storage nor AE history resets. */
     return qtrue;
 }
+static void SourceGroupsDestroy( ralWebGpuExposure_t *e ) {
+    for(unsigned i=0;i<2;++i) if(e->sourceGroups[i]) {
+        RalWebGpu_BrowserBridgeDestroyBindGroup(e->bridge,e->sourceGroups[i]);
+        e->sourceGroups[i]=0;
+    }
+    e->source=0;
+}
 static void GroupsDestroy( ralWebGpuExposure_t *e ) {
+    SourceGroupsDestroy(e);
     for(unsigned i=5;i>0;--i) if(e->groups[i-1]) {
         RalWebGpu_BrowserBridgeDestroyBindGroup(e->bridge,e->groups[i-1]);
         e->groups[i-1]=0;
@@ -298,9 +307,27 @@ qboolean RalWebGpu_ExposurePrepare( ralWebGpuExposure_t *e,
     e->pendingWorld=world; e->pendingTime=timeMs; e->pendingEnabled=s->enabled;
     e->active=qtrue; e->recorded=qfalse; *outHdr=e->hdrReceipt.resourceIdentity; return qtrue;
 }
+/* Bind groups that meter and tonemap `source` instead of the scene HDR (same size and format); kept while the source is the same. */
+static qboolean SourceGroups( ralWebGpuExposure_t *e, uintptr_t source ) {
+    if(e->source==source&&e->sourceGroups[0]&&e->sourceGroups[1]) return qtrue;
+    SourceGroupsDestroy(e);
+    ralWebGpuBrowserBindResource_t hist[]={
+        {0,RAL_WEBGPU_BROWSER_BIND_RESOURCE_TEXTURE,source,0,0},
+        {1,RAL_WEBGPU_BROWSER_BIND_RESOURCE_SAMPLER,e->samplerReceipt.resourceIdentity,0,0},
+        BufferBinding(e,2,HIST),BufferBinding(e,3,DIMS)};
+    ralWebGpuBrowserBindResource_t tone[]={hist[0],hist[1]};
+    tone[1].binding=32;
+    if(!RalWebGpu_BrowserBridgeCreateBindGroup(e->bridge,e->pipelineReceipts[0].bindGroupLayoutIdentities[0],hist,4,&e->sourceGroups[0])
+        ||!RalWebGpu_BrowserBridgeCreateBindGroup(e->bridge,e->pipelineReceipts[2].bindGroupLayoutIdentities[0],tone,2,&e->sourceGroups[1])) {
+        SourceGroupsDestroy(e); return qfalse;
+    }
+    e->source=source; return qtrue;
+}
 qboolean RalWebGpu_ExposureRecord( ralWebGpuExposure_t *e,
-        ralWebGpuCommand_t *cmd,ralWebGpuCommandReceipt_t *rec,uintptr_t output ) {
+        ralWebGpuCommand_t *cmd,ralWebGpuCommandReceipt_t *rec,uintptr_t output,uintptr_t source ) {
     if(!e||!e->active||e->recorded||!cmd||!rec||!output) return qfalse;
+    if(source&&source!=e->hdrReceipt.resourceIdentity&&!SourceGroups(e,source)) return qfalse;
+    const qboolean alt=source&&source!=e->hdrReceipt.resourceIdentity;
     ralWebGpuCommandReceipt_t next;
     ralWebGpuPassDesc_t pass={0};
     if(e->pendingEnabled) {
@@ -310,7 +337,7 @@ qboolean RalWebGpu_ExposureRecord( ralWebGpuExposure_t *e,
         for(unsigned i=0;i<2;++i) {
             ralWebGpuComputeDispatch_t d={0};
             d.pipelineIdentity=e->pipelineReceipts[i].pipelineIdentity;
-            d.bindGroupCount=1; d.bindGroupIdentities[0]=e->groups[i];
+            d.bindGroupCount=1; d.bindGroupIdentities[0]=(alt&&i==0)?e->sourceGroups[0]:e->groups[i];
             d.groupCountX=i?1:(e->width+15)/16;
             d.groupCountY=i?1:(e->height+15)/16; d.groupCountZ=1;
             d.contentDigest=e->generation;
@@ -329,6 +356,7 @@ qboolean RalWebGpu_ExposureRecord( ralWebGpuExposure_t *e,
     draw.indexCount=3; draw.instanceCount=1; draw.contentDigest=e->generation;
     draw.bindGroupCount=3;
     for(unsigned i=0;i<3;++i) draw.bindGroupIdentities[i]=e->groups[i+2];
+    if(alt) draw.bindGroupIdentities[0]=e->sourceGroups[1];
     if(!RalWebGpu_CommandRecordIndexedDraw(cmd,rec,&draw,&next)) return qfalse;
     *rec=next; e->recorded=qtrue; return qtrue;
 }
