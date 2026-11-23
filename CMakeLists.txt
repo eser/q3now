@@ -2493,6 +2493,23 @@ FOREACH(RAL_WEBGPU_TAA_SHADER IN ITEMS resolve bootstrap)
     LIST(APPEND RAL_WEBGPU_TAA_HEADERS ${RAL_WEBGPU_TAA_HEADER})
 ENDFOREACH()
 ADD_CUSTOM_TARGET(ral_webgpu_taa_shaders DEPENDS ${RAL_WEBGPU_TAA_HEADERS})
+
+# SMAA (r_aa 2): the catalog edge / blend / resolve modules shared with the Vulkan and Metal renderers.
+SET(RAL_WEBGPU_SMAA_HEADERS)
+FOREACH(RAL_WEBGPU_SMAA_SHADER IN ITEMS edge_vert edge_frag blend_vert blend_frag resolve_vert resolve_frag)
+    SET(RAL_WEBGPU_SMAA_INPUT "${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/vulkan/renderer/shaders/portable/smaa_${RAL_WEBGPU_SMAA_SHADER}_spv.wgsl")
+    SET(RAL_WEBGPU_SMAA_HEADER "${RAL_WEBGPU_SKY_SHADER_DIR}/ral_webgpu_smaa_${RAL_WEBGPU_SMAA_SHADER}.h")
+    ADD_CUSTOM_COMMAND(OUTPUT ${RAL_WEBGPU_SMAA_HEADER}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${RAL_WEBGPU_SKY_SHADER_DIR}
+        COMMAND ${CMAKE_COMMAND} -DINPUT=${RAL_WEBGPU_SMAA_INPUT}
+            -DOUTPUT=${RAL_WEBGPU_SMAA_HEADER}
+            -DSYMBOL=ral_webgpu_smaa_${RAL_WEBGPU_SMAA_SHADER}_wgsl
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake
+        DEPENDS ${RAL_WEBGPU_SMAA_INPUT} ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake VERBATIM)
+    LIST(APPEND RAL_WEBGPU_SMAA_HEADERS ${RAL_WEBGPU_SMAA_HEADER})
+ENDFOREACH()
+ADD_CUSTOM_TARGET(ral_webgpu_smaa_shaders DEPENDS ${RAL_WEBGPU_SMAA_HEADERS})
+ADD_DEPENDENCIES(ral_webgpu_sky_shaders ral_webgpu_smaa_shaders)
 ADD_DEPENDENCIES(ral_webgpu_sky_shaders ral_webgpu_taa_shaders)
 
 SET(RAL_WEBGPU_ATMOSPHERE_HEADERS)
@@ -2539,6 +2556,7 @@ ADD_LIBRARY(ral_webgpu STATIC
     code/render/ral/backends/webgpu/ral_webgpu_sky_material.c
     code/render/ral/backends/webgpu/ral_webgpu_exposure.c
     code/render/ral/backends/webgpu/ral_webgpu_taa.c
+    code/render/ral/backends/webgpu/ral_webgpu_smaa.c
     code/render/ral/core/ral_temporal.c
 	code/render/ral/backends/webgpu/ral_webgpu_atmosphere.c
 	code/render/ral/backends/webgpu/ral_webgpu_sky.c
@@ -4087,6 +4105,7 @@ IF(WIRED_EMCC_EXECUTABLE)
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_weather.c
             ${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_exposure.c
             ${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_taa.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_smaa.c
             ${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/core/ral_temporal.c
             ${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_sky_material.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_browser_bridge.c

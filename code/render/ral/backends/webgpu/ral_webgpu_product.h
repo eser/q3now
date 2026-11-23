@@ -148,7 +148,11 @@ qboolean RalWebGpu_ProductGetEffectParameterBuffer(
 /* TAA (r_aa 1): created once with the product's owners; SetTaa follows the cvar each frame. */
 qboolean RalWebGpu_ProductEnableTaa( ralWebGpuProduct_t *product,
 	ralWebGpuRuntimeReceipt_t *rr, ralWebGpuBrowserBridge_t *bridge, uint64_t generation );
-qboolean RalWebGpu_ProductSetTaa( ralWebGpuProduct_t *product, qboolean enabled );
+qboolean RalWebGpu_ProductEnableSmaa( ralWebGpuProduct_t *product,
+	ralWebGpuRuntimeReceipt_t *rr, ralWebGpuBrowserBridge_t *bridge, uint64_t generation );
+/* r_aa: 0 off, 1 TAA, 2 SMAA; smaaQuality is r_smaa (0 selects 3). Call between frames. */
+qboolean RalWebGpu_ProductSetAntiAliasing( ralWebGpuProduct_t *product, ralWebGpuRuntimeReceipt_t *rr, int mode,
+	int smaaQuality );
 void RalWebGpu_ProductTaaFrameCounts( const ralWebGpuProduct_t *product, uint32_t *resolved, uint32_t *bootstrap );
 qboolean RalWebGpu_ProductEnableExposure( ralWebGpuProduct_t *product,
     ralWebGpuRuntimeReceipt_t *rr, ralWebGpuBrowserBridge_t *bridge, uint64_t generation );

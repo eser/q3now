@@ -6,6 +6,7 @@
 #include "ral_sky_radiance.h"
 #include "ral_webgpu_sky_material.h"
 #include "ral_webgpu_taa.h"
+#include "ral_webgpu_smaa.h"
 #include "ral_temporal.h"
 
 #include <limits.h>
@@ -63,6 +64,8 @@ struct ralWebGpuProduct_s {
     qboolean taaPendingResolved;
     ralWebGpuTaaCamera_t taaPreviousCamera, taaPendingCamera;
     ralWebGpuPipelineReceipt_t taaMaskPipeline;   /* entity coverage into the TAA effect mask */
+    ralWebGpuSmaa_t *smaa;                       /* SMAA (r_aa 2), exclusive with TAA */
+    qboolean smaaEnabled;
     qboolean taaMaskPipelineReady;
     ralExposureSettings_t exposureSettings;
     ralDisplayVisibilityPlan_t exposureVisibility;
@@ -1921,10 +1924,18 @@ qboolean RalWebGpu_ProductEnableTaa( ralWebGpuProduct_t *product,
     Ral_TemporalInit( &product->taaState );
     return RalWebGpu_TaaCreate(product->runtime,rr,bridge,generation,&product->taa);
 }
-qboolean RalWebGpu_ProductSetTaa( ralWebGpuProduct_t *product, qboolean enabled ) {
-    if (!product || !product->taa) return qfalse;
-    product->taaEnabled = enabled ? qtrue : qfalse;
-    return qtrue;
+qboolean RalWebGpu_ProductEnableSmaa( ralWebGpuProduct_t *product,
+        ralWebGpuRuntimeReceipt_t *rr, ralWebGpuBrowserBridge_t *bridge, uint64_t generation ) {
+    if (!product || product->inFlight || product->smaa) return qfalse;
+    return RalWebGpu_SmaaCreate(product->runtime,rr,bridge,generation,&product->smaa);
+}
+/* r_aa: 0 off, 1 TAA, 2 SMAA (exclusive by construction); `smaaQuality` is r_smaa (0 selects preset 3). Between frames. */
+qboolean RalWebGpu_ProductSetAntiAliasing( ralWebGpuProduct_t *product, ralWebGpuRuntimeReceipt_t *rr, int mode,
+        int smaaQuality ) {
+    if (!product || !product->taa || !product->smaa || product->inFlight) return qfalse;
+    product->taaEnabled = mode == 1 ? qtrue : qfalse;
+    product->smaaEnabled = mode == 2 ? qtrue : qfalse;
+    return !product->smaaEnabled || RalWebGpu_SmaaSetQuality(product->smaa,rr,smaaQuality);
 }
 void RalWebGpu_ProductTaaFrameCounts( const ralWebGpuProduct_t *product, uint32_t *resolved, uint32_t *bootstrap ) {
     *resolved = product ? product->taaResolvedFrames : 0u;
@@ -2069,6 +2080,8 @@ void RalWebGpu_ProductDestroy( ralWebGpuProduct_t *product,
         RalWebGpu_ExposureDestroy(product->exposure,&authority);
         (void)RalWebGpu_RuntimeGetReceipt(product->runtime,&authority);
         RalWebGpu_TaaDestroy(product->taa,&authority);
+        (void)RalWebGpu_RuntimeGetReceipt(product->runtime,&authority);
+        RalWebGpu_SmaaDestroy(product->smaa,&authority);
         // Exposure retires pipelines, changing the exact runtime receipt.
         // Refresh before retiring the next resource owner.
         (void)RalWebGpu_RuntimeGetReceipt(product->runtime,&authority);
@@ -2423,6 +2436,12 @@ static qboolean RecordToneMap( ralWebGpuProduct_t *product, const ralWebGpuRunti
 		candidate->aaDispatchCount = dispatches;
 		product->taaPending = qtrue; product->taaPendingFrame = product->taaState.pendingPlan.frameId;
 		product->taaPendingCamera = taaFrame->current; product->taaPendingResolved = taaFrame->historyValid ? qtrue : qfalse;
+	}
+	else if ( product->smaa && product->smaaEnabled ) {
+		if ( !RalWebGpu_SmaaRecord( product->smaa, runtimeReceipt, command, recording, sceneTarget, product->viewportWidth,
+				product->viewportHeight, &source ) ) {
+			s_productFailureStage = 200u + RalWebGpu_SmaaLastFailure(); return qfalse;
+		}
 	}
 	if ( !RalWebGpu_ExposureRecord( product->exposure, command, recording, target, source ) ) {
 		s_productFailureStage = source ? 99u : 98u; return qfalse;
