@@ -2984,7 +2984,7 @@ PYEOF
     v="$(awk -v ne="$1" -v no="$2" -v d0="$3" -v d1="$4" -v nz="$5" 'BEGIN{
         if (ne < 200) print "FAIL(no explosion footprint: " ne " px; the shot did not reach the wall or the frames are off)";
         else if (no < 100) print "OK(footprint " ne " px but nothing left a position between the frames: " no " px; raise RG_FRAMES)";
-        else if (d1 > d0 + 0.25) print "FAIL(the effect mask made the old region deviate MORE: " d0 " -> " d1 ")";
+        else if (d1 > d0 + (nz > 0.25 ? nz : 0.25)) print "FAIL(the effect mask made the old region deviate MORE: " d0 " -> " d1 ", beyond the repeat noise " nz ")";
         else if (d0 > d1 + 0.25 && nz < d0) print "OK(mask removes the trail: " d0 " -> " d1 ", noise " nz ")";
         else print "OK(no measurable mask effect: mask0 " d0 " mask1 " d1 " noise " nz ")" }')"
     [ "${v:0:2}" = "OK" ] || FAIL=1
