@@ -2224,8 +2224,12 @@ ralResult_t Ral_ResetBindGroupArenaExact(
 		arena->backend->device, arena->pool, 0u );
 	if ( result == VK_ERROR_DEVICE_LOST ) return ralErrorDeviceLost;
 	if ( result != VK_SUCCESS ) return ralErrorUnknown;
-	return Ral_BindGroupArenaLifecyclePublishReset( &arena->lifecycle,
-		current, outNext );
+	{
+		const ralResult_t published = Ral_BindGroupArenaLifecyclePublishReset( &arena->lifecycle,
+			current, outNext );
+		if ( published == ralSuccess ) arena->groupsAllocated = 0u;
+		return published;
+	}
 }
 
 void Ral_DestroyBindGroupArena( ralBindGroupArena_t *arena ) {
@@ -2238,6 +2242,10 @@ void Ral_DestroyBindGroupArena( ralBindGroupArena_t *arena ) {
 
 void *Ral_GetBindGroupArenaHandle( const ralBindGroupArena_t *arena ) {
 	return arena ? (void *)arena->pool : NULL;
+}
+
+uint32_t Ral_GetBindGroupArenaGroupsAllocated( const ralBindGroupArena_t *arena ) {
+	return arena ? arena->groupsAllocated : 0u;
 }
 
 ralBindGroupLayout_t *Ral_CreateBindGroupLayout( ralBackend_t *b, const ralBindGroupLayoutCreateInfo_t *ci ) {
@@ -2511,6 +2519,7 @@ ralBindGroup_t *Ral_CreateBindGroup( ralBackend_t *b, const ralBindGroupCreateIn
 		RAL_VK_LOG( SEV_WARN, "Ral_CreateBindGroup: vkAllocateDescriptorSets failed (VkResult %d -- pool may be exhausted)\n", (int)r );
 		free( bg ); return NULL;
 	}
+	if ( ci->arena ) ci->arena->groupsAllocated++;
 
 	for ( v = 0; v < ci->numValues && nw < RAL_VK_MAX_BG_WRITES; v++ ) {
 		const ralBindingValue_t *val = &ci->values[v];

@@ -164,6 +164,9 @@ ralBindGroupLayout_t *Ral_AdoptBindGroupLayout( ralBackend_t *b,
                                                 const char *debugName );
 void *Ral_GetBindGroupLayoutHandle( const ralBindGroupLayout_t *layout );
 void *Ral_GetBindGroupArenaHandle( const ralBindGroupArena_t *arena );
+// Groups created from the arena since its creation or last reset, and the pool's maxSets. An arena group is never freed on its own
+// (Ral_DestroyBindGroup drops only the wrapper), so a renderer that re-publishes cohorts without a reset must watch this.
+uint32_t Ral_GetBindGroupArenaGroupsAllocated( const ralBindGroupArena_t *arena );
 
 ralPipelineLayout_t *Ral_AdoptPipelineLayout( ralBackend_t *b,
                                               void *externalLayout,

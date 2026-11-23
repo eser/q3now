@@ -387,6 +387,7 @@ struct ralBindGroupArena_s {
 	ralBackend_t *backend;
 	VkDescriptorPool pool;
 	ralBindGroupArenaLifecycle_t lifecycle;
+	uint32_t groupsAllocated;   // groups created from this arena since its creation or last reset (arena sets are only reclaimed by a reset)
 };
 
 struct ralBindGroupLayout_s {

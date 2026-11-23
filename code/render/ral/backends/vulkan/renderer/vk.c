@@ -4823,6 +4823,12 @@ fail:
 
 void vk_update_attachment_descriptors( void ) {
 
+	// Diagnostic: every attachment rebuild (resize, r_aa / r_fbo switch) republishes cohorts from the descriptor arena, whose sets
+	// are only reclaimed by a reset (see the arena pressure check below).
+	if ( vk.ral_descriptor_arena )
+		R_LOG( rch_ral, SEV_INFO, "descriptor arena: %u groups allocated since the last reset (maxGroups %u)\n",
+			Ral_GetBindGroupArenaGroupsAllocated( vk.ral_descriptor_arena ), vk.ral_descriptor_arena_receipt.maxGroups );
+
 	R_LOG( rch_fbo, SEV_TRACE, "vk_update_attachment_descriptors: color_texture=%p fboActive=%d\n",
 		(void*)vk.ral_color_image, vk.fboActive );
 
