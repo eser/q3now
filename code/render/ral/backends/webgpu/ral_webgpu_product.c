@@ -62,6 +62,8 @@ struct ralWebGpuProduct_s {
     uint32_t taaTopologyEpoch, taaResolvedFrames, taaBootstrapFrames;
     qboolean taaPendingResolved;
     ralWebGpuTaaCamera_t taaPreviousCamera, taaPendingCamera;
+    ralWebGpuPipelineReceipt_t taaMaskPipeline;   /* entity coverage into the TAA effect mask */
+    qboolean taaMaskPipelineReady;
     ralExposureSettings_t exposureSettings;
     ralDisplayVisibilityPlan_t exposureVisibility;
 	ralWebGpuPipelineReceipt_t worldPipeline;
@@ -1566,6 +1568,16 @@ qboolean RalWebGpu_ProductSetEntityPipeline( ralWebGpuProduct_t *product,
 	product->entityPipelineReady = qtrue; return qtrue;
 }
 
+qboolean RalWebGpu_ProductSetTaaMaskPipeline( ralWebGpuProduct_t *product,
+		const ralWebGpuRuntimeReceipt_t *runtimeReceipt,
+		const ralWebGpuPipelineReceipt_t *maskPipeline ) {
+	if ( !product || !runtimeReceipt || !maskPipeline || product->inFlight
+			|| maskPipeline->kind != RAL_SHADER_PIPELINE_GRAPHICS
+			|| !RalWebGpu_RuntimeOwnsPipeline( product->runtime, runtimeReceipt, maskPipeline ) ) return qfalse;
+	product->taaMaskPipeline = *maskPipeline;
+	product->taaMaskPipelineReady = qtrue; return qtrue;
+}
+
 qboolean RalWebGpu_ProductGetEntityLightingBuffer(
 		const ralWebGpuProduct_t *product,
 		const ralWebGpuRuntimeReceipt_t *runtimeReceipt,
@@ -2383,10 +2395,29 @@ static qboolean RecordWorldBatch( ralWebGpuProduct_t *product,
  * scene HDR. The plan and the camera wait for the submission to complete (RalWebGpu_ProductPoll) before they become history. */
 static qboolean RecordToneMap( ralWebGpuProduct_t *product, const ralWebGpuRuntimeReceipt_t *runtimeReceipt,
 		ralWebGpuCommand_t *command, ralWebGpuCommandReceipt_t *recording, uintptr_t target, uintptr_t sceneTarget,
-		const ralWebGpuTaaFrame_t *taaFrame, ralWebGpuProductFrameReceipt_t *candidate ) {
+		const ralWebGpuTaaFrame_t *taaFrame, const ralWebGpuIndexedDraw_t *maskDraws, uint32_t maskDrawCount,
+		ralWebGpuProductFrameReceipt_t *candidate ) {
 	uintptr_t source = 0;
 	if ( taaFrame ) {
 		uint32_t dispatches = 0u;
+		/* Effect mask: the entity draws of this frame again, with the mask pipeline, against the finished scene depth. Entities have no
+		 * tracked motion and the first-person weapon moves with the camera, so they take the resolve's spatial fallback (the Vulkan
+		 * renderer invalidates the same draws). */
+		const uintptr_t mask = RalWebGpu_TaaEffectMask( product->taa, runtimeReceipt, sceneTarget, taaFrame->width, taaFrame->height );
+		ralWebGpuPassDesc_t pass;
+		ralWebGpuCommandReceipt_t next;
+		if ( !mask || !product->taaMaskPipelineReady ) { s_productFailureStage = 97u; return qfalse; }
+		memset( &pass, 0, sizeof( pass ) );
+		pass.kind = RAL_WEBGPU_PASS_RENDER; pass.targetIdentity = mask; pass.colorLoadOp = RAL_WEBGPU_LOAD_CLEAR;
+		pass.depthEnabled = qtrue; pass.depthLoadOp = RAL_WEBGPU_LOAD_PRESERVE; pass.depthStore = qtrue; pass.clearDepth = 1.0f;
+		if ( !RalWebGpu_CommandNextPass( command, recording, &pass, &next ) ) { s_productFailureStage = 96u; return qfalse; }
+		*recording = next;
+		for ( uint32_t i = 0u; i < maskDrawCount; ++i ) {
+			ralWebGpuIndexedDraw_t draw = maskDraws[i];
+			draw.pipelineIdentity = product->taaMaskPipeline.pipelineIdentity;
+			if ( !RalWebGpu_CommandRecordIndexedDraw( command, recording, &draw, &next ) ) { s_productFailureStage = 95u; return qfalse; }
+			*recording = next;
+		}
 		if ( !RalWebGpu_TaaRecord( product->taa, runtimeReceipt, command, recording, sceneTarget, taaFrame, &source,
 				&dispatches ) ) { s_productFailureStage = 100u + RalWebGpu_TaaLastFailure(); return qfalse; }
 		candidate->aaDispatchCount = dispatches;
@@ -2462,6 +2493,8 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
     uintptr_t sceneTarget=targetIdentity;
 	ralTemporalFramePlan_t taaPlan;
 	ralWebGpuTaaFrame_t taaFrame;
+	ralWebGpuIndexedDraw_t *taaMaskDraws = NULL;
+	uint32_t taaMaskDrawCount = 0u;
 	float taaJitterNdc[2] = { 0.0f, 0.0f }, taaProjection[4];
 	qboolean taaActive = qfalse;
 	memset( &taaPlan, 0, sizeof( taaPlan ) ); memset( &taaFrame, 0, sizeof( taaFrame ) );
@@ -3019,6 +3052,10 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 		}
 	}
 	s_productFailureStage = 9u;
+	if ( taaActive && entityDrawCount ) {
+		taaMaskDraws = calloc( entityDrawCount, sizeof( *taaMaskDraws ) );
+		if ( !taaMaskDraws ) goto fail;
+	}
 	for ( uint32_t i = 0u; i < entityDrawCount; ++i ) {
 		materialEntry_t *material = NULL;
 		ralWebGpuIndexedDraw_t draw;
@@ -3045,6 +3082,7 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 		if ( !RalWebGpu_CommandRecordIndexedDraw( command, &recording, &draw,
 				&updated ) ) goto fail;
 		recording = updated; candidate.entityDrawCount++;
+		if ( taaMaskDraws ) taaMaskDraws[taaMaskDrawCount++] = draw;
 		candidate.atmosphereBoundDrawCount++;
 	}
 	if ( !candidate.weather.zeroWork ) {
@@ -3079,7 +3117,7 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 		if ( submission->sceneRendered && miscDraws[i].kind == RAL_WEBGPU_DRAW_UI && !candidate.uiDrawCount ) {
             if (product->exposure) {
                 if (!RecordToneMap(product,runtimeReceipt,command,&recording,targetIdentity,sceneTarget,
-                        taaActive?&taaFrame:NULL,&candidate)) goto fail;
+                        taaActive?&taaFrame:NULL,taaMaskDraws,taaMaskDrawCount,&candidate)) goto fail;
                 candidate.exposureDispatchCount=frameExposure.enabled?2u:0u;
             }
 			/* BuildMiscGeometry appends UI after every scene effect. Keep UI in
@@ -3156,7 +3194,7 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 	s_productFailureStage = 11u;
     if (submission->sceneRendered && product->exposure && !candidate.toneMapDrawCount) {
         if (!RecordToneMap(product,runtimeReceipt,command,&recording,targetIdentity,sceneTarget,
-                taaActive?&taaFrame:NULL,&candidate)) goto fail;
+                taaActive?&taaFrame:NULL,taaMaskDraws,taaMaskDrawCount,&candidate)) goto fail;
         candidate.exposureDispatchCount=frameExposure.enabled?2u:0u;
     }
 	if ( !RalWebGpu_CommandEnd( command, &recording, &executable ) ) {
@@ -3232,7 +3270,7 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 	candidate.ready = qtrue;
 	s_productFailureStage = 13u;
 	if ( !ReceiptValid( &candidate ) ) goto fail_committed;
-	free( entityVertices ); free( entityIndices ); free( entityDraws );
+	free( entityVertices ); free( entityIndices ); free( entityDraws ); free( taaMaskDraws );
 	free( entityLightingData );
 	free( effectParameterData );
 	free( worldMaterialData );
@@ -3247,7 +3285,7 @@ fail:
 	if ( commandActive ) RalWebGpu_CommandCancel( command, &recording );
     RalWebGpu_ExposureComplete(product->exposure,qfalse);
 	TaaFinish( product, qfalse );
-	free( entityVertices ); free( entityIndices ); free( entityDraws );
+	free( entityVertices ); free( entityIndices ); free( entityDraws ); free( taaMaskDraws );
 	free( entityLightingData );
 	free( effectParameterData );
 	free( worldMaterialData );
@@ -3273,7 +3311,7 @@ fail:
 		miscVertexResource, &miscVertexReceipt );
 	return qfalse;
 fail_committed:
-	free( entityVertices ); free( entityIndices ); free( entityDraws );
+	free( entityVertices ); free( entityIndices ); free( entityDraws ); free( taaMaskDraws );
 	free( entityLightingData );
 	free( effectParameterData );
 	free( worldMaterialData );

@@ -34,5 +34,9 @@ void RalWebGpu_TaaDestroy( ralWebGpuTaa_t *taa, const ralWebGpuRuntimeReceipt_t 
 qboolean RalWebGpu_TaaRecord( ralWebGpuTaa_t *taa, const ralWebGpuRuntimeReceipt_t *rr,
 	ralWebGpuCommand_t *command, ralWebGpuCommandReceipt_t *recording, uintptr_t sceneColor,
 	const ralWebGpuTaaFrame_t *frame, uintptr_t *outResolved, uint32_t *outDispatchCount );
+/* The R8 effect-mask render target of the cohort (allocated with the other targets): the caller clears it and draws 1 where a
+ * pixel must not inherit history by camera reprojection (entities, first-person weapon), before RalWebGpu_TaaRecord. */
+uintptr_t RalWebGpu_TaaEffectMask( ralWebGpuTaa_t *taa, const ralWebGpuRuntimeReceipt_t *rr, uintptr_t sceneColor,
+	uint32_t width, uint32_t height );
 uint32_t RalWebGpu_TaaLastFailure( void );
 #endif

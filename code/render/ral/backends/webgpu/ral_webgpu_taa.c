@@ -14,7 +14,7 @@
 
 enum { TAA_MOTION, TAA_BOOTSTRAP, TAA_RESOLVE, TAA_PIPELINE_COUNT };
 enum { TEX_VELOCITY, TEX_VALIDITY, TEX_REVERSE_DEPTH, TEX_OUTPUT, TEX_HISTORY_COLOR0, TEX_HISTORY_COLOR1,
-	TEX_HISTORY_DEPTH0, TEX_HISTORY_DEPTH1, TEX_COUNT };
+	TEX_HISTORY_DEPTH0, TEX_HISTORY_DEPTH1, TEX_EFFECT_MASK, TEX_COUNT };
 enum { BUF_MOTION, BUF_BOOTSTRAP, BUF_RESOLVE, BUF_COUNT };
 
 typedef struct { float co[4], cf[4], cl[4], cu[4], cp[4], po[4], pf[4], pl[4], pu[4], pp[4], jitter[4]; uint32_t extent[4]; } taaMotionParams_t;
@@ -37,6 +37,7 @@ static const char s_motionWgsl[] =
 	"@group(0) @binding(2) var velocity:texture_storage_2d<rgba16float,write>;"
 	"@group(0) @binding(3) var validity:texture_storage_2d<rgba16float,write>;"
 	"@group(0) @binding(4) var reverseDepth:texture_storage_2d<r32float,write>;"
+	"@group(0) @binding(5) var effectMask:texture_2d<f32>;"
 	"@compute @workgroup_size(8,8,1) fn main(@builtin(global_invocation_id) gid:vec3<u32>){"
 	"if(gid.x>=p.extent.x||gid.y>=p.extent.y){return;}"
 	"let d=textureLoad(sceneDepth,vec2<i32>(gid.xy),0);"
@@ -50,13 +51,14 @@ static const char s_motionWgsl[] =
 	"let world=p.co.xyz+p.cf.xyz*fwd-p.cl.xyz*side+p.cu.xyz*up;"
 	"let delta=world-p.po.xyz;"
 	"let pfwd=dot(delta,p.pf.xyz);"
+	"let covered=textureLoad(effectMask,vec2<i32>(gid.xy),0).r>0.5;"
 	"let ok=pfwd>1.0e-3;"
 	"var prev=ndc;"
 	"if(ok){prev=vec2<f32>(-dot(delta,p.pl.xyz)/p.pp.x,dot(delta,p.pu.xyz)/p.pp.y)/pfwd;}"
 	"let uvC=vec2<f32>(ndc.x*0.5+0.5,0.5-ndc.y*0.5);"
 	"let uvP=vec2<f32>(prev.x*0.5+0.5,0.5-prev.y*0.5);"
 	"textureStore(velocity,vec2<i32>(gid.xy),vec4<f32>(uvC-uvP,0.0,0.0));"
-	"textureStore(validity,vec2<i32>(gid.xy),vec4<f32>(select(0.0,1.0,ok),0.0,0.0,0.0));"
+	"textureStore(validity,vec2<i32>(gid.xy),vec4<f32>(select(0.0,1.0,ok&&!covered),0.0,0.0,0.0));"
 	"textureStore(reverseDepth,vec2<i32>(gid.xy),vec4<f32>(rd,0.0,0.0,0.0));}";
 
 static uint32_t s_taaFailure;   /* last failing step of RalWebGpu_TaaRecord (product failure stage 100 + step) */
@@ -142,7 +144,7 @@ static qboolean Pipelines( ralWebGpuTaa_t *t, ralWebGpuRuntimeReceipt_t *rr ) {
 	/* Binding tables follow the @group/@binding lines of the WGSL (the catalog modules: portable/temporal_*_comp_spv.wgsl). */
 	const taaBinding_t motion[] = { UNIFORM( 0u, sizeof( taaMotionParams_t ) ), SAMPLED( 1u, RAL_SHADER_SAMPLE_DEPTH ),
 		STORAGE( 2u, RAL_FORMAT_R16G16B16A16_SFLOAT ), STORAGE( 3u, RAL_FORMAT_R16G16B16A16_SFLOAT ),
-		STORAGE( 4u, RAL_FORMAT_R32_SFLOAT ) };
+		STORAGE( 4u, RAL_FORMAT_R32_SFLOAT ), SAMPLED( 5u, RAL_SHADER_SAMPLE_FLOAT ) };
 	const taaBinding_t bootstrap[] = { SAMPLED( 0u, RAL_SHADER_SAMPLE_FLOAT ), SAMPLED( 1u, RAL_SHADER_SAMPLE_UNFILTERABLE_FLOAT ),
 		SAMPLER( 2u ), STORAGE( 3u, RAL_FORMAT_R16G16B16A16_SFLOAT ), STORAGE( 4u, RAL_FORMAT_R16G16B16A16_SFLOAT ),
 		STORAGE( 5u, RAL_FORMAT_R32_SFLOAT ), UNIFORM( 6u, sizeof( taaBootstrapParams_t ) ) };
@@ -151,7 +153,7 @@ static qboolean Pipelines( ralWebGpuTaa_t *t, ralWebGpuRuntimeReceipt_t *rr ) {
 		SAMPLED( 4u, RAL_SHADER_SAMPLE_FLOAT ), SAMPLED( 5u, RAL_SHADER_SAMPLE_FLOAT ), SAMPLER( 6u ),
 		STORAGE( 7u, RAL_FORMAT_R16G16B16A16_SFLOAT ), STORAGE( 8u, RAL_FORMAT_R16G16B16A16_SFLOAT ),
 		STORAGE( 9u, RAL_FORMAT_R32_SFLOAT ), UNIFORM( 10u, sizeof( taaResolveParams_t ) ) };
-	return Pipeline( t, rr, TAA_MOTION, s_motionWgsl, (uint32_t)sizeof( s_motionWgsl ) - 1u, motion, 5u )
+	return Pipeline( t, rr, TAA_MOTION, s_motionWgsl, (uint32_t)sizeof( s_motionWgsl ) - 1u, motion, 6u )
 		&& Pipeline( t, rr, TAA_BOOTSTRAP, (const char *)ral_webgpu_taa_bootstrap_wgsl,
 			(uint32_t)sizeof( ral_webgpu_taa_bootstrap_wgsl ), bootstrap, 7u )
 		&& Pipeline( t, rr, TAA_RESOLVE, (const char *)ral_webgpu_taa_resolve_wgsl,
@@ -191,12 +193,13 @@ static qboolean Prepare( ralWebGpuTaa_t *t, ralWebGpuResourceLayer_t *r, uintptr
 	DestroyGroups( t ); DestroyTextures( t, r );
 	for ( int i = 0; i < TEX_COUNT; ++i ) {
 		const qboolean depth = i == TEX_REVERSE_DEPTH || i == TEX_HISTORY_DEPTH0 || i == TEX_HISTORY_DEPTH1;
+		const qboolean mask = i == TEX_EFFECT_MASK;
 		ralWebGpuTextureDesc_t d;
 		memset( &d, 0, sizeof( d ) );
 		d.width = width; d.height = height; d.depth = d.mipLevelCount = 1u;
-		d.format = depth ? RAL_FORMAT_R32_SFLOAT : RAL_FORMAT_R16G16B16A16_SFLOAT;
-		d.bytesPerTexel = depth ? 4u : 8u;
-		d.usage = RAL_WEBGPU_TEXTURE_SAMPLED | RAL_WEBGPU_TEXTURE_STORAGE;
+		d.format = mask ? RAL_FORMAT_R8_UNORM : ( depth ? RAL_FORMAT_R32_SFLOAT : RAL_FORMAT_R16G16B16A16_SFLOAT );
+		d.bytesPerTexel = mask ? 1u : ( depth ? 4u : 8u );
+		d.usage = RAL_WEBGPU_TEXTURE_SAMPLED | ( mask ? RAL_WEBGPU_TEXTURE_RENDER_ATTACHMENT : RAL_WEBGPU_TEXTURE_STORAGE );
 		if ( !RalWebGpu_CreateTexture( r, &d, &t->textures[i], &t->textureReceipts[i] ) ) { s_taaFailure = 41u; return qfalse; }
 	}
 	const ralWebGpuBrowserBindResource_t scene = { 0u, RAL_WEBGPU_BROWSER_BIND_RESOURCE_TEXTURE, sceneColor, 0u, 0u };
@@ -268,6 +271,13 @@ static void Camera( float origin[4], float fwd[4], float left[4], float up[4], f
 	proj[0] = c->tanHalfX; proj[1] = c->tanHalfY; proj[2] = c->zNear; proj[3] = c->zFar;
 }
 
+uintptr_t RalWebGpu_TaaEffectMask( ralWebGpuTaa_t *t, const ralWebGpuRuntimeReceipt_t *rr, uintptr_t sceneColor,
+		uint32_t width, uint32_t height ) {
+	ralWebGpuResourceLayer_t *r = t && rr ? RalWebGpu_RuntimeResources( t->runtime, rr ) : NULL;
+	if ( !r || !sceneColor || !width || !height || !Prepare( t, r, sceneColor, width, height ) ) return 0;
+	return t->textureReceipts[TEX_EFFECT_MASK].resourceIdentity;
+}
+
 qboolean RalWebGpu_TaaRecord( ralWebGpuTaa_t *t, const ralWebGpuRuntimeReceipt_t *rr, ralWebGpuCommand_t *command,
 		ralWebGpuCommandReceipt_t *recording, uintptr_t sceneColor, const ralWebGpuTaaFrame_t *frame,
 		uintptr_t *outResolved, uint32_t *outDispatchCount ) {
@@ -310,11 +320,11 @@ qboolean RalWebGpu_TaaRecord( ralWebGpuTaa_t *t, const ralWebGpuRuntimeReceipt_t
 	 * each frame (the previous frame has completed: one frame is outstanding at a time). */
 	if ( t->motionGroup ) { RalWebGpu_BrowserBridgeDestroyBindGroup( t->bridge, t->motionGroup ); t->motionGroup = 0; }
 	{
-		const ralWebGpuBrowserBindResource_t m[5] = { Buf( t, 0u, BUF_MOTION ),
+		const ralWebGpuBrowserBindResource_t m[6] = { Buf( t, 0u, BUF_MOTION ),
 			{ 1u, RAL_WEBGPU_BROWSER_BIND_RESOURCE_SCENE_DEPTH, (uintptr_t)1u, 0u, 0u },
-			Tex( t, 2u, TEX_VELOCITY ), Tex( t, 3u, TEX_VALIDITY ), Tex( t, 4u, TEX_REVERSE_DEPTH ) };
+			Tex( t, 2u, TEX_VELOCITY ), Tex( t, 3u, TEX_VALIDITY ), Tex( t, 4u, TEX_REVERSE_DEPTH ), Tex( t, 5u, TEX_EFFECT_MASK ) };
 		if ( !RalWebGpu_BrowserBridgeCreateBindGroup( t->bridge, t->pipelineReceipts[TAA_MOTION].bindGroupLayoutIdentities[0],
-				m, 5u, &t->motionGroup ) ) { s_taaFailure = 6u; return qfalse; }
+				m, 6u, &t->motionGroup ) ) { s_taaFailure = 6u; return qfalse; }
 	}
 	memset( &pass, 0, sizeof( pass ) ); pass.kind = RAL_WEBGPU_PASS_COMPUTE;
 	if ( !RalWebGpu_CommandNextPass( command, recording, &pass, &next ) ) { s_taaFailure = 7u; return qfalse; }

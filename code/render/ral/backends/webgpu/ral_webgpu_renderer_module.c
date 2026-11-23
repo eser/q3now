@@ -33,6 +33,7 @@ enum {
 	WEBGPU_PIPELINE_EFFECT_ADDITIVE_NO_DEPTH,
 	WEBGPU_PIPELINE_UI,
 	WEBGPU_PIPELINE_MSDF,
+	WEBGPU_PIPELINE_TAA_MASK,   /* entity geometry into the TAA effect mask (R8, depth test only) */
 	WEBGPU_PIPELINE_COUNT
 };
 
@@ -271,6 +272,18 @@ static const char s_entityVertexWgsl[] =
 	" var out: VertexOut; out.position = vec4<f32>(p, clipW);"
 	" out.color = vec4<f32>(wired_srgb_to_linear(color.rgb) * irradiance, color.a);"
 	" out.fogCoord = fogCoord; out.uv = uv; return out; }\n";
+/* TAA effect mask: entity coverage. Same vertex stage and bind groups as the entity pipeline (identical positions). The fragment
+ * declares the entity fragment's bindings (the manifest requires every fragment-visible binding to be declared; the layouts must stay
+ * identical so the entity bind groups bind here) but reads none of them. */
+static const char s_taaMaskFragmentWgsl[] =
+	"struct Atmosphere { eyeDensity: vec4<f32>, colorVisibility: vec4<f32>,"
+	" heightCloud: vec4<f32>, froxelGrid: vec4<u32>, displayVisibility: vec4<f32> };"
+	"struct Froxels { values: array<vec4<f32>> };"
+	"@group(0) @binding(0) var<uniform> atmosphere: Atmosphere;"
+	"@group(0) @binding(1) var<storage, read> froxels: Froxels;"
+	"@group(2) @binding(0) var baseTexture: texture_2d<f32>;"
+	"@group(2) @binding(1) var baseSampler: sampler;"
+	"@fragment fn main() -> @location(0) vec4<f32> { return vec4<f32>(1.0, 0.0, 0.0, 0.0); }\n";
 /* Entity fragment: the misc fragment plus the material base texture (group 2). */
 static const char s_entityFragmentWgsl[] =
 	"struct Atmosphere { eyeDensity: vec4<f32>, colorVisibility: vec4<f32>,"
@@ -754,24 +767,26 @@ static qboolean CreatePipeline( uint32_t index )
 	ralWebGpuPipelineCreateInfo_t	info;
 	qboolean isUi = index == WEBGPU_PIPELINE_UI || index == WEBGPU_PIPELINE_MSDF;
 	qboolean isEffectPrimitive = IsEffectPrimitivePipeline( index );
+	const qboolean isTaaMask = index == WEBGPU_PIPELINE_TAA_MASK;
+	const qboolean entityLike = index == WEBGPU_PIPELINE_ENTITY || isTaaMask;
 	const ralShaderSpecConstantAbi_t effectSpec = {0,RAL_STAGE_FRAGMENT,0,RAL_SHADER_SPEC_U32};
 	const ralShaderSpecValue_t effectValue = {0,EffectPipelineAdditive(index) ? 1u : 0u};
 	const ralSpecConstant_t nativeEffectValue = {0,effectValue.value};
 	const char					   *vertexWgsl = isUi
 		? s_uiVertexWgsl : ( isEffectPrimitive ? s_effectVertexWgsl
 			: ( index == WEBGPU_PIPELINE_WORLD ? s_worldVertexWgsl
-			: ( index == WEBGPU_PIPELINE_ENTITY ? s_entityVertexWgsl
+			: ( entityLike ? s_entityVertexWgsl
 				: s_vertexWgsl ) ) );
 	const char					   *fragmentWgsl = index == WEBGPU_PIPELINE_MSDF
 		? s_msdfFragmentWgsl : ( index == WEBGPU_PIPELINE_UI ? s_uiFragmentWgsl : ( index == WEBGPU_PIPELINE_WORLD
 			? s_worldFragmentWgsl : ( isEffectPrimitive ? s_effectFragmentWgsl
 				: ( index == WEBGPU_PIPELINE_ENTITY ? s_entityFragmentWgsl
-					: s_fragmentWgsl ) ) ) );
+					: ( isTaaMask ? s_taaMaskFragmentWgsl : s_fragmentWgsl ) ) ) ) );
 	uint32_t						vertexWgslBytes =
 		(uint32_t)( isUi ? sizeof( s_uiVertexWgsl ) - 1u
 			: ( isEffectPrimitive ? sizeof( s_effectVertexWgsl ) - 1u
 				: ( index == WEBGPU_PIPELINE_WORLD ? sizeof( s_worldVertexWgsl ) - 1u
-				: ( index == WEBGPU_PIPELINE_ENTITY ? sizeof( s_entityVertexWgsl ) - 1u
+				: ( entityLike ? sizeof( s_entityVertexWgsl ) - 1u
 					: sizeof( s_vertexWgsl ) - 1u ) ) ) );
 	uint32_t fragmentWgslBytes =
 		(uint32_t)( index == WEBGPU_PIPELINE_MSDF ? sizeof( s_msdfFragmentWgsl ) - 1u
@@ -779,10 +794,10 @@ static qboolean CreatePipeline( uint32_t index )
 			: ( index == WEBGPU_PIPELINE_WORLD ? sizeof( s_worldFragmentWgsl ) - 1u
 				: ( isEffectPrimitive ? sizeof( s_effectFragmentWgsl ) - 1u
 					: ( index == WEBGPU_PIPELINE_ENTITY ? sizeof( s_entityFragmentWgsl ) - 1u
-						: sizeof( s_fragmentWgsl ) - 1u ) ) ) ) );
+						: ( isTaaMask ? sizeof( s_taaMaskFragmentWgsl ) - 1u : sizeof( s_fragmentWgsl ) - 1u ) ) ) ) ) );
 	uint32_t vertexInputCount = isUi ? 3u
 		: ( index == WEBGPU_PIPELINE_WORLD ? 7u
-		: ( index == WEBGPU_PIPELINE_ENTITY ? 6u
+		: ( entityLike ? 6u
 		: ( isEffectPrimitive ? 5u : 4u ) ) );
 	uint64_t generation		  = NextGeneration();
 	if ( index >= WEBGPU_PIPELINE_COUNT || !generation ||
@@ -886,7 +901,7 @@ static qboolean CreatePipeline( uint32_t index )
 		atmosphereBindings[12].stageFlags = RAL_STAGE_FRAGMENT;
 		atmosphereBindings[12].viewDimension = RAL_SHADER_VIEW_2D;
 		atmosphereBindings[12].sampleType = RAL_SHADER_SAMPLE_FLOAT;
-	} else if ( index == WEBGPU_PIPELINE_ENTITY ) {
+	} else if ( entityLike ) {
 		atmosphereBindings[2].set = 1u;
 		atmosphereBindings[2].binding = 0u;
 		atmosphereBindings[2].bindingClass = RAL_SHADER_BIND_STORAGE_BUFFER_READ;
@@ -955,12 +970,12 @@ static qboolean CreatePipeline( uint32_t index )
 	} else {
 		manifest.bindings	  = atmosphereBindings;
 		manifest.bindingCount = index == WEBGPU_PIPELINE_WORLD ? 13u
-			: ( index == WEBGPU_PIPELINE_ENTITY ? 5u
+			: ( entityLike ? 5u
 				: ( isEffectPrimitive ? 5u : 2u ) );
 	}
 	wgsl[0]		  = (ralWebGpuWgslModule_t){ vertexWgsl, vertexWgslBytes };
 	wgsl[1]		  = (ralWebGpuWgslModule_t){ fragmentWgsl, fragmentWgslBytes };
-	if ( index == WEBGPU_PIPELINE_WORLD || index == WEBGPU_PIPELINE_ENTITY ) {
+	if ( index == WEBGPU_PIPELINE_WORLD || entityLike ) {
 		/* Projected world/entity vertex: authored vertex intact + clipW + fog. */
 		binding		  = (ralVertexBinding_t){ 0u, sizeof( ralWebGpuWorldVertex_t ), RAL_VERTEX_INPUT_PER_VERTEX };
 		attributes[0] = (ralVertexAttribute_t){ 0u, 0u, RAL_FORMAT_R32G32B32_SFLOAT,
@@ -1017,7 +1032,7 @@ static qboolean CreatePipeline( uint32_t index )
 	graphics.numColorBlends		 = 1u;
 	/* UI draws into the canvas -srgb view (hardware display encoding). */
 	graphics.colorFormats[0] = isUi ? RAL_FORMAT_B8G8R8A8_SRGB
-        : RAL_FORMAT_R16G16B16A16_SFLOAT;
+        : ( isTaaMask ? RAL_FORMAT_R8_UNORM : RAL_FORMAT_R16G16B16A16_SFLOAT );
 	graphics.numColorFormats	 = 1u;
 	graphics.sampleCount		 = 1u;
     /* UI has an independent output pass without a scene-depth attachment. */
@@ -1039,7 +1054,7 @@ static qboolean CreatePipeline( uint32_t index )
 		groupLayouts[2]				 = (const ralBindGroupLayout_t *)(uintptr_t)3u;
 		graphics.bindGroupLayouts	 = groupLayouts;
 		graphics.numBindGroupLayouts = index == WEBGPU_PIPELINE_WORLD
-				|| index == WEBGPU_PIPELINE_ENTITY ? 3u
+				|| entityLike ? 3u
 			: ( isEffectPrimitive ? 2u : 1u );
 	}
 	memset( &variant, 0, sizeof( variant ) );
@@ -1050,8 +1065,9 @@ static qboolean CreatePipeline( uint32_t index )
 		variant.specValues = &effectValue; variant.specValueCount = 1;
 		graphics.specConstants = &nativeEffectValue; graphics.numSpecConstants = 1;
 	}
-	if ( Ral_GraphicsPipelineSemanticDigest( &graphics, &variant.semanticStateDigest ) != ralSuccess )
-		return qfalse;
+	if ( Ral_GraphicsPipelineSemanticDigest( &graphics, &variant.semanticStateDigest ) != ralSuccess ) {
+		s_module.failureStage = 1000 + 10 * (int)index + 3; return qfalse;
+	}
 	memset( &info, 0, sizeof( info ) );
 	info.manifest	   = &manifest;
 	info.variant	   = &variant;
@@ -1059,10 +1075,15 @@ static qboolean CreatePipeline( uint32_t index )
 	info.moduleCount   = 2u;
 	info.graphicsState = &graphics;
 	info.generation	   = generation;
-	return RalWebGpu_BrowserBridgeApplyPipelineInfo( s_module.borrow.bridge, &info ) &&
-		   RalWebGpu_RuntimeCreatePipeline( s_module.borrow.runtime, &s_module.borrow.runtimeReceipt, &info,
-											&s_module.pipelines[index], &s_module.pipelineReceipts[index] ) &&
-		   RalWebGpu_RuntimeGetReceipt( s_module.borrow.runtime, &s_module.borrow.runtimeReceipt );
+	/* Failure stage 1000 + 10 * index + step identifies which call refused the pipeline. */
+	if ( !RalWebGpu_BrowserBridgeApplyPipelineInfo( s_module.borrow.bridge, &info ) ) {
+		s_module.failureStage = 1000 + 10 * (int)index + 1; return qfalse;
+	}
+	if ( !RalWebGpu_RuntimeCreatePipeline( s_module.borrow.runtime, &s_module.borrow.runtimeReceipt, &info,
+			&s_module.pipelines[index], &s_module.pipelineReceipts[index] ) ) {
+		s_module.failureStage = 1000 + 10 * (int)index + 2; return qfalse;
+	}
+	return RalWebGpu_RuntimeGetReceipt( s_module.borrow.runtime, &s_module.borrow.runtimeReceipt );
 }
 
 static qboolean CreateAtmosphereOwners( void )
@@ -1513,7 +1534,9 @@ static qboolean InitializeOwners( void )
 	}
 	s_module.failureStage = 2240;
 	if ( !RalWebGpu_ProductSetEntityPipeline( s_module.product, &s_module.borrow.runtimeReceipt,
-											  &s_module.pipelineReceipts[WEBGPU_PIPELINE_ENTITY] ) ) {
+											  &s_module.pipelineReceipts[WEBGPU_PIPELINE_ENTITY] )
+		|| !RalWebGpu_ProductSetTaaMaskPipeline( s_module.product, &s_module.borrow.runtimeReceipt,
+			&s_module.pipelineReceipts[WEBGPU_PIPELINE_TAA_MASK] ) ) {
 		DestroyOwners();
 		return qfalse;
 	}

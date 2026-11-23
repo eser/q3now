@@ -169,6 +169,8 @@ void RalWebGpu_ProductSkyCaptureEnd(ralWebGpuProduct_t *product);
 qboolean RalWebGpu_ProductSetExposure( ralWebGpuProduct_t *product,
     const ralExposureSettings_t *settings, const ralDisplayVisibilityPlan_t *visibility,
     int toneMode, float toneExposure );
+qboolean RalWebGpu_ProductSetTaaMaskPipeline( ralWebGpuProduct_t *product,
+	const ralWebGpuRuntimeReceipt_t *runtimeReceipt, const ralWebGpuPipelineReceipt_t *maskPipeline );
 qboolean RalWebGpu_ProductSetEntityPipeline( ralWebGpuProduct_t *product,
 	const ralWebGpuRuntimeReceipt_t *runtimeReceipt,
 	const ralWebGpuPipelineReceipt_t *entityPipeline );
