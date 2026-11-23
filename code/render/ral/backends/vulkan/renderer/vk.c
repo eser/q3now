@@ -30880,6 +30880,14 @@ void vk_draw_geometry( Vk_Depth_Range depth_range, qboolean indexed ) {
 			static uint32_t why[8];
 			const int recActive = ( VK_TemporalMotionRecordingIsActive( &vk_temporal_motion_recording )
 				&& vk_temporal_motion_recording.primaryCommandActive ) ? 1 : 0;
+			// Coverage diagnostic: which pipeline types (and how many blended draws) take the ordinary route while recording is
+			// active. This is what a temporal coverage extension is steered by, and what the share of exact draws is judged on.
+			static uint32_t whyType[256], whyBlended;
+			if ( !exact && recActive && temporalPipelineSlot < vk.pipelines_count ) {
+				const uint32_t type = (uint32_t)vk.pipelines[temporalPipelineSlot].def.shader_type;
+				whyType[type < 256u ? type : 255u]++;
+				if ( vk.pipelines[temporalPipelineSlot].def.state_bits & GLS_BLEND_BITS ) whyBlended++;
+			}
 			if ( !exact ) {
 				if ( !recActive ) why[0]++;
 				else if ( !entMatPlanValid ) why[1]++;
@@ -30894,6 +30902,16 @@ void vk_draw_geometry( Vk_Depth_Range depth_range, qboolean indexed ) {
 					why[0], why[1], why[2], why[3], why[4], why[5], why[6],
 					(int)vk_temporal_motion_recording.poisoned, (int)vk_temporal_main_activation.poisoned );
 				memset( why, 0, sizeof( why ) );
+				{
+					char line[384]; size_t used = 0; uint32_t t;
+					line[0] = 0;
+					for ( t = 0; t < 256u; ++t ) {
+						if ( whyType[t] && used + 16u < sizeof( line ) )
+							used += (size_t)Com_sprintf( line + used, (int)( sizeof( line ) - used ), " %u:%u", t, whyType[t] );
+					}
+					R_LOG( rch_ral, SEV_INFO, "temporal ordinary-route by shader type (per 1000 draws, blended %u):%s\n", whyBlended, line );
+					memset( whyType, 0, sizeof( whyType ) ); whyBlended = 0u;
+				}
 			}
 		}
 		if ( exact ) { exactDraws++; if ( !prevExact ) runs++; prevExact = 1u; }

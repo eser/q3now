@@ -79,7 +79,7 @@ ARMS=(${AAC_ARMS:-0 2 3})
 for a in "${ARMS[@]}"; do
 	case "$a" in
 		1|4|5) echo "FAIL arm $a was an SMAA arm; SMAA is retired (TAA is the only AA technique)"; exit 64 ;;
-		0|2|3|6|7|8|9|10|11|12|13|14|15|16) ;;
+		0|2|3|6|7|8|9|10|11|12|13|14|15|16|17) ;;
 		*) echo "FAIL unknown arm '$a' in AAC_ARMS"; exit 64 ;;
 	esac
 done
@@ -122,6 +122,7 @@ CFGEOF
 			14) armcmd="r_temporalInputTest 0; r_aa 2; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve 1; r_dbgTemporalRepeatStore 1; r_dbgTemporalFold 1; r_dbgTemporalQuality 0" ;;
 			15) armcmd="r_temporalInputTest 0; r_aa 2; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve 1; r_dbgTemporalRepeatStore 1; r_dbgTemporalFold 1; r_dbgTemporalQuality 3" ;;
 			16) armcmd="r_temporalInputTest 0; r_aa 2; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve 1; r_dbgTemporalRepeatStore 1; r_dbgTemporalFold 1; r_dbgTemporalQuality 4" ;;
+			17) armcmd="r_temporalInputTest 0; r_aa 2; r_dbgExtraSplit 0; r_dbgExactHold 2; r_dbgTemporalRepeatResolve 1; r_dbgTemporalRepeatStore 1; r_dbgTemporalFold 1; r_dbgTemporalQuality 7" ;;   # leak control: ordinary draws issue into the held exact pass, so no draw closes it (upper bound of what pass splits cost)
 		esac
 		printf 'set aacSeg%s "%s; wait 96; set r_gpuSpeeds 1; echo AAC_%s_BEGIN; wait 220; echo AAC_%s_END; set r_gpuSpeeds 0; wait 16; %s"\n' "$i" "$armcmd" "$tag" "$tag" "$next"
 	done
@@ -200,7 +201,7 @@ for i, arm in enumerate(order):
     for k, v in full_s[0].items():
         if k not in ("frames", "total"): lanes[arm].setdefault(k, []).append(v)
 RAN = [arm for arm in range(24) if per[arm]]
-name = {0: "none", 2: "TAA", 3: "gate-on", 6: "none+4sp", 7: "none+16sp", 8: "TAA-legacy", 9: "TAA resolve x4", 10: "TAA store x4", 11: "TAA resolve skipped", 12: "TAA resolve+store skipped", 13: "TAA store-copy", 14: "TAA quality off", 15: "TAA no fallback", 16: "TAA fallback only"}
+name = {0: "none", 2: "TAA", 3: "gate-on", 6: "none+4sp", 7: "none+16sp", 8: "TAA-legacy", 9: "TAA resolve x4", 10: "TAA store x4", 11: "TAA resolve skipped", 12: "TAA resolve+store skipped", 13: "TAA store-copy", 14: "TAA quality off", 15: "TAA no fallback", 16: "TAA fallback only", 17: "TAA hold-leak control"}
 print(f"config: {'full default renderer' if full == '1' else 'stripped (as the temporal gate)'}; order {order_s}")
 for arm in RAN:
     v = per[arm]

@@ -260,6 +260,42 @@ vec2 dlMotionVelocity(ivec2 px, float centerValid) {
 	return finite2(dv) ? dv : centerVelocity;
 }
 
+// The colour box the reprojected history is clamped into: min/max of the 3x3 current-colour neighbourhood, tightened by variance
+// clipping when enabled. Deliberately a separate, non-precise function. `precise` propagates backwards through every operation
+// that feeds a precise result, and each such operation is emitted by SPIRV-Cross as an optnone spvFAdd/spvFMul call that the
+// Metal compiler does not inline: measured at ~0.9 ms of this pass at 1280x720. The box needs no bit-exact arithmetic (it only
+// bounds a clamp), whereas the reprojection and the final blend keep their precise chains.
+bool neighborhoodBox(ivec2 pixel, out vec3 boxMin, out vec3 boxMax) {
+	vec3 neighborhoodMin = vec3(3.402823466e+38);
+	vec3 neighborhoodMax = vec3(-3.402823466e+38);
+	vec3 momentSum = vec3(0.0);
+	vec3 momentSquares = vec3(0.0);
+	for (int y = -1; y <= 1; ++y) {
+		for (int x = -1; x <= 1; ++x) {
+			vec3 c = sampleCurrent(pixel + ivec2(x, y)).rgb;
+			neighborhoodMin = min(neighborhoodMin, c);
+			neighborhoodMax = max(neighborhoodMax, c);
+			momentSum += c;
+			momentSquares += c * c;
+		}
+	}
+	if (!(finite3(neighborhoodMin) && finite3(neighborhoodMax))) return false;
+	// Variance clipping: tighten the min/max box to mean +/- gamma * sigma of the same 3x3 samples. The box is an
+	// intersection, so it can only get smaller; mean lies inside both, hence it is never empty.
+	vec3 clipMin = neighborhoodMin;
+	vec3 clipMax = neighborhoodMax;
+	if ((pc.qualityFlags & 1u) != 0u) {
+		vec3 momentMean = momentSum * (1.0 / 9.0);
+		vec3 momentSigma = sqrt(max(momentSquares * (1.0 / 9.0)
+			- momentMean * momentMean, vec3(0.0)));
+		clipMin = max(neighborhoodMin, momentMean - 1.25 * momentSigma);
+		clipMax = min(neighborhoodMax, momentMean + 1.25 * momentSigma);
+	}
+	boxMin = clipMin;
+	boxMax = clipMax;
+	return true;
+}
+
 void main() {
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
 	if (any(greaterThanEqual(pixel, ivec2(pc.extent)))) return;
@@ -302,31 +338,9 @@ void main() {
 				&& currentLinear > 0.0 && priorLinear > 0.0
 				&& abs(currentLinear - priorLinear) <= depthLimit) {
 			vec4 prior = samplePreviousColorLinear(previousTexel);
-			vec3 neighborhoodMin = vec3(3.402823466e+38);
-			vec3 neighborhoodMax = vec3(-3.402823466e+38);
-			vec3 momentSum = vec3(0.0);
-			vec3 momentSquares = vec3(0.0);
-			for (int y = -1; y <= 1; ++y) {
-				for (int x = -1; x <= 1; ++x) {
-					vec3 c = sampleCurrent(pixel + ivec2(x, y)).rgb;
-					neighborhoodMin = min(neighborhoodMin, c);
-					neighborhoodMax = max(neighborhoodMax, c);
-					momentSum += c;
-					momentSquares += c * c;
-				}
-			}
-			if (finite4(prior) && finite3(neighborhoodMin) && finite3(neighborhoodMax)) {
-				// Variance clipping: tighten the min/max box to mean +/- gamma * sigma of the same 3x3 samples. The box is an
-				// intersection, so it can only get smaller; mean lies inside both, hence it is never empty.
-				vec3 clipMin = neighborhoodMin;
-				vec3 clipMax = neighborhoodMax;
-				if ((pc.qualityFlags & 1u) != 0u) {
-					vec3 momentMean = momentSum * (1.0 / 9.0);
-					vec3 momentSigma = sqrt(max(momentSquares * (1.0 / 9.0)
-						- momentMean * momentMean, vec3(0.0)));
-					clipMin = max(neighborhoodMin, momentMean - 1.25 * momentSigma);
-					clipMax = min(neighborhoodMax, momentMean + 1.25 * momentSigma);
-				}
+			vec3 clipMin;
+			vec3 clipMax;
+			if (finite4(prior) && neighborhoodBox(pixel, clipMin, clipMax)) {
 				vec3 clampedPrior = clamp(prior.rgb, clipMin, clipMax);
 				// Scale the history weight by the pixel's confidence. At
 				// valid == 1 this is exactly the previous behaviour
