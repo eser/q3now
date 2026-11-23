@@ -8,12 +8,11 @@ layout(std140, binding = 6) uniform TemporalBootstrapPush
     float zFar;
 } pc;
 
-layout(binding = 0) uniform texture2D currentColor;
-layout(binding = 0) uniform sampler nearestSampler;
+layout(binding = 0) uniform sampler2D currentColor;
 layout(binding = 0, rgba16f) uniform writeonly image2D bootstrapColor;
 layout(binding = 1, rgba16f) uniform writeonly image2D historyOutColor;
 layout(binding = 2, r32f) uniform writeonly image2D historyOutLinearDepth;
-layout(binding = 1) uniform texture2D currentDeviceDepth;
+layout(binding = 1) uniform sampler2D currentDeviceDepth;
 
 bool finite4(vec4 v)
 {
@@ -60,7 +59,7 @@ float fxLuma(vec3 c)
 vec4 sampleCurrent(ivec2 pixel)
 {
     ivec2 bounded = clamp(pixel, ivec2(0), ivec2(pc.extent) - ivec2(1));
-    return texelFetch(sampler2D(currentColor, nearestSampler), bounded, 0);
+    return texelFetch(currentColor, bounded, 0);
 }
 
 float fxLumaAt(ivec2 p)
@@ -208,7 +207,7 @@ void main()
     {
         return;
     }
-    vec4 current = texelFetch(sampler2D(currentColor, nearestSampler), pixel, 0);
+    vec4 current = texelFetch(currentColor, pixel, 0);
     vec4 param = current;
     vec4 _632;
     if (finite4(param))
@@ -229,7 +228,7 @@ void main()
     }
     imageStore(bootstrapColor, pixel, result);
     imageStore(historyOutColor, pixel, result);
-    float param_4 = texelFetch(sampler2D(currentDeviceDepth, nearestSampler), pixel, 0).x;
+    float param_4 = texelFetch(currentDeviceDepth, pixel, 0).x;
     imageStore(historyOutLinearDepth, pixel, vec4(storeLinearDepth(param_4)));
 }
 

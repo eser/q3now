@@ -1,6 +1,9 @@
 #version 460
 
-layout(constant_id = 0) const float SMAA_THRESHOLD = 0.100000001490116119384765625;
+#ifndef WIRED_SPEC_0
+#define WIRED_SPEC_0 0.100000001490116119384765625
+#endif
+const float SMAA_THRESHOLD = WIRED_SPEC_0;
 
 layout(binding = 0, std140) uniform RtMetrics
 {

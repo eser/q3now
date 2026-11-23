@@ -1,11 +1,20 @@
 #version 460
 
-layout(constant_id = 1) const int SMAA_MAX_SEARCH_STEPS_DIAG = 8;
+#ifndef WIRED_SPEC_1
+#define WIRED_SPEC_1 8
+#endif
+const int SMAA_MAX_SEARCH_STEPS_DIAG = WIRED_SPEC_1;
 const int _172 = (SMAA_MAX_SEARCH_STEPS_DIAG - 1);
 const int _245 = (SMAA_MAX_SEARCH_STEPS_DIAG - 1);
-layout(constant_id = 2) const int SMAA_CORNER_ROUNDING = 25;
+#ifndef WIRED_SPEC_2
+#define WIRED_SPEC_2 25
+#endif
+const int SMAA_CORNER_ROUNDING = WIRED_SPEC_2;
 const bool _1010 = (SMAA_MAX_SEARCH_STEPS_DIAG > 0);
-layout(constant_id = 0) const int SMAA_MAX_SEARCH_STEPS = 16;
+#ifndef WIRED_SPEC_0
+#define WIRED_SPEC_0 16
+#endif
+const int SMAA_MAX_SEARCH_STEPS = WIRED_SPEC_0;
 
 layout(binding = 0, std140) uniform RtMetrics
 {

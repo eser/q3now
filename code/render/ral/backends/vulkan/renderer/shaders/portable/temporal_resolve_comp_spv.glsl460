@@ -15,13 +15,12 @@ layout(std140, binding = 10) uniform TemporalResolvePush
     uint qualityFlags;
 } pc;
 
-layout(binding = 0) uniform texture2D currentColor;
-layout(binding = 0) uniform sampler nearestSampler;
-layout(binding = 2) uniform texture2D previousColor;
-layout(binding = 3) uniform texture2D previousLinearDepth;
-layout(binding = 4) uniform texture2D motionVelocity;
-layout(binding = 5) uniform texture2D motionValidity;
-layout(binding = 1) uniform texture2D currentDeviceDepth;
+layout(binding = 0) uniform sampler2D currentColor;
+layout(binding = 2) uniform sampler2D previousColor;
+layout(binding = 3) uniform sampler2D previousLinearDepth;
+layout(binding = 4) uniform sampler2D motionVelocity;
+layout(binding = 5) uniform sampler2D motionValidity;
+layout(binding = 1) uniform sampler2D currentDeviceDepth;
 layout(binding = 0, rgba16f) uniform writeonly image2D resolvedColor;
 layout(binding = 1, rgba16f) uniform writeonly image2D historyOutColor;
 layout(binding = 2, r32f) uniform writeonly image2D historyOutLinearDepth;
@@ -46,7 +45,7 @@ bool finite2(vec2 v)
 
 vec2 dlMotionVelocity(ivec2 px, int tileIndex, float centerValid)
 {
-    vec2 centerVelocity = texelFetch(sampler2D(motionVelocity, nearestSampler), px, 0).xy;
+    vec2 centerVelocity = texelFetch(motionVelocity, px, 0).xy;
     bool _1071 = (pc.qualityFlags & 2u) == 0u;
     bool _1078;
     if (!_1071)
@@ -90,12 +89,12 @@ vec2 dlMotionVelocity(ivec2 px, int tileIndex, float centerValid)
     {
         return centerVelocity;
     }
-    float v = texelFetch(sampler2D(motionValidity, nearestSampler), best, 0).x;
+    float v = texelFetch(motionValidity, best, 0).x;
     if (!(v > 0.0))
     {
         return centerVelocity;
     }
-    vec2 dv = texelFetch(sampler2D(motionVelocity, nearestSampler), best, 0).xy;
+    vec2 dv = texelFetch(motionVelocity, best, 0).xy;
     vec2 param_1 = dv;
     return mix(centerVelocity, dv, bvec2(finite2(param_1)));
 }
@@ -157,10 +156,10 @@ float samplePreviousDepthLinear(vec2 texel)
     precise vec2 _489 = texel - baseFloat;
     vec2 f = _489;
     ivec2 hi = ivec2(pc.extent) - ivec2(1);
-    float d00 = texelFetch(sampler2D(previousLinearDepth, nearestSampler), clamp(base, ivec2(0), hi), 0).x;
-    float d10 = texelFetch(sampler2D(previousLinearDepth, nearestSampler), clamp(base + ivec2(1, 0), ivec2(0), hi), 0).x;
-    float d01 = texelFetch(sampler2D(previousLinearDepth, nearestSampler), clamp(base + ivec2(0, 1), ivec2(0), hi), 0).x;
-    float d11 = texelFetch(sampler2D(previousLinearDepth, nearestSampler), clamp(base + ivec2(1), ivec2(0), hi), 0).x;
+    float d00 = texelFetch(previousLinearDepth, clamp(base, ivec2(0), hi), 0).x;
+    float d10 = texelFetch(previousLinearDepth, clamp(base + ivec2(1, 0), ivec2(0), hi), 0).x;
+    float d01 = texelFetch(previousLinearDepth, clamp(base + ivec2(0, 1), ivec2(0), hi), 0).x;
+    float d11 = texelFetch(previousLinearDepth, clamp(base + ivec2(1), ivec2(0), hi), 0).x;
     float param = d00;
     float param_1 = d10;
     float param_2 = f.x;
@@ -205,7 +204,7 @@ vec4 samplePreviousColor(vec2 texel)
     float total = 0.0;
     for (int i = 0; i < 5; i++)
     {
-        sum += (textureLod(sampler2D(previousColor, nearestSampler), vec2(ux[i], uy[i]), 0.0) * w[i]);
+        sum += (textureLod(previousColor, vec2(ux[i], uy[i]), 0.0) * w[i]);
         total += w[i];
     }
     return sum * inversesqrt(total * total);
@@ -308,7 +307,7 @@ float fxLuma(vec3 c)
 vec4 sampleCurrent(ivec2 pixel)
 {
     ivec2 bounded = clamp(pixel, ivec2(0), ivec2(pc.extent) - ivec2(1));
-    return texelFetch(sampler2D(currentColor, nearestSampler), bounded, 0);
+    return texelFetch(currentColor, bounded, 0);
 }
 
 float fxLumaAt(ivec2 p)
@@ -457,8 +456,8 @@ void main()
     for (uint i = gl_LocalInvocationIndex; i < 100u; i += 64u)
     {
         ivec2 q = clamp(tileOrigin + ivec2(int(i % 10u), int(i / 10u)), ivec2(0), imageHi);
-        tileColor[i] = texelFetch(sampler2D(currentColor, nearestSampler), q, 0);
-        tileDepth[i] = texelFetch(sampler2D(currentDeviceDepth, nearestSampler), q, 0).x;
+        tileColor[i] = texelFetch(currentColor, q, 0);
+        tileDepth[i] = texelFetch(currentDeviceDepth, q, 0).x;
     }
     barrier();
     if (any(greaterThanEqual(pixel, ivec2(pc.extent))))
@@ -469,7 +468,7 @@ void main()
     vec4 current = tileColor[tileIndex];
     vec4 result = current;
     bool usedHistory = false;
-    float valid = texelFetch(sampler2D(motionValidity, nearestSampler), pixel, 0).x;
+    float valid = texelFetch(motionValidity, pixel, 0).x;
     ivec2 param = pixel;
     int param_1 = tileIndex;
     float param_2 = valid;

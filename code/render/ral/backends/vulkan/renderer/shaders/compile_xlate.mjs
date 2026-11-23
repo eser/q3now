@@ -198,6 +198,12 @@ export function lowerGlsl460(bytes, portableEntry) {
 		project_sky_sh_comp_spv: { sampler: 'srcSamp', textures: [['srcTex', 'texture2DArray', 'sampler2DArray']] },
 		convolve_irradiance_comp_spv: { sampler: 'srcSamp', textures: [['srcTex', 'texture2DArray', 'sampler2DArray']] },
 		prefilter_radiance_comp_spv: { sampler: 'srcSamp', textures: [['srcTex', 'texture2DArray', 'sampler2DArray']] },
+		// TAA: the single (linear) sampler becomes a GL sampler object bound on every texture unit of the dispatch.
+		temporal_bootstrap_aa_comp_spv: { sampler: 'nearestSampler',
+			textures: ['currentColor', 'currentDeviceDepth'].map((name) => [name, 'texture2D', 'sampler2D']) },
+		temporal_resolve_comp_spv: { sampler: 'nearestSampler',
+			textures: ['currentColor', 'currentDeviceDepth', 'previousColor', 'previousLinearDepth', 'motionVelocity',
+				'motionValidity'].map((name) => [name, 'texture2D', 'sampler2D']) },
 	}[portableEntry.symbol];
 	if (computeSamplers) {
 		const { sampler: samplerName, textures } = computeSamplers;
@@ -269,8 +275,8 @@ export function lowerGlsl460(bytes, portableEntry) {
 	}
 	if (portableEntry.symbol === 'gamma_vert_spv')
 		source = source.replaceAll('gl_VertexIndex', 'gl_VertexID');
-	if (portableEntry.symbol === 'tonemap_tonemap_frag_spv') {
-		// Desktop GLSL specializes at program creation, not via Vulkan constant IDs.
+	if (portableEntry.symbol === 'tonemap_tonemap_frag_spv' || /^smaa_(edge|blend|resolve)_(vert|frag)_spv$/.test(portableEntry.symbol)) {
+		// Desktop GLSL specializes at program creation, not via Vulkan constant IDs (SMAA: the r_smaa quality presets).
 		source = source.replace(/layout\(constant_id = (\d+)\) const (float|int) (\w+) = ([^;]+);/g,
 			(_match, id, type, name, value) => `#ifndef WIRED_SPEC_${id}\n#define WIRED_SPEC_${id} ${value}\n#endif\nconst ${type} ${name} = WIRED_SPEC_${id};`);
 	}
