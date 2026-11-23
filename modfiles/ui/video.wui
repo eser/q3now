@@ -246,12 +246,28 @@ menuDef {
 							visible 1
 							grow 0
 						}
+						// r_aa is the post-process anti-aliasing mode (TAA by default; SMAA is the fallback for players who see temporal
+						// ghosting). Renderers without a post chain (OpenGL, WebGPU) say so in the log and ignore it.
 						itemDef {
 							name "row_aa"
 							type segmented
 							height FIXED 38px
 							width PERCENT 1
 							text "Anti-Aliasing"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "r_aa"
+							cvarFloatList { "Off" 0 "TAA" 1 "SMAA" 2 }
+							visible 1
+							grow 0
+						}
+						itemDef {
+							name "row_msaa"
+							type segmented
+							height FIXED 38px
+							width PERCENT 1
+							text "MSAA"
 							textalign 0
 							font $font_sans 13
 							forecolor $bone
