@@ -315,7 +315,7 @@ static void ApplyRaster( const worldDispatch_t *gl, glName_t uniformBuffer,
 		const ralLightingRuntimePlan_t *lightingPlan,
 		const float emissiveRadiance[4],
 		const renderMaterialFactorsSnapshot_t *materialFactors,
-		float environmentBlend ) {
+		float environmentBlend, const float colorScale[4] ) {
 	productMaterialUniforms_t materialUniforms = { 0 };
 	if (beamParams) materialUniforms.beam = *beamParams;
 	gl->Disable( GL_CULL_FACE_VALUE );
@@ -378,6 +378,8 @@ static void ApplyRaster( const worldDispatch_t *gl, glName_t uniformBuffer,
 			materialFactors->factors.occlusionStrength;
 		materialUniforms.materialFactors[3] = environmentBlend;
 	}
+	if ( colorScale )
+		for ( uint32_t c = 0u; c < 4u; ++c ) materialUniforms.materialBaseColor[c] *= colorScale[c];
 	gl->NamedBufferSubData( materialUniformBuffer, 0,
 		(glSizePtr_t)sizeof( materialUniforms ), &materialUniforms );
 	UploadProductDraw( gl, uniformBuffer, uniforms );
@@ -527,7 +529,7 @@ static qboolean DrawSkyBatch( const worldDispatch_t *gl,
 	}
 	ApplyRaster( gl, uniformBuffer, materialUniformBuffer, uniforms, NULL,
 		RENDER_ALPHA_OPAQUE, 0.0f, qfalse, qfalse, qtrue,
-		NULL, NULL, NULL, NULL, NULL, 0.0f );
+		NULL, NULL, NULL, NULL, NULL, 0.0f, NULL );
 	gl->NamedBufferSubData( materialUniformBuffer, 0, sizeof( params ), &params );
 	for ( uint32_t i = 0u; i < 8u; ++i ) gl->BindTextureUnit( i, images[i] );
 	gl->BindTextureUnit( 8u, owner );
@@ -607,7 +609,7 @@ static qboolean DrawWorldBatch( const worldDispatch_t *gl,
 		lightingPlan, emissiveRadiance,
 		frontend->pbrEnabled && info->skyRadianceConsumer.ready
 			? &materialSnapshot.factors : NULL,
-		info->skyRadianceConsumer.previousToCurrentBlend );
+		info->skyRadianceConsumer.previousToCurrentBlend, NULL );
 	if ( binding ) {
 		uint64_t identity = binding->surfaceId
 			^ ( (uint64_t)binding->diffuseAuthority << 56u )
@@ -678,6 +680,25 @@ static void EntityTransformNormal( const refEntity_t *entity,
 	else out[2] = 1.0f;
 }
 
+/* Q3 applies refEntity_t::shaderRGBA only through a stage's entity generators (rgbGen entity / oneMinusEntity, alphaGen entity /
+ * oneMinusEntity) or RF_FORCE_ENT_ALPHA; every other model surface is untinted. The product program draws the material's first
+ * stage, so that stage selects the tint. */
+static void EntityStageColor( const renderSubmissionState_t *frontend, qhandle_t material, const refEntity_t *entity,
+		float out[4] ) {
+	renderMaterialSnapshot_t snapshot;
+	out[0] = out[1] = out[2] = out[3] = 1.0f;
+	if ( RenderSubmission_MaterialSnapshot( frontend, material, &snapshot ) && snapshot.stageCount ) {
+		const renderMaterialStageSnapshot_t *stage = &snapshot.stages[0];
+		for ( uint32_t c = 0u; c < 3u; ++c ) {
+			if ( stage->rgbGen == RAL_MATERIAL_COLOR_ENTITY ) out[c] = entity->shader.rgba[c] / 255.0f;
+			else if ( stage->rgbGen == RAL_MATERIAL_COLOR_ONE_MINUS_ENTITY ) out[c] = 1.0f - entity->shader.rgba[c] / 255.0f;
+		}
+		if ( stage->alphaGen == RAL_MATERIAL_ALPHA_ENTITY ) out[3] = entity->shader.rgba[3] / 255.0f;
+		else if ( stage->alphaGen == RAL_MATERIAL_ALPHA_ONE_MINUS_ENTITY ) out[3] = 1.0f - entity->shader.rgba[3] / 255.0f;
+	}
+	if ( entity->renderfx & RF_FORCE_ENT_ALPHA ) out[3] = entity->shader.rgba[3] / 255.0f;
+}
+
 static qboolean DrawModelEntity( const worldDispatch_t *gl,
 		glName_t uniformBuffer, glName_t materialUniformBuffer,
 		productDrawUniforms_t *uniforms,
@@ -719,8 +740,10 @@ static qboolean DrawModelEntity( const worldDispatch_t *gl,
 		EntityTransformNormal( &command->entity, localNormal, vertices[i].normal );
 		memcpy( vertices[i].texCoord, model.texCoords + (size_t)i * 2u,
 			sizeof( vertices[i].texCoord ) );
-		memcpy( vertices[i].color, command->entity.shader.rgba,
-			sizeof( vertices[i].color ) );
+		/* Model vertices carry the model's own colours (white when it has none), as on Metal; the entity colour is a stage
+		 * generator input, applied per batch below. */
+		if ( model.colors ) memcpy( vertices[i].color, model.colors[i].rgba, sizeof( vertices[i].color ) );
+		else memset( vertices[i].color, 255, sizeof( vertices[i].color ) );
 	}
 	if ( !TransientCreate( gl, vertices, model.vertexCount, model.indices,
 		model.indexCount, &geometry ) ) goto cleanup;
@@ -728,11 +751,13 @@ static qboolean DrawModelEntity( const worldDispatch_t *gl,
 	for ( uint32_t i = 0u; i < model.batchCount; ++i ) {
 		qhandle_t material = RenderSubmission_EntityBatchMaterial(
 			frontend, command, &model.batches[i] );
+		float entityColor[4];
+		EntityStageColor( frontend, material, &command->entity, entityColor );
 		gl->BindTextureUnit( 0u, MaterialTexture( frontend, textures, material ) );
 		ApplyRaster( gl, uniformBuffer, materialUniformBuffer, uniforms, NULL,
 			RENDER_ALPHA_OPAQUE,
 			0.5f, qtrue, qfalse, qfalse, command, NULL, NULL, NULL,
-			NULL, 1.0f );
+			NULL, 1.0f, entityColor );
 		gl->DrawElements( GL_TRIANGLES_VALUE, (glSize_t)model.batches[i].indexCount,
 			GL_UNSIGNED_INT_VALUE, (const void *)(uintptr_t)( model.batches[i].firstIndex
 				* sizeof( uint32_t ) ) );
@@ -802,7 +827,7 @@ static qboolean DrawPrimitiveEntity( const worldDispatch_t *gl,
 	ApplyRaster( gl, uniformBuffer, materialUniformBuffer, uniforms, NULL,
 		RENDER_ALPHA_BLEND,
 		0.5f, qfalse, qfalse, qfalse, command, NULL, NULL, NULL,
-		NULL, 1.0f );
+		NULL, 1.0f, NULL );
 	gl->DrawElements( GL_TRIANGLES_VALUE, (glSize_t)indexCount,
 		GL_UNSIGNED_INT_VALUE, NULL );
 	TransientDestroy( gl, &geometry );
@@ -843,7 +868,7 @@ static qboolean DrawUiPrimitive( const worldDispatch_t *gl,
 	ApplyRaster( gl, uniformBuffer, materialUniformBuffer, uniforms, &materialParams,
 		RENDER_ALPHA_BLEND,
 		0.5f, qfalse, qfalse, qfalse, NULL, NULL, NULL, NULL,
-		NULL, 1.0f );
+		NULL, 1.0f, NULL );
 	gl->DrawElements( GL_TRIANGLES_VALUE, 6, GL_UNSIGNED_INT_VALUE, NULL );
 	TransientDestroy( gl, &geometry );
 	return qtrue;
@@ -1385,7 +1410,7 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 			ApplyRaster( &gl, uniformBuffer, materialUniformBuffer, &uniforms, NULL,
 				RENDER_ALPHA_BLEND, 0.5f,
 				qfalse, qfalse, qfalse, NULL, NULL, NULL, NULL,
-				NULL, 1.0f );
+				NULL, 1.0f, NULL );
 			gl.DrawElements( GL_TRIANGLES_VALUE, (glSize_t)count,
 				GL_UNSIGNED_INT_VALUE, (const void *)(uintptr_t)( firstIndex
 					* sizeof( uint32_t ) ) );
@@ -1396,7 +1421,7 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 			ApplyRaster( &gl, uniformBuffer, materialUniformBuffer, &uniforms, NULL,
 				RENDER_ALPHA_BLEND, 0.5f,
 				qfalse, qfalse, qfalse, NULL, NULL, NULL, NULL,
-				NULL, 1.0f );
+				NULL, 1.0f, NULL );
 			gl.DrawElements( GL_TRIANGLES_VALUE, 6, GL_UNSIGNED_INT_VALUE,
 				(const void *)(uintptr_t)( firstIndex * sizeof( uint32_t ) ) );
 			firstIndex += 6u;
@@ -1413,7 +1438,7 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 				( sprite->flags & PRIM_FLAG_ADDITIVE )
 					? RENDER_ALPHA_ALPHA_ADDITIVE : RENDER_ALPHA_BLEND,
 				0.5f, qfalse, qfalse, qfalse, NULL, NULL, NULL, NULL,
-				NULL, 1.0f );
+				NULL, 1.0f, NULL );
 			gl.DrawElements( GL_TRIANGLES_VALUE, 6, GL_UNSIGNED_INT_VALUE,
 				(const void *)(uintptr_t)( firstIndex * sizeof( uint32_t ) ) );
 			firstIndex += 6u;
@@ -1427,7 +1452,7 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 				slot->decal.shader ) );
 			ApplyRaster( &gl, uniformBuffer, materialUniformBuffer, &uniforms, NULL,
 				RENDER_ALPHA_BLEND, 0.5f, qfalse, qfalse, qfalse,
-				NULL, NULL, NULL, NULL, NULL, 1.0f );
+				NULL, NULL, NULL, NULL, NULL, 1.0f, NULL );
 			gl.DrawElements( GL_TRIANGLES_VALUE, 6, GL_UNSIGNED_INT_VALUE,
 				(const void *)(uintptr_t)( firstIndex * sizeof( uint32_t ) ) );
 			firstIndex += 6u;
@@ -1446,7 +1471,7 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 				( ribbon->flags & PRIM_FLAG_ADDITIVE )
 					? RENDER_ALPHA_ALPHA_ADDITIVE : RENDER_ALPHA_BLEND,
 				0.5f, qfalse, qfalse, qfalse, NULL, NULL, NULL, NULL,
-				NULL, 1.0f );
+				NULL, 1.0f, NULL );
 			gl.DrawElements( GL_TRIANGLES_VALUE, (glSize_t)count,
 				GL_UNSIGNED_INT_VALUE,
 				(const void *)(uintptr_t)( firstIndex * sizeof( uint32_t ) ) );
@@ -1496,7 +1521,7 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 				ApplyRaster(&gl, uniformBuffer, materialUniformBuffer, &uniforms, &params,
 					(material.stageCount || (slot->beam.flags & PRIM_FLAG_ADDITIVE))
 						? RENDER_ALPHA_ALPHA_ADDITIVE : RENDER_ALPHA_BLEND,
-					0.5f, qfalse, qfalse, qfalse, NULL, NULL, NULL, NULL, NULL, 1.0f);
+					0.5f, qfalse, qfalse, qfalse, NULL, NULL, NULL, NULL, NULL, 1.0f, NULL);
 				gl.DrawElements(GL_TRIANGLES_VALUE, (glSize_t)count, GL_UNSIGNED_INT_VALUE,
 					(const void *)(uintptr_t)(firstIndex * sizeof(uint32_t)));
 				receipt.effectBeamStageDrawCount++;
