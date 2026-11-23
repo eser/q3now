@@ -40,6 +40,10 @@ typedef struct {
 	// first-person (depthHack) draws do not inherit the history of the opaque surface beneath them. A blended STAGE of an opaque
 	// surface (a lightmap multiply, a detail overlay) is not an effect and stays PRESERVE; they invalidate it, so the resolve filters those pixels spatially instead of reprojecting them.
 	qboolean effectMask;
+	// The shader animates its texture coordinates over time (tcMod scroll/rotate/stretch/turb, entity-driven translate). Such a
+	// surface changes appearance without any geometric motion, so a reprojected history of it is wrong in the same way an effect
+	// is (scrolling lava and water, teleporters). Under the effect mask it does not inherit history either.
+	qboolean textureAnimated;
 } temporalMotionDrawFacts_t;
 
 typedef struct {

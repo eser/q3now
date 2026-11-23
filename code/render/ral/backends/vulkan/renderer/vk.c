@@ -30716,6 +30716,27 @@ void vk_temporal_motion_end_primary_command( qboolean admitted )
 		&vk_temporal_motion_recording );
 }
 
+// True when any active stage of the shader moves its texture coordinates with time. Static tcMod scale/transform/offset do not
+// count: they do not change what a surface looks like from one frame to the next.
+static qboolean vk_shader_texture_animated( const shader_t *shader ) {
+	uint32_t i, b, m;
+	if ( !shader ) return qfalse;
+	for ( i = 0; i < (uint32_t)shader->numUnfoggedPasses && i < MAX_SHADER_STAGES; ++i ) {
+		const shaderStage_t *stage = shader->stages[i];
+		if ( !stage || !stage->active ) continue;
+		for ( b = 0; b < stage->numTexBundles && b < NUM_TEXTURE_BUNDLES; ++b ) {
+			for ( m = 0; m < (uint32_t)stage->bundle[b].numTexMods; ++m ) {
+				switch ( stage->bundle[b].texMods[m].type ) {
+				case TMOD_TURBULENT: case TMOD_SCROLL: case TMOD_STRETCH: case TMOD_ROTATE:
+				case TMOD_ENTITY_TRANSLATE: return qtrue;
+				default: break;
+				}
+			}
+		}
+	}
+	return qfalse;
+}
+
 static qboolean vk_temporal_motion_prepare_bound_draw( uint32_t pipelineSlot )
 {
 	temporalMotionDrawFacts_t facts;
@@ -30770,6 +30791,7 @@ static qboolean vk_temporal_motion_prepare_bound_draw( uint32_t pipelineSlot )
 	facts.sky = shader->isSky;
 	facts.polygonOffset = def->polygon_offset;
 	facts.effectMask = r_dbgTemporalEffectMask && r_dbgTemporalEffectMask->integer ? qtrue : qfalse;
+	facts.textureAnimated = vk_shader_texture_animated( shader );
 	if ( entity ) {
 		facts.depthHack = ( entity->e.renderfx & RF_DEPTHHACK ) ? qtrue : qfalse;
 		facts.crosshair = ( entity->e.renderfx & RF_CROSSHAIR ) ? qtrue : qfalse;

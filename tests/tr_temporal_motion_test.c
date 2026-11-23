@@ -152,6 +152,22 @@ static int TestClassification( void ) {
 	EXPECT_EFFECT( decal );
 	EXPECT_EFFECT( depthHack );
 #undef EXPECT_EFFECT
+	// A shader that animates its texture coordinates (scrolling lava, water, teleporters) changes appearance without moving, so under the
+	// effect mask it does not inherit history either; without the mask it is unchanged. UI, crosshair, sky and a blended stage keep their
+	// class, and an alpha-tested animated surface still follows the invalidate path.
+	facts = WritableFacts( TEMPORAL_MOTION_GEOMETRY_WORLD_STATIC );
+	facts.textureAnimated = qtrue;
+	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_WRITE_VALID );
+	facts.effectMask = qtrue;
+	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_INVALIDATE_OPAQUE );
+	facts.geometry = TEMPORAL_MOTION_GEOMETRY_MOD_BRUSH_RIGID;
+	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_INVALIDATE_OPAQUE );
+	facts.ui = qtrue;
+	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_PRESERVE );
+	facts.ui = qfalse; facts.sky = qtrue;
+	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_INVALIDATE_OPAQUE );   // the pre-existing sky rule
+	facts.sky = qfalse; facts.blended = qtrue;
+	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_PRESERVE );
 	// A blended or additive stage of an opaque surface is not an effect.
 	facts = WritableFacts( TEMPORAL_MOTION_GEOMETRY_WORLD_STATIC );
 	facts.effectMask = facts.blended = facts.additive = qtrue;
