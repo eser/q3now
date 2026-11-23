@@ -298,7 +298,7 @@ fi
         +set com_automated 1 +set s_initsound 0 \
         +set r_fullscreen 0 +set r_mode -1 +set r_customwidth "$W" +set r_customheight "$H" \
         +set r_layoutDump "${WIRED_LAYOUT_DUMP:-0}" \
-        +set r_smaa 1 \
+        +set r_aa 0 +set r_smaa 1 \
         $SURFACE_ARGS +screenshot cornercap +wait 30 +quit \
         >"$RUN_LOG" 2>&1
 )
