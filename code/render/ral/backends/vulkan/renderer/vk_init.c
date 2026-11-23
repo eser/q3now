@@ -2937,7 +2937,7 @@ static void R_Register( void )
 	r_dbgTemporalRepeatResolve = ri.Cvar_Get( "r_dbgTemporalRepeatResolve", "1", CVAR_CHEAT );   // measurement: repeat the (idempotent) resolve dispatch N times
 	r_dbgTemporalRepeatStore = ri.Cvar_Get( "r_dbgTemporalRepeatStore", "1", CVAR_CHEAT );   // measurement: repeat the (idempotent) history store dispatch N times
 	r_dbgTemporalFold = ri.Cvar_Get( "r_dbgTemporalFold", "1", CVAR_CHEAT );   // 1 (default): the resolve dispatch writes the history pair and the store pass only transitions; 0: the store copy runs too (older behaviour, identity reference)
-	r_dbgTemporalQuality = ri.Cvar_Get( "r_dbgTemporalQuality", "7", CVAR_CHEAT );   // resolve quality switches: bit 0 variance clipping, bit 1 velocity dilation, bit 2 spatial fallback (A/B work)
+	r_dbgTemporalQuality = ri.Cvar_Get( "r_dbgTemporalQuality", "7", CVAR_CHEAT );   // resolve quality switches: bit 0 variance clipping, bit 1 velocity dilation, bit 2 spatial fallback, bit 3 set = no output sharpening (A/B work)
 	r_dbgTemporalBootstrap = ri.Cvar_Get( "r_dbgTemporalBootstrap", "1", CVAR_CHEAT );   // 1 (default): the first frame of a temporal history is spatially filtered; 0: plain copy
 	r_dbgTemporalEffectMask = ri.Cvar_Get( "r_dbgTemporalEffectMask", "1", CVAR_CHEAT );   // 1 (default): translucent/additive/decal/first-person draws invalidate the history beneath them; 0: they keep it
 	r_dbgExactHold = ri.Cvar_Get( "r_dbgExactHold", "1", CVAR_CHEAT );   // 1 = default: exact temporal pass held across consecutive exact draws

@@ -328,6 +328,16 @@ vec2 dlMotionVelocity(ivec2 px, int tileIndex, float centerValid) {
 //
 // Box: the 3x3 min/max, tightened by variance clipping (mean +/- 1.25 sigma) when qualityFlags bit 0 is set. The box is an
 // intersection, so it can only get smaller; the mean lies inside both, hence it is never empty.
+void accumulateTap(int index, float weight, inout vec3 sum, inout vec3 lo, inout vec3 hi, inout vec3 moments,
+		inout vec3 squares) {
+	vec3 c = tileColor[index].rgb;
+	sum += c * weight;
+	lo = min(lo, c);
+	hi = max(hi, c);
+	moments += c;
+	squares += c * c;
+}
+
 vec4 reconstructCurrent(int tileIndex, out vec3 boxMin, out vec3 boxMax) {
 	vec2 t = pc.currentEffectiveJitterUv * vec2(pc.extent);
 	vec3 wx = vec3(0.5 * t.x * (t.x - 1.0), 1.0 - t.x * t.x, 0.5 * t.x * (t.x + 1.0));
@@ -337,16 +347,17 @@ vec4 reconstructCurrent(int tileIndex, out vec3 boxMin, out vec3 boxMax) {
 	vec3 neighborhoodMax = vec3(-3.402823466e+38);
 	vec3 momentSum = vec3(0.0);
 	vec3 momentSquares = vec3(0.0);
-	for (int y = -1; y <= 1; ++y) {
-		for (int x = -1; x <= 1; ++x) {
-			vec3 c = tileColor[tileIndex + y * tileSide + x].rgb;
-			sum += c * (wx[x + 1] * wy[y + 1]);
-			neighborhoodMin = min(neighborhoodMin, c);
-			neighborhoodMax = max(neighborhoodMax, c);
-			momentSum += c;
-			momentSquares += c * c;
-		}
-	}
+	// Nine explicit taps with constant weight components: a runtime index into the weight vectors would keep them in memory on
+	// some targets (it cost ~0.3 ms at 2560x1440 through MoltenVK).
+	accumulateTap(tileIndex - tileSide - 1, wx.x * wy.x, sum, neighborhoodMin, neighborhoodMax, momentSum, momentSquares);
+	accumulateTap(tileIndex - tileSide,     wx.y * wy.x, sum, neighborhoodMin, neighborhoodMax, momentSum, momentSquares);
+	accumulateTap(tileIndex - tileSide + 1, wx.z * wy.x, sum, neighborhoodMin, neighborhoodMax, momentSum, momentSquares);
+	accumulateTap(tileIndex - 1,            wx.x * wy.y, sum, neighborhoodMin, neighborhoodMax, momentSum, momentSquares);
+	accumulateTap(tileIndex,                wx.y * wy.y, sum, neighborhoodMin, neighborhoodMax, momentSum, momentSquares);
+	accumulateTap(tileIndex + 1,            wx.z * wy.y, sum, neighborhoodMin, neighborhoodMax, momentSum, momentSquares);
+	accumulateTap(tileIndex + tileSide - 1, wx.x * wy.z, sum, neighborhoodMin, neighborhoodMax, momentSum, momentSquares);
+	accumulateTap(tileIndex + tileSide,     wx.y * wy.z, sum, neighborhoodMin, neighborhoodMax, momentSum, momentSquares);
+	accumulateTap(tileIndex + tileSide + 1, wx.z * wy.z, sum, neighborhoodMin, neighborhoodMax, momentSum, momentSquares);
 	boxMin = neighborhoodMin;
 	boxMax = neighborhoodMax;
 	if ((pc.qualityFlags & 1u) != 0u) {
@@ -425,10 +436,13 @@ void main() {
 				precise vec3 resolvedRgb = mixPrecise(current.rgb, clampedPrior,
 					weight);
 				result = vec4(resolvedRgb, current.a);
-				// Sharpened copy for display only, kept inside the range of the result and the clamp box (no halos).
-				vec3 detail = prior.rgb - samplePreviousBlur(previousTexel);
-				displayed = vec4(clamp(resolvedRgb + outputSharpen * confidence * detail,
-					min(resolvedRgb, clipMin), max(resolvedRgb, clipMax)), current.a);
+				// Sharpened copy for display only, kept inside the range of the result and the clamp box (no halos). qualityFlags bit 3
+				// turns it off (a diagnostic; every backend passes 7).
+				if ((pc.qualityFlags & 8u) == 0u) {
+					vec3 detail = prior.rgb - samplePreviousBlur(previousTexel);
+					displayed = vec4(clamp(resolvedRgb + outputSharpen * confidence * detail,
+						min(resolvedRgb, clipMin), max(resolvedRgb, clipMax)), current.a);
+				}
 				usedHistory = true;
 			}
 		}
