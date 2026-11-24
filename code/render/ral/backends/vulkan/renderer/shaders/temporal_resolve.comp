@@ -183,8 +183,9 @@ float historyWeightForCount(float count) {
 // The range the sharpened colour is kept in (no halos) is the range of the history taps both fetches already read (the five bicubic
 // taps and the four blur taps), so it costs no fetch. It comes from the history, like the detail: the current frame's 3x3 box (the
 // old bound) moves with the jitter phase and made the displayed image ripple with the 8-frame jitter cycle on items and edges. That
-// range is narrower than the jittered box, so the gain is 2 (Vulkan aacompare edge energy vs AA off 0.977; SMAA 0.996).
-const float outputSharpen = 2.0;
+// range is narrower than the jittered box, and the accumulated history (historyCountCap) is smoother still, so the gain is 2.4
+// (Vulkan aacompare edge energy vs AA off 0.990 at 2.4, 0.973 at 2.0; SMAA 0.996).
+const float outputSharpen = 2.4;
 vec3 samplePreviousBlur(vec2 texel, inout vec3 tapMin, inout vec3 tapMax) {
 	vec2 extent = vec2(pc.extent);
 	vec2 invExtent = inversesqrt(extent * extent);

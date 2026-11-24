@@ -839,33 +839,33 @@ kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buff
                     tapMin = param_38;
                     tapMax = param_39;
                     float3 detail = prior.xyz - _1912;
-                    displayed = float4(fast::clamp(resolvedRgb + (detail * (2.0 * confidence)), fast::min(resolvedRgb, tapMin), fast::max(resolvedRgb, tapMax)), current.w);
+                    displayed = float4(fast::clamp(resolvedRgb + (detail * (2.400000095367431640625 * confidence)), fast::min(resolvedRgb, tapMin), fast::max(resolvedRgb, tapMax)), current.w);
                 }
                 usedHistory = true;
             }
         }
     }
-    bool _1936 = !usedHistory;
-    bool _1942;
-    if (_1936)
+    bool _1937 = !usedHistory;
+    bool _1943;
+    if (_1937)
     {
         float4 param_40 = current;
-        _1942 = finite4(param_40);
+        _1943 = finite4(param_40);
     }
     else
     {
-        _1942 = _1936;
+        _1943 = _1937;
     }
-    bool _1950;
-    if (_1942)
+    bool _1951;
+    if (_1943)
     {
-        _1950 = (pc.qualityFlags & 4u) != 0u;
+        _1951 = (pc.qualityFlags & 4u) != 0u;
     }
     else
     {
-        _1950 = _1942;
+        _1951 = _1943;
     }
-    if (_1950)
+    if (_1951)
     {
         int2 param_41 = pixel;
         float4 param_42 = current;
@@ -876,18 +876,18 @@ kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buff
     {
         result = float4(0.0);
     }
-    bool _1965 = !usedHistory;
-    bool _1973;
-    if (!_1965)
+    bool _1966 = !usedHistory;
+    bool _1974;
+    if (!_1966)
     {
         float4 param_44 = displayed;
-        _1973 = !finite4(param_44);
+        _1974 = !finite4(param_44);
     }
     else
     {
-        _1973 = _1965;
+        _1974 = _1966;
     }
-    if (_1973)
+    if (_1974)
     {
         displayed = result;
     }
