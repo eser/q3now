@@ -225,18 +225,28 @@ for key, bucket in buckets.items():
     complete = [sample for sample in bucket["gpu"] if sample.get("frames") == 200 and "total" in sample]
     if len(complete) != 1:
         raise SystemExit(f"FAIL temporal-quality GPU aggregate {key}: {complete}")
-    if "present_prep" not in complete[0]:
-        raise SystemExit(f"FAIL temporal-quality GPU aggregate {key} has no present_prep lane")
-    # GPU work = the frame's lanes minus present_prep, the interval that ends at presentation and absorbs the wait for the next
-    # drawable. On this machine the totals are paced by presentation (present_prep 3.4 ms of a ~4.1 ms total in the AA-off and
-    # SMAA windows), so totals compare cadence, not work.
-    bucket["total"] = complete[0]["total"] - complete[0]["present_prep"]
-off_ms = statistics.mean(buckets[("off", i)]["total"] for i in (1, 2))
-on_ms = statistics.mean(buckets[("on", i)]["total"] for i in (1, 2))
-smaa_ms = statistics.mean(buckets[("smaa", i)]["total"] for i in (1, 2))
-delta_ms = on_ms - off_ms
-smaa_delta_ms = smaa_ms - off_ms
-delta_percent = delta_ms / off_ms * 100.0
+    bucket["lanes"] = complete[0]
+# Budget lanes. Totals are paced by presentation on this machine (present_prep, the interval that ends at presentation, absorbs the
+# wait for the next drawable: 3.4 ms of a ~4.1 ms AA-off total), so the budget compares the anti-aliasing work itself, each mode
+# measured in the same run: its own passes plus what it adds to the scene lanes over AA off (TAA's motion-target passes).
+#   TAA:  temporal_resolve + temporal_store (the "temporal_pre" lane is the post chain before it, not AA work)
+#   SMAA: smaa_passes (copy, edges, blend weights, resolve; the "smaa" lane before it is the post chain)
+scene_lanes = ("particle_compute", "atmosphere_compute", "dlight_shadow_start", "dlight_shadow", "opaque_to_depth",
+    "depth_transfer", "gtao_denoise", "lens_depth")
+def lane_mean(mode, names):
+    values = []
+    for i in (1, 2):
+        lanes = buckets[(mode, i)]["lanes"]
+        missing = [name for name in names if name not in lanes]
+        if missing:
+            raise SystemExit(f"FAIL temporal-quality GPU aggregate {mode}{i} misses lanes {missing}")
+        values.append(sum(lanes[name] for name in names))
+    return statistics.mean(values)
+scene_off = lane_mean("off", scene_lanes)
+on_ms = lane_mean("on", ("temporal_resolve", "temporal_store")) + lane_mean("on", scene_lanes) - scene_off
+smaa_ms = lane_mean("smaa", ("smaa_passes",)) + lane_mean("smaa", scene_lanes) - scene_off
+off_ms = scene_off
+delta_ms = on_ms - smaa_ms
 # The quality criteria above already passed (each raises on failure); report them even when the budget below fails.
 print(
     f"PASS temporal quality: static AA-off={static_baseline_delta:.3f} TAA={static_delta:.3f} "
@@ -245,19 +255,17 @@ print(
     f"pan={motion_delta:.3f}, "
     f"first-settled={first_settled_delta:.3f}, old-frame-residual={ghost_ratio:.2%}, history-roi={history_share:.1%}, "
     f"edge-ratio={edge_ratio:.3f}, AA-off-reference-delta={reference_delta:.3f}")
-# Budget (owner, 2026-11-24): TAA must not cost more GPU work than SMAA by more than SMAA_MARGIN_MS, both measured in the same run
-# as frame work without the presentation wait (see above). This includes the scene-side cost of the motion targets, not only the
-# resolve. The former absolute terms (whole frame within 4.0 ms, TAA within 0.75 ms of AA off) compared presentation cadence and
-# were dropped; AA off is still reported.
+# Budget (owner, 2026-11-24): TAA's anti-aliasing work must not exceed SMAA's by more than TQ_SMAA_MARGIN_MS (lanes above). The
+# former absolute terms (whole frame within 4.0 ms, TAA within 0.75 ms of AA off) compared presentation cadence and were dropped.
 smaa_margin = float(os.environ.get("TQ_SMAA_MARGIN_MS", "0.35"))
-if on_ms > smaa_ms + smaa_margin:
+if delta_ms > smaa_margin:
     raise SystemExit(
-        f"FAIL temporal-quality GPU budget (work without present_prep) off={off_ms:.3f}ms TAA={on_ms:.3f}ms SMAA={smaa_ms:.3f}ms "
-        f"delta={delta_ms:+.3f}ms/{delta_percent:+.2f}% (SMAA reference delta={smaa_delta_ms:+.3f}ms, margin {smaa_margin:.2f}ms)")
+        f"FAIL temporal-quality GPU budget (anti-aliasing work) TAA={on_ms:.3f}ms SMAA={smaa_ms:.3f}ms "
+        f"TAA-SMAA={delta_ms:+.3f}ms > {smaa_margin:.2f}ms (AA-off scene lanes {off_ms:.3f}ms)")
 
 print(
-    f"PASS temporal GPU budget (work without present_prep): off={off_ms:.3f}ms TAA={on_ms:.3f}ms SMAA={smaa_ms:.3f}ms "
-    f"delta={delta_ms:+.3f}ms/{delta_percent:+.2f}% (SMAA reference delta={smaa_delta_ms:+.3f}ms)")
+    f"PASS temporal GPU budget (anti-aliasing work): TAA={on_ms:.3f}ms SMAA={smaa_ms:.3f}ms TAA-SMAA={delta_ms:+.3f}ms "
+    f"(margin {smaa_margin:.2f}ms, AA-off scene lanes {off_ms:.3f}ms)")
 PYEOF
 }
 

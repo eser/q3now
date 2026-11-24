@@ -33384,6 +33384,9 @@ void vk_smaa( void )
 			return;
 		}
 	}
+	// The "smaa" stamp above closes the post chain before SMAA; this one closes SMAA's own passes (copy, edges, blend weights,
+	// resolve), which otherwise fell into the present_prep lane.
+	vk_gpu_ts_write( "smaa_passes" );
 }
 
 
