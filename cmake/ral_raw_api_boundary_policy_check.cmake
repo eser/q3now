@@ -781,7 +781,9 @@ foreach(path IN LISTS production_sources)
 	endforeach()
 endforeach()
 
-set(vk_type_cap 944)
+# 944 -> 946: VK_TemporalInvalidateAuxBlends (declaration + definition), the INVALIDATE sibling's auxiliary blends derived from the
+# draw's scene blend so an effect reduces TAA history by its visible contribution instead of erasing it.
+set(vk_type_cap 946)
 set(vk_macro_cap 1186)
 set(qvk_call_cap 0)
 if(DEFINED RAL_RAW_PRINT_COUNTS AND RAL_RAW_PRINT_COUNTS)

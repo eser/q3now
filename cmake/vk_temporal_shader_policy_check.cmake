@@ -24,7 +24,7 @@ foreach(needle
     "temporalPreviousClip.xy / temporalPreviousClip.w"
     "currentUv - previousUv"
     "out_temporal_velocity = vec2( 0.0 )"
-    "out_temporal_validity = 0.0")
+    "out_temporal_validity = vec4( 0.0 )")
   string(FIND "${VERT}\n${FRAG}" "${needle}" pos)
   if(pos EQUAL -1)
     message(FATAL_ERROR "missing temporal shader authority: ${needle}")
@@ -33,7 +33,7 @@ endforeach()
 if(FRAG MATCHES "gl_FragCoord[^\n]*(velocity|currentUv|currentNdc)")
   message(FATAL_ERROR "raster coordinates must not author temporal motion")
 endif()
-string(FIND "${FRAG}" "void wiredTemporalWriteAux( float coverageConfidence )" helper_start)
+string(FIND "${FRAG}" "void wiredTemporalWriteAux( float coverageConfidence, vec4 sceneColor )" helper_start)
 if(helper_start EQUAL -1)
   message(FATAL_ERROR "temporal helper missing")
 endif()
@@ -60,9 +60,15 @@ if(FRAG MATCHES "out_color[ \t]*(\\.|\\+=|-=|\\*=|/=|\\+\\+|--)")
   message(FATAL_ERROR "out_color gained component, compound or increment authority")
 endif()
 string(FIND "${FRAG}" "out_color = base;" scene_write_pos)
-string(FIND "${FRAG}" "wiredTemporalWriteAux( wiredTemporalAtestConfidence( color0.a ) );" temporal_call_pos)
+string(FIND "${FRAG}" "wiredTemporalWriteAux( wiredTemporalAtestConfidence( color0.a ), base );" temporal_call_pos)
 if(scene_write_pos EQUAL -1 OR temporal_call_pos EQUAL -1 OR NOT scene_write_pos LESS temporal_call_pos)
   message(FATAL_ERROR "temporal auxiliary write must follow the shared scene result")
+endif()
+# The INVALIDATE variant hands the validity blend its visible contribution (max channel, alpha); the pipeline's blend decides
+# whether that erases the history (opaque) or reduces it (an effect). See VK_TemporalInvalidateAuxBlends.
+string(FIND "${HELPER}" "out_temporal_validity = vec4( clamp( max( sceneColor.r, max( sceneColor.g, sceneColor.b ) ), 0.0, 1.0 ), 0.0, 0.0," invalidate_contribution_pos)
+if(invalidate_contribution_pos EQUAL -1)
+  message(FATAL_ERROR "INVALIDATE fragment must write its visible contribution to the validity output")
 endif()
 if(HELPER MATCHES "out_color|discard")
   message(FATAL_ERROR "temporal helper must not mutate scene color or fragment coverage")
@@ -75,8 +81,8 @@ foreach(needle
     "abs( alpha - alpha_test_value ) / span"
     "( alpha_test_value - alpha )"
     "( alpha - alpha_test_value )"
-    "out_temporal_validity = clamp( coverageConfidence, 0.0, 1.0 )"
-    "wiredTemporalWriteAux( 1.0 )")
+    "out_temporal_validity = vec4( clamp( coverageConfidence, 0.0, 1.0 ), 0.0, 0.0, 1.0 )"
+    "wiredTemporalWriteAux( 1.0, base )")
   string(FIND "${FRAG}" "${needle}" atest_confidence_pos)
   if(atest_confidence_pos EQUAL -1)
     message(FATAL_ERROR "ATEST temporal confidence gate missing: ${needle}")

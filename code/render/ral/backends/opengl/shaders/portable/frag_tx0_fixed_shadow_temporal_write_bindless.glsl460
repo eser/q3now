@@ -4,15 +4,15 @@ layout(constant_id = 4) const int tex_domain = 0;
 layout(constant_id = 26) const int lightmap_slot = 0;
 layout(constant_id = 29) const float shadow_bias = 0.004999999888241291046142578125;
 layout(constant_id = 28) const int shadow_pcf = 5;
-const bool _519 = (shadow_pcf <= 1);
-const bool _535 = (shadow_pcf <= 5);
-const bool _788 = (lightmap_slot == 1);
+const bool _522 = (shadow_pcf <= 1);
+const bool _538 = (shadow_pcf <= 5);
+const bool _791 = (lightmap_slot == 1);
 layout(constant_id = 8) const float identity_color = 1.0;
 layout(constant_id = 9) const float identity_alpha = 1.0;
-const bool _832 = (lightmap_slot != 0);
+const bool _835 = (lightmap_slot != 0);
 layout(constant_id = 7) const int discard_mode = 0;
-const bool _931 = (discard_mode == 1);
-const bool _941 = (discard_mode == 2);
+const bool _934 = (discard_mode == 1);
+const bool _944 = (discard_mode == 2);
 layout(constant_id = 3) const int alpha_to_coverage = 0;
 
 layout(binding = 0, std140) uniform UBO
@@ -36,14 +36,14 @@ layout(binding = 0, std140) uniform UBO
     vec4 emissionRadiance;
     vec4 materialBaseColor;
     vec4 materialFactors;
-} _216;
+} _219;
 
 layout(binding = 0) uniform texture2D wired_bindless_images[64];
 layout(binding = 0) uniform sampler wired_bindless_samplers[32];
 layout(binding = 1) uniform sampler2DArray shadowMap;
 
 layout(location = 1) out vec2 out_temporal_velocity;
-layout(location = 2) out float out_temporal_validity;
+layout(location = 2) out vec4 out_temporal_validity;
 layout(location = 12) flat in uint temporalOutcome;
 layout(location = 10) in vec4 temporalCurrentClip;
 layout(location = 11) in vec4 temporalPreviousClip;
@@ -62,7 +62,7 @@ vec3 sRGBToLinear(inout vec3 c)
 
 vec3 wired_boost_legacy_lightmap(vec3 rgb)
 {
-    vec3 boosted = rgb * _216.worldLightParams.x;
+    vec3 boosted = rgb * _219.worldLightParams.x;
     float peak = max(boosted.x, max(boosted.y, boosted.z));
     if (peak > 1.0)
     {
@@ -73,74 +73,74 @@ vec3 wired_boost_legacy_lightmap(vec3 rgb)
 
 vec4 wired_bl_sample_domain(uint role, vec2 uv, int slot)
 {
-    uint _371 = _216.packed_indices[role / 4u][role % 4u] & 4095u;
-    uint _388 = (_216.packed_indices[role / 4u][role % 4u] >> uint(12)) & 255u;
-    vec4 c = texture(sampler2D(wired_bindless_images[_371], wired_bindless_samplers[_388]), uv);
+    uint _374 = _219.packed_indices[role / 4u][role % 4u] & 4095u;
+    uint _391 = (_219.packed_indices[role / 4u][role % 4u] >> uint(12)) & 255u;
+    vec4 c = texture(sampler2D(wired_bindless_images[_374], wired_bindless_samplers[_391]), uv);
     if ((tex_domain & (1 << slot)) == 0)
     {
         vec3 param = c.xyz;
-        vec3 _407 = sRGBToLinear(param);
-        c.x = _407.x;
-        c.y = _407.y;
-        c.z = _407.z;
+        vec3 _410 = sRGBToLinear(param);
+        c.x = _410.x;
+        c.y = _410.y;
+        c.z = _410.z;
     }
     if (lightmap_slot == (slot + 1))
     {
         vec3 param_1 = c.xyz;
-        vec3 _423 = wired_boost_legacy_lightmap(param_1);
-        c.x = _423.x;
-        c.y = _423.y;
-        c.z = _423.z;
+        vec3 _426 = wired_boost_legacy_lightmap(param_1);
+        c.x = _426.x;
+        c.y = _426.y;
+        c.z = _426.z;
     }
     return c;
 }
 
 float sampleCascade(int c, vec3 worldPos)
 {
-    vec4 sc4 = _216.cascadeMVP[c] * vec4(worldPos, 1.0);
+    vec4 sc4 = _219.cascadeMVP[c] * vec4(worldPos, 1.0);
     vec3 sc = sc4.xyz / vec3(sc4.w);
-    vec3 _452 = sc;
-    vec2 _456 = (_452.xy * 0.5) + vec2(0.5);
-    sc.x = _456.x;
-    sc.y = _456.y;
-    bool _463 = sc.x < 0.0;
-    bool _470;
-    if (!_463)
+    vec3 _455 = sc;
+    vec2 _459 = (_455.xy * 0.5) + vec2(0.5);
+    sc.x = _459.x;
+    sc.y = _459.y;
+    bool _466 = sc.x < 0.0;
+    bool _473;
+    if (!_466)
     {
-        _470 = sc.x > 1.0;
+        _473 = sc.x > 1.0;
     }
     else
     {
-        _470 = _463;
+        _473 = _466;
     }
-    bool _477;
-    if (!_470)
+    bool _480;
+    if (!_473)
     {
-        _477 = sc.y < 0.0;
+        _480 = sc.y < 0.0;
     }
     else
     {
-        _477 = _470;
+        _480 = _473;
     }
-    bool _484;
-    if (!_477)
+    bool _487;
+    if (!_480)
     {
-        _484 = sc.y > 1.0;
+        _487 = sc.y > 1.0;
     }
     else
     {
-        _484 = _477;
+        _487 = _480;
     }
-    bool _491;
-    if (!_484)
+    bool _494;
+    if (!_487)
     {
-        _491 = sc.z > 1.0;
+        _494 = sc.z > 1.0;
     }
     else
     {
-        _491 = _484;
+        _494 = _487;
     }
-    if (_491)
+    if (_494)
     {
         return 1.0;
     }
@@ -148,13 +148,13 @@ float sampleCascade(int c, vec3 worldPos)
     vec2 texelSize = vec2(1.0) / vec2(textureSize(shadowMap, 0).xy);
     float currentDepth = sc.z - shadow_bias;
     float shadow = 0.0;
-    if (_519)
+    if (_522)
     {
         shadow = step(currentDepth, texture(shadowMap, vec3(sc.xy, layer)).x);
     }
     else
     {
-        if (_535)
+        if (_538)
         {
             shadow += step(currentDepth, texture(shadowMap, vec3(sc.xy, layer)).x);
             shadow += step(currentDepth, texture(shadowMap, vec3(sc.xy + vec2(texelSize.x, 0.0), layer)).x);
@@ -180,20 +180,20 @@ float sampleCascade(int c, vec3 worldPos)
 
 float sampleShadow(vec3 worldPos, float viewDepth, out int outCascade)
 {
-    vec4 cmp = step(_216.cascadeSplits, vec4(viewDepth));
+    vec4 cmp = step(_219.cascadeSplits, vec4(viewDepth));
     int cascade = min(int(((cmp.x + cmp.y) + cmp.z) + cmp.w), 3);
     outCascade = cascade;
-    float _697;
+    float _700;
     if (cascade == 0)
     {
-        _697 = 0.0;
+        _700 = 0.0;
     }
     else
     {
-        _697 = _216.cascadeSplits[max((cascade - 1), 0)];
+        _700 = _219.cascadeSplits[max((cascade - 1), 0)];
     }
-    float prevSplit = _697;
-    float farSplit = _216.cascadeSplits[cascade];
+    float prevSplit = _700;
+    float farSplit = _219.cascadeSplits[cascade];
     float blendRange = max(0.100000001490116119384765625 * (farSplit - prevSplit), 1.0);
     float blendT = clamp((farSplit - viewDepth) / blendRange, 0.0, 1.0);
     int param = cascade;
@@ -207,17 +207,17 @@ float sampleShadow(vec3 worldPos, float viewDepth, out int outCascade)
 
 vec3 wired_apply_sun_shadow(inout vec3 rgb, vec2 lm_uv)
 {
-    uint _749 = _216.packed_indices[1].w & 4095u;
-    uint _756 = (_216.packed_indices[1].w >> uint(12)) & 255u;
-    float sun_mask = texture(sampler2D(wired_bindless_images[_749], wired_bindless_samplers[_756]), lm_uv).x;
+    uint _752 = _219.packed_indices[1].w & 4095u;
+    uint _759 = (_219.packed_indices[1].w >> uint(12)) & 255u;
+    float sun_mask = texture(sampler2D(wired_bindless_images[_752], wired_bindless_samplers[_759]), lm_uv).x;
     if (sun_mask > 0.001000000047497451305389404296875)
     {
         vec3 param = shadowData.xyz;
         float param_1 = shadowData.w;
         int param_2;
-        float _778 = sampleShadow(param, param_1, param_2);
+        float _781 = sampleShadow(param, param_1, param_2);
         int ignoredCascade = param_2;
-        float shadow = _778;
+        float shadow = _781;
         rgb *= mix(1.0, shadow, sun_mask);
     }
     return rgb;
@@ -225,20 +225,20 @@ vec3 wired_apply_sun_shadow(inout vec3 rgb, vec2 lm_uv)
 
 vec3 wired_apply_sun_shadow_operand(vec3 rgb)
 {
-    if (_788)
+    if (_791)
     {
         vec3 param = rgb;
         vec2 param_1 = frag_tex_coord0;
-        vec3 _797 = wired_apply_sun_shadow(param, param_1);
-        return _797;
+        vec3 _800 = wired_apply_sun_shadow(param, param_1);
+        return _800;
     }
     return rgb;
 }
 
 bool wired_advanced_fog_enabled()
 {
-    int fogType = int(_216.advancedFogTypeFarEnabled.x + 0.5);
-    return ((_216.advancedFogTypeFarEnabled.z > 0.5) && (fogType >= 1)) && (fogType <= 3);
+    int fogType = int(_219.advancedFogTypeFarEnabled.x + 0.5);
+    return ((_219.advancedFogTypeFarEnabled.z > 0.5) && (fogType >= 1)) && (fogType <= 3);
 }
 
 float wired_advanced_fog_amount()
@@ -248,16 +248,16 @@ float wired_advanced_fog_amount()
         return 0.0;
     }
     float viewDepth = 1.0 / max(gl_FragCoord.w, 9.9999999747524270787835121154785e-07);
-    int fogType = int(_216.advancedFogTypeFarEnabled.x + 0.5);
+    int fogType = int(_219.advancedFogTypeFarEnabled.x + 0.5);
     if (fogType == 1)
     {
-        if (_216.advancedFogTypeFarEnabled.y <= 0.0)
+        if (_219.advancedFogTypeFarEnabled.y <= 0.0)
         {
             return 0.0;
         }
-        return clamp(viewDepth / _216.advancedFogTypeFarEnabled.y, 0.0, 1.0);
+        return clamp(viewDepth / _219.advancedFogTypeFarEnabled.y, 0.0, 1.0);
     }
-    float opticalDepth = max(_216.advancedFogColorDensity.w, 0.0) * viewDepth;
+    float opticalDepth = max(_219.advancedFogColorDensity.w, 0.0) * viewDepth;
     if (fogType == 2)
     {
         return clamp(1.0 - exp(-opticalDepth), 0.0, 1.0);
@@ -267,96 +267,96 @@ float wired_advanced_fog_amount()
 
 bool wiredTemporalFinite4(vec4 value)
 {
-    bool _73 = all(equal(value, value));
-    bool _82;
-    if (_73)
+    bool _74 = all(equal(value, value));
+    bool _83;
+    if (_74)
     {
-        _82 = all(lessThanEqual(abs(value), vec4(3.4028234663852885981170418348452e+38)));
+        _83 = all(lessThanEqual(abs(value), vec4(3.4028234663852885981170418348452e+38)));
     }
     else
     {
-        _82 = _73;
+        _83 = _74;
     }
-    return _82;
+    return _83;
 }
 
 bool wiredTemporalFinite2(vec2 value)
 {
-    bool _89 = all(equal(value, value));
-    bool _97;
-    if (_89)
+    bool _90 = all(equal(value, value));
+    bool _98;
+    if (_90)
     {
-        _97 = all(lessThanEqual(abs(value), vec2(3.4028234663852885981170418348452e+38)));
+        _98 = all(lessThanEqual(abs(value), vec2(3.4028234663852885981170418348452e+38)));
     }
     else
     {
-        _97 = _89;
+        _98 = _90;
     }
-    return _97;
+    return _98;
 }
 
-void wiredTemporalWriteAux(float coverageConfidence)
+void wiredTemporalWriteAux(float coverageConfidence, vec4 sceneColor)
 {
     out_temporal_velocity = vec2(0.0);
-    out_temporal_validity = 0.0;
-    bool _110 = temporalOutcome != 1u;
-    bool _120;
-    if (!_110)
+    out_temporal_validity = vec4(0.0);
+    bool _112 = temporalOutcome != 1u;
+    bool _122;
+    if (!_112)
     {
         vec4 param = temporalCurrentClip;
-        _120 = !wiredTemporalFinite4(param);
+        _122 = !wiredTemporalFinite4(param);
     }
     else
     {
-        _120 = _110;
+        _122 = _112;
     }
-    bool _129;
-    if (!_120)
+    bool _131;
+    if (!_122)
     {
         vec4 param_1 = temporalPreviousClip;
-        _129 = !wiredTemporalFinite4(param_1);
+        _131 = !wiredTemporalFinite4(param_1);
     }
     else
     {
-        _129 = _120;
+        _131 = _122;
     }
-    bool _139;
-    if (!_129)
+    bool _141;
+    if (!_131)
     {
-        _139 = temporalCurrentClip.w <= 9.9999999747524270787835121154785e-07;
+        _141 = temporalCurrentClip.w <= 9.9999999747524270787835121154785e-07;
     }
     else
     {
-        _139 = _129;
+        _141 = _131;
     }
-    bool _146;
-    if (!_139)
+    bool _148;
+    if (!_141)
     {
-        _146 = temporalPreviousClip.w <= 9.9999999747524270787835121154785e-07;
+        _148 = temporalPreviousClip.w <= 9.9999999747524270787835121154785e-07;
     }
     else
     {
-        _146 = _139;
+        _148 = _141;
     }
-    if (_146)
+    if (_148)
     {
         return;
     }
     vec2 currentNdc = temporalCurrentClip.xy / vec2(temporalCurrentClip.w);
     vec2 previousNdc = temporalPreviousClip.xy / vec2(temporalPreviousClip.w);
     vec2 param_2 = currentNdc;
-    bool _167 = !wiredTemporalFinite2(param_2);
-    bool _175;
-    if (!_167)
+    bool _169 = !wiredTemporalFinite2(param_2);
+    bool _177;
+    if (!_169)
     {
         vec2 param_3 = previousNdc;
-        _175 = !wiredTemporalFinite2(param_3);
+        _177 = !wiredTemporalFinite2(param_3);
     }
     else
     {
-        _175 = _167;
+        _177 = _169;
     }
-    if (_175)
+    if (_177)
     {
         return;
     }
@@ -369,7 +369,7 @@ void wiredTemporalWriteAux(float coverageConfidence)
         return;
     }
     out_temporal_velocity = velocity;
-    out_temporal_validity = clamp(coverageConfidence, 0.0, 1.0);
+    out_temporal_validity = vec4(clamp(coverageConfidence, 0.0, 1.0), 0.0, 0.0, 1.0);
 }
 
 void main()
@@ -387,45 +387,45 @@ void main()
     vec4 base = color0;
     base = color0;
     vec3 param_3 = base.xyz;
-    vec3 _825 = wired_apply_sun_shadow_operand(param_3);
-    base.x = _825.x;
-    base.y = _825.y;
-    base.z = _825.z;
-    if (_832)
+    vec3 _828 = wired_apply_sun_shadow_operand(param_3);
+    base.x = _828.x;
+    base.y = _828.y;
+    base.z = _828.z;
+    if (_835)
     {
-        float wetness = clamp(_216.worldLightParams.y, 0.0, 1.0);
-        float frost = clamp(_216.worldLightParams.z, 0.0, 1.0);
+        float wetness = clamp(_219.worldLightParams.y, 0.0, 1.0);
+        float frost = clamp(_219.worldLightParams.z, 0.0, 1.0);
         float luminance = dot(base.xyz, vec3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
-        vec4 _854 = base;
-        vec3 _856 = _854.xyz * mix(1.0, 0.819999992847442626953125, wetness);
-        base.x = _856.x;
-        base.y = _856.y;
-        base.z = _856.z;
-        vec4 _863 = base;
-        vec3 _877 = mix(_863.xyz, vec3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), vec3(frost * 0.550000011920928955078125));
-        base.x = _877.x;
-        base.y = _877.y;
-        base.z = _877.z;
+        vec4 _857 = base;
+        vec3 _859 = _857.xyz * mix(1.0, 0.819999992847442626953125, wetness);
+        base.x = _859.x;
+        base.y = _859.y;
+        base.z = _859.z;
+        vec4 _866 = base;
+        vec3 _880 = mix(_866.xyz, vec3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), vec3(frost * 0.550000011920928955078125));
+        base.x = _880.x;
+        base.y = _880.y;
+        base.z = _880.z;
     }
-    if (_216.materialFactors.x >= 0.0)
+    if (_219.materialFactors.x >= 0.0)
     {
-        base *= _216.materialBaseColor;
+        base *= _219.materialBaseColor;
     }
-    vec4 _902 = base;
-    vec3 _904 = _902.xyz + (color0.xyz * _216.emissionRadiance.xyz);
-    base.x = _904.x;
-    base.y = _904.y;
-    base.z = _904.z;
+    vec4 _905 = base;
+    vec3 _907 = _905.xyz + (color0.xyz * _219.emissionRadiance.xyz);
+    base.x = _907.x;
+    base.y = _907.y;
+    base.z = _907.z;
     if (wired_advanced_fog_enabled())
     {
         float fogAmount = wired_advanced_fog_amount();
-        vec4 _916 = base;
-        vec3 _923 = mix(_916.xyz, _216.advancedFogColorDensity.xyz, vec3(fogAmount));
-        base.x = _923.x;
-        base.y = _923.y;
-        base.z = _923.z;
+        vec4 _919 = base;
+        vec3 _926 = mix(_919.xyz, _219.advancedFogColorDensity.xyz, vec3(fogAmount));
+        base.x = _926.x;
+        base.y = _926.y;
+        base.z = _926.z;
     }
-    if (_931)
+    if (_934)
     {
         if (base.w == 0.0)
         {
@@ -434,7 +434,7 @@ void main()
     }
     else
     {
-        if (_941)
+        if (_944)
         {
             if (dot(base.xyz, base.xyz) == 0.0)
             {
@@ -444,6 +444,7 @@ void main()
     }
     out_color = base;
     float param_4 = 1.0;
-    wiredTemporalWriteAux(param_4);
+    vec4 param_5 = base;
+    wiredTemporalWriteAux(param_4, param_5);
 }
 

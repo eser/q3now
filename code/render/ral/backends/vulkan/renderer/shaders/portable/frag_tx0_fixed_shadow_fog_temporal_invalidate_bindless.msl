@@ -51,32 +51,32 @@ constant float shadow_bias_tmp [[function_constant(29)]];
 constant float shadow_bias = is_function_constant_defined(shadow_bias_tmp) ? shadow_bias_tmp : 0.004999999888241291046142578125;
 constant int shadow_pcf_tmp [[function_constant(28)]];
 constant int shadow_pcf = is_function_constant_defined(shadow_pcf_tmp) ? shadow_pcf_tmp : 5;
-constant bool _389 = (shadow_pcf <= 1);
-constant bool _405 = (shadow_pcf <= 5);
-constant bool _658 = (lightmap_slot == 1);
+constant bool _404 = (shadow_pcf <= 1);
+constant bool _420 = (shadow_pcf <= 5);
+constant bool _673 = (lightmap_slot == 1);
 constant float identity_color_tmp [[function_constant(8)]];
 constant float identity_color = is_function_constant_defined(identity_color_tmp) ? identity_color_tmp : 1.0;
 constant float identity_alpha_tmp [[function_constant(9)]];
 constant float identity_alpha = is_function_constant_defined(identity_alpha_tmp) ? identity_alpha_tmp : 1.0;
-constant bool _720 = (lightmap_slot != 0);
+constant bool _735 = (lightmap_slot != 0);
 constant int acff_tmp [[function_constant(10)]];
 constant int acff = is_function_constant_defined(acff_tmp) ? acff_tmp : 0;
-constant bool _805 = (acff == 1);
-constant bool _820 = (acff == 2);
-constant bool _828 = (acff == 3);
-constant bool _853 = (acff == 1);
-constant bool _869 = (acff == 2);
-constant bool _878 = (acff == 3);
+constant bool _820 = (acff == 1);
+constant bool _835 = (acff == 2);
+constant bool _843 = (acff == 3);
+constant bool _868 = (acff == 1);
+constant bool _884 = (acff == 2);
+constant bool _893 = (acff == 3);
 constant int discard_mode_tmp [[function_constant(7)]];
 constant int discard_mode = is_function_constant_defined(discard_mode_tmp) ? discard_mode_tmp : 0;
-constant bool _900 = (discard_mode == 1);
-constant bool _910 = (discard_mode == 2);
+constant bool _915 = (discard_mode == 1);
+constant bool _925 = (discard_mode == 2);
 constant int alpha_to_coverage_tmp [[function_constant(3)]];
 constant int alpha_to_coverage = is_function_constant_defined(alpha_to_coverage_tmp) ? alpha_to_coverage_tmp : 0;
 
 struct spvDescriptorSetBuffer0
 {
-    constant UBO* m_80 [[id(0)]];
+    constant UBO* m_99 [[id(0)]];
 };
 
 struct spvDescriptorSetBuffer1
@@ -95,7 +95,7 @@ struct main0_out
 {
     float4 out_color [[color(0)]];
     float2 out_temporal_velocity [[color(1)]];
-    float out_temporal_validity [[color(2)]];
+    float4 out_temporal_validity [[color(2)]];
 };
 
 struct main0_in
@@ -116,9 +116,9 @@ float3 sRGBToLinear(thread float3& c)
 }
 
 static inline __attribute__((always_inline))
-float3 wired_boost_legacy_lightmap(thread const float3& rgb, constant UBO& _80)
+float3 wired_boost_legacy_lightmap(thread const float3& rgb, constant UBO& _99)
 {
-    float3 boosted = rgb * _80.worldLightParams.x;
+    float3 boosted = rgb * _99.worldLightParams.x;
     float peak = fast::max(boosted.x, fast::max(boosted.y, boosted.z));
     if (peak > 1.0)
     {
@@ -128,77 +128,77 @@ float3 wired_boost_legacy_lightmap(thread const float3& rgb, constant UBO& _80)
 }
 
 static inline __attribute__((always_inline))
-float4 wired_bl_sample_domain(thread const uint& role, thread const float2& uv, thread const int& slot, constant UBO& _80, const spvDescriptorArray<texture2d<float>> wired_bindless_images, const spvDescriptorArray<sampler> wired_bindless_samplers)
+float4 wired_bl_sample_domain(thread const uint& role, thread const float2& uv, thread const int& slot, constant UBO& _99, const spvDescriptorArray<texture2d<float>> wired_bindless_images, const spvDescriptorArray<sampler> wired_bindless_samplers)
 {
-    uint _241 = _80.packed_indices[role / 4u][role % 4u] & 4095u;
-    uint _258 = (_80.packed_indices[role / 4u][role % 4u] >> uint(12)) & 255u;
-    float4 c = wired_bindless_images[_241].sample(wired_bindless_samplers[_258], uv);
+    uint _256 = _99.packed_indices[role / 4u][role % 4u] & 4095u;
+    uint _273 = (_99.packed_indices[role / 4u][role % 4u] >> uint(12)) & 255u;
+    float4 c = wired_bindless_images[_256].sample(wired_bindless_samplers[_273], uv);
     if ((tex_domain & (1 << slot)) == 0)
     {
         float3 param = c.xyz;
-        float3 _277 = sRGBToLinear(param);
-        c.x = _277.x;
-        c.y = _277.y;
-        c.z = _277.z;
+        float3 _292 = sRGBToLinear(param);
+        c.x = _292.x;
+        c.y = _292.y;
+        c.z = _292.z;
     }
     if (lightmap_slot == (slot + 1))
     {
         float3 param_1 = c.xyz;
-        float3 _293 = wired_boost_legacy_lightmap(param_1, _80);
-        c.x = _293.x;
-        c.y = _293.y;
-        c.z = _293.z;
+        float3 _308 = wired_boost_legacy_lightmap(param_1, _99);
+        c.x = _308.x;
+        c.y = _308.y;
+        c.z = _308.z;
     }
     return c;
 }
 
 static inline __attribute__((always_inline))
-float sampleCascade(thread const int& c, thread const float3& worldPos, constant UBO& _80, texture2d_array<float> shadowMap, sampler shadowMapSmplr)
+float sampleCascade(thread const int& c, thread const float3& worldPos, constant UBO& _99, texture2d_array<float> shadowMap, sampler shadowMapSmplr)
 {
-    float4 sc4 = _80.cascadeMVP[c] * float4(worldPos, 1.0);
+    float4 sc4 = _99.cascadeMVP[c] * float4(worldPos, 1.0);
     float3 sc = sc4.xyz / float3(sc4.w);
-    float3 _322 = sc;
-    float2 _326 = (_322.xy * 0.5) + float2(0.5);
-    sc.x = _326.x;
-    sc.y = _326.y;
-    bool _333 = sc.x < 0.0;
-    bool _340;
-    if (!_333)
+    float3 _337 = sc;
+    float2 _341 = (_337.xy * 0.5) + float2(0.5);
+    sc.x = _341.x;
+    sc.y = _341.y;
+    bool _348 = sc.x < 0.0;
+    bool _355;
+    if (!_348)
     {
-        _340 = sc.x > 1.0;
+        _355 = sc.x > 1.0;
     }
     else
     {
-        _340 = _333;
+        _355 = _348;
     }
-    bool _347;
-    if (!_340)
+    bool _362;
+    if (!_355)
     {
-        _347 = sc.y < 0.0;
+        _362 = sc.y < 0.0;
     }
     else
     {
-        _347 = _340;
+        _362 = _355;
     }
-    bool _354;
-    if (!_347)
+    bool _369;
+    if (!_362)
     {
-        _354 = sc.y > 1.0;
+        _369 = sc.y > 1.0;
     }
     else
     {
-        _354 = _347;
+        _369 = _362;
     }
-    bool _361;
-    if (!_354)
+    bool _376;
+    if (!_369)
     {
-        _361 = sc.z > 1.0;
+        _376 = sc.z > 1.0;
     }
     else
     {
-        _361 = _354;
+        _376 = _369;
     }
-    if (_361)
+    if (_376)
     {
         return 1.0;
     }
@@ -206,25 +206,25 @@ float sampleCascade(thread const int& c, thread const float3& worldPos, constant
     float2 texelSize = float2(1.0) / float2(int3(shadowMap.get_width(), shadowMap.get_height(), shadowMap.get_array_size()).xy);
     float currentDepth = sc.z - shadow_bias;
     float shadow = 0.0;
-    if (_389)
+    if (_404)
     {
-        float3 _399 = float3(sc.xy, layer);
-        shadow = step(currentDepth, shadowMap.sample(shadowMapSmplr, _399.xy, uint(rint(_399.z))).x);
+        float3 _414 = float3(sc.xy, layer);
+        shadow = step(currentDepth, shadowMap.sample(shadowMapSmplr, _414.xy, uint(rint(_414.z))).x);
     }
     else
     {
-        if (_405)
+        if (_420)
         {
-            float3 _415 = float3(sc.xy, layer);
-            shadow += step(currentDepth, shadowMap.sample(shadowMapSmplr, _415.xy, uint(rint(_415.z))).x);
-            float3 _432 = float3(sc.xy + float2(texelSize.x, 0.0), layer);
-            shadow += step(currentDepth, shadowMap.sample(shadowMapSmplr, _432.xy, uint(rint(_432.z))).x);
-            float3 _449 = float3(sc.xy - float2(texelSize.x, 0.0), layer);
-            shadow += step(currentDepth, shadowMap.sample(shadowMapSmplr, _449.xy, uint(rint(_449.z))).x);
-            float3 _466 = float3(sc.xy + float2(0.0, texelSize.y), layer);
-            shadow += step(currentDepth, shadowMap.sample(shadowMapSmplr, _466.xy, uint(rint(_466.z))).x);
-            float3 _483 = float3(sc.xy - float2(0.0, texelSize.y), layer);
-            shadow += step(currentDepth, shadowMap.sample(shadowMapSmplr, _483.xy, uint(rint(_483.z))).x);
+            float3 _430 = float3(sc.xy, layer);
+            shadow += step(currentDepth, shadowMap.sample(shadowMapSmplr, _430.xy, uint(rint(_430.z))).x);
+            float3 _447 = float3(sc.xy + float2(texelSize.x, 0.0), layer);
+            shadow += step(currentDepth, shadowMap.sample(shadowMapSmplr, _447.xy, uint(rint(_447.z))).x);
+            float3 _464 = float3(sc.xy - float2(texelSize.x, 0.0), layer);
+            shadow += step(currentDepth, shadowMap.sample(shadowMapSmplr, _464.xy, uint(rint(_464.z))).x);
+            float3 _481 = float3(sc.xy + float2(0.0, texelSize.y), layer);
+            shadow += step(currentDepth, shadowMap.sample(shadowMapSmplr, _481.xy, uint(rint(_481.z))).x);
+            float3 _498 = float3(sc.xy - float2(0.0, texelSize.y), layer);
+            shadow += step(currentDepth, shadowMap.sample(shadowMapSmplr, _498.xy, uint(rint(_498.z))).x);
             shadow /= 5.0;
         }
         else
@@ -233,8 +233,8 @@ float sampleCascade(thread const int& c, thread const float3& worldPos, constant
             {
                 for (int y = -1; y <= 1; y++)
                 {
-                    float3 _525 = float3(sc.xy + (float2(float(x), float(y)) * texelSize), layer);
-                    shadow += step(currentDepth, shadowMap.sample(shadowMapSmplr, _525.xy, uint(rint(_525.z))).x);
+                    float3 _540 = float3(sc.xy + (float2(float(x), float(y)) * texelSize), layer);
+                    shadow += step(currentDepth, shadowMap.sample(shadowMapSmplr, _540.xy, uint(rint(_540.z))).x);
                 }
             }
             shadow /= 9.0;
@@ -244,90 +244,90 @@ float sampleCascade(thread const int& c, thread const float3& worldPos, constant
 }
 
 static inline __attribute__((always_inline))
-float sampleShadow(thread const float3& worldPos, thread const float& viewDepth, thread int& outCascade, constant UBO& _80, texture2d_array<float> shadowMap, sampler shadowMapSmplr)
+float sampleShadow(thread const float3& worldPos, thread const float& viewDepth, thread int& outCascade, constant UBO& _99, texture2d_array<float> shadowMap, sampler shadowMapSmplr)
 {
-    float4 cmp = step(_80.cascadeSplits, float4(viewDepth));
+    float4 cmp = step(_99.cascadeSplits, float4(viewDepth));
     int cascade = min(int(((cmp.x + cmp.y) + cmp.z) + cmp.w), 3);
     outCascade = cascade;
-    float _567;
+    float _582;
     if (cascade == 0)
     {
-        _567 = 0.0;
+        _582 = 0.0;
     }
     else
     {
-        _567 = _80.cascadeSplits[max((cascade - 1), 0)];
+        _582 = _99.cascadeSplits[max((cascade - 1), 0)];
     }
-    float prevSplit = _567;
-    float farSplit = _80.cascadeSplits[cascade];
+    float prevSplit = _582;
+    float farSplit = _99.cascadeSplits[cascade];
     float blendRange = fast::max(0.100000001490116119384765625 * (farSplit - prevSplit), 1.0);
     float blendT = fast::clamp((farSplit - viewDepth) / blendRange, 0.0, 1.0);
     int param = cascade;
     float3 param_1 = worldPos;
-    float s0 = sampleCascade(param, param_1, _80, shadowMap, shadowMapSmplr);
+    float s0 = sampleCascade(param, param_1, _99, shadowMap, shadowMapSmplr);
     int param_2 = min((cascade + 1), 3);
     float3 param_3 = worldPos;
-    float s1 = sampleCascade(param_2, param_3, _80, shadowMap, shadowMapSmplr);
+    float s1 = sampleCascade(param_2, param_3, _99, shadowMap, shadowMapSmplr);
     return mix(s1, s0, blendT);
 }
 
 static inline __attribute__((always_inline))
-float3 wired_apply_sun_shadow(thread float3& rgb, thread const float2& lm_uv, constant UBO& _80, const spvDescriptorArray<texture2d<float>> wired_bindless_images, const spvDescriptorArray<sampler> wired_bindless_samplers, texture2d_array<float> shadowMap, sampler shadowMapSmplr, thread float4& shadowData)
+float3 wired_apply_sun_shadow(thread float3& rgb, thread const float2& lm_uv, constant UBO& _99, const spvDescriptorArray<texture2d<float>> wired_bindless_images, const spvDescriptorArray<sampler> wired_bindless_samplers, texture2d_array<float> shadowMap, sampler shadowMapSmplr, thread float4& shadowData)
 {
-    uint _619 = _80.packed_indices[1].w & 4095u;
-    uint _626 = (_80.packed_indices[1].w >> uint(12)) & 255u;
-    float sun_mask = wired_bindless_images[_619].sample(wired_bindless_samplers[_626], lm_uv).x;
+    uint _634 = _99.packed_indices[1].w & 4095u;
+    uint _641 = (_99.packed_indices[1].w >> uint(12)) & 255u;
+    float sun_mask = wired_bindless_images[_634].sample(wired_bindless_samplers[_641], lm_uv).x;
     if (sun_mask > 0.001000000047497451305389404296875)
     {
         float3 param = shadowData.xyz;
         float param_1 = shadowData.w;
         int param_2;
-        float _648 = sampleShadow(param, param_1, param_2, _80, shadowMap, shadowMapSmplr);
+        float _663 = sampleShadow(param, param_1, param_2, _99, shadowMap, shadowMapSmplr);
         int ignoredCascade = param_2;
-        float shadow = _648;
+        float shadow = _663;
         rgb *= mix(1.0, shadow, sun_mask);
     }
     return rgb;
 }
 
 static inline __attribute__((always_inline))
-float3 wired_apply_sun_shadow_operand(thread const float3& rgb, constant UBO& _80, const spvDescriptorArray<texture2d<float>> wired_bindless_images, const spvDescriptorArray<sampler> wired_bindless_samplers, texture2d_array<float> shadowMap, sampler shadowMapSmplr, thread float4& shadowData, thread float2& frag_tex_coord0)
+float3 wired_apply_sun_shadow_operand(thread const float3& rgb, constant UBO& _99, const spvDescriptorArray<texture2d<float>> wired_bindless_images, const spvDescriptorArray<sampler> wired_bindless_samplers, texture2d_array<float> shadowMap, sampler shadowMapSmplr, thread float4& shadowData, thread float2& frag_tex_coord0)
 {
-    if (_658)
+    if (_673)
     {
         float3 param = rgb;
         float2 param_1 = frag_tex_coord0;
-        float3 _667 = wired_apply_sun_shadow(param, param_1, _80, wired_bindless_images, wired_bindless_samplers, shadowMap, shadowMapSmplr, shadowData);
-        return _667;
+        float3 _682 = wired_apply_sun_shadow(param, param_1, _99, wired_bindless_images, wired_bindless_samplers, shadowMap, shadowMapSmplr, shadowData);
+        return _682;
     }
     return rgb;
 }
 
 static inline __attribute__((always_inline))
-bool wired_advanced_fog_enabled(constant UBO& _80)
+bool wired_advanced_fog_enabled(constant UBO& _99)
 {
-    int fogType = int(_80.advancedFogTypeFarEnabled.x + 0.5);
-    return ((_80.advancedFogTypeFarEnabled.z > 0.5) && (fogType >= 1)) && (fogType <= 3);
+    int fogType = int(_99.advancedFogTypeFarEnabled.x + 0.5);
+    return ((_99.advancedFogTypeFarEnabled.z > 0.5) && (fogType >= 1)) && (fogType <= 3);
 }
 
 static inline __attribute__((always_inline))
-float wired_advanced_fog_amount(constant UBO& _80, thread float4& gl_FragCoord)
+float wired_advanced_fog_amount(constant UBO& _99, thread float4& gl_FragCoord)
 {
-    if (!wired_advanced_fog_enabled(_80))
+    if (!wired_advanced_fog_enabled(_99))
     {
         return 0.0;
     }
     float viewDepth = 1.0 / fast::max(gl_FragCoord.w, 9.9999999747524270787835121154785e-07);
-    int fogType = int(_80.advancedFogTypeFarEnabled.x + 0.5);
+    int fogType = int(_99.advancedFogTypeFarEnabled.x + 0.5);
     if (fogType == 1)
     {
-        if (_80.advancedFogTypeFarEnabled.y <= 0.0)
+        if (_99.advancedFogTypeFarEnabled.y <= 0.0)
         {
             return 0.0;
         }
-        return fast::clamp(viewDepth / _80.advancedFogTypeFarEnabled.y, 0.0, 1.0);
+        return fast::clamp(viewDepth / _99.advancedFogTypeFarEnabled.y, 0.0, 1.0);
     }
-    float opticalDepth = fast::max(_80.advancedFogColorDensity.w, 0.0) * viewDepth;
+    float opticalDepth = fast::max(_99.advancedFogColorDensity.w, 0.0) * viewDepth;
     if (fogType == 2)
     {
         return fast::clamp(1.0 - exp(-opticalDepth), 0.0, 1.0);
@@ -336,10 +336,11 @@ float wired_advanced_fog_amount(constant UBO& _80, thread float4& gl_FragCoord)
 }
 
 static inline __attribute__((always_inline))
-void wiredTemporalWriteAux(thread const float& coverageConfidence, thread float2& out_temporal_velocity, thread float& out_temporal_validity)
+void wiredTemporalWriteAux(thread const float& coverageConfidence, thread const float4& sceneColor, thread float2& out_temporal_velocity, thread float4& out_temporal_validity)
 {
     out_temporal_velocity = float2(0.0);
-    out_temporal_validity = 0.0;
+    out_temporal_validity = float4(0.0);
+    out_temporal_validity = float4(fast::clamp(fast::max(sceneColor.x, fast::max(sceneColor.y, sceneColor.z)), 0.0, 1.0), 0.0, 0.0, fast::clamp(sceneColor.w, 0.0, 1.0));
 }
 
 fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], const device spvDescriptorSetBuffer1& spvDescriptorSet1 [[buffer(1)]], const device spvDescriptorSetBuffer2& spvDescriptorSet2 [[buffer(2)]], float4 gl_FragCoord [[position]])
@@ -348,13 +349,13 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
     spvDescriptorArray<sampler> wired_bindless_samplers {reinterpret_cast<const device spvDescriptor<sampler>*>(&spvDescriptorSet1.wired_bindless_images)};
 
     main0_out out = {};
-    uint _676 = (*spvDescriptorSet0.m_80).packed_indices[0].w & 4095u;
-    uint _683 = ((*spvDescriptorSet0.m_80).packed_indices[0].w >> uint(12)) & 255u;
-    float4 fog = wired_bindless_images[_676].sample(wired_bindless_samplers[_683], in.fog_tex_coord);
+    uint _691 = (*spvDescriptorSet0.m_99).packed_indices[0].w & 4095u;
+    uint _698 = ((*spvDescriptorSet0.m_99).packed_indices[0].w >> uint(12)) & 255u;
+    float4 fog = wired_bindless_images[_691].sample(wired_bindless_samplers[_698], in.fog_tex_coord);
     uint param = 0u;
     float2 param_1 = in.frag_tex_coord0;
     int param_2 = 0;
-    float4 sampledColor0 = wired_bl_sample_domain(param, param_1, param_2, (*spvDescriptorSet0.m_80), wired_bindless_images, wired_bindless_samplers);
+    float4 sampledColor0 = wired_bl_sample_domain(param, param_1, param_2, (*spvDescriptorSet0.m_99), wired_bindless_images, wired_bindless_samplers);
     float4 frag_color;
     frag_color.x = identity_color;
     frag_color.y = identity_color;
@@ -364,99 +365,99 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
     float4 base = color0;
     base = color0;
     float3 param_3 = base.xyz;
-    float3 _713 = wired_apply_sun_shadow_operand(param_3, (*spvDescriptorSet0.m_80), wired_bindless_images, wired_bindless_samplers, spvDescriptorSet2.shadowMap, spvDescriptorSet2.shadowMapSmplr, in.shadowData, in.frag_tex_coord0);
-    base.x = _713.x;
-    base.y = _713.y;
-    base.z = _713.z;
-    if (_720)
+    float3 _728 = wired_apply_sun_shadow_operand(param_3, (*spvDescriptorSet0.m_99), wired_bindless_images, wired_bindless_samplers, spvDescriptorSet2.shadowMap, spvDescriptorSet2.shadowMapSmplr, in.shadowData, in.frag_tex_coord0);
+    base.x = _728.x;
+    base.y = _728.y;
+    base.z = _728.z;
+    if (_735)
     {
-        float wetness = fast::clamp((*spvDescriptorSet0.m_80).worldLightParams.y, 0.0, 1.0);
-        float frost = fast::clamp((*spvDescriptorSet0.m_80).worldLightParams.z, 0.0, 1.0);
+        float wetness = fast::clamp((*spvDescriptorSet0.m_99).worldLightParams.y, 0.0, 1.0);
+        float frost = fast::clamp((*spvDescriptorSet0.m_99).worldLightParams.z, 0.0, 1.0);
         float luminance = dot(base.xyz, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
-        float4 _742 = base;
-        float3 _744 = _742.xyz * mix(1.0, 0.819999992847442626953125, wetness);
-        base.x = _744.x;
-        base.y = _744.y;
-        base.z = _744.z;
-        float4 _751 = base;
-        float3 _765 = mix(_751.xyz, float3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), float3(frost * 0.550000011920928955078125));
-        base.x = _765.x;
-        base.y = _765.y;
-        base.z = _765.z;
+        float4 _757 = base;
+        float3 _759 = _757.xyz * mix(1.0, 0.819999992847442626953125, wetness);
+        base.x = _759.x;
+        base.y = _759.y;
+        base.z = _759.z;
+        float4 _766 = base;
+        float3 _780 = mix(_766.xyz, float3(luminance * 0.87999999523162841796875, luminance * 0.939999997615814208984375, luminance), float3(frost * 0.550000011920928955078125));
+        base.x = _780.x;
+        base.y = _780.y;
+        base.z = _780.z;
     }
-    if ((*spvDescriptorSet0.m_80).materialFactors.x >= 0.0)
+    if ((*spvDescriptorSet0.m_99).materialFactors.x >= 0.0)
     {
-        base *= (*spvDescriptorSet0.m_80).materialBaseColor;
+        base *= (*spvDescriptorSet0.m_99).materialBaseColor;
     }
-    float4 _790 = base;
-    float3 _792 = _790.xyz + (color0.xyz * (*spvDescriptorSet0.m_80).emissionRadiance.xyz);
-    base.x = _792.x;
-    base.y = _792.y;
-    base.z = _792.z;
-    if (wired_advanced_fog_enabled((*spvDescriptorSet0.m_80)))
+    float4 _805 = base;
+    float3 _807 = _805.xyz + (color0.xyz * (*spvDescriptorSet0.m_99).emissionRadiance.xyz);
+    base.x = _807.x;
+    base.y = _807.y;
+    base.z = _807.z;
+    if (wired_advanced_fog_enabled((*spvDescriptorSet0.m_99)))
     {
-        float fogAmount = wired_advanced_fog_amount((*spvDescriptorSet0.m_80), gl_FragCoord);
-        if (_805)
+        float fogAmount = wired_advanced_fog_amount((*spvDescriptorSet0.m_99), gl_FragCoord);
+        if (_820)
         {
-            float4 _810 = base;
-            float3 _812 = _810.xyz * (1.0 - fogAmount);
-            base.x = _812.x;
-            base.y = _812.y;
-            base.z = _812.z;
+            float4 _825 = base;
+            float3 _827 = _825.xyz * (1.0 - fogAmount);
+            base.x = _827.x;
+            base.y = _827.y;
+            base.z = _827.z;
         }
         else
         {
-            if (_820)
+            if (_835)
             {
                 base *= (1.0 - fogAmount);
             }
             else
             {
-                if (_828)
+                if (_843)
                 {
                     base.w *= (1.0 - fogAmount);
                 }
                 else
                 {
-                    float4 _838 = base;
-                    float3 _845 = mix(_838.xyz, (*spvDescriptorSet0.m_80).advancedFogColorDensity.xyz, float3(fogAmount));
-                    base.x = _845.x;
-                    base.y = _845.y;
-                    base.z = _845.z;
+                    float4 _853 = base;
+                    float3 _860 = mix(_853.xyz, (*spvDescriptorSet0.m_99).advancedFogColorDensity.xyz, float3(fogAmount));
+                    base.x = _860.x;
+                    base.y = _860.y;
+                    base.z = _860.z;
                 }
             }
         }
     }
     else
     {
-        if (_853)
+        if (_868)
         {
-            float4 _856 = base;
-            float3 _861 = _856.xyz * (1.0 - fog.w);
-            base.x = _861.x;
-            base.y = _861.y;
-            base.z = _861.z;
+            float4 _871 = base;
+            float3 _876 = _871.xyz * (1.0 - fog.w);
+            base.x = _876.x;
+            base.y = _876.y;
+            base.z = _876.z;
         }
         else
         {
-            if (_869)
+            if (_884)
             {
                 base *= (1.0 - fog.w);
             }
             else
             {
-                if (_878)
+                if (_893)
                 {
                     base.w *= (1.0 - fog.w);
                 }
                 else
                 {
-                    base = mix(base, fog * (*spvDescriptorSet0.m_80).fogColor, float4(fog.w));
+                    base = mix(base, fog * (*spvDescriptorSet0.m_99).fogColor, float4(fog.w));
                 }
             }
         }
     }
-    if (_900)
+    if (_915)
     {
         if (base.w == 0.0)
         {
@@ -465,7 +466,7 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
     }
     else
     {
-        if (_910)
+        if (_925)
         {
             if (dot(base.xyz, base.xyz) == 0.0)
             {
@@ -475,7 +476,8 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
     }
     out.out_color = base;
     float param_4 = 1.0;
-    wiredTemporalWriteAux(param_4, out.out_temporal_velocity, out.out_temporal_validity);
+    float4 param_5 = base;
+    wiredTemporalWriteAux(param_4, param_5, out.out_temporal_velocity, out.out_temporal_validity);
     return out;
 }
 

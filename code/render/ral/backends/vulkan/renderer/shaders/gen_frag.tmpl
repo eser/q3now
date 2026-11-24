@@ -186,7 +186,9 @@ layout(location = 10) in vec4 temporalCurrentClip;
 layout(location = 11) in vec4 temporalPreviousClip;
 layout(location = 12) flat in uint temporalOutcome;
 layout(location = 1) out vec2 out_temporal_velocity;
-layout(location = 2) out float out_temporal_validity;
+// vec4 so an INVALIDATE draw can hand the validity blend its contribution in .r and its alpha in .a (see
+// VK_TemporalInvalidateAuxBlends); the attachment is R8, only .r is stored.
+layout(location = 2) out vec4 out_temporal_validity;
 
 bool wiredTemporalFinite4( vec4 value ) {
 	return all( equal( value, value ) )
@@ -197,10 +199,15 @@ bool wiredTemporalFinite2( vec2 value ) {
 		&& all( lessThanEqual( abs( value ), vec2( 3.402823466e38 ) ) );
 }
 
-void wiredTemporalWriteAux( float coverageConfidence ) {
+void wiredTemporalWriteAux( float coverageConfidence, vec4 sceneColor ) {
 	out_temporal_velocity = vec2( 0.0 );
-	out_temporal_validity = 0.0;
-#ifndef USE_TEMPORAL_INVALIDATE
+	out_temporal_validity = vec4( 0.0 );
+#ifdef USE_TEMPORAL_INVALIDATE
+	// The pipeline's validity blend decides what this means: an opaque INVALIDATE blends it away to zero, a blended one
+	// subtracts its visible contribution (max channel of what it adds, weighted by the scene's own blend factors).
+	out_temporal_validity = vec4( clamp( max( sceneColor.r, max( sceneColor.g, sceneColor.b ) ), 0.0, 1.0 ), 0.0, 0.0,
+		clamp( sceneColor.a, 0.0, 1.0 ) );
+#else
 	if ( temporalOutcome != 1u || !wiredTemporalFinite4( temporalCurrentClip )
 			|| !wiredTemporalFinite4( temporalPreviousClip )
 			|| temporalCurrentClip.w <= 1.0e-6
@@ -214,7 +221,7 @@ void wiredTemporalWriteAux( float coverageConfidence ) {
 	vec2 velocity = currentUv - previousUv;
 	if ( !wiredTemporalFinite2( velocity ) ) return;
 	out_temporal_velocity = velocity;
-	out_temporal_validity = clamp( coverageConfidence, 0.0, 1.0 );
+	out_temporal_validity = vec4( clamp( coverageConfidence, 0.0, 1.0 ), 0.0, 0.0, 1.0 );
 #endif
 }
 #endif
@@ -1086,9 +1093,9 @@ frag_color.w = identity_alpha;
 
 #ifdef USE_TEMPORAL_MOTION
 #ifdef USE_ATEST
-	wiredTemporalWriteAux( wiredTemporalAtestConfidence( color0.a ) );
+	wiredTemporalWriteAux( wiredTemporalAtestConfidence( color0.a ), base );
 #else
-	wiredTemporalWriteAux( 1.0 );
+	wiredTemporalWriteAux( 1.0, base );
 #endif
 #endif
 

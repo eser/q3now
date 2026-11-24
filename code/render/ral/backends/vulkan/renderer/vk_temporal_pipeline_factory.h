@@ -37,6 +37,17 @@ typedef struct {
 	qboolean ready;
 } vkTemporalPipelineLayoutOwner_t;
 
+// Auxiliary attachment blends of a generic INVALIDATE sibling, derived from its scene blend (attachment zero).
+// An opaque draw replaces the pixel: velocity is written (the fragment writes zero) and validity becomes zero.
+// A blended draw (an effect, a decal) only partly changes the pixel, so it must not erase the history under it outright:
+// velocity keeps the surface's own motion (write mask zero) and validity is reduced by the draw's visible contribution,
+// blended with the scene's own factors and REVERSE_SUBTRACT: validity' = validity * dstFactor - contribution * srcFactor,
+// where the fragment's validity output is (max(r, g, b), 0, 0, alpha) of its scene colour. An additive effect therefore
+// subtracts the light it adds (a faded one leaves the history almost intact), an alpha-blended one scales validity by
+// (1 - alpha) and subtracts its weighted brightness. UNORM clamping keeps the result in [0, 1].
+// blends[0] is the scene blend (read), blends[1] velocity and blends[2] validity are authored.
+void VK_TemporalInvalidateAuxBlends( VkPipelineColorBlendAttachmentState blends[3] );
+
 void VK_TemporalPipelineLayoutInit( vkTemporalPipelineLayoutOwner_t *owner );
 qboolean VK_TemporalPipelineLayoutEnsure( vkTemporalPipelineLayoutOwner_t *owner,
 	ralBackend_t *backend, VkDevice device,

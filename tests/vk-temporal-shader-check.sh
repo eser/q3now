@@ -46,7 +46,8 @@ grep -Eq '%temporalPreviousClip = OpVariable %_ptr_Output_v4float Output' "$vert
 grep -Eq '%temporalCurrentClip = OpVariable %_ptr_Input_v4float Input' "$frag"
 grep -Eq '%temporalPreviousClip = OpVariable %_ptr_Input_v4float Input' "$frag"
 grep -Eq '%out_temporal_velocity = OpVariable %_ptr_Output_v2float Output' "$frag"
-grep -Eq '%out_temporal_validity = OpVariable %_ptr_Output_float Output' "$frag"
+# Generic temporal fragments write validity as a vec4 (.r stored; .a feeds the INVALIDATE sibling's validity blend).
+grep -Eq '%out_temporal_validity = OpVariable %_ptr_Output_v4float Output' "$frag"
 ! grep -Eq 'OpDecorate %(temporalCurrentClip|temporalPreviousClip) (Flat|NoPerspective|Noperspective)' "$vert" "$frag"
 grep -Eq 'OpDecorate %temporalOutcome Flat' "$vert"
 grep -Eq 'OpDecorate %temporalOutcome Flat' "$frag"
@@ -56,8 +57,9 @@ for file in "$inv" "$iqm"; do
 	grep -Eq 'OpDecorate %out_temporal_validity Location 2' "$file"
 	grep -Eq '%out_color = OpVariable %_ptr_Output_v4float Output' "$file"
 	grep -Eq '%out_temporal_velocity = OpVariable %_ptr_Output_v2float Output' "$file"
-	grep -Eq '%out_temporal_validity = OpVariable %_ptr_Output_float Output' "$file"
 done
+grep -Eq '%out_temporal_validity = OpVariable %_ptr_Output_v4float Output' "$inv"
+grep -Eq '%out_temporal_validity = OpVariable %_ptr_Output_float Output' "$iqm"
 
 # Exhaust every manifest-owned temporal generic blob, rather than treating the
 # representative pair above as proof for the generated 58-pair catalog.

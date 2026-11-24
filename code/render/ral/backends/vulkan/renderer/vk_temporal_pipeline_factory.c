@@ -188,6 +188,21 @@ static qboolean BaseFingerprint( const VkGraphicsPipelineCreateInfo *base,
 	return qtrue;
 }
 
+void VK_TemporalInvalidateAuxBlends( VkPipelineColorBlendAttachmentState blends[3] ) {
+	uint32_t sceneBlended;
+	if ( !blends ) return;
+	sceneBlended = blends[0].blendEnable ? 1u : 0u;
+	memset( &blends[2], 0, sizeof( blends[2] ) );   // factor ZERO and op ADD are the zero enumerants
+	blends[2].blendEnable = VK_TRUE;
+	blends[2].colorWriteMask = VK_COLOR_COMPONENT_R_BIT;
+	if ( !sceneBlended ) return;   // opaque: velocity as authored (RG), validity blended to zero (factors ZERO/ZERO, ADD)
+	blends[1].blendEnable = 0;
+	blends[1].colorWriteMask = 0;
+	blends[2].srcColorBlendFactor = blends[2].srcAlphaBlendFactor = blends[0].srcColorBlendFactor;
+	blends[2].dstColorBlendFactor = blends[2].dstAlphaBlendFactor = blends[0].dstColorBlendFactor;
+	blends[2].colorBlendOp = blends[2].alphaBlendOp = VK_BLEND_OP_REVERSE_SUBTRACT;
+}
+
 void VK_TemporalPipelineLayoutInit( vkTemporalPipelineLayoutOwner_t *owner ) {
 	if ( owner ) memset( owner, 0, sizeof( *owner ) );
 }
@@ -389,6 +404,8 @@ qboolean VK_TemporalPipelineFactoryEnsure( vkTemporalPipelineFactoryOwner_t *own
 		vkBlends[0] = genericBase->pColorBlendState->pAttachments[0];
 		vkBlends[1].colorWriteMask = recipe.colorBlends[1].writeMask;
 		vkBlends[2].colorWriteMask = recipe.colorBlends[2].writeMask;
+		if ( ri.kind == VK_TEMPORAL_SHADER_INVALIDATE )
+			VK_TemporalInvalidateAuxBlends( vkBlends );
 		colorBlend.attachmentCount = 3;
 		colorBlend.pAttachments = vkBlends;
 		exact.pColorBlendState = &colorBlend;
@@ -577,6 +594,7 @@ qboolean VK_TemporalGenericPipelineFactoryEnsure( vkTemporalGenericPipelineFacto
 		vkBlends[0]=base->pColorBlendState->pAttachments[0];
 		vkBlends[1].colorWriteMask=recipe.colorBlends[1].writeMask;
 		vkBlends[2].colorWriteMask=recipe.colorBlends[2].writeMask;
+		if(ri.kind==VK_TEMPORAL_SHADER_INVALIDATE)VK_TemporalInvalidateAuxBlends(vkBlends);
 		colorBlend.attachmentCount=3u;colorBlend.pAttachments=vkBlends;exact.pColorBlendState=&colorBlend;
 		candidate[i]=ops->create(&exact,layoutOwner->adopted,recipe.colorFormats,3u,
 			input->depthFormat,&override,"wired-temporal-generic");
