@@ -7,7 +7,7 @@
 # the Quake 1 train rules, and which the RAL renderers draw since inline brush models register again. Time is NOT pinned: a mover's position comes from a server-time trajectory leg, so a pinned cg.time
 # outside the current leg clamps it and nothing moves. The harness's fixedtime advances client and server time by the same amount every
 # frame, which makes an unpinned capture reproducible (two runs differ only in the HUD counters). Three captures per backend:
-#   taa   r_aa 1 throughout, captured STEP frames after the harness's settle point, so its history follows the movers' motion.
+#   taa   r_aa 1 throughout, captured SETTLE + STEP frames after the harness's settle point, so its history follows the movers.
 #   off   r_aa 0, the same frame (the reference image of the same pose).
 #   base  r_aa 0, STEP frames earlier: |off - base| > 8 segments the region that moved (the mover region).
 # The report is the mean abs deviation of the TAA frame from the AA-off frame at the same pose, inside the mover region and over the
@@ -30,11 +30,14 @@ PNG2RAW="${PNG2RAW:-$WIRED_SOURCE/tools/png2raw/png2raw}"
 OUT="${RAL_MOVER_OUT:-$(mktemp -d "${WIRED_TMP:-${TMPDIR:-/tmp}}/ral-mover-trail-XXXXXX")}"
 mkdir -p "$OUT"
 STEP="${RAL_MOVER_STEP_FRAMES:-8}"
+# Frames to wait after the harness's settle point before the base capture: the setviewpos teleport effect cuts TAA history over the
+# whole screen for about 1.2 s, and the harness shoots about 0.8 s after it, so without this the TAA capture has no history to test.
+SETTLE="${RAL_MOVER_SETTLE_FRAMES:-200}"
 MAP="${RAL_MOVER_MAP:-e1m5}"
 
 FAIL=0
 for backend in $BACKENDS; do
-	for spec in "taa:1:wait $STEP" "off:0:wait $STEP" "base:0:"; do
+	for spec in "taa:1:wait $(( SETTLE + STEP ))" "off:0:wait $(( SETTLE + STEP ))" "base:0:wait $(( SETTLE ))"; do
 		name=${spec%%:*}; rest=${spec#*:}; aa=${rest%%:*}; pre=${rest#*:}
 		RAL_PARITY_BACKENDS="$backend" RAL_PARITY_MAPS="$MAP" RAL_PARITY_MATERIAL_COOK_DIR="$COOK" RAL_PARITY_INITSOUND=0 \
 			RAL_PARITY_ANALYZE=0 RAL_PARITY_REPEAT=0 RAL_PARITY_PIN_FRAME_TIME=0 RAL_PARITY_EXTRA_CFG="set r_aa $aa" \

@@ -2459,8 +2459,9 @@ static qboolean BuildEntityVertices( const ralMetalPresent_t *present,
 				EntityBatchLighting( &commands[i], batch );
 			}
 			/* A rigid brush entity (door, plat, train) with a motion identity is a candidate for object motion; the first-person
-			 * weapon moves with the camera and stays invalidated. */
-			if ( motion && commands[i].hasTemporal && model.format == RENDER_MODEL_INLINE_BSP
+			 * weapon moves with the camera and stays invalidated. MD3 and IQM models replay their previous animation frames the same
+			 * way, but stay invalidated until their benefit and the animated-model cases (bots, powerup shells) are measured. */
+			if ( motion && commands[i].hasTemporal && model.format == RENDER_MODEL_INLINE_BSP && model.frameCount && model.positions
 					&& !( entity->renderfx & ( RF_DEPTHHACK | RF_FIRST_PERSON ) ) ) {
 				if ( motion->candidateCount == motion->candidateCapacity ) {
 					const uint32_t capacity = motion->candidateCapacity ? motion->candidateCapacity * 2u : 64u;
@@ -3106,17 +3107,17 @@ static void EntityMotionFinish( ralMetalPresent_t *present, qboolean committed )
 }
 
 /* Records this frame's candidate poses under the TAA frame id and, for each entity with a committed previous pose, fills the previous
- * world position of its vertices (the vertex's model-space position, kept in materialPosition, under the previous transform) and
- * marks the batches that write motion. True when at least one batch writes motion. */
+ * world position of its vertices (the model's previous animation frames under the previous transform) and marks the batches that
+ * write motion. True when at least one batch writes motion. */
 static qboolean EntityMotionPrepare( ralMetalPresent_t *present, const renderSubmissionState_t *frontend,
-		const ralMetalWorldVertex_t *vertices, uint32_t vertexCount, ralMetalEntityBatch_t *batches, uint32_t batchCount,
+		uint32_t vertexCount, ralMetalEntityBatch_t *batches, uint32_t batchCount,
 		uint64_t frameId ) {
 	ralMetalEntityMotion_t *motion = &present->entityMotion;
 	const renderEntityCommand_t *commands;
 	uint32_t commandCount = 0u;
 	motion->motionBatches = 0u;
 	EntityMotionFinish( present, qfalse );
-	if ( !motion->candidateCount || !frontend || frontend->activeWorldIndex < 0 || !vertices || !batches ) return qfalse;
+	if ( !motion->candidateCount || !frontend || frontend->activeWorldIndex < 0 || !batches ) return qfalse;
 	if ( vertexCount > motion->previousCapacity ) {
 		float (*grown)[4] = (float (*)[4])realloc( motion->previous, (size_t)vertexCount * sizeof( *grown ) );
 		if ( !grown ) return qfalse;
@@ -3141,19 +3142,30 @@ static qboolean EntityMotionPrepare( ralMetalPresent_t *present, const renderSub
 		}
 		motion->recorded++;
 		if ( !receipt.previousValid ) continue;
+		/* The previous pose replays its own animation frames (the same frame selection and lerp as BuildEntityVertices) under its
+		 * own transform. */
+		if ( candidate->vertexCount != model.vertexCount || !model.frameCount ) continue;
 		motion->previousValid++;
-		for ( uint32_t v = candidate->firstVertex; v < candidate->firstVertex + candidate->vertexCount; ++v ) {
-			const float *local = vertices[v].materialPosition;
-			for ( uint32_t axis = 0u; axis < 3u; ++axis )
-				motion->previous[v][axis] = receipt.previous.origin[axis]
-					+ receipt.previous.axis[0u * 3u + axis] * local[0]
-					+ receipt.previous.axis[1u * 3u + axis] * local[1]
-					+ receipt.previous.axis[2u * 3u + axis] * local[2];
-			motion->previous[v][3] = 1.0f;
+		{
+			const temporalEntityPose_t *previous = &receipt.previous;
+			const uint32_t frame = previous->frame < 0 ? 0u : (uint32_t)previous->frame % model.frameCount;
+			const uint32_t oldFrame = previous->oldframe < 0 ? frame : (uint32_t)previous->oldframe % model.frameCount;
+			const float oldWeight = previous->backlerp, newWeight = 1.0f - oldWeight;
+			for ( uint32_t vertex = 0u; vertex < model.vertexCount; ++vertex ) {
+				float local[3];
+				float *out = motion->previous[candidate->firstVertex + vertex];
+				for ( uint32_t axis = 0u; axis < 3u; ++axis )
+					local[axis] = model.positions[( (size_t)frame * model.vertexCount + vertex ) * 3u + axis] * newWeight
+						+ model.positions[( (size_t)oldFrame * model.vertexCount + vertex ) * 3u + axis] * oldWeight;
+				for ( uint32_t axis = 0u; axis < 3u; ++axis )
+					out[axis] = previous->origin[axis] + previous->axis[0u * 3u + axis] * local[0]
+						+ previous->axis[1u * 3u + axis] * local[1] + previous->axis[2u * 3u + axis] * local[2];
+				out[3] = 1.0f;
+			}
 		}
 		for ( uint32_t b = candidate->firstBatch; b < candidate->firstBatch + candidate->batchCount; ++b ) {
 			if ( !batches[b].visible || batches[b].depthHack
-					|| !RenderTemporal_RigidBatchWritesMotion( frontend, batches[b].material ) ) continue;
+					|| !RenderTemporal_EntityBatchWritesMotion( frontend, batches[b].material ) ) continue;
 			batches[b].motion = qtrue; motion->motionBatches++;
 		}
 	}
@@ -6632,7 +6644,7 @@ static qboolean RenderAndSubmit( ralMetalPresent_t *present,
 			worldViewParams.left[3] = taaJitterNdc[1];
 			distantWorldViewParams.forward[3] = taaJitterNdc[0];
 			distantWorldViewParams.left[3] = taaJitterNdc[1];
-			taaEntityMotion = EntityMotionPrepare( present, frontend, entityVertexBytes, entityVertexCount, entityBatches,
+			taaEntityMotion = EntityMotionPrepare( present, frontend, entityVertexCount, entityBatches,
 				entityBatchCount, taaPlan.frameId );
 		}
 	}

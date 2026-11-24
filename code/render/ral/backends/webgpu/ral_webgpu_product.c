@@ -874,7 +874,7 @@ static qboolean BuildEntityGeometry( const renderSubmissionState_t *frontend,
 				draw->material = RenderSubmission_EntityBatchMaterial(
 					frontend, &entities[i], batch );
 				draw->viewWeapon = ( entity->renderfx & ( RF_DEPTHHACK | RF_FIRST_PERSON ) ) ? qtrue : qfalse;
-				draw->motion = previousPose && RenderTemporal_RigidBatchWritesMotion( frontend, draw->material ) ? qtrue : qfalse;
+				draw->motion = previousPose && RenderTemporal_EntityBatchWritesMotion( frontend, draw->material ) ? qtrue : qfalse;
 				if ( draw->motion ) motion->motionDraws++;
 				draw->contentDigest = HashU64( model.digest,
 					( (uint64_t)i << 32u ) | batchIndex );

@@ -13,9 +13,10 @@
 
 #include <string.h>
 
-/* The rule every renderer applies (R_TemporalMotionClassify) to a rigid (inline BSP) batch: opaque, depth-writing, unanimated
- * texture. Alpha-tested batches stay invalidated: the mask rasterizes their whole geometry, holes included. */
-static inline qboolean RenderTemporal_RigidBatchWritesMotion( const renderSubmissionState_t *frontend, qhandle_t material ) {
+/* The rule every renderer applies (R_TemporalMotionClassify) to an entity batch whose previous-frame vertex positions are known (a
+ * rigid brush entity, or an MD3 / IQM model whose previous animation frame is replayed): opaque, depth-writing, unanimated texture.
+ * Alpha-tested batches stay invalidated: the mask rasterizes their whole geometry, holes included. */
+static inline qboolean RenderTemporal_EntityBatchWritesMotion( const renderSubmissionState_t *frontend, qhandle_t material ) {
 	renderMaterialSnapshot_t snapshot;
 	temporalMotionDrawFacts_t facts;
 	if ( !RenderSubmission_MaterialSnapshot( frontend, material, &snapshot ) || !snapshot.ready ) return qfalse;
