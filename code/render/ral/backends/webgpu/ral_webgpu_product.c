@@ -583,6 +583,7 @@ typedef struct {
 	qhandle_t material;
 	uint64_t contentDigest;
 	float localSh[4][4];
+	qboolean viewWeapon;   /* first-person (RF_DEPTHHACK / RF_FIRST_PERSON): moves with the camera, no motion of its own */
 } entityDrawPlan_t;
 
 static qboolean EntityLighting( const renderEntityCommand_t *command,
@@ -802,6 +803,7 @@ static qboolean BuildEntityGeometry( const renderSubmissionState_t *frontend,
 				draw->indexCount = batch->indexCount;
 				draw->material = RenderSubmission_EntityBatchMaterial(
 					frontend, &entities[i], batch );
+				draw->viewWeapon = ( entity->renderfx & ( RF_DEPTHHACK | RF_FIRST_PERSON ) ) ? qtrue : qfalse;
 				draw->contentDigest = HashU64( model.digest,
 					( (uint64_t)i << 32u ) | batchIndex );
 				memcpy( draw->localSh, localSh, sizeof( draw->localSh ) );
@@ -3136,8 +3138,10 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 				&updated ) ) goto fail;
 		recording = updated; candidate.entityDrawCount++;
 		if ( taaMaskDraws ) {
-			/* Opaque batches mark their geometry in the effect mask; translucent ones add their visible contribution. */
-			draw.pipelineIdentity = blendIndex ? product->taaTrustPipelines[blendIndex - 1u].pipelineIdentity
+			/* Opaque batches mark their geometry in the effect mask; translucent ones add their visible contribution, except the
+			 * first-person weapon: it moves with the camera, so camera reprojection is wrong for every layer of it (fully marked). */
+			draw.pipelineIdentity = blendIndex && !entityDraws[i].viewWeapon
+				? product->taaTrustPipelines[blendIndex - 1u].pipelineIdentity
 				: product->taaMaskPipeline.pipelineIdentity;
 			taaMaskDraws[taaMaskDrawCount++] = draw;
 		}
