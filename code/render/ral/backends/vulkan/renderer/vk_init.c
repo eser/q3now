@@ -2164,7 +2164,7 @@ static void R_Register( void )
 	ri.Cvar_CheckRange( r_temporalInputTest, "0", "2", CV_INTEGER );
 	ri.Cvar_SetDescription( r_temporalInputTest,
 							"Developer diagnostic that forces the temporal (TAA) path on regardless of r_aa.\n"
-							"Players should use r_aa 2 instead.\n"
+							"Players should use r_aa 1 (TAA) instead.\n"
 							" 0: temporal path follows r_aa (default)\n"
 							" 1: primary world views run the temporal path (jitter, history and resolve)\n"
 							" 2: same temporal path, but force-defer ATEST draws as a measurement baseline\n"
@@ -2975,7 +2975,7 @@ static void R_Register( void )
 	// pixels — this is the portable-binding surface (a clone of the shadow depth
 	// pass), not a draw-count or speed change. Latched: the shader read site is
 	// selected at pipeline build, so the value cannot change mid-frame.
-	// Default 1 (2026-11-20): TAA (r_aa 2) needs this path, and paired A/B runs
+	// Default 1 (2026-11-20): TAA (r_aa 1) needs this path, and paired A/B runs
 	// (8 rounds, default vs 1) showed no measurable CPU/GPU cost from it.
 	ri.Cvar_Get( "r_shadowPCF", "5", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( ri.Cvar_Get( "r_shadowPCF", "5", 0 ), "1", "9", CV_INTEGER );
