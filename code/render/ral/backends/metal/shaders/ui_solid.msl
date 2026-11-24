@@ -1127,6 +1127,15 @@ static float4 wired_atmosphere_media(WorldVertexOut in,
 	return media;
 }
 
+// TAA history trust variant of the world/entity material fragment (function constant 20, off by default so every existing pipeline
+// is unchanged). Specialized on, the fragment returns its visible contribution instead of its colour: (max(r, g, b), 0, 0, alpha),
+// which the TAA trust pass blends with the batch's own factors under REVERSE_SUBTRACT (see EncodeTaaEffectMask).
+constant bool wired_trust_out_defined [[function_constant(20)]];
+constant bool wired_trust_out = is_function_constant_defined(wired_trust_out_defined) && wired_trust_out_defined;
+static inline float4 wired_world_out(float4 c) {
+    return wired_trust_out ? float4(saturate(max(c.r, max(c.g, c.b))), 0.0, 0.0, saturate(c.a)) : c;
+}
+
 fragment float4 wired_world_fragment(WorldVertexOut in [[stage_in]],
                                      texture2d<float> baseImage [[texture(0)]],
                                      texture2d<float> lightmapImage [[texture(1)]],
@@ -1205,8 +1214,8 @@ fragment float4 wired_world_fragment(WorldVertexOut in [[stage_in]],
 	if (primitiveBeam && material.stageProgram.x == 0u) {
 		float coverage = base.a * in.color.a;
 		float transmission = wired_atmosphere_sample(in, atmosphere, atmosphereArena).w;
-		return float4(base.rgb * wired_srgb_to_linear(in.color.rgb) * coverage * transmission,
-			coverage);
+		return wired_world_out(float4(base.rgb * wired_srgb_to_linear(in.color.rgb) * coverage * transmission,
+			coverage));
 	}
 	bool stageHasLightmap = false;
 	bool stageProgramApplied = false;
@@ -1326,8 +1335,8 @@ fragment float4 wired_world_fragment(WorldVertexOut in [[stage_in]],
 		base = accumulated;
 		if (sky) base.a = 1.0;
 	}
-	if (primitiveBeam) return float4(base.rgb
-		* wired_atmosphere_sample(in, atmosphere, atmosphereArena).w, base.a);
+	if (primitiveBeam) return wired_world_out(float4(base.rgb
+		* wired_atmosphere_sample(in, atmosphere, atmosphereArena).w, base.a));
 	/* Visible sky and radiance capture share this composition. Capture uses
 	 * the target blend; display and environment consumers crossfade separately
 	 * so no intermediate display transition is baked into the IBL source. */
@@ -1353,7 +1362,7 @@ fragment float4 wired_world_fragment(WorldVertexOut in [[stage_in]],
 				+ (z * atmosphere.froxelGrid.y + y) * atmosphere.froxelGrid.x + x];
 			composedSky = composedSky * media.w + media.rgb;
 		}
-		return float4(composedSky, 1.0);
+		return wired_world_out(float4(composedSky, 1.0));
 	}
     if (material.alphaMode == 1 && base.a < material.alphaCutoff) {
         discard_fragment();
@@ -1460,7 +1469,7 @@ fragment float4 wired_world_fragment(WorldVertexOut in [[stage_in]],
 		lit += specularIbl * occlusion;
 	}
     if ((material.hasLightmap & 4u) != 0u) {
-        return float4(lit, base.a);
+        return wired_world_out(float4(lit, base.a));
     }
     // Additive emission contributes no opaque surface coverage. Attenuate its
     // radiance, but never add the background's in-scattering a second time:
@@ -1486,8 +1495,8 @@ fragment float4 wired_world_fragment(WorldVertexOut in [[stage_in]],
 		media = wired_atmosphere_media(in, atmosphere, atmosphereArena,
 			physicalSkyView, physicalSkySampler, currentSkyRadiance, skyRadianceSampler);
 	}
-	return float4(lit * media.w + (additiveMedia ? float3(0.0) : media.xyz),
-		stageProgramApplied ? base.a : base.a * in.color.a);
+	return wired_world_out(float4(lit * media.w + (additiveMedia ? float3(0.0) : media.xyz),
+		stageProgramApplied ? base.a : base.a * in.color.a));
 }
 
 
@@ -1510,8 +1519,9 @@ static float3 wiredTaaWorldFromNdc(constant WorldViewParams &v, float2 ndc, floa
 }
 
 // Writes 1 where an entity batch is the visible surface; drawn with the world vertex function (identical positions) against the scene depth.
+// Opaque entity batches in the TAA trust pass: no per-object motion on Metal, so their history is dropped (trust 0).
 fragment float4 wired_taa_mask_fragment(WorldVertexOut in [[stage_in]]) {
-    return float4(1.0, 0.0, 0.0, 0.0);
+    return float4(0.0, 0.0, 0.0, 0.0);
 }
 
 kernel void wired_taa_motion_compute(
@@ -1539,10 +1549,10 @@ kernel void wired_taa_motion_compute(
     const float2 uvCurrent = float2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
     const float2 uvPrevious = float2(previousNdc.x * 0.5 + 0.5, 0.5 - previousNdc.y * 0.5);
     velocity.write(float4(uvCurrent - uvPrevious, 0.0, 0.0), gid);
-    // Effect mask (same contract as the Vulkan renderer's INVALIDATE_OPAQUE / translucent / decal / depth-hack draws): pixels covered by an
-    // entity, a first-person weapon or a translucent or decal surface have no trustworthy camera-only reprojection, so they take the
-    // resolve's spatial fallback instead of a history that would trail behind them.
-    const bool covered = effectMask.read(gid).r > 0.5;
-    validity.write(float4((ok && !covered) ? 1.0 : 0.0, 0.0, 0.0, 0.0), gid);
+    // History trust from the effect pass (same contract as the Vulkan renderer's validity): 1 where the camera-only reprojection
+    // holds, 0 under an entity or the first-person weapon (no per-object motion here), and reduced by a translucent effect's
+    // visible contribution, so a faded effect keeps the history under it.
+    const float trust = saturate(effectMask.read(gid).r);
+    validity.write(float4(ok ? trust : 0.0, 0.0, 0.0, 0.0), gid);
     reverseDepth.write(float4(rd, 0.0, 0.0, 0.0), gid);
 }
