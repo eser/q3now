@@ -1429,7 +1429,7 @@ void G_TrainAdvance( gentity_t *ent, const trainRules_t *rules ) {
 	// looping sound
 	ent->s.loopSound = next->soundLoop;
 
-	if ( rules->negativeWaitStops && next->wait < 0 ) {
+	if ( rules->negativeWaitStops && next->wait < 0 && ( !starting || rules->waitAtStart ) ) {
 		// parked at this corner for good
 		ent->s.loopSound = 0;
 		Q3_SetMoverState( ent, MOVER_POS1, start );
