@@ -56,6 +56,7 @@ require_text(CACHE "a->modelType == b->modelType" "model type compatibility")
 require_text(CACHE "a->modelTopology == b->modelTopology" "model topology compatibility")
 require_text(LOCAL "MOD_BAD,\n\tMOD_BRUSH,\n\tMOD_MESH," "stable MOD_BRUSH numeric prefix")
 require_text(MOTION "#define TEMPORAL_MOTION_MOD_BRUSH_MODEL_TYPE 1u" "host-pure MOD_BRUSH pin")
+require_text(MOTION "#define TEMPORAL_MOTION_MOD_MESH_MODEL_TYPE 2u" "host-pure MOD_MESH pin")
 
 # This bounded leaf remains receipt-only. Runtime integration may consume the
 # pure classifier once, but must not introduce alternate view-state inputs.
@@ -63,6 +64,8 @@ forbid_text(MOTION "backEnd.viewParms" "live backend view dependency")
 forbid_text(MOTION "view->projectionMatrix" "live frontend projection dependency")
 forbid_text(BACKEND "R_TemporalMotion" "runtime backend integration")
 require_text(VK "R_TemporalMotionClassify( &facts )" "single pure Vulkan motion classification")
+require_text(VK "if ( stage->tessFlags & TESS_ENV ) return qtrue;" "Vulkan reports vertex-shader environment mapping (tcGen reset to TCGEN_BAD) as environmentMapped")
+require_text(VK "R_TemporalEntityPoseRigid( &entity->temporalReceipt )" "Vulkan admits MD3 rigid motion through the shared rigid-pose rule")
 string(REGEX MATCHALL "R_TemporalMotion[A-Za-z0-9_]*[ \t\r\n]*\\(" vk_motion_calls "${VK}")
 list(LENGTH vk_motion_calls vk_motion_call_count)
 if(NOT vk_motion_call_count EQUAL 1)

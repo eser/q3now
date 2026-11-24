@@ -30733,15 +30733,6 @@ static qboolean vk_shader_texture_animated( const shader_t *shader ) {
 	return qfalse;
 }
 
-/* The entity's previous pose differs from its current one only by its transform (same animation frames): an MD3 drawn from the
- * same lerped mesh moves rigidly, so the rigid matrices give its exact motion. */
-static qboolean vk_temporal_pose_animation_unchanged( const temporalEntityPoseReceipt_t *receipt ) {
-	return receipt && receipt->valid && receipt->previousValid
-		&& receipt->current.frame == receipt->previous.frame
-		&& receipt->current.oldframe == receipt->previous.oldframe
-		&& receipt->current.backlerp == receipt->previous.backlerp ? qtrue : qfalse;
-}
-
 /* The entity turned between its previous and current pose. */
 static qboolean vk_temporal_pose_rotated( const temporalEntityPoseReceipt_t *receipt ) {
 	if ( !receipt || !receipt->previousValid ) return qfalse;
@@ -30752,12 +30743,14 @@ static qboolean vk_temporal_pose_rotated( const temporalEntityPoseReceipt_t *rec
 	return qfalse;
 }
 
-/* A stage takes its texture coordinates from the surface orientation (tcGen environment). */
+/* A stage takes its texture coordinates from the surface orientation (tcGen environment). The shader finisher moves a plain
+ * environment-mapped bundle 0 to the vertex shader: TESS_ENV on the stage, tcGen reset to TCGEN_BAD (vk_shader.c). */
 static qboolean vk_shader_environment_mapped( const shader_t *shader ) {
 	if ( !shader ) return qfalse;
 	for ( uint32_t i = 0u; i < (uint32_t)shader->numUnfoggedPasses && i < MAX_SHADER_STAGES; ++i ) {
 		const shaderStage_t *stage = shader->stages[i];
 		if ( !stage || !stage->active ) continue;
+		if ( stage->tessFlags & TESS_ENV ) return qtrue;
 		for ( uint32_t b = 0u; b < stage->numTexBundles && b < NUM_TEXTURE_BUNDLES; ++b )
 			if ( stage->bundle[b].tcGen == TCGEN_ENVIRONMENT_MAPPED
 					|| stage->bundle[b].tcGen == TCGEN_ENVIRONMENT_MAPPED_FP ) return qtrue;
@@ -30837,7 +30830,7 @@ static qboolean vk_temporal_motion_prepare_bound_draw( uint32_t pipelineSlot )
 			facts.geometry = TEMPORAL_MOTION_GEOMETRY_MOD_BRUSH_RIGID;
 			entityReceipt = &entity->temporalReceipt;
 		} else if ( model && model->type == MOD_MESH
-				&& vk_temporal_pose_animation_unchanged( &entity->temporalReceipt ) ) {
+				&& R_TemporalEntityPoseRigid( &entity->temporalReceipt ) ) {
 			/* An MD3 whose animation frames did not change (items, static props) moves rigidly. */
 			facts.geometry = TEMPORAL_MOTION_GEOMETRY_MOD_BRUSH_RIGID;
 			entityReceipt = &entity->temporalReceipt;

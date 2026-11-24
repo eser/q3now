@@ -431,8 +431,20 @@ static int TestReceiptRejection( void ) {
 	REJECT_ENTITY( changed.current.origin[0] = NAN );
 	REJECT_ENTITY( changed.previous.axis[0] = INFINITY );
 	REJECT_ENTITY( changed.current.nonNormalizedAxes = 2 );
-	REJECT_ENTITY( changed.current.modelType = 2; changed.previous.modelType = 2 );
+	// A mesh (MD3) is rigid only while its animation frames and blend stay the same.
+	REJECT_ENTITY( changed.current.modelType = 2; changed.previous.modelType = 2; changed.current.frame++ );
+	REJECT_ENTITY( changed.current.modelType = 2; changed.previous.modelType = 2; changed.current.oldframe++ );
+	REJECT_ENTITY( changed.current.modelType = 2; changed.previous.modelType = 2; changed.current.backlerp = 0.5f );
+	REJECT_ENTITY( changed.current.modelType = 3; changed.previous.modelType = 3 );
 #undef REJECT_ENTITY
+
+	// A mesh whose animation did not change moves rigidly, like a brush model.
+	changed = entity;
+	changed.current.modelType = changed.previous.modelType = 2;
+	changed.current.origin[0] = 4.0f;
+	CHECK( R_TemporalEntityPoseRigid( &changed ) );
+	CHECK( R_TemporalMotionBuildMatrices(
+		TEMPORAL_MOTION_GEOMETRY_MOD_BRUSH_RIGID, &camera, &changed, &matrices ) );
 
 	// Transform-only motion and non-normalized axis state changes remain rigid.
 	changed = entity;

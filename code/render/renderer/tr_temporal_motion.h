@@ -36,9 +36,15 @@ typedef struct {
 } temporalMotionSample_t;
 
 
+// True when the entity's geometry is the same in its previous and current pose
+// up to the entity transform: a brush model (frame-tuple-independent), or a mesh
+// (MD3) whose animation frames and blend did not change (items, static props).
+// Such an entity moves rigidly; every rigid-motion admission uses this rule.
+qboolean R_TemporalEntityPoseRigid( const temporalEntityPoseReceipt_t *receipt );
+
 // Builds Vulkan-clip-space current/previous MVPs from unjittered receipts.
 // WORLD_STATIC requires entity == NULL.  MOD_BRUSH_RIGID requires an exact,
-// model-compatible entity receipt; brush geometry is frame-tuple-independent.
+// model-compatible entity receipt whose pose is rigid (R_TemporalEntityPoseRigid).
 // Outputs are atomic.
 qboolean R_TemporalMotionBuildMatrices( temporalMotionGeometry_t geometry,
 	const temporalCameraPoseReceipt_t *camera,

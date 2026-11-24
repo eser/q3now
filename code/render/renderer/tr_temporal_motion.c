@@ -8,8 +8,9 @@
 
 #define TEMPORAL_MOTION_CLIP_W_EPSILON 1.0e-6f
 // modtype_t is renderer-private; keep the pure host module decoupled while
-// pinning its stable MOD_BAD=0, MOD_BRUSH=1 prefix in the source policy test.
+// pinning its stable MOD_BAD=0, MOD_BRUSH=1, MOD_MESH=2 prefix in the source policy test.
 #define TEMPORAL_MOTION_MOD_BRUSH_MODEL_TYPE 1u
+#define TEMPORAL_MOTION_MOD_MESH_MODEL_TYPE 2u
 
 static qboolean FiniteFloats( const float *values, size_t count ) {
 	if ( !values ) return qfalse;
@@ -79,6 +80,16 @@ static qboolean ModelCompatible( const temporalEntityPose_t *current,
 		&& current->modelContentDigest == previous->modelContentDigest;
 }
 
+qboolean R_TemporalEntityPoseRigid( const temporalEntityPoseReceipt_t *receipt ) {
+	if ( !receipt || !receipt->valid || !receipt->previousValid
+			|| receipt->current.modelType != receipt->previous.modelType ) return qfalse;
+	if ( receipt->current.modelType == TEMPORAL_MOTION_MOD_BRUSH_MODEL_TYPE ) return qtrue;
+	return receipt->current.modelType == TEMPORAL_MOTION_MOD_MESH_MODEL_TYPE
+		&& receipt->current.frame == receipt->previous.frame
+		&& receipt->current.oldframe == receipt->previous.oldframe
+		&& receipt->current.backlerp == receipt->previous.backlerp ? qtrue : qfalse;
+}
+
 static qboolean EntityReceiptValid( const temporalCameraPoseReceipt_t *camera,
 		const temporalEntityPoseReceipt_t *entity ) {
 	return entity && entity->valid == qtrue && entity->previousValid == qtrue
@@ -91,8 +102,8 @@ static qboolean EntityReceiptValid( const temporalCameraPoseReceipt_t *camera,
 		&& entity->identity.role < REF_ENTITY_MOTION_ROLE_COUNT
 		&& EntityPoseValid( &entity->current )
 		&& EntityPoseValid( &entity->previous )
-		&& entity->current.modelType == TEMPORAL_MOTION_MOD_BRUSH_MODEL_TYPE
-		&& ModelCompatible( &entity->current, &entity->previous );
+		&& ModelCompatible( &entity->current, &entity->previous )
+		&& R_TemporalEntityPoseRigid( entity );
 }
 
 static void EntityModelMatrix( const temporalEntityPose_t *pose, float out[16] ) {
