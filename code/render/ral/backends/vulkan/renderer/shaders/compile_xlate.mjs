@@ -276,7 +276,7 @@ export function lowerGlsl460(bytes, portableEntry) {
 	if (portableEntry.symbol === 'gamma_vert_spv')
 		source = source.replaceAll('gl_VertexIndex', 'gl_VertexID');
 	if (portableEntry.symbol === 'tonemap_tonemap_frag_spv' || /^smaa_(edge|blend|resolve)_(vert|frag)_spv$/.test(portableEntry.symbol)) {
-		// Desktop GLSL specializes at program creation, not via Vulkan constant IDs (SMAA: the r_smaa quality presets).
+		// Desktop GLSL specializes at program creation, not via Vulkan constant IDs (SMAA: the quality preset).
 		source = source.replace(/layout\(constant_id = (\d+)\) const (float|int) (\w+) = ([^;]+);/g,
 			(_match, id, type, name, value) => `#ifndef WIRED_SPEC_${id}\n#define WIRED_SPEC_${id} ${value}\n#endif\nconst ${type} ${name} = WIRED_SPEC_${id};`);
 	}

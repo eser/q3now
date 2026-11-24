@@ -4997,20 +4997,21 @@ SET_TESTS_PROPERTIES(ral_temporal_contract PROPERTIES
 )
 WIRED_CONFIGURE_HOST_TEST(ral_temporal_test ral_temporal_contract)
 
-ADD_EXECUTABLE(tr_antialiasing_test
-	tests/tr_antialiasing_test.c
-	code/render/renderer/tr_antialiasing.c
-)
-TARGET_INCLUDE_DIRECTORIES(tr_antialiasing_test PRIVATE
-	code/render/ral/backends/vulkan/renderer
-	code/render/renderer
-)
-ADD_TEST(NAME tr_antialiasing_contract COMMAND tr_antialiasing_test)
-SET_TESTS_PROPERTIES(tr_antialiasing_contract PROPERTIES
+ADD_EXECUTABLE(render_antialiasing_test tests/render_antialiasing_test.c)
+TARGET_INCLUDE_DIRECTORIES(render_antialiasing_test PRIVATE code/render/frontend)
+ADD_TEST(NAME render_antialiasing_contract COMMAND render_antialiasing_test)
+SET_TESTS_PROPERTIES(render_antialiasing_contract PROPERTIES
 	LABELS "host-only;subsystem;owner.renderer;failure.contract;feature.always"
 	TIMEOUT 30
 )
-WIRED_CONFIGURE_HOST_TEST(tr_antialiasing_test tr_antialiasing_contract)
+WIRED_CONFIGURE_HOST_TEST(render_antialiasing_test render_antialiasing_contract)
+
+ADD_TEST(NAME render_antialiasing_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/render_antialiasing_policy_check.cmake)
+SET_TESTS_PROPERTIES(render_antialiasing_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;failure.contract;feature.always"
+	TIMEOUT 60)
 
 ADD_EXECUTABLE(tr_temporal_motion_targets_test
 	tests/tr_temporal_motion_targets_test.c

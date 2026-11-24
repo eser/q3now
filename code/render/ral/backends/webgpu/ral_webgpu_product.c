@@ -2085,13 +2085,14 @@ qboolean RalWebGpu_ProductEnableSmaa( ralWebGpuProduct_t *product,
     if (!product || product->inFlight || product->smaa) return qfalse;
     return RalWebGpu_SmaaCreate(product->runtime,rr,bridge,generation,&product->smaa);
 }
-/* r_aa: 0 off, 1 TAA, 2 SMAA (exclusive by construction); `smaaQuality` is r_smaa (0 selects preset 3). Between frames. */
-qboolean RalWebGpu_ProductSetAntiAliasing( ralWebGpuProduct_t *product, ralWebGpuRuntimeReceipt_t *rr, int mode,
-        int smaaQuality ) {
-    if (!product || !product->taa || !product->smaa || product->inFlight) return qfalse;
-    product->taaEnabled = mode == 1 ? qtrue : qfalse;
-    product->smaaEnabled = mode == 2 ? qtrue : qfalse;
-    return !product->smaaEnabled || RalWebGpu_SmaaSetQuality(product->smaa,rr,smaaQuality);
+/* The r_aa plan (render_antialiasing.h): TAA, or SMAA at its preset, never both. Between frames. */
+qboolean RalWebGpu_ProductSetAntiAliasing( ralWebGpuProduct_t *product, ralWebGpuRuntimeReceipt_t *rr,
+        const renderAntialiasingPlan_t *plan ) {
+    if (!product || !plan || !product->taa || !product->smaa || product->inFlight) return qfalse;
+    if (plan->temporalRequested && plan->smaaQuality) return qfalse;
+    product->taaEnabled = plan->temporalRequested ? qtrue : qfalse;
+    product->smaaEnabled = plan->smaaQuality > 0 ? qtrue : qfalse;
+    return !product->smaaEnabled || RalWebGpu_SmaaSetQuality(product->smaa,rr,plan->smaaQuality);
 }
 void RalWebGpu_ProductTaaFrameCounts( const ralWebGpuProduct_t *product, uint32_t *resolved, uint32_t *bootstrap ) {
     *resolved = product ? product->taaResolvedFrames : 0u;

@@ -86,7 +86,7 @@ for number,line in enumerate(open(manifest_path,encoding="utf-8",errors="strict"
  except Exception as exc:raise SystemExit(f"FAIL ral-profile-layout manifest JSON {number}: {exc}")
  if not isinstance(item,dict):raise SystemExit("FAIL ral-profile-layout manifest schema")
  manifest.append(item)
-scenario={"kind":"scenario","schema":1,"name":"ral-profile-layout","map":"arena7","backend":"vulkan","gpu_speeds":1,"toggle":"r_smaa:0->1->0","expected_relation":"baseline + smaa -> baseline","history_capacity":120,"snapshot_command":"ral_dump live profile"}
+scenario={"kind":"scenario","schema":1,"name":"ral-profile-layout","map":"arena7","backend":"vulkan","gpu_speeds":1,"toggle":"r_aa:0->2->0","expected_relation":"baseline + smaa -> baseline","history_capacity":120,"snapshot_command":"ral_dump live profile"}
 if not manifest or manifest[0]!=scenario:raise SystemExit("FAIL ral-profile-layout scenario")
 if [x.get("role") for x in manifest[1:-1]] != ["gui","renderer","moltenvk","pax21","base","harness","bootstrap-cfg"]:raise SystemExit("FAIL ral-profile-layout provenance roles")
 for item in manifest[1:-1]:
@@ -145,12 +145,12 @@ elif mode=="lane-suffix":R[find("RAL profile lane: epoch=2 index=1")]["msg"]=R[f
 with open(log_path,"w") as out:
  for item in R:out.write(json.dumps(item)+"\n")
 roles=("gui","renderer","moltenvk","pax21","base","harness","bootstrap-cfg")
-M=[{"kind":"scenario","schema":1,"name":"ral-profile-layout","map":"arena7","backend":"vulkan","gpu_speeds":1,"toggle":"r_smaa:0->1->0","expected_relation":"baseline + smaa -> baseline","history_capacity":120,"snapshot_command":"ral_dump live profile"}]
+M=[{"kind":"scenario","schema":1,"name":"ral-profile-layout","map":"arena7","backend":"vulkan","gpu_speeds":1,"toggle":"r_aa:0->2->0","expected_relation":"baseline + smaa -> baseline","history_capacity":120,"snapshot_command":"ral_dump live profile"}]
 for role in roles:
  path=manifest_path+"."+role;data=("fixture-"+role).encode();open(path,"wb").write(data);M.append({"kind":"provenance","role":role,"path":os.path.abspath(path),"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()})
 M.append({"kind":"result","controller_pid":101,"rc":0,"timeout":False,"forced":False})
 if mode=="manifest":M[2]["sha256"]="0"*64
-elif mode=="scenario":M[0]["toggle"]="r_smaa:0->1"
+elif mode=="scenario":M[0]["toggle"]="r_aa:0->2"
 elif mode=="result":M[-1]["rc"]=1
 with open(manifest_path,"w") as out:
  for item in M:out.write(json.dumps(item,sort_keys=True)+"\n")
@@ -202,16 +202,16 @@ fi
 
 # Cross two 200-sample reporting resets before the first topology change:
 # clearing interval averages must not emit another epoch-start record.
-BOOT="$HOME_DIR/base/ral-profile-layout.cfg";printf '%s\n' 'log renderer.timing info' 'set activeAction "echo Q0_RAL_PROFILE_LAYOUT_REQUESTED; r_gpuSpeeds 1; wait 450; echo Q0_RAL_PROFILE_LAYOUT_BASE_READY; ral_dump live profile; echo Q0_RAL_PROFILE_LAYOUT_SMAA_ON_REQUESTED; r_smaa 1; wait 180; echo Q0_RAL_PROFILE_LAYOUT_SMAA_ON_READY; ral_dump live profile; echo Q0_RAL_PROFILE_LAYOUT_SMAA_OFF_REQUESTED; r_smaa 0; wait 180; ral_dump live profile; echo Q0_RAL_PROFILE_LAYOUT_COMPLETE; quit"' 'map arena7' >"$BOOT"
+BOOT="$HOME_DIR/base/ral-profile-layout.cfg";printf '%s\n' 'log renderer.timing info' 'set activeAction "echo Q0_RAL_PROFILE_LAYOUT_REQUESTED; r_gpuSpeeds 1; wait 450; echo Q0_RAL_PROFILE_LAYOUT_BASE_READY; ral_dump live profile; echo Q0_RAL_PROFILE_LAYOUT_SMAA_ON_REQUESTED; r_aa 2; wait 180; echo Q0_RAL_PROFILE_LAYOUT_SMAA_ON_READY; ral_dump live profile; echo Q0_RAL_PROFILE_LAYOUT_SMAA_OFF_REQUESTED; r_aa 0; wait 180; ral_dump live profile; echo Q0_RAL_PROFILE_LAYOUT_COMPLETE; quit"' 'map arena7' >"$BOOT"
 MANIFEST="$ROOT/manifest.jsonl";python3 - "$MANIFEST" "$WIRED" "$RENDERER" "$MOLTEN" "$PACK/base/pax21.sw3z" "$BASE" "$0" "$BOOT" <<'PYEOF'
 import hashlib,json,os,sys
 with open(sys.argv[1],"w") as out:
- out.write(json.dumps({"kind":"scenario","schema":1,"name":"ral-profile-layout","map":"arena7","backend":"vulkan","gpu_speeds":1,"toggle":"r_smaa:0->1->0","expected_relation":"baseline + smaa -> baseline","history_capacity":120,"snapshot_command":"ral_dump live profile"},sort_keys=True)+"\n")
+ out.write(json.dumps({"kind":"scenario","schema":1,"name":"ral-profile-layout","map":"arena7","backend":"vulkan","gpu_speeds":1,"toggle":"r_aa:0->2->0","expected_relation":"baseline + smaa -> baseline","history_capacity":120,"snapshot_command":"ral_dump live profile"},sort_keys=True)+"\n")
  for role,path in zip(("gui","renderer","moltenvk","pax21","base","harness","bootstrap-cfg"),sys.argv[2:]):
   data=open(path,"rb").read();out.write(json.dumps({"kind":"provenance","role":role,"path":os.path.abspath(path),"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()},sort_keys=True)+"\n")
 PYEOF
 QCONSOLE="$HOME_DIR/qconsole.jsonl";STDOUT="$ROOT/stdout.log"
-python3 "$TIMEOUT_RUNNER" --timeout 90 --kill-after 15 --cwd "$RUN" --stdout "$STDOUT" -- "$RUN/wired" +set fs_basepath "$HOME_DIR" +set fs_homepath "$HOME_DIR" +set r_aa 0 +set fs_game base +set sv_cheats 1 +set sv_pure 0 +set com_automated 1 +set com_noHardReboot 1 +set s_initsound 0 +set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set r_vkValidate 1 +set r_gpuSpeeds 0 +set r_bloom 0 +set r_ao 0 +set r_smaa 0 +set r_forwardPlus 0 +set r_drawSunRays 0 +set r_shadows 0 +set log_severity DEBUG +set log_file_severity DEBUG +set log_file_mode overwrite_synced +exec ral-profile-layout.cfg
+python3 "$TIMEOUT_RUNNER" --timeout 90 --kill-after 15 --cwd "$RUN" --stdout "$STDOUT" -- "$RUN/wired" +set fs_basepath "$HOME_DIR" +set fs_homepath "$HOME_DIR" +set r_aa 0 +set fs_game base +set sv_cheats 1 +set sv_pure 0 +set com_automated 1 +set com_noHardReboot 1 +set s_initsound 0 +set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set r_vkValidate 1 +set r_gpuSpeeds 0 +set r_bloom 0 +set r_ao 0 +set r_forwardPlus 0 +set r_drawSunRays 0 +set r_shadows 0 +set log_severity DEBUG +set log_file_severity DEBUG +set log_file_mode overwrite_synced +exec ral-profile-layout.cfg
 RC=$?;TIMEOUT=false;[ "$RC" -eq 124 ] && TIMEOUT=true;python3 - "$MANIFEST" "$$" "$RC" "$TIMEOUT" "$FORCED" <<'PYEOF'
 import json,sys
 with open(sys.argv[1],"a") as out:out.write(json.dumps({"kind":"result","controller_pid":int(sys.argv[2]),"rc":int(sys.argv[3]),"timeout":sys.argv[4]=="true","forced":sys.argv[5]=="1"},sort_keys=True)+"\n")

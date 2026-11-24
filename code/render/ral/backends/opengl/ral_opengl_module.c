@@ -796,7 +796,8 @@ fail:
 	return qfalse;
 }
 
-/* r_aa (0 off, 1 TAA default, 2 SMAA) and r_smaa: the same cvars, defaults and ranges as the Vulkan, Metal and WebGPU renderers. */
+/* r_aa (0 off, 1 TAA default, 2 SMAA), the only anti-aliasing setting: the same cvar, default and range as the Vulkan, Metal and
+ * WebGPU renderers, mapped by the shared render_antialiasing.h. */
 static void RegisterAntiAliasing( void ) {
 	static qboolean noted;
 	cvar_t *aa;
@@ -807,26 +808,18 @@ static void RegisterAntiAliasing( void ) {
 	if ( !aa ) return;
 	ri.Cvar_CheckRange( aa, "0", "2", CV_INTEGER );
 	if ( ri.Cvar_SetDescription ) ri.Cvar_SetDescription( aa,
-		"Anti-aliasing: 0 off, 1 TAA (default), 2 SMAA (only if TAA ghosting bothers you; r_smaa selects its preset)." );
+		"Anti-aliasing: 0 off, 1 TAA (default), 2 SMAA (only if TAA ghosting bothers you)." );
 	if ( ri.Cvar_SetGroup ) ri.Cvar_SetGroup( aa, CVG_RENDERER );
 	noted = qtrue;
-	{
-		cvar_t *smaa = ri.Cvar_Get( "r_smaa", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
-		if ( smaa ) {
-			ri.Cvar_CheckRange( smaa, "0", "4", CV_INTEGER );
-			if ( ri.Cvar_SetDescription ) ri.Cvar_SetDescription( smaa,
-				"SMAA quality preset 1 low .. 4 ultra; 0 uses preset 3 (high) when r_aa selects SMAA." );
-		}
-	}
 }
 
 /* r_aa follows live; one line per 1000 anti-aliased frames is the gameplay evidence (TAA resolved vs bootstrap, SMAA). */
 static qboolean ApplyAntiAliasing( void ) {
 	static uint32_t lastLoggedFrames;
 	cvar_t *aa = ri.Cvar_Get ? ri.Cvar_Get( "r_aa", "1", CVAR_ARCHIVE | CVAR_NODEFAULT ) : NULL;
-	cvar_t *smaa = ri.Cvar_Get ? ri.Cvar_Get( "r_smaa", "0", CVAR_ARCHIVE | CVAR_NODEFAULT ) : NULL;
+	const renderAntialiasingPlan_t plan = RenderAntialiasing_Resolve( aa ? aa->integer : RENDER_AA_OFF, 0 );
 	uint32_t resolved = 0u, bootstrap = 0u, smaaFrames = 0u;
-	if ( !RalOpenGl_ProductSetAntiAliasing( s_module.product, aa ? aa->integer : 0, smaa ? smaa->integer : 0 ) ) return qfalse;
+	if ( !RalOpenGl_ProductSetAntiAliasing( s_module.product, &plan ) ) return qfalse;
 	RalOpenGl_ProductAntiAliasingCounts( s_module.product, &resolved, &bootstrap, &smaaFrames );
 	if ( resolved + bootstrap + smaaFrames >= lastLoggedFrames + 1000u && s_module.imports.LogCh && s_module.logChannel >= 0 ) {
 		lastLoggedFrames = resolved + bootstrap + smaaFrames;

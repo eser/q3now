@@ -35,7 +35,7 @@
 #include "../../qcommon/q_shared.h"
 #include "tr_temporal_batch_request.h"
 #include "tr_temporal_history.h"
-#include "tr_antialiasing.h"
+#include "../frontend/render_antialiasing.h"
 #include "../../qcommon/qfiles.h"
 #include "../../qcommon/qcommon.h"
 #include "../frontend/tr_public.h"
@@ -1798,8 +1798,6 @@ extern cvar_t	*r_sunRayIntensity;
 extern cvar_t	*r_sunRayDecay;
 #endif
 extern cvar_t	*r_aa;
-extern cvar_t	*r_smaa;
-extern cvar_t	*r_smaa_threshold;
 extern cvar_t	*r_lerpLightstyles;		// 0=10Hz stepped, 1=smooth lerp between pattern chars
 #endif
 
@@ -1910,10 +1908,10 @@ void R_SwapBuffers( int );
 void R_RenderView( const viewParms_t *parms );
 uint64_t R_TemporalProjectionPrepare( viewParms_t *view );
 
-// Anti-aliasing decisions (r_aa, r_smaa, r_temporalInputTest, entity-matrix
-// path) resolved by tr_antialiasing.c.  Every SMAA and temporal enable check in
-// the renderer reads these instead of the cvars.
-void R_AntialiasingPlan( rAntialiasingPlan_t *outPlan );
+// Anti-aliasing decisions (r_aa and the r_temporalInputTest diagnostic) resolved
+// by render_antialiasing.h.  Every SMAA and temporal enable check in the renderer
+// reads these instead of the cvars.
+void R_AntialiasingPlan( renderAntialiasingPlan_t *outPlan );
 int  R_AntialiasingSmaaQuality( void );
 int  R_AntialiasingTemporalRequested( void );
 void R_TemporalProjectionFinish( int worldIndex, uint64_t frameId, qboolean queued );

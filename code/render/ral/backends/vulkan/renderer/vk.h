@@ -848,7 +848,7 @@ qboolean vk_bloom( void );
 //                       RENDER_PASS_MAIN so world/UI dynamic pipeline formats
 //                       share the same typed cache cohort.
 //
-// vk_smaa()           — self-gated on r_smaa; precondition and
+// vk_smaa()           — self-gated on the SMAA plan (r_aa 2); precondition and
 //                       postcondition: no render pass open. Reads/writes
 //                       img 265. Dispatched only from the transition
 //                       gameplay branch, between vk_tonemap() and
@@ -2938,7 +2938,7 @@ typedef struct {
 		struct ralTextureView_s *ral_search_view;
 
 		// Direct RAL intermediate textures (resolution-dependent). Their independent
-		// ownership is load-bearing for live r_smaa disable/re-enable.
+		// ownership is load-bearing for live SMAA disable/re-enable.
 		VkDescriptorSet edges_descriptor;
 		struct ralBindGroup_s *ral_edges_descriptor;
 		struct ralTexture_s *ral_edges_image;  // R8G8
@@ -3264,8 +3264,8 @@ typedef struct {
 	struct ralPipelineLayout_s *ral_pipeline_layout_sunrays;
 	// capture / bloom_extract / blur / bloom_blend are dynamic-rendering only (ral_* siblings).
 
-	// Dynamic-rendering SMAA pipelines. Recreated on r_smaa / r_smaa_threshold
-	// rebake so their cvar-baked specialization constants stay in sync.
+	// Dynamic-rendering SMAA pipelines. Recreated on an SMAA preset change
+	// so their baked specialization constants stay in sync.
 	struct ralPipeline_s *ral_smaa_edge_pipeline;
 	struct ralPipeline_s *ral_smaa_blend_pipeline;
 	struct ralPipeline_s *ral_smaa_resolve_pipeline;

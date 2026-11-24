@@ -2555,22 +2555,22 @@ aacompare)
     # taken at the end of its frame, so each switch waits two frames after the capture before it).
     AC_POS="${AC_POS:-1052 1432 50 135}"; AC_CUT_POS="${AC_CUT_POS:-300 300 200 45}"
     ac() {
-        local tag="$1" aa="$2" smaa="$3" yaw="$4"
+        local tag="$1" aa="$2" yaw="$3"
         { printf 'set cg_draw2D 0\nset cg_drawGun 0\nset fixedtime 8\n'
           case "$yaw" in
             0) printf 'wait 40\n' ;;
-            1) printf 'cl_yawspeed 60\n+right\nwait 24\n-right\nwait 40\nscreenshot vrf_ac_taa_1p\nwait 2\nset r_aa 0\nwait 4\nscreenshot vrf_ac_none_1p\nwait 2\nset r_smaa 3\nset r_aa 2\nwait 4\nscreenshot vrf_ac_smaa_1p\nwait 4\n' ;;
+            1) printf 'cl_yawspeed 60\n+right\nwait 24\n-right\nwait 40\nscreenshot vrf_ac_taa_1p\nwait 2\nset r_aa 0\nwait 4\nscreenshot vrf_ac_none_1p\nwait 2\nset r_aa 2\nwait 4\nscreenshot vrf_ac_smaa_1p\nwait 4\n' ;;
             2) printf 'wait 40\nsetviewpos %s 0\nwait 3\nscreenshot vrf_%s_cut\nwait 3\n' "$AC_CUT_POS" "$tag" ;;
           esac; } > "$SMOKE_HOME/base/vrf_ac.cfg"
-        CAP_POST_CMD="exec vrf_ac.cfg" capture_fixed_cam arena1 "$AC_POS" "$tag" +set r_aa "$aa" +set r_smaa "$smaa" >/dev/null || return 1
+        CAP_POST_CMD="exec vrf_ac.cfg" capture_fixed_cam arena1 "$AC_POS" "$tag" +set r_aa "$aa" >/dev/null || return 1
     }
     for yaw in 0 1 2; do
-        for cfg in "none 0 0" "smaa 2 3" "taa 1 0"; do
+        for cfg in "none 0" "smaa 2" "taa 1"; do
             set -- $cfg
             # The yaw case takes all three images in the TAA run (pose-exact, above).
             [ "$yaw" = 1 ] && [ "$1" != taa ] && continue
             [ "$yaw" = 1 ] && rm -f "$SHOTDIR/vrf_ac_none_1p.png" "$SHOTDIR/vrf_ac_smaa_1p.png" "$SHOTDIR/vrf_ac_taa_1p.png"
-            ac "ac_$1_$yaw" "$2" "$3" "$yaw" || FAIL=1
+            ac "ac_$1_$yaw" "$2" "$yaw" || FAIL=1
         done
         if ! grep -q 'temporal-resolved-hdr' "$VRF_TMP/vrf-ac_taa_$yaw.log"; then
             echo "  aacompare yaw=$yaw: FAIL(TAA was not active: no temporal-resolved lines)"; FAIL=1
@@ -2611,20 +2611,20 @@ aalatency)
     # configuration. A configuration that needs more frames than the others adds presentation latency.
     AL_POS="${AL_POS:-1052 1432 50 135}"; AL_DEST="${AL_DEST:-300 300 200 45}"
     al() {
-        local tag="$1" aa="$2" smaa="$3" n="$4" hold="${5:-1}"
+        local tag="$1" aa="$2" n="$3" hold="${4:-1}"
         { printf 'set cg_draw2D 0\nset cg_drawGun 0\nset fixedtime 8\nset r_dbgExactHold %s\nwait 40\nsetviewpos %s 0\nwait %s\nscreenshot vrf_%s_n\nwait 40\n' "$hold" "$AL_DEST" "$n" "$tag"; } > "$SMOKE_HOME/base/vrf_al.cfg"
-        CAP_POST_CMD="exec vrf_al.cfg" capture_fixed_cam arena1 "$AL_POS" "$tag" +set r_aa "$aa" +set r_smaa "$smaa" >/dev/null || return 1
+        CAP_POST_CMD="exec vrf_al.cfg" capture_fixed_cam arena1 "$AL_POS" "$tag" +set r_aa "$aa" >/dev/null || return 1
     }
     while read -r -u 3 cfg; do
         [ -n "$cfg" ] || continue
         set -- $cfg
         line="  aalatency $1: diff to settled destination by frames after teleport:"
         for n in ${AL_NS:-1 2 3 5}; do
-            al "al_$1_$n" "$2" "$3" "$n" "$4" || { FAIL=1; continue; }
+            al "al_$1_$n" "$2" "$n" "$3" || { FAIL=1; continue; }
             line="$line N=$n:$(worst_tile_diff_nohud "$SHOTDIR/vrf_al_$1_${n}_n.png" "$SHOTDIR/vrf_al_$1_$n.png")"
         done
         echo "$line"
-    done 3<<<"${AL_CFGS:-$'none 0 0 1\nsmaa 2 3 1\ntaa 1 0 1'}"
+    done 3<<<"${AL_CFGS:-$'none 0 1\nsmaa 2 1\ntaa 1 1'}"
     ;;
 
 temporalfold)
@@ -2666,18 +2666,18 @@ aaportal)
     AP_MAP="${AP_MAP:-q3dm7}"
     AP_VIEWS="${AP_VIEWS:-1082 -700 -395 270 0}"   # "x y z yaw pitch" per view, separated by |
     ap() {
-        local tag="$1" aa="$2" smaa="$3" pos="$4"
+        local tag="$1" aa="$2" pos="$3"
         { printf 'set cg_draw2D 0\nset cg_drawGun 0\nset fixedtime 8\nwait 60\n'
           # AP_YAW=1: a short yaw sweep so a portal view reprojected with the wrong velocity shows as ghosting.
           [ "${AP_YAW:-0}" = 1 ] && printf 'cl_yawspeed 30\n+left\nwait 14\n-left\nwait 2\n'; } > "$SMOKE_HOME/base/vrf_ap.cfg"
-        CAP_POST_CMD="exec vrf_ap.cfg" capture_fixed_cam "$AP_MAP" "$pos" "$tag" +set r_aa "$aa" +set r_smaa "$smaa" ${AP_EXTRA:-} >/dev/null || return 1
+        CAP_POST_CMD="exec vrf_ap.cfg" capture_fixed_cam "$AP_MAP" "$pos" "$tag" +set r_aa "$aa" ${AP_EXTRA:-} >/dev/null || return 1
     }
     n=0
     IFS='|' read -r -a APV <<< "$AP_VIEWS"
     for pos in "${APV[@]}"; do
-        for cfg in "none 0 0" "smaa 2 3" "taa 1 0"; do
+        for cfg in "none 0" "smaa 2" "taa 1"; do
             set -- $cfg
-            ap "ap_$1_$n" "$2" "$3" "$pos" || FAIL=1
+            ap "ap_$1_$n" "$2" "$pos" || FAIL=1
         done
         printf "  aaportal view %s (%s): worst-tile none-vs-smaa=%s none-vs-taa=%s smaa-vs-taa=%s\n" "$n" "$pos" \
             "$(worst_tile_diff_nohud "$SHOTDIR/vrf_ap_none_$n.png" "$SHOTDIR/vrf_ap_smaa_$n.png")" \

@@ -66,19 +66,20 @@ ln -sfn "$PAX21" "$HOME_DIR/base/pax21.sw3z"
 ln -sfn "$GAMECL" "$HOME_DIR/base/gameclarm64.dylib"
 ln -sfn "$GAMESV" "$HOME_DIR/base/gamesvarm64.dylib"
 
-# Arms, run in a palindromic order and repeated. 0 none (r_aa 0), 2 TAA (r_aa 1),
+# Arms, run in a palindromic order and repeated. 0 none (r_aa 0), 1 SMAA (r_aa 2), 2 TAA (r_aa 1),
 # 3 the temporal gate's own "on" arm (r_aa 0 + r_temporalInputTest 1),
 # 6 none + 4 redundant pass splits, 7 none + 16 redundant pass splits (r_dbgExtraSplit), 8 TAA with the older
 # per-draw exact pass (r_dbgExactHold 0; the default is the held exact pass). Arms 6-7 are dose
 # responses: they say whether a cost grows with the number of render passes. The arm numbers
-# are stable identifiers: the retired SMAA arms (1, 4, 5) are simply not assigned.
+# are stable identifiers: the retired SMAA preset arms 4 (low) and 5 (ultra) are not assigned, since SMAA runs one preset
+# (r_aa is the only anti-aliasing setting).
 ORDER=()
 # AAC_ARMS picks the arms (default 0 2 3: none, TAA, gate). The dose arms 6-7 answered their question and
 # every live mode switch eats descriptor-pool memory (TASK-258), so they are opt-in.
 ARMS=(${AAC_ARMS:-0 2 3})
 for a in "${ARMS[@]}"; do
 	case "$a" in
-		0|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16|17) ;;
+		0|1|2|3|6|7|8|9|10|11|12|13|14|15|16|17) ;;
 		*) echo "FAIL unknown arm '$a' in AAC_ARMS"; exit 64 ;;
 	esac
 done
@@ -108,11 +109,9 @@ CFGEOF
 		if [ "$i" -lt "$LAST" ]; then next="vstr aacSeg$(( i + 1 ))"; else next="echo AAC_COMPLETE; quit"; fi
 		case "$arm" in
 			0) armcmd="r_temporalInputTest 0; r_aa 0; r_dbgExtraSplit 0; r_dbgExactHold 0" ;;
-			1) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 0; r_dbgExtraSplit 0; r_dbgExactHold 0" ;;   # SMAA, preset 3 (high)
+			1) armcmd="r_temporalInputTest 0; r_aa 2; r_dbgExtraSplit 0; r_dbgExactHold 0" ;;   # SMAA (its one preset, high)
 			2) armcmd="r_temporalInputTest 0; r_aa 1; r_dbgExtraSplit 0; r_dbgExactHold 1; r_dbgTemporalRepeatResolve 1; r_dbgTemporalRepeatStore 1; r_dbgTemporalFold 1; r_dbgTemporalQuality 7" ;;
 			3) armcmd="r_aa 0; r_dbgExtraSplit 0; r_dbgExactHold 1; r_temporalInputTest 1" ;;
-			4) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 1; r_dbgExtraSplit 0" ;;   # SMAA preset 1 (low)
-			5) armcmd="r_temporalInputTest 0; r_aa 2; r_smaa 4; r_dbgExtraSplit 0" ;;   # SMAA preset 4 (ultra)
 			6) armcmd="r_temporalInputTest 0; r_aa 0; r_dbgExtraSplit 4" ;;
 			7) armcmd="r_temporalInputTest 0; r_aa 0; r_dbgExtraSplit 16" ;;
 			8) armcmd="r_temporalInputTest 0; r_aa 1; r_dbgExtraSplit 0; r_dbgExactHold 0" ;;
@@ -203,7 +202,7 @@ for i, arm in enumerate(order):
     for k, v in full_s[0].items():
         if k not in ("frames", "total"): lanes[arm].setdefault(k, []).append(v)
 RAN = [arm for arm in range(24) if per[arm]]
-name = {0: "none", 1: "SMAA3", 2: "TAA", 4: "SMAA1", 5: "SMAA4", 3: "gate-on", 6: "none+4sp", 7: "none+16sp", 8: "TAA-legacy", 9: "TAA resolve x4", 10: "TAA store x4", 11: "TAA resolve skipped", 12: "TAA resolve+store skipped", 13: "TAA store-copy", 14: "TAA quality off", 15: "TAA no fallback", 16: "TAA fallback only", 17: "TAA hold-leak control"}
+name = {0: "none", 1: "SMAA", 2: "TAA", 3: "gate-on", 6: "none+4sp", 7: "none+16sp", 8: "TAA-legacy", 9: "TAA resolve x4", 10: "TAA store x4", 11: "TAA resolve skipped", 12: "TAA resolve+store skipped", 13: "TAA store-copy", 14: "TAA quality off", 15: "TAA no fallback", 16: "TAA fallback only", 17: "TAA hold-leak control"}
 print(f"config: {'full default renderer' if full == '1' else 'stripped (as the temporal gate)'}; order {order_s}")
 for arm in RAN:
     v = per[arm]

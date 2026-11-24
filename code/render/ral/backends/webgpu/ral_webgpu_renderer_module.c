@@ -2357,17 +2357,9 @@ static void RegisterAntiAliasing( void ) {
 	if ( !aa ) return;
 	ri.Cvar_CheckRange( aa, "0", "2", CV_INTEGER );
 	if ( ri.Cvar_SetDescription ) ri.Cvar_SetDescription( aa,
-		"Anti-aliasing: 0 off, 1 TAA (default), 2 SMAA (only if TAA ghosting bothers you; r_smaa selects its preset)." );
+		"Anti-aliasing: 0 off, 1 TAA (default), 2 SMAA (only if TAA ghosting bothers you)." );
 	if ( ri.Cvar_SetGroup ) ri.Cvar_SetGroup( aa, CVG_RENDERER );
 	noted = qtrue;
-	{
-		cvar_t *smaa = ri.Cvar_Get( "r_smaa", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
-		if ( smaa ) {
-			ri.Cvar_CheckRange( smaa, "0", "4", CV_INTEGER );
-			if ( ri.Cvar_SetDescription ) ri.Cvar_SetDescription( smaa,
-				"SMAA quality preset 1 low .. 4 ultra; 0 uses preset 3 (high) when r_aa selects SMAA." );
-		}
-	}
 }
 
 static void BeginRegistration( glconfig_t *config )
@@ -2535,11 +2527,10 @@ static void BeginFrame( stereoFrame_t stereo )
 		/* r_aa follows live; one line per 1000 TAA frames is the gameplay evidence (resolved vs bootstrap). */
 		static uint32_t lastLoggedTaaFrames;
 		cvar_t *aa = ri.Cvar_Get ? ri.Cvar_Get( "r_aa", "1", CVAR_ARCHIVE | CVAR_NODEFAULT ) : NULL;
-		cvar_t *smaa = ri.Cvar_Get ? ri.Cvar_Get( "r_smaa", "0", CVAR_ARCHIVE | CVAR_NODEFAULT ) : NULL;
+		const renderAntialiasingPlan_t plan = RenderAntialiasing_Resolve( aa ? aa->integer : RENDER_AA_OFF, 0 );
 		uint32_t resolved = 0u, bootstrap = 0u;
 		if ( RalWebGpu_RuntimeGetReceipt( s_module.borrow.runtime, &s_module.borrow.runtimeReceipt ) )
-			(void)RalWebGpu_ProductSetAntiAliasing( s_module.product, &s_module.borrow.runtimeReceipt,
-				aa ? aa->integer : 0, smaa ? smaa->integer : 0 );
+			(void)RalWebGpu_ProductSetAntiAliasing( s_module.product, &s_module.borrow.runtimeReceipt, &plan );
 		RalWebGpu_ProductTaaFrameCounts( s_module.product, &resolved, &bootstrap );
 		if ( resolved + bootstrap >= lastLoggedTaaFrames + 1000u && s_module.imports.LogCh && s_module.logChannel >= 0 ) {
 			lastLoggedTaaFrames = resolved + bootstrap;

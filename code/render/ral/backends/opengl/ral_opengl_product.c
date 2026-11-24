@@ -446,9 +446,10 @@ struct ralOpenGlProduct_s {
 	ralDisplayVisibilityPlan_t displayVisibility;
 	float aerialHaze; /* r_atmosphereAerialHaze weight, 0..1 */
 	float lightmapBoost; /* r_lightmapBoost, linear world-lightmap overbright */
-	/* Anti-aliasing (r_aa 0 off, 1 TAA, 2 SMAA; r_smaa preset), created on first use. */
+	/* Anti-aliasing (the r_aa plan: TAA, or SMAA at its preset, never both), created on first use. */
 	ralOpenGlAa_t *aa;
-	int aaMode, smaaQuality;
+	qboolean taaEnabled;
+	int smaaQuality;
 	ralTemporalState_t taaState;
 	uint64_t taaFrameId, taaWorldGeneration;
 	uint32_t taaTopologyEpoch;
@@ -1864,10 +1865,11 @@ qboolean RalOpenGl_ProductSetDisplayVisibility( ralOpenGlProduct_t *product,
 	return qtrue;
 }
 
-qboolean RalOpenGl_ProductSetAntiAliasing( ralOpenGlProduct_t *product, int mode, int smaaQuality ) {
-	if ( !product || mode < 0 || mode > 2 || smaaQuality < 0 || smaaQuality > 4 ) return qfalse;
-	product->aaMode = mode;
-	product->smaaQuality = smaaQuality;
+qboolean RalOpenGl_ProductSetAntiAliasing( ralOpenGlProduct_t *product, const renderAntialiasingPlan_t *plan ) {
+	if ( !product || !plan || plan->smaaQuality < 0 || plan->smaaQuality > 4 || ( plan->temporalRequested && plan->smaaQuality ) )
+		return qfalse;
+	product->taaEnabled = plan->temporalRequested ? qtrue : qfalse;
+	product->smaaQuality = plan->smaaQuality;
 	return qtrue;
 }
 
@@ -3140,13 +3142,14 @@ qboolean RalOpenGl_ProductRender( ralOpenGlProduct_t *product, renderSubmissionS
 	 * world view (folded into the view axes by the world pass) and binds the coverage target as attachment 1 of the HDR scene. */
 	if ( product->taaState.pending )
 		(void)Ral_TemporalCancelFrame( &product->taaState, product->taaState.pendingPlan.frameId );
-	if ( product->aaMode != 1 && product->taaState.active ) { Ral_TemporalInit( &product->taaState ); product->taaFrameId = 0u; }
+	if ( !product->taaEnabled && product->taaState.active ) { Ral_TemporalInit( &product->taaState ); product->taaFrameId = 0u; }
 	memset( &taaFrame, 0, sizeof( taaFrame ) );
 	{
-		const qboolean anti = sceneComplete.sceneRendered && frontend->activeWorldIndex >= 0 && product->aaMode != 0;
+		const qboolean anti = sceneComplete.sceneRendered && frontend->activeWorldIndex >= 0
+			&& ( product->taaEnabled || product->smaaQuality > 0 );
 		uint32_t coverage = 0u;
 		if ( anti && !EnsureAa( product ) ) return qfalse;
-		if ( anti && product->aaMode == 1 && isfinite( effectView.fovX ) && isfinite( effectView.fovY )
+		if ( anti && product->taaEnabled && isfinite( effectView.fovX ) && isfinite( effectView.fovY )
 				&& effectView.fovX > 1.0f && effectView.fovX < 179.0f && effectView.fovY > 1.0f && effectView.fovY < 179.0f ) {
 			ralTemporalFrameInput_t input;
 			ralTemporalFramePlan_t plan;
@@ -3189,7 +3192,7 @@ qboolean RalOpenGl_ProductRender( ralOpenGlProduct_t *product, renderSubmissionS
 				taaPlanFrame = plan.frameId;
 			}
 		}
-		sceneComplete.smaa = anti && product->aaMode == 2 ? qtrue : qfalse;
+		sceneComplete.smaa = anti && product->smaaQuality > 0 ? qtrue : qfalse;
 		if ( product->aa && !RalOpenGl_AaAttachCoverage( product->aa, product->hdrFramebuffer, coverage ) ) return qfalse;
 	}
 	product->gl.GetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING_VALUE, &sceneComplete.drawFramebuffer );

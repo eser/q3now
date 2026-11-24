@@ -18,6 +18,7 @@
 #include "render_texture_sampling.h"
 #include "render_pbr_control.h"
 #include "render_dynamic_light_control.h"
+#include "render_antialiasing.h"
 #include "tr_public.h"
 #include "tr_screenshot.h"
 
@@ -108,8 +109,8 @@ typedef struct {
 	cvar_t *toneMap;
 	cvar_t *bloomCvars[5];
 	cvar_t bloomFallback[5];
-	cvar_t *aa, *smaa;                   /* r_aa (0 off, 1 TAA, 2 SMAA) and the r_smaa preset */
-	cvar_t aaFallback, smaaFallback;
+	cvar_t *aa;                          /* r_aa (0 off, 1 TAA, 2 SMAA), the only anti-aliasing setting */
+	cvar_t aaFallback;
 	cvar_t toneMapFallback;
 	cvar_t *toneMapExposure;
 	cvar_t toneMapExposureFallback;
@@ -1501,11 +1502,9 @@ static void BeginRegistration( glconfig_t *config ) {
 			if ( !s_module.bloomCvars[i] ) { MarkFailed( "bloom-cvars" ); return; }
 		}
 		s_module.aa = RegisterMetalRenderCvar( "r_aa", "1", "0", "2", qtrue,
-			"Anti-aliasing: 0 off, 1 TAA (default; camera-motion reprojection on this renderer, moving entities rely on the depth test and clip), 2 SMAA.",
+			"Anti-aliasing: 0 off, 1 TAA (default; camera-motion reprojection on this renderer, moving entities rely on the depth test and clip), 2 SMAA (only if TAA ghosting bothers you).",
 			&s_module.aaFallback );
-		s_module.smaa = RegisterMetalRenderCvar( "r_smaa", "0", "0", "4", qtrue,
-			"SMAA quality preset 1 low .. 4 ultra; 0 uses preset 3 (high) when r_aa selects SMAA.", &s_module.smaaFallback );
-		if ( !s_module.aa || !s_module.smaa ) { MarkFailed( "aa-cvars" ); return; }
+		if ( !s_module.aa ) { MarkFailed( "aa-cvars" ); return; }
 		if ( ri.Cvar_Get && ri.Cvar_Set ) { ri.Cvar_Get( "r_aaSupported", "1", CVAR_TEMP ); ri.Cvar_Set( "r_aaSupported", "1" ); }
 		s_module.toneMap = RegisterMetalRenderCvar( "r_tonemap", "3", "0", "4",
 			qtrue, "HDR tone mapping operator: 0 identity, 1 PBR Neutral, 2 AgX, 3 Lottes, 4 Reinhard.",
@@ -1736,12 +1735,10 @@ static void EndFrame( int *frontEndMsec, int *backEndMsec ) {
 	qboolean bloomReady = qtrue;
 	int smaaQuality = 0;
 	qboolean taaEnabled = qfalse;
-	if ( s_module.aa && s_module.smaa ) {
-		/* r_aa 0 leaves r_smaa as a developer override; 1 (TAA) and 2 (SMAA) both run SMAA here: the Metal renderer has no jittered
-		 * velocity-carrying scene pass or history yet (TASK-257), so a TAA request degrades to SMAA instead of to no anti-aliasing. */
-		const int mode = s_module.aa->integer, preset = s_module.smaa->integer;
-		smaaQuality = mode == 0 ? preset : ( mode == 2 ? ( preset ? preset : 3 ) : 0 );
-		taaEnabled = mode == 1 ? qtrue : qfalse;
+	if ( s_module.aa ) {
+		const renderAntialiasingPlan_t aaPlan = RenderAntialiasing_Resolve( s_module.aa->integer, 0 );
+		smaaQuality = aaPlan.smaaQuality;
+		taaEnabled = aaPlan.temporalRequested ? qtrue : qfalse;
 	}
 	for ( unsigned i = 0; i < ARRAY_LEN( s_module.bloomCvars ); ++i )
 		if ( !s_module.bloomCvars[i] ) bloomReady = qfalse;

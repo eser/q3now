@@ -8,6 +8,7 @@
 #include "ral_exposure.h"
 #include "ral_display_visibility.h"
 #include "render_material_package.h"
+#include "render_antialiasing.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -73,9 +74,9 @@ qboolean RalOpenGl_ProductSetDisplayVisibility( ralOpenGlProduct_t *product,
 	const ralDisplayVisibilityPlan_t *visibility );
 qboolean RalOpenGl_ProductSetAerialHaze( ralOpenGlProduct_t *product,
 	float aerialHaze );
-/* r_aa (0 off, 1 TAA, 2 SMAA) and r_smaa (preset 1..4, 0 = 3). Takes effect on the next frame; switching away from TAA drops its
- * history, so switching back starts from the bootstrap frame. */
-qboolean RalOpenGl_ProductSetAntiAliasing( ralOpenGlProduct_t *product, int mode, int smaaQuality );
+/* The anti-aliasing plan the module resolved from r_aa (render_antialiasing.h). Takes effect on the next frame; switching away from
+ * TAA drops its history, so switching back starts from the bootstrap frame. */
+qboolean RalOpenGl_ProductSetAntiAliasing( ralOpenGlProduct_t *product, const renderAntialiasingPlan_t *plan );
 /* Frames completed per anti-aliasing path since the product was created (r_aa diagnostics). */
 void RalOpenGl_ProductAntiAliasingCounts( const ralOpenGlProduct_t *product, uint32_t *taaResolved, uint32_t *taaBootstrap,
 	uint32_t *smaa );

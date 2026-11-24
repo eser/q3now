@@ -1597,7 +1597,7 @@ void vk_ral_adopt_static_bindgroups( void )
 	// adopt the 6 renderer-owned internal-image VkImages
 	// + the GPU-timestamp VkQueryPool into ralTexture_t / ralQueryPool_t
 	// siblings. Must run AFTER vk_initialize (which creates the VkImages) and
-	// AFTER vk_smaa_alloc_resources (when r_smaa is on at boot). The boot-time
+	// AFTER vk_smaa_alloc_resources (when SMAA is on at boot). The boot-time
 	// call path is vk_initialize → vk_init_descriptors → vk_ral_adopt_static_bindgroups
 	// → here; the SMAA images are conditionally adopted under vk.fboActive.
 	vk_ral_refresh_internal_texture_dependents();

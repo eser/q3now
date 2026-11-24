@@ -8,6 +8,7 @@
 #include "ral_webgpu_weather.h"
 #include "ral_webgpu_exposure.h"
 #include "render_material_package.h"
+#include "render_antialiasing.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -150,9 +151,10 @@ qboolean RalWebGpu_ProductEnableTaa( ralWebGpuProduct_t *product,
 	ralWebGpuRuntimeReceipt_t *rr, ralWebGpuBrowserBridge_t *bridge, uint64_t generation );
 qboolean RalWebGpu_ProductEnableSmaa( ralWebGpuProduct_t *product,
 	ralWebGpuRuntimeReceipt_t *rr, ralWebGpuBrowserBridge_t *bridge, uint64_t generation );
-/* r_aa: 0 off, 1 TAA, 2 SMAA; smaaQuality is r_smaa (0 selects 3). Call between frames. */
-qboolean RalWebGpu_ProductSetAntiAliasing( ralWebGpuProduct_t *product, ralWebGpuRuntimeReceipt_t *rr, int mode,
-	int smaaQuality );
+/* The anti-aliasing plan the module resolved from r_aa (render_antialiasing.h): TAA, or SMAA at its preset, never both. Call
+ * between frames. */
+qboolean RalWebGpu_ProductSetAntiAliasing( ralWebGpuProduct_t *product, ralWebGpuRuntimeReceipt_t *rr,
+	const renderAntialiasingPlan_t *plan );
 void RalWebGpu_ProductTaaFrameCounts( const ralWebGpuProduct_t *product, uint32_t *resolved, uint32_t *bootstrap );
 qboolean RalWebGpu_ProductEnableExposure( ralWebGpuProduct_t *product,
     ralWebGpuRuntimeReceipt_t *rr, ralWebGpuBrowserBridge_t *bridge, uint64_t generation );

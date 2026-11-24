@@ -13,7 +13,7 @@ typedef struct ralWebGpuSmaa_s ralWebGpuSmaa_t;
 qboolean RalWebGpu_SmaaCreate( ralWebGpuRuntime_t *runtime, ralWebGpuRuntimeReceipt_t *rr,
 	ralWebGpuBrowserBridge_t *bridge, uint64_t generation, ralWebGpuSmaa_t **out );
 void RalWebGpu_SmaaDestroy( ralWebGpuSmaa_t *smaa, const ralWebGpuRuntimeReceipt_t *rr );
-/* `quality` 1 low .. 4 ultra (r_smaa; 0 selects 3). Rebuilds the pipelines when it changes; call between frames. */
+/* `quality` 1 low .. 4 ultra (the r_aa plan passes RENDER_AA_SMAA_QUALITY; 0 selects 3). Rebuilds the pipelines when it changes; call between frames. */
 qboolean RalWebGpu_SmaaSetQuality( ralWebGpuSmaa_t *smaa, ralWebGpuRuntimeReceipt_t *rr, int quality );
 /* Records the three render passes after the scene passes. */
 qboolean RalWebGpu_SmaaRecord( ralWebGpuSmaa_t *smaa, const ralWebGpuRuntimeReceipt_t *rr,

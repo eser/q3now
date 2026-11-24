@@ -4781,7 +4781,7 @@ static qboolean vk_ral_refresh_smaa_sampler_cohorts( void ) {
 			&& Ral_GetBindGroupHandle( vk.smaa.ral_search_descriptor ) == (void *)vk.smaa.search_descriptor )
 		return qtrue;
 
-	// Arena resets and live r_smaa recreation converge here. Texture parents are
+	// Arena resets and live SMAA (r_aa) recreation converge here. Texture parents are
 	// direct RAL owners and survive arena-only child refreshes.
 	if ( !vk.smaa.ral_edges_image || !vk.smaa.ral_blend_image
 			|| !vk.smaa.ral_input_image || !vk.smaa.ral_area_image
@@ -14054,7 +14054,7 @@ static void vk_create_shader_modules( void )
 	// this function. Gating module creation on vk.smaa.active left the handles
 	// VK_NULL_HANDLE while vk_update_post_process_pipelines still saw .active and
 	// fed them to vk_create_smaa_pipelines (VUID-VkGraphicsPipelineCreateInfo
-	// triple-NULL at boot when r_smaa > 0). r_smaa is also live-toggleable
+	// triple-NULL at boot when SMAA is on). SMAA (r_aa) is also live-toggleable
 	// (CVG_RENDERER), so the modules must exist even if SMAA is off at boot. The
 	// six SMAA shaders are tiny — always-present is cheaper than re-introducing an
 	// ordering dependency. Destroyed unconditionally (NULL-guarded) in vk_shutdown.
@@ -14578,7 +14578,7 @@ static void vk_create_smaa_pipelines( void )
 	static const int searchStepsDiag[] = { 0, 0, 0, 8, 16 };
 	static const int cornerRounding[] = { 0, 0, 0, 25, 25 };
 
-	// The effective SMAA preset (r_aa / r_smaa) is live (CVG_RENDERER), so
+	// The effective SMAA preset (r_aa) is live (CVG_RENDERER), so
 	// re-read it at every rebuild instead of reusing the init-time cache.
 	// vk.smaa.quality stays in sync for the SEV_INFO log path elsewhere.
 	int q = R_AntialiasingSmaaQuality();
@@ -14594,7 +14594,7 @@ static void vk_create_smaa_pipelines( void )
 	if ( !vk.smaa.active )
 		return;
 
-	// r_smaa toggled off live. Resources stay allocated per the always-alloc
+	// SMAA turned off live (r_aa). Resources stay allocated per the always-alloc
 	// design; only the three RAL dynamic-rendering pipelines come and go.
 	if ( q == 0 ) {
 		if ( vk.ral_smaa_edge_pipeline    ) { Ral_DestroyPipeline( vk.ral_smaa_edge_pipeline    ); vk.ral_smaa_edge_pipeline    = NULL; }
@@ -14604,23 +14604,13 @@ static void vk_create_smaa_pipelines( void )
 	}
 
 	// --- Edge detection pipeline ---
-	// r_smaa_threshold > 0 overrides the quality preset.
-	// Default value 0 means "use r_smaa preset" so existing user
-	// configs continue to behave as before. The override only swaps
-	// the threshold constant; searchSteps / searchStepsDiag /
-	// cornerRounding stay preset-keyed (they're quality knobs, not
-	// sensitivity knobs).
-	if ( r_smaa_threshold->value > 0.0f ) {
-		edge_threshold = r_smaa_threshold->value;
-	} else {
-		edge_threshold = thresholds[q];
-	}
+	edge_threshold = thresholds[q];
 	// SMAA cluster (shared RAL pipeline_layout_smaa).
 	// Binding contract per smaa_edge.{vert,frag}: set 0 is colorTex and set 3 is
 	// the per-frame rtMetrics UBO. The shared layout also declares sampler sets
 	// 1/2 for blend/resolve; this shader variant statically ignores them.
 	// The edge pipeline is dynamic-rendering only. Rebuilt here
-	// on every r_smaa / r_smaa_threshold change (the spec threshold is cvar-baked).
+	// on every SMAA preset change (the threshold is a baked spec constant).
 	{
 		vk_ral_special_pipeline_params_t p;
 		ralSpecConstant_t edgeSpec[1];
@@ -14651,7 +14641,7 @@ static void vk_create_smaa_pipelines( void )
 		p.depthFormat        = fmt->depthFormat;
 		p.debugName          = "ral-smaa-edge";
 		p.externalLayout     = vk.ral_pipeline_layout_smaa;
-		// destroy-then-create: vk_create_smaa_pipelines re-runs on r_smaa toggle /
+		// destroy-then-create: vk_create_smaa_pipelines re-runs on r_aa toggle /
 		// resize / rebake, so drop the predecessor before replacing it.
 		if ( vk.ral_smaa_edge_pipeline ) { Ral_DestroyPipeline( vk.ral_smaa_edge_pipeline ); vk.ral_smaa_edge_pipeline = NULL; }
 		vk.ral_smaa_edge_pipeline = vk_ral_create_special_pipeline( &p );
@@ -14751,7 +14741,7 @@ static void vk_recreate_swapchain_generation( void );
 // Bodies live near vk_create_attachments so all of SMAA's lifecycle
 // is together. Called from vk_create_attachments / vk_destroy_attachments
 // for cold start + r_fbo flip, and from vk_update_post_process_pipelines
-// for r_smaa live toggle.
+// for the live SMAA (r_aa) toggle.
 static void vk_smaa_alloc_resources( void );
 static void vk_smaa_release_resources( void );
 static void vk_create_bluenoise_texture( void );
@@ -15800,8 +15790,8 @@ void vk_update_post_process_pipelines( void )
 	// real r_hdr change.
 	static int s_r_fbo_value = -1;
 	static int s_r_hdr_value = -1;
-	// r_smaa live alloc / release.
-	static int s_r_smaa_value = -1;
+	// SMAA (r_aa) live alloc / release.
+	static int s_smaa_quality = -1;
 	// r_hdrDisplay live conversion + HDR10 mastering-metadata
 	// re-issue on r_hdrPeakLuminance / r_hdrMinLuminance change.
 	static int   s_r_hdrDisplay_value = -1;
@@ -15825,7 +15815,7 @@ void vk_update_post_process_pipelines( void )
 	// SET, so nothing in the main framebuffers / render passes / pipelines refers
 	// to them. The descriptor SET was allocated by vk_init_descriptors (whenever
 	// vk.fboActive) and persists across release/realloc; vk_update_attachment_
-	// descriptors rebinds it to the fresh RAL array view. (Mirrors the r_smaa
+	// descriptors rebinds it to the fresh RAL array view. (Mirrors the SMAA
 	// live hook below.)
 	{
 		cvar_t *c_size = ri.Cvar_Get( "r_shadowMapSize", "2048", 0 );
@@ -15859,11 +15849,11 @@ void vk_update_post_process_pipelines( void )
 		// the FBO chain (including color_format) was rebuilt against
 		// the current r_hdr value during the r_fbo rebuild path.
 		s_r_hdr_value = r_hdr->integer;
-		// Reseed the r_smaa cache too: vk_create_attachments inside
+		// Reseed the SMAA quality cache too: vk_create_attachments inside
 		// the rebuild already called vk_smaa_alloc_resources iff
 		// (vk.fboActive && effective SMAA preset > 0), so smaa.active is now in
 		// agreement with the effective preset for whatever fbo state we landed in.
-		s_r_smaa_value = R_AntialiasingSmaaQuality();
+		s_smaa_quality = R_AntialiasingSmaaQuality();
 		// Reseed r_hdrDisplay too — the rebuild re-ran vk_select_surface_
 		// format, which re-negotiated the swapchain colorspace.
 		s_r_hdrDisplay_value = r_hdrDisplay->integer;
@@ -15882,7 +15872,7 @@ void vk_update_post_process_pipelines( void )
 		vk_rebuild_for_fbo_change();
 		s_r_hdrDisplay_value = r_hdrDisplay->integer;
 		s_r_hdr_value  = r_hdr->integer;   // reseed — rebuilt against current r_hdr
-		s_r_smaa_value = R_AntialiasingSmaaQuality();  // reseed
+		s_smaa_quality = R_AntialiasingSmaaQuality();  // reseed
 	}
 
 	if ( vk.fboActive ) {
@@ -15910,7 +15900,7 @@ void vk_update_post_process_pipelines( void )
 		s_hdr_min_nits  = r_hdrMinLuminance->value;
 	}
 
-	// r_smaa live alloc / release. Runs after the r_fbo/r_hdr rebuilds
+	// SMAA (r_aa) live alloc / release. Runs after the r_fbo/r_hdr rebuilds
 	// above so we see the post-rebuild vk.fboActive state. Crossing the
 	// 0/non-0 boundary either frees ~tens of MB of SMAA images (drop to
 	// 0) or reallocates them (rise from 0). Same-side bumps (e.g. 1->4)
@@ -15918,13 +15908,13 @@ void vk_update_post_process_pipelines( void )
 	// react, which the existing vk_create_smaa_pipelines path handles.
 	if ( vk.fboActive ) {
 		const int smaaQuality = R_AntialiasingSmaaQuality();
-		if ( s_r_smaa_value == -1 ) {
-			s_r_smaa_value = smaaQuality;
-		} else if ( ( s_r_smaa_value == 0 ) != ( smaaQuality == 0 ) ) {
+		if ( s_smaa_quality == -1 ) {
+			s_smaa_quality = smaaQuality;
+		} else if ( ( s_smaa_quality == 0 ) != ( smaaQuality == 0 ) ) {
 			vk_wait_idle();
 			if ( smaaQuality == 0 ) {
 				vk_smaa_release_resources();
-				R_LOG( rch_fbo, SEV_INFO, "r_smaa live: 0, released SMAA resources\n" );
+				R_LOG( rch_fbo, SEV_INFO, "SMAA live: off, released SMAA resources\n" );
 			} else {
 				vk_smaa_alloc_resources();
 				// Rebind the SMAA descriptors to the freshly-allocated
@@ -15932,11 +15922,11 @@ void vk_update_post_process_pipelines( void )
 				// across release/realloc cycles (allocated eagerly in
 				// vk_init_descriptors when vk.fboActive).
 				vk_update_attachment_descriptors();
-				R_LOG( rch_fbo, SEV_INFO, "r_smaa live: %d, allocated SMAA resources\n", smaaQuality );
+				R_LOG( rch_fbo, SEV_INFO, "SMAA live: preset %d, allocated SMAA resources\n", smaaQuality );
 			}
-			s_r_smaa_value = smaaQuality;
+			s_smaa_quality = smaaQuality;
 		} else {
-			s_r_smaa_value = smaaQuality;
+			s_smaa_quality = smaaQuality;
 		}
 	}
 
@@ -16113,7 +16103,7 @@ static ralTexture_t *vk_create_depth_attachment_texture( uint32_t width,
 ================
 vk_smaa_create_texture
 
-Creates one independently owned SMAA texture through RAL so live r_smaa
+Creates one independently owned SMAA texture through RAL so a live SMAA (r_aa)
 disable can retire the five-resource cohort without rebuilding the attachment
 pool. Views remain arena-generation children created by the sampler cohort.
 ================
@@ -16293,7 +16283,7 @@ RAL arena generation receives groups for the fresh image-view handles.
 
 Called from:
   - vk_create_attachments (cold start + r_fbo flip rebuild)
-  - vk_update_post_process_pipelines via the r_smaa live hook
+  - vk_update_post_process_pipelines via the SMAA (r_aa) live hook
 ================
 */
 static void vk_smaa_alloc_resources( void )
@@ -16540,7 +16530,7 @@ in-flight command buffer is still referencing the resources.
 
 Called from:
   - vk_destroy_attachments (full FBO chain teardown)
-  - vk_update_post_process_pipelines via the r_smaa live hook
+  - vk_update_post_process_pipelines via the SMAA (r_aa) live hook
 ================
 */
 static void vk_smaa_release_resources( void )
@@ -23724,8 +23714,8 @@ qboolean vk_initialize( void )
 
 	// option (ii) memory-release SMAA. vk.smaa.active
 	// is owned by vk_smaa_alloc_resources (sets qtrue) and
-	// vk_smaa_release_resources (sets qfalse). r_smaa = 0 at boot leaves
-	// .active false and no SMAA Vulkan resources allocated; r_smaa > 0
+	// vk_smaa_release_resources (sets qfalse). SMAA off at boot leaves
+	// .active false and no SMAA Vulkan resources allocated; SMAA on
 	// at boot has vk_create_attachments call alloc, which flips .active
 	// to qtrue. Live toggling routes through vk_update_post_process_pipelines.
 	vk.smaa.active = qfalse;
@@ -24332,7 +24322,7 @@ qboolean vk_initialize( void )
 		// SMAA pipeline layout: 3 sampler sets + push constants (vec4 rtMetrics).
 		// Created unconditionally for the same reason the SMAA shader modules are
 		// (see vk_create_shader_modules): vk.smaa.active is still qfalse at this
-		// point in vk_initialize, and r_smaa is live-toggleable, so the layout has
+		// point in vk_initialize, and SMAA (r_aa) is live-toggleable, so the layout has
 		// to exist whenever vk_create_smaa_pipelines might run. Destroyed
 		// NULL-guarded in vk_shutdown.
 		{
@@ -24664,7 +24654,7 @@ static void vk_destroy_attachments( void )
 	// every SMAA resource (images / views /
 	// memory / samplers) lives on dedicated allocations now. The
 	// release helper is idempotent so the cold-path (full FBO teardown)
-	// and the live-path (r_smaa flips to 0) share this single call.
+	// and the live-path (SMAA turns off) share this single call.
 	vk_smaa_release_resources();
 
 	if ( vk.screenMap.ral_color_image ) {
@@ -32564,7 +32554,7 @@ depth testing and writes disabled.
     was drawn there). 2D draws land in a fresh black img 265 with no tonemap.
 
   clear == qfalse (gameplay frames): the orchestrator already ran
-    vk_tonemap() (and vk_smaa() if r_smaa>0), which left a clean state —
+    vk_tonemap() (and vk_smaa() if SMAA is on), which left a clean state —
     no render pass open. Begin the same dynamic UI pass on img 265 with
     loadOp=LOAD so the HUD blends on top of the tonemapped (+ SMAA'd) scene.
 
@@ -33195,11 +33185,11 @@ void vk_smaa( void )
 	float rtMetrics[4];
 
 	// vk.smaa.active is the resource-alloc gate. Dispatch
-	// also requires an effective SMAA preset > 0 (r_aa / r_smaa) AND the live pipelines to be
-	// built (vk_create_smaa_pipelines tears them down when r_smaa hits
-	// 0). The caller (the transition gameplay branch) is itself once-
+	// also requires an effective SMAA preset > 0 (r_aa 2) AND the live pipelines to be
+	// built (vk_create_smaa_pipelines tears them down when SMAA turns
+	// off). The caller (the transition gameplay branch) is itself once-
 	// guarded by backEnd.doneUIPass, so this runs at most once per frame;
-	// this defensive guard handles r_smaa = 0 and the live-toggle /
+	// this defensive guard handles SMAA off and the live-toggle /
 	// acquire-failed corner cases.
 	if ( !vk.smaa.active || R_AntialiasingSmaaQuality() == 0
 			|| !vk.ral_tonemapped_image || !vk.smaa.ral_input_image
