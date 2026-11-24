@@ -121,6 +121,14 @@ typedef struct {
 	// surface changes appearance without any geometric motion, so a reprojected history of it is wrong in the same way an effect
 	// is (scrolling lava and water, teleporters). Under the effect mask it does not inherit history either.
 	qboolean textureAnimated;
+	// A stage takes its texture coordinates from the surface orientation (tcGen environment): its look follows the orientation, not
+	// the geometry, so once the entity turned since its previous pose (entityRotated) it is classified like an animated texture.
+	qboolean environmentMapped;
+	qboolean entityRotated;
+	// The material's base stage is opaque and depth-writing. `transparent` and `opaque` come from the material sort; a material sorted
+	// after SS_OPAQUE with an opaque base (an item frame whose environment-mapped base carries a blended detail stage) is opaque
+	// geometry, and its blended stage is a stage of an opaque surface, not an effect.
+	qboolean opaqueBase;
 } temporalMotionDrawFacts_t;
 
 // Pure per-draw disposition.  This does not inspect renderer-private shader or

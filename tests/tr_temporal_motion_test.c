@@ -148,10 +148,29 @@ static int TestClassification( void ) {
 	facts.crosshair = qfalse; facts.visible = qfalse; \
 	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_PRESERVE ); \
 } while (0)
-	EXPECT_EFFECT( transparent );
 	EXPECT_EFFECT( decal );
 	EXPECT_EFFECT( depthHack );
 #undef EXPECT_EFFECT
+	// Sorted after SS_OPAQUE: without an opaque base the material is a translucent effect; with one (an item frame whose opaque base
+	// carries a blended detail stage) its base draw is opaque geometry and its blended stage keeps the base's history.
+	facts = WritableFacts( TEMPORAL_MOTION_GEOMETRY_MOD_BRUSH_RIGID );
+	facts.transparent = qtrue; facts.opaque = qfalse; facts.effectMask = qtrue;
+	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_INVALIDATE_OPAQUE );
+	facts.opaqueBase = qtrue;
+	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_WRITE_VALID );
+	facts.blended = qtrue;
+	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_PRESERVE );
+	facts.blended = qfalse; facts.opaqueBase = qfalse; facts.effectMask = qfalse;
+	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_PRESERVE );
+	// An environment-mapped surface keeps writing motion while its entity holds its orientation; once the entity turned, its
+	// reflection does not follow the motion vector and it is invalidated like an animated texture (under the effect mask).
+	facts = WritableFacts( TEMPORAL_MOTION_GEOMETRY_MOD_BRUSH_RIGID );
+	facts.environmentMapped = facts.effectMask = qtrue;
+	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_WRITE_VALID );
+	facts.entityRotated = qtrue;
+	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_INVALIDATE_OPAQUE );
+	facts.environmentMapped = qfalse;
+	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_WRITE_VALID );
 	// A shader that animates its texture coordinates (scrolling lava, water, teleporters) changes appearance without moving, so under the
 	// effect mask it does not inherit history either; without the mask it is unchanged. UI, crosshair, sky and a blended stage keep their
 	// class, and an alpha-tested animated surface still follows the invalidate path.

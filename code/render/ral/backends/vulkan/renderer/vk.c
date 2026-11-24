@@ -30733,6 +30733,38 @@ static qboolean vk_shader_texture_animated( const shader_t *shader ) {
 	return qfalse;
 }
 
+/* The entity's previous pose differs from its current one only by its transform (same animation frames): an MD3 drawn from the
+ * same lerped mesh moves rigidly, so the rigid matrices give its exact motion. */
+static qboolean vk_temporal_pose_animation_unchanged( const temporalEntityPoseReceipt_t *receipt ) {
+	return receipt && receipt->valid && receipt->previousValid
+		&& receipt->current.frame == receipt->previous.frame
+		&& receipt->current.oldframe == receipt->previous.oldframe
+		&& receipt->current.backlerp == receipt->previous.backlerp ? qtrue : qfalse;
+}
+
+/* The entity turned between its previous and current pose. */
+static qboolean vk_temporal_pose_rotated( const temporalEntityPoseReceipt_t *receipt ) {
+	if ( !receipt || !receipt->previousValid ) return qfalse;
+	for ( int i = 0; i < 9; ++i ) {
+		const float d = receipt->current.axis[i] - receipt->previous.axis[i];
+		if ( d > 1.0e-5f || d < -1.0e-5f ) return qtrue;
+	}
+	return qfalse;
+}
+
+/* A stage takes its texture coordinates from the surface orientation (tcGen environment). */
+static qboolean vk_shader_environment_mapped( const shader_t *shader ) {
+	if ( !shader ) return qfalse;
+	for ( uint32_t i = 0u; i < (uint32_t)shader->numUnfoggedPasses && i < MAX_SHADER_STAGES; ++i ) {
+		const shaderStage_t *stage = shader->stages[i];
+		if ( !stage || !stage->active ) continue;
+		for ( uint32_t b = 0u; b < stage->numTexBundles && b < NUM_TEXTURE_BUNDLES; ++b )
+			if ( stage->bundle[b].tcGen == TCGEN_ENVIRONMENT_MAPPED
+					|| stage->bundle[b].tcGen == TCGEN_ENVIRONMENT_MAPPED_FP ) return qtrue;
+	}
+	return qfalse;
+}
+
 static qboolean vk_temporal_motion_prepare_bound_draw( uint32_t pipelineSlot )
 {
 	temporalMotionDrawFacts_t facts;
@@ -30788,6 +30820,10 @@ static qboolean vk_temporal_motion_prepare_bound_draw( uint32_t pipelineSlot )
 	facts.polygonOffset = def->polygon_offset;
 	facts.effectMask = r_dbgTemporalEffectMask && r_dbgTemporalEffectMask->integer ? qtrue : qfalse;
 	facts.textureAnimated = vk_shader_texture_animated( shader );
+	facts.environmentMapped = vk_shader_environment_mapped( shader );
+	facts.opaqueBase = shader->stages[0] && shader->stages[0]->active
+		&& !( shader->stages[0]->stateBits & GLS_BLEND_BITS )
+		&& ( shader->stages[0]->stateBits & GLS_DEPTHMASK_TRUE ) ? qtrue : qfalse;
 	if ( entity ) {
 		facts.depthHack = ( entity->e.renderfx & RF_DEPTHHACK ) ? qtrue : qfalse;
 		facts.crosshair = ( entity->e.renderfx & RF_CROSSHAIR ) ? qtrue : qfalse;
@@ -30800,7 +30836,13 @@ static qboolean vk_temporal_motion_prepare_bound_draw( uint32_t pipelineSlot )
 		if ( model && model->type == MOD_BRUSH ) {
 			facts.geometry = TEMPORAL_MOTION_GEOMETRY_MOD_BRUSH_RIGID;
 			entityReceipt = &entity->temporalReceipt;
+		} else if ( model && model->type == MOD_MESH
+				&& vk_temporal_pose_animation_unchanged( &entity->temporalReceipt ) ) {
+			/* An MD3 whose animation frames did not change (items, static props) moves rigidly. */
+			facts.geometry = TEMPORAL_MOTION_GEOMETRY_MOD_BRUSH_RIGID;
+			entityReceipt = &entity->temporalReceipt;
 		}
+		facts.entityRotated = entityReceipt && vk_temporal_pose_rotated( entityReceipt ) ? qtrue : qfalse;
 	}
 	outcome = R_TemporalMotionClassify( &facts );
 	// A blended recipe's WRITE sibling exists (the factory builds all three) but is never valid to select: velocity written under

@@ -301,16 +301,23 @@ qboolean R_TemporalEntityCacheFinish( int worldIndex, uint64_t frameId,
 
 temporalMotionOutcome_t R_TemporalMotionClassify(
 		const temporalMotionDrawFacts_t *facts ) {
-	qboolean supportedGeometry;
+	qboolean supportedGeometry, transparent, opaque, textureAnimated;
 	if ( !facts || !facts->visible ) return TEMPORAL_MOTION_PRESERVE;
+	/* `transparent` and `opaque` come from the material sort. A material sorted after SS_OPAQUE whose base stage is opaque and
+	 * depth-writing (an item frame whose environment-mapped base carries a blended detail stage) is opaque geometry: its base draw is
+	 * opaque and its blended stage is a stage of an opaque surface, not a translucent effect. An environment-mapped stage of a turned
+	 * entity changes look without following its motion, like an animated texture. */
+	transparent = facts->transparent && !facts->opaqueBase ? qtrue : qfalse;
+	opaque = facts->opaque || ( facts->transparent && facts->opaqueBase && !facts->blended ) ? qtrue : qfalse;
+	textureAnimated = facts->textureAnimated || ( facts->environmentMapped && facts->entityRotated ) ? qtrue : qfalse;
 	if ( facts->effectMask && !facts->ui && !facts->crosshair && !facts->sky
-			&& ( facts->transparent || facts->decal || facts->depthHack ) )
+			&& ( transparent || facts->decal || facts->depthHack ) )
 		return TEMPORAL_MOTION_INVALIDATE_OPAQUE;
-	if ( facts->effectMask && facts->textureAnimated && !facts->ui && !facts->crosshair && !facts->sky
-			&& !facts->blended && facts->opaque && facts->depthAuthoritative )
+	if ( facts->effectMask && textureAnimated && !facts->ui && !facts->crosshair && !facts->sky
+			&& !facts->blended && opaque && facts->depthAuthoritative )
 		return TEMPORAL_MOTION_INVALIDATE_OPAQUE;
-	if ( facts->ui || facts->transparent || facts->blended || facts->decal
-			|| facts->additive || !facts->opaque || facts->polygonOffset
+	if ( facts->ui || transparent || facts->blended || facts->decal
+			|| facts->additive || !opaque || facts->polygonOffset
 			|| facts->depthHack || facts->crosshair ) return TEMPORAL_MOTION_PRESERVE;
 	if ( !facts->depthAuthoritative ) return TEMPORAL_MOTION_PRESERVE;
 	if ( facts->alphaTested && facts->deferAlphaTested )
