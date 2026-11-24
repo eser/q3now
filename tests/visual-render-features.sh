@@ -2773,7 +2773,9 @@ gunsmear)
     # gun pixels are filtered spatially. The same frame (fixedtime 8, same camera path, one frame after the sweep stops: the pose is identical, the history still holds the sweep) is
     # captured with AA off, TAA mask 0 and TAA mask 1; the deviation of each TAA frame from the AA-off frame inside the gun region
     # (lower right) is the smear. Controls: a repeat of the mask-1 capture gives the noise floor (the pan timing is not bit-identical between processes, so single runs can be
-    # inconclusive); the mask must never make the gun region deviate more. Measured over four runs: mask 1 1.21-1.29, mask 0 1.29-1.74 mean abs.
+    # inconclusive); the mask must never make the gun region deviate more. With TAA (r_aa 1; the four runs quoted earlier were SMAA): single captures gave mask 0 1.7-3.8 and mask 1 1.4-2.8 mean abs,
+    # but captures of one recipe differ between processes by up to 2.7 (both arms are therefore captured twice): the mask's effect on
+    # the gun region is inside that noise, so the usual verdict is "inconclusive"; a FAIL needs the mask to be worse beyond it.
     GS_POS="${GS_POS:-1052 1432 50 135}"
     gs() {
         local tag="$1" aa="$2" mask="$3"
@@ -2781,9 +2783,11 @@ gunsmear)
         CAP_POST_CMD="exec vrf_gs.cfg" capture_fixed_cam arena1 "$GS_POS" "$tag" +set r_aa "$aa" >/dev/null || return 1
     }
     gs gs_off 0 1 || FAIL=1
-    gs gs_m0 2 0 || FAIL=1
-    gs gs_m1 2 1 || FAIL=1
-    gs gs_m1b 2 1 || FAIL=1
+    # r_aa 1 is TAA (since 66618549d r_aa 2 is SMAA, which this mode measured by mistake: the mask cannot act on SMAA).
+    gs gs_m0 1 0 || FAIL=1
+    gs gs_m0b 1 0 || FAIL=1
+    gs gs_m1 1 1 || FAIL=1
+    gs gs_m1b 1 1 || FAIL=1
     PNG2RAW_BIN="${PNG2RAW:-$WIRED_SOURCE/tools/png2raw/png2raw}"
     res="$(python3 - "$SHOTDIR" "$PNG2RAW_BIN" <<'PYEOF'
 import subprocess, struct, sys
@@ -2792,7 +2796,7 @@ def load(n):
     p = f"{d}/vrf_{n}_mid.png"
     w, h = struct.unpack(">II", open(p, "rb").read(24)[16:24])
     return w, h, subprocess.check_output([dec, p])
-w, h, off = load("gs_off"); _, _, m0 = load("gs_m0"); _, _, m1 = load("gs_m1"); _, _, m1b = load("gs_m1b")
+w, h, off = load("gs_off"); _, _, m0 = load("gs_m0"); _, _, m0b = load("gs_m0b"); _, _, m1 = load("gs_m1"); _, _, m1b = load("gs_m1b")
 x0, x1, y0, y1 = int(w * 0.55), w, int(h * 0.50), h   # lower right: the weapon
 def dev(a, b, thr=10):
     tot = cnt = big = 0
@@ -2804,15 +2808,21 @@ def dev(a, b, thr=10):
             tot += m; cnt += 1
             if m > thr: big += 1
     return tot / cnt, 100.0 * big / cnt
-a0, b0 = dev(m0, off); a1, b1 = dev(m1, off); an, bn = dev(m1, m1b)
+# Each TAA arm is captured twice: the arms are compared by their mean, and the larger within-arm repeat difference is the noise.
+def mean2(x, y): return ((x[0] + y[0]) / 2.0, (x[1] + y[1]) / 2.0)
+a0, b0 = mean2(dev(m0, off), dev(m0b, off)); a1, b1 = mean2(dev(m1, off), dev(m1b, off))
+n0 = dev(m0, m0b); n1 = dev(m1, m1b); an, bn = max(n0, n1)
 print("%.3f %.3f %.3f %.3f %.3f %.3f" % (a0, b0, a1, b1, an, bn))
 PYEOF
 )"
     set -- $res
     v="$(awk -v a0="$1" -v a1="$3" -v an="$5" -v p0="$2" -v p1="$4" 'BEGIN{
-        if (an > 0.5 && a1 <= a0 + 0.25) print "OK(inconclusive: this run was not deterministic, repeat noise " an "; mask1 " a1 " vs mask0 " a0 ")";
-        else if (a1 > a0 + 0.25) print "FAIL(the effect mask made the gun region deviate MORE from AA off)";
-        else if (a0 > a1 + 0.25) print "OK(mask removes smear: " a0 " -> " a1 ")";
+        # The capture is not bit-identical between processes (repeat noise 0.6-1.6 mean abs with TAA; source not found; pinning the game
+        # seed, resetting the jitter phase or dropping the camera sweep did not remove it), so the mask effect is judged against the repeat noise of the same run.
+        tol = (an > 0.25 ? an : 0.25);
+        if (a1 > a0 + tol) print "FAIL(the effect mask made the gun region deviate MORE from AA off than the repeat noise " an ")";
+        else if (a0 > a1 + tol) print "OK(mask removes smear: " a0 " -> " a1 ", repeat noise " an ")";
+        else if (an > 0.5) print "OK(inconclusive: mask effect " a0 " -> " a1 " within the repeat noise " an ")";
         else if (a0 < 3.0 && p0 < 3.0) print "OK(no measurable smear: TAA stays within " a0 " mean abs / " p0 "% of pixels of AA off in the gun region with and without the mask; positive control unavailable in this scene)";
         else print "FAIL(smear present (" a0 " / " p0 "%) and the mask does not reduce it: the gun draws probably never reach the effect classification)" }')"
     [ "${v:0:2}" = "OK" ] || FAIL=1
