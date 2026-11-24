@@ -737,11 +737,38 @@ static void EntityStageColor( const renderSubmissionState_t *frontend, qhandle_t
 	if ( entity->renderfx & RF_FORCE_ENT_ALPHA ) out[3] = entity->shader.rgba[3] / 255.0f;
 }
 
+/* A model batch's raster state from its material, as the Metal and Vulkan entity paths take it: alpha mode, cutoff, depth write and
+ * nodraw. Translucent and additive model effects (the teleport-in swirl, explosion and sphere models) used to be drawn opaque here,
+ * writing depth and covering the world behind them. */
+typedef struct {
+	renderAlphaMode_t alphaMode;
+	float alphaCutoff;
+	qboolean depthWrite;
+	qboolean visible;
+} modelBatchRaster_t;
+
+static modelBatchRaster_t ModelBatchRaster( const renderSubmissionState_t *frontend, qhandle_t material ) {
+	modelBatchRaster_t raster = { RENDER_ALPHA_OPAQUE, 0.5f, qtrue, qtrue };
+	renderMaterialSnapshot_t snapshot;
+	if ( material > 0 && RenderSubmission_MaterialSnapshot( frontend, material, &snapshot ) ) {
+		raster.alphaMode = snapshot.alphaMode;
+		raster.alphaCutoff = snapshot.alphaCutoff;
+		raster.depthWrite = snapshot.depthWrite;
+		if ( snapshot.noDraw ) raster.visible = qfalse;
+	}
+	return raster;
+}
+
+/* Entity draw phase: depth-writing geometry first, blended batches after it (Metal's composition order). */
+static uint32_t RasterPhase( renderAlphaMode_t alpha ) {
+	return alpha == RENDER_ALPHA_BLEND || alpha == RENDER_ALPHA_ADDITIVE || alpha == RENDER_ALPHA_ALPHA_ADDITIVE ? 1u : 0u;
+}
+
 static qboolean DrawModelEntity( const worldDispatch_t *gl,
 		glName_t uniformBuffer, glName_t materialUniformBuffer,
 		productDrawUniforms_t *uniforms,
 		const renderSubmissionState_t *frontend, const glName_t *textures,
-		const renderEntityCommand_t *command, uint32_t *outIndices,
+		const renderEntityCommand_t *command, uint32_t phase, uint32_t *outIndices,
 		uint32_t *outDraws ) {
 	renderModelSnapshot_t model;
 	effectVertex_t *vertices = NULL;
@@ -758,6 +785,15 @@ static qboolean DrawModelEntity( const worldDispatch_t *gl,
 	if ( frame >= model.frameCount || oldFrame >= model.frameCount ) return qfalse;
 	backlerp = command->entity.backlerp;
 	if ( backlerp < 0.0f || backlerp > 1.0f ) return qfalse;
+	{
+		qboolean any = qfalse;
+		for ( uint32_t i = 0u; i < model.batchCount && !any; ++i ) {
+			const modelBatchRaster_t raster = ModelBatchRaster( frontend,
+				RenderSubmission_EntityBatchMaterial( frontend, command, &model.batches[i] ) );
+			any = raster.visible && RasterPhase( raster.alphaMode ) == phase ? qtrue : qfalse;
+		}
+		if ( !any ) return qtrue;   /* nothing of this entity in this phase: no geometry */
+	}
 	vertices = calloc( model.vertexCount, sizeof( *vertices ) );
 	if ( !vertices ) return qfalse;
 	for ( uint32_t i = 0u; i < model.vertexCount; ++i ) {
@@ -789,18 +825,21 @@ static qboolean DrawModelEntity( const worldDispatch_t *gl,
 	for ( uint32_t i = 0u; i < model.batchCount; ++i ) {
 		qhandle_t material = RenderSubmission_EntityBatchMaterial(
 			frontend, command, &model.batches[i] );
+		const modelBatchRaster_t raster = ModelBatchRaster( frontend, material );
 		float entityColor[4];
+		if ( !raster.visible || RasterPhase( raster.alphaMode ) != phase ) continue;
 		EntityStageColor( frontend, material, &command->entity, entityColor );
 		gl->BindTextureUnit( 0u, MaterialTexture( frontend, textures, material ) );
 		ApplyRaster( gl, uniformBuffer, materialUniformBuffer, uniforms, &s_coverageParams,
-			RENDER_ALPHA_OPAQUE,
-			0.5f, qtrue, 0.0f, qfalse, command, NULL, NULL, NULL,
+			raster.alphaMode,
+			raster.alphaCutoff, raster.depthWrite, 0.0f, qfalse, command, NULL, NULL, NULL,
 			NULL, 1.0f, entityColor );
 		gl->DrawElements( GL_TRIANGLES_VALUE, (glSize_t)model.batches[i].indexCount,
 			GL_UNSIGNED_INT_VALUE, (const void *)(uintptr_t)( model.batches[i].firstIndex
 				* sizeof( uint32_t ) ) );
+		*outIndices += model.batches[i].indexCount; ( *outDraws )++;
 	}
-	*outIndices += model.indexCount; *outDraws += model.batchCount; ok = qtrue;
+	ok = qtrue;
 	TransientDestroy( gl, &geometry );
 cleanup:
 	free( vertices );
@@ -1579,26 +1618,27 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 		}
 		gl.Enable( GL_DEPTH_TEST_VALUE );
 	}
-	for ( uint32_t i = 0u; i < entityCount; ++i ) {
+	/* Two phases: depth-writing entity geometry, then blended batches and the primitive (sprite/beam) entities, which blend. */
+	for ( uint32_t phase = 0u; phase < 2u; ++phase ) for ( uint32_t i = 0u; i < entityCount; ++i ) {
 		uint32_t drawsBefore = receipt.entityDrawCount;
 		if ( !RalOpenGl_EntityInPrimaryView( &entities[i].entity ) ) continue;
 		if ( entities[i].entity.reType == RT_MODEL
 				&& entities[i].entity.hModel > 0 ) {
 			if ( !DrawModelEntity( &gl, uniformBuffer, materialUniformBuffer,
 				&uniforms, frontend, textures,
-				&entities[i],
+				&entities[i], phase,
 				&receipt.entityIndexCount, &receipt.entityDrawCount ) ) goto cleanup;
-			receipt.modelEntityCount++;
-		} else {
+			if ( phase == 0u ) receipt.modelEntityCount++;
+		} else if ( phase == 1u ) {
 			if ( !DrawPrimitiveEntity( &gl, uniformBuffer, materialUniformBuffer,
 				&uniforms, frontend, textures,
 				&entities[i],
 				&receipt.entityIndexCount, &receipt.entityDrawCount ) ) goto cleanup;
 			receipt.primitiveEntityCount++;
 		}
-		if ( entities[i].hasTemporal ) receipt.temporalEntityCount++;
+		if ( phase == 0u && entities[i].hasTemporal ) receipt.temporalEntityCount++;
 		if ( entities[i].hasLocalIrradiance ) {
-			receipt.localIrradianceEntityCount++;
+			if ( phase == 0u ) receipt.localIrradianceEntityCount++;
 			receipt.localIrradianceDrawCount += receipt.entityDrawCount - drawsBefore;
 		}
 	}
