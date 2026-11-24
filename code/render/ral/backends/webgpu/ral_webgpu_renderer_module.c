@@ -1976,7 +1976,14 @@ static qhandle_t RegisterModel( const char *name )
 	char				  canonical[MAX_QPATH];
 	if ( !name || !name[0] )
 		return 0;
-	if ( name[0] == '*' ) return RenderSubmission_RegisterBspModel( &s_module.frontend, name );
+	if ( name[0] == '*' ) {
+		/* a brush entity (door, plat, train): a refused one would silently not draw */
+		handle = RenderSubmission_RegisterBspModel( &s_module.frontend, name );
+		if ( !handle && s_module.imports.LogCh && s_module.logChannel >= 0 )
+			s_module.imports.LogCh( s_module.logChannel, SEV_WARN,
+				"Wired WebGPU: model rejected path=%s stage=inline-bsp\n", name );
+		return handle;
+	}
 	if ( ri.FS_ResolveResource && ri.FS_ResolveResource( name, canonical,
 			sizeof( canonical ), NULL, NULL, NULL ) ) name = canonical;
 	if ( !ri.FS_ReadFile || !ri.FS_FreeFile )

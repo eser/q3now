@@ -642,7 +642,12 @@ static qhandle_t RegisterModel( const char *name ) {
 	int byteCount;
 	char canonical[MAX_QPATH];
 	if ( !name || !name[0] ) return 0;
-	if ( name[0] == '*' ) return RenderSubmission_RegisterBspModel( &s_module.frontend, name );
+	if ( name[0] == '*' ) {
+		/* a brush entity (door, plat, train): a refused one would silently not draw */
+		handle = RenderSubmission_RegisterBspModel( &s_module.frontend, name );
+		if ( !handle ) LogModelReject( name, "inline-bsp" );
+		return handle;
+	}
 	if ( ri.FS_ResolveResource && ri.FS_ResolveResource( name, canonical,
 			sizeof( canonical ), NULL, NULL, NULL ) ) name = canonical;
 	if ( !ri.FS_ReadFile || !ri.FS_FreeFile )

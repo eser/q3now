@@ -217,6 +217,64 @@ static int TestMaterialScriptLighting( void ) {
 	return 0;
 }
 
+/* A brush entity (func_door, func_plat, func_train) is an inline BSP model: model 0 is the static world, models 1..N own their
+ * own surface ranges and are drawn through refEntity_t. Their surfaces stay out of the static world, and "*N" must still register
+ * from them (the RAL renderers drew no door, plat or train while the world snapshot alone held lowered geometry). */
+static int TestInlineSubmodelRegisters( void )
+{
+	static renderSubmissionState_t state;
+	mapFile_t world;
+	dsurface_t surfaces[2];
+	drawVert_t vertices[6];
+	int indices[6] = { 0, 1, 2, 0, 1, 2 };
+	dshader_t shader = { 0 };
+	dmodel_t subModels[2];
+	renderModelSnapshot_t snapshot;
+	qhandle_t door;
+	memset( &world, 0, sizeof( world ) ); memset( surfaces, 0, sizeof( surfaces ) );
+	memset( vertices, 0, sizeof( vertices ) ); memset( subModels, 0, sizeof( subModels ) );
+	strcpy( world.name, "maps/inline-submodel-fixture.bsp" );
+	world.checksum = 0x5151;
+	world.numSurfaces = 2; world.surfaces = surfaces;
+	world.numDrawVerts = 6; world.drawVerts = vertices;
+	world.numDrawIndexes = 6; world.drawIndexes = indices;
+	world.numShaders = 1; world.shaders = &shader;
+	world.numSubModels = 2; world.subModels = subModels;
+	strcpy( shader.shader, "textures/inline-submodel-fixture" );
+	for ( int i = 0; i < 2; ++i ) {
+		surfaces[i].surfaceType = MST_PLANAR; surfaces[i].lightmapNum = -1;
+		surfaces[i].firstVert = 3 * i; surfaces[i].numVerts = 3;
+		surfaces[i].firstIndex = 3 * i; surfaces[i].numIndexes = 3;
+	}
+	/* world triangle near the origin, door triangle at x 100..101 */
+	vertices[1].xyz[0] = 1.0f; vertices[2].xyz[1] = 1.0f;
+	vertices[3].xyz[0] = 100.0f; vertices[4].xyz[0] = 101.0f; vertices[5].xyz[0] = 100.0f; vertices[5].xyz[1] = 1.0f;
+	subModels[0].firstSurface = 0; subModels[0].numSurfaces = 1;
+	subModels[1].firstSurface = 1; subModels[1].numSurfaces = 1;
+	subModels[1].mins[0] = 100.0f; subModels[1].maxs[0] = 101.0f; subModels[1].maxs[1] = 1.0f;
+	CHECK( RenderSubmission_Init( &state, 57u ) );
+	CHECK( RenderSubmission_RegisterAsset( &state, RENDER_ASSET_MATERIAL, shader.shader ) > 0 );
+	CHECK( RenderSubmission_LoadWorld( &state, &world, 0 ) );
+	/* the static world holds model 0 only */
+	CHECK( state.worldSnapshot.batchCount == 1u && state.worldSnapshot.batches[0].sourceSurfaceIndex == 0u );
+	door = RenderSubmission_RegisterBspModel( &state, "*1" );
+	CHECK( door > 0 && RenderSubmission_ModelSnapshot( &state, door, &snapshot ) );
+	CHECK( snapshot.format == RENDER_MODEL_INLINE_BSP && snapshot.batchCount == 1u && snapshot.indexCount == 3u );
+	/* the door's own triangle, not the world's */
+	{
+		float minX = 1e9f;
+		for ( uint32_t i = 0u; i < snapshot.indexCount; ++i ) {
+			const float x = snapshot.positions[snapshot.indices[i] * 3u];
+			if ( x < minX ) minX = x;
+		}
+		CHECK( minX == 100.0f );
+	}
+	CHECK( RenderSubmission_RegisterBspModel( &state, "*1" ) == door );
+	CHECK( !RenderSubmission_RegisterBspModel( &state, "*2" ) );
+	CHECK( RenderSubmission_UnloadWorld( &state, 0 ) );
+	return 0;
+}
+
 static int TestLegacyLightGridIrradiance( void )
 {
 	static renderSubmissionState_t state;
@@ -2021,6 +2079,7 @@ int main( int argc, char **argv )
 	CHECK( TestLightingSidecar() == 0 );
 	CHECK( TestMaterialScriptLighting() == 0 );
 	CHECK( TestLegacyLightGridIrradiance() == 0 );
+	CHECK( TestInlineSubmodelRegisters() == 0 );
 	CHECK( TestIrradianceVolumeOwner() == 0 );
 	CHECK( TestModelPayloads() == 0 );
 	CHECK( TestDistantWorldDrawPlanBridge() == 0 );

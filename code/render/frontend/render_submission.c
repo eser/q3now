@@ -1532,6 +1532,189 @@ qboolean RenderSubmission_RecordAsset( renderSubmissionState_t *state, renderAss
 	return qtrue;
 }
 
+/* The lowered size of one BSP surface: *outSkip for a surface the renderer never draws (bad, flare, nodraw / skip material),
+ * *outPatch for a tessellated patch. False on a malformed surface. Shared by the static world (model 0) and inline brush models. */
+qboolean RenderSubmission_WorldSurfaceSize( const mapFile_t *bsp, int surfaceIndex, qboolean *outSkip, qboolean *outPatch,
+		uint32_t *outVertices, uint32_t *outIndices ) {
+	const dsurface_t *surface;
+	uint64_t		  addVertices, addIndices;
+	if ( !bsp || surfaceIndex < 0 || surfaceIndex >= bsp->numSurfaces || !outSkip || !outPatch || !outVertices || !outIndices )
+		return qfalse;
+	surface = &bsp->surfaces[surfaceIndex];
+	*outSkip = qtrue; *outPatch = qfalse; *outVertices = *outIndices = 0u;
+	if ( surface->surfaceType == MST_BAD || surface->surfaceType == MST_FLARE )
+		return qtrue;
+	if ( surface->surfaceType != MST_PLANAR && surface->surfaceType != MST_TRIANGLE_SOUP &&
+		 surface->surfaceType != MST_PATCH )
+		return qfalse;
+	if ( surface->shaderNum < 0 || surface->shaderNum >= bsp->numShaders || surface->firstVert < 0 ||
+		 surface->numVerts < 0 || surface->firstVert > bsp->numDrawVerts - surface->numVerts )
+		return qfalse;
+	if ( bsp->shaders[surface->shaderNum].surfaceFlags & ( SURF_NODRAW | SURF_SKIP ) )
+		return qtrue;
+	if ( surface->surfaceType == MST_PATCH ) {
+		uint64_t blocks;
+		if ( surface->patchWidth < 3 || surface->patchHeight < 3 || !( surface->patchWidth & 1 ) ||
+			 !( surface->patchHeight & 1 ) || surface->patchWidth > surface->numVerts ||
+			 surface->patchHeight > surface->numVerts / surface->patchWidth ||
+			 surface->patchWidth * surface->patchHeight != surface->numVerts )
+			return qfalse;
+		blocks = (uint64_t)( ( surface->patchWidth - 1 ) / 2 ) * (uint64_t)( ( surface->patchHeight - 1 ) / 2 );
+		addVertices =
+			blocks * ( RENDER_SUBMISSION_PATCH_SUBDIVISIONS + 1u ) * ( RENDER_SUBMISSION_PATCH_SUBDIVISIONS + 1u );
+		addIndices = blocks * RENDER_SUBMISSION_PATCH_SUBDIVISIONS * RENDER_SUBMISSION_PATCH_SUBDIVISIONS * 6u;
+		*outPatch = qtrue;
+	} else {
+		if ( surface->firstIndex < 0 || surface->numIndexes < 0 ||
+			 surface->firstIndex > bsp->numDrawIndexes - surface->numIndexes || ( surface->numIndexes % 3 ) != 0 )
+			return qfalse;
+		addVertices = (uint32_t)surface->numVerts;
+		addIndices	= (uint32_t)surface->numIndexes;
+	}
+	if ( addVertices > UINT32_MAX || addIndices > UINT32_MAX ) return qfalse;
+	*outSkip = qfalse;
+	*outVertices = (uint32_t)addVertices;
+	*outIndices = (uint32_t)addIndices;
+	return qtrue;
+}
+
+/* Lowers one drawable BSP surface (sized by RenderSubmission_WorldSurfaceSize) into world vertices, indices and one batch:
+ * normalised normals, tessellated patches, the base and lightmap materials. */
+qboolean RenderSubmission_LowerWorldSurface( renderSubmissionState_t *state, const mapFile_t *bsp, int surfaceIndex,
+		renderWorldVertex_t *vertices, uint32_t *vertexCursor, uint32_t *indices, uint32_t *indexCursor,
+		renderWorldBatch_t *batch ) {
+	const dsurface_t *surface = &bsp->surfaces[surfaceIndex];
+	batch->sourceSurfaceIndex = (uint32_t)surfaceIndex;
+	batch->firstIndex		  = (*indexCursor);
+	batch->shaderIndex		  = surface->shaderNum;
+	batch->lightmapIndex	  = surface->lightmapNum;
+	batch->surfaceType		  = surface->surfaceType == MST_PATCH
+									? RENDER_WORLD_SURFACE_PATCH
+									: ( surface->surfaceType == MST_PLANAR ? RENDER_WORLD_SURFACE_PLANAR
+																		   : RENDER_WORLD_SURFACE_TRIANGLES );
+	batch->alphaMode		  = RENDER_ALPHA_OPAQUE;
+	batch->cullMode		  = RENDER_CULL_BACK;
+	batch->alphaCutoff		  = 0.5f;
+	batch->depthWrite		  = qtrue;
+	batch->sort               = RENDER_MATERIAL_SORT_OPAQUE;
+	batch->visible			  = qtrue;
+	if ( !WorldSurfaceBounds( bsp, surface, batch ) ) {
+		return qfalse;
+	}
+	batch->baseMaterial = RenderSubmission_MaterialHandle( state, bsp->shaders[surface->shaderNum].shader );
+	if ( batch->baseMaterial ) {
+		renderMaterialSnapshot_t material;
+		if ( RenderSubmission_MaterialSnapshot( state, batch->baseMaterial, &material ) ) {
+			batch->alphaMode   = material.alphaMode;
+			batch->cullMode    = material.cullMode;
+			batch->alphaCutoff = material.alphaCutoff;
+			batch->depthWrite  = material.depthWrite;
+			batch->sort        = material.sort;
+			batch->sky			 = material.sky;
+			batch->noDraw		 = material.noDraw;
+		}
+	}
+	if ( surface->lightmapNum >= 0 ) {
+		char lightmapName[MAX_QPATH];
+		if ( !RenderSubmission_LightmapMaterialName( lightmapName, (uint32_t)bsp->checksum,
+													 surface->lightmapNum ) ) {
+			return qfalse;
+		}
+		batch->lightmapMaterial = RenderSubmission_MaterialHandle( state, lightmapName );
+	}
+	if ( surface->surfaceType != MST_PATCH ) {
+		uint32_t baseVertex = (*vertexCursor);
+		for ( int i = 0; i < surface->numVerts; ++i ) {
+			const drawVert_t	*source = &bsp->drawVerts[surface->firstVert + i];
+			renderWorldVertex_t *target = &vertices[(*vertexCursor)++];
+			memcpy( target->position, source->xyz, sizeof( target->position ) );
+			memcpy( target->normal, source->normal, sizeof( target->normal ) );
+			{
+				float length = sqrtf( target->normal[0] * target->normal[0]
+					+ target->normal[1] * target->normal[1]
+					+ target->normal[2] * target->normal[2] );
+				if ( isfinite( length ) && length > 0.000001f )
+					for ( uint32_t axis = 0u; axis < 3u; ++axis )
+						target->normal[axis] /= length;
+				else {
+					target->normal[0] = target->normal[1] = 0.0f;
+					target->normal[2] = 1.0f;
+				}
+			}
+			memcpy( target->texCoord, source->st, sizeof( target->texCoord ) );
+			memcpy( target->lightmapCoord, source->lightmap, sizeof( target->lightmapCoord ) );
+			memcpy( target->color, source->color.rgba, sizeof( target->color ) );
+		}
+		for ( int i = 0; i < surface->numIndexes; ++i ) {
+			int local = bsp->drawIndexes[surface->firstIndex + i];
+			if ( local < 0 || local >= surface->numVerts ) {
+				return qfalse;
+			}
+			indices[(*indexCursor)++] = baseVertex + (uint32_t)local;
+		}
+	} else {
+		const uint32_t side = RENDER_SUBMISSION_PATCH_SUBDIVISIONS + 1u;
+		for ( int blockY = 0; blockY < surface->patchHeight - 1; blockY += 2 ) {
+			for ( int blockX = 0; blockX < surface->patchWidth - 1; blockX += 2 ) {
+				uint32_t baseVertex = (*vertexCursor);
+				for ( uint32_t y = 0u; y < side; ++y ) {
+					float v		= (float)y / RENDER_SUBMISSION_PATCH_SUBDIVISIONS;
+					float bv[3] = { ( 1.0f - v ) * ( 1.0f - v ), 2.0f * v * ( 1.0f - v ), v * v };
+					for ( uint32_t x = 0u; x < side; ++x ) {
+						float u		= (float)x / RENDER_SUBMISSION_PATCH_SUBDIVISIONS;
+						float bu[3] = { ( 1.0f - u ) * ( 1.0f - u ), 2.0f * u * ( 1.0f - u ), u * u };
+						renderWorldVertex_t *target	  = &vertices[(*vertexCursor)++];
+						float				 color[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+						for ( uint32_t cy = 0u; cy < 3u; ++cy ) {
+							for ( uint32_t cx = 0u; cx < 3u; ++cx ) {
+								const drawVert_t *control =
+									&bsp->drawVerts[surface->firstVert +
+													( blockY + (int)cy ) * surface->patchWidth + blockX +
+													(int)cx];
+								float weight = bu[cx] * bv[cy];
+								for ( uint32_t axis = 0u; axis < 3u; ++axis )
+									target->position[axis] += control->xyz[axis] * weight;
+								for ( uint32_t axis = 0u; axis < 3u; ++axis )
+									target->normal[axis] += control->normal[axis] * weight;
+								for ( uint32_t uv = 0u; uv < 2u; ++uv ) {
+									target->texCoord[uv] += control->st[uv] * weight;
+									target->lightmapCoord[uv] += control->lightmap[uv] * weight;
+								}
+								for ( uint32_t channel = 0u; channel < 4u; ++channel )
+									color[channel] += control->color.rgba[channel] * weight;
+							}
+						}
+						for ( uint32_t channel = 0u; channel < 4u; ++channel )
+							target->color[channel] = (uint8_t)( color[channel] + 0.5f );
+						{
+							float length = sqrtf( target->normal[0] * target->normal[0]
+								+ target->normal[1] * target->normal[1]
+								+ target->normal[2] * target->normal[2] );
+							if ( length > 0.000001f ) for ( uint32_t axis = 0u; axis < 3u; ++axis )
+								target->normal[axis] /= length;
+							else target->normal[2] = 1.0f;
+						}
+					}
+				}
+				for ( uint32_t y = 0u; y < RENDER_SUBMISSION_PATCH_SUBDIVISIONS; ++y ) {
+					for ( uint32_t x = 0u; x < RENDER_SUBMISSION_PATCH_SUBDIVISIONS; ++x ) {
+						uint32_t a = baseVertex + y * side + x;
+						uint32_t b = a + 1u, c = a + side, d = c + 1u;
+						indices[(*indexCursor)++] = a;
+						indices[(*indexCursor)++] = c;
+						indices[(*indexCursor)++] = b;
+						indices[(*indexCursor)++] = b;
+						indices[(*indexCursor)++] = c;
+						indices[(*indexCursor)++] = d;
+					}
+				}
+			}
+		}
+	}
+	batch->indexCount = (*indexCursor) - batch->firstIndex;
+	return qtrue;
+}
+
 qboolean RenderSubmission_LoadWorld( renderSubmissionState_t *state, const mapFile_t *bsp, int worldIndex )
 {
 	uint64_t			 digest		 = FNV_OFFSET;
@@ -1589,37 +1772,15 @@ qboolean RenderSubmission_LoadWorld( renderSubmissionState_t *state, const mapFi
 	if ( !contentIdentity || contentIdentity == UINT64_MAX )
 		contentIdentity = 1u;
 	for ( int surfaceIndex = surfaceFirst; surfaceIndex < surfaceEnd; ++surfaceIndex ) {
-		const dsurface_t *surface = &bsp->surfaces[surfaceIndex];
-		uint64_t		  addVertices, addIndices;
-		if ( surface->surfaceType == MST_BAD || surface->surfaceType == MST_FLARE )
-			continue;
-		if ( surface->surfaceType != MST_PLANAR && surface->surfaceType != MST_TRIANGLE_SOUP &&
-			 surface->surfaceType != MST_PATCH )
+		qboolean skip, patch;
+		uint32_t addVertices, addIndices;
+		if ( !RenderSubmission_WorldSurfaceSize( bsp, surfaceIndex, &skip, &patch, &addVertices, &addIndices ) )
 			return qfalse;
-		if ( surface->shaderNum < 0 || surface->shaderNum >= bsp->numShaders || surface->firstVert < 0 ||
-			 surface->numVerts < 0 || surface->firstVert > bsp->numDrawVerts - surface->numVerts )
-			return qfalse;
-		if ( bsp->shaders[surface->shaderNum].surfaceFlags & ( SURF_NODRAW | SURF_SKIP ) )
+		if ( skip )
 			continue;
-		if ( surface->surfaceType == MST_PATCH ) {
-			uint64_t blocks;
-			if ( surface->patchWidth < 3 || surface->patchHeight < 3 || !( surface->patchWidth & 1 ) ||
-				 !( surface->patchHeight & 1 ) || surface->patchWidth > surface->numVerts ||
-				 surface->patchHeight > surface->numVerts / surface->patchWidth ||
-				 surface->patchWidth * surface->patchHeight != surface->numVerts )
-				return qfalse;
-			blocks = (uint64_t)( ( surface->patchWidth - 1 ) / 2 ) * (uint64_t)( ( surface->patchHeight - 1 ) / 2 );
-			addVertices =
-				blocks * ( RENDER_SUBMISSION_PATCH_SUBDIVISIONS + 1u ) * ( RENDER_SUBMISSION_PATCH_SUBDIVISIONS + 1u );
-			addIndices = blocks * RENDER_SUBMISSION_PATCH_SUBDIVISIONS * RENDER_SUBMISSION_PATCH_SUBDIVISIONS * 6u;
+		if ( patch ) {
 			patchBatchCount++;
-			patchTriangleCount += (uint32_t)( addIndices / 3u );
-		} else {
-			if ( surface->firstIndex < 0 || surface->numIndexes < 0 ||
-				 surface->firstIndex > bsp->numDrawIndexes - surface->numIndexes || ( surface->numIndexes % 3 ) != 0 )
-				return qfalse;
-			addVertices = (uint32_t)surface->numVerts;
-			addIndices	= (uint32_t)surface->numIndexes;
+			patchTriangleCount += addIndices / 3u;
 		}
 		if ( addVertices > RENDER_SUBMISSION_MAX_WORLD_VERTICES - vertexCount ||
 			 addIndices > RENDER_SUBMISSION_MAX_WORLD_INDICES - indexCount ||
@@ -1650,144 +1811,14 @@ qboolean RenderSubmission_LoadWorld( renderSubmissionState_t *state, const mapFi
 				continue;
 			if ( bsp->shaders[surface->shaderNum].surfaceFlags & ( SURF_NODRAW | SURF_SKIP ) )
 				continue;
-			batch					  = &batches[batchCursor++];
-			batch->sourceSurfaceIndex = (uint32_t)surfaceIndex;
-			batch->firstIndex		  = indexCursor;
-			batch->shaderIndex		  = surface->shaderNum;
-			batch->lightmapIndex	  = surface->lightmapNum;
-			batch->surfaceType		  = surface->surfaceType == MST_PATCH
-											? RENDER_WORLD_SURFACE_PATCH
-											: ( surface->surfaceType == MST_PLANAR ? RENDER_WORLD_SURFACE_PLANAR
-																				   : RENDER_WORLD_SURFACE_TRIANGLES );
-			batch->alphaMode		  = RENDER_ALPHA_OPAQUE;
-			batch->cullMode		  = RENDER_CULL_BACK;
-			batch->alphaCutoff		  = 0.5f;
-			batch->depthWrite		  = qtrue;
-			batch->sort               = RENDER_MATERIAL_SORT_OPAQUE;
-			batch->visible			  = qtrue;
-			if ( !WorldSurfaceBounds( bsp, surface, batch ) ) {
+			batch = &batches[batchCursor++];
+			if ( !RenderSubmission_LowerWorldSurface( state, bsp, surfaceIndex, vertices, &vertexCursor, indices,
+					&indexCursor, batch ) ) {
 				free( batches );
 				free( indices );
 				free( vertices );
 				return qfalse;
 			}
-			batch->baseMaterial = RenderSubmission_MaterialHandle( state, bsp->shaders[surface->shaderNum].shader );
-			if ( batch->baseMaterial ) {
-				renderMaterialSnapshot_t material;
-				if ( RenderSubmission_MaterialSnapshot( state, batch->baseMaterial, &material ) ) {
-					batch->alphaMode   = material.alphaMode;
-					batch->cullMode    = material.cullMode;
-					batch->alphaCutoff = material.alphaCutoff;
-					batch->depthWrite  = material.depthWrite;
-					batch->sort        = material.sort;
-					batch->sky			 = material.sky;
-					batch->noDraw		 = material.noDraw;
-				}
-			}
-			if ( surface->lightmapNum >= 0 ) {
-				char lightmapName[MAX_QPATH];
-				if ( !RenderSubmission_LightmapMaterialName( lightmapName, (uint32_t)bsp->checksum,
-															 surface->lightmapNum ) ) {
-					free( batches );
-					free( indices );
-					free( vertices );
-					return qfalse;
-				}
-				batch->lightmapMaterial = RenderSubmission_MaterialHandle( state, lightmapName );
-			}
-			if ( surface->surfaceType != MST_PATCH ) {
-				uint32_t baseVertex = vertexCursor;
-				for ( int i = 0; i < surface->numVerts; ++i ) {
-					const drawVert_t	*source = &bsp->drawVerts[surface->firstVert + i];
-					renderWorldVertex_t *target = &vertices[vertexCursor++];
-					memcpy( target->position, source->xyz, sizeof( target->position ) );
-					memcpy( target->normal, source->normal, sizeof( target->normal ) );
-					{
-						float length = sqrtf( target->normal[0] * target->normal[0]
-							+ target->normal[1] * target->normal[1]
-							+ target->normal[2] * target->normal[2] );
-						if ( isfinite( length ) && length > 0.000001f )
-							for ( uint32_t axis = 0u; axis < 3u; ++axis )
-								target->normal[axis] /= length;
-						else {
-							target->normal[0] = target->normal[1] = 0.0f;
-							target->normal[2] = 1.0f;
-						}
-					}
-					memcpy( target->texCoord, source->st, sizeof( target->texCoord ) );
-					memcpy( target->lightmapCoord, source->lightmap, sizeof( target->lightmapCoord ) );
-					memcpy( target->color, source->color.rgba, sizeof( target->color ) );
-				}
-				for ( int i = 0; i < surface->numIndexes; ++i ) {
-					int local = bsp->drawIndexes[surface->firstIndex + i];
-					if ( local < 0 || local >= surface->numVerts ) {
-						free( batches );
-						free( indices );
-						free( vertices );
-						return qfalse;
-					}
-					indices[indexCursor++] = baseVertex + (uint32_t)local;
-				}
-			} else {
-				const uint32_t side = RENDER_SUBMISSION_PATCH_SUBDIVISIONS + 1u;
-				for ( int blockY = 0; blockY < surface->patchHeight - 1; blockY += 2 ) {
-					for ( int blockX = 0; blockX < surface->patchWidth - 1; blockX += 2 ) {
-						uint32_t baseVertex = vertexCursor;
-						for ( uint32_t y = 0u; y < side; ++y ) {
-							float v		= (float)y / RENDER_SUBMISSION_PATCH_SUBDIVISIONS;
-							float bv[3] = { ( 1.0f - v ) * ( 1.0f - v ), 2.0f * v * ( 1.0f - v ), v * v };
-							for ( uint32_t x = 0u; x < side; ++x ) {
-								float u		= (float)x / RENDER_SUBMISSION_PATCH_SUBDIVISIONS;
-								float bu[3] = { ( 1.0f - u ) * ( 1.0f - u ), 2.0f * u * ( 1.0f - u ), u * u };
-								renderWorldVertex_t *target	  = &vertices[vertexCursor++];
-								float				 color[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-								for ( uint32_t cy = 0u; cy < 3u; ++cy ) {
-									for ( uint32_t cx = 0u; cx < 3u; ++cx ) {
-										const drawVert_t *control =
-											&bsp->drawVerts[surface->firstVert +
-															( blockY + (int)cy ) * surface->patchWidth + blockX +
-															(int)cx];
-										float weight = bu[cx] * bv[cy];
-										for ( uint32_t axis = 0u; axis < 3u; ++axis )
-											target->position[axis] += control->xyz[axis] * weight;
-										for ( uint32_t axis = 0u; axis < 3u; ++axis )
-											target->normal[axis] += control->normal[axis] * weight;
-										for ( uint32_t uv = 0u; uv < 2u; ++uv ) {
-											target->texCoord[uv] += control->st[uv] * weight;
-											target->lightmapCoord[uv] += control->lightmap[uv] * weight;
-										}
-										for ( uint32_t channel = 0u; channel < 4u; ++channel )
-											color[channel] += control->color.rgba[channel] * weight;
-									}
-								}
-								for ( uint32_t channel = 0u; channel < 4u; ++channel )
-									target->color[channel] = (uint8_t)( color[channel] + 0.5f );
-								{
-									float length = sqrtf( target->normal[0] * target->normal[0]
-										+ target->normal[1] * target->normal[1]
-										+ target->normal[2] * target->normal[2] );
-									if ( length > 0.000001f ) for ( uint32_t axis = 0u; axis < 3u; ++axis )
-										target->normal[axis] /= length;
-									else target->normal[2] = 1.0f;
-								}
-							}
-						}
-						for ( uint32_t y = 0u; y < RENDER_SUBMISSION_PATCH_SUBDIVISIONS; ++y ) {
-							for ( uint32_t x = 0u; x < RENDER_SUBMISSION_PATCH_SUBDIVISIONS; ++x ) {
-								uint32_t a = baseVertex + y * side + x;
-								uint32_t b = a + 1u, c = a + side, d = c + 1u;
-								indices[indexCursor++] = a;
-								indices[indexCursor++] = c;
-								indices[indexCursor++] = b;
-								indices[indexCursor++] = b;
-								indices[indexCursor++] = c;
-								indices[indexCursor++] = d;
-							}
-						}
-					}
-				}
-			}
-			batch->indexCount = indexCursor - batch->firstIndex;
 		}
 	}
 	if ( batchCount > 1u )

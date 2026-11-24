@@ -8,6 +8,7 @@
 #include "tr_types.h"
 #include "render_submission_material.h"
 #include "../ral/core/ral_atmosphere.h"
+#include "maps/map_format_registry.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -160,6 +161,15 @@ qboolean RenderSubmission_WorldLifecycleGeneration(
 	uint64_t *outGeneration );
 qboolean RenderSubmission_LightmapMaterialName( char outName[MAX_QPATH],
 	uint32_t checksum, int lightmapIndex );
+/* One BSP surface lowered for drawing, shared by the static world (model 0, RenderSubmission_LoadWorld) and inline brush models
+ * (RenderSubmission_RegisterInlineModel). WorldSurfaceSize reports the lowered size, or *outSkip for a surface never drawn (bad,
+ * flare, nodraw / skip material); LowerWorldSurface appends its vertices and indices and fills one batch. False on a malformed
+ * surface. */
+qboolean RenderSubmission_WorldSurfaceSize( const mapFile_t *bsp, int surfaceIndex, qboolean *outSkip, qboolean *outPatch,
+	uint32_t *outVertices, uint32_t *outIndices );
+qboolean RenderSubmission_LowerWorldSurface( renderSubmissionState_t *state, const mapFile_t *bsp, int surfaceIndex,
+	renderWorldVertex_t *vertices, uint32_t *vertexCursor, uint32_t *indices, uint32_t *indexCursor,
+	renderWorldBatch_t *batch );
 
 #ifdef __cplusplus
 }

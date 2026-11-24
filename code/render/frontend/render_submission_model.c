@@ -652,10 +652,19 @@ void RenderSubmission_ReleaseWorldModels( renderSubmissionState_t *state, int wo
 
 qhandle_t RenderSubmission_RegisterInlineModel( renderSubmissionState_t *state,
 		const char *name, uint32_t firstSurface, uint32_t surfaceCount ) {
+	/* An inline BSP model (a brush entity: door, plat, train, ...) owns a surface range of the loaded map. Model 0 is the static
+	 * world and is the only range lowered into the world snapshot, so the model is lowered here from the map itself, with the
+	 * world's per-surface lowering; it keeps only its own vertices, and its surfaces are merged into one batch per material. */
 	renderModelSnapshot_t candidate;
 	renderModelRecord_t *record;
-	const renderWorldSnapshot_t *world;
-	uint32_t batchCount = 0u, indexCount = 0u, batchCursor = 0u, indexCursor = 0u;
+	const renderSubmissionWorldSlot_t *slot;
+	const mapFile_t *bsp;
+	renderWorldVertex_t *worldVertices = NULL;
+	uint32_t *worldIndices = NULL;
+	renderWorldBatch_t *worldBatches = NULL;
+	qhandle_t *materials = NULL;
+	uint32_t vertexCount = 0u, indexCount = 0u, drawableCount = 0u, materialCount = 0u;
+	uint32_t vertexCursor = 0u, indexCursor = 0u, batchCursor = 0u;
 	uint64_t ownedBytes;
 	qhandle_t handle;
 	if ( !state || !state->initialized || !name || name[0] != '*'
@@ -664,28 +673,50 @@ qhandle_t RenderSubmission_RegisterInlineModel( renderSubmissionState_t *state,
 			|| firstSurface > state->worldSurfaceCount
 			|| surfaceCount > state->worldSurfaceCount - firstSurface
 			|| !state->worldSnapshot.ready ) return 0;
+	slot = &state->worlds[state->activeWorldIndex];
+	bsp = slot->map;
+	if ( !slot->loaded || !bsp || firstSurface + surfaceCount > (uint32_t)bsp->numSurfaces ) return 0;
 	for ( uint32_t i = 0u; i < state->modelCount; ++i )
-		if ( state->models[i].worldLifecycleGeneration == state->worlds[state->activeWorldIndex].lifecycleGeneration
+		if ( state->models[i].worldLifecycleGeneration == slot->lifecycleGeneration
 				&& state->models[i].worldIndex == state->activeWorldIndex
 				&& !strcasecmp( state->models[i].name, name ) )
 			return state->models[i].snapshot.handle;
 	if ( state->modelCount >= RENDER_SUBMISSION_MAX_MODELS ) return 0;
-	world = &state->worldSnapshot;
-	for ( uint32_t i = 0u; i < world->batchCount; ++i ) {
-		const renderWorldBatch_t *batch = &world->batches[i];
-		if ( batch->sourceSurfaceIndex < firstSurface
-				|| batch->sourceSurfaceIndex >= firstSurface + surfaceCount ) continue;
-		if ( batchCount >= RENDER_SUBMISSION_MAX_MODEL_BATCHES
-				|| batch->indexCount > RENDER_SUBMISSION_MAX_MODEL_INDICES - indexCount )
-			return 0;
-		batchCount++; indexCount += batch->indexCount;
+	for ( uint32_t s = firstSurface; s < firstSurface + surfaceCount; ++s ) {
+		qboolean skip, patch;
+		uint32_t addVertices, addIndices;
+		if ( !RenderSubmission_WorldSurfaceSize( bsp, (int)s, &skip, &patch, &addVertices, &addIndices ) ) return 0;
+		if ( skip ) continue;
+		if ( addVertices > RENDER_SUBMISSION_MAX_MODEL_VERTICES - vertexCount
+				|| addIndices > RENDER_SUBMISSION_MAX_MODEL_INDICES - indexCount ) return 0;
+		vertexCount += addVertices; indexCount += addIndices; drawableCount++;
 	}
-	if ( !batchCount || !indexCount || world->vertexCount > RENDER_SUBMISSION_MAX_MODEL_VERTICES )
-		return 0;
+	if ( !drawableCount || !vertexCount || !indexCount ) return 0;
+	worldVertices = (renderWorldVertex_t *)calloc( vertexCount, sizeof( *worldVertices ) );
+	worldIndices = (uint32_t *)calloc( indexCount, sizeof( *worldIndices ) );
+	worldBatches = (renderWorldBatch_t *)calloc( drawableCount, sizeof( *worldBatches ) );
+	materials = (qhandle_t *)calloc( drawableCount, sizeof( *materials ) );
 	memset( &candidate, 0, sizeof( candidate ) );
+	if ( !worldVertices || !worldIndices || !worldBatches || !materials ) goto reject;
+	for ( uint32_t s = firstSurface; s < firstSurface + surfaceCount; ++s ) {
+		qboolean skip, patch;
+		uint32_t addVertices, addIndices;
+		(void)RenderSubmission_WorldSurfaceSize( bsp, (int)s, &skip, &patch, &addVertices, &addIndices );
+		if ( skip ) continue;
+		if ( !RenderSubmission_LowerWorldSurface( state, bsp, (int)s, worldVertices, &vertexCursor,
+				worldIndices, &indexCursor, &worldBatches[batchCursor] ) ) goto reject;
+		batchCursor++;
+	}
+	/* one batch per material, in first-use order */
+	for ( uint32_t i = 0u; i < batchCursor; ++i ) {
+		uint32_t m = 0u;
+		while ( m < materialCount && materials[m] != worldBatches[i].baseMaterial ) m++;
+		if ( m == materialCount ) materials[materialCount++] = worldBatches[i].baseMaterial;
+	}
+	if ( materialCount > RENDER_SUBMISSION_MAX_MODEL_BATCHES ) goto reject;
 	candidate.format = RENDER_MODEL_INLINE_BSP; candidate.frameCount = 1u;
-	candidate.vertexCount = world->vertexCount; candidate.indexCount = indexCount;
-	candidate.batchCount = batchCount;
+	candidate.vertexCount = vertexCursor; candidate.indexCount = indexCursor;
+	candidate.batchCount = materialCount;
 	candidate.positions = (float *)calloc( (size_t)candidate.vertexCount * 3u,
 		sizeof( float ) );
 	candidate.normals = (float *)calloc( (size_t)candidate.vertexCount * 3u,
@@ -693,36 +724,41 @@ qhandle_t RenderSubmission_RegisterInlineModel( renderSubmissionState_t *state,
 	candidate.texCoords = (float *)calloc( (size_t)candidate.vertexCount * 2u,
 		sizeof( float ) );
 	candidate.colors = (color4ub_t *)calloc( candidate.vertexCount, sizeof( color4ub_t ) );
-	candidate.indices = (uint32_t *)calloc( indexCount, sizeof( uint32_t ) );
-	candidate.batches = (renderModelBatch_t *)calloc( batchCount,
+	candidate.indices = (uint32_t *)calloc( candidate.indexCount, sizeof( uint32_t ) );
+	candidate.batches = (renderModelBatch_t *)calloc( candidate.batchCount,
 		sizeof( renderModelBatch_t ) );
 	if ( !candidate.positions || !candidate.normals || !candidate.texCoords || !candidate.indices
-			|| !candidate.batches || !candidate.colors ) { FreeSnapshot( &candidate ); return 0; }
+			|| !candidate.batches || !candidate.colors ) goto reject;
 	for ( uint32_t vertex = 0u; vertex < candidate.vertexCount; ++vertex ) {
 		memcpy( ((color4ub_t *)candidate.colors)[vertex].rgba,
-			world->vertices[vertex].color, sizeof( color4ub_t ) );
+			worldVertices[vertex].color, sizeof( color4ub_t ) );
 		memcpy( (float *)candidate.positions + (size_t)vertex * 3u,
-			world->vertices[vertex].position, 3u * sizeof( float ) );
+			worldVertices[vertex].position, 3u * sizeof( float ) );
 		memcpy( (float *)candidate.normals + (size_t)vertex * 3u,
-			world->vertices[vertex].normal, 3u * sizeof( float ) );
+			worldVertices[vertex].normal, 3u * sizeof( float ) );
 		memcpy( (float *)candidate.texCoords + (size_t)vertex * 2u,
-			world->vertices[vertex].texCoord, 2u * sizeof( float ) );
+			worldVertices[vertex].texCoord, 2u * sizeof( float ) );
 	}
-	for ( uint32_t i = 0u; i < world->batchCount; ++i ) {
-		const renderWorldBatch_t *source = &world->batches[i];
-		renderModelBatch_t *batch;
-		if ( source->sourceSurfaceIndex < firstSurface
-				|| source->sourceSurfaceIndex >= firstSurface + surfaceCount ) continue;
-		batch = &((renderModelBatch_t *)candidate.batches)[batchCursor++];
-		batch->firstVertex = 0u; batch->vertexCount = candidate.vertexCount;
-		batch->firstIndex = indexCursor; batch->indexCount = source->indexCount;
-		batch->material = source->baseMaterial;
-		(void)snprintf( batch->materialName, sizeof( batch->materialName ), "*inline" );
-		memcpy( (uint32_t *)candidate.indices + indexCursor,
-			world->indices + source->firstIndex,
-			(size_t)source->indexCount * sizeof( uint32_t ) );
-		indexCursor += source->indexCount;
+	{
+		uint32_t modelIndexCursor = 0u;
+		for ( uint32_t m = 0u; m < materialCount; ++m ) {
+			renderModelBatch_t *batch = &((renderModelBatch_t *)candidate.batches)[m];
+			batch->firstVertex = 0u; batch->vertexCount = candidate.vertexCount;
+			batch->firstIndex = modelIndexCursor;
+			batch->material = materials[m];
+			(void)snprintf( batch->materialName, sizeof( batch->materialName ), "*inline" );
+			for ( uint32_t i = 0u; i < batchCursor; ++i ) {
+				if ( worldBatches[i].baseMaterial != materials[m] ) continue;
+				memcpy( (uint32_t *)candidate.indices + modelIndexCursor,
+					worldIndices + worldBatches[i].firstIndex,
+					(size_t)worldBatches[i].indexCount * sizeof( uint32_t ) );
+				modelIndexCursor += worldBatches[i].indexCount;
+			}
+			batch->indexCount = modelIndexCursor - batch->firstIndex;
+		}
 	}
+	free( worldVertices ); free( worldIndices ); free( worldBatches ); free( materials );
+	worldVertices = NULL; worldIndices = NULL; worldBatches = NULL; materials = NULL;
 	ownedBytes = SnapshotBytes( &candidate );
 	if ( ownedBytes > RENDER_SUBMISSION_MAX_MODEL_BYTES - state->modelBytes ) {
 		FreeSnapshot( &candidate ); return 0;
@@ -740,6 +776,10 @@ qhandle_t RenderSubmission_RegisterInlineModel( renderSubmissionState_t *state,
 	state->modelDigest = ModelHash( state->modelDigest, &candidate.digest,
 		sizeof( candidate.digest ) );
 	return handle;
+reject:
+	FreeSnapshot( &candidate );
+	free( worldVertices ); free( worldIndices ); free( worldBatches ); free( materials );
+	return 0;
 }
 
 qboolean RenderSubmission_SetModelBatchMaterial( renderSubmissionState_t *state,
