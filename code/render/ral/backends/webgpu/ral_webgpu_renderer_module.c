@@ -34,6 +34,14 @@ enum {
 	WEBGPU_PIPELINE_UI,
 	WEBGPU_PIPELINE_MSDF,
 	WEBGPU_PIPELINE_TAA_MASK,   /* entity geometry into the TAA effect mask (R8, depth test only) */
+	/* Translucent model entities, by their material's alpha mode (depth test, no depth write), and the matching TAA mask pipelines
+	 * that add the batch's visible contribution to the effect mask instead of marking its whole geometry. */
+	WEBGPU_PIPELINE_ENTITY_BLEND,
+	WEBGPU_PIPELINE_ENTITY_ALPHA_ADDITIVE,
+	WEBGPU_PIPELINE_ENTITY_ADDITIVE,
+	WEBGPU_PIPELINE_TAA_MASK_BLEND,
+	WEBGPU_PIPELINE_TAA_MASK_ALPHA_ADDITIVE,
+	WEBGPU_PIPELINE_TAA_MASK_ADDITIVE,
 	WEBGPU_PIPELINE_COUNT
 };
 
@@ -284,6 +292,67 @@ static const char s_taaMaskFragmentWgsl[] =
 	"@group(2) @binding(0) var baseTexture: texture_2d<f32>;"
 	"@group(2) @binding(1) var baseSampler: sampler;"
 	"@fragment fn main() -> @location(0) vec4<f32> { return vec4<f32>(1.0, 0.0, 0.0, 0.0); }\n";
+/* Shared by the translucent entity fragment and its TAA mask fragment: the bindings of the entity fragment and the entity colour
+ * (vertex colour = the entity's shaderRGBA with its lighting, times the base texture). */
+#define WIRED_ENTITY_BLEND_HEAD_WGSL \
+	"struct Atmosphere { eyeDensity: vec4<f32>, colorVisibility: vec4<f32>," \
+	" heightCloud: vec4<f32>, froxelGrid: vec4<u32>, displayVisibility: vec4<f32> };" \
+	"struct Froxels { values: array<vec4<f32>> };" \
+	"@group(0) @binding(0) var<uniform> atmosphere: Atmosphere;" \
+	"@group(0) @binding(1) var<storage, read> froxels: Froxels;" \
+	"@group(2) @binding(0) var baseTexture: texture_2d<f32>;" \
+	"@group(2) @binding(1) var baseSampler: sampler;" \
+	"@id(0) override wired_entity_mode:u32=1u;" /* 1 alpha blend, 2 alpha-additive, 3 additive */ \
+	"fn wired_entity_color(vertexColor: vec4<f32>, uv: vec2<f32>) -> vec4<f32> {" \
+	" let tex=textureSample(baseTexture,baseSampler,uv);" \
+	" return vec4<f32>(vertexColor.rgb*tex.rgb,vertexColor.a*tex.a); }"
+/* Translucent entity fragment: the entity fragment's composition, except that the additive modes only attenuate through the medium
+ * (no inscatter added per layer), as the effect fragment and the GL / Metal entity paths do. */
+static const char s_entityBlendFragmentWgsl[] =
+	WIRED_ENTITY_BLEND_HEAD_WGSL
+	"fn wired_display_visibility(c: vec3<f32>) -> vec3<f32> {"
+	" var exposed=max(c,vec3<f32>(0.0))*atmosphere.displayVisibility.x;"
+	" let l=dot(exposed,vec3<f32>(0.2126,0.7152,0.0722));"
+	" if (l>0.0 && l<atmosphere.displayVisibility.z && atmosphere.displayVisibility.y!=1.0) {"
+	" let curved=pow(l/atmosphere.displayVisibility.z,atmosphere.displayVisibility.y)"
+	" *atmosphere.displayVisibility.z; exposed*=curved/l; } return exposed; }"
+	"@fragment fn main(@location(0) vertexColor: vec4<f32>,"
+	" @location(1) fogCoord: vec2<f32>, @location(2) uv: vec2<f32>,"
+	" @builtin(position) pixel: vec4<f32>)"
+	" -> @location(0) vec4<f32> {"
+	" let color=wired_entity_color(vertexColor,uv);"
+	" let additive=wired_entity_mode>=2u;"
+	" if (atmosphere.froxelGrid.z > 0u) {"
+	" let x=min(u32(pixel.x)/16u,atmosphere.froxelGrid.x-1u);"
+	" let y=min(u32(pixel.y)/16u,atmosphere.froxelGrid.y-1u);"
+	" let farZ=max(atmosphere.colorVisibility.w,4.01);"
+	" let slice=clamp(log(max(1.0/pixel.w,4.0)/4.0)/log(farZ/4.0),0.0,0.9999);"
+	" let z=min(u32(slice*f32(atmosphere.froxelGrid.z)),atmosphere.froxelGrid.z-1u);"
+	" let f=froxels.values[atmosphere.froxelGrid.w+(z*atmosphere.froxelGrid.y+y)*atmosphere.froxelGrid.x+x];"
+	" return vec4<f32>(wired_display_visibility(color.rgb*f.w+select(f.rgb,vec3<f32>(0.0),additive)),color.a); }"
+	" var density = atmosphere.eyeDensity.w;"
+	" if (atmosphere.colorVisibility.w > 0.0) { density = max(density,"
+	" 3.912023 / atmosphere.colorVisibility.w); }"
+	" var lit = color.rgb; if (density > 0.0) {"
+	" let heightWeight = exp(-atmosphere.heightCloud.y *"
+	" max(fogCoord.y - atmosphere.heightCloud.x, 0.0));"
+	" let transmittance = clamp(exp(-density * heightWeight * fogCoord.x), 0.0, 1.0);"
+	" lit = select(mix(atmosphere.colorVisibility.rgb, lit, transmittance), lit * transmittance, additive); }"
+	" return vec4<f32>(wired_display_visibility(lit), color.a); }\n";
+/* TAA mask fragment of a translucent entity. The mask is cleared to 0 and blended SRC_ALPHA / ONE_MINUS_SRC_ALPHA, so writing
+ * (1, 0, 0, c) gives mask' = c + mask * (1 - c): history trust (1 - mask) is multiplied by (1 - c), the batch's visible
+ * contribution - alpha for alpha blend, max(r, g, b) * alpha for alpha-additive, max(r, g, b) for additive. A faded effect keeps the
+ * history under it; the multiplicative form of the rule Vulkan, Metal and OpenGL apply with REVERSE_SUBTRACT on a target cleared to
+ * 1 (the browser command ABI clears colour to 0). */
+static const char s_taaTrustFragmentWgsl[] =
+	WIRED_ENTITY_BLEND_HEAD_WGSL
+	"@fragment fn main(@location(0) vertexColor: vec4<f32>,"
+	" @location(1) fogCoord: vec2<f32>, @location(2) uv: vec2<f32>) -> @location(0) vec4<f32> {"
+	" let color=wired_entity_color(vertexColor,uv);"
+	" let light=clamp(max(color.r,max(color.g,color.b)),0.0,1.0);"
+	" let alpha=clamp(color.a,0.0,1.0);"
+	" var c=alpha; if (wired_entity_mode==2u) { c=light*alpha; } else if (wired_entity_mode==3u) { c=light; }"
+	" return vec4<f32>(1.0, 0.0, 0.0, c); }\n";
 /* Entity fragment: the misc fragment plus the material base texture (group 2). */
 static const char s_entityFragmentWgsl[] =
 	"struct Atmosphere { eyeDensity: vec4<f32>, colorVisibility: vec4<f32>,"
@@ -750,6 +819,16 @@ static qboolean EffectPipelineUsesDepth( uint32_t index ) {
 		|| index == WEBGPU_PIPELINE_EFFECT_ADDITIVE_DEPTH;
 }
 
+/* 1 alpha blend, 2 alpha-additive, 3 additive for the translucent entity pipelines and their TAA mask pipelines; 0 otherwise. */
+static uint32_t EntityBlendMode( uint32_t index ) {
+	switch ( index ) {
+	case WEBGPU_PIPELINE_ENTITY_BLEND: case WEBGPU_PIPELINE_TAA_MASK_BLEND: return 1u;
+	case WEBGPU_PIPELINE_ENTITY_ALPHA_ADDITIVE: case WEBGPU_PIPELINE_TAA_MASK_ALPHA_ADDITIVE: return 2u;
+	case WEBGPU_PIPELINE_ENTITY_ADDITIVE: case WEBGPU_PIPELINE_TAA_MASK_ADDITIVE: return 3u;
+	default: return 0u;
+	}
+}
+
 static qboolean CreatePipeline( uint32_t index )
 {
 	uint32_t						spirv[2][4] = { { 0x07230203u }, { 0x07230203u } };
@@ -768,7 +847,12 @@ static qboolean CreatePipeline( uint32_t index )
 	qboolean isUi = index == WEBGPU_PIPELINE_UI || index == WEBGPU_PIPELINE_MSDF;
 	qboolean isEffectPrimitive = IsEffectPrimitivePipeline( index );
 	const qboolean isTaaMask = index == WEBGPU_PIPELINE_TAA_MASK;
-	const qboolean entityLike = index == WEBGPU_PIPELINE_ENTITY || isTaaMask;
+	const uint32_t entityBlendMode = EntityBlendMode( index );
+	const qboolean isEntityBlend = entityBlendMode && index <= WEBGPU_PIPELINE_ENTITY_ADDITIVE;
+	const qboolean isTaaTrust = entityBlendMode && index >= WEBGPU_PIPELINE_TAA_MASK_BLEND;
+	const qboolean entityLike = index == WEBGPU_PIPELINE_ENTITY || isTaaMask || isEntityBlend || isTaaTrust;
+	const ralShaderSpecValue_t entityModeValue = {0,entityBlendMode};
+	const ralSpecConstant_t nativeEntityModeValue = {0,entityBlendMode};
 	const ralShaderSpecConstantAbi_t effectSpec = {0,RAL_STAGE_FRAGMENT,0,RAL_SHADER_SPEC_U32};
 	const ralShaderSpecValue_t effectValue = {0,EffectPipelineAdditive(index) ? 1u : 0u};
 	const ralSpecConstant_t nativeEffectValue = {0,effectValue.value};
@@ -777,7 +861,8 @@ static qboolean CreatePipeline( uint32_t index )
 			: ( index == WEBGPU_PIPELINE_WORLD ? s_worldVertexWgsl
 			: ( entityLike ? s_entityVertexWgsl
 				: s_vertexWgsl ) ) );
-	const char					   *fragmentWgsl = index == WEBGPU_PIPELINE_MSDF
+	const char					   *fragmentWgsl = isEntityBlend ? s_entityBlendFragmentWgsl
+		: isTaaTrust ? s_taaTrustFragmentWgsl : index == WEBGPU_PIPELINE_MSDF
 		? s_msdfFragmentWgsl : ( index == WEBGPU_PIPELINE_UI ? s_uiFragmentWgsl : ( index == WEBGPU_PIPELINE_WORLD
 			? s_worldFragmentWgsl : ( isEffectPrimitive ? s_effectFragmentWgsl
 				: ( index == WEBGPU_PIPELINE_ENTITY ? s_entityFragmentWgsl
@@ -788,7 +873,8 @@ static qboolean CreatePipeline( uint32_t index )
 				: ( index == WEBGPU_PIPELINE_WORLD ? sizeof( s_worldVertexWgsl ) - 1u
 				: ( entityLike ? sizeof( s_entityVertexWgsl ) - 1u
 					: sizeof( s_vertexWgsl ) - 1u ) ) ) );
-	uint32_t fragmentWgslBytes =
+	uint32_t fragmentWgslBytes = isEntityBlend ? (uint32_t)( sizeof( s_entityBlendFragmentWgsl ) - 1u )
+		: isTaaTrust ? (uint32_t)( sizeof( s_taaTrustFragmentWgsl ) - 1u ) :
 		(uint32_t)( index == WEBGPU_PIPELINE_MSDF ? sizeof( s_msdfFragmentWgsl ) - 1u
 			: ( index == WEBGPU_PIPELINE_UI ? sizeof( s_uiFragmentWgsl ) - 1u
 			: ( index == WEBGPU_PIPELINE_WORLD ? sizeof( s_worldFragmentWgsl ) - 1u
@@ -1020,6 +1106,16 @@ static qboolean CreatePipeline( uint32_t index )
 		blend.dstAlpha = RAL_BLEND_ONE_MINUS_SRC_ALPHA;
 		blend.alphaOp = RAL_BLEND_OP_ADD;
 	}
+	if ( isEntityBlend || isTaaTrust ) {
+		/* The scene's three translucent blends for the entity pipelines; the TAA mask accumulates SRC_ALPHA / ONE_MINUS_SRC_ALPHA. */
+		blend.blendEnable = qtrue;
+		blend.srcColor = isEntityBlend && entityBlendMode == 3u ? RAL_BLEND_ONE : RAL_BLEND_SRC_ALPHA;
+		blend.dstColor = isEntityBlend && entityBlendMode != 1u ? RAL_BLEND_ONE : RAL_BLEND_ONE_MINUS_SRC_ALPHA;
+		blend.colorOp = RAL_BLEND_OP_ADD;
+		blend.srcAlpha = RAL_BLEND_ONE;
+		blend.dstAlpha = RAL_BLEND_ONE_MINUS_SRC_ALPHA;
+		blend.alphaOp = RAL_BLEND_OP_ADD;
+	}
 	memset( &graphics, 0, sizeof( graphics ) );
 	graphics.vertexBindings		 = &binding;
 	graphics.numVertexBindings	 = 1u;
@@ -1032,7 +1128,7 @@ static qboolean CreatePipeline( uint32_t index )
 	graphics.numColorBlends		 = 1u;
 	/* UI draws into the canvas -srgb view (hardware display encoding). */
 	graphics.colorFormats[0] = isUi ? RAL_FORMAT_B8G8R8A8_SRGB
-        : ( isTaaMask ? RAL_FORMAT_R8_UNORM : RAL_FORMAT_R16G16B16A16_SFLOAT );
+        : ( isTaaMask || isTaaTrust ? RAL_FORMAT_R8_UNORM : RAL_FORMAT_R16G16B16A16_SFLOAT );
 	graphics.numColorFormats	 = 1u;
 	graphics.sampleCount		 = 1u;
     /* UI has an independent output pass without a scene-depth attachment. */
@@ -1064,6 +1160,11 @@ static qboolean CreatePipeline( uint32_t index )
 		manifest.specConstants = &effectSpec; manifest.specConstantCount = 1;
 		variant.specValues = &effectValue; variant.specValueCount = 1;
 		graphics.specConstants = &nativeEffectValue; graphics.numSpecConstants = 1;
+	}
+	if ( isEntityBlend || isTaaTrust ) {
+		manifest.specConstants = &effectSpec; manifest.specConstantCount = 1;
+		variant.specValues = &entityModeValue; variant.specValueCount = 1;
+		graphics.specConstants = &nativeEntityModeValue; graphics.numSpecConstants = 1;
 	}
 	if ( Ral_GraphicsPipelineSemanticDigest( &graphics, &variant.semanticStateDigest ) != ralSuccess ) {
 		s_module.failureStage = 1000 + 10 * (int)index + 3; return qfalse;
@@ -1539,7 +1640,10 @@ static qboolean InitializeOwners( void )
 	if ( !RalWebGpu_ProductSetEntityPipeline( s_module.product, &s_module.borrow.runtimeReceipt,
 											  &s_module.pipelineReceipts[WEBGPU_PIPELINE_ENTITY] )
 		|| !RalWebGpu_ProductSetTaaMaskPipeline( s_module.product, &s_module.borrow.runtimeReceipt,
-			&s_module.pipelineReceipts[WEBGPU_PIPELINE_TAA_MASK] ) ) {
+			&s_module.pipelineReceipts[WEBGPU_PIPELINE_TAA_MASK] )
+		|| !RalWebGpu_ProductSetEntityBlendPipelines( s_module.product, &s_module.borrow.runtimeReceipt,
+			&s_module.pipelineReceipts[WEBGPU_PIPELINE_ENTITY_BLEND],
+			&s_module.pipelineReceipts[WEBGPU_PIPELINE_TAA_MASK_BLEND] ) ) {
 		DestroyOwners();
 		return qfalse;
 	}

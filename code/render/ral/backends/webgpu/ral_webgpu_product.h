@@ -175,6 +175,10 @@ qboolean RalWebGpu_ProductSetExposure( ralWebGpuProduct_t *product,
     int toneMode, float toneExposure );
 qboolean RalWebGpu_ProductSetTaaMaskPipeline( ralWebGpuProduct_t *product,
 	const ralWebGpuRuntimeReceipt_t *runtimeReceipt, const ralWebGpuPipelineReceipt_t *maskPipeline );
+/* Translucent entity pipelines (alpha blend, alpha-additive, additive) and their TAA mask pipelines, in that order. */
+qboolean RalWebGpu_ProductSetEntityBlendPipelines( ralWebGpuProduct_t *product,
+	const ralWebGpuRuntimeReceipt_t *runtimeReceipt,
+	const ralWebGpuPipelineReceipt_t entityBlend[3], const ralWebGpuPipelineReceipt_t taaTrust[3] );
 qboolean RalWebGpu_ProductSetEntityPipeline( ralWebGpuProduct_t *product,
 	const ralWebGpuRuntimeReceipt_t *runtimeReceipt,
 	const ralWebGpuPipelineReceipt_t *entityPipeline );

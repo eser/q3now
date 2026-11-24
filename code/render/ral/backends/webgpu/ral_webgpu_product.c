@@ -67,6 +67,9 @@ struct ralWebGpuProduct_s {
     ralWebGpuSmaa_t *smaa;                       /* SMAA (r_aa 2), exclusive with TAA */
     qboolean smaaEnabled;
     qboolean taaMaskPipelineReady;
+    /* Translucent entities by alpha mode (blend, alpha-additive, additive) and their TAA mask pipelines (visible contribution). */
+    ralWebGpuPipelineReceipt_t entityBlendPipelines[3], taaTrustPipelines[3];
+    qboolean entityBlendPipelinesReady;
     ralExposureSettings_t exposureSettings;
     ralDisplayVisibilityPlan_t exposureVisibility;
 	ralWebGpuPipelineReceipt_t worldPipeline;
@@ -1581,6 +1584,32 @@ qboolean RalWebGpu_ProductSetTaaMaskPipeline( ralWebGpuProduct_t *product,
 	product->taaMaskPipelineReady = qtrue; return qtrue;
 }
 
+qboolean RalWebGpu_ProductSetEntityBlendPipelines( ralWebGpuProduct_t *product,
+		const ralWebGpuRuntimeReceipt_t *runtimeReceipt,
+		const ralWebGpuPipelineReceipt_t entityBlend[3], const ralWebGpuPipelineReceipt_t taaTrust[3] ) {
+	if ( !product || !runtimeReceipt || !entityBlend || !taaTrust || product->inFlight ) return qfalse;
+	for ( uint32_t i = 0u; i < 3u; ++i ) {
+		if ( entityBlend[i].kind != RAL_SHADER_PIPELINE_GRAPHICS || taaTrust[i].kind != RAL_SHADER_PIPELINE_GRAPHICS
+				|| !RalWebGpu_RuntimeOwnsPipeline( product->runtime, runtimeReceipt, &entityBlend[i] )
+				|| !RalWebGpu_RuntimeOwnsPipeline( product->runtime, runtimeReceipt, &taaTrust[i] ) ) return qfalse;
+		product->entityBlendPipelines[i] = entityBlend[i];
+		product->taaTrustPipelines[i] = taaTrust[i];
+	}
+	product->entityBlendPipelinesReady = qtrue; return qtrue;
+}
+
+/* 0 for depth-writing entity batches, 1..3 (blend, alpha-additive, additive) for translucent ones, from the batch material. */
+static uint32_t EntityBlendIndex( const renderSubmissionState_t *frontend, qhandle_t material ) {
+	renderMaterialSnapshot_t snapshot;
+	if ( material <= 0 || !RenderSubmission_MaterialSnapshot( frontend, material, &snapshot ) ) return 0u;
+	switch ( snapshot.alphaMode ) {
+	case RENDER_ALPHA_BLEND: return 1u;
+	case RENDER_ALPHA_ALPHA_ADDITIVE: return 2u;
+	case RENDER_ALPHA_ADDITIVE: return 3u;
+	default: return 0u;
+	}
+}
+
 qboolean RalWebGpu_ProductGetEntityLightingBuffer(
 		const ralWebGpuProduct_t *product,
 		const ralWebGpuRuntimeReceipt_t *runtimeReceipt,
@@ -2426,8 +2455,7 @@ static qboolean RecordToneMap( ralWebGpuProduct_t *product, const ralWebGpuRunti
 		if ( !RalWebGpu_CommandNextPass( command, recording, &pass, &next ) ) { s_productFailureStage = 96u; return qfalse; }
 		*recording = next;
 		for ( uint32_t i = 0u; i < maskDrawCount; ++i ) {
-			ralWebGpuIndexedDraw_t draw = maskDraws[i];
-			draw.pipelineIdentity = product->taaMaskPipeline.pipelineIdentity;
+			ralWebGpuIndexedDraw_t draw = maskDraws[i];   /* carries its mask pipeline (opaque mark or translucent contribution) */
 			if ( !RalWebGpu_CommandRecordIndexedDraw( command, recording, &draw, &next ) ) { s_productFailureStage = 95u; return qfalse; }
 			*recording = next;
 		}
@@ -3075,15 +3103,21 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 		taaMaskDraws = calloc( entityDrawCount, sizeof( *taaMaskDraws ) );
 		if ( !taaMaskDraws ) goto fail;
 	}
-	for ( uint32_t i = 0u; i < entityDrawCount; ++i ) {
+	/* Two phases, as the effect primitives follow the depth-writing geometry: depth-writing entity batches first, then the
+	 * translucent ones with their material's blend (no depth write). Frames without translucent entities record exactly as before. */
+	for ( uint32_t phase = 0u; phase < 2u; ++phase ) for ( uint32_t i = 0u; i < entityDrawCount; ++i ) {
 		materialEntry_t *material = NULL;
 		ralWebGpuIndexedDraw_t draw;
+		const uint32_t blendIndex = product->entityBlendPipelinesReady
+			? EntityBlendIndex( frontend, entityDraws[i].material ) : 0u;
+		if ( ( blendIndex ? 1u : 0u ) != phase ) continue;
 		for ( uint32_t m = 0u; m < materialCount; ++m )
 			if (resolved[m] && resolved[m]->handle == entityDraws[i].material)
 				material = resolved[m];
 		if ( !material ) goto fail;
 		memset( &draw, 0, sizeof( draw ) ); draw.kind = RAL_WEBGPU_DRAW_ENTITY;
-		draw.pipelineIdentity = product->entityPipeline.pipelineIdentity;
+		draw.pipelineIdentity = blendIndex ? product->entityBlendPipelines[blendIndex - 1u].pipelineIdentity
+			: product->entityPipeline.pipelineIdentity;
 		draw.vertexBufferIdentity = entityVertexReceipt.resourceIdentity;
 		draw.indexBufferIdentity = entityIndexReceipt.resourceIdentity;
 		draw.textureIdentity = material->textureReceipt.resourceIdentity;
@@ -3101,7 +3135,12 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 		if ( !RalWebGpu_CommandRecordIndexedDraw( command, &recording, &draw,
 				&updated ) ) goto fail;
 		recording = updated; candidate.entityDrawCount++;
-		if ( taaMaskDraws ) taaMaskDraws[taaMaskDrawCount++] = draw;
+		if ( taaMaskDraws ) {
+			/* Opaque batches mark their geometry in the effect mask; translucent ones add their visible contribution. */
+			draw.pipelineIdentity = blendIndex ? product->taaTrustPipelines[blendIndex - 1u].pipelineIdentity
+				: product->taaMaskPipeline.pipelineIdentity;
+			taaMaskDraws[taaMaskDrawCount++] = draw;
+		}
 		candidate.atmosphereBoundDrawCount++;
 	}
 	if ( !candidate.weather.zeroWork ) {
