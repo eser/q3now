@@ -5007,6 +5007,15 @@ SET_TESTS_PROPERTIES(render_antialiasing_contract PROPERTIES
 )
 WIRED_CONFIGURE_HOST_TEST(render_antialiasing_test render_antialiasing_contract)
 
+ADD_EXECUTABLE(render_temporal_view_test tests/render_temporal_view_test.c)
+TARGET_INCLUDE_DIRECTORIES(render_temporal_view_test PRIVATE code/render/frontend code/qcommon)
+ADD_TEST(NAME render_temporal_view_contract COMMAND render_temporal_view_test)
+SET_TESTS_PROPERTIES(render_temporal_view_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;failure.contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(render_temporal_view_test render_temporal_view_contract)
+
 ADD_TEST(NAME render_antialiasing_source_policy_contract
 	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
 		-P ${CMAKE_SOURCE_DIR}/cmake/render_antialiasing_policy_check.cmake)

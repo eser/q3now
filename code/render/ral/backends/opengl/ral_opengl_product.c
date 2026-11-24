@@ -8,6 +8,7 @@
 #include "ral_sky_radiance.h"
 #include "../../../frontend/render_material_stage_gpu.h"
 #include "../../../frontend/render_atmosphere_gpu.h"
+#include "../../../frontend/render_temporal_view.h"
 
 #include <limits.h>
 #include <math.h>
@@ -451,7 +452,8 @@ struct ralOpenGlProduct_s {
 	qboolean taaEnabled;
 	int smaaQuality;
 	ralTemporalState_t taaState;
-	uint64_t taaFrameId, taaWorldGeneration;
+	uint64_t taaWorldGeneration;
+	renderTemporalCutLatch_t taaCut;   /* camera cuts held until a temporal frame commits (render_temporal_view.h) */
 	uint32_t taaTopologyEpoch;
 	ralOpenGlAaCamera_t taaPreviousCamera;
 	uint32_t taaResolvedFrames, taaBootstrapFrames, smaaFrames;
@@ -1891,7 +1893,6 @@ static qboolean EnsureAa( ralOpenGlProduct_t *product ) {
 	AA_SOURCE( smaaResolveVertex, SmaaResolveVertex ); AA_SOURCE( smaaResolveFragment, SmaaResolveFragment );
 #undef AA_SOURCE
 	Ral_TemporalInit( &product->taaState );
-	product->taaFrameId = 0u;
 	return RalOpenGl_AaCreate( product->core, &sources, &product->aa );
 }
 
@@ -3142,14 +3143,15 @@ qboolean RalOpenGl_ProductRender( ralOpenGlProduct_t *product, renderSubmissionS
 	 * world view (folded into the view axes by the world pass) and binds the coverage target as attachment 1 of the HDR scene. */
 	if ( product->taaState.pending )
 		(void)Ral_TemporalCancelFrame( &product->taaState, product->taaState.pendingPlan.frameId );
-	if ( !product->taaEnabled && product->taaState.active ) { Ral_TemporalInit( &product->taaState ); product->taaFrameId = 0u; }
+	if ( !product->taaEnabled && product->taaState.active ) Ral_TemporalInit( &product->taaState );
+	RenderTemporal_ObserveCut( &product->taaCut, RenderSubmission_ViewCameraCut( frontend ) );
 	memset( &taaFrame, 0, sizeof( taaFrame ) );
 	{
 		const qboolean anti = sceneComplete.sceneRendered && frontend->activeWorldIndex >= 0
 			&& ( product->taaEnabled || product->smaaQuality > 0 );
 		uint32_t coverage = 0u;
 		if ( anti && !EnsureAa( product ) ) return qfalse;
-		if ( anti && product->taaEnabled && isfinite( effectView.fovX ) && isfinite( effectView.fovY )
+		if ( anti && product->taaEnabled && RenderTemporal_PrimaryScene( effectView.rdflags ) && isfinite( effectView.fovX ) && isfinite( effectView.fovY )
 				&& effectView.fovX > 1.0f && effectView.fovX < 179.0f && effectView.fovY > 1.0f && effectView.fovY < 179.0f ) {
 			ralTemporalFrameInput_t input;
 			ralTemporalFramePlan_t plan;
@@ -3159,10 +3161,10 @@ qboolean RalOpenGl_ProductRender( ralOpenGlProduct_t *product, renderSubmissionS
 				product->taaWorldGeneration = lifecycle;
 				if ( !++product->taaTopologyEpoch ) product->taaTopologyEpoch = 1u;
 			}
-			input.frameId = product->taaFrameId + 1u;
+			input.frameId = RenderSubmission_FrameSerial( frontend );
 			input.width = product->outputWidth; input.height = product->outputHeight;
 			input.topologyEpoch = product->taaTopologyEpoch; input.enabled = 1u;
-			input.cameraCut = ( effectView.rdflags & ( RDF_CAMERA_CUT | RDF_HYPERSPACE ) ) ? 1u : 0u;
+			input.cameraCut = RenderTemporal_CutPending( &product->taaCut ) ? 1u : 0u;
 			if ( Ral_TemporalBeginFrame( &product->taaState, &input, &plan ) ) {
 				const float w = (float)product->outputWidth, h = (float)product->outputHeight;
 				for ( int axis = 0; axis < 3; ++axis ) {
@@ -3241,7 +3243,7 @@ qboolean RalOpenGl_ProductRender( ralOpenGlProduct_t *product, renderSubmissionS
 	product->lastFrameGeneration = frameGeneration;
 	if ( taaPlanFrame && receipt.aaDispatchCount == 2u
 			&& Ral_TemporalCommitFrame( &product->taaState, taaPlanFrame ) ) {
-		product->taaFrameId = taaPlanFrame;
+		RenderTemporal_CutConsumed( &product->taaCut );
 		product->taaPreviousCamera = taaFrame.current;
 		if ( taaFrame.historyValid ) product->taaResolvedFrames++; else product->taaBootstrapFrames++;
 	}

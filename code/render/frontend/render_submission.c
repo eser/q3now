@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "render_submission.h"
+#include "render_temporal_view.h"
 #include "maps/map_format_registry.h"
 
 #include <limits.h>
@@ -1873,6 +1874,11 @@ qboolean RenderSubmission_LoadWorld( renderSubmissionState_t *state, const mapFi
 	return qtrue;
 }
 
+uint64_t RenderSubmission_FrameSerial( const renderSubmissionState_t *state )
+{
+	return state ? state->frameSerial : 0u;
+}
+
 qboolean RenderSubmission_BeginFrame( renderSubmissionState_t *state, uint64_t frameGeneration )
 {
 	if ( !state || !state->initialized || state->frameOpen || frameGeneration == 0u || frameGeneration == UINT64_MAX )
@@ -1883,6 +1889,8 @@ qboolean RenderSubmission_BeginFrame( renderSubmissionState_t *state, uint64_t f
 	state->uiDigest	   = HashU32( FNV_OFFSET, (uint32_t)( frameGeneration >> 32u ) );
 	state->currentFrameGeneration = frameGeneration;
 	state->sealedFrameGeneration = 0u;
+	if ( ++state->frameSerial == 0u ) state->frameSerial = 1u;
+	state->frameCameraCut = qfalse;
 	state->entityCount = state->temporalEntityCount = state->localIrradianceEntityCount = 0u;
 	state->characterSkinCount = 0u;
 	state->polygonCount = state->lightCount = state->emissiveProxyFrameLightCount = 0u;
@@ -2258,6 +2266,7 @@ qboolean RenderSubmission_RenderScene( renderSubmissionState_t *state, const ref
 		? (uint32_t)view->height : 0u;
 	state->worldSnapshot.uiPrimitiveInsertionIndex = state->uiPrimitiveCount;
 	state->worldSnapshot.rdflags = (uint32_t)view->rdflags;
+	if ( RenderTemporal_SceneCuts( (uint32_t)view->rdflags ) ) state->frameCameraCut = qtrue;
 	state->worldSnapshot.timeMs = view->time;
 	state->sceneRendered	  = qtrue;
 	RenderSubmission_CommitActiveWorld( state );

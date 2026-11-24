@@ -65,9 +65,9 @@ qboolean RenderSubmission_ViewSnapshot( const renderSubmissionState_t *state,
 }
 
 qboolean RenderSubmission_ViewCameraCut( const renderSubmissionState_t *state ) {
-	renderWorldSnapshot_t view;
-	return RenderSubmission_ViewSnapshot( state, &view )
-		&& ( view.rdflags & ( RDF_CAMERA_CUT | RDF_HYPERSPACE ) ) ? qtrue : qfalse;
+	/* Any scene of the frame: a cut on the gameplay scene is not undone by a later UI/model scene of the same frame. */
+	return state && state->initialized && ( state->frameOpen || state->frameSealed )
+		&& state->sceneRendered && state->frameCameraCut ? qtrue : qfalse;
 }
 
 qboolean RenderSubmission_ResidentWorldSnapshot(

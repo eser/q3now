@@ -249,6 +249,10 @@ typedef struct renderSubmissionState_s {
 	qboolean				   atmosphereReady;
 	qboolean				   initialized;
 	qboolean				   frameOpen;
+	/* Every frame RenderSubmission_BeginFrame opened (render_temporal_view.h: the temporal frame number), and whether a scene of
+	 * the current frame was a camera cut (RenderSubmission_ViewCameraCut). */
+	uint64_t				   frameSerial;
+	qboolean				   frameCameraCut;
 	qboolean				   emissiveAuthorityDirty;
 	// EndFrame seals the retained native-free payload for backend consumption.
 	// It remains readable until the next BeginFrame or CancelFrame.
@@ -329,6 +333,9 @@ int       RenderSubmission_ResidentWorldCount( const renderSubmissionState_t *st
 qboolean  RenderSubmission_ActiveSkyMaterial( const renderSubmissionState_t *state,
 	renderMaterialSnapshot_t *outMaterial, char outSemanticName[MAX_QPATH] );
 qboolean  RenderSubmission_BeginFrame( renderSubmissionState_t *state, uint64_t frameGeneration );
+/* The temporal frame number (render_temporal_view.h): the frame being submitted, counting every frame. Whether one of its scenes cut
+ * the camera is RenderSubmission_ViewCameraCut. */
+uint64_t  RenderSubmission_FrameSerial( const renderSubmissionState_t *state );
 void	  RenderSubmission_CancelFrame( renderSubmissionState_t *state );
 qboolean  RenderSubmission_ClearScene( renderSubmissionState_t *state );
 qboolean  RenderSubmission_AddEntity( renderSubmissionState_t *state, const refEntity_t *entity,

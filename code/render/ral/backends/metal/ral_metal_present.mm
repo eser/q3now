@@ -34,6 +34,7 @@ extern "C" {
 #include "render_submission_model.h"
 #include "render_submission_ui.h"
 #include "render_temporal_entity_submission.h"
+#include "render_temporal_view.h"
 #include "render_submission_world.h"
 
 #import <CoreGraphics/CoreGraphics.h>
@@ -342,7 +343,7 @@ qboolean effectParity;
 	ralMetalTaa_t *taa;
 	qboolean taaEnabled;
 	ralTemporalState_t taaState;
-	uint64_t taaFrameId;
+	renderTemporalCutLatch_t taaCut;   /* camera cuts held until a temporal frame commits (render_temporal_view.h) */
 	uint32_t taaResolvedFrames, taaBootstrapFrames;   /* evidence that TAA resolves in real play, not only the bootstrap copy */
 	uint32_t taaTopologyEpoch;
 	uint64_t taaWorldDigest;
@@ -5709,7 +5710,7 @@ qboolean RalMetal_PresentResetRegistrationAssets( ralMetalPresent_t *present,
 	RalMetal_BloomDestroy( present->bloom ); present->bloom = NULL;
 	RalMetal_SmaaDestroy( present->smaa ); present->smaa = NULL;
 	RalMetal_TaaDestroy( present->taa ); present->taa = NULL;
-	Ral_TemporalInit( &present->taaState ); present->taaFrameId = 0u;
+	Ral_TemporalInit( &present->taaState );
 	EntityMotionReset( present );
 	wired_clear_present_upload_caches( present );
 	for ( uint32_t i = 0u; i < RENDER_SUBMISSION_MAX_TEXTURE_RESOURCES; ++i )
@@ -6620,10 +6621,11 @@ static qboolean RenderAndSubmit( ralMetalPresent_t *present,
 	/* TAA switched off (r_aa changed): drop the history so a later switch-on starts from the bootstrap frame, not a stale image. */
 	if ( !present->taaEnabled && present->taaState.active ) {
 		Ral_TemporalInit( &present->taaState );
-		present->taaFrameId = 0u;
 		EntityMotionReset( present );
 	}
-	if ( present->taaEnabled && offscreenScene && receipt.width && receipt.height ) {
+	RenderTemporal_ObserveCut( &present->taaCut, RenderSubmission_ViewCameraCut( frontend ) );
+	if ( present->taaEnabled && offscreenScene && receipt.width && receipt.height
+			&& RenderTemporal_PrimaryScene( sceneView.rdflags ) ) {
 		ralTemporalFrameInput_t taaInput;
 		memset( &taaInput, 0, sizeof( taaInput ) );
 		if ( present->taaWorldDigest != frontend->worldDigest ) {
@@ -6631,11 +6633,11 @@ static qboolean RenderAndSubmit( ralMetalPresent_t *present,
 			++present->taaTopologyEpoch;
 			if ( !present->taaTopologyEpoch ) present->taaTopologyEpoch = 1u;
 		}
-		taaInput.frameId = present->taaFrameId + 1u;
+		taaInput.frameId = RenderSubmission_FrameSerial( frontend );
 		taaInput.width = receipt.width; taaInput.height = receipt.height;
 		taaInput.viewId = 0u; taaInput.topologyEpoch = present->taaTopologyEpoch;
 		taaInput.enabled = 1u;
-		taaInput.cameraCut = ( sceneView.rdflags & ( RDF_CAMERA_CUT | RDF_HYPERSPACE ) ) ? 1u : 0u;
+		taaInput.cameraCut = RenderTemporal_CutPending( &present->taaCut ) ? 1u : 0u;
 		if ( Ral_TemporalBeginFrame( &present->taaState, &taaInput, &taaPlan ) ) {
 			taaActive = qtrue;
 			taaJitterNdc[0] = 2.0f * taaPlan.sceneJitterPixels[0] / (float)receipt.width;
@@ -7695,7 +7697,7 @@ static qboolean RenderAndSubmit( ralMetalPresent_t *present,
 					return PresentFailure( "taa" );
 				}
 				memcpy( present->taaPreviousView, taaFrame.currentView, sizeof( present->taaPreviousView ) );
-				present->taaFrameId = taaPlan.frameId;
+				RenderTemporal_CutConsumed( &present->taaCut );
 				if ( taaFrame.historyValid ) present->taaResolvedFrames++; else present->taaBootstrapFrames++;
 				(void)Ral_TemporalCommitFrame( &present->taaState, taaPlan.frameId );
 				EntityMotionFinish( present, qtrue );

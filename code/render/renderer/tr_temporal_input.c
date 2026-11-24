@@ -7,6 +7,7 @@
 #include "tr_temporal_history.h"
 #include "../ral/core/ral_temporal.h"
 #include "../frontend/r_log.h"
+#include "../frontend/render_temporal_view.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -46,7 +47,7 @@ static uint32_t s_temporalTopologyEpochs[ MAX_RENDER_WORLDS ];
 static temporalProjectionDiagnostic_t s_temporalDiagnostics[ MAX_RENDER_WORLDS ];
 static temporalHistoryResources_t s_temporalHistory[ MAX_RENDER_WORLDS ];
 static temporalHistoryCommittedReceipt_t s_temporalCommittedHistory[ MAX_RENDER_WORLDS ][2];
-static qboolean s_temporalCameraCutPending[ MAX_RENDER_WORLDS ];
+static renderTemporalCutLatch_t s_temporalCameraCut[ MAX_RENDER_WORLDS ];
 static int s_temporalBackendWorld = -1;
 static uint64_t s_temporalBackendFrame;
 static temporalBackendSubmitQuery_t s_temporalBackendExpectation =
@@ -57,7 +58,7 @@ static temporalBatchRequest_t s_temporalDeliveredRequest;
 
 void R_TemporalHistoryShutdown( void ) {
 	R_TemporalEntityCacheResetAll();
-	memset( s_temporalCameraCutPending, 0, sizeof( s_temporalCameraCutPending ) );
+	memset( s_temporalCameraCut, 0, sizeof( s_temporalCameraCut ) );
 	R_Backend_TemporalHistoryShutdown();
 	for ( int i = 0; i < MAX_RENDER_WORLDS; ++i ) {
 		R_TemporalHistoryRelease( &s_temporalHistory[i] );
@@ -75,7 +76,7 @@ void R_TemporalHistoryShutdown( void ) {
 
 void R_TemporalMarkCameraCut( int worldIndex ) {
 	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS ) worldIndex = 0;
-	s_temporalCameraCutPending[worldIndex] = qtrue;
+	RenderTemporal_ObserveCut( &s_temporalCameraCut[worldIndex], qtrue );
 }
 
 void R_TemporalWorldLoaded( int worldIndex ) {
@@ -101,7 +102,7 @@ void R_TemporalWorldLoaded( int worldIndex ) {
 	}
 	memset( &s_temporalDiagnostics[ worldIndex ], 0,
 		sizeof( s_temporalDiagnostics[ worldIndex ] ) );
-	s_temporalCameraCutPending[worldIndex] = qfalse;
+	RenderTemporal_CutConsumed( &s_temporalCameraCut[worldIndex] );
 	R_TemporalEntityCacheResetWorld( worldIndex );
 	s_temporalBackendWorld = -1;
 	s_temporalBackendFrame = 0;
@@ -120,9 +121,10 @@ uint64_t R_TemporalProjectionPrepare( viewParms_t *view ) {
 	int worldIndex;
 	int temporalRequested;
 
-	if ( !view || !( tr.refdef.rdflags & RDF_TEMPORAL_PRIMARY )
+	// The shared primary-scene rule, then this renderer's own sub-views: portal and mirror views of the scene, stereo eyes and a
+	// partial viewport never drive the history.
+	if ( !view || !RenderTemporal_PrimaryScene( (uint32_t)tr.refdef.rdflags )
 			|| view->portalView != PV_NONE
-			|| ( tr.refdef.rdflags & RDF_NOWORLDMODEL )
 			|| view->stereoFrame != STEREO_CENTER
 			|| view->viewportX != 0 || view->viewportY != 0
 			|| view->viewportWidth != glConfig.vidWidth
@@ -152,7 +154,7 @@ uint64_t R_TemporalProjectionPrepare( viewParms_t *view ) {
 	input.viewId = (uint32_t)worldIndex + 1u;
 	input.topologyEpoch = s_temporalTopologyEpochs[ worldIndex ];
 	input.enabled = (uint8_t)( temporalRequested ? 1 : 0 );
-	input.cameraCut = (uint8_t)s_temporalCameraCutPending[worldIndex];
+	input.cameraCut = (uint8_t)RenderTemporal_CutPending( &s_temporalCameraCut[worldIndex] );
 	if ( !Ral_TemporalBeginFrame( state, &input, &plan ) ) {
 		return 0;
 	}
@@ -676,7 +678,7 @@ qboolean R_TemporalBackendSubmitted(
 			memset( s_temporalCommittedHistory[authority->worldIndex], 0,
 				sizeof( s_temporalCommittedHistory[authority->worldIndex] ) );
 		}
-		s_temporalCameraCutPending[authority->worldIndex] = qfalse;
+		RenderTemporal_CutConsumed( &s_temporalCameraCut[authority->worldIndex] );
 	}
 	s_temporalBackendWorld = -1;
 	s_temporalBackendFrame = 0;

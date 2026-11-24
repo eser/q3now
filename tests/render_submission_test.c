@@ -1982,6 +1982,16 @@ static int TestViewCameraCut( void ) {
 	view.rdflags = RDF_NOWORLDMODEL | RDF_HYPERSPACE;
 	CHECK( RenderSubmission_RenderScene( &state, &view, 0 ) );
 	CHECK( RenderSubmission_ViewCameraCut( &state ) ); // legacy teleport still resets
+	CHECK( RenderSubmission_EndFrame( &state, 2u, &receipt ) );
+	// A cut on the gameplay scene holds through a later UI/model scene of the same frame.
+	CHECK( RenderSubmission_BeginFrame( &state, 3u ) );
+	view.rdflags = RDF_CAMERA_CUT;
+	CHECK( RenderSubmission_RenderScene( &state, &view, 0 ) );
+	view.rdflags = RDF_NOWORLDMODEL;
+	CHECK( RenderSubmission_RenderScene( &state, &view, 0 ) );
+	CHECK( RenderSubmission_ViewCameraCut( &state ) );
+	// Every opened frame advances the temporal frame number.
+	CHECK( RenderSubmission_FrameSerial( &state ) == 3u );
 	RenderSubmission_Reset( &state );
 	CHECK( !RenderSubmission_ViewCameraCut( &state ) );
 	return 0;

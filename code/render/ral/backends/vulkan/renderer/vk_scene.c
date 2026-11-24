@@ -3,6 +3,7 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "vk_local.h"
+#include "../../../../frontend/render_temporal_view.h"
 #include "../../../../frontend/r_log.h"  // rilog-channel-mechanism Turn B — renderer.cmd
 #include "../../../../frontend/render_submission_effects.h"
 #include "vk_fixtures.h"
@@ -1442,7 +1443,7 @@ void RE_RenderScene( const refdef_t *fd, int worldIndex ) {
 		return;
 	}
 	startTime = ri.Milliseconds();
-	if ( fd->rdflags & ( RDF_CAMERA_CUT | RDF_HYPERSPACE ) ) {
+	if ( RenderTemporal_SceneCuts( (uint32_t)fd->rdflags ) ) {
 		R_TemporalMarkCameraCut( worldIndex );
 	}
 

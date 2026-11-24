@@ -9,6 +9,7 @@
 #include "ral_webgpu_smaa.h"
 #include "ral_temporal.h"
 #include "render_temporal_entity_submission.h"
+#include "render_temporal_view.h"
 
 #include <limits.h>
 #include <math.h>
@@ -60,7 +61,8 @@ struct ralWebGpuProduct_s {
     ralWebGpuTaa_t *taa;
     qboolean taaEnabled, taaPending;
     ralTemporalState_t taaState;
-    uint64_t taaFrameId, taaPendingFrame, taaWorldGeneration;
+    uint64_t taaPendingFrame, taaWorldGeneration;
+    renderTemporalCutLatch_t taaCut;   /* camera cuts held until a temporal frame commits (render_temporal_view.h) */
     uint32_t taaTopologyEpoch, taaResolvedFrames, taaBootstrapFrames;
     qboolean taaPendingResolved;
     ralWebGpuTaaCamera_t taaPreviousCamera, taaPendingCamera;
@@ -2239,7 +2241,7 @@ qboolean RalWebGpu_ProductUnloadWorld( ralWebGpuProduct_t *product,
     DestroySkyVertices(product,resources,worldIndex);
 	if ( worldIndex == 0 ) {
         RalWebGpu_ExposureReset(product->exposure);
-        Ral_TemporalInit( &product->taaState ); product->taaFrameId = 0u; EntityMotionReset( product );
+        Ral_TemporalInit( &product->taaState ); EntityMotionReset( product );
 		RenderEffectDecalPool_Reset( &product->effectDecalPool );
 		RenderEffectDecalPool_Reset( &product->pendingEffectDecalPool );
 		memset( &product->pendingEffectDecalPoolReceipt, 0,
@@ -2584,7 +2586,7 @@ static void TaaFinish( ralWebGpuProduct_t *product, qboolean success ) {
 	}
 	product->taaPending = qfalse;
 	if ( success && Ral_TemporalCommitFrame( &product->taaState, product->taaPendingFrame ) ) {
-		product->taaFrameId = product->taaPendingFrame;
+		RenderTemporal_CutConsumed( &product->taaCut );
 		product->taaPreviousCamera = product->taaPendingCamera;
 		if ( product->taaPendingResolved ) product->taaResolvedFrames++; else product->taaBootstrapFrames++;
 		EntityMotionFinish( product, product->entityMotionFrame == product->taaPendingFrame );
@@ -2725,12 +2727,12 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 		(void)Ral_TemporalCancelFrame( &product->taaState, product->taaState.pendingPlan.frameId );
 	EntityMotionFinish( product, qfalse );
 	if ( !product->taaEnabled && product->taaState.active ) {
-		/* Frame ids restart with the history: the pose cache restarts with them. */
-		Ral_TemporalInit( &product->taaState ); product->taaFrameId = 0u;
+		Ral_TemporalInit( &product->taaState );
 		EntityMotionReset( product );
 	}
+	RenderTemporal_ObserveCut( &product->taaCut, RenderSubmission_ViewCameraCut( frontend ) );
 	if ( product->taa && product->taaEnabled && product->exposure && submission->sceneRendered
-			&& !( world.rdflags & RDF_NOWORLDMODEL ) && product->viewportWidth && product->viewportHeight
+			&& RenderTemporal_PrimaryScene( world.rdflags ) && product->viewportWidth && product->viewportHeight
 			&& RalWebGpu_ProductProjection( &world, taaProjection ) ) {
 		ralTemporalFrameInput_t input;
 		const uint64_t lifecycle = frontend->worlds[frontend->activeWorldIndex].lifecycleGeneration;
@@ -2739,10 +2741,10 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 			product->taaWorldGeneration = lifecycle;
 			if ( !++product->taaTopologyEpoch ) product->taaTopologyEpoch = 1u;
 		}
-		input.frameId = product->taaFrameId + 1u;
+		input.frameId = RenderSubmission_FrameSerial( frontend );
 		input.width = product->viewportWidth; input.height = product->viewportHeight;
 		input.topologyEpoch = product->taaTopologyEpoch; input.enabled = 1u;
-		input.cameraCut = ( world.rdflags & ( RDF_CAMERA_CUT | RDF_HYPERSPACE ) ) ? 1u : 0u;
+		input.cameraCut = RenderTemporal_CutPending( &product->taaCut ) ? 1u : 0u;
 		if ( Ral_TemporalBeginFrame( &product->taaState, &input, &taaPlan ) ) {
 			taaActive = qtrue;
 			memset( &product->entityMotionStats, 0, sizeof( product->entityMotionStats ) );
