@@ -73,7 +73,12 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
     const keys = materialGroupKeys.get(handle);
     if (!keys) return;
     materialGroupKeys.delete(handle);
-    for (const key of keys) materialGroups.delete(key);
+    for (const key of keys) {
+      const cached = materialGroups.get(key);
+      materialGroups.delete(key);
+      /* The group's other handles (a long-lived pipeline or sampler) drop the key too. */
+      for (const other of cached?.handles ?? []) if (other !== handle) materialGroupKeys.get(other)?.delete(key);
+    }
   };
 
   const put = (kind, object, options = {}) => {
@@ -560,7 +565,7 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
 		const materialGroup = draw.textureBindGroupSlot - 1;
 		const secondaryHandle = secondary ? draw.secondaryTextureHandle : 0;
 		const key = `${draw.pipelineHandle}/${materialGroup}/${draw.textureHandle}/${secondaryHandle}/${draw.samplerHandle}`;
-		let group = materialGroups.get(key);
+		let group = materialGroups.get(key)?.group;
 		if (!group) {
 		  /* The implicit material group is texture @0 + sampler @1; a draw that
 		   * carries a secondary texture (world lightmap) declares it at @2. */
@@ -569,9 +574,9 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
 		  ];
 		  if (secondary) entries.push({ binding: 2, resource: secondary.createView() });
 		  group = getDevice().createBindGroup({ layout: pipeline.getBindGroupLayout(materialGroup), entries });
-		  materialGroups.set(key, group);
-		  for (const handle of [draw.pipelineHandle, draw.textureHandle, secondaryHandle, draw.samplerHandle]) {
-		    if (!handle) continue;
+		  const handles = [draw.pipelineHandle, draw.textureHandle, secondaryHandle, draw.samplerHandle].filter(Boolean);
+		  materialGroups.set(key, { group, handles });
+		  for (const handle of handles) {
 		    let keys = materialGroupKeys.get(handle);
 		    if (!keys) materialGroupKeys.set(handle, keys = new Set());
 		    keys.add(key);
