@@ -200,6 +200,7 @@ qboolean RalWebGpu_FrontendPlanBuild( ralWebGpuRuntime_t *runtime,
 				PLAN_STAGE( 24u ); candidate.unresolvedCount++;
 			} else candidate.localIrradianceEntityCount++;
 		}
+		if ( !RalWebGpu_EntityInPrimaryView( entity ) ) continue;
 		if ( entity->reType == RT_MODEL ) {
 			renderModelSnapshot_t model;
 			if ( entity->hModel <= 0 || !RenderSubmission_ModelSnapshot( frontend,

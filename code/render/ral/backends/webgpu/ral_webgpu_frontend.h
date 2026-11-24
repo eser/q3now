@@ -63,6 +63,11 @@ qboolean RalWebGpu_FrontendPlanBuild( ralWebGpuRuntime_t *runtime,
 	const renderEffectBeamPoolReceipt_t *effectBeamPoolReceipt,
 		ralWebGpuFrontendPlanReceipt_t *outReceipt );
 uint32_t RalWebGpu_FrontendPlanLastFailureStage( void );
+/* RF_THIRD_PERSON marks mirror/portal-only entities (the local player's own body): drawing them in the primary view puts the camera
+ * inside that model. The plan and the entity geometry both exclude them, as the other RAL backends do. */
+static inline qboolean RalWebGpu_EntityInPrimaryView( const refEntity_t *entity ) {
+	return ( entity->renderfx & RF_THIRD_PERSON ) ? qfalse : qtrue;
+}
 qboolean RalWebGpu_FrontendPlanReceiptExact(
 	const ralWebGpuFrontendPlanReceipt_t *a,
 	const ralWebGpuFrontendPlanReceipt_t *b );

@@ -612,6 +612,12 @@ int main( void ) {
 	beamEntity.radius = 0.5f; beamEntity.customShader = material;
 	beamEntity.oldorigin[0] = 4.0f; memset( beamEntity.shader.rgba, 255, 4u );
 	CHECK( RenderSubmission_AddEntity( &frontend, &beamEntity, NULL ) );
+	{
+		/* The local player's own body (mirror/portal only): neither planned nor drawn in the primary view. */
+		refEntity_t ownBody = modelEntity;
+		ownBody.renderfx |= RF_THIRD_PERSON;
+		CHECK( RenderSubmission_AddEntity( &frontend, &ownBody, NULL ) );
+	}
 	CHECK( RenderSubmission_AddUiQuad( &frontend, 0.0f, 0.0f, 1280.0f, 720.0f,
 		0.0f, 0.0f, 1.0f, 1.0f, 0.0f, material ) );
 	CHECK( RenderSubmission_AddUiLine( &frontend, 10.0f, 20.0f, 200.0f, 220.0f,

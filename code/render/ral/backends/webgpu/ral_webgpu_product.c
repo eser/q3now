@@ -718,6 +718,7 @@ static qboolean BuildEntityGeometry( const renderSubmissionState_t *frontend,
 	if ( entityCount && !entities ) return qfalse;
 	for ( uint32_t i = 0u; i < entityCount; ++i ) {
 		uint32_t add = 0u;
+		if ( !RalWebGpu_EntityInPrimaryView( &entities[i].entity ) ) continue;
 		if ( entities[i].entity.reType == RT_MODEL ) {
 			renderModelSnapshot_t model;
 			if ( !RenderSubmission_ModelSnapshot( frontend,
@@ -745,6 +746,7 @@ static qboolean BuildEntityGeometry( const renderSubmissionState_t *frontend,
 		const refEntity_t *entity = &entities[i].entity;
 		float localSh[4][4];
 		uint32_t baseVertex = vertexCount;
+		if ( !RalWebGpu_EntityInPrimaryView( entity ) ) continue;
 		if ( !EntityLighting( &entities[i], localSh ) ) goto fail;
 		if ( entity->reType == RT_MODEL ) {
 			renderModelSnapshot_t model;
