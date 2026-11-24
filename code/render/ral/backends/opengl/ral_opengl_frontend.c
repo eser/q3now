@@ -193,14 +193,19 @@ qboolean RalOpenGl_FrontendPlanBuild(
 					|| entity->backlerp > 1.0f ) {
 				candidate.unresolvedCount++; continue;
 			}
-			if ( !AddU32( &candidate.loweredEntityIndexCount, model.indexCount )
-					|| !AddU32( &candidate.loweredEntityBatchCount, model.batchCount ) )
-				return qfalse;
 			for ( uint32_t batch = 0u; batch < model.batchCount; ++batch ) {
 				qhandle_t material = RenderSubmission_EntityBatchMaterial(
 					frontend, &entities[i], &model.batches[batch] );
-				if ( !MaterialReady( frontend, material, NULL ) )
-					candidate.unresolvedCount++;
+				renderMaterialSnapshot_t snapshot;
+				if ( !MaterialReady( frontend, material, NULL ) ) {
+					candidate.unresolvedCount++; continue;
+				}
+				/* A nodraw batch is not drawn (DrawModelEntity), so it is not planned either: the world pass compares the two. */
+				if ( material > 0 && RenderSubmission_MaterialSnapshot( frontend, material, &snapshot ) && snapshot.noDraw )
+					continue;
+				if ( !AddU32( &candidate.loweredEntityIndexCount, model.batches[batch].indexCount )
+						|| !AddU32( &candidate.loweredEntityBatchCount, 1u ) )
+					return qfalse;
 			}
 			candidate.loweredModelEntityCount++;
 		} else if ( entity->reType == RT_SPRITE || entity->reType == RT_BEAM ) {
