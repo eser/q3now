@@ -294,7 +294,7 @@ RAL_SHADER_SPIRV_ARTIFACT(289u, frag_light_pbr_fog_bindless, RAL_STAGE_FRAGMENT,
 RAL_SHADER_SPIRV_ARTIFACT(290u, frag_light_pbr_line_bindless, RAL_STAGE_FRAGMENT, 16464u, 0xe4d95377bb4501f9ull, 0xf756811b368ccfa7ull, 0x647684b1297b347eull, 0xb4b96c7b7ce9bc8full)
 RAL_SHADER_SPIRV_ARTIFACT(291u, frag_light_pbr_line_fog_bindless, RAL_STAGE_FRAGMENT, 17260u, 0x0cb4eb9b9c2dd678ull, 0xf7d68943e4be41f4ull, 0xc556d820c2d3576eull, 0x95f00ed846c2c8bbull)
 RAL_SHADER_SPIRV_ARTIFACT(292u, ral_opengl_product_vert_spv, RAL_STAGE_VERTEX, 4936u, 0x4135323df9dede3eull, 0x089322effbadc4caull, 0xb71da126dd41ab7dull, 0xdeaee916be852d25ull)
-RAL_SHADER_SPIRV_ARTIFACT(293u, ral_opengl_product_frag_spv, RAL_STAGE_FRAGMENT, 31076u, 0x0d00ae28c4ffb466ull, 0xf53b915d7c804d12ull, 0x8bd0fed47be30c22ull, 0x1fe42608c08605e9ull)
+RAL_SHADER_SPIRV_ARTIFACT(293u, ral_opengl_product_frag_spv, RAL_STAGE_FRAGMENT, 32140u, 0x6b5edeb182ff5bd6ull, 0x6a0ce1b9da4cf1daull, 0xf31bf5f1ea54be75ull, 0x71838bf4632ffd89ull)
 RAL_SHADER_SPIRV_ARTIFACT(294u, atmosphere_froxel_inject_comp_spv, RAL_STAGE_COMPUTE, 9240u, 0x05a3d4166c81fa4dull, 0x9222c2acce028811ull, 0x32442a41b0992819ull, 0x0e89cf7be0914fa6ull)
 RAL_SHADER_SPIRV_ARTIFACT(295u, atmosphere_froxel_light_comp_spv, RAL_STAGE_COMPUTE, 8520u, 0xbc900236c42d796full, 0xf78b7ae36ef1fd87ull, 0x7b226aac4d88a3b7ull, 0x123c46bf64976bedull)
 RAL_SHADER_SPIRV_ARTIFACT(296u, atmosphere_froxel_integrate_comp_spv, RAL_STAGE_COMPUTE, 5188u, 0x664e1d09f4f6a4cbull, 0x3863d21edefeee95ull, 0x2659decd13762d7dull, 0x023abdc258511b4dull)

@@ -590,6 +590,8 @@ static void FakeBlendFunc( fakeEnum_t source, fakeEnum_t destination ) {
 static void FakeClearBufferfv( unsigned int buffer, fakeInt_t drawBuffer, const float *value ) {
 	(void)buffer; (void)drawBuffer; (void)value;
 }
+static unsigned int s_blendEquation1 = 0x8006u;   /* attachment 1 (TAA trust) blend equation */
+static void FakeBlendEquationi( unsigned int buffer, unsigned int mode ) { if ( buffer == 1u ) s_blendEquation1 = mode; }
 static void FakeColorMaski( unsigned int index, fakeBool_t r, fakeBool_t g, fakeBool_t b, fakeBool_t a ) {
 	(void)index; (void)r; (void)g; (void)b; (void)a;
 }
@@ -759,6 +761,7 @@ static ralOpenGlProc_t FakeResolve( const char *name, void *userData ) {
 	if ( !strcmp( name, "glGetError" ) ) RETURN_PROC( FakeGetError );
 	if ( !strcmp( name, "glClearBufferfv" ) ) RETURN_PROC( FakeClearBufferfv );
 	if ( !strcmp( name, "glColorMaski" ) ) RETURN_PROC( FakeColorMaski );
+	if ( !strcmp( name, "glBlendEquationi" ) ) RETURN_PROC( FakeBlendEquationi );
 	if ( !strcmp( name, "glCreateBuffers" ) ) RETURN_PROC( FakeCreateBuffers );
 	if ( !strcmp( name, "glNamedBufferStorage" ) ) RETURN_PROC( FakeNamedBufferStorage );
 	if ( !strcmp( name, "glNamedBufferSubData" ) ) RETURN_PROC( FakeNamedBufferSubData );

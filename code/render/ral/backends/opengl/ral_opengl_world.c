@@ -30,6 +30,8 @@ typedef unsigned char glBool_t;
 enum {
 	GL_NO_ERROR_VALUE = 0,
 	GL_ONE_VALUE = 1,
+	GL_FUNC_ADD_VALUE = 0x8006,
+	GL_FUNC_REVERSE_SUBTRACT_VALUE = 0x800b,
 	GL_TEXTURE_2D_VALUE = 0x0de1,
 	GL_RGBA8_VALUE = 0x8058,
 	GL_SRGB8_ALPHA8_VALUE = 0x8c43,
@@ -101,6 +103,7 @@ typedef void ( RAL_GL_APIENTRY *drawArraysInstancedFn )( glEnum_t, glInt_t,
 typedef void ( RAL_GL_APIENTRY *enableFn )( glEnum_t );
 typedef void ( RAL_GL_APIENTRY *disableFn )( glEnum_t );
 typedef void ( RAL_GL_APIENTRY *blendFuncFn )( glEnum_t, glEnum_t );
+typedef void ( RAL_GL_APIENTRY *blendEquationiFn )( unsigned int, glEnum_t );
 typedef void ( RAL_GL_APIENTRY *depthMaskFn )( glBool_t );
 typedef void ( RAL_GL_APIENTRY *depthFuncFn )( glEnum_t );
 typedef void ( RAL_GL_APIENTRY *viewportFn )( glInt_t, glInt_t, glSize_t,
@@ -137,6 +140,7 @@ typedef struct {
 	enableFn Enable;
 	disableFn Disable;
 	blendFuncFn BlendFunc;
+	blendEquationiFn BlendEquationi;
 	depthMaskFn DepthMask;
 	depthFuncFn DepthFunc;
 	viewportFn Viewport;
@@ -250,6 +254,7 @@ static qboolean LoadDispatch( const ralOpenGlCore_t *core,
 	LOAD_GL( Enable, "glEnable", enableFn );
 	LOAD_GL( Disable, "glDisable", disableFn );
 	LOAD_GL( BlendFunc, "glBlendFunc", blendFuncFn );
+	LOAD_GL( BlendEquationi, "glBlendEquationi", blendEquationiFn );
 	LOAD_GL( DepthMask, "glDepthMask", depthMaskFn );
 	LOAD_GL( DepthFunc, "glDepthFunc", depthFuncFn );
 	LOAD_GL( Viewport, "glViewport", viewportFn );
@@ -344,6 +349,9 @@ static void ApplyRaster( const worldDispatch_t *gl, glName_t uniformBuffer,
 		float environmentBlend, const float colorScale[4] ) {
 	productMaterialUniforms_t materialUniforms = { 0 };
 	if (beamParams) materialUniforms.beam = *beamParams;
+	/* beamFlags.w: the draw blends, so its TAA trust write goes through the blend (see wiredWriteTrust in the product shader). */
+	materialUniforms.beam.flags[3] = alpha == RENDER_ALPHA_BLEND || alpha == RENDER_ALPHA_ALPHA_ADDITIVE
+		|| alpha == RENDER_ALPHA_ADDITIVE ? 1u : 0u;
 	gl->Disable( GL_CULL_FACE_VALUE );
 	if ( alpha == RENDER_ALPHA_BLEND ) {
 		gl->Enable( GL_BLEND_VALUE );
@@ -1383,8 +1391,10 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 	gl.DepthMask( 1u );
 	gl.Clear( GL_COLOR_BUFFER_BIT_VALUE | GL_DEPTH_BUFFER_BIT_VALUE );
 	if ( info->coverageActive ) {
-		static const float noCoverage[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-		gl.ClearBufferfv( GL_COLOR_VALUE, 1, noCoverage );
+		/* TAA history trust starts at 1; draws reduce it through their own blend factors (REVERSE_SUBTRACT on this attachment). */
+		static const float fullTrust[4] = { 1.0f, 0.0f, 0.0f, 0.0f };
+		gl.ClearBufferfv( GL_COLOR_VALUE, 1, fullTrust );
+		gl.BlendEquationi( 1u, GL_FUNC_REVERSE_SUBTRACT_VALUE );
 	}
 	gl.Enable( GL_DEPTH_TEST_VALUE );
 	gl.DepthFunc( GL_LEQUAL_VALUE );
@@ -1622,6 +1632,7 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 			info->atmosphereBufferName );
 	}
 	if ( info->sceneComplete ) {
+		if ( info->coverageActive ) gl.BlendEquationi( 1u, GL_FUNC_ADD_VALUE );
 		if ( !info->sceneComplete( info->sceneCompleteContext ) ) goto cleanup;
 		gl.UseProgram( info->programName );
 		gl.BindBufferBase( GL_UNIFORM_BUFFER_VALUE, 0u, uniformBuffer );
@@ -1723,6 +1734,8 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 			|| !ReceiptValid( &receipt ) ) goto cleanup;
 	ok = qtrue;
 cleanup:
+	/* A failed pass must not leave the trust attachment's REVERSE_SUBTRACT equation behind (gl is loaded once coverage is set). */
+	if ( !ok && info->coverageActive && gl.BlendEquationi ) gl.BlendEquationi( 1u, GL_FUNC_ADD_VALUE );
 	if ( materialUniformBuffer ) gl.DeleteBuffers( 1, &materialUniformBuffer );
 	if ( uniformBuffer ) gl.DeleteBuffers( 1, &uniformBuffer );
 	if ( vaos[0] || vaos[1] || vaos[2] ) gl.DeleteVertexArrays( 3, vaos );

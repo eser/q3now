@@ -6,8 +6,8 @@
     "generation": 1,
     "byteCount": 1165154,
     "digest": {
-      "lane0": "ee70805dde2f8c36",
-      "lane1": "c0afff4b940234de"
+      "lane0": "37300b3962638b1e",
+      "lane1": "8eb2114babe0d306"
     }
   },
   "requiredTargets": [
@@ -11155,35 +11155,35 @@
       "symbol": "ral_opengl_product_frag_spv",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 31076,
+        "byteCount": 32140,
         "digest": {
-          "lane0": "8bd0fed47be30c22",
-          "lane1": "1fe42608c08605e9"
+          "lane0": "f31bf5f1ea54be75",
+          "lane1": "71838bf4632ffd89"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 20068,
+          "byteCount": 21124,
           "digest": {
-            "lane0": "5974ac59a150aa87",
-            "lane1": "6a197f2e62c74f11"
+            "lane0": "a5eb70d7074041f5",
+            "lane1": "c6c33f0437f60be4"
           }
         },
         {
           "target": "glsl460",
-          "byteCount": 15771,
+          "byteCount": 16441,
           "digest": {
-            "lane0": "2b2887fca30f481f",
-            "lane1": "1a2be71dea352e95"
+            "lane0": "2936312aefae1dd3",
+            "lane1": "3b37cccc27d0bd70"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 29383,
+          "byteCount": 30579,
           "digest": {
-            "lane0": "198eb57956ece9c6",
-            "lane1": "93dcfac129aa38f0"
+            "lane0": "242ef97ea708d0bb",
+            "lane1": "b7d01814a6acf1e6"
           }
         }
       ]

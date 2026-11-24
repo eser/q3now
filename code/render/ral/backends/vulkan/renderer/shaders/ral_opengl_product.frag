@@ -125,12 +125,23 @@ vec4 wired_atmosphere_sample() {
 	return vec4(inscatter * (1.0 - transmittance), transmittance);
 }
 
+// TAA history trust (attachment 1, bound only while TAA runs; cleared to 1, blended with this draw's own factors under
+// REVERSE_SUBTRACT: trust' = trust * dst - value * src). beamFlags.z marks entity/effect draws, beamFlags.w blended draws.
+// - opaque world: 1 (blending off: it replaces what it covers, so an occluded entity's mark is gone);
+// - opaque entity: 0 (no per-object motion here: its history is dropped);
+// - blended entity/effect: (max(r, g, b), 0, 0, alpha) of its colour, so an additive effect subtracts the light it adds and an
+//   alpha-blended one scales trust by (1 - alpha) - a faded effect leaves the history almost intact (the Vulkan validity rule);
+// - blended world: 0, which leaves trust unchanged under all three product blend modes.
+void wiredWriteTrust(vec4 sceneColor) {
+	bool marking = productMaterial.beamFlags.z != 0u;
+	bool blended = productMaterial.beamFlags.w != 0u;
+	if (!blended) outCoverage = vec4(marking ? 0.0 : 1.0, 0.0, 0.0, 1.0);
+	else if (marking) outCoverage = vec4(clamp(max(sceneColor.r, max(sceneColor.g, sceneColor.b)), 0.0, 1.0), 0.0, 0.0,
+		clamp(sceneColor.a, 0.0, 1.0));
+	else outCoverage = vec4(0.0);
+}
+
 void main() {
-	// TAA coverage (attachment 1, bound only while TAA runs): entity and effect draws (beamFlags.z) mark their pixels so the resolve
-	// drops history there, like the Metal / WebGPU effect mask. (f, 0, 0, f) replaces under opaque draws and leaves blended
-	// non-marking draws untouched under every blend mode.
-	float coverage = productMaterial.beamFlags.z != 0u ? 1.0 : 0.0;
-	outCoverage = vec4(coverage, 0.0, 0.0, coverage);
 	vec4 base = texture(sampler2D(baseTexture, baseSampler), texCoord);
 	if (productMaterial.beamFlags.y != 0u) {
 		// MSDF text, as the Metal UI MSDF fragment: the median of the three channels is the signed distance; coverage is its
@@ -145,6 +156,7 @@ void main() {
 		vec3 linearColor = mix(pow((color.rgb + 0.055) / 1.055, vec3(2.4)),
 			color.rgb / 12.92, lessThanEqual(color.rgb, vec3(0.04045)));
 		outColor = vec4(base.rgb * linearColor * wired_atmosphere_sample().w, base.a * color.a);
+		wiredWriteTrust(outColor);
 		return;
 	}
 	if (productDraw.atmosphereHeightSky.w > 0.5
@@ -171,11 +183,13 @@ void main() {
 		outColor = vec4(wired_display_visibility(
 			wired_compose_authored_physical_sky(base.rgb, physical,
 				clamp(productDraw.atmosphereHeightSky.z, 0.0, 1.0))), 1.0);
+		wiredWriteTrust(outColor);
 		return;
 	}
 	if (productDraw.atmosphereHeightSky.w > 0.5
 			&& productDraw.emissiveRadiance.w >= 0.0) {
 		outColor = vec4(wired_display_visibility(base.rgb), 1.0);
+		wiredWriteTrust(outColor);
 		return;
 	}
 	int alphaMode = int(productDraw.viewportAlpha.z + 0.5);
@@ -242,4 +256,5 @@ void main() {
 	if (productDraw.viewOriginDrawSpace.w < 0.5)
 		lit = wired_display_visibility(lit);
 	outColor = vec4(lit, base.a * color.a);
+	wiredWriteTrust(outColor);
 }

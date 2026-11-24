@@ -79,7 +79,9 @@ assert.match(beamVertex, /texCoord = \(in_tex_coord \* productMaterial\.beamScal
 assert.match(beamFragment, /vec3 linearColor = mix\(pow\([\s\S]*?lessThanEqual\(color\.xyz,/);
 // Beam emission consumes transmittance only; straight coverage remains in
 // alpha for SRC_ALPHA/ONE, with no extra fog radiance or double alpha.
-assert.match(beamFragment, /outColor = vec4\(\(base\.xyz \* linearColor\) \* wired_atmosphere_sample\(\)\.w, base\.w \* color\.w\);\s*return;/);
+// The TAA trust write follows the beam's final colour (it is a blended effect draw), then the beam returns.
+assert.match(beamFragment, /outColor = vec4\(\(base\.xyz \* linearColor\) \* wired_atmosphere_sample\(\)\.w, base\.w \* color\.w\);\s*vec4 (\w+) = outColor;\s*wiredWriteTrust\(\1\);\s*return;/);
+assert.match(beamFragment, /void wiredWriteTrust\(vec4 sceneColor\)/);
 assert.match(beamFragment, /float viewDistance = dot\(worldPosition - productDraw\.atmosphereEyeDensity\.xyz, productDraw\.viewForward\.xyz\)/);
 const histogram = readFileSync(join(root, 'hdr_histogram_comp_spv.glsl460'), 'utf8');
 assert.match(histogram, /layout\(binding = 0\) uniform sampler2D colorImage;/);

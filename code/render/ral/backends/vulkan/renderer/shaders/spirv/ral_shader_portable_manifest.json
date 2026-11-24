@@ -28902,14 +28902,14 @@
       "symbol": "ral_opengl_product_frag_spv",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
-        "lane0": "0d00ae28c4ffb466",
-        "lane1": "f53b915d7c804d12"
+        "lane0": "6b5edeb182ff5bd6",
+        "lane1": "6a0ce1b9da4cf1da"
       },
       "spirv": {
-        "byteCount": 31076,
+        "byteCount": 32140,
         "digest": {
-          "lane0": "8bd0fed47be30c22",
-          "lane1": "1fe42608c08605e9"
+          "lane0": "f31bf5f1ea54be75",
+          "lane1": "71838bf4632ffd89"
         }
       },
       "reflection": {

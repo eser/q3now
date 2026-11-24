@@ -141,9 +141,9 @@ static const char s_motionSource[] =
 	"	float previousForward = dot(delta, p.pf.xyz);\n"
 	"	bool reprojected = previousForward > 1.0e-3;\n"
 	"	vec2 previous = reprojected ? vec2(-dot(delta, p.pl.xyz) * p.pp.x, dot(delta, p.pu.xyz) * p.pp.y) / previousForward : ndc;\n"
-	"	bool covered = texelFetch(coverage, texel, 0).r > 0.5;\n"
+	"	float trust = clamp(texelFetch(coverage, texel, 0).r, 0.0, 1.0);\n"
 	"	imageStore(velocity, texel, vec4((ndc - previous) * 0.5, 0.0, 0.0));\n"
-	"	imageStore(validity, texel, vec4(reprojected && !covered ? 1.0 : 0.0, 0.0, 0.0, 0.0));\n"
+	"	imageStore(validity, texel, vec4(reprojected ? trust : 0.0, 0.0, 0.0, 0.0));\n"
 	"	imageStore(reverseDepth, texel, vec4(rd, 0.0, 0.0, 0.0));\n"
 	"}\n";
 
