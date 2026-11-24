@@ -47,7 +47,7 @@
 	X( q1_trigger_setskill_touch )     \
 	X( q1_trigger_teleport_touch )
 
-// ── code/game/entities/g_mover_q1.c (18, all unconditional) ──────────────────
+// ── code/game/entities/g_mover_q1.c (22, all unconditional) ──────────────────
 #define SG_LOCAL_CB_g_mover_q1( X )  \
 	X( Q1_Blocked_Door )              \
 	X( Q1_Button_Die )                \
@@ -65,7 +65,11 @@
 	X( Q1_SecretDoor_StartClose )     \
 	X( Q1_SecretDoor_Touch )          \
 	X( Q1_SecretDoor_Use )            \
+	X( Q1_Think_SetupTrain )          \
+	X( Q1_Think_StartTrain )          \
 	X( Q1_Train_Blocked )             \
+	X( Q1_Train_Use )                 \
+	X( Q1_Reached_Train )             \
 	X( Reached_Q1Plat )
 
 // ── code/game/entities/g_misc_q3.c (6; Q3_Portal* under FEAT_PW_PORTAL) ───────

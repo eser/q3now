@@ -4,6 +4,7 @@
 // Q1 mover entities (func_door, func_plat)
 
 #include "g_local.h"
+#include "g_mover_train.h"
 LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 #define DOOR_START_OPEN   1   /* Q1 spawnflag: spawn at open position */
@@ -1025,15 +1026,60 @@ Q1 trains push through obstacles (unlike Q3 TRAIN_BLOCK_STOPS which halts).
 #define FUNC_TRAIN_NONSOLID  1   /* Q1/RR spawnflag: train has no collision */
 
 static void Q1_Train_Blocked( gentity_t *ent, gentity_t *other ) {
-	if ( !other->client ) {
-		G_FreeEntity( other );
-		return;
-	}
 	/* fly_sound_debounce_time: unused by trains, repurposed as damage rate-limiter */
 	if ( ent->fly_sound_debounce_time > level.time ) return;
 	ent->fly_sound_debounce_time = level.time + 500;
-	if ( ent->damage ) {
-		G_Damage( other, ent, ent, NULL, NULL, ent->damage, 0, MOD_CRUSH );
+	/* Quake 1 (plats.qc train_blocked) damages whatever blocks it and removes nothing: monsters and players take the damage.
+	 * Only something that cannot take damage and is not a player is removed, the nearest equivalent of Quake 1 squashing a
+	 * non-solid blocker's bounds, so the train is never held forever. */
+	if ( other->takedamage ) {
+		if ( ent->damage ) {
+			G_Damage( other, ent, ent, NULL, NULL, ent->damage, 0, MOD_CRUSH );
+		}
+	} else if ( !other->client ) {
+		G_FreeEntity( other );
+	}
+}
+
+/* Quake 1 train rules (v1.01 QuakeC plats.qc + sv_phys.c SV_Physics_Pusher): the corner marks the train's mins, only the train's
+ * speed counts, a corner without "wait" pauses 0.1 s, a negative "wait" parks the train for good (its think time is in the past,
+ * so the pusher never runs it), the first leg leaves without a wait, and corners fire nothing. */
+static const trainRules_t q1TrainRules = {
+	qtrue,	/* cornerIsMins */
+	qfalse,	/* cornerSpeed */
+	qfalse,	/* waitAtStart */
+	qtrue,	/* negativeWaitStops */
+	100,	/* defaultWaitMs */
+	qfalse	/* fireCornerTargets */
+};
+
+static void Q1_Reached_Train( gentity_t *ent ) {
+	G_TrainAdvance( ent, &q1TrainRules );
+}
+
+/* train_use: a targeted train starts on its first use; later uses do nothing. */
+static void Q1_Train_Use( gentity_t *ent, gentity_t *other, gentity_t *activator ) {
+	ent->use = NULL;
+	Q1_Reached_Train( ent );
+}
+
+static void Q1_Think_StartTrain( gentity_t *ent ) {
+	Q1_Reached_Train( ent );
+}
+
+/* func_train_find: link the path, put the train's mins on the first corner, then start 0.1 s later, or wait for a trigger when
+ * the train has a targetname. */
+static void Q1_Think_SetupTrain( gentity_t *ent ) {
+	if ( !G_TrainLinkCorners( ent ) ) {
+		return;
+	}
+	VectorSubtract( ent->nextTrain->s.origin, ent->r.mins, ent->pos1 );
+	Q3_SetMoverState( ent, MOVER_POS1, level.time );
+	if ( ent->targetname ) {
+		ent->use = Q1_Train_Use;
+	} else {
+		ent->nextthink = level.time + 100;
+		ent->think = Q1_Think_StartTrain;
 	}
 }
 
@@ -1041,7 +1087,7 @@ static void Q1_Train_Blocked( gentity_t *ent, gentity_t *other ) {
 =================
 SP_q1_func_train
 
-Q1 path-corner-following mover. Wraps Q3's SP_q3_func_train with:
+Q1 path-corner-following mover. Wraps Q3's SP_q3_func_train with the Quake 1 train rules (q1TrainRules) and:
   - FUNC_TRAIN_NONSOLID=1 (spawnflag): passthrough geometry
   - Q1 blocked semantics: damage without stopping (no TRAIN_BLOCK_STOPS)
   Q1's FUNC_TRAIN_NONSOLID=1 has the same bit as Q3's TRAIN_START_ON=1;
@@ -1055,9 +1101,15 @@ void SP_q1_func_train( gentity_t *ent ) {
 	ent->spawnflags &= ~FUNC_TRAIN_NONSOLID;
 
 	SP_q3_func_train( ent );
+	if ( !ent->inuse ) {
+		return;	/* no target: the Q3 spawner freed it */
+	}
 
 	/* Override blocked handler: Q1 trains damage instead of stopping */
 	ent->blocked = Q1_Train_Blocked;
+	ent->reached = Q1_Reached_Train;
+	ent->think = Q1_Think_SetupTrain;	/* nextthink stays the spawner's second frame */
+	ent->use = NULL;					/* not Q3_InitMover's binary-mover use: a targeted train gets Q1_Train_Use */
 
 	if ( q1flags & FUNC_TRAIN_NONSOLID ) {
 		ent->r.contents = 0;

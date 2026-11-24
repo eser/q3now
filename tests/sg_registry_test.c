@@ -92,12 +92,12 @@ static const char *sg_expectedNames[] = {
 static const size_t sg_numExpected =
 	sizeof( sg_expectedNames ) / sizeof( sg_expectedNames[0] );
 
-// With the default flags pinned above: central 65 + trigger 18 + mover_q1 18 +
+// With the default flags pinned above: central 65 + trigger 18 + mover_q1 22 +
 // misc_q3 3 (portal off, drops 3) + misc_q1 6 + team 0 (overload off, drops 5) +
 // target_q3 2 (location + earthquake) + mover_q3 1 + weapon 1 + missile 0
-// (destroyable off) = 114. Enabling MISSIONPACK re-adds portal(3)+obelisk(5)=8 ->
-// 122; that build variant is covered by the game's own compile, not this gate.
-#define SG_EXPECTED_TOTAL 114
+// (destroyable off) = 118. Enabling MISSIONPACK re-adds portal(3)+obelisk(5)=8 ->
+// 126; that build variant is covered by the game's own compile, not this gate.
+#define SG_EXPECTED_TOTAL 118
 
 int main( void ) {
 	size_t i, j;

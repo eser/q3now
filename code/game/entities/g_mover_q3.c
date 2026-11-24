@@ -4,6 +4,7 @@
 //
 
 #include "g_local.h"
+#include "g_mover_train.h"
 LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 
@@ -1333,50 +1334,69 @@ TRAIN
 #define TRAIN_TOGGLE		2
 #define TRAIN_BLOCK_STOPS	4
 
+/* Quake 3 train rules: the corner is the train's origin, a corner's "speed" sets the leg's speed, the first corner's "wait" delays
+ * the first leg, and a corner fires its other targets. A negative "wait" never stopped a Quake 3 train (it was a past think time,
+ * run on the next frame), so it is a zero wait here. */
+static const trainRules_t q3TrainRules = {
+	qfalse,	/* cornerIsMins */
+	qtrue,	/* cornerSpeed */
+	qtrue,	/* waitAtStart */
+	qfalse,	/* negativeWaitStops */
+	0,		/* defaultWaitMs */
+	qtrue	/* fireCornerTargets */
+};
+
 /*
 ===============
 Q3_Think_BeginMoving
 
-The wait time at a corner has completed, so start moving again
+The wait at a corner is over. The leg's trajectory already starts at the instant the wait ended (trTime, set by G_TrainAdvance),
+so only its type changes; the origin stays at the corner and the next frame's push covers the travel since then.
 ===============
 */
 void Q3_Think_BeginMoving( gentity_t *ent ) {
-	ent->s.pos.trTime = level.time;
 	ent->s.pos.trType = TR_LINEAR_STOP;
 }
 
 /*
 ===============
-Q3_Reached_Train
+G_TrainAdvance
+
+The train is at the corner it was heading to, or is starting (setup, use). A leg that ran to its end continues from the instant it
+ended, not from the server frame that noticed it, so the schedule is the same at every sv_fps.
 ===============
 */
-void Q3_Reached_Train( gentity_t *ent ) {
-	gentity_t		*next;
-	float			speed;
-	vec3_t			move;
-	float			length;
+void G_TrainAdvance( gentity_t *ent, const trainRules_t *rules ) {
+	gentity_t	*next;
+	vec3_t		offset, move;
+	float		speed, length;
+	qboolean	starting;
+	int			start, waitMs;
 
-	// copy the appropriate values
 	next = ent->nextTrain;
 	if ( !next || !next->nextTrain ) {
 		return;		// just stop
 	}
+	starting = ent->s.pos.trType != TR_LINEAR_STOP ? qtrue : qfalse;
+	start = starting ? level.time : ent->s.pos.trTime + ent->s.pos.trDuration;
 
 	// fire all other targets
-	G_UseTargets( next, NULL );
+	if ( rules->fireCornerTargets ) {
+		G_UseTargets( next, NULL );
+	}
 
 	// set the new trajectory
 	ent->nextTrain = next->nextTrain;
-	VectorCopy( next->s.origin, ent->pos1 );
-	VectorCopy( next->nextTrain->s.origin, ent->pos2 );
-
-	// if the path_corner has a speed, use that
-	if ( next->speed ) {
-		speed = next->speed;
+	if ( rules->cornerIsMins ) {
+		VectorNegate( ent->r.mins, offset );
 	} else {
-		// otherwise use the train's speed
-		speed = ent->speed;
+		VectorClear( offset );
 	}
+	VectorAdd( next->s.origin, offset, ent->pos1 );
+	VectorAdd( next->nextTrain->s.origin, offset, ent->pos2 );
+
+	// if the path_corner has a speed, use that, otherwise the train's speed
+	speed = ( rules->cornerSpeed && next->speed ) ? next->speed : ent->speed;
 	if ( speed < 1 ) {
 		speed = 1;
 	}
@@ -1409,33 +1429,61 @@ void Q3_Reached_Train( gentity_t *ent ) {
 	// looping sound
 	ent->s.loopSound = next->soundLoop;
 
-	// start it going
-	Q3_SetMoverState( ent, MOVER_1TO2, level.time );
-
-	// if there is a "wait" value on the target, don't start moving yet
-	if ( next->wait ) {
-		ent->nextthink = level.time + next->wait * 1000;
-		ent->think = Q3_Think_BeginMoving;
-		ent->s.pos.trType = TR_STATIONARY;
+	if ( rules->negativeWaitStops && next->wait < 0 ) {
+		// parked at this corner for good
+		ent->s.loopSound = 0;
+		Q3_SetMoverState( ent, MOVER_POS1, start );
+		return;
 	}
-}
+	waitMs = next->wait ? (int)( next->wait * 1000 ) : rules->defaultWaitMs;
+	if ( waitMs < 0 || ( starting && !rules->waitAtStart ) ) {
+		waitMs = 0;
+	}
 
+	// start it going
+	Q3_SetMoverState( ent, MOVER_1TO2, start );
+
+	// if there is a wait at this corner, don't start moving yet: the leg begins when the wait ends
+	if ( waitMs ) {
+		ent->s.pos.trTime = start + waitMs;
+		ent->s.pos.trType = TR_STATIONARY;
+		ent->nextthink = start + waitMs;
+		ent->think = Q3_Think_BeginMoving;
+	}
+
+	// Q3_SetMoverState evaluated the leg at level.time, which can be past the corner: keep the train at the corner so the next
+	// frame pushes it through that travel (riders are carried, obstacles block)
+	VectorCopy( ent->pos1, ent->r.currentOrigin );
+	trap_LinkEntity( ent );
+
+	Com_Log( SEV_DEBUG, LOG_CH(ch_game), "train %d leg start=%d duration=%d\n", ent->s.number, ent->s.pos.trTime,
+		ent->s.pos.trDuration );
+}
 
 /*
 ===============
-Q3_Think_SetupTrainTargets
+Q3_Reached_Train
+===============
+*/
+void Q3_Reached_Train( gentity_t *ent ) {
+	G_TrainAdvance( ent, &q3TrainRules );
+}
+
+/*
+===============
+G_TrainLinkCorners
 
 Link all the corners together
 ===============
 */
-void Q3_Think_SetupTrainTargets( gentity_t *ent ) {
+qboolean G_TrainLinkCorners( gentity_t *ent ) {
 	gentity_t		*path, *next, *start;
 
 	ent->nextTrain = G_Find( NULL, FOFS(targetname), ent->target );
 	if ( !ent->nextTrain ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_game), "func_train at %s with an unfound target\n",
 			vtos(ent->r.absmin) );
-		return;
+		return qfalse;
 	}
 
 	start = NULL;
@@ -1447,10 +1495,10 @@ void Q3_Think_SetupTrainTargets( gentity_t *ent ) {
 		if ( !path->target ) {
 			Com_Log( SEV_INFO, LOG_CH(ch_game), "Train corner at %s without a target\n",
 				vtos(path->s.origin) );
-			return;
+			return qfalse;
 		}
 
-		// find a path_corner among the targets
+		// find a path_corner among the targets (q1_path_corner too)
 		// there may also be other targets that get fired when the corner
 		// is reached
 		next = NULL;
@@ -1459,15 +1507,26 @@ void Q3_Think_SetupTrainTargets( gentity_t *ent ) {
 			if ( !next ) {
 				Com_Log( SEV_INFO, LOG_CH(ch_game), "Train corner at %s without a target path_corner\n",
 					vtos(path->s.origin) );
-				return;
+				return qfalse;
 			}
-		} while ( strcmp( next->classname, "path_corner" ) != 0 );
+		} while ( !G_ClassnameIs( next, "path_corner" ) );
 
 		path->nextTrain = next;
 	}
+	return qtrue;
+}
 
-	// start the train moving from the first corner
-	Q3_Reached_Train( ent );
+/*
+===============
+Q3_Think_SetupTrainTargets
+
+Link all the corners together, then start the train moving from the first corner
+===============
+*/
+void Q3_Think_SetupTrainTargets( gentity_t *ent ) {
+	if ( G_TrainLinkCorners( ent ) ) {
+		Q3_Reached_Train( ent );
+	}
 }
 
 
