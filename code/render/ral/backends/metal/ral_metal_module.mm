@@ -1507,7 +1507,7 @@ static void BeginRegistration( glconfig_t *config ) {
 			if ( !s_module.bloomCvars[i] ) { MarkFailed( "bloom-cvars" ); return; }
 		}
 		s_module.aa = RegisterMetalRenderCvar( "r_aa", "1", "0", "2", qtrue,
-			"Anti-aliasing: 0 off, 1 TAA (default; camera-motion reprojection on this renderer, moving entities rely on the depth test and clip), 2 SMAA (only if TAA ghosting bothers you).",
+			"Anti-aliasing: 0 off, 1 TAA (default; rigid movers carry their own motion, other moving entities restart their history), 2 SMAA (only if TAA ghosting bothers you).",
 			&s_module.aaFallback );
 		if ( !s_module.aa ) { MarkFailed( "aa-cvars" ); return; }
 		if ( ri.Cvar_Get && ri.Cvar_Set ) { ri.Cvar_Get( "r_aaSupported", "1", CVAR_TEMP ); ri.Cvar_Set( "r_aaSupported", "1" ); }
@@ -1966,6 +1966,16 @@ static void EndFrame( int *frontEndMsec, int *backEndMsec ) {
 			lastLoggedTaaFrames = taaResolved + taaBootstrap;
 			s_module.imports.LogCh( s_module.initLogChannel, SEV_INFO,
 				"Wired native Metal RAL: taa frames resolved=%u bootstrap=%u\n", taaResolved, taaBootstrap );
+		}
+		/* Entity object motion, every 100 TAA frames: the mover checks read whether rigid entities write motion. */
+		static uint32_t lastLoggedMotionFrames;
+		if ( taaResolved + taaBootstrap >= lastLoggedMotionFrames + 100u && s_module.imports.LogCh && s_module.initLogChannel >= 0 ) {
+			ralMetalEntityMotionStats_t motion;
+			lastLoggedMotionFrames = taaResolved + taaBootstrap;
+			RalMetal_PresentEntityMotionStats( s_module.presentation, &motion );
+			s_module.imports.LogCh( s_module.initLogChannel, SEV_INFO,
+				"Wired native Metal RAL: taa entity motion recorded=%u rejected=%u previous=%u batches=%u frames=%u\n",
+				motion.recorded, motion.rejected, motion.previousValid, motion.motionBatches, motion.motionFrames );
 		}
 	}
 	if ( published.frontend.worldLoaded == qtrue

@@ -1524,6 +1524,49 @@ fragment float4 wired_taa_mask_fragment(WorldVertexOut in [[stage_in]]) {
     return float4(0.0, 0.0, 0.0, 0.0);
 }
 
+// Entity object motion into the TAA effect mask (green, blue, alpha; see ral_metal_taa.h). The raster position is computed exactly as
+// wired_world_vertex computes it, so the surfaces that are visible in the scene pass the depth-equal test; the velocity is the
+// perspective-correct screen difference between the unjittered current view and the previous view of the entity's previous pose.
+struct TaaObjectMotionViews {
+    WorldViewParams current;
+    WorldViewParams previous;
+};
+
+struct TaaObjectMotionOut {
+    float4 position [[position]];
+    float3 currentClip;
+    float3 previousClip;
+};
+
+static float3 wiredTaaClipXyw(constant WorldViewParams &v, float3 world) {
+    const float3 d = world - v.viewOrigin.xyz;
+    return float3(-dot(d, v.left.xyz) * v.projection.x, dot(d, v.up.xyz) * v.projection.y, dot(d, v.forward.xyz));
+}
+
+vertex TaaObjectMotionOut wired_taa_object_motion_vertex(WorldVertexIn in [[stage_in]], uint vid [[vertex_id]],
+        constant WorldViewParams &view [[buffer(1)]],
+        constant TaaObjectMotionViews &views [[buffer(3)]],
+        const device float4 *previousWorld [[buffer(4)]]) {
+    TaaObjectMotionOut out;
+    float3 delta = in.worldPosition.xyz - view.viewOrigin.xyz;
+    float forward = dot(delta, view.forward.xyz);
+    float left = dot(delta, view.left.xyz);
+    float up = dot(delta, view.up.xyz);
+    out.position = float4(-left * view.projection.x, up * view.projection.y,
+        forward - view.projection.z, forward);
+    out.position.xy += float2(view.forward.w, view.left.w) * forward;
+    out.currentClip = wiredTaaClipXyw(views.current, in.worldPosition.xyz);
+    out.previousClip = wiredTaaClipXyw(views.previous, previousWorld[vid].xyz);
+    return out;
+}
+
+fragment float4 wired_taa_object_motion_fragment(TaaObjectMotionOut in [[stage_in]]) {
+    const float2 c = in.currentClip.xy / max(in.currentClip.z, 1.0e-3);
+    const float2 p = in.previousClip.xy / max(in.previousClip.z, 1.0e-3);
+    // the motion kernel's convention: uv = (ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5), velocity = uvCurrent - uvPrevious
+    return float4(1.0, (c.x - p.x) * 0.5, (p.y - c.y) * 0.5, 0.0);
+}
+
 kernel void wired_taa_motion_compute(
         depth2d<float, access::read> sceneDepth [[texture(0)]],
         texture2d<float, access::write> velocity [[texture(1)]],
@@ -1548,11 +1591,13 @@ kernel void wired_taa_motion_compute(
         dot(delta, p.previous.up.xyz) * p.previous.projection.y) / previousForward : ndc;
     const float2 uvCurrent = float2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
     const float2 uvPrevious = float2(previousNdc.x * 0.5 + 0.5, 0.5 - previousNdc.y * 0.5);
-    velocity.write(float4(uvCurrent - uvPrevious, 0.0, 0.0), gid);
-    // History trust from the effect pass (same contract as the Vulkan renderer's validity): 1 where the camera-only reprojection
-    // holds, 0 under an entity or the first-person weapon (no per-object motion here), and reduced by a translucent effect's
-    // visible contribution, so a faded effect keeps the history under it.
-    const float trust = saturate(effectMask.read(gid).r);
-    validity.write(float4(ok ? trust : 0.0, 0.0, 0.0, 0.0), gid);
+    // The effect mask: r = history trust (same contract as the Vulkan renderer's validity: 1 where the reprojection holds, 0 under an
+    // entity without object motion or the first-person weapon, reduced by a translucent effect's visible contribution); a = 0 marks
+    // a rigid entity's object motion, whose screen velocity (current - previous uv) is in gb.
+    const float4 mask = effectMask.read(gid);
+    const bool object = mask.a < 0.5;
+    velocity.write(float4(object ? mask.gb : uvCurrent - uvPrevious, 0.0, 0.0), gid);
+    const float trust = saturate(mask.r);
+    validity.write(float4((ok || object) ? trust : 0.0, 0.0, 0.0, 0.0), gid);
     reverseDepth.write(float4(rd, 0.0, 0.0, 0.0), gid);
 }

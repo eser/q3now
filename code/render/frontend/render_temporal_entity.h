@@ -8,6 +8,10 @@
 #include "tr_public.h"
 #include "tr_types.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct {
 	qhandle_t hModel;
 	uintptr_t modelToken;
@@ -123,5 +127,9 @@ typedef struct {
 // model structures: the eventual adapter owns the exact fact translation.
 temporalMotionOutcome_t R_TemporalMotionClassify(
 	const temporalMotionDrawFacts_t *facts );
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

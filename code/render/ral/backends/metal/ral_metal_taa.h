@@ -7,7 +7,8 @@
 /* Temporal anti-aliasing for the native Metal renderer (r_aa 1). The resolve and the first-frame bootstrap are the same catalog MSL
  * modules the Vulkan renderer runs (temporal_resolve, temporal_bootstrap_aa), fed with the same quality flags and thresholds. The Metal
  * scene pass has no velocity attachment, so a small compute kernel rebuilds the camera-induced motion, validity and a reversed device
- * depth from the depth buffer and the current/previous view parameters. */
+ * depth from the depth buffer and the current/previous view parameters; rigid entities with a previous pose bring their own object
+ * velocity through the effect mask. */
 typedef struct ralMetalTaa_s ralMetalTaa_t;
 
 typedef struct {
@@ -24,9 +25,10 @@ typedef struct {
 /* `motionLibrary` is the product library that holds wired_taa_motion_compute. */
 ralMetalTaa_t *RalMetal_TaaCreate(id<MTLDevice> device, id<MTLLibrary> motionLibrary);
 void RalMetal_TaaDestroy(ralMetalTaa_t *state);
-/* The R8Unorm effect-mask render target of the cohort for `scene` (allocated on demand). The caller clears it to 0 and draws 1 where
- * a pixel must not inherit history by camera reprojection (entities, first-person weapon, translucent and decal batches); the motion
- * kernel turns those pixels invalid, as the Vulkan renderer does for the same classes of draw. */
+/* The RGBA16Float effect-mask render target of the cohort for `scene` (allocated on demand). The caller clears it to (1, 0, 0, 1). Red
+ * is the history trust: 0 where a pixel must not inherit history (entities without object motion, first-person weapon), reduced by a
+ * translucent batch's visible contribution. Green/blue carry an object velocity (uv, current - previous) where alpha is 0: a rigid
+ * entity with a previous pose. The motion kernel takes that velocity instead of the camera reprojection, as the Vulkan renderer does. */
 id<MTLTexture> RalMetal_TaaEffectMask(ralMetalTaa_t *state, id<MTLTexture> scene);
 /* Encodes motion, resolve (or the bootstrap when there is no history) and the copy of the result back into `scene`, in place, before
  * bloom and tone mapping. `depth` is the Depth32Float scene depth of the frame. On false the caller must discard the command. */

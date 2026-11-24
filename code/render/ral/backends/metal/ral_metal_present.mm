@@ -33,6 +33,7 @@ extern "C" {
 #include "render_material_stage_gpu.h"
 #include "render_submission_model.h"
 #include "render_submission_ui.h"
+#include "render_temporal_entity_submission.h"
 #include "render_submission_world.h"
 
 #import <CoreGraphics/CoreGraphics.h>
@@ -111,6 +112,27 @@ typedef struct {
 	uint32_t vertexCount;
 	uint32_t indexCount;
 } ralMetalWorldCacheSlot_t;
+
+/* Entity object motion (TAA). BuildEntityVertices lists the rigid (inline BSP) entities with a motion identity; once the frame's TAA
+ * plan exists, EntityMotionPrepare records their poses into the shared entity pose cache and, for those with a committed previous
+ * pose, writes each vertex's previous-frame world position into `previous` (parallel to the entity vertices) and marks their
+ * motion-writing batches. The pose-cache transaction is finished with the TAA frame: committed with it, discarded otherwise. */
+typedef struct {
+	uint32_t command;                  /* index into the frame's entity commands */
+	uint32_t firstVertex, vertexCount;
+	uint32_t firstBatch, batchCount;
+} ralMetalEntityMotionCandidate_t;
+
+typedef struct {
+	ralMetalEntityMotionCandidate_t *candidates;
+	uint32_t candidateCount, candidateCapacity;
+	float (*previous)[4];
+	uint32_t previousCapacity;
+	int world;
+	uint64_t frame;                    /* the open pose-cache transaction, 0 = none */
+	uint32_t recorded, rejected, previousValid, motionBatches;   /* the last three accumulate; motionBatches is this frame's */
+	uint32_t motionBatchesTotal, motionFrames;
+} ralMetalEntityMotion_t;
 
 struct ralMetalPresent_s {
 	ralMetalCore_t *core;
@@ -227,6 +249,7 @@ qboolean effectParity;
 	id<MTLRenderPipelineState> taaMaskPipeline;   /* entity coverage into the TAA effect mask */
 	id<MTLBuffer> taaMaskMaterial;                 /* unused since the trust pass binds each batch's own material; kept nil */
 	id<MTLRenderPipelineState> taaTrustPipelines[3];   /* world material fragment specialized to TAA trust: blend, alpha-additive, additive */
+	id<MTLRenderPipelineState> taaMotionPipeline;      /* entity object velocity into the TAA effect mask (green, blue, alpha) */
 	id<MTLDepthStencilState> worldDepthEqualState;
 	id<MTLDepthStencilState> worldDepthEqualReadState;
 	ralMetalWorldCacheSlot_t worldCaches[MAX_RENDER_WORLDS];
@@ -324,6 +347,7 @@ qboolean effectParity;
 	uint32_t taaTopologyEpoch;
 	uint64_t taaWorldDigest;
 	float taaPreviousView[20];
+	ralMetalEntityMotion_t entityMotion;
 	qboolean exposureHistoryValid;
 	int exposureTimeMs;
 	uint64_t exposureWorldDigest;
@@ -598,7 +622,9 @@ typedef struct {
 	qboolean receivesDirectLight;
 	float boundsCenter[3];
 	float boundsRadius;
+	qboolean motion;   /* writes its object velocity into the TAA effect mask instead of invalidating the history */
 } ralMetalEntityBatch_t;
+
 
 #define RAL_METAL_READBACK_RING_SIZE 3u
 
@@ -2209,7 +2235,7 @@ static qboolean BuildEntityVertices( const ralMetalPresent_t *present,
 		uint32_t *outIndexCount, uint32_t *outBatchCount,
 		uint32_t *outModelCount, uint32_t *outPrimitiveCount,
 		uint32_t *outTemporalCount, uint32_t *outLocalIrradianceCount,
-		uint32_t *outUnresolvedCount ) {
+		uint32_t *outUnresolvedCount, ralMetalEntityMotion_t *motion ) {
 	const renderEntityCommand_t *commands;
 	renderEffectPrimitiveSnapshot_t effectSnapshot;
 	const spriteDesc_t *effectSprites = NULL;
@@ -2230,6 +2256,7 @@ static qboolean BuildEntityVertices( const ralMetalPresent_t *present,
 	*outVertexCount = *outIndexCount = *outBatchCount = 0u;
 	*outModelCount = *outPrimitiveCount = *outTemporalCount = 0u;
 	*outLocalIrradianceCount = *outUnresolvedCount = 0u;
+	if ( motion ) motion->candidateCount = 0u;
 	commands = RenderSubmission_EntityCommands( frontend, &commandCount );
 	memset( &effectSnapshot, 0, sizeof( effectSnapshot ) );
 	if ( frontend ) haveEffects = RenderSubmission_EffectPrimitiveSnapshots(
@@ -2357,6 +2384,7 @@ static qboolean BuildEntityVertices( const ralMetalPresent_t *present,
 		if ( entity->reType == RT_MODEL ) {
 			renderModelSnapshot_t model;
 			if ( !RenderSubmission_ModelSnapshot( frontend, entity->hModel, &model ) ) continue;
+			const uint32_t entityFirstBatch = batchBase;
 			uint32_t frame = entity->frame < 0 ? 0u : (uint32_t)entity->frame % model.frameCount;
 			uint32_t oldFrame = entity->oldframe < 0 ? frame
 				: (uint32_t)entity->oldframe % model.frameCount;
@@ -2429,6 +2457,23 @@ static qboolean BuildEntityVertices( const ralMetalPresent_t *present,
 						&model.batches[batchIndex] ), batch );
 				batch->entityColor = entity->shader;
 				EntityBatchLighting( &commands[i], batch );
+			}
+			/* A rigid brush entity (door, plat, train) with a motion identity is a candidate for object motion; the first-person
+			 * weapon moves with the camera and stays invalidated. */
+			if ( motion && commands[i].hasTemporal && model.format == RENDER_MODEL_INLINE_BSP
+					&& !( entity->renderfx & ( RF_DEPTHHACK | RF_FIRST_PERSON ) ) ) {
+				if ( motion->candidateCount == motion->candidateCapacity ) {
+					const uint32_t capacity = motion->candidateCapacity ? motion->candidateCapacity * 2u : 64u;
+					ralMetalEntityMotionCandidate_t *grown = (ralMetalEntityMotionCandidate_t *)realloc(
+						motion->candidates, capacity * sizeof( *grown ) );
+					if ( grown ) { motion->candidates = grown; motion->candidateCapacity = capacity; }
+				}
+				if ( motion->candidateCount < motion->candidateCapacity ) {
+					ralMetalEntityMotionCandidate_t *candidate = &motion->candidates[motion->candidateCount++];
+					candidate->command = i;
+					candidate->firstVertex = vertexBase; candidate->vertexCount = model.vertexCount;
+					candidate->firstBatch = entityFirstBatch; candidate->batchCount = batchBase - entityFirstBatch;
+				}
 			}
 			vertexBase += model.vertexCount; indexBase += model.indexCount;
 		} else if ( entity->reType == RT_SPRITE || entity->reType == RT_BEAM ) {
@@ -2849,6 +2894,7 @@ static qboolean DrawEntityBatches( id<MTLRenderCommandEncoder> encoder,
 		renderMaterialSnapshot_t materialSnapshot;
 		if ( !batch->visible || batchPhase != phase
 				|| !( phaseMask & ( 1u << phase ) ) ) continue;
+		if ( trustPipelines && batch->motion ) continue;   /* the TAA mask draws its object motion instead */
 		const MTLCullMode cull = ( sceneView->rdflags & RDF_NOWORLDMODEL )
 			|| batch->cullMode == RENDER_CULL_NONE ? MTLCullModeNone
 			: ( batch->cullMode == RENDER_CULL_FRONT ? MTLCullModeFront : MTLCullModeBack );
@@ -2993,18 +3039,29 @@ static MTLVertexDescriptor *WorldVertexDescriptor( void ) {
  * REVERSE_SUBTRACT (trust' = trust * dst - value * src). The motion kernel takes the trust as validity. */
 static qboolean EnsureTaaTrustPipelines( ralMetalPresent_t *present ) {
 	if ( present->taaMaskPipeline && present->taaTrustPipelines[0] && present->taaTrustPipelines[1]
-			&& present->taaTrustPipelines[2] ) return qtrue;
+			&& present->taaTrustPipelines[2] && present->taaMotionPipeline ) return qtrue;
 	id<MTLDevice> device = RalMetal_CoreNativeDevice( present->core );
 	NSError *error = nil;
 	id<MTLFunction> vertex = [present->uiLibrary newFunctionWithName:@"wired_world_vertex"];
 	id<MTLFunction> opaque = [present->uiLibrary newFunctionWithName:@"wired_taa_mask_fragment"];
 	id<MTLFunction> trust = WorldFragmentFunction( present->uiLibrary, true, &error );
-	if ( vertex && opaque && trust && !error ) {
+	id<MTLFunction> motionVertex = [present->uiLibrary newFunctionWithName:@"wired_taa_object_motion_vertex"];
+	id<MTLFunction> motionFragment = [present->uiLibrary newFunctionWithName:@"wired_taa_object_motion_fragment"];
+	if ( vertex && opaque && trust && motionVertex && motionFragment && !error ) {
 		MTLRenderPipelineDescriptor *pipeline = [[[MTLRenderPipelineDescriptor alloc] init] autorelease];
-		pipeline.vertexFunction = vertex;
 		pipeline.vertexDescriptor = WorldVertexDescriptor();
-		pipeline.colorAttachments[0].pixelFormat = MTLPixelFormatR8Unorm;
+		pipeline.colorAttachments[0].pixelFormat = MTLPixelFormatRGBA16Float;
 		pipeline.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
+		/* Object motion: green and blue carry the velocity, alpha 0 marks the pixel as object motion; red (the trust) is left to the
+		 * mask and trust pipelines, so the draw order between them does not matter. */
+		if ( !present->taaMotionPipeline ) {
+			pipeline.vertexFunction = motionVertex;
+			pipeline.fragmentFunction = motionFragment;
+			pipeline.colorAttachments[0].writeMask = MTLColorWriteMaskGreen | MTLColorWriteMaskBlue | MTLColorWriteMaskAlpha;
+			present->taaMotionPipeline = [device newRenderPipelineStateWithDescriptor:pipeline error:&error];
+		}
+		pipeline.vertexFunction = vertex;
+		pipeline.colorAttachments[0].writeMask = MTLColorWriteMaskRed;
 		if ( !present->taaMaskPipeline ) {
 			pipeline.fragmentFunction = opaque;
 			present->taaMaskPipeline = [device newRenderPipelineStateWithDescriptor:pipeline error:&error];
@@ -3025,9 +3082,84 @@ static qboolean EnsureTaaTrustPipelines( ralMetalPresent_t *present ) {
 			present->taaTrustPipelines[i] = [device newRenderPipelineStateWithDescriptor:pipeline error:&error];
 		}
 	}
-	[vertex release]; [opaque release]; [trust release];
+	[vertex release]; [opaque release]; [trust release]; [motionVertex release]; [motionFragment release];
 	return present->taaMaskPipeline && present->taaTrustPipelines[0] && present->taaTrustPipelines[1]
-		&& present->taaTrustPipelines[2] && !error ? qtrue : qfalse;
+		&& present->taaTrustPipelines[2] && present->taaMotionPipeline && !error ? qtrue : qfalse;
+}
+
+/* The entity pose cache is process-wide while TAA frame ids belong to this presenter's history: every point that restarts the history
+ * restarts the cache with it, or Begin would refuse the lower ids. */
+static void EntityMotionReset( ralMetalPresent_t *present ) {
+	R_TemporalEntityCacheResetAll();
+	present->entityMotion.frame = 0u;
+	present->entityMotion.recorded = present->entityMotion.rejected = 0u;
+	present->entityMotion.previousValid = present->entityMotion.motionBatches = 0u;
+	present->entityMotion.motionBatchesTotal = present->entityMotion.motionFrames = 0u;
+}
+
+/* Publishes (committed) or discards the open pose-cache transaction. A frame that failed after its TAA plan leaves it open; the next
+ * frame discards it before it begins its own. */
+static void EntityMotionFinish( ralMetalPresent_t *present, qboolean committed ) {
+	if ( !present->entityMotion.frame ) return;
+	(void)R_TemporalEntityCacheFinish( present->entityMotion.world, present->entityMotion.frame, committed );
+	present->entityMotion.frame = 0u;
+}
+
+/* Records this frame's candidate poses under the TAA frame id and, for each entity with a committed previous pose, fills the previous
+ * world position of its vertices (the vertex's model-space position, kept in materialPosition, under the previous transform) and
+ * marks the batches that write motion. True when at least one batch writes motion. */
+static qboolean EntityMotionPrepare( ralMetalPresent_t *present, const renderSubmissionState_t *frontend,
+		const ralMetalWorldVertex_t *vertices, uint32_t vertexCount, ralMetalEntityBatch_t *batches, uint32_t batchCount,
+		uint64_t frameId ) {
+	ralMetalEntityMotion_t *motion = &present->entityMotion;
+	const renderEntityCommand_t *commands;
+	uint32_t commandCount = 0u;
+	motion->motionBatches = 0u;
+	EntityMotionFinish( present, qfalse );
+	if ( !motion->candidateCount || !frontend || frontend->activeWorldIndex < 0 || !vertices || !batches ) return qfalse;
+	if ( vertexCount > motion->previousCapacity ) {
+		float (*grown)[4] = (float (*)[4])realloc( motion->previous, (size_t)vertexCount * sizeof( *grown ) );
+		if ( !grown ) return qfalse;
+		motion->previous = grown; motion->previousCapacity = vertexCount;
+	}
+	if ( !R_TemporalEntityCacheBegin( frontend->activeWorldIndex, present->taaTopologyEpoch, 1u, frameId ) ) return qfalse;
+	motion->world = frontend->activeWorldIndex; motion->frame = frameId;
+	commands = RenderSubmission_EntityCommands( frontend, &commandCount );
+	for ( uint32_t c = 0u; c < motion->candidateCount; ++c ) {
+		const ralMetalEntityMotionCandidate_t *candidate = &motion->candidates[c];
+		temporalEntityPose_t pose;
+		temporalEntityPoseReceipt_t receipt;
+		renderModelSnapshot_t model;
+		if ( candidate->command >= commandCount || candidate->firstVertex > vertexCount
+				|| candidate->vertexCount > vertexCount - candidate->firstVertex
+				|| candidate->firstBatch > batchCount || candidate->batchCount > batchCount - candidate->firstBatch ) continue;
+		const renderEntityCommand_t *command = &commands[candidate->command];
+		if ( !RenderSubmission_ModelSnapshot( frontend, command->entity.hModel, &model ) ) continue;
+		RenderTemporal_EntityPose( &command->entity, &model, &pose );
+		if ( !R_TemporalEntityCacheRecord( motion->world, frameId, (uintptr_t)command, &command->motion, &pose, &receipt ) ) {
+			motion->rejected++; continue;
+		}
+		motion->recorded++;
+		if ( !receipt.previousValid ) continue;
+		motion->previousValid++;
+		for ( uint32_t v = candidate->firstVertex; v < candidate->firstVertex + candidate->vertexCount; ++v ) {
+			const float *local = vertices[v].materialPosition;
+			for ( uint32_t axis = 0u; axis < 3u; ++axis )
+				motion->previous[v][axis] = receipt.previous.origin[axis]
+					+ receipt.previous.axis[0u * 3u + axis] * local[0]
+					+ receipt.previous.axis[1u * 3u + axis] * local[1]
+					+ receipt.previous.axis[2u * 3u + axis] * local[2];
+			motion->previous[v][3] = 1.0f;
+		}
+		for ( uint32_t b = candidate->firstBatch; b < candidate->firstBatch + candidate->batchCount; ++b ) {
+			if ( !batches[b].visible || batches[b].depthHack
+					|| !RenderTemporal_RigidBatchWritesMotion( frontend, batches[b].material ) ) continue;
+			batches[b].motion = qtrue; motion->motionBatches++;
+		}
+	}
+	motion->motionBatchesTotal += motion->motionBatches;
+	if ( motion->motionBatches ) motion->motionFrames++;
+	return motion->motionBatches ? qtrue : qfalse;
 }
 
 static qboolean EncodeTaaEffectMask( id<MTLCommandBuffer> command, ralMetalPresent_t *present,
@@ -3036,12 +3168,14 @@ static qboolean EncodeTaaEffectMask( id<MTLCommandBuffer> command, ralMetalPrese
 		id<MTLBuffer> entityIndices, const ralMetalEntityBatch_t *entityBatches,
 		uint32_t entityBatchCount, const renderWorldSnapshot_t *sceneView,
 		const ralMetalWorldViewParams_t *viewParams, const ralMetalWorldAtmosphereParams_t *atmosphereParams,
-		id<MTLBuffer> atmosphereArena, const ralMetalPresentReceipt_t *receipt ) {
+		id<MTLBuffer> atmosphereArena, const ralMetalPresentReceipt_t *receipt,
+		id<MTLBuffer> motionPrevious, const float *motionViews ) {
 	if ( !EnsureTaaTrustPipelines( present ) ) return qfalse;
 	MTLRenderPassDescriptor *pass = [MTLRenderPassDescriptor renderPassDescriptor];
 	pass.colorAttachments[0].texture = mask;
 	pass.colorAttachments[0].loadAction = MTLLoadActionClear;
-	pass.colorAttachments[0].clearColor = MTLClearColorMake( 1.0, 0.0, 0.0, 0.0 );
+	/* red = history trust (1 kept), green/blue = object velocity, alpha = 1 camera reprojection / 0 object motion */
+	pass.colorAttachments[0].clearColor = MTLClearColorMake( 1.0, 0.0, 0.0, 1.0 );
 	pass.colorAttachments[0].storeAction = MTLStoreActionStore;
 	pass.depthAttachment.texture = depth;
 	pass.depthAttachment.loadAction = MTLLoadActionLoad;
@@ -3069,6 +3203,24 @@ static qboolean EncodeTaaEffectMask( id<MTLCommandBuffer> command, ralMetalPrese
 		ralMetalPresentReceipt_t scratch = *receipt;
 		ok = DrawEntityBatches( encoder, present, frontend, uniforms, entityVertices, entityIndices, entityBatches,
 			entityBatchCount, sceneView, 7u, present->sceneDepthCache, sceneFog, &scratch, present->taaTrustPipelines );
+		/* Object motion of the rigid entities with a previous pose (skipped above): their visible surfaces (depth-equal to the
+		 * scene) write the screen velocity between the previous and the current unjittered view. */
+		if ( ok && motionPrevious && motionViews ) {
+			[encoder setRenderPipelineState:present->taaMotionPipeline];
+			[encoder setDepthStencilState:present->worldDepthEqualReadState];
+			[encoder setCullMode:MTLCullModeNone];
+			[encoder setVertexBuffer:entityVertices offset:0u atIndex:0u];
+			[encoder setVertexBytes:viewParams length:sizeof( *viewParams ) atIndex:1u];
+			[encoder setVertexBytes:motionViews length:2u * sizeof( *viewParams ) atIndex:3u];
+			[encoder setVertexBuffer:motionPrevious offset:0u atIndex:4u];
+			for ( uint32_t b = 0u; b < entityBatchCount; ++b ) {
+				const ralMetalEntityBatch_t *batch = &entityBatches[b];
+				if ( !batch->motion || !batch->visible || !batch->indexCount ) continue;
+				[encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:batch->indexCount
+					indexType:MTLIndexTypeUInt32 indexBuffer:entityIndices
+					indexBufferOffset:(NSUInteger)batch->firstIndex * sizeof( uint32_t )];
+			}
+		}
 	}
 	[encoder endEncoding];
 	return ok;
@@ -5239,6 +5391,7 @@ static qboolean BuildOwnedLayer( ralMetalCore_t *core,
 static void InitializeToneMapDefaults( ralMetalPresent_t *present ) {
 	present->bloomSettings = { 0u, 2u, 0u, 0.32f, 0.5f };
 	Ral_TemporalInit( &present->taaState );
+	EntityMotionReset( present );
 	present->taaTopologyEpoch = 1u;
 	present->toneMap.mode = 3u;
 	present->toneMap.exposure = 1.0f;
@@ -5443,6 +5596,8 @@ void RalMetal_PresentDestroy( ralMetalPresent_t *present ) {
 	[present->taaMaskPipeline release];
 	[present->taaMaskMaterial release];
 	for ( uint32_t i = 0u; i < 3u; ++i ) [present->taaTrustPipelines[i] release];
+	[present->taaMotionPipeline release];
+	free( present->entityMotion.candidates ); free( present->entityMotion.previous );
 	for ( i = 0u; i < MAX_RENDER_WORLDS; ++i ) {
 		[present->worldCaches[i].vertices release];
 		[present->worldCaches[i].indices release];
@@ -5543,6 +5698,7 @@ qboolean RalMetal_PresentResetRegistrationAssets( ralMetalPresent_t *present,
 	RalMetal_SmaaDestroy( present->smaa ); present->smaa = NULL;
 	RalMetal_TaaDestroy( present->taa ); present->taa = NULL;
 	Ral_TemporalInit( &present->taaState ); present->taaFrameId = 0u;
+	EntityMotionReset( present );
 	wired_clear_present_upload_caches( present );
 	for ( uint32_t i = 0u; i < RENDER_SUBMISSION_MAX_TEXTURE_RESOURCES; ++i )
 		[present->uiMaterials[i].texture release];
@@ -5691,6 +5847,17 @@ qboolean RalMetal_PresentSetBloom( ralMetalPresent_t *present,
 	if ( !present || !Ral_BloomSettingsValid( settings ) ) return qfalse;
 	present->bloomSettings = *settings;
 	return qtrue;
+}
+
+void RalMetal_PresentEntityMotionStats( const ralMetalPresent_t *present, ralMetalEntityMotionStats_t *outStats ) {
+	if ( !outStats ) return;
+	memset( outStats, 0, sizeof( *outStats ) );
+	if ( !present ) return;
+	outStats->recorded = present->entityMotion.recorded;
+	outStats->rejected = present->entityMotion.rejected;
+	outStats->previousValid = present->entityMotion.previousValid;
+	outStats->motionBatches = present->entityMotion.motionBatchesTotal;
+	outStats->motionFrames = present->entityMotion.motionFrames;
 }
 
 void RalMetal_PresentTaaFrameCounts( const ralMetalPresent_t *present, uint32_t *resolved, uint32_t *bootstrap ) {
@@ -6333,7 +6500,7 @@ static qboolean RenderAndSubmit( ralMetalPresent_t *present,
 			&entityBatchCount, &receipt.modelEntityCount,
 			&receipt.primitiveEntityCount, &receipt.temporalEntityCount,
 			&receipt.localIrradianceEntityCount,
-			&receipt.unresolvedEntityCount ) ) {
+			&receipt.unresolvedEntityCount, &present->entityMotion ) ) {
 		[worldVertices release]; [worldIndices release];
 		free( worldVertexBytes ); free( uiVertexBytes ); return PresentFailure( "entity-vertices" );
 	}
@@ -6431,16 +6598,18 @@ static qboolean RenderAndSubmit( ralMetalPresent_t *present,
 		: present->layer.pixelFormat;
 	/* Temporal AA: plan the frame (jitter, history slots, resets) and bake the sub-pixel jitter into the world view parameters before
 	 * any pass uses them. A plan abandoned by an earlier failed frame is cancelled first. */
-	qboolean taaActive = qfalse;
+	qboolean taaActive = qfalse, taaEntityMotion = qfalse;
 	ralTemporalFramePlan_t taaPlan;
 	float taaJitterNdc[2] = { 0.0f, 0.0f };
 	memset( &taaPlan, 0, sizeof( taaPlan ) );
 	if ( present->taaState.pending )
 		(void)Ral_TemporalCancelFrame( &present->taaState, present->taaState.pendingPlan.frameId );
+	EntityMotionFinish( present, qfalse );   /* a transaction left open by a failed frame */
 	/* TAA switched off (r_aa changed): drop the history so a later switch-on starts from the bootstrap frame, not a stale image. */
 	if ( !present->taaEnabled && present->taaState.active ) {
 		Ral_TemporalInit( &present->taaState );
 		present->taaFrameId = 0u;
+		EntityMotionReset( present );
 	}
 	if ( present->taaEnabled && offscreenScene && receipt.width && receipt.height ) {
 		ralTemporalFrameInput_t taaInput;
@@ -6463,6 +6632,8 @@ static qboolean RenderAndSubmit( ralMetalPresent_t *present,
 			worldViewParams.left[3] = taaJitterNdc[1];
 			distantWorldViewParams.forward[3] = taaJitterNdc[0];
 			distantWorldViewParams.left[3] = taaJitterNdc[1];
+			taaEntityMotion = EntityMotionPrepare( present, frontend, entityVertexBytes, entityVertexCount, entityBatches,
+				entityBatchCount, taaPlan.frameId );
 		}
 	}
 	@autoreleasepool {
@@ -7483,10 +7654,23 @@ static qboolean RenderAndSubmit( ralMetalPresent_t *present,
 				taaFrame.historyValid = taaPlan.historyValid; taaFrame.readIndex = taaPlan.historyReadIndex;
 				taaFrame.writeIndex = taaPlan.historyWriteIndex;
 				id<MTLTexture> effectMask = RalMetal_TaaEffectMask( present->taa, present->sceneColorCache );
-				if ( !effectMask || !EncodeTaaEffectMask( command, present, frontend, uniforms, effectMask, worldDepth,
-						entityVertices, entityIndices, entityBatches, entityBatchCount, &sceneView, &worldViewParams,
+				/* object motion: the previous world positions and the unjittered current + previous views */
+				float motionViews[40];
+				memcpy( motionViews, taaFrame.currentView, sizeof( taaFrame.currentView ) );
+				memcpy( motionViews + 20, taaFrame.previousView, sizeof( taaFrame.previousView ) );
+				id<MTLBuffer> motionPrevious = taaEntityMotion && taaFrame.historyValid && entityVertexCount
+					? [RalMetal_CoreNativeDevice( present->core ) newBufferWithBytes:present->entityMotion.previous
+						length:(NSUInteger)entityVertexCount * sizeof( present->entityMotion.previous[0] )
+						options:MTLResourceStorageModeShared] : nil;
+				/* No motion to draw: those batches fall back to the opaque mask (invalidated), never to an unmarked trust of 1. */
+				if ( !motionPrevious ) for ( uint32_t b = 0u; b < entityBatchCount; ++b ) entityBatches[b].motion = qfalse;
+				const qboolean maskEncoded = effectMask && EncodeTaaEffectMask( command, present, frontend, uniforms, effectMask,
+						worldDepth, entityVertices, entityIndices, entityBatches, entityBatchCount, &sceneView, &worldViewParams,
 						&worldAtmosphereParams, atmospherePlan.computeDispatchCount != 0u
-							? RalMetal_AtmosphereArena( present->atmosphereGpu ) : present->atmosphereFallback, &receipt ) ) {
+							? RalMetal_AtmosphereArena( present->atmosphereGpu ) : present->atmosphereFallback, &receipt,
+						motionPrevious, motionPrevious ? motionViews : NULL ) ? qtrue : qfalse;
+				[motionPrevious release];
+				if ( !maskEncoded ) {
 					[worldVertices release]; [worldIndices release]; [worldDepth release];
 					[entityVertices release]; [entityIndices release]; free( entityBatches );
 					[uiVertices release]; [readback release];
@@ -7502,6 +7686,7 @@ static qboolean RenderAndSubmit( ralMetalPresent_t *present,
 				present->taaFrameId = taaPlan.frameId;
 				if ( taaFrame.historyValid ) present->taaResolvedFrames++; else present->taaBootstrapFrames++;
 				(void)Ral_TemporalCommitFrame( &present->taaState, taaPlan.frameId );
+				EntityMotionFinish( present, qtrue );
 			}
 			if ( present->bloomSettings.enabled ) {
 				if ( !present->bloom ) present->bloom =

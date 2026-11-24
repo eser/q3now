@@ -130,7 +130,8 @@ static bool wired_taa_prepare(ralMetalTaa_t *s, id<MTLTexture> scene) {
 		c->validity = wired_taa_texture(s, MTLPixelFormatR8Unorm, w, h);
 		c->reverseDepth = wired_taa_texture(s, MTLPixelFormatR32Float, w, h);
 		{
-			MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatR8Unorm width:w height:h mipmapped:NO];
+			/* r = history trust, gb = object velocity (uv), a = 1 camera reprojection / 0 object motion */
+			MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA16Float width:w height:h mipmapped:NO];
 			td.storageMode = MTLStorageModePrivate;
 			td.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
 			c->effectMask = [s->device newTextureWithDescriptor:td];

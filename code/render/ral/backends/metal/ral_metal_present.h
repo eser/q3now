@@ -226,6 +226,12 @@ qboolean RalMetal_PresentSetSmaaQuality( ralMetalPresent_t *present, int quality
 qboolean RalMetal_PresentSetTaa( ralMetalPresent_t *present, qboolean enabled );
 /* Frames whose TAA pass ran the resolve (history valid) and the bootstrap copy (no history) since the presenter was created. */
 void RalMetal_PresentTaaFrameCounts( const ralMetalPresent_t *present, uint32_t *resolved, uint32_t *bootstrap );
+/* Entity object motion since the TAA history last restarted: rigid entity poses recorded / rejected by the pose cache, those with a
+ * committed previous pose, the batches that wrote object motion and the frames that had any. */
+typedef struct {
+	uint32_t recorded, rejected, previousValid, motionBatches, motionFrames;
+} ralMetalEntityMotionStats_t;
+void RalMetal_PresentEntityMotionStats( const ralMetalPresent_t *present, ralMetalEntityMotionStats_t *outStats );
 qboolean RalMetal_PresentSetExposure( ralMetalPresent_t *present,
 	const ralExposureSettings_t *settings );
 qboolean RalMetal_PresentPrepareMaterialResources(

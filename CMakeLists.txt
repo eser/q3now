@@ -3320,6 +3320,7 @@ IF(APPLE)
 		code/render/frontend/render_submission_model.c
 		code/render/frontend/render_submission_ui.c
 		code/render/frontend/render_submission_world.c
+		code/render/frontend/render_temporal_entity.c
 		code/render/ral/core/ral_allocation.c
 		code/render/ral/core/ral_atmosphere.c
 		code/render/ral/core/ral_sky_radiance.c
