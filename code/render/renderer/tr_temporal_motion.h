@@ -4,47 +4,8 @@
 #ifndef WIRED_TR_TEMPORAL_MOTION_H
 #define WIRED_TR_TEMPORAL_MOTION_H
 
-#include "tr_temporal_entity_cache.h"
+#include "../frontend/render_temporal_entity.h"
 
-typedef enum {
-	TEMPORAL_MOTION_PRESERVE = 0,
-	TEMPORAL_MOTION_WRITE_VALID,
-	TEMPORAL_MOTION_INVALIDATE_OPAQUE,
-	TEMPORAL_MOTION_DEFER_ATEST
-} temporalMotionOutcome_t;
-
-typedef enum {
-	TEMPORAL_MOTION_GEOMETRY_UNSUPPORTED = 0,
-	TEMPORAL_MOTION_GEOMETRY_WORLD_STATIC,
-	TEMPORAL_MOTION_GEOMETRY_MOD_BRUSH_RIGID
-} temporalMotionGeometry_t;
-
-typedef struct {
-	temporalMotionGeometry_t geometry;
-	qboolean visible;
-	qboolean opaque;
-	qboolean depthAuthoritative;
-	qboolean vertexDeformed;
-	qboolean alphaTested;
-	qboolean deferAlphaTested;
-	qboolean blended;
-	qboolean transparent;
-	qboolean decal;
-	qboolean additive;
-	qboolean ui;
-	qboolean sky;
-	qboolean polygonOffset;
-	qboolean depthHack;
-	qboolean crosshair;
-	// Effect mask: draws of translucent surfaces (sort after opaque: water, glass, sprites, beams, explosion models), decals and
-	// first-person (depthHack) draws do not inherit the history of the opaque surface beneath them. A blended STAGE of an opaque
-	// surface (a lightmap multiply, a detail overlay) is not an effect and stays PRESERVE; they invalidate it, so the resolve filters those pixels spatially instead of reprojecting them.
-	qboolean effectMask;
-	// The shader animates its texture coordinates over time (tcMod scroll/rotate/stretch/turb, entity-driven translate). Such a
-	// surface changes appearance without any geometric motion, so a reprojected history of it is wrong in the same way an effect
-	// is (scrolling lava and water, teleporters). Under the effect mask it does not inherit history either.
-	qboolean textureAnimated;
-} temporalMotionDrawFacts_t;
 
 typedef struct {
 	float currentMvp[16];
@@ -74,10 +35,6 @@ typedef struct {
 	float velocity[2];
 } temporalMotionSample_t;
 
-// Pure per-draw disposition.  This does not inspect renderer-private shader or
-// model structures: the eventual adapter owns the exact fact translation.
-temporalMotionOutcome_t R_TemporalMotionClassify(
-	const temporalMotionDrawFacts_t *facts );
 
 // Builds Vulkan-clip-space current/previous MVPs from unjittered receipts.
 // WORLD_STATIC requires entity == NULL.  MOD_BRUSH_RIGID requires an exact,

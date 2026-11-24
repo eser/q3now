@@ -5148,6 +5148,7 @@ ADD_EXECUTABLE(vk_temporal_main_activation_test
 	code/render/ral/backends/vulkan/renderer/vk_temporal_iqm_payload.c
 	code/render/renderer/tr_temporal_iqm_motion.c
 	code/render/renderer/tr_temporal_motion.c
+	code/render/frontend/render_temporal_entity.c
 	code/render/ral/backends/vulkan/renderer/vk_bindless_publication.c)
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_main_activation_test PRIVATE
 	code/qcommon code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer code/render/renderer)
@@ -5411,7 +5412,7 @@ SET_TESTS_PROPERTIES(tr_temporal_motion_structural_source_policy_contract PROPER
 
 ADD_EXECUTABLE(ral_temporal_entity_cache_test
 	tests/ral_temporal_entity_cache_test.c
-	code/render/renderer/tr_temporal_entity_cache.c
+	code/render/frontend/render_temporal_entity.c
 )
 TARGET_INCLUDE_DIRECTORIES(ral_temporal_entity_cache_test PRIVATE
 	code/qcommon
@@ -5430,6 +5431,7 @@ WIRED_CONFIGURE_HOST_TEST(ral_temporal_entity_cache_test
 ADD_EXECUTABLE(tr_temporal_motion_test
 	tests/tr_temporal_motion_test.c
 	code/render/renderer/tr_temporal_motion.c
+	code/render/frontend/render_temporal_entity.c
 )
 TARGET_INCLUDE_DIRECTORIES(tr_temporal_motion_test PRIVATE
 	code/qcommon
@@ -5449,6 +5451,7 @@ ADD_EXECUTABLE(tr_temporal_iqm_motion_test
 	tests/tr_temporal_iqm_motion_test.c
 	code/render/renderer/tr_temporal_iqm_motion.c
 	code/render/renderer/tr_temporal_motion.c
+	code/render/frontend/render_temporal_entity.c
 	code/render/ral/backends/vulkan/renderer/vk_bindless_publication.c
 )
 TARGET_INCLUDE_DIRECTORIES(tr_temporal_iqm_motion_test PRIVATE
@@ -5530,6 +5533,7 @@ ADD_EXECUTABLE(vk_temporal_iqm_payload_test
 	code/render/ral/backends/vulkan/renderer/vk_temporal_iqm_payload.c
 	code/render/renderer/tr_temporal_iqm_motion.c
 	code/render/renderer/tr_temporal_motion.c
+	code/render/frontend/render_temporal_entity.c
 	code/render/ral/backends/vulkan/renderer/vk_bindless_publication.c)
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_iqm_payload_test PRIVATE
 	code/qcommon code/render/frontend code/render/ral/backends/vulkan/renderer code/render/ral/core)
@@ -5557,6 +5561,7 @@ ADD_EXECUTABLE(vk_temporal_iqm_payload_authoring_test
 	code/render/ral/backends/vulkan/renderer/vk_temporal_iqm_payload.c
 	code/render/renderer/tr_temporal_iqm_motion.c
 	code/render/renderer/tr_temporal_motion.c
+	code/render/frontend/render_temporal_entity.c
 	code/render/ral/backends/vulkan/renderer/vk_bindless_publication.c)
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_iqm_payload_authoring_test PRIVATE
 	code/qcommon code/render/frontend code/render/ral/backends/vulkan/renderer code/render/ral/core)
@@ -5584,6 +5589,7 @@ ADD_EXECUTABLE(vk_temporal_iqm_exact3_factory_test
 	code/render/ral/backends/vulkan/renderer/vk_temporal_iqm_payload.c
 	code/render/renderer/tr_temporal_iqm_motion.c
 	code/render/renderer/tr_temporal_motion.c
+	code/render/frontend/render_temporal_entity.c
 	code/render/ral/backends/vulkan/renderer/vk_bindless_publication.c)
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_iqm_exact3_factory_test PRIVATE
 	code/qcommon code/render/frontend code/render/ral/backends/vulkan/renderer code/render/ral/core)
@@ -5604,6 +5610,7 @@ ADD_EXECUTABLE(vk_temporal_iqm_command_test
 	code/render/ral/backends/vulkan/renderer/vk_temporal_main_rendering.c
 	code/render/renderer/tr_temporal_iqm_motion.c
 	code/render/renderer/tr_temporal_motion.c
+	code/render/frontend/render_temporal_entity.c
 	code/render/ral/backends/vulkan/renderer/vk_bindless_publication.c)
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_iqm_command_test PRIVATE
 	code/qcommon code/render/frontend code/render/ral/backends/vulkan/renderer code/render/ral/core)

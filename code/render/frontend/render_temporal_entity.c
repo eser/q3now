@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Wired Engine contributors
 
-#include "tr_temporal_entity_cache.h"
+#include "render_temporal_entity.h"
 
 #include <math.h>
 #include <string.h>
@@ -297,4 +297,29 @@ qboolean R_TemporalEntityCacheFinish( int worldIndex, uint64_t frameId,
 	memset( world->pendingHash, 0, sizeof( world->pendingHash ) );
 	memset( &world->pendingCameraPose, 0, sizeof( world->pendingCameraPose ) );
 	return publish;
+}
+
+temporalMotionOutcome_t R_TemporalMotionClassify(
+		const temporalMotionDrawFacts_t *facts ) {
+	qboolean supportedGeometry;
+	if ( !facts || !facts->visible ) return TEMPORAL_MOTION_PRESERVE;
+	if ( facts->effectMask && !facts->ui && !facts->crosshair && !facts->sky
+			&& ( facts->transparent || facts->decal || facts->depthHack ) )
+		return TEMPORAL_MOTION_INVALIDATE_OPAQUE;
+	if ( facts->effectMask && facts->textureAnimated && !facts->ui && !facts->crosshair && !facts->sky
+			&& !facts->blended && facts->opaque && facts->depthAuthoritative )
+		return TEMPORAL_MOTION_INVALIDATE_OPAQUE;
+	if ( facts->ui || facts->transparent || facts->blended || facts->decal
+			|| facts->additive || !facts->opaque || facts->polygonOffset
+			|| facts->depthHack || facts->crosshair ) return TEMPORAL_MOTION_PRESERVE;
+	if ( !facts->depthAuthoritative ) return TEMPORAL_MOTION_PRESERVE;
+	if ( facts->alphaTested && facts->deferAlphaTested )
+		return TEMPORAL_MOTION_DEFER_ATEST;
+	supportedGeometry = facts->geometry == TEMPORAL_MOTION_GEOMETRY_WORLD_STATIC
+		|| facts->geometry == TEMPORAL_MOTION_GEOMETRY_MOD_BRUSH_RIGID;
+	if ( supportedGeometry && !facts->vertexDeformed && !facts->sky ) {
+		return TEMPORAL_MOTION_WRITE_VALID;
+	}
+	if ( facts->alphaTested ) return TEMPORAL_MOTION_DEFER_ATEST;
+	return TEMPORAL_MOTION_INVALIDATE_OPAQUE;
 }

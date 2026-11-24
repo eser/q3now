@@ -7,7 +7,7 @@ endif()
 
 file(READ "${ROOT}/code/render/renderer/tr_temporal_motion.c" MOTION)
 file(READ "${ROOT}/code/render/renderer/tr_temporal_input.c" INPUT)
-file(READ "${ROOT}/code/render/renderer/tr_temporal_entity_cache.c" CACHE)
+file(READ "${ROOT}/code/render/frontend/render_temporal_entity.c" CACHE)
 file(READ "${ROOT}/code/render/renderer/tr_main.c" MAIN)
 file(READ "${ROOT}/code/render/renderer/tr_local.h" LOCAL)
 file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_backend.c" BACKEND)
