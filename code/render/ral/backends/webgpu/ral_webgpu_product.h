@@ -173,6 +173,12 @@ void RalWebGpu_ProductSkyCaptureEnd(ralWebGpuProduct_t *product);
 qboolean RalWebGpu_ProductSetExposure( ralWebGpuProduct_t *product,
     const ralExposureSettings_t *settings, const ralDisplayVisibilityPlan_t *visibility,
     int toneMode, float toneExposure );
+/* Entity object motion of the last planned TAA frame: poses recorded into the shared pose cache (and refused), those with a committed
+ * previous pose, the batches that wrote their velocity and the vertices copied for them, and whether the cache refused the frame. */
+typedef struct {
+	uint32_t recorded, rejected, previousValid, motionDraws, motionVertices, beginRefused;
+} ralWebGpuEntityMotionStats_t;
+qboolean RalWebGpu_ProductEntityMotionStats( const ralWebGpuProduct_t *product, ralWebGpuEntityMotionStats_t *out );
 /* The TAA effect mask pipelines: entity coverage (invalidate) and object motion (rigid and IQM entities with a previous pose). */
 qboolean RalWebGpu_ProductSetTaaMaskPipeline( ralWebGpuProduct_t *product,
 	const ralWebGpuRuntimeReceipt_t *runtimeReceipt, const ralWebGpuPipelineReceipt_t *maskPipeline,

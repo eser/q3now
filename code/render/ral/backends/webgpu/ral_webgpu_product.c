@@ -74,6 +74,7 @@ struct ralWebGpuProduct_s {
     qboolean taaMotionPipelineReady;
     int entityMotionWorld;
     uint64_t entityMotionFrame;
+    ralWebGpuEntityMotionStats_t entityMotionStats;   /* the last planned TAA frame's */
     /* Translucent entities by alpha mode (blend, alpha-additive, additive) and their TAA mask pipelines (visible contribution). */
     ralWebGpuPipelineReceipt_t entityBlendPipelines[3], taaTrustPipelines[3];
     qboolean entityBlendPipelinesReady;
@@ -627,6 +628,14 @@ static qboolean EntityBatchWritesMotion( const renderSubmissionState_t *frontend
 		if ( snapshot.stages[stage].tcModCount || snapshot.stages[stage].animationFrameCount > 1u ) facts.textureAnimated = qtrue;
 	if ( facts.alphaTested ) return qfalse;
 	return R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_WRITE_VALID ? qtrue : qfalse;
+}
+
+/* The entity pose cache is process-wide while TAA frame ids belong to this product's history: every point that restarts the history
+ * (product create / destroy, TAA enable, world reset, r_aa off) restarts the cache with it, or Begin would refuse the lower ids. */
+static void EntityMotionReset( ralWebGpuProduct_t *product ) {
+	R_TemporalEntityCacheResetAll();
+	product->entityMotionFrame = 0u;
+	memset( &product->entityMotionStats, 0, sizeof( product->entityMotionStats ) );
 }
 
 static void EntityMotionPose( const refEntity_t *entity, const renderModelSnapshot_t *model, temporalEntityPose_t *pose ) {
@@ -1589,6 +1598,7 @@ qboolean RalWebGpu_ProductCreate( ralWebGpuRuntime_t *runtime,
 	product->runtime = runtime; product->worldPipeline = *worldPipeline;
 	product->generation = generation; product->planGeneration = generation;
 	product->lightmapBoost = 4.6f;
+	EntityMotionReset( product );
 	RenderEffectDecalPool_Reset( &product->effectDecalPool );
 	RenderEffectDecalPool_Reset( &product->pendingEffectDecalPool );
 	RenderEffectBeamPool_Reset( &product->effectBeamPool );
@@ -1679,6 +1689,11 @@ qboolean RalWebGpu_ProductSetEntityPipeline( ralWebGpuProduct_t *product,
 				entityPipeline ) ) return qfalse;
 	product->entityPipeline = *entityPipeline;
 	product->entityPipelineReady = qtrue; return qtrue;
+}
+
+qboolean RalWebGpu_ProductEntityMotionStats( const ralWebGpuProduct_t *product, ralWebGpuEntityMotionStats_t *out ) {
+	if ( !product || !out ) return qfalse;
+	*out = product->entityMotionStats; return qtrue;
 }
 
 qboolean RalWebGpu_ProductSetTaaMaskPipeline( ralWebGpuProduct_t *product,
@@ -2062,7 +2077,7 @@ qboolean RalWebGpu_ProductEnableExposure( ralWebGpuProduct_t *product,
 qboolean RalWebGpu_ProductEnableTaa( ralWebGpuProduct_t *product,
         ralWebGpuRuntimeReceipt_t *rr, ralWebGpuBrowserBridge_t *bridge, uint64_t generation ) {
     if (!product || product->inFlight || product->taa) return qfalse;
-    Ral_TemporalInit( &product->taaState );
+    Ral_TemporalInit( &product->taaState ); EntityMotionReset( product );
     return RalWebGpu_TaaCreate(product->runtime,rr,bridge,generation,&product->taa);
 }
 qboolean RalWebGpu_ProductEnableSmaa( ralWebGpuProduct_t *product,
@@ -2214,6 +2229,7 @@ void RalWebGpu_ProductDestroy( ralWebGpuProduct_t *product,
 		const ralWebGpuRuntimeReceipt_t *runtimeReceipt ) {
 	ralWebGpuResourceLayer_t *resources;
 	if ( !product ) return;
+	EntityMotionReset( product );
 	resources = runtimeReceipt ? RalWebGpu_RuntimeResources( product->runtime,
 		runtimeReceipt ) : NULL;
 	if ( resources && !product->inFlight ) {
@@ -2263,7 +2279,7 @@ qboolean RalWebGpu_ProductUnloadWorld( ralWebGpuProduct_t *product,
     DestroySkyVertices(product,resources,worldIndex);
 	if ( worldIndex == 0 ) {
         RalWebGpu_ExposureReset(product->exposure);
-        Ral_TemporalInit( &product->taaState ); product->taaFrameId = 0u;
+        Ral_TemporalInit( &product->taaState ); product->taaFrameId = 0u; EntityMotionReset( product );
 		RenderEffectDecalPool_Reset( &product->effectDecalPool );
 		RenderEffectDecalPool_Reset( &product->pendingEffectDecalPool );
 		memset( &product->pendingEffectDecalPoolReceipt, 0,
@@ -2554,9 +2570,10 @@ static qboolean RecordToneMap( ralWebGpuProduct_t *product, const ralWebGpuRunti
 	uintptr_t source = 0;
 	if ( taaFrame ) {
 		uint32_t dispatches = 0u;
-		/* Effect mask: the entity draws of this frame again, with the mask pipeline, against the finished scene depth. Entities have no
-		 * tracked motion and the first-person weapon moves with the camera, so they take the resolve's spatial fallback (the Vulkan
-		 * renderer invalidates the same draws). */
+		/* Effect mask: the entity draws of this frame again, against the finished scene depth. Rigid and IQM batches with a previous
+		 * pose write their object velocity (motion pipeline); the other entities and the first-person weapon (which moves with the
+		 * camera) are invalidated and take the resolve's spatial fallback, as in the Vulkan renderer; translucents add their visible
+		 * contribution. */
 		const uintptr_t mask = RalWebGpu_TaaEffectMask( product->taa, runtimeReceipt, sceneTarget, taaFrame->width, taaFrame->height );
 		ralWebGpuPassDesc_t pass;
 		ralWebGpuCommandReceipt_t next;
@@ -2750,7 +2767,7 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 	if ( !product->taaEnabled && product->taaState.active ) {
 		/* Frame ids restart with the history: the pose cache restarts with them. */
 		Ral_TemporalInit( &product->taaState ); product->taaFrameId = 0u;
-		R_TemporalEntityCacheResetAll();
+		EntityMotionReset( product );
 	}
 	if ( product->taa && product->taaEnabled && product->exposure && submission->sceneRendered
 			&& !( world.rdflags & RDF_NOWORLDMODEL ) && product->viewportWidth && product->viewportHeight
@@ -2768,9 +2785,13 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 		input.cameraCut = ( world.rdflags & ( RDF_CAMERA_CUT | RDF_HYPERSPACE ) ) ? 1u : 0u;
 		if ( Ral_TemporalBeginFrame( &product->taaState, &input, &taaPlan ) ) {
 			taaActive = qtrue;
+			memset( &product->entityMotionStats, 0, sizeof( product->entityMotionStats ) );
 			if ( product->taaMotionPipelineReady && frontend->activeWorldIndex >= 0
 					&& frontend->activeWorldIndex < MAX_RENDER_WORLDS
-					&& R_TemporalEntityCacheBegin( frontend->activeWorldIndex, product->taaTopologyEpoch, 1u, input.frameId ) ) {
+					&& !R_TemporalEntityCacheBegin( frontend->activeWorldIndex, product->taaTopologyEpoch, 1u, input.frameId ) )
+				product->entityMotionStats.beginRefused = 1u;
+			else if ( product->taaMotionPipelineReady && frontend->activeWorldIndex >= 0
+					&& frontend->activeWorldIndex < MAX_RENDER_WORLDS ) {
 				product->entityMotionWorld = frontend->activeWorldIndex;
 				product->entityMotionFrame = input.frameId;
 				entityMotion.worldIndex = frontend->activeWorldIndex;
@@ -2952,30 +2973,48 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 	/* Object motion: the entity vertex buffer gains a motion copy of every entity vertex (unjittered current clip x/y in the UV, the
 	 * previous-frame clip x/y/w through the previous camera in the normal) and the index buffer the motion draws' indices into it.
 	 * Without history (bootstrap) the previous camera is meaningless and nothing writes motion. */
+	product->entityMotionStats.recorded = entityMotion.recorded;
+	product->entityMotionStats.rejected = entityMotion.rejected;
+	product->entityMotionStats.previousValid = entityMotion.previousValid;
 	if ( entityMotion.motionDraws && !taaFrame.historyValid ) {
 		for ( uint32_t i = 0u; i < entityDrawCount; ++i ) entityDraws[i].motion = qfalse;
 		entityMotion.motionDraws = 0u;
 	}
 	if ( entityMotion.motionDraws ) {
+		/* Only the vertices the motion batches reference are copied (remapped in first-use order). */
 		const ralWebGpuTaaCamera_t *camera = &taaFrame.previous;
-		uint32_t motionIndexCount = 0u, cursor = entityIndexCount;
+		uint32_t motionIndexCount = 0u, motionVertexCount = 0u, cursor = entityIndexCount;
+		uint32_t *remap;
 		ralWebGpuWorldVertex_t *grownVertices;
 		uint32_t *grownIndices;
 		for ( uint32_t i = 0u; i < entityDrawCount; ++i )
 			if ( entityDraws[i].motion ) motionIndexCount += entityDraws[i].indexCount;
 		if ( entityVertexCount > UINT32_MAX / 2u || motionIndexCount > UINT32_MAX - entityIndexCount
 				|| !camera->tanHalfX || !camera->tanHalfY ) goto fail;
+		remap = (uint32_t *)malloc( (size_t)entityVertexCount * sizeof( *remap ) );
+		if ( !remap ) goto fail;
+		memset( remap, 0xff, (size_t)entityVertexCount * sizeof( *remap ) );
+		for ( uint32_t i = 0u; i < entityDrawCount; ++i ) {
+			if ( !entityDraws[i].motion ) continue;
+			for ( uint32_t index = 0u; index < entityDraws[i].indexCount; ++index ) {
+				const uint32_t vertex = entityIndices[entityDraws[i].firstIndex + index];
+				if ( vertex >= entityVertexCount ) { free( remap ); goto fail; }
+				if ( remap[vertex] == UINT32_MAX ) remap[vertex] = entityVertexCount + motionVertexCount++;
+			}
+		}
 		grownVertices = (ralWebGpuWorldVertex_t *)realloc( projectedEntities,
-			(size_t)entityVertexCount * 2u * sizeof( projectedEntities[0] ) );
-		if ( !grownVertices ) goto fail;
+			(size_t)( entityVertexCount + motionVertexCount ) * sizeof( projectedEntities[0] ) );
+		if ( !grownVertices ) { free( remap ); goto fail; }
 		projectedEntities = grownVertices;
 		grownIndices = (uint32_t *)realloc( entityIndices, (size_t)( entityIndexCount + motionIndexCount ) * sizeof( entityIndices[0] ) );
-		if ( !grownIndices ) goto fail;
+		if ( !grownIndices ) { free( remap ); goto fail; }
 		entityIndices = grownIndices;
 		for ( uint32_t vertex = 0u; vertex < entityVertexCount; ++vertex ) {
-			ralWebGpuWorldVertex_t *copy = &projectedEntities[entityVertexCount + vertex];
+			ralWebGpuWorldVertex_t *copy;
 			const float *previous = entityMotion.previous[vertex];
 			float delta[3];
+			if ( remap[vertex] == UINT32_MAX ) continue;
+			copy = &projectedEntities[remap[vertex]];
 			*copy = projectedEntities[vertex];
 			copy->authored.texCoord[0] = copy->authored.position[0] - taaJitterNdc[0] * copy->clipW;
 			copy->authored.texCoord[1] = copy->authored.position[1] - taaJitterNdc[1] * copy->clipW;
@@ -2990,10 +3029,13 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 			if ( !entityDraws[i].motion ) continue;
 			entityDraws[i].motionFirstIndex = cursor;
 			for ( uint32_t index = 0u; index < entityDraws[i].indexCount; ++index )
-				entityIndices[cursor++] = entityIndices[entityDraws[i].firstIndex + index] + entityVertexCount;
+				entityIndices[cursor++] = remap[entityIndices[entityDraws[i].firstIndex + index]];
 		}
-		entityVertexCount *= 2u;
+		free( remap );
+		entityVertexCount += motionVertexCount;
 		entityIndexCount += motionIndexCount;
+		product->entityMotionStats.motionDraws = entityMotion.motionDraws;
+		product->entityMotionStats.motionVertices = motionVertexCount;
 	}
 	if ( entityDrawCount ) {
 		if ( entityDrawCount > RAL_WEBGPU_ENTITY_LIGHTING_CAPACITY ) goto fail;
