@@ -7,6 +7,7 @@
 #include "maps/map_format_registry.h"
 #include "maps/meta.h"
 #include "render_image_decode.h"
+#include "render_q1_miptex.h"
 #include "render_sky_atlas.h"
 #include "render_lighting_project_cook.h"
 #include "render_material_project_cook.h"
@@ -708,9 +709,13 @@ static qboolean PrepareWorldMaterials( const mapFile_t *bsp ) {
 			|| bsp->lightmapPageSize < 0
 			|| ( bsp->numShaders && !bsp->shaders ) ) return qfalse;
 	for ( int i = 0; i < bsp->numShaders; ++i ) {
+		char embeddedImage[MAX_QPATH];
 		if ( !used[i] ) continue;
-		if ( !RegisterMaterialImage( RENDER_ASSET_MATERIAL,
-				bsp->shaders[i].shader, qfalse ) ) {
+		/* A Quake 1 world material draws its embedded miptex (the cook's reference, so the identities agree). */
+		const qboolean embedded = RenderQ1Miptex_MaterialImage( bsp, bsp->shaders[i].shader, embeddedImage );
+		if ( !( embedded
+				? RegisterMaterialImageSource( RENDER_ASSET_MATERIAL, bsp->shaders[i].shader, embeddedImage, qfalse )
+				: RegisterMaterialImage( RENDER_ASSET_MATERIAL, bsp->shaders[i].shader, qfalse ) ) ) {
 			if ( s_module.imports.LogCh && s_module.initLogChannel >= 0 )
 				s_module.imports.LogCh( s_module.initLogChannel, SEV_WARN,
 					"Wired native Metal RAL: world material rejected map=%s shader=%s materials=%u stages=%u\n",

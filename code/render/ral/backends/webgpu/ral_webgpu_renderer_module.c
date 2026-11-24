@@ -11,6 +11,7 @@
 #include "render_lighting_project_cook.h"
 #include "render_lighting_sidecar.h"
 #include "render_image_decode.h"
+#include "render_q1_miptex.h"
 #include "render_sky_atlas.h"
 #include "render_material_script.h"
 #include "render_world_material_usage.h"
@@ -1899,7 +1900,9 @@ static qboolean ApplyScriptedMaterial( renderAssetKind_t kind,
 				skyInnerTextures ) );
 }
 
-static qhandle_t RegisterMaterial( renderAssetKind_t kind, const char *name, qboolean clamp )
+/* `sourceImage`, when given, is the image the material draws instead of its own name and without a declaration lookup: a Quake 1
+ * world material's embedded miptex reference (render_q1_miptex.h), which takes precedence over a declaration of the same name. */
+static qhandle_t RegisterMaterialSource( renderAssetKind_t kind, const char *name, const char *sourceImage, qboolean clamp )
 {
 	qhandle_t existing;
 	qhandle_t handle;
@@ -1907,7 +1910,7 @@ static qhandle_t RegisterMaterial( renderAssetKind_t kind, const char *name, qbo
 	byte *pixels = NULL;
 	uint32_t width = 0u, height = 0u;
 	char resolved[MAX_QPATH];
-	const char *imageName = name;
+	const char *imageName = sourceImage ? sourceImage : name;
 	if ( !name || !name[0] )
 		return 0;
 	existing = RenderSubmission_MaterialHandle( &s_module.frontend, name );
@@ -1919,7 +1922,7 @@ static qhandle_t RegisterMaterial( renderAssetKind_t kind, const char *name, qbo
 		return RenderSubmission_RegisterMaterialImage( &s_module.frontend,
 			kind, name, clamp, s_white, 1u, 1u );
 	memset( &scripted, 0, sizeof( scripted ) );
-	if ( RenderMaterialScript_Lookup( &s_module.materialScripts, name, &scripted ) ) {
+	if ( !sourceImage && RenderMaterialScript_Lookup( &s_module.materialScripts, name, &scripted ) ) {
 		clamp = scripted.clampToEdge;
 		if ( scripted.imageName[0] ) imageName = scripted.imageName;
 	}
@@ -1957,6 +1960,11 @@ static qhandle_t RegisterMaterial( renderAssetKind_t kind, const char *name, qbo
 		 !RenderMaterialScript_ApplyLighting( &s_module.materialScripts, name,
 			&s_module.frontend, handle ) ) return 0;
 	return handle;
+}
+
+static qhandle_t RegisterMaterial( renderAssetKind_t kind, const char *name, qboolean clamp )
+{
+	return RegisterMaterialSource( kind, name, NULL, clamp );
 }
 
 static qhandle_t RegisterModel( const char *name )
@@ -2047,9 +2055,17 @@ static qboolean PrepareWorldMaterials( const mapFile_t *bsp )
 	if ( !RenderWorldMaterialUsage_Build( bsp, used, sizeof( used ) ) || bsp->numLightmapPages < 0 || bsp->lightmapPageSize < 0 ||
 		 ( bsp->numShaders && !bsp->shaders ) )
 		return qfalse;
-	for ( int i = 0; i < bsp->numShaders; ++i )
-		if ( used[i] && !RegisterShader( bsp->shaders[i].shader ) )
+	for ( int i = 0; i < bsp->numShaders; ++i ) {
+		char embeddedImage[MAX_QPATH];
+		if ( !used[i] ) continue;
+		/* A Quake 1 world material draws its embedded miptex (the cook's reference, so the identities agree). */
+		if ( RenderQ1Miptex_MaterialImage( bsp, bsp->shaders[i].shader, embeddedImage ) ) {
+			if ( !RenderSubmission_MaterialHandle( &s_module.frontend, bsp->shaders[i].shader )
+					&& !RegisterMaterialSource( RENDER_ASSET_MATERIAL, bsp->shaders[i].shader, embeddedImage, qfalse ) )
+				return qfalse;
+		} else if ( !RegisterShader( bsp->shaders[i].shader ) )
 			return qfalse;
+	}
 	if ( bsp->numLightmapPages == 0 )
 		return qtrue;
 	if ( !bsp->lightmapData || bsp->lightmapPageSize <= 0 || ( bsp->lightmapPageSize % 3 ) != 0 )

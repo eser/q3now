@@ -1651,6 +1651,7 @@ SET_TESTS_PROPERTIES(ral_texture_export_source_policy_contract PROPERTIES
 	LABELS "host-only;infrastructure;owner.ral;owner.texture;failure.contract;backend.webgpu"
 	TIMEOUT 30)
 SET(RENDERER_MATERIAL_PROJECT_COOK_SRCS
+	code/render/frontend/render_q1_miptex.c
 	code/tools/material_cook/material_cook_fs.c
 	code/render/frontend/render_material_cache_vfs.c
 	code/render/frontend/render_material_project_cook.c
@@ -2815,6 +2816,7 @@ SET_TESTS_PROPERTIES(ral_webgpu_product_source_policy_contract PROPERTIES
 
 ADD_EXECUTABLE(ral_webgpu_renderer_module_test
 	tests/ral_webgpu_renderer_module_test.c
+	code/render/frontend/render_q1_miptex.c
 	code/tools/lighting_cook/lighting_cook_fs.c
 	code/render/frontend/render_material_cache_vfs.c
 	code/render/frontend/render_material_product.c
@@ -4121,6 +4123,7 @@ IF(WIRED_EMCC_EXECUTABLE)
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_temporal_entity.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_renderer_module.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_image_decode.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_q1_miptex.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_resource.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_runtime.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_lighting_metadata.c
@@ -5411,6 +5414,22 @@ ADD_TEST(NAME tr_temporal_motion_structural_source_policy_contract
 SET_TESTS_PROPERTIES(tr_temporal_motion_structural_source_policy_contract PROPERTIES
 	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.contract;feature.always"
 	TIMEOUT 30)
+
+ADD_EXECUTABLE(render_q1_miptex_test
+	tests/render_q1_miptex_test.c
+	code/render/frontend/render_q1_miptex.c
+)
+TARGET_INCLUDE_DIRECTORIES(render_q1_miptex_test PRIVATE
+	code/qcommon
+	code/render/frontend
+)
+ADD_TEST(NAME render_q1_miptex_contract
+	COMMAND render_q1_miptex_test)
+SET_TESTS_PROPERTIES(render_q1_miptex_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;failure.contract;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(render_q1_miptex_test
+	render_q1_miptex_contract)
 
 ADD_EXECUTABLE(ral_temporal_entity_cache_test
 	tests/ral_temporal_entity_cache_test.c
@@ -7459,6 +7478,10 @@ LIST(REMOVE_ITEM RENDERER_COMMON_SRCS code/render/frontend/render_material_cache
 LIST(REMOVE_ITEM RENDERER_COMMON_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_material_cache_vfs.c)
 LIST(REMOVE_ITEM RENDERER_COMMON_SRCS code/render/frontend/render_material_project_cook.c)
 LIST(REMOVE_ITEM RENDERER_COMMON_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_material_project_cook.c)
+# The Quake 1 embedded-texture decoder rides with the cook sources (every RAL backend); the deprecated GL renderers, which take the
+# directory glob but not the cook sources, list it explicitly for r_q1_texture.c's shared palette.
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS code/render/frontend/render_q1_miptex.c)
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_q1_miptex.c)
 # r_image_probe.c is an offline-tool-only TU (consumed by extract-meta).
 # It calls FS_FOpenFileRead/FS_FCloseFile directly, which the renderer
 # DLLs can't satisfy (they go through refimport_t::FS_ReadFile). The
@@ -7868,12 +7891,12 @@ IF(USE_RENDERER_DLOPEN)
 	)
 	TARGET_COMPILE_DEFINITIONS(client PRIVATE USE_RENDERER_DLOPEN RENDERER_PREFIX="${RENDERER_PREFIX}" RENDERER_DEFAULT=${RENDERER_DEFAULT})
 
-	ADD_LIBRARY(${RENDERER_PREFIX}_opengl_legacy${RENDEXT} SHARED ${RENDERER_GL_SRCS} ${RENDERER_COMMON_SRCS} ${RENDERER_LIGHTING_COMPAT_SRCS} ${RENDERER_MATERIAL_SOURCE_COMPAT_SRCS} ${AUX_SRCS})
+	ADD_LIBRARY(${RENDERER_PREFIX}_opengl_legacy${RENDEXT} SHARED ${RENDERER_GL_SRCS} code/render/frontend/render_q1_miptex.c ${RENDERER_COMMON_SRCS} ${RENDERER_LIGHTING_COMPAT_SRCS} ${RENDERER_MATERIAL_SOURCE_COMPAT_SRCS} ${AUX_SRCS})
 	TARGET_COMPILE_DEFINITIONS(${RENDERER_PREFIX}_opengl_legacy${RENDEXT} PRIVATE USE_RENDERER_DLOPEN)
 	TARGET_INCLUDE_DIRECTORIES(${RENDERER_PREFIX}_opengl_legacy${RENDEXT} PRIVATE code/qcommon code/render/ral/core)
 	SET_TARGET_PROPERTIES(${RENDERER_PREFIX}_opengl_legacy${RENDEXT} PROPERTIES PREFIX "")
 
-	ADD_LIBRARY(${RENDERER_PREFIX}_opengl2${RENDEXT} SHARED ${RENDERER_GL2_SRCS} ${RENDERER_GL2_FALLBACK_SRCS} ${RENDERER_COMMON_SRCS} ${RENDERER_LIGHTING_COMPAT_SRCS} ${RENDERER_MATERIAL_SOURCE_COMPAT_SRCS} ${AUX_SRCS})
+	ADD_LIBRARY(${RENDERER_PREFIX}_opengl2${RENDEXT} SHARED ${RENDERER_GL2_SRCS} ${RENDERER_GL2_FALLBACK_SRCS} code/render/frontend/render_q1_miptex.c ${RENDERER_COMMON_SRCS} ${RENDERER_LIGHTING_COMPAT_SRCS} ${RENDERER_MATERIAL_SOURCE_COMPAT_SRCS} ${AUX_SRCS})
 	TARGET_COMPILE_DEFINITIONS(${RENDERER_PREFIX}_opengl2${RENDEXT} PRIVATE USE_RENDERER_DLOPEN)
 	TARGET_INCLUDE_DIRECTORIES(${RENDERER_PREFIX}_opengl2${RENDEXT} PRIVATE code/qcommon code/render/ral/core)
 	SET_TARGET_PROPERTIES(${RENDERER_PREFIX}_opengl2${RENDEXT} PROPERTIES PREFIX "")
@@ -8557,6 +8580,7 @@ IF(WIRED_EMCC_EXECUTABLE)
 		code/render/ral/backends/webgpu/ral_webgpu_browser_emscripten.c
 		code/render/ral/backends/webgpu/ral_webgpu_renderer_module.c
 		code/render/ral/backends/webgpu/ral_webgpu_image_decode.c
+		code/render/frontend/render_q1_miptex.c
 		code/render/frontend/render_lighting_metadata.c
 		code/render/frontend/render_material_script.c
 		code/render/frontend/render_material_script_lighting.c

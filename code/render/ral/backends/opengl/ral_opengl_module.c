@@ -7,6 +7,7 @@
 #include "ral_opengl_lighting.h"
 #include "maps/map_format_registry.h"
 #include "render_image_decode.h"
+#include "render_q1_miptex.h"
 #include "render_sky_atlas.h"
 #include "render_lighting_project_cook.h"
 #include "render_material_project_cook.h"
@@ -492,10 +493,14 @@ static qboolean PrepareWorldMaterials( const mapFile_t *bsp )
 	}
 	for ( int i = 0; i < bsp->numShaders; ++i ) {
 		const dshader_t *shader = &bsp->shaders[i];
+		char			 embeddedImage[MAX_QPATH];
 		if ( !used[i] )
 			continue;
+		/* A Quake 1 world material draws its embedded miptex (the cook's reference, so the identities agree). */
 		if ( !RenderSubmission_MaterialHandle( &s_module.frontend, shader->shader ) &&
-			 !RegisterShader( shader->shader ) ) {
+			 !( RenderQ1Miptex_MaterialImage( bsp, shader->shader, embeddedImage )
+					? RegisterImageSource( RENDER_ASSET_MATERIAL, shader->shader, embeddedImage, qfalse )
+					: RegisterShader( shader->shader ) ) ) {
 			if ( s_module.imports.LogCh && s_module.logChannel >= 0 )
 				s_module.imports.LogCh(
 					s_module.logChannel, SEV_WARN,

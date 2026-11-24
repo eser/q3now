@@ -4,6 +4,7 @@
 // vk_image.c  (renamed from tr_image.c: backend code, TASK-231)
 #include "vk_local.h"
 #include "../../../../frontend/render_image_decode.h"
+#include "../../../../frontend/render_q1_miptex.h"
 #include "../../../../frontend/render_submission_material.h"
 #include "../../../../frontend/r_log.h"  // rilog-channel-mechanism — renderer.assets
 #ifdef USE_VULKAN
@@ -1616,6 +1617,15 @@ static const char *R_LoadImage( const char *name, byte **pic, int *width, int *h
 
 	Q_strncpyz( localName, name, sizeof( localName ) );
 
+	/* "<bsp>#<miptex>": a Quake 1 texture inside its map (render_q1_miptex.h), the same pixels the material cook decoded. */
+	if ( RenderQ1Miptex_IsReference( localName ) ) {
+		byte *embedded = NULL;
+		uint32_t embeddedWidth = 0u, embeddedHeight = 0u;
+		if ( !RenderQ1Miptex_DecodeImage( &ri, localName, &embedded, &embeddedWidth, &embeddedHeight, NULL ) ) return NULL;
+		*pic = embedded; *width = (int)embeddedWidth; *height = (int)embeddedHeight;
+		return localName;
+	}
+
 	ext = COM_GetExtension( localName );
 	if ( !*ext ) {
 		const char *preferredExt = R_ShouldPreferLegacyImages() ? "tga" : "png";
@@ -1733,6 +1743,9 @@ qboolean RenderImage_DecodeRgba8( const char *name, byte **outPixels,
 	uint64_t bytes;
 	if ( !name || !name[0] || !outPixels || !outWidth || !outHeight
 			|| !outResolved ) return qfalse;
+	/* "<bsp>#<miptex>": a Quake 1 texture inside its map (render_q1_miptex.h), decoded before any extension handling. */
+	if ( RenderQ1Miptex_IsReference( name ) )
+		return RenderQ1Miptex_DecodeImage( &ri, name, outPixels, outWidth, outHeight, outResolved );
 	resolved = R_LoadImage( name, &pixels, &width, &height );
 	bytes = width > 0 && height > 0
 		? (uint64_t)width * (uint64_t)height * 4u : 0u;

@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Wired Engine contributors
 
 #include "render_material_project_cook.h"
+#include "render_q1_miptex.h"
 #include "render_world_material_usage.h"
 
 #include "render_image_decode.h"
@@ -93,7 +94,8 @@ static qboolean BindDependency( void *opaque, uint32_t dependencyIndex,
 	return success;
 }
 
-static qboolean ImplicitEntry( const dshader_t *shader,
+/* A texture-only material: one opaque stage drawing `imageName` (the material's own name, or a Quake 1 map's embedded reference). */
+static qboolean ImplicitEntry( const dshader_t *shader, const char *imageName,
 		const refimport_t *imports, renderMaterialScriptEntry_t *out ) {
 	char canonical[MAX_QPATH], resolved[MAX_QPATH];
 	byte *pixels = NULL;
@@ -102,7 +104,7 @@ static qboolean ImplicitEntry( const dshader_t *shader,
 	unsigned fsGeneration = 0u;
 	if ( !shader || !shader->shader[0] || !imports || !imports->FS_ResolveResource
 			|| !imports->Free || !out ) return qfalse;
-	if ( !RenderImage_DecodeRgba8( shader->shader, &pixels, &width,
+	if ( !imageName || !RenderImage_DecodeRgba8( imageName, &pixels, &width,
 			&height, resolved ) || !pixels ) return qfalse;
 	imports->Free( pixels );
 	if ( !width || !height || !resolved[0] ) return qfalse;
@@ -242,6 +244,7 @@ qboolean RenderMaterialProjectCook_Execute(
 	for ( uint32_t shaderIndex = 0u;
 			shaderIndex < (uint32_t)map->numShaders; ++shaderIndex ) {
 		renderMaterialScriptEntry_t entry;
+		char embeddedImage[MAX_QPATH];
 		renderMaterialProductDiagnostic_t productDiagnostic;
 		ralMaterialSourceDiagnostic_t sourceDiagnostic;
 		qboolean duplicate = qfalse;
@@ -257,9 +260,13 @@ qboolean RenderMaterialProjectCook_Execute(
 					map->shaders[shaderIndex].shader ) ) duplicate = qtrue;
 		if ( duplicate ) continue;
 		memset( &entry, 0, sizeof( entry ) );
-		if ( !RenderMaterialScript_Lookup( catalog,
-				map->shaders[shaderIndex].shader, &entry )
-				&& !ImplicitEntry( &map->shaders[shaderIndex], imports, &entry ) ) {
+		/* A Quake 1 map's embedded miptex takes precedence over a declaration of the same name, as in the renderer that draws
+		 * those maps natively (R_FindShader builds the Q1 synthetic shader before the text-file path). */
+		if ( !( RenderQ1Miptex_MaterialImage( map, map->shaders[shaderIndex].shader, embeddedImage )
+					&& ImplicitEntry( &map->shaders[shaderIndex], embeddedImage, imports, &entry ) )
+				&& !RenderMaterialScript_Lookup( catalog,
+					map->shaders[shaderIndex].shader, &entry )
+				&& !ImplicitEntry( &map->shaders[shaderIndex], map->shaders[shaderIndex].shader, imports, &entry ) ) {
 			Fail( outDiagnostic, RENDER_MATERIAL_PROJECT_COOK_SOURCE_REJECTED,
 				shaderIndex, 0u ); goto done;
 		}

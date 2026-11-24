@@ -2118,10 +2118,34 @@ static qboolean FS_ResolveResourceDirect( const char *qpath,
 qboolean FS_ResolveResource( const char *qpath, fsResolvedResource_t *out ) {
 	char canonical[WIRED_FS_ALIAS_PATH_MAX];
 	const char *resolvedPath = qpath;
+	const char *member;
 	unsigned generation;
 
 	if ( !qpath || !out ) {
 		return qfalse;
+	}
+	/* An embedded member, "<file>#<member>" (a Quake 1 miptex inside its .bsp): the container's identity extended by the member
+	 * name (case-folded), so a member's identity changes exactly when its container does and its canonical path stays unique. */
+	member = strchr( qpath, '#' );
+	if ( member ) {
+		char container[MAX_VFS_PATH];
+		fsResolvedResource_t file;
+		const size_t containerLength = (size_t)( member - qpath );
+		member++;
+		if ( !containerLength || containerLength >= sizeof( container ) || !member[0]
+				|| strchr( member, '#' ) || strchr( member, '/' ) || strchr( member, '\\' ) ) {
+			return qfalse;
+		}
+		memcpy( container, qpath, containerLength );
+		container[containerLength] = '\0';
+		if ( !FS_ResolveResource( container, &file )
+				|| strlen( file.canonicalPath ) + 1u + strlen( member ) >= sizeof( out->canonicalPath ) ) {
+			return qfalse;
+		}
+		*out = file;
+		Com_sprintf( out->canonicalPath, sizeof( out->canonicalPath ), "%s#%s", file.canonicalPath, member );
+		out->sourceId = FS_ResourceHashPath( FS_ResourceHashBytes( file.sourceId, "#", 1u ), member );
+		return qtrue;
 	}
 	FS_LockAliasCatalog();
 	fs_resourceResolveRequests++;

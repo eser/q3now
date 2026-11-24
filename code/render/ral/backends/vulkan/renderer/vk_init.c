@@ -15,6 +15,7 @@
 #include "../../../../frontend/render_lighting_sidecar.h"
 #include "../../../../frontend/render_material_script.h"
 #include "../../../../frontend/render_image_decode.h"
+#include "../../../../frontend/render_q1_miptex.h"
 #include "../../../core/ral_atmosphere_conformance.h"
 #include "vk_fixtures.h"
 #include "../ral_vulkan_lighting.h"
@@ -274,6 +275,8 @@ cvar_t *r_nocurves;
 static refexport_t				 s_re;
 static renderSubmissionState_t	 s_frontendSubmission;
 static const mapFile_t			*s_frontendLoadedWorld;
+/* The world whose materials are being registered (FrontendLoadWorld); a Quake 1 map supplies embedded miptex images. */
+static const mapFile_t			*s_frontendEmbeddedTextureWorld;
 static const mapFile_t             *s_frontendLoadedWorlds[MAX_RENDER_WORLDS];
 static int                          s_frontendActiveWorldIndex = -1;
 /* Per world slot and material index: the cooked material came from a PBR or glTF
@@ -3875,7 +3878,13 @@ static qhandle_t FrontendEnsureMaterial( renderAssetKind_t kind,
 		}
 	}
 	if ( material ) {
-		image_t *image = FrontendMaterialBaseImage( name, legacyHandle );
+		/* A Quake 1 world material draws its embedded miptex: the image is loaded by the cook's reference ("<bsp>#<miptex>",
+		 * render_q1_miptex.h) with the implicit-world flags, so its published identity is the cooked texture key. */
+		char embeddedImage[MAX_QPATH];
+		image_t *image = s_frontendEmbeddedTextureWorld
+			&& RenderQ1Miptex_MaterialImage( s_frontendEmbeddedTextureWorld, name, embeddedImage )
+			? R_FindImageFile( embeddedImage, IMGFLAG_MIPMAP | IMGFLAG_PICMIP ) : NULL;
+		if ( !image || !image->ralTextureCacheKeyReady ) image = FrontendMaterialBaseImage( name, legacyHandle );
 		if ( image ) FrontendDecline( RenderSubmission_SetMaterialTextureCacheKey(
 			&s_frontendSubmission, material, &image->ralTextureCacheKey ),
 			"material-texture-identity" );
@@ -3980,10 +3989,12 @@ static void FrontendLoadWorld( const mapFile_t *bsp, int worldIndex )
 		return;
 	}
 	RE_LoadWorldMap( bsp, worldIndex );
+	s_frontendEmbeddedTextureWorld = bsp;
 	for ( int shaderIndex = 0; shaderIndex < bsp->numShaders; ++shaderIndex )
 		if ( used[shaderIndex] && !RenderSubmission_MaterialHandle( &s_frontendSubmission, bsp->shaders[shaderIndex].shader ) )
 			FrontendDecline( FrontendEnsureMaterial( RENDER_ASSET_MATERIAL,
 				bsp->shaders[shaderIndex].shader, 0 ) > 0, "world-material" );
+	s_frontendEmbeddedTextureWorld = NULL;
 	FrontendDecline( RenderSubmission_LoadWorld( &s_frontendSubmission, bsp, worldIndex ), "world" );
 	FrontendSyncLegacyWorldMaterialState();
 	FrontendDecline( RenderLightingSidecar_LoadDirectional( &s_frontendSubmission,

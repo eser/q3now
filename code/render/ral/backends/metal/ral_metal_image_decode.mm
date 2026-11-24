@@ -3,6 +3,7 @@
 
 extern "C" {
 #include "render_image_decode.h"
+#include "render_q1_miptex.h"
 }
 #include "render_submission_material.h"
 
@@ -86,6 +87,9 @@ extern "C" qboolean RenderImage_DecodeRgba8( const char *name,
 			|| !outWidth || !outHeight || !outResolved || !ri.FS_ReadFile
 			|| !ri.FS_FreeFile || !ri.Malloc || !ri.Free ) return qfalse;
 	*outPixels = NULL; *outWidth = *outHeight = 0u; outResolved[0] = '\0';
+	/* "<bsp>#<miptex>": a Quake 1 texture inside its map (render_q1_miptex.h), decoded before any extension handling. */
+	if ( RenderQ1Miptex_IsReference( name ) )
+		return RenderQ1Miptex_DecodeImage( &ri, name, outPixels, outWidth, outHeight, outResolved );
 	if ( ri.FS_ResolveResource && ri.FS_ResolveResource( name, canonical,
 			sizeof( canonical ), NULL, NULL, NULL ) ) name = canonical;
 	extension = Extension( name );
