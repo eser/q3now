@@ -1029,6 +1029,8 @@ static void Q1_Train_Blocked( gentity_t *ent, gentity_t *other ) {
 	/* fly_sound_debounce_time: unused by trains, repurposed as damage rate-limiter */
 	if ( ent->fly_sound_debounce_time > level.time ) return;
 	ent->fly_sound_debounce_time = level.time + 500;
+	Com_Log( SEV_DEBUG, LOG_CH(ch_game), "train %d blocked by %d (%s) at %d\n", ent->s.number, other->s.number,
+		other->classname ? other->classname : "?", level.time );
 	/* Quake 1 (plats.qc train_blocked) damages whatever blocks it and removes nothing: monsters and players take the damage.
 	 * Only something that cannot take damage and is not a player is removed, the nearest equivalent of Quake 1 squashing a
 	 * non-solid blocker's bounds, so the train is never held forever. */
