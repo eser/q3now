@@ -53,6 +53,17 @@ if not any(message.startswith("temporal-resolved-hdr schema=3 ") for message in 
     raise SystemExit("FAIL temporal-quality has no resolved temporal output")
 if not any(message.startswith("temporal-history-feedback ") for message in messages):
     raise SystemExit("FAIL temporal-quality has no recursive history feedback")
+# The static TAA view must actually take the history branch. Its motion validity is read back over the centre ROI (world
+# geometry only); a run whose validity is zero there resolves every pixel without history (reconstruction plus the spatial
+# fallback) and measures nothing about TAA. This is what a teleport-in effect around the camera did to every capture.
+content_pattern = re.compile(r"temporal-motion-content schema=1 .* pixels=([1-9][0-9]*) validity-zero=([0-9]+) ")
+contents = [content_pattern.match(message) for message in messages]
+contents = [match for match in contents if match]
+if not contents:
+    raise SystemExit("FAIL temporal-quality no motion-target readback (history in use is unproven)")
+history_share = min((int(m.group(1)) - int(m.group(2))) / int(m.group(1)) for m in contents)
+if history_share < 0.90:
+    raise SystemExit(f"FAIL temporal-quality history not in use: motion validity non-zero on {history_share:.1%} of the readback ROI (< 90%)")
 
 names = (
     "temporal_off_a", "temporal_off_a_2", "temporal_off_a_3", "temporal_off_b", "temporal_taa_a_1",
@@ -227,7 +238,7 @@ print(
     f"excess={static_excess:.3f}, consecutive AA-off={consecutive_baseline:.3f} TAA={consecutive_delta:.3f} "
     f"({consecutive_share:.2%} px >8/255), jitter-cycle mean TAA={cycle_delta:.3f} ({cycle_share:.2%} px >8/255), "
     f"pan={motion_delta:.3f}, "
-    f"first-settled={first_settled_delta:.3f}, old-frame-residual={ghost_ratio:.2%}, "
+    f"first-settled={first_settled_delta:.3f}, old-frame-residual={ghost_ratio:.2%}, history-roi={history_share:.1%}, "
     f"edge-ratio={edge_ratio:.3f}, AA-off-reference-delta={reference_delta:.3f}")
 # Budget: the TAA frame may cost at most 0.75 ms over AA off and the whole frame must fit the 240 Hz period (4.0 ms). Measured on
 # this configuration (Apple GPU, 2560x1440 resolve for the 1280x720 logical window): +0.46..+0.69 ms over six runs. The gate used to
@@ -306,6 +317,9 @@ ln -sfn "$PAX21" "$HOME_DIR/base/pax21.sw3z"
 ln -sfn "$GAMECL" "$HOME_DIR/base/gameclarm64.dylib"
 ln -sfn "$GAMESV" "$HOME_DIR/base/gamesvarm64.dylib"
 
+# setviewpos spawns cgame's teleport-in effect (models/misc/telep.md3, 1200 ms) around the camera. r_pinFrameTime freezes cg.time,
+# so under the pin that local entity never expires; each setviewpos is therefore followed by a short unpinned stretch of fixed
+# 20 ms game frames (1.8 s) that lets it expire, then the same pin again (the captured frame stays byte-stable).
 BOOT="$HOME_DIR/base/ral-temporal-quality.cfg"
 cat >"$BOOT" <<'CFGEOF'
 set r_fullscreen 0
@@ -319,8 +333,8 @@ set vm_game 0
 set vm_cgame 0
 set sv_cheats 1
 set sv_pure 0
-set tqSetup "cg_draw2D 0; cg_drawGun 0; cg_thirdPerson 0; con_notifytime 0; cl_yawspeed 90; sv_fps 125; timescale 1; fixedtime 0; r_pinShaderTime 2.0; r_pinFrameTime 2.0; wait 512; noclip; wait 150; echo Q3_TEMPORAL_QUALITY_BEGIN; setviewpos 888 -768 434 180 0; r_temporalInputTest 0; wait 96; screenshot temporal_off_a png silent; wait 8; screenshot temporal_off_a_2 png silent; wait 1; screenshot temporal_off_a_3 png silent; wait 4; +right; wait 12; -right; wait 8; screenshot temporal_off_b png silent; vstr tqTemporalA"
-set tqTemporalA "r_temporalInputTest 1; setviewpos 888 -768 434 180 0; wait 96; screenshot temporal_taa_a_1 png silent; wait 8; screenshot temporal_taa_a_2 png silent; wait 1; screenshot temporal_taa_a_3 png silent; wait 1; screenshot temporal_taa_a_4 png silent; wait 1; screenshot temporal_taa_a_5 png silent; wait 1; screenshot temporal_taa_a_6 png silent; wait 1; screenshot temporal_taa_a_7 png silent; wait 1; screenshot temporal_taa_a_8 png silent; wait 1; screenshot temporal_taa_a_9 png silent; wait 1; screenshot temporal_taa_a_10 png silent; wait 4; +right; wait 12; -right; wait 4; screenshot temporal_taa_b_first png silent; wait 96; screenshot temporal_taa_b_steady png silent; echo Q3_TEMPORAL_QUALITY_CAPTURED; vstr tqPerfOff1"
+set tqSetup "cg_draw2D 0; cg_drawGun 0; cg_thirdPerson 0; con_notifytime 0; cl_yawspeed 90; sv_fps 125; timescale 1; fixedtime 0; r_pinShaderTime 2.0; r_pinFrameTime 2.0; wait 512; noclip; wait 150; echo Q3_TEMPORAL_QUALITY_BEGIN; setviewpos 888 -768 434 180 0; r_temporalInputTest 0; r_pinFrameTime 0; fixedtime 20; wait 90; fixedtime 0; r_pinFrameTime 2.0; wait 96; screenshot temporal_off_a png silent; wait 8; screenshot temporal_off_a_2 png silent; wait 1; screenshot temporal_off_a_3 png silent; wait 4; +right; wait 12; -right; wait 8; screenshot temporal_off_b png silent; wait 4; vstr tqTemporalA"
+set tqTemporalA "r_temporalInputTest 1; setviewpos 888 -768 434 180 0; r_pinFrameTime 0; fixedtime 20; wait 90; fixedtime 0; r_pinFrameTime 2.0; wait 96; screenshot temporal_taa_a_1 png silent; wait 8; screenshot temporal_taa_a_2 png silent; wait 1; screenshot temporal_taa_a_3 png silent; wait 1; screenshot temporal_taa_a_4 png silent; wait 1; screenshot temporal_taa_a_5 png silent; wait 1; screenshot temporal_taa_a_6 png silent; wait 1; screenshot temporal_taa_a_7 png silent; wait 1; screenshot temporal_taa_a_8 png silent; wait 1; screenshot temporal_taa_a_9 png silent; wait 1; screenshot temporal_taa_a_10 png silent; ral_dump live temporal-motion-arm; wait 4; +right; wait 12; -right; wait 4; screenshot temporal_taa_b_first png silent; wait 96; screenshot temporal_taa_b_steady png silent; wait 4; echo Q3_TEMPORAL_QUALITY_CAPTURED; vstr tqPerfOff1"
 set tqPerfOff1 "r_temporalInputTest 0; wait 96; set r_gpuSpeeds 0; wait 4; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_OFF_1_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_OFF_1_END; set r_gpuSpeeds 0; wait 16; vstr tqPerfOn1"
 set tqPerfOn1 "r_temporalInputTest 1; wait 96; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_ON_1_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_ON_1_END; set r_gpuSpeeds 0; wait 16; vstr tqPerfOn2"
 set tqPerfOn2 "wait 96; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_ON_2_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_ON_2_END; set r_gpuSpeeds 0; wait 16; vstr tqPerfOff2"
