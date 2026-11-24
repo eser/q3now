@@ -90,7 +90,7 @@ function fakeBrowser() {
     createBindGroupLayout() { return resource("bind-group-layout"); },
     async createRenderPipelineAsync() { return { ...resource("pipeline"),
       getBindGroupLayout(index) { assert.ok(index === 0 || index === 1); return { kind: "pipeline-bind-group-layout", index }; } }; },
-    createBindGroup() { return resource("bind-group"); },
+    createBindGroup() { host.bindGroupsCreated = (host.bindGroupsCreated ?? 0) + 1; return resource("bind-group"); },
     createQuerySet() { host.created++; return resource("query-set"); },
     createCommandEncoder() { return new FakeEncoder(host); },
     destroy() { host.destroyed++; host.destroyedKinds.push("device"); }
@@ -178,6 +178,31 @@ assert.deepEqual([...captured.rgba.subarray(0, 4)], [30, 20, 10, 255]);
 await Promise.resolve(); await Promise.resolve();
 assert.equal(webgpu.pollSubmission(7, submission).status, "ready");
 assert.equal(browser.host.draws, 2); assert.equal(browser.host.submits, 1);
+
+// Material bind groups are built once per (pipeline, group, texture, secondary, sampler) and evicted when one of those
+// handles is released: a repeated draw reuses its group, a new texture builds one, a released texture never resurfaces.
+{
+  const target = webgpu.createTexture(7, { size: { width:1280, height:720 }, format:"rgba16float", usage:20 });
+  const encoder = webgpu.createCommandEncoder(7);
+  const pass = webgpu.beginRenderPass(7, encoder, target);
+  const draw = (textureHandle) => webgpu.recordIndexedDraw(7, pass, {
+    pipelineHandle: pipeline, vertexBufferHandle: vertex, indexBufferHandle: index,
+    textureHandle, samplerHandle: sampler, textureBindGroupSlot: 2,
+    bindGroups: [{ index: 0, handle: bindGroup }], indexCount: 3, firstInstance: 7 });
+  const second = webgpu.createTexture(7, { size: { width: 2, height: 2 }, format: "rgba8unorm", usage: 3 });
+  const built = browser.host.bindGroupsCreated;
+  assert.equal(draw(texture), true); assert.equal(draw(texture), true);
+  assert.equal(browser.host.bindGroupsCreated, built);
+  assert.equal(draw(second), true); assert.equal(draw(second), true);
+  assert.equal(browser.host.bindGroupsCreated, built + 1);
+  assert.equal(webgpu.release(7, second), true);
+  const third = webgpu.createTexture(7, { size: { width: 2, height: 2 }, format: "rgba8unorm", usage: 3 });
+  assert.equal(draw(third), true);
+  assert.equal(browser.host.bindGroupsCreated, built + 2);
+  assert.throws(() => draw(second), /unknown/);
+  assert.equal(webgpu.endRenderPass(7, pass), true);
+  browser.host.draws -= 5;
+}
 
 const timingEncoder = webgpu.createCommandEncoder(7);
 // Owned HDR target: exact extent permits the same scene-depth authority;

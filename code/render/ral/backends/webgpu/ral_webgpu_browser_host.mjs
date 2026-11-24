@@ -63,6 +63,18 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
   const canvasCaptureCandidates = [];
   const entries = new Map();
   const order = [];
+  /* Material bind groups (texture @0, sampler @1, optional secondary texture @2), keyed by the handles they are built from. A
+   * frame's world, entity and effect draws reuse a few hundred of them; building one (and two texture views) per draw cost about
+   * 13 us each over ~1300 draws a frame. Handles are never reused, so an entry stays valid until one of its handles is released,
+   * which evicts it. */
+  const materialGroups = new Map();
+  const materialGroupKeys = new Map();
+  const evictMaterialGroups = (handle) => {
+    const keys = materialGroupKeys.get(handle);
+    if (!keys) return;
+    materialGroupKeys.delete(handle);
+    for (const key of keys) materialGroups.delete(key);
+  };
 
   const put = (kind, object, options = {}) => {
     if (!object) throw new RalWebGpuBrowserHostError("host-failure", `cannot register empty ${kind}`);
@@ -86,7 +98,7 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
   const release = (handle) => {
     const entry = entries.get(handle);
     if (!entry) return false;
-    entries.delete(handle);
+    entries.delete(handle); evictMaterialGroups(handle);
     if (entry.destroyable && typeof entry.object.destroy === "function") entry.object.destroy();
     return true;
   };
@@ -546,13 +558,25 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
       pass.setIndexBuffer(index, draw.indexFormat ?? "uint32", draw.indexOffset ?? 0);
 	  if (draw.textureBindGroupSlot && texture && sampler) {
 		const materialGroup = draw.textureBindGroupSlot - 1;
-		/* The implicit material group is texture @0 + sampler @1; a draw that
-		 * carries a secondary texture (world lightmap) declares it at @2. */
-		const entries = [
-		  { binding: 0, resource: texture.createView() }, { binding: 1, resource: sampler }
-		];
-		if (secondary) entries.push({ binding: 2, resource: secondary.createView() });
-		const group = getDevice().createBindGroup({ layout: pipeline.getBindGroupLayout(materialGroup), entries });
+		const secondaryHandle = secondary ? draw.secondaryTextureHandle : 0;
+		const key = `${draw.pipelineHandle}/${materialGroup}/${draw.textureHandle}/${secondaryHandle}/${draw.samplerHandle}`;
+		let group = materialGroups.get(key);
+		if (!group) {
+		  /* The implicit material group is texture @0 + sampler @1; a draw that
+		   * carries a secondary texture (world lightmap) declares it at @2. */
+		  const entries = [
+		    { binding: 0, resource: texture.createView() }, { binding: 1, resource: sampler }
+		  ];
+		  if (secondary) entries.push({ binding: 2, resource: secondary.createView() });
+		  group = getDevice().createBindGroup({ layout: pipeline.getBindGroupLayout(materialGroup), entries });
+		  materialGroups.set(key, group);
+		  for (const handle of [draw.pipelineHandle, draw.textureHandle, secondaryHandle, draw.samplerHandle]) {
+		    if (!handle) continue;
+		    let keys = materialGroupKeys.get(handle);
+		    if (!keys) materialGroupKeys.set(handle, keys = new Set());
+		    keys.add(key);
+		  }
+		}
 		pass.setBindGroup(materialGroup, group);
 	  }
       for (const binding of draw.bindGroups ?? []) pass.setBindGroup(binding.index, get(binding.handle, "bind-group"), binding.offsets ?? []);
@@ -672,7 +696,7 @@ export function createRalWebGpuBrowserHost({ gpu, canvas = null, devicePixelRati
       for (const candidate of canvasCaptureCandidates) candidate.readback.destroy?.();
       canvasCaptureCandidates.length = 0;
       for (let i = order.length - 1; i >= 0; --i) release(order[i]);
-      entries.clear(); order.length = 0; limits = Object.freeze({}); uncapturedError = "";
+      entries.clear(); order.length = 0; materialGroups.clear(); materialGroupKeys.clear(); limits = Object.freeze({}); uncapturedError = "";
       status = "destroyed"; reason = ""; generation = 0;
       return true;
     }
