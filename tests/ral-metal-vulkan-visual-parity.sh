@@ -294,6 +294,8 @@ for backend in $BACKENDS; do
       arena1) capture "$backend" arena1 1052 1432 50 135 ;;
       arena7) capture "$backend" arena7 -96 -1040 176 45 -25 ;;
       arena17) capture "$backend" arena17 488 1096 378 -90 ;;
+      # e1m5: the four looping func_trains (TAA object-motion fixture, tests/ral-temporal-mover-trail-check.sh).
+      e1m5) capture "$backend" e1m5 -1360 2150 400 90 89 ;;
       *) echo "FAIL: unsupported RAL_PARITY_MAPS entry: $map"; exit 1 ;;
     esac
     # Same-backend repeat capture in a fresh isolated home: pinned frame/shader
@@ -305,6 +307,7 @@ for backend in $BACKENDS; do
         arena1) capture "$backend" arena1 1052 1432 50 135 0 repeat ;;
         arena7) capture "$backend" arena7 -96 -1040 176 45 -25 repeat ;;
         arena17) capture "$backend" arena17 488 1096 378 -90 0 repeat ;;
+        e1m5) capture "$backend" e1m5 -1360 2150 400 90 89 repeat ;;
       esac
     fi
   done
