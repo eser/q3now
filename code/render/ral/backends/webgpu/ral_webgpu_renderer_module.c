@@ -2544,6 +2544,20 @@ static void BeginFrame( stereoFrame_t stereo )
 			s_module.imports.LogCh( s_module.logChannel, SEV_INFO,
 				"Wired WebGPU: taa frames resolved=%u bootstrap=%u\n", resolved, bootstrap );
 		}
+		/* Entity object motion of the last planned TAA frame, every 100 TAA frames: the mover checks read whether rigid entities
+		 * write motion on a real map. */
+		{
+			static uint32_t lastLoggedMotionFrames;
+			ralWebGpuEntityMotionStats_t motion;
+			if ( resolved + bootstrap >= lastLoggedMotionFrames + 100u && s_module.imports.LogCh && s_module.logChannel >= 0
+					&& RalWebGpu_ProductEntityMotionStats( s_module.product, &motion ) ) {
+				lastLoggedMotionFrames = resolved + bootstrap;
+				s_module.imports.LogCh( s_module.logChannel, SEV_INFO,
+					"Wired WebGPU: taa entity motion recorded=%u rejected=%u previous=%u draws=%u vertices=%u refused=%u\n",
+					motion.recorded, motion.rejected, motion.previousValid, motion.motionDraws, motion.motionVertices,
+					motion.beginRefused );
+			}
+		}
 	}
 }
 

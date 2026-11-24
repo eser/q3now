@@ -111,7 +111,9 @@ EMSCRIPTEN_KEEPALIVE int WiredWeb_ClientStart( void ) {
 	if ( s_client.status != WIRED_WEB_CLIENT_IDLE
 			&& s_client.status != WIRED_WEB_CLIENT_STOPPED ) return 0;
 	s_webCommand[sizeof( s_webCommand ) - 1] = '\0';
-	snprintf( commandLine, sizeof( commandLine ), "%s %s +map arena17", defaults, s_webCommand );
+	/* arena17 unless the host's launch arguments start a map of their own (a test page's "+devmap e1m5"). */
+	snprintf( commandLine, sizeof( commandLine ), "%s %s%s", defaults, s_webCommand,
+		strstr( s_webCommand, "+map " ) || strstr( s_webCommand, "+devmap " ) ? "" : " +map arena17" );
 	s_webCommand[0] = '\0';
 	memset( &browser, 0, sizeof( browser ) );
 	if ( !RalWebGpu_BrowserModuleBorrow( &browser ) || !browser.runtime
