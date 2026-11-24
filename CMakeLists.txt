@@ -2571,6 +2571,7 @@ ADD_LIBRARY(ral_webgpu STATIC
 	code/render/ral/backends/webgpu/ral_webgpu_pipeline.c
 	code/render/ral/backends/webgpu/ral_webgpu_presentation.c
 	code/render/ral/backends/webgpu/ral_webgpu_product.c
+	code/render/frontend/render_temporal_entity.c
 	code/render/ral/backends/webgpu/ral_webgpu_resource.c
 	code/render/ral/backends/webgpu/ral_webgpu_runtime.c
 	code/render/frontend/render_material_runtime_catalog.c
@@ -4117,6 +4118,7 @@ IF(WIRED_EMCC_EXECUTABLE)
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_pipeline.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_presentation.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_product.c
+			${CMAKE_CURRENT_SOURCE_DIR}/code/render/frontend/render_temporal_entity.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_renderer_module.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_image_decode.c
 			${CMAKE_CURRENT_SOURCE_DIR}/code/render/ral/backends/webgpu/ral_webgpu_resource.c

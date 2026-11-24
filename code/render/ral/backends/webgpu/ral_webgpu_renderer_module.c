@@ -33,7 +33,7 @@ enum {
 	WEBGPU_PIPELINE_EFFECT_ADDITIVE_NO_DEPTH,
 	WEBGPU_PIPELINE_UI,
 	WEBGPU_PIPELINE_MSDF,
-	WEBGPU_PIPELINE_TAA_MASK,   /* entity geometry into the TAA effect mask (R8, depth test only) */
+	WEBGPU_PIPELINE_TAA_MASK,   /* entity geometry into the TAA effect mask (RGBA16F, depth test only) */
 	/* Translucent model entities, by their material's alpha mode (depth test, no depth write), and the matching TAA mask pipelines
 	 * that add the batch's visible contribution to the effect mask instead of marking its whole geometry. */
 	WEBGPU_PIPELINE_ENTITY_BLEND,
@@ -42,6 +42,8 @@ enum {
 	WEBGPU_PIPELINE_TAA_MASK_BLEND,
 	WEBGPU_PIPELINE_TAA_MASK_ALPHA_ADDITIVE,
 	WEBGPU_PIPELINE_TAA_MASK_ADDITIVE,
+	/* Rigid (mover) and IQM entities with a committed previous pose: their object velocity into the TAA effect mask. */
+	WEBGPU_PIPELINE_TAA_MOTION,
 	WEBGPU_PIPELINE_COUNT
 };
 
@@ -291,7 +293,34 @@ static const char s_taaMaskFragmentWgsl[] =
 	"@group(0) @binding(1) var<storage, read> froxels: Froxels;"
 	"@group(2) @binding(0) var baseTexture: texture_2d<f32>;"
 	"@group(2) @binding(1) var baseSampler: sampler;"
-	"@fragment fn main() -> @location(0) vec4<f32> { return vec4<f32>(1.0, 0.0, 0.0, 0.0); }\n";
+	"@fragment fn main() -> @location(0) vec4<f32> { return vec4<f32>(1.0, 0.0, 0.0, 1.0); }\n";
+/* TAA object motion: the effect mask's channels are (invalidate, velocity uv x, velocity uv y, camera flag: 1 = the clear value, camera
+ * reprojection; 0 = this object velocity). The motion copy of
+ * an entity's vertices carries its unjittered current clip x/y (uv) with clip W, and its previous-frame clip x/y/w (normal); both are
+ * interpolated perspective-correctly and divided per fragment, so the velocity is exact for rigid and per-vertex motion alike. The
+ * position is the jittered scene raster position, so the depth test against the scene matches the colour pass. Bindings as the mask. */
+static const char s_taaMotionVertexWgsl[] =
+	"struct EntityLighting { values: array<vec4<f32>> };"
+	"@group(1) @binding(0) var<storage, read> entityLighting: EntityLighting;"
+	"struct MotionOut { @builtin(position) position: vec4<f32>,"
+	" @location(0) current: vec3<f32>, @location(1) previous: vec3<f32> };"
+	"@vertex fn main(@location(0) p: vec3<f32>, @location(1) clipW: f32,"
+	" @location(2) color: vec4<f32>, @location(3) fogCoord: vec2<f32>,"
+	" @location(4) normal: vec3<f32>, @location(5) uv: vec2<f32>) -> MotionOut {"
+	" var out: MotionOut; out.position = vec4<f32>(p, clipW);"
+	" out.current = vec3<f32>(uv, clipW); out.previous = normal; return out; }\n";
+static const char s_taaMotionFragmentWgsl[] =
+	"struct Atmosphere { eyeDensity: vec4<f32>, colorVisibility: vec4<f32>,"
+	" heightCloud: vec4<f32>, froxelGrid: vec4<u32>, displayVisibility: vec4<f32> };"
+	"struct Froxels { values: array<vec4<f32>> };"
+	"@group(0) @binding(0) var<uniform> atmosphere: Atmosphere;"
+	"@group(0) @binding(1) var<storage, read> froxels: Froxels;"
+	"@group(2) @binding(0) var baseTexture: texture_2d<f32>;"
+	"@group(2) @binding(1) var baseSampler: sampler;"
+	"@fragment fn main(@location(0) current: vec3<f32>, @location(1) previous: vec3<f32>) -> @location(0) vec4<f32> {"
+	" if (previous.z <= 1.0e-3 || current.z <= 1.0e-3) { return vec4<f32>(1.0, 0.0, 0.0, 1.0); }"
+	" let c = current.xy / current.z; let q = previous.xy / previous.z;"
+	" return vec4<f32>(0.0, ( c.x - q.x ) * 0.5, ( q.y - c.y ) * 0.5, 0.0); }\n";
 /* Shared by the translucent entity fragment and its TAA mask fragment: the bindings of the entity fragment and the entity colour
  * (vertex colour = the entity's shaderRGBA with its lighting, times the base texture). */
 #define WIRED_ENTITY_BLEND_HEAD_WGSL \
@@ -847,10 +876,11 @@ static qboolean CreatePipeline( uint32_t index )
 	qboolean isUi = index == WEBGPU_PIPELINE_UI || index == WEBGPU_PIPELINE_MSDF;
 	qboolean isEffectPrimitive = IsEffectPrimitivePipeline( index );
 	const qboolean isTaaMask = index == WEBGPU_PIPELINE_TAA_MASK;
+	const qboolean isTaaMotion = index == WEBGPU_PIPELINE_TAA_MOTION;
 	const uint32_t entityBlendMode = EntityBlendMode( index );
 	const qboolean isEntityBlend = entityBlendMode && index <= WEBGPU_PIPELINE_ENTITY_ADDITIVE;
 	const qboolean isTaaTrust = entityBlendMode && index >= WEBGPU_PIPELINE_TAA_MASK_BLEND;
-	const qboolean entityLike = index == WEBGPU_PIPELINE_ENTITY || isTaaMask || isEntityBlend || isTaaTrust;
+	const qboolean entityLike = index == WEBGPU_PIPELINE_ENTITY || isTaaMask || isTaaMotion || isEntityBlend || isTaaTrust;
 	const ralShaderSpecValue_t entityModeValue = {0,entityBlendMode};
 	const ralSpecConstant_t nativeEntityModeValue = {0,entityBlendMode};
 	const ralShaderSpecConstantAbi_t effectSpec = {0,RAL_STAGE_FRAGMENT,0,RAL_SHADER_SPEC_U32};
@@ -859,9 +889,9 @@ static qboolean CreatePipeline( uint32_t index )
 	const char					   *vertexWgsl = isUi
 		? s_uiVertexWgsl : ( isEffectPrimitive ? s_effectVertexWgsl
 			: ( index == WEBGPU_PIPELINE_WORLD ? s_worldVertexWgsl
-			: ( entityLike ? s_entityVertexWgsl
-				: s_vertexWgsl ) ) );
-	const char					   *fragmentWgsl = isEntityBlend ? s_entityBlendFragmentWgsl
+			: ( isTaaMotion ? s_taaMotionVertexWgsl : ( entityLike ? s_entityVertexWgsl
+				: s_vertexWgsl ) ) ) );
+	const char					   *fragmentWgsl = isTaaMotion ? s_taaMotionFragmentWgsl : isEntityBlend ? s_entityBlendFragmentWgsl
 		: isTaaTrust ? s_taaTrustFragmentWgsl : index == WEBGPU_PIPELINE_MSDF
 		? s_msdfFragmentWgsl : ( index == WEBGPU_PIPELINE_UI ? s_uiFragmentWgsl : ( index == WEBGPU_PIPELINE_WORLD
 			? s_worldFragmentWgsl : ( isEffectPrimitive ? s_effectFragmentWgsl
@@ -871,9 +901,10 @@ static qboolean CreatePipeline( uint32_t index )
 		(uint32_t)( isUi ? sizeof( s_uiVertexWgsl ) - 1u
 			: ( isEffectPrimitive ? sizeof( s_effectVertexWgsl ) - 1u
 				: ( index == WEBGPU_PIPELINE_WORLD ? sizeof( s_worldVertexWgsl ) - 1u
-				: ( entityLike ? sizeof( s_entityVertexWgsl ) - 1u
-					: sizeof( s_vertexWgsl ) - 1u ) ) ) );
-	uint32_t fragmentWgslBytes = isEntityBlend ? (uint32_t)( sizeof( s_entityBlendFragmentWgsl ) - 1u )
+				: ( isTaaMotion ? sizeof( s_taaMotionVertexWgsl ) - 1u : ( entityLike ? sizeof( s_entityVertexWgsl ) - 1u
+					: sizeof( s_vertexWgsl ) - 1u ) ) ) ) );
+	uint32_t fragmentWgslBytes = isTaaMotion ? (uint32_t)( sizeof( s_taaMotionFragmentWgsl ) - 1u )
+		: isEntityBlend ? (uint32_t)( sizeof( s_entityBlendFragmentWgsl ) - 1u )
 		: isTaaTrust ? (uint32_t)( sizeof( s_taaTrustFragmentWgsl ) - 1u ) :
 		(uint32_t)( index == WEBGPU_PIPELINE_MSDF ? sizeof( s_msdfFragmentWgsl ) - 1u
 			: ( index == WEBGPU_PIPELINE_UI ? sizeof( s_uiFragmentWgsl ) - 1u
@@ -1106,6 +1137,7 @@ static qboolean CreatePipeline( uint32_t index )
 		blend.dstAlpha = RAL_BLEND_ONE_MINUS_SRC_ALPHA;
 		blend.alphaOp = RAL_BLEND_OP_ADD;
 	}
+	if ( isTaaTrust ) blend.writeMask = RAL_COLOR_WRITE_R;   /* the invalidate channel only: the motion beneath stays */
 	if ( isEntityBlend || isTaaTrust ) {
 		/* The scene's three translucent blends for the entity pipelines; the TAA mask accumulates SRC_ALPHA / ONE_MINUS_SRC_ALPHA. */
 		blend.blendEnable = qtrue;
@@ -1128,7 +1160,7 @@ static qboolean CreatePipeline( uint32_t index )
 	graphics.numColorBlends		 = 1u;
 	/* UI draws into the canvas -srgb view (hardware display encoding). */
 	graphics.colorFormats[0] = isUi ? RAL_FORMAT_B8G8R8A8_SRGB
-        : ( isTaaMask || isTaaTrust ? RAL_FORMAT_R8_UNORM : RAL_FORMAT_R16G16B16A16_SFLOAT );
+        : RAL_FORMAT_R16G16B16A16_SFLOAT;   /* scene colour, and the RGBA16F TAA effect mask */
 	graphics.numColorFormats	 = 1u;
 	graphics.sampleCount		 = 1u;
     /* UI has an independent output pass without a scene-depth attachment. */
@@ -1640,7 +1672,7 @@ static qboolean InitializeOwners( void )
 	if ( !RalWebGpu_ProductSetEntityPipeline( s_module.product, &s_module.borrow.runtimeReceipt,
 											  &s_module.pipelineReceipts[WEBGPU_PIPELINE_ENTITY] )
 		|| !RalWebGpu_ProductSetTaaMaskPipeline( s_module.product, &s_module.borrow.runtimeReceipt,
-			&s_module.pipelineReceipts[WEBGPU_PIPELINE_TAA_MASK] )
+			&s_module.pipelineReceipts[WEBGPU_PIPELINE_TAA_MASK], &s_module.pipelineReceipts[WEBGPU_PIPELINE_TAA_MOTION] )
 		|| !RalWebGpu_ProductSetEntityBlendPipelines( s_module.product, &s_module.borrow.runtimeReceipt,
 			&s_module.pipelineReceipts[WEBGPU_PIPELINE_ENTITY_BLEND],
 			&s_module.pipelineReceipts[WEBGPU_PIPELINE_TAA_MASK_BLEND] ) ) {

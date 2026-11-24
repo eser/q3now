@@ -173,8 +173,10 @@ void RalWebGpu_ProductSkyCaptureEnd(ralWebGpuProduct_t *product);
 qboolean RalWebGpu_ProductSetExposure( ralWebGpuProduct_t *product,
     const ralExposureSettings_t *settings, const ralDisplayVisibilityPlan_t *visibility,
     int toneMode, float toneExposure );
+/* The TAA effect mask pipelines: entity coverage (invalidate) and object motion (rigid and IQM entities with a previous pose). */
 qboolean RalWebGpu_ProductSetTaaMaskPipeline( ralWebGpuProduct_t *product,
-	const ralWebGpuRuntimeReceipt_t *runtimeReceipt, const ralWebGpuPipelineReceipt_t *maskPipeline );
+	const ralWebGpuRuntimeReceipt_t *runtimeReceipt, const ralWebGpuPipelineReceipt_t *maskPipeline,
+	const ralWebGpuPipelineReceipt_t *motionPipeline );
 /* Translucent entity pipelines (alpha blend, alpha-additive, additive) and their TAA mask pipelines, in that order. */
 qboolean RalWebGpu_ProductSetEntityBlendPipelines( ralWebGpuProduct_t *product,
 	const ralWebGpuRuntimeReceipt_t *runtimeReceipt,

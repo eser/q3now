@@ -51,14 +51,17 @@ static const char s_motionWgsl[] =
 	"let world=p.co.xyz+p.cf.xyz*fwd-p.cl.xyz*side+p.cu.xyz*up;"
 	"let delta=world-p.po.xyz;"
 	"let pfwd=dot(delta,p.pf.xyz);"
-	"let trust=1.0-clamp(textureLoad(effectMask,vec2<i32>(gid.xy),0).r,0.0,1.0);"
+	"let mask=textureLoad(effectMask,vec2<i32>(gid.xy),0);"
+	"let trust=1.0-clamp(mask.r,0.0,1.0);"
+	"let object=mask.a<0.5;"
 	"let ok=pfwd>1.0e-3;"
 	"var prev=ndc;"
 	"if(ok){prev=vec2<f32>(-dot(delta,p.pl.xyz)/p.pp.x,dot(delta,p.pu.xyz)/p.pp.y)/pfwd;}"
 	"let uvC=vec2<f32>(ndc.x*0.5+0.5,0.5-ndc.y*0.5);"
 	"let uvP=vec2<f32>(prev.x*0.5+0.5,0.5-prev.y*0.5);"
-	"textureStore(velocity,vec2<i32>(gid.xy),vec4<f32>(uvC-uvP,0.0,0.0));"
-	"textureStore(validity,vec2<i32>(gid.xy),vec4<f32>(select(0.0,trust,ok),0.0,0.0,0.0));"
+	"let vel=select(uvC-uvP,mask.gb,object);"
+	"textureStore(velocity,vec2<i32>(gid.xy),vec4<f32>(vel,0.0,0.0));"
+	"textureStore(validity,vec2<i32>(gid.xy),vec4<f32>(select(0.0,trust,ok||object),0.0,0.0,0.0));"
 	"textureStore(reverseDepth,vec2<i32>(gid.xy),vec4<f32>(rd,0.0,0.0,0.0));}";
 
 static uint32_t s_taaFailure;   /* last failing step of RalWebGpu_TaaRecord (product failure stage 100 + step) */
@@ -197,8 +200,10 @@ static qboolean Prepare( ralWebGpuTaa_t *t, ralWebGpuResourceLayer_t *r, uintptr
 		ralWebGpuTextureDesc_t d;
 		memset( &d, 0, sizeof( d ) );
 		d.width = width; d.height = height; d.depth = d.mipLevelCount = 1u;
-		d.format = mask ? RAL_FORMAT_R8_UNORM : ( depth ? RAL_FORMAT_R32_SFLOAT : RAL_FORMAT_R16G16B16A16_SFLOAT );
-		d.bytesPerTexel = mask ? 1u : ( depth ? 4u : 8u );
+		/* The effect mask is (invalidate, object velocity uv x, y, camera flag): RGBA16F like the colour targets. A is 1 (the pass's
+		 * clear value) where the camera reprojection holds and 0 where an entity wrote its object velocity. */
+		d.format = depth ? RAL_FORMAT_R32_SFLOAT : RAL_FORMAT_R16G16B16A16_SFLOAT;
+		d.bytesPerTexel = depth ? 4u : 8u;
 		d.usage = RAL_WEBGPU_TEXTURE_SAMPLED | ( mask ? RAL_WEBGPU_TEXTURE_RENDER_ATTACHMENT : RAL_WEBGPU_TEXTURE_STORAGE );
 		if ( !RalWebGpu_CreateTexture( r, &d, &t->textures[i], &t->textureReceipts[i] ) ) { s_taaFailure = 41u; return qfalse; }
 	}
