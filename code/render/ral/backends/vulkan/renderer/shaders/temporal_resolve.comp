@@ -419,14 +419,31 @@ void main() {
 	// right: all-in ghosts, all-out loses the anti-aliasing.
 	if (finite4(current) && finite1(valid) && valid > 0.0
 			&& finite2(velocity) && finite2(previousTexel) && inside) {
+		// Disocclusion test against the current 3x3 depth range, not the centre sample alone. The centre is a jittered sample: on a
+		// silhouette it flips between the two surfaces with the jitter phase, so a centre-only test rejected the history of edge
+		// pixels in some phases and showed the raw frame there (most of the static shimmer left on items). The history depth still
+		// has to belong to a surface present around the pixel now; a surface that moved away (true disocclusion) is rejected.
+		// linearizeDepth is monotonic, so the range needs only the nearest and farthest device depths of the tile.
 		float currentDevice = tileDepth[tileIndex];
+		float deviceLo = currentDevice;
+		float deviceHi = currentDevice;
+		for (int y = -1; y <= 1; ++y) {
+			for (int x = -1; x <= 1; ++x) {
+				float d = tileDepth[tileIndex + y * tileSide + x];
+				deviceLo = min(deviceLo, d);
+				deviceHi = max(deviceHi, d);
+			}
+		}
 		float currentLinear = linearizeDepth(currentDevice);
+		float rangeA = linearizeDepth(deviceLo);
+		float rangeB = linearizeDepth(deviceHi);
 		float priorLinear = samplePreviousDepthLinear(previousTexel);
 		float depthLimit = max(pc.depthThresholdAbsolute,
 			pc.depthThresholdRelative * max(currentLinear, priorLinear));
-		if (finite1(currentLinear) && finite1(priorLinear)
+		if (finite1(currentLinear) && finite1(priorLinear) && finite1(rangeA) && finite1(rangeB)
 				&& currentLinear > 0.0 && priorLinear > 0.0
-				&& abs(currentLinear - priorLinear) <= depthLimit) {
+				&& priorLinear >= min(rangeA, rangeB) - depthLimit
+				&& priorLinear <= max(rangeA, rangeB) + depthLimit) {
 			// The current-frame box first: the history tap range is then live only from the history fetches to the sharpening, not
 			// across the 3x3 moment loop (fewer registers held in this latency-bound pass).
 			bool boxValid = neighborhoodBox(tileIndex, clipMin, clipMax);

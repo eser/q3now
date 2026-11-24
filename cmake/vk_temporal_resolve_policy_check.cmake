@@ -118,8 +118,12 @@ require_text(SHADER "finite2(previousTexel) && inside"
 	"non-finite and out-of-bounds reprojection must reject history")
 require_text(SHADER "currentLinear > 0.0 && priorLinear > 0.0"
 	"both depths must be finite positive before history consumption")
-require_text(SHADER "abs(currentLinear - priorLinear) <= depthLimit"
-	"depth discontinuity must reject history")
+require_text(SHADER "priorLinear >= min(rangeA, rangeB) - depthLimit"
+	"depth discontinuity must reject history: the history depth must lie in the current 3x3 depth range")
+require_text(SHADER "priorLinear <= max(rangeA, rangeB) + depthLimit"
+	"depth discontinuity must reject history: the history depth must lie in the current 3x3 depth range")
+require_count(SHADER "abs\\(currentLinear - priorLinear\\) <= depthLimit" 0
+	"a centre-only depth test rejects silhouette history with the jitter phase (static edge shimmer)")
 require_text(SHADER "boxMin = neighborhoodMin;"
 	"the history clamp box must start from the current 3x3 min/max")
 require_text(SHADER "boxMin = max(neighborhoodMin,"

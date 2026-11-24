@@ -555,139 +555,183 @@ void main()
     if (_1579 && inside)
     {
         float currentDevice = tileDepth[tileIndex];
+        float deviceLo = currentDevice;
+        float deviceHi = currentDevice;
+        for (int y = -1; y <= 1; y++)
+        {
+            for (int x = -1; x <= 1; x++)
+            {
+                float d = tileDepth[(tileIndex + (y * 10)) + x];
+                deviceLo = min(deviceLo, d);
+                deviceHi = max(deviceHi, d);
+            }
+        }
         float param_9 = currentDevice;
         float currentLinear = linearizeDepth(param_9);
-        vec2 param_10 = previousTexel;
-        float priorLinear = samplePreviousDepthLinear(param_10);
+        float param_10 = deviceLo;
+        float rangeA = linearizeDepth(param_10);
+        float param_11 = deviceHi;
+        float rangeB = linearizeDepth(param_11);
+        vec2 param_12 = previousTexel;
+        float priorLinear = samplePreviousDepthLinear(param_12);
         float depthLimit = max(pc.depthThresholdAbsolute, pc.depthThresholdRelative * max(currentLinear, priorLinear));
-        float param_11 = currentLinear;
-        bool _1609 = finite1(param_11);
-        bool _1615;
-        if (_1609)
+        float param_13 = currentLinear;
+        bool _1656 = finite1(param_13);
+        bool _1662;
+        if (_1656)
         {
-            float param_12 = priorLinear;
-            _1615 = finite1(param_12);
+            float param_14 = priorLinear;
+            _1662 = finite1(param_14);
         }
         else
         {
-            _1615 = _1609;
+            _1662 = _1656;
         }
-        bool _1621 = (_1615 && (currentLinear > 0.0)) && (priorLinear > 0.0);
-        bool _1630;
-        if (_1621)
+        bool _1668;
+        if (_1662)
         {
-            _1630 = abs(currentLinear - priorLinear) <= depthLimit;
+            float param_15 = rangeA;
+            _1668 = finite1(param_15);
         }
         else
         {
-            _1630 = _1621;
+            _1668 = _1662;
         }
-        if (_1630)
+        bool _1674;
+        if (_1668)
         {
-            int param_13 = tileIndex;
-            vec3 param_14;
-            vec3 param_15;
-            bool _1638 = neighborhoodBox(param_13, param_14, param_15);
-            clipMin = param_14;
-            clipMax = param_15;
-            bool boxValid = _1638;
+            float param_16 = rangeB;
+            _1674 = finite1(param_16);
+        }
+        else
+        {
+            _1674 = _1668;
+        }
+        bool _1680 = (_1674 && (currentLinear > 0.0)) && (priorLinear > 0.0);
+        bool _1690;
+        if (_1680)
+        {
+            _1690 = priorLinear >= (min(rangeA, rangeB) - depthLimit);
+        }
+        else
+        {
+            _1690 = _1680;
+        }
+        bool _1700;
+        if (_1690)
+        {
+            _1700 = priorLinear <= (max(rangeA, rangeB) + depthLimit);
+        }
+        else
+        {
+            _1700 = _1690;
+        }
+        if (_1700)
+        {
+            int param_17 = tileIndex;
+            vec3 param_18;
+            vec3 param_19;
+            bool _1708 = neighborhoodBox(param_17, param_18, param_19);
+            clipMin = param_18;
+            clipMax = param_19;
+            bool boxValid = _1708;
             vec3 tapMin = vec3(3.4028234663852885981170418348452e+38);
             vec3 tapMax = vec3(-3.4028234663852885981170418348452e+38);
-            vec2 param_16 = previousTexel;
-            vec3 param_17 = tapMin;
-            vec3 param_18 = tapMax;
-            vec4 _1650 = samplePreviousColor(param_16, param_17, param_18);
-            tapMin = param_17;
-            tapMax = param_18;
-            vec4 prior = _1650;
-            bool _1659;
+            vec2 param_20 = previousTexel;
+            vec3 param_21 = tapMin;
+            vec3 param_22 = tapMax;
+            vec4 _1720 = samplePreviousColor(param_20, param_21, param_22);
+            tapMin = param_21;
+            tapMax = param_22;
+            vec4 prior = _1720;
+            bool _1729;
             if (boxValid)
             {
-                vec4 param_19 = prior;
-                _1659 = finite4(param_19);
+                vec4 param_23 = prior;
+                _1729 = finite4(param_23);
             }
             else
             {
-                _1659 = boxValid;
+                _1729 = boxValid;
             }
-            if (_1659)
+            if (_1729)
             {
                 vec3 clampedPrior = clamp(prior.xyz, clipMin, clipMax);
                 float confidence = clamp(valid, 0.0, 1.0);
                 float baseWeight = clamp(pc.historyWeight, 0.0, 1.0);
-                float param_20 = baseWeight;
-                float param_21 = confidence;
-                float weight = scalePrecise(param_20, param_21);
-                vec3 param_22 = current.xyz;
-                vec3 param_23 = clampedPrior;
-                float param_24 = weight;
-                vec3 resolvedRgb = mixPrecise(param_22, param_23, param_24);
+                float param_24 = baseWeight;
+                float param_25 = confidence;
+                float weight = scalePrecise(param_24, param_25);
+                vec3 param_26 = current.xyz;
+                vec3 param_27 = clampedPrior;
+                float param_28 = weight;
+                vec3 resolvedRgb = mixPrecise(param_26, param_27, param_28);
                 result = vec4(resolvedRgb, current.w);
                 displayed = result;
                 if ((pc.qualityFlags & 8u) == 0u)
                 {
-                    vec2 param_25 = previousTexel;
-                    vec3 param_26 = tapMin;
-                    vec3 param_27 = tapMax;
-                    vec3 _1715 = samplePreviousBlur(param_25, param_26, param_27);
-                    tapMin = param_26;
-                    tapMax = param_27;
-                    vec3 detail = prior.xyz - _1715;
+                    vec2 param_29 = previousTexel;
+                    vec3 param_30 = tapMin;
+                    vec3 param_31 = tapMax;
+                    vec3 _1785 = samplePreviousBlur(param_29, param_30, param_31);
+                    tapMin = param_30;
+                    tapMax = param_31;
+                    vec3 detail = prior.xyz - _1785;
                     displayed = vec4(clamp(resolvedRgb + (detail * (2.0 * confidence)), min(resolvedRgb, tapMin), max(resolvedRgb, tapMax)), current.w);
                 }
                 usedHistory = true;
             }
         }
     }
-    bool _1739 = !usedHistory;
-    bool _1745;
-    if (_1739)
+    bool _1809 = !usedHistory;
+    bool _1815;
+    if (_1809)
     {
-        vec4 param_28 = current;
-        _1745 = finite4(param_28);
+        vec4 param_32 = current;
+        _1815 = finite4(param_32);
     }
     else
     {
-        _1745 = _1739;
+        _1815 = _1809;
     }
-    bool _1753;
-    if (_1745)
+    bool _1823;
+    if (_1815)
     {
-        _1753 = (pc.qualityFlags & 4u) != 0u;
+        _1823 = (pc.qualityFlags & 4u) != 0u;
     }
     else
     {
-        _1753 = _1745;
+        _1823 = _1815;
     }
-    if (_1753)
+    if (_1823)
     {
-        ivec2 param_29 = pixel;
-        vec4 param_30 = current;
-        result = fxSpatialAa(param_29, param_30);
+        ivec2 param_33 = pixel;
+        vec4 param_34 = current;
+        result = fxSpatialAa(param_33, param_34);
     }
-    vec4 param_31 = result;
-    if (!finite4(param_31))
+    vec4 param_35 = result;
+    if (!finite4(param_35))
     {
         result = vec4(0.0);
     }
-    bool _1768 = !usedHistory;
-    bool _1776;
-    if (!_1768)
+    bool _1838 = !usedHistory;
+    bool _1846;
+    if (!_1838)
     {
-        vec4 param_32 = displayed;
-        _1776 = !finite4(param_32);
+        vec4 param_36 = displayed;
+        _1846 = !finite4(param_36);
     }
     else
     {
-        _1776 = _1768;
+        _1846 = _1838;
     }
-    if (_1776)
+    if (_1846)
     {
         displayed = result;
     }
     imageStore(resolvedColor, pixel, displayed);
     imageStore(historyOutColor, pixel, result);
-    float param_33 = tileDepth[tileIndex];
-    imageStore(historyOutLinearDepth, pixel, vec4(storeLinearDepth(param_33)));
+    float param_37 = tileDepth[tileIndex];
+    imageStore(historyOutLinearDepth, pixel, vec4(storeLinearDepth(param_37)));
 }
 
