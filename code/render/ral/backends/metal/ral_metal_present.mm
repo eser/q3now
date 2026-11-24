@@ -2458,10 +2458,9 @@ static qboolean BuildEntityVertices( const ralMetalPresent_t *present,
 				batch->entityColor = entity->shader;
 				EntityBatchLighting( &commands[i], batch );
 			}
-			/* A rigid brush entity (door, plat, train) with a motion identity is a candidate for object motion; the first-person
-			 * weapon moves with the camera and stays invalidated. MD3 and IQM models replay their previous animation frames the same
-			 * way, but stay invalidated until their benefit and the animated-model cases (bots, powerup shells) are measured. */
-			if ( motion && commands[i].hasTemporal && model.format == RENDER_MODEL_INLINE_BSP && model.frameCount && model.positions
+			/* A model entity with a motion identity (brush entity, MD3 item or creature, IQM) is a candidate for object motion: its
+			 * previous pose replays its own animation frames. The first-person weapon moves with the camera and stays invalidated. */
+			if ( motion && commands[i].hasTemporal && model.frameCount && model.positions
 					&& !( entity->renderfx & ( RF_DEPTHHACK | RF_FIRST_PERSON ) ) ) {
 				if ( motion->candidateCount == motion->candidateCapacity ) {
 					const uint32_t capacity = motion->candidateCapacity ? motion->candidateCapacity * 2u : 64u;
@@ -3165,7 +3164,8 @@ static qboolean EntityMotionPrepare( ralMetalPresent_t *present, const renderSub
 		}
 		for ( uint32_t b = candidate->firstBatch; b < candidate->firstBatch + candidate->batchCount; ++b ) {
 			if ( !batches[b].visible || batches[b].depthHack
-					|| !RenderTemporal_EntityBatchWritesMotion( frontend, batches[b].material ) ) continue;
+					|| !RenderTemporal_EntityBatchWritesMotion( frontend, batches[b].material,
+						RenderTemporal_PoseRotated( &receipt.previous, &pose ) ) ) continue;
 			batches[b].motion = qtrue; motion->motionBatches++;
 		}
 	}

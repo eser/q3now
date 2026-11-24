@@ -15,8 +15,11 @@
 
 /* The rule every renderer applies (R_TemporalMotionClassify) to an entity batch whose previous-frame vertex positions are known (a
  * rigid brush entity, or an MD3 / IQM model whose previous animation frame is replayed): opaque, depth-writing, unanimated texture.
- * Alpha-tested batches stay invalidated: the mask rasterizes their whole geometry, holes included. */
-static inline qboolean RenderTemporal_EntityBatchWritesMotion( const renderSubmissionState_t *frontend, qhandle_t material ) {
+ * Alpha-tested batches stay invalidated: the mask rasterizes their whole geometry, holes included. An environment-mapped stage is
+ * shaded by the surface orientation, not carried by the geometry: when the entity turned since its previous pose (`rotated`), its
+ * reflection does not follow the motion vector, so it is treated like an animated texture. */
+static inline qboolean RenderTemporal_EntityBatchWritesMotion( const renderSubmissionState_t *frontend, qhandle_t material,
+		qboolean rotated ) {
 	renderMaterialSnapshot_t snapshot;
 	temporalMotionDrawFacts_t facts;
 	if ( !RenderSubmission_MaterialSnapshot( frontend, material, &snapshot ) || !snapshot.ready ) return qfalse;
@@ -26,16 +29,29 @@ static inline qboolean RenderTemporal_EntityBatchWritesMotion( const renderSubmi
 	facts.alphaTested = snapshot.alphaMode == RENDER_ALPHA_MASK ? qtrue : qfalse;
 	facts.additive = snapshot.alphaMode == RENDER_ALPHA_ADDITIVE ? qtrue : qfalse;
 	facts.blended = snapshot.alphaMode != RENDER_ALPHA_OPAQUE && snapshot.alphaMode != RENDER_ALPHA_MASK ? qtrue : qfalse;
-	facts.transparent = snapshot.sort > 3.0f ? qtrue : qfalse;   /* SS_OPAQUE */
+	/* Sorted after SS_OPAQUE but drawn opaque and depth-writing (an item frame whose opaque, environment-mapped base carries a
+	 * blended detail stage) is opaque geometry, not a translucent effect. */
+	facts.transparent = snapshot.sort > 3.0f
+		&& ( snapshot.alphaMode != RENDER_ALPHA_OPAQUE || !snapshot.depthWrite ) ? qtrue : qfalse;   /* SS_OPAQUE */
 	facts.decal = snapshot.sort == 4.0f ? qtrue : qfalse;        /* SS_DECAL */
 	facts.opaque = !facts.blended && !facts.transparent ? qtrue : qfalse;
 	facts.depthAuthoritative = snapshot.depthWrite;
 	facts.sky = snapshot.sky;
 	facts.effectMask = qtrue;
 	for ( uint32_t stage = 0u; stage < snapshot.stageCount && stage < RENDER_MATERIAL_MAX_STAGES; ++stage )
-		if ( snapshot.stages[stage].tcModCount || snapshot.stages[stage].animationFrameCount > 1u ) facts.textureAnimated = qtrue;
+		if ( snapshot.stages[stage].tcModCount || snapshot.stages[stage].animationFrameCount > 1u
+				|| ( rotated && snapshot.stages[stage].tcGen == RENDER_MATERIAL_TCGEN_ENVIRONMENT ) ) facts.textureAnimated = qtrue;
 	if ( facts.alphaTested ) return qfalse;
 	return R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_WRITE_VALID ? qtrue : qfalse;
+}
+
+/* True when the entity's orientation changed between its previous pose and its current one. */
+static inline qboolean RenderTemporal_PoseRotated( const temporalEntityPose_t *previous, const temporalEntityPose_t *current ) {
+	for ( uint32_t i = 0u; i < 9u; ++i ) {
+		const float d = previous->axis[i] - current->axis[i];
+		if ( d > 1.0e-5f || d < -1.0e-5f ) return qtrue;
+	}
+	return qfalse;
 }
 
 /* The pose an entity records: model identity (handle, data, topology, generation, digest), animation frame and transform. */

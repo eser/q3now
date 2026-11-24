@@ -784,14 +784,14 @@ static qboolean BuildEntityGeometry( const renderSubmissionState_t *frontend,
 			renderModelSnapshot_t model;
 			temporalEntityPoseReceipt_t poseReceipt;
 			const temporalEntityPose_t *previousPose = NULL;
+			qboolean rotated = qfalse;
 			if ( !RenderSubmission_ModelSnapshot( frontend, entity->hModel, &model )
 					|| !model.ready || !model.positions || !model.normals || !model.texCoords
 					|| !model.indices || !model.batches ) goto fail;
-			/* Rigid (inline BSP) and IQM entities with a motion identity record their pose; one with a committed previous pose
-			 * gets each vertex's previous-frame world position (the view weapon moves with the camera and stays invalidated). */
+			/* Model entities with a motion identity (brush, MD3, IQM) record their pose; one with a committed previous pose gets each
+			 * vertex's previous-frame world position (the view weapon moves with the camera and stays invalidated). */
 			if ( motion && entities[i].hasTemporal
-					&& !( entity->renderfx & ( RF_DEPTHHACK | RF_FIRST_PERSON ) )
-					&& ( model.format == RENDER_MODEL_INLINE_BSP || model.format == RENDER_MODEL_IQM ) ) {
+					&& !( entity->renderfx & ( RF_DEPTHHACK | RF_FIRST_PERSON ) ) ) {
 				temporalEntityPose_t pose;
 				RenderTemporal_EntityPose( entity, &model, &pose );
 				if ( R_TemporalEntityCacheRecord( motion->worldIndex, motion->frameId, (uintptr_t)&entities[i],
@@ -801,6 +801,7 @@ static qboolean BuildEntityGeometry( const renderSubmissionState_t *frontend,
 							&& (uint32_t)poseReceipt.previous.frame < model.frameCount
 							&& (uint32_t)poseReceipt.previous.oldframe < model.frameCount ) {
 						previousPose = &poseReceipt.previous;
+						rotated = RenderTemporal_PoseRotated( previousPose, &pose );
 						motion->previousValid++;
 					}
 				} else motion->rejected++;
@@ -874,7 +875,7 @@ static qboolean BuildEntityGeometry( const renderSubmissionState_t *frontend,
 				draw->material = RenderSubmission_EntityBatchMaterial(
 					frontend, &entities[i], batch );
 				draw->viewWeapon = ( entity->renderfx & ( RF_DEPTHHACK | RF_FIRST_PERSON ) ) ? qtrue : qfalse;
-				draw->motion = previousPose && RenderTemporal_EntityBatchWritesMotion( frontend, draw->material ) ? qtrue : qfalse;
+				draw->motion = previousPose && RenderTemporal_EntityBatchWritesMotion( frontend, draw->material, rotated ) ? qtrue : qfalse;
 				if ( draw->motion ) motion->motionDraws++;
 				draw->contentDigest = HashU64( model.digest,
 					( (uint64_t)i << 32u ) | batchIndex );
