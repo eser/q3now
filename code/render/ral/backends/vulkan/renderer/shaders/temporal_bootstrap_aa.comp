@@ -148,7 +148,7 @@ void main() {
 	vec4 result = finite4(current) ? fxSpatialAa(pixel, current) : vec4(0.0);
 	if (!finite4(result)) result = vec4(0.0);
 	imageStore(bootstrapColor, pixel, result);
-	imageStore(historyOutColor, pixel, result);
+	imageStore(historyOutColor, pixel, vec4(result.rgb, 1.0));   // history alpha = accumulated sample count (temporal_resolve.comp)
 	imageStore(historyOutLinearDepth, pixel, vec4(storeLinearDepth(texelFetch(
 		sampler2D(currentDeviceDepth, nearestSampler), pixel, 0).r)));
 }

@@ -245,7 +245,7 @@ kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buff
         result = float4(0.0);
     }
     spvDescriptorSet0.bootstrapColor.write(result, uint2(pixel));
-    spvDescriptorSet0.historyOutColor.write(result, uint2(pixel));
+    spvDescriptorSet0.historyOutColor.write(float4(result.xyz, 1.0), uint2(pixel));
     float param_4 = spvDescriptorSet0.currentDeviceDepth.read(uint2(pixel), 0).x;
     spvDescriptorSet0.historyOutLinearDepth.write(float4(storeLinearDepth(param_4, pc)), uint2(pixel));
 }

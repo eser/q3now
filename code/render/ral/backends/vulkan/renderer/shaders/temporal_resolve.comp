@@ -109,7 +109,7 @@ vec4 sampleCurrent(ivec2 pixel) {
 // The 4x4 kernel is evaluated with bilinear fetches: the two middle taps of each axis (both weights positive) collapse into one
 // fetch at w2 / (w1 + w2). `nearestSampler` is therefore a LINEAR clamp-to-edge sampler; every other read in this shader is a
 // texelFetch, which ignores filtering. Reciprocals use inversesqrt (the reflection contract admits one non-precise division).
-vec4 samplePreviousColor(vec2 texel, inout vec3 tapMin, inout vec3 tapMax) {
+vec4 samplePreviousColor(vec2 texel, inout vec3 tapMin, inout vec3 tapMax, inout float centreCount) {
 	vec2 baseFloat = floor(texel);
 	precise vec2 f = texel - baseFloat;
 	const float A = -0.75;
@@ -139,8 +139,40 @@ vec4 samplePreviousColor(vec2 texel, inout vec3 tapMin, inout vec3 tapMax) {
 		total += w[i];
 		tapMin = min(tapMin, tap.rgb);
 		tapMax = max(tapMax, tap.rgb);
+		if (i == 0) centreCount = tap.a;   // the centre tap: on a static pixel exactly its own texel
 	}
 	return sum * inversesqrt(total * total);
+}
+
+// History weight from the pixel's accumulated sample count, kept in the history alpha (a frame without usable history stores 1).
+// The resolved colour is the running mean of the last n jittered samples: weight n / (n + 1), up to historyCountCap, so a pixel
+// that stays put converges towards the average of the jitter phases instead of rippling with the 8-frame jitter cycle (static
+// items and edges). A moving pixel falls back to the backend weight (pc.historyWeight = m / (m + 1)): its count is limited to m,
+// so its lag is unchanged and, once it stops, the weight ramps up from there one sample per frame rather than jumping (a jump
+// kept the moving frames' history visible for longer after the camera stopped). The count is read from the centre bicubic tap
+// (the pixel's own texel when it does not move). History the clamp had to move far, relative to the size of the neighbourhood
+// box, is content the pixel no longer shows: its count drops accordingly, so a mismatch fades at the moving rate or faster
+// instead of the static one. The small clamps the jitter causes on static edges leave the count alone.
+const float historyCountCap = 24.0;   // weight 0.96
+const float staticMotionScale = 8.0;  // fully moving from 1/8 pixel of motion per frame
+float movingHistoryCount(float movingWeight) {
+	// m = w / (1 - w); 1 / x as inversesqrt(x * x) (the reflection contract admits one division, in linearizeDepth)
+	float rest = max(1.0 - movingWeight, 1.0 / historyCountCap);
+	return movingWeight * inversesqrt(rest * rest);
+}
+float accumulatedHistoryCount(float storedCount, float movingWeight, vec2 motionPixels) {
+	float count = clamp(storedCount, 1.0, historyCountCap);
+	float moving = clamp(length(motionPixels) * staticMotionScale, 0.0, 1.0);
+	return count + (min(count, movingHistoryCount(movingWeight)) - count) * moving;
+}
+float rectifiedHistoryCount(float count, vec3 clampMove, vec3 boxExtent) {
+	// rectified: clamp distance over box size, 1 / x as inversesqrt(x * x)
+	float boxSize = max(length(boxExtent), 1.0e-4);
+	float rectified = clamp(length(clampMove) * inversesqrt(boxSize * boxSize) - 0.5, 0.0, 1.0);
+	return max(1.0, count - (count - 1.0) * rectified);
+}
+float historyWeightForCount(float count) {
+	return count * inversesqrt((count + 1.0) * (count + 1.0));
 }
 
 // Output-only sharpening. TAA averages the jittered sub-pixel samples, which softens texture detail SMAA leaves untouched. The
@@ -396,6 +428,7 @@ void main() {
 	vec4 result = current;
 	vec4 displayed = current;
 	bool usedHistory = false;
+	float historyCount = 1.0;   // the history alpha: samples accumulated in this pixel (1 = this frame only)
 	float valid = texelFetch(
 		sampler2D(motionValidity, nearestSampler), pixel, 0).r;
 	vec2 velocity = dlMotionVelocity(pixel, tileIndex, valid);
@@ -449,7 +482,8 @@ void main() {
 			bool boxValid = neighborhoodBox(tileIndex, clipMin, clipMax);
 			vec3 tapMin = vec3(3.402823466e+38);
 			vec3 tapMax = vec3(-3.402823466e+38);
-			vec4 prior = samplePreviousColor(previousTexel, tapMin, tapMax);
+			float centreCount = 3.402823466e+38;
+			vec4 prior = samplePreviousColor(previousTexel, tapMin, tapMax, centreCount);
 			if (boxValid && finite4(prior)) {
 				vec3 clampedPrior = clamp(prior.rgb, clipMin, clipMax);
 				// Scale the history weight by the pixel's confidence. At
@@ -460,12 +494,15 @@ void main() {
 				// which is what suppresses ghosting on partly-trusted
 				// surfaces without disabling temporal accumulation for them.
 				float confidence = clamp(valid, 0.0, 1.0);
-				float baseWeight = clamp(pc.historyWeight, 0.0, 1.0);
+				float priorCount = accumulatedHistoryCount(centreCount, clamp(pc.historyWeight, 0.0, 1.0), motionTexel);
+				priorCount = rectifiedHistoryCount(priorCount, prior.rgb - clampedPrior, clipMax - clipMin);
+				float baseWeight = historyWeightForCount(priorCount);
 				float weight = scalePrecise(baseWeight, confidence);
 				precise vec3 resolvedRgb = mixPrecise(current.rgb, clampedPrior,
 					weight);
 				result = vec4(resolvedRgb, current.a);
 				displayed = result;
+				historyCount = min(priorCount * confidence + 1.0, historyCountCap);
 				// Sharpened copy for display only, kept inside the range of the result and the history neighbourhood (no halos).
 				// qualityFlags bit 3 turns it off (a diagnostic; every backend passes 7).
 				if ((pc.qualityFlags & 8u) == 0u) {
@@ -481,6 +518,6 @@ void main() {
 	if (!finite4(result)) result = vec4(0.0);
 	if (!usedHistory || !finite4(displayed)) displayed = result;
 	imageStore(resolvedColor, pixel, displayed);
-	imageStore(historyOutColor, pixel, result);
+	imageStore(historyOutColor, pixel, vec4(result.rgb, historyCount));
 	imageStore(historyOutLinearDepth, pixel, vec4(storeLinearDepth(tileDepth[tileIndex])));
 }

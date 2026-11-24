@@ -518,13 +518,14 @@ fn main_1() {
     textureStore(bootstrapColor, _e75, _e76);
     let _e77 = pixel_1;
     let _e78 = result;
-    textureStore(historyOutColor, _e77, _e78);
-    let _e79 = pixel_1;
-    let _e80 = pixel_1;
-    let _e81 = textureLoad(currentDeviceDepth, _e80, 0i);
-    param_27 = _e81.x;
-    let _e83 = storeLinearDepth_u0028_f1_u003b((&param_27));
-    textureStore(historyOutLinearDepth, _e79, vec4(_e83));
+    let _e79 = _e78.xyz;
+    textureStore(historyOutColor, _e77, vec4<f32>(_e79.x, _e79.y, _e79.z, 1f));
+    let _e84 = pixel_1;
+    let _e85 = pixel_1;
+    let _e86 = textureLoad(currentDeviceDepth, _e85, 0i);
+    param_27 = _e86.x;
+    let _e88 = storeLinearDepth_u0028_f1_u003b((&param_27));
+    textureStore(historyOutLinearDepth, _e84, vec4(_e88));
     return;
 }
 

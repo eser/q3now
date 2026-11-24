@@ -86,7 +86,11 @@ require_text(SHADER "vec2 sampleAt = (vec2(pixel) + 0.5) * inversesqrt(extent * 
 	"the reconstruction samples the current frame at the pixel centre shifted by the current effective jitter")
 require_text(SHADER "float samplePreviousDepthLinear(vec2 texel)"
 	"manual bilinear previous-depth helper missing")
-require_text(SHADER "vec4 samplePreviousColor(vec2 texel, inout vec3 tapMin, inout vec3 tapMax)"
+require_text(SHADER "float baseWeight = historyWeightForCount(priorCount);"
+	"the history weight follows the accumulated sample count (n / (n + 1)), limited to the backend weight while moving")
+require_text(SHADER "imageStore(historyOutColor, pixel, vec4(result.rgb, historyCount));"
+	"the history alpha carries the accumulated sample count")
+require_text(SHADER "vec4 samplePreviousColor(vec2 texel, inout vec3 tapMin, inout vec3 tapMax, inout float centreCount)"
 	"bicubic previous-color helper missing (it also reports the range of its history taps)")
 require_text(SHADER "min(resolvedRgb, tapMin), max(resolvedRgb, tapMax)"
 	"the sharpened display colour is bounded by the history taps; a bound from the current 3x3 box rides the jitter (shimmer)")

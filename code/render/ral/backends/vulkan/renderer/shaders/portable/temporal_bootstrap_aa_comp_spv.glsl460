@@ -227,7 +227,7 @@ void main()
         result = vec4(0.0);
     }
     imageStore(bootstrapColor, pixel, result);
-    imageStore(historyOutColor, pixel, result);
+    imageStore(historyOutColor, pixel, vec4(result.xyz, 1.0));
     float param_4 = texelFetch(currentDeviceDepth, pixel, 0).x;
     imageStore(historyOutLinearDepth, pixel, vec4(storeLinearDepth(param_4)));
 }
