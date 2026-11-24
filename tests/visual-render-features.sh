@@ -2549,13 +2549,17 @@ aacompare)
     # Same camera, fixedtime 8: no AA / SMAA preset 3 / TAA. Still, after a yaw, and 3 frames after a teleport (a cut: no valid
     # history). The frames differ by construction (SMAA is spatial, TAA accumulates); this mode produces the images and the pairwise
     # tile differences for a human to judge. It never fails on image content, only when a capture is missing or TAA is not active.
+    # The yaw case (1) is pose-exact: separate processes ended the +right turn at different yaws (the TAA frame aligned about 8 px
+    # off the AA-off one, SMAA's at 0), so its three images come from ONE process that pans with TAA on, then, with the camera at
+    # rest, captures TAA, switches to AA off and to SMAA live and captures each a few frames later at the same pose (a screenshot is
+    # taken at the end of its frame, so each switch waits two frames after the capture before it).
     AC_POS="${AC_POS:-1052 1432 50 135}"; AC_CUT_POS="${AC_CUT_POS:-300 300 200 45}"
     ac() {
         local tag="$1" aa="$2" smaa="$3" yaw="$4"
         { printf 'set cg_draw2D 0\nset cg_drawGun 0\nset fixedtime 8\n'
           case "$yaw" in
             0) printf 'wait 40\n' ;;
-            1) printf 'cl_yawspeed 60\n+right\nwait 24\n-right\nwait 40\n' ;;
+            1) printf 'cl_yawspeed 60\n+right\nwait 24\n-right\nwait 40\nscreenshot vrf_ac_taa_1p\nwait 2\nset r_aa 0\nwait 4\nscreenshot vrf_ac_none_1p\nwait 2\nset r_smaa 3\nset r_aa 2\nwait 4\nscreenshot vrf_ac_smaa_1p\nwait 4\n' ;;
             2) printf 'wait 40\nsetviewpos %s 0\nwait 3\nscreenshot vrf_%s_cut\nwait 3\n' "$AC_CUT_POS" "$tag" ;;
           esac; } > "$SMOKE_HOME/base/vrf_ac.cfg"
         CAP_POST_CMD="exec vrf_ac.cfg" capture_fixed_cam arena1 "$AC_POS" "$tag" +set r_aa "$aa" +set r_smaa "$smaa" >/dev/null || return 1
@@ -2563,12 +2567,19 @@ aacompare)
     for yaw in 0 1 2; do
         for cfg in "none 0 0" "smaa 2 3" "taa 1 0"; do
             set -- $cfg
+            # The yaw case takes all three images in the TAA run (pose-exact, above).
+            [ "$yaw" = 1 ] && [ "$1" != taa ] && continue
+            [ "$yaw" = 1 ] && rm -f "$SHOTDIR/vrf_ac_none_1p.png" "$SHOTDIR/vrf_ac_smaa_1p.png" "$SHOTDIR/vrf_ac_taa_1p.png"
             ac "ac_$1_$yaw" "$2" "$3" "$yaw" || FAIL=1
         done
         if ! grep -q 'temporal-resolved-hdr' "$VRF_TMP/vrf-ac_taa_$yaw.log"; then
             echo "  aacompare yaw=$yaw: FAIL(TAA was not active: no temporal-resolved lines)"; FAIL=1
         fi
         a="$SHOTDIR/vrf_ac_none_$yaw.png"; b="$SHOTDIR/vrf_ac_smaa_$yaw.png"; c="$SHOTDIR/vrf_ac_taa_$yaw.png"
+        if [ "$yaw" = 1 ]; then   # the pose-exact trio, taken inside the TAA run ("p": same pose)
+            a="$SHOTDIR/vrf_ac_none_1p.png"; b="$SHOTDIR/vrf_ac_smaa_1p.png"; c="$SHOTDIR/vrf_ac_taa_1p.png"
+            for f in "$a" "$b" "$c"; do [ -s "$f" ] || { echo "  aacompare yaw=1: FAIL(missing $f)"; FAIL=1; }; done
+        fi
         printf "  aacompare case=%s: worst-tile none-vs-smaa=%s none-vs-taa=%s smaa-vs-taa=%s (images in %s)\n" "$yaw" \
             "$(worst_tile_diff_nohud "$a" "$b")" "$(worst_tile_diff_nohud "$a" "$c")" "$(worst_tile_diff_nohud "$b" "$c")" "$SHOTDIR"
         if [ "$yaw" = 0 ]; then
