@@ -225,7 +225,12 @@ for key, bucket in buckets.items():
     complete = [sample for sample in bucket["gpu"] if sample.get("frames") == 200 and "total" in sample]
     if len(complete) != 1:
         raise SystemExit(f"FAIL temporal-quality GPU aggregate {key}: {complete}")
-    bucket["total"] = complete[0]["total"]
+    if "present_prep" not in complete[0]:
+        raise SystemExit(f"FAIL temporal-quality GPU aggregate {key} has no present_prep lane")
+    # GPU work = the frame's lanes minus present_prep, the interval that ends at presentation and absorbs the wait for the next
+    # drawable. On this machine the totals are paced by presentation (present_prep 3.4 ms of a ~4.1 ms total in the AA-off and
+    # SMAA windows), so totals compare cadence, not work.
+    bucket["total"] = complete[0]["total"] - complete[0]["present_prep"]
 off_ms = statistics.mean(buckets[("off", i)]["total"] for i in (1, 2))
 on_ms = statistics.mean(buckets[("on", i)]["total"] for i in (1, 2))
 smaa_ms = statistics.mean(buckets[("smaa", i)]["total"] for i in (1, 2))
@@ -240,23 +245,18 @@ print(
     f"pan={motion_delta:.3f}, "
     f"first-settled={first_settled_delta:.3f}, old-frame-residual={ghost_ratio:.2%}, history-roi={history_share:.1%}, "
     f"edge-ratio={edge_ratio:.3f}, AA-off-reference-delta={reference_delta:.3f}")
-# Budget: the TAA frame may cost at most 0.75 ms over AA off and the whole frame must fit the 240 Hz period (4.0 ms). Measured on
-# this configuration (Apple GPU, 2560x1440 resolve for the 1280x720 logical window): +0.46..+0.69 ms over six runs. The gate used to
-# flip between two scene states (+0.6..1.0 ms and +2.1..2.3 ms) because the camera was placed while the player was still falling out
-# of the noclip transition; the velocity now decays before setviewpos.
-# The absolute 0.75 ms is not stable on this machine: the same code measured +0.46..+0.69 ms in the morning and +0.2..+1.4 ms
-# later the same day, run to run (reverting every renderer change in between gave the same +1.3; the cause of the regime is not identified). SMAA is measured in the same run as the
-# reference the owner asked TAA to match: TAA is accepted when it is within 0.75 ms of AA off OR not dearer than SMAA by more than
-# SMAA_MARGIN_MS. Observed TAA-minus-SMAA gaps at the default settings: -0.26..+0.20 ms over five runs; a min/max-only run (not the
-# default) reached +0.57 ms and failed, so the margin is tight rather than generous.
+# Budget (owner, 2026-11-24): TAA must not cost more GPU work than SMAA by more than SMAA_MARGIN_MS, both measured in the same run
+# as frame work without the presentation wait (see above). This includes the scene-side cost of the motion targets, not only the
+# resolve. The former absolute terms (whole frame within 4.0 ms, TAA within 0.75 ms of AA off) compared presentation cadence and
+# were dropped; AA off is still reported.
 smaa_margin = float(os.environ.get("TQ_SMAA_MARGIN_MS", "0.35"))
-if on_ms > 4.0 or (delta_ms > 0.75 and delta_ms > smaa_delta_ms + smaa_margin):
+if on_ms > smaa_ms + smaa_margin:
     raise SystemExit(
-        f"FAIL temporal-quality GPU budget off={off_ms:.3f}ms on={on_ms:.3f}ms "
+        f"FAIL temporal-quality GPU budget (work without present_prep) off={off_ms:.3f}ms TAA={on_ms:.3f}ms SMAA={smaa_ms:.3f}ms "
         f"delta={delta_ms:+.3f}ms/{delta_percent:+.2f}% (SMAA reference delta={smaa_delta_ms:+.3f}ms, margin {smaa_margin:.2f}ms)")
 
 print(
-    f"PASS temporal GPU budget: off={off_ms:.3f}ms on={on_ms:.3f}ms "
+    f"PASS temporal GPU budget (work without present_prep): off={off_ms:.3f}ms TAA={on_ms:.3f}ms SMAA={smaa_ms:.3f}ms "
     f"delta={delta_ms:+.3f}ms/{delta_percent:+.2f}% (SMAA reference delta={smaa_delta_ms:+.3f}ms)")
 PYEOF
 }
