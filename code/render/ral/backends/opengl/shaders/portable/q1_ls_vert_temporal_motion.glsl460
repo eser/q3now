@@ -1,0 +1,44 @@
+#version 460
+
+struct TemporalPayloadRecord
+{
+    mat4 currentMvp;
+    mat4 previousMvp;
+    uvec4 outcomeReserved;
+};
+
+layout(binding = 0, std140) uniform UBO
+{
+    vec4 _pad_to_mvp[30];
+    mat4 mvp;
+} ubo;
+
+layout(binding = 0, std430) readonly buffer TemporalPayloads
+{
+    TemporalPayloadRecord temporalPayload[];
+} temporalPayloads;
+
+layout(location = 0) in vec3 in_position;
+layout(location = 1) out vec2 frag_tex_coord0;
+layout(location = 2) in vec2 in_tex_coord0;
+layout(location = 2) out vec2 frag_tex_coord1;
+layout(location = 3) in vec2 in_tex_coord1;
+layout(location = 10) out vec4 temporalCurrentClip;
+layout(location = 11) out vec4 temporalPreviousClip;
+layout(location = 12) flat out uint temporalOutcome;
+
+void main()
+{
+    gl_Position = ubo.mvp * vec4(in_position, 1.0);
+    frag_tex_coord0 = in_tex_coord0;
+    frag_tex_coord1 = in_tex_coord1;
+    TemporalPayloadRecord temporal;
+    temporal.currentMvp = temporalPayloads.temporalPayload[(gl_InstanceID + gl_BaseInstance)].currentMvp;
+    temporal.previousMvp = temporalPayloads.temporalPayload[(gl_InstanceID + gl_BaseInstance)].previousMvp;
+    temporal.outcomeReserved = temporalPayloads.temporalPayload[(gl_InstanceID + gl_BaseInstance)].outcomeReserved;
+    vec4 temporalLocalPosition = vec4(in_position, 1.0);
+    temporalCurrentClip = temporal.currentMvp * temporalLocalPosition;
+    temporalPreviousClip = temporal.previousMvp * temporalLocalPosition;
+    temporalOutcome = temporal.outcomeReserved.x;
+}
+

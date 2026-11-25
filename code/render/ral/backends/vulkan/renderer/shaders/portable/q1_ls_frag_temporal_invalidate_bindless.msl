@@ -1,0 +1,143 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+template<typename T>
+struct spvDescriptor
+{
+    T value;
+};
+
+template<typename T>
+struct spvDescriptorArray
+{
+    spvDescriptorArray(const device spvDescriptor<T>* ptr_) : ptr(&ptr_->value) {}
+    spvDescriptorArray(const device void *ptr_) : spvDescriptorArray(static_cast<const device spvDescriptor<T>*>(ptr_)) {}
+    const device T& operator [] (size_t i) const { return ptr[i]; }
+    const device T* ptr;
+};
+
+struct UBO
+{
+    float4 _eyePos;
+    float4 _animPad;
+    float4 _pad1;
+    float4 _pad2;
+    float4 _fogDist;
+    float4 _fogDepth;
+    float4 _fogEyeT;
+    float4 _fogColor;
+    float4 q1StyleIntensities;
+    float4 _pad_to_packed_indices[25];
+    uint4 packed_indices[3];
+};
+
+struct spvDescriptorSetBuffer0
+{
+    constant UBO* m_90 [[id(0)]];
+};
+
+struct spvDescriptorSetBuffer1
+{
+    spvDescriptor<texture2d<float>> wired_bindless_images [[id(0)]][1] /* unsized array hack */;
+    // Overlapping binding: spvDescriptor<sampler> wired_bindless_samplers [[id(0)]][1] /* unsized array hack */;
+};
+
+struct main0_out
+{
+    float4 out_color [[color(0)]];
+    float2 out_temporal_velocity [[color(1)]];
+    float4 out_temporal_validity [[color(2)]];
+};
+
+struct main0_in
+{
+    float2 frag_tex_coord0 [[user(locn1), centroid_perspective]];
+    float2 frag_tex_coord1 [[user(locn2), centroid_perspective]];
+};
+
+static inline __attribute__((always_inline))
+float3 sRGBToLinear(thread float3& c)
+{
+    c = fast::max(c, float3(0.0));
+    bool3 cutoff = c <= float3(0.040449999272823333740234375);
+    float3 lo = c / float3(12.9200000762939453125);
+    float3 hi = powr((c + float3(0.054999999701976776123046875)) / float3(1.05499994754791259765625), float3(2.400000095367431640625));
+    return mix(hi, lo, float3(cutoff));
+}
+
+static inline __attribute__((always_inline))
+void wiredTemporalWriteAux(thread const float& coverageConfidence, thread const float4& sceneColor, thread float2& out_temporal_velocity, thread float4& out_temporal_validity)
+{
+    out_temporal_velocity = float2(0.0);
+    out_temporal_validity = float4(0.0);
+    out_temporal_validity = float4(fast::clamp(fast::max(sceneColor.x, fast::max(sceneColor.y, sceneColor.z)), 0.0, 1.0), 0.0, 0.0, fast::clamp(sceneColor.w, 0.0, 1.0));
+}
+
+fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], const device spvDescriptorSetBuffer1& spvDescriptorSet1 [[buffer(1)]])
+{
+    spvDescriptorArray<texture2d<float>> wired_bindless_images {spvDescriptorSet1.wired_bindless_images};
+    spvDescriptorArray<sampler> wired_bindless_samplers {reinterpret_cast<const device spvDescriptor<sampler>*>(&spvDescriptorSet1.wired_bindless_images)};
+
+    main0_out out = {};
+    float animBlend = (*spvDescriptorSet0.m_90)._animPad.x;
+    uint _108 = (*spvDescriptorSet0.m_90).packed_indices[0].x & 4095u;
+    uint _122 = ((*spvDescriptorSet0.m_90).packed_indices[0].x >> uint(12)) & 255u;
+    float4 diffuseA = wired_bindless_images[_108].sample(wired_bindless_samplers[_122], in.frag_tex_coord0);
+    uint _136 = (*spvDescriptorSet0.m_90).packed_indices[0].y & 4095u;
+    uint _143 = ((*spvDescriptorSet0.m_90).packed_indices[0].y >> uint(12)) & 255u;
+    float4 diffuseB = wired_bindless_images[_136].sample(wired_bindless_samplers[_143], in.frag_tex_coord0);
+    float3 param = diffuseA.xyz;
+    float3 _152 = sRGBToLinear(param);
+    diffuseA.x = _152.x;
+    diffuseA.y = _152.y;
+    diffuseA.z = _152.z;
+    float3 param_1 = diffuseB.xyz;
+    float3 _162 = sRGBToLinear(param_1);
+    diffuseB.x = _162.x;
+    diffuseB.y = _162.y;
+    diffuseB.z = _162.z;
+    float4 diffuse = mix(diffuseA, diffuseB, float4(animBlend));
+    uint _179 = (*spvDescriptorSet0.m_90).packed_indices[0].z & 4095u;
+    uint _186 = ((*spvDescriptorSet0.m_90).packed_indices[0].z >> uint(12)) & 255u;
+    float4 t0 = wired_bindless_images[_179].sample(wired_bindless_samplers[_186], in.frag_tex_coord1);
+    float3 param_2 = t0.xyz;
+    float3 _196 = sRGBToLinear(param_2);
+    t0.x = _196.x;
+    t0.y = _196.y;
+    t0.z = _196.z;
+    uint _207 = (*spvDescriptorSet0.m_90).packed_indices[0].w & 4095u;
+    uint _214 = ((*spvDescriptorSet0.m_90).packed_indices[0].w >> uint(12)) & 255u;
+    float4 t1 = wired_bindless_images[_207].sample(wired_bindless_samplers[_214], in.frag_tex_coord1);
+    float3 param_3 = t1.xyz;
+    float3 _223 = sRGBToLinear(param_3);
+    t1.x = _223.x;
+    t1.y = _223.y;
+    t1.z = _223.z;
+    uint _234 = (*spvDescriptorSet0.m_90).packed_indices[1].x & 4095u;
+    uint _241 = ((*spvDescriptorSet0.m_90).packed_indices[1].x >> uint(12)) & 255u;
+    float4 t2 = wired_bindless_images[_234].sample(wired_bindless_samplers[_241], in.frag_tex_coord1);
+    float3 param_4 = t2.xyz;
+    float3 _250 = sRGBToLinear(param_4);
+    t2.x = _250.x;
+    t2.y = _250.y;
+    t2.z = _250.z;
+    uint _261 = (*spvDescriptorSet0.m_90).packed_indices[1].y & 4095u;
+    uint _268 = ((*spvDescriptorSet0.m_90).packed_indices[1].y >> uint(12)) & 255u;
+    float4 t3 = wired_bindless_images[_261].sample(wired_bindless_samplers[_268], in.frag_tex_coord1);
+    float3 param_5 = t3.xyz;
+    float3 _277 = sRGBToLinear(param_5);
+    t3.x = _277.x;
+    t3.y = _277.y;
+    t3.z = _277.z;
+    float4 lm = (((t0 * (*spvDescriptorSet0.m_90).q1StyleIntensities.x) + (t1 * (*spvDescriptorSet0.m_90).q1StyleIntensities.y)) + (t2 * (*spvDescriptorSet0.m_90).q1StyleIntensities.z)) + (t3 * (*spvDescriptorSet0.m_90).q1StyleIntensities.w);
+    out.out_color = diffuse * lm;
+    float param_6 = 1.0;
+    float4 param_7 = out.out_color;
+    wiredTemporalWriteAux(param_6, param_7, out.out_temporal_velocity, out.out_temporal_validity);
+    return out;
+}
+

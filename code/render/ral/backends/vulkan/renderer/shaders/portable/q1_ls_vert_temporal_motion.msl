@@ -1,0 +1,74 @@
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct UBO
+{
+    float4 _pad_to_mvp[30];
+    float4x4 mvp;
+};
+
+struct TemporalPayloadRecord
+{
+    float4x4 currentMvp;
+    float4x4 previousMvp;
+    uint4 outcomeReserved;
+};
+
+struct TemporalPayloadRecord_1
+{
+    float4x4 currentMvp;
+    float4x4 previousMvp;
+    uint4 outcomeReserved;
+};
+
+struct TemporalPayloads
+{
+    TemporalPayloadRecord_1 temporalPayload[1];
+};
+
+struct spvDescriptorSetBuffer0
+{
+    constant UBO* ubo [[id(0)]];
+};
+
+struct spvDescriptorSetBuffer3
+{
+    const device TemporalPayloads* temporalPayloads [[id(0)]];
+};
+
+struct main0_out
+{
+    float2 frag_tex_coord0 [[user(locn1)]];
+    float2 frag_tex_coord1 [[user(locn2)]];
+    float4 temporalCurrentClip [[user(locn10)]];
+    float4 temporalPreviousClip [[user(locn11)]];
+    uint temporalOutcome [[user(locn12)]];
+    float4 gl_Position [[position]];
+};
+
+struct main0_in
+{
+    float3 in_position [[attribute(0)]];
+    float2 in_tex_coord0 [[attribute(2)]];
+    float2 in_tex_coord1 [[attribute(3)]];
+};
+
+vertex main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], const device spvDescriptorSetBuffer3& spvDescriptorSet3 [[buffer(3)]], uint gl_InstanceIndex [[instance_id]])
+{
+    main0_out out = {};
+    out.gl_Position = (*spvDescriptorSet0.ubo).mvp * float4(in.in_position, 1.0);
+    out.frag_tex_coord0 = in.in_tex_coord0;
+    out.frag_tex_coord1 = in.in_tex_coord1;
+    TemporalPayloadRecord temporal;
+    temporal.currentMvp = (*spvDescriptorSet3.temporalPayloads).temporalPayload[int(gl_InstanceIndex)].currentMvp;
+    temporal.previousMvp = (*spvDescriptorSet3.temporalPayloads).temporalPayload[int(gl_InstanceIndex)].previousMvp;
+    temporal.outcomeReserved = (*spvDescriptorSet3.temporalPayloads).temporalPayload[int(gl_InstanceIndex)].outcomeReserved;
+    float4 temporalLocalPosition = float4(in.in_position, 1.0);
+    out.temporalCurrentClip = temporal.currentMvp * temporalLocalPosition;
+    out.temporalPreviousClip = temporal.previousMvp * temporalLocalPosition;
+    out.temporalOutcome = temporal.outcomeReserved.x;
+    return out;
+}
+

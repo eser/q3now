@@ -1,0 +1,248 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+template<typename T>
+struct spvDescriptor
+{
+    T value;
+};
+
+template<typename T>
+struct spvDescriptorArray
+{
+    spvDescriptorArray(const device spvDescriptor<T>* ptr_) : ptr(&ptr_->value) {}
+    spvDescriptorArray(const device void *ptr_) : spvDescriptorArray(static_cast<const device spvDescriptor<T>*>(ptr_)) {}
+    const device T& operator [] (size_t i) const { return ptr[i]; }
+    const device T* ptr;
+};
+
+struct UBO
+{
+    float4 _eyePos;
+    float4 _animPad;
+    float4 _pad1;
+    float4 _pad2;
+    float4 _fogDist;
+    float4 _fogDepth;
+    float4 _fogEyeT;
+    float4 _fogColor;
+    float4 q1StyleIntensities;
+    float4 _pad_to_packed_indices[25];
+    uint4 packed_indices[3];
+};
+
+struct spvDescriptorSetBuffer0
+{
+    constant UBO* m_211 [[id(0)]];
+};
+
+struct spvDescriptorSetBuffer1
+{
+    spvDescriptor<texture2d<float>> wired_bindless_images [[id(0)]][1] /* unsized array hack */;
+    // Overlapping binding: spvDescriptor<sampler> wired_bindless_samplers [[id(0)]][1] /* unsized array hack */;
+};
+
+struct main0_out
+{
+    float4 out_color [[color(0)]];
+    float2 out_temporal_velocity [[color(1)]];
+    float4 out_temporal_validity [[color(2)]];
+};
+
+struct main0_in
+{
+    float2 frag_tex_coord0 [[user(locn1), centroid_perspective]];
+    float2 frag_tex_coord1 [[user(locn2), centroid_perspective]];
+    float4 temporalCurrentClip [[user(locn10)]];
+    float4 temporalPreviousClip [[user(locn11)]];
+    uint temporalOutcome [[user(locn12)]];
+};
+
+static inline __attribute__((always_inline))
+float3 sRGBToLinear(thread float3& c)
+{
+    c = fast::max(c, float3(0.0));
+    bool3 cutoff = c <= float3(0.040449999272823333740234375);
+    float3 lo = c / float3(12.9200000762939453125);
+    float3 hi = powr((c + float3(0.054999999701976776123046875)) / float3(1.05499994754791259765625), float3(2.400000095367431640625));
+    return mix(hi, lo, float3(cutoff));
+}
+
+static inline __attribute__((always_inline))
+bool wiredTemporalFinite4(thread const float4& value)
+{
+    bool _36 = all(value == value);
+    bool _45;
+    if (_36)
+    {
+        _45 = all(abs(value) <= float4(3.4028234663852885981170418348452e+38));
+    }
+    else
+    {
+        _45 = _36;
+    }
+    return _45;
+}
+
+static inline __attribute__((always_inline))
+bool wiredTemporalFinite2(thread const float2& value)
+{
+    bool _52 = all(value == value);
+    bool _60;
+    if (_52)
+    {
+        _60 = all(abs(value) <= float2(3.4028234663852885981170418348452e+38));
+    }
+    else
+    {
+        _60 = _52;
+    }
+    return _60;
+}
+
+static inline __attribute__((always_inline))
+void wiredTemporalWriteAux(thread const float& coverageConfidence, thread const float4& sceneColor, thread float2& out_temporal_velocity, thread float4& out_temporal_validity, thread uint& temporalOutcome, thread float4& temporalCurrentClip, thread float4& temporalPreviousClip)
+{
+    out_temporal_velocity = float2(0.0);
+    out_temporal_validity = float4(0.0);
+    bool _75 = temporalOutcome != 1u;
+    bool _85;
+    if (!_75)
+    {
+        float4 param = temporalCurrentClip;
+        _85 = !wiredTemporalFinite4(param);
+    }
+    else
+    {
+        _85 = _75;
+    }
+    bool _94;
+    if (!_85)
+    {
+        float4 param_1 = temporalPreviousClip;
+        _94 = !wiredTemporalFinite4(param_1);
+    }
+    else
+    {
+        _94 = _85;
+    }
+    bool _104;
+    if (!_94)
+    {
+        _104 = temporalCurrentClip.w <= 9.9999999747524270787835121154785e-07;
+    }
+    else
+    {
+        _104 = _94;
+    }
+    bool _111;
+    if (!_104)
+    {
+        _111 = temporalPreviousClip.w <= 9.9999999747524270787835121154785e-07;
+    }
+    else
+    {
+        _111 = _104;
+    }
+    if (_111)
+    {
+        return;
+    }
+    float2 currentNdc = temporalCurrentClip.xy / float2(temporalCurrentClip.w);
+    float2 previousNdc = temporalPreviousClip.xy / float2(temporalPreviousClip.w);
+    float2 param_2 = currentNdc;
+    bool _132 = !wiredTemporalFinite2(param_2);
+    bool _140;
+    if (!_132)
+    {
+        float2 param_3 = previousNdc;
+        _140 = !wiredTemporalFinite2(param_3);
+    }
+    else
+    {
+        _140 = _132;
+    }
+    if (_140)
+    {
+        return;
+    }
+    float2 currentUv = (currentNdc * 0.5) + float2(0.5);
+    float2 previousUv = (previousNdc * 0.5) + float2(0.5);
+    float2 velocity = currentUv - previousUv;
+    float2 param_4 = velocity;
+    if (!wiredTemporalFinite2(param_4))
+    {
+        return;
+    }
+    out_temporal_velocity = velocity;
+    out_temporal_validity = float4(fast::clamp(coverageConfidence, 0.0, 1.0), 0.0, 0.0, 1.0);
+}
+
+fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], const device spvDescriptorSetBuffer1& spvDescriptorSet1 [[buffer(1)]])
+{
+    spvDescriptorArray<texture2d<float>> wired_bindless_images {spvDescriptorSet1.wired_bindless_images};
+    spvDescriptorArray<sampler> wired_bindless_samplers {reinterpret_cast<const device spvDescriptor<sampler>*>(&spvDescriptorSet1.wired_bindless_images)};
+
+    main0_out out = {};
+    float animBlend = (*spvDescriptorSet0.m_211)._animPad.x;
+    uint _230 = (*spvDescriptorSet0.m_211).packed_indices[0].x & 4095u;
+    uint _244 = ((*spvDescriptorSet0.m_211).packed_indices[0].x >> uint(12)) & 255u;
+    float4 diffuseA = wired_bindless_images[_230].sample(wired_bindless_samplers[_244], in.frag_tex_coord0);
+    uint _258 = (*spvDescriptorSet0.m_211).packed_indices[0].y & 4095u;
+    uint _265 = ((*spvDescriptorSet0.m_211).packed_indices[0].y >> uint(12)) & 255u;
+    float4 diffuseB = wired_bindless_images[_258].sample(wired_bindless_samplers[_265], in.frag_tex_coord0);
+    float3 param = diffuseA.xyz;
+    float3 _274 = sRGBToLinear(param);
+    diffuseA.x = _274.x;
+    diffuseA.y = _274.y;
+    diffuseA.z = _274.z;
+    float3 param_1 = diffuseB.xyz;
+    float3 _285 = sRGBToLinear(param_1);
+    diffuseB.x = _285.x;
+    diffuseB.y = _285.y;
+    diffuseB.z = _285.z;
+    float4 diffuse = mix(diffuseA, diffuseB, float4(animBlend));
+    uint _302 = (*spvDescriptorSet0.m_211).packed_indices[0].z & 4095u;
+    uint _309 = ((*spvDescriptorSet0.m_211).packed_indices[0].z >> uint(12)) & 255u;
+    float4 t0 = wired_bindless_images[_302].sample(wired_bindless_samplers[_309], in.frag_tex_coord1);
+    float3 param_2 = t0.xyz;
+    float3 _319 = sRGBToLinear(param_2);
+    t0.x = _319.x;
+    t0.y = _319.y;
+    t0.z = _319.z;
+    uint _330 = (*spvDescriptorSet0.m_211).packed_indices[0].w & 4095u;
+    uint _337 = ((*spvDescriptorSet0.m_211).packed_indices[0].w >> uint(12)) & 255u;
+    float4 t1 = wired_bindless_images[_330].sample(wired_bindless_samplers[_337], in.frag_tex_coord1);
+    float3 param_3 = t1.xyz;
+    float3 _346 = sRGBToLinear(param_3);
+    t1.x = _346.x;
+    t1.y = _346.y;
+    t1.z = _346.z;
+    uint _357 = (*spvDescriptorSet0.m_211).packed_indices[1].x & 4095u;
+    uint _364 = ((*spvDescriptorSet0.m_211).packed_indices[1].x >> uint(12)) & 255u;
+    float4 t2 = wired_bindless_images[_357].sample(wired_bindless_samplers[_364], in.frag_tex_coord1);
+    float3 param_4 = t2.xyz;
+    float3 _373 = sRGBToLinear(param_4);
+    t2.x = _373.x;
+    t2.y = _373.y;
+    t2.z = _373.z;
+    uint _384 = (*spvDescriptorSet0.m_211).packed_indices[1].y & 4095u;
+    uint _391 = ((*spvDescriptorSet0.m_211).packed_indices[1].y >> uint(12)) & 255u;
+    float4 t3 = wired_bindless_images[_384].sample(wired_bindless_samplers[_391], in.frag_tex_coord1);
+    float3 param_5 = t3.xyz;
+    float3 _400 = sRGBToLinear(param_5);
+    t3.x = _400.x;
+    t3.y = _400.y;
+    t3.z = _400.z;
+    float4 lm = (((t0 * (*spvDescriptorSet0.m_211).q1StyleIntensities.x) + (t1 * (*spvDescriptorSet0.m_211).q1StyleIntensities.y)) + (t2 * (*spvDescriptorSet0.m_211).q1StyleIntensities.z)) + (t3 * (*spvDescriptorSet0.m_211).q1StyleIntensities.w);
+    out.out_color = diffuse * lm;
+    float param_6 = 1.0;
+    float4 param_7 = out.out_color;
+    wiredTemporalWriteAux(param_6, param_7, out.out_temporal_velocity, out.out_temporal_validity, in.temporalOutcome, in.temporalCurrentClip, in.temporalPreviousClip);
+    return out;
+}
+

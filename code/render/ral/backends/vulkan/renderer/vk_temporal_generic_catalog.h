@@ -13,7 +13,10 @@ typedef enum {
 	VK_TEMPORAL_GENERIC_IDENT = 1,
 	VK_TEMPORAL_GENERIC_FIXED = 2,
 	VK_TEMPORAL_GENERIC_ENT = 3,
-	VK_TEMPORAL_GENERIC_CL = 4
+	VK_TEMPORAL_GENERIC_CL = 4,
+	/* Quake 1 4-style lightmap world pipelines (TYPE_LIGHTSTYLES / _ARRAY): q1_ls.vert + q1_ls[_array].frag, textureCount 0 */
+	VK_TEMPORAL_GENERIC_LS = 5,
+	VK_TEMPORAL_GENERIC_LSA = 6
 } vkTemporalGenericFamily_t;
 
 typedef struct {
@@ -35,7 +38,7 @@ typedef struct {
 } vkTemporalGenericCatalogEntry_t;
 
 enum {
-	VK_TEMPORAL_GENERIC_CATALOG_COUNT = 58,
+	VK_TEMPORAL_GENERIC_CATALOG_COUNT = 60,
 	VK_TEMPORAL_GENERIC_CATALOG_GENERATION = 1
 };
 

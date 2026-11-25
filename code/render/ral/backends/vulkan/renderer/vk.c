@@ -1459,6 +1459,8 @@ static void vk_temporal_motion_readback_collect_all_after_idle( void ) {
 // variants of the multi-texture pipelines, which sit outside it (no env pairing) but have their own catalog pairs.
 static qboolean vk_temporal_type_has_generic_cohort( uint32_t shaderType ) {
 	if ( shaderType >= TYPE_GENERIC_BEGIN && shaderType <= TYPE_GENERIC_END ) return qtrue;
+	/* Quake 1 4-style lightmap world pipelines: q1_ls siblings in the catalog's LS / LSA families (TASK-270). */
+	if ( shaderType == TYPE_LIGHTSTYLES || shaderType == TYPE_LIGHTSTYLES_ARRAY ) return qtrue;
 #if FEAT_SHADOW_MAPPING
 	if ( shaderType >= TYPE_MULTI_TEXTURE_MUL2_SHADOW
 			&& shaderType <= TYPE_MULTI_TEXTURE_MUL2_FIXED_COLOR_SHADOW ) return qtrue;
@@ -28467,8 +28469,11 @@ static void create_pipeline( const Vk_Pipeline_Def *def,
 	// MSDF fragment shader has its own specialization layout (constant_id=0 is
 	// msdf_distance_range, not alpha-test-function). Shader compiled-in default
 	// is 8.0, matching all shipped atlases (pxrange 8). Pass NULL to use default.
-	if ( def->shader_type == TYPE_MSDF || def->shader_type == TYPE_LIGHTSTYLES
-	  || def->shader_type == TYPE_LIGHTSTYLES_ARRAY )
+	// The Q1 lightstyle fragments (q1_ls*.frag) declare no specialization
+	// constants, so the generic fragment map is inert for them; they carry it so
+	// their temporal recipe validates the same specialization ABI as the generic
+	// cohort (TASK-270).
+	if ( def->shader_type == TYPE_MSDF )
 		shader_stages[1].pSpecializationInfo = NULL;
 	else
 		shader_stages[1].pSpecializationInfo = &specialization.fragmentInfo;

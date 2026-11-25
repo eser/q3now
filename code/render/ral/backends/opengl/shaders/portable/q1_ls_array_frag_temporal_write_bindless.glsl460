@@ -1,0 +1,210 @@
+#version 460
+
+layout(binding = 0, std140) uniform UBO
+{
+    vec4 _eyePos;
+    vec4 _animPad;
+    vec4 _pad1;
+    vec4 _pad2;
+    vec4 _fogDist;
+    vec4 _fogDepth;
+    vec4 _fogEyeT;
+    vec4 _fogColor;
+    vec4 q1StyleIntensities;
+    vec4 _pad_to_packed_indices[25];
+    uvec4 packed_indices[3];
+} _211;
+
+layout(binding = 1) uniform texture2DArray wired_bindless_image_arrays[64];
+layout(binding = 0) uniform sampler wired_bindless_samplers[32];
+layout(binding = 0) uniform texture2D wired_bindless_images[64];
+
+layout(location = 1) out vec2 out_temporal_velocity;
+layout(location = 2) out vec4 out_temporal_validity;
+layout(location = 12) flat in uint temporalOutcome;
+layout(location = 10) in vec4 temporalCurrentClip;
+layout(location = 11) in vec4 temporalPreviousClip;
+layout(location = 1) centroid in vec2 frag_tex_coord0;
+layout(location = 2) centroid in vec2 frag_tex_coord1;
+layout(location = 0) out vec4 out_color;
+
+vec3 sRGBToLinear(inout vec3 c)
+{
+    c = max(c, vec3(0.0));
+    bvec3 cutoff = lessThanEqual(c, vec3(0.040449999272823333740234375));
+    vec3 lo = c / vec3(12.9200000762939453125);
+    vec3 hi = pow((c + vec3(0.054999999701976776123046875)) / vec3(1.05499994754791259765625), vec3(2.400000095367431640625));
+    return mix(hi, lo, vec3(cutoff));
+}
+
+bool wiredTemporalFinite4(vec4 value)
+{
+    bool _36 = all(equal(value, value));
+    bool _45;
+    if (_36)
+    {
+        _45 = all(lessThanEqual(abs(value), vec4(3.4028234663852885981170418348452e+38)));
+    }
+    else
+    {
+        _45 = _36;
+    }
+    return _45;
+}
+
+bool wiredTemporalFinite2(vec2 value)
+{
+    bool _52 = all(equal(value, value));
+    bool _60;
+    if (_52)
+    {
+        _60 = all(lessThanEqual(abs(value), vec2(3.4028234663852885981170418348452e+38)));
+    }
+    else
+    {
+        _60 = _52;
+    }
+    return _60;
+}
+
+void wiredTemporalWriteAux(float coverageConfidence, vec4 sceneColor)
+{
+    out_temporal_velocity = vec2(0.0);
+    out_temporal_validity = vec4(0.0);
+    bool _75 = temporalOutcome != 1u;
+    bool _85;
+    if (!_75)
+    {
+        vec4 param = temporalCurrentClip;
+        _85 = !wiredTemporalFinite4(param);
+    }
+    else
+    {
+        _85 = _75;
+    }
+    bool _94;
+    if (!_85)
+    {
+        vec4 param_1 = temporalPreviousClip;
+        _94 = !wiredTemporalFinite4(param_1);
+    }
+    else
+    {
+        _94 = _85;
+    }
+    bool _104;
+    if (!_94)
+    {
+        _104 = temporalCurrentClip.w <= 9.9999999747524270787835121154785e-07;
+    }
+    else
+    {
+        _104 = _94;
+    }
+    bool _111;
+    if (!_104)
+    {
+        _111 = temporalPreviousClip.w <= 9.9999999747524270787835121154785e-07;
+    }
+    else
+    {
+        _111 = _104;
+    }
+    if (_111)
+    {
+        return;
+    }
+    vec2 currentNdc = temporalCurrentClip.xy / vec2(temporalCurrentClip.w);
+    vec2 previousNdc = temporalPreviousClip.xy / vec2(temporalPreviousClip.w);
+    vec2 param_2 = currentNdc;
+    bool _132 = !wiredTemporalFinite2(param_2);
+    bool _140;
+    if (!_132)
+    {
+        vec2 param_3 = previousNdc;
+        _140 = !wiredTemporalFinite2(param_3);
+    }
+    else
+    {
+        _140 = _132;
+    }
+    if (_140)
+    {
+        return;
+    }
+    vec2 currentUv = (currentNdc * 0.5) + vec2(0.5);
+    vec2 previousUv = (previousNdc * 0.5) + vec2(0.5);
+    vec2 velocity = currentUv - previousUv;
+    vec2 param_4 = velocity;
+    if (!wiredTemporalFinite2(param_4))
+    {
+        return;
+    }
+    out_temporal_velocity = velocity;
+    out_temporal_validity = vec4(clamp(coverageConfidence, 0.0, 1.0), 0.0, 0.0, 1.0);
+}
+
+void main()
+{
+    float t = _211._animPad.x * 0.00999999977648258209228515625;
+    float nf = max(1.0, _211._animPad.y);
+    float animPos = mod(t, nf);
+    int frame = int(animPos);
+    int nextFr = int(mod(float(frame) + 1.0, nf));
+    float blend = fract(animPos);
+    uint _254 = _211.packed_indices[0].x & 4095u;
+    uint _268 = (_211.packed_indices[0].x >> uint(12)) & 255u;
+    vec4 diffuseA = texture(sampler2DArray(wired_bindless_image_arrays[_254], wired_bindless_samplers[_268]), vec3(frag_tex_coord0, float(frame)));
+    uint _287 = _211.packed_indices[0].x & 4095u;
+    uint _294 = (_211.packed_indices[0].x >> uint(12)) & 255u;
+    vec4 diffuseB = texture(sampler2DArray(wired_bindless_image_arrays[_287], wired_bindless_samplers[_294]), vec3(frag_tex_coord0, float(nextFr)));
+    vec3 param = diffuseA.xyz;
+    vec3 _308 = sRGBToLinear(param);
+    diffuseA.x = _308.x;
+    diffuseA.y = _308.y;
+    diffuseA.z = _308.z;
+    vec3 param_1 = diffuseB.xyz;
+    vec3 _319 = sRGBToLinear(param_1);
+    diffuseB.x = _319.x;
+    diffuseB.y = _319.y;
+    diffuseB.z = _319.z;
+    vec4 diffuse = mix(diffuseA, diffuseB, vec4(blend));
+    uint _340 = _211.packed_indices[0].z & 4095u;
+    uint _348 = (_211.packed_indices[0].z >> uint(12)) & 255u;
+    vec4 t0 = texture(sampler2D(wired_bindless_images[_340], wired_bindless_samplers[_348]), frag_tex_coord1);
+    vec3 param_2 = t0.xyz;
+    vec3 _359 = sRGBToLinear(param_2);
+    t0.x = _359.x;
+    t0.y = _359.y;
+    t0.z = _359.z;
+    uint _370 = _211.packed_indices[0].w & 4095u;
+    uint _377 = (_211.packed_indices[0].w >> uint(12)) & 255u;
+    vec4 t1 = texture(sampler2D(wired_bindless_images[_370], wired_bindless_samplers[_377]), frag_tex_coord1);
+    vec3 param_3 = t1.xyz;
+    vec3 _386 = sRGBToLinear(param_3);
+    t1.x = _386.x;
+    t1.y = _386.y;
+    t1.z = _386.z;
+    uint _397 = _211.packed_indices[1].x & 4095u;
+    uint _404 = (_211.packed_indices[1].x >> uint(12)) & 255u;
+    vec4 t2 = texture(sampler2D(wired_bindless_images[_397], wired_bindless_samplers[_404]), frag_tex_coord1);
+    vec3 param_4 = t2.xyz;
+    vec3 _413 = sRGBToLinear(param_4);
+    t2.x = _413.x;
+    t2.y = _413.y;
+    t2.z = _413.z;
+    uint _424 = _211.packed_indices[1].y & 4095u;
+    uint _431 = (_211.packed_indices[1].y >> uint(12)) & 255u;
+    vec4 t3 = texture(sampler2D(wired_bindless_images[_424], wired_bindless_samplers[_431]), frag_tex_coord1);
+    vec3 param_5 = t3.xyz;
+    vec3 _440 = sRGBToLinear(param_5);
+    t3.x = _440.x;
+    t3.y = _440.y;
+    t3.z = _440.z;
+    vec4 lm = (((t0 * _211.q1StyleIntensities.x) + (t1 * _211.q1StyleIntensities.y)) + (t2 * _211.q1StyleIntensities.z)) + (t3 * _211.q1StyleIntensities.w);
+    out_color = diffuse * lm;
+    float param_6 = 1.0;
+    vec4 param_7 = out_color;
+    wiredTemporalWriteAux(param_6, param_7);
+}
+

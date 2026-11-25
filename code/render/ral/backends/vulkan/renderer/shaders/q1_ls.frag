@@ -83,6 +83,9 @@ layout(location = 2) centroid in vec2 frag_tex_coord1;
 
 layout(location = 0) out vec4 out_color;
 
+// TAA motion outputs when built as a temporal sibling (USE_TEMPORAL_MOTION); nothing otherwise.
+#include "temporal_motion_frag.glsl"
+
 // Precise piecewise sRGB <-> linear conversion.
 // Duplicated in every fragment shader per the engine-wide
 // unconditional linear migration; compile.mjs lacks #include
@@ -138,4 +141,7 @@ void main() {
 	        + t3 * q1StyleIntensities.w;
 
 	out_color = diffuse * lm;
+#ifdef USE_TEMPORAL_MOTION
+	wiredTemporalWriteAux( 1.0, out_color );   // opaque world surface: full coverage
+#endif
 }

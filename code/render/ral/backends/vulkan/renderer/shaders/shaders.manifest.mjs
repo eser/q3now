@@ -91,7 +91,24 @@ function addCohort(cohort, shadow, entriesOut) {
 addCohort(temporalTxFamilies, false, temporalGenericShaderEntries);
 addCohort(temporalShadowTxFamilies, true, temporalShadowShaderEntries);
 
-if (temporalGenericPairs.length !== 58 || temporalGenericShaderEntries.length !== 76 || temporalShadowShaderEntries.length !== 54)
+// Quake 1 lightstyle cohort (TYPE_LIGHTSTYLES / TYPE_LIGHTSTYLES_ARRAY): the 4-style lightmap world pipelines are built from
+// q1_ls.vert + q1_ls[_array].frag, not gen_*.tmpl, so their siblings come from those sources with the same defines. One temporal
+// vertex serves both (the ordinary vertex is shared too). Without them Q1 world surfaces wrote no velocity/validity and TAA kept no
+// history there (TASK-270).
+const temporalLightstyleShaderEntries = [
+	{ stage: 'vert', source: 'q1_ls.vert', defines: ['USE_TEMPORAL_MOTION'], output: 'q1_ls_vert_temporal_motion' },
+	{ stage: 'frag', source: 'q1_ls.frag', defines: ['USE_TEMPORAL_MOTION'], output: 'q1_ls_frag_temporal_write_bindless' },
+	{ stage: 'frag', source: 'q1_ls.frag', defines: ['USE_TEMPORAL_MOTION', 'USE_TEMPORAL_INVALIDATE'], output: 'q1_ls_frag_temporal_invalidate_bindless' },
+	{ stage: 'frag', source: 'q1_ls_array.frag', defines: ['USE_TEMPORAL_MOTION'], output: 'q1_ls_array_frag_temporal_write_bindless' },
+	{ stage: 'frag', source: 'q1_ls_array.frag', defines: ['USE_TEMPORAL_MOTION', 'USE_TEMPORAL_INVALIDATE'], output: 'q1_ls_array_frag_temporal_invalidate_bindless' },
+];
+for (const [family, fragment] of [['ls', 'q1_ls_frag'], ['lsa', 'q1_ls_array_frag']])
+	temporalGenericPairs.push({ tx: 0, family, env: false, shaderFog: false, shadow: false,
+		ordinaryVertex: 'q1_ls_vert_spv', ordinaryFragment: `${fragment}_spv`, temporalVertex: 'q1_ls_vert_temporal_motion',
+		temporalWriteFragment: `${fragment}_temporal_write_bindless`, temporalInvalidateFragment: `${fragment}_temporal_invalidate_bindless` });
+
+if (temporalGenericPairs.length !== 60 || temporalGenericShaderEntries.length !== 76 || temporalShadowShaderEntries.length !== 54
+		|| temporalLightstyleShaderEntries.length !== 5)
 	throw new Error('temporal generic cohort cardinality drift');
 
 export default [
@@ -468,4 +485,7 @@ export default [
 	// Temporal siblings of the sun-shadow receiver generic pipelines (the shadow-receiver cohort). Appended: the sealed corpus is never
 	// reordered.
 	...temporalShadowShaderEntries,
+
+	// Temporal siblings of the Quake 1 lightstyle world pipelines (TASK-270). Appended: the sealed corpus is never reordered.
+	...temporalLightstyleShaderEntries,
 ];

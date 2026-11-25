@@ -21,7 +21,7 @@ qboolean VK_TemporalGenericCatalogSelect( const vkTemporalGenericKey_t *key,
 	vkTemporalGenericCatalogEntry_t candidate;
 	if ( !key || !out || key->textureCount > 2u
 			|| key->family < VK_TEMPORAL_GENERIC_PLAIN
-			|| key->family > VK_TEMPORAL_GENERIC_CL
+			|| key->family > VK_TEMPORAL_GENERIC_LSA
 			|| ( key->environment != qfalse && key->environment != qtrue )
 			|| ( key->shaderFog != qfalse && key->shaderFog != qtrue )
 			|| ( key->shadowReceiver != qfalse && key->shadowReceiver != qtrue ) ) return qfalse;

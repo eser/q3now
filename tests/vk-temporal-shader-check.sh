@@ -62,7 +62,7 @@ grep -Eq '%out_temporal_validity = OpVariable %_ptr_Output_v4float Output' "$inv
 grep -Eq '%out_temporal_validity = OpVariable %_ptr_Output_float Output' "$iqm"
 
 # Exhaust every manifest-owned temporal generic blob, rather than treating the
-# representative pair above as proof for the generated 58-pair catalog.
+# representative pair above as proof for the generated 60-pair catalog.
 (cd "$shader_dir" && node --input-type=module -e '
 	const m=await import("./shaders.manifest.mjs");
 	const byOutput=new Map(m.default.map(e=>[e.output,e])); const emitted=new Set();
@@ -72,16 +72,24 @@ grep -Eq '%out_temporal_validity = OpVariable %_ptr_Output_float Output' "$iqm"
 		if(emitted.has(output)) continue; emitted.add(output);
 		const e=byOutput.get(output), o=byOutput.get(ordinary);
 		if(!e||!o) throw new Error(`missing temporal/ordinary manifest entry ${output}/${ordinary}`);
-		console.log([e.stage,e.output,(e.defines||[]).join(","),o.output,(o.defines||[]).join(",")].join("|"));
+		console.log([e.stage,e.output,(e.defines||[]).join(","),o.output,(o.defines||[]).join(","),e.source,o.source].join("|"));
 	}
 ') > "$tmp/temporal-variants.txt"
 variant_count=0
 vertex_count=0
 write_count=0
 invalidate_count=0
-while IFS='|' read -r stage output defines ordinary_output ordinary_defines; do
+while IFS='|' read -r stage output defines ordinary_output ordinary_defines variant_source ordinary_source; do
 	variant_count=$((variant_count + 1))
-	case "$stage" in vert) source="$shader_dir/gen_vert.tmpl";; frag) source="$tmp/gen_frag.glsl";; *) exit 1;; esac
+	test "$variant_source" = "$ordinary_source"
+	case "$variant_source" in
+		gen_vert.tmpl) source="$shader_dir/gen_vert.tmpl";;
+		gen_frag.tmpl) source="$tmp/gen_frag.glsl";;
+		# Non-template siblings (the Quake 1 lightstyle cohort): their own source with the include directive enabled after #version.
+		*) source="$tmp/source-$variant_count.glsl"
+			awk '/^#version/ { print; print "#extension GL_GOOGLE_include_directive : require"; next } { print }' \
+				"$shader_dir/$variant_source" > "$source";;
+	esac
 	define_args=
 	old_ifs=$IFS; IFS=,
 	for define in $defines; do define_args="$define_args -D$define"; done
@@ -147,7 +155,7 @@ while IFS='|' read -r stage output defines ordinary_output ordinary_defines; do
 		cmp "$tmp/current.scene-type" "$tmp/ordinary.scene-type"
 	fi
 	case "$output" in
-		vert_*_temporal_motion)
+		*_temporal_motion)
 			vertex_count=$((vertex_count + 1))
 			grep -Eq 'OpDecorate %temporalPayloads DescriptorSet 3' "$tmp/$variant_count.dis"
 			grep -Eq 'OpDecorate %temporalPayloads Binding 1' "$tmp/$variant_count.dis"
@@ -155,7 +163,7 @@ while IFS='|' read -r stage output defines ordinary_output ordinary_defines; do
 			grep -Eq 'OpDecorate %temporalPreviousClip Location 11' "$tmp/$variant_count.dis"
 			! grep -Eq 'OpDecorate %(temporalCurrentClip|temporalPreviousClip) (Flat|NoPerspective)' "$tmp/$variant_count.dis"
 			;;
-		frag_*_temporal_write_bindless)
+		*_temporal_write_bindless)
 			write_count=$((write_count + 1))
 			grep -Eq 'OpDecorate %temporalCurrentClip Location 10' "$tmp/$variant_count.dis"
 			grep -Eq 'OpDecorate %temporalPreviousClip Location 11' "$tmp/$variant_count.dis"
@@ -163,7 +171,7 @@ while IFS='|' read -r stage output defines ordinary_output ordinary_defines; do
 			grep -Eq 'OpDecorate %out_temporal_velocity Location 1' "$tmp/$variant_count.dis"
 			grep -Eq 'OpDecorate %out_temporal_validity Location 2' "$tmp/$variant_count.dis"
 			;;
-		frag_*_temporal_invalidate_bindless)
+		*_temporal_invalidate_bindless)
 			invalidate_count=$((invalidate_count + 1))
 			grep -Eq 'OpDecorate %out_color Location 0' "$tmp/$variant_count.dis"
 			grep -Eq 'OpDecorate %out_temporal_velocity Location 1' "$tmp/$variant_count.dis"
@@ -172,8 +180,8 @@ while IFS='|' read -r stage output defines ordinary_output ordinary_defines; do
 		*) exit 1;;
 	esac
 done < "$tmp/temporal-variants.txt"
-test "$variant_count" -eq 130
-test "$vertex_count" -eq 54
-test "$write_count" -eq 38
-test "$invalidate_count" -eq 38
+test "$variant_count" -eq 135
+test "$vertex_count" -eq 55
+test "$write_count" -eq 40
+test "$invalidate_count" -eq 40
 echo 'vk temporal shader reflection contract: PASS'

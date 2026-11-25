@@ -221,8 +221,9 @@ int main( void ) {
 					&&crossId==99); }
 			accepted++;
 		}
-	// This loop walks the 40 non-shadow keys; the 18 sun-shadow receiver pairs are covered by vk_temporal_generic_catalog_test.
-	CHECK(accepted+18u==VK_TEMPORAL_GENERIC_CATALOG_COUNT);
+	// This loop walks the 40 non-shadow keys; the 18 sun-shadow receiver pairs and the 2 Quake 1 lightstyle pairs are covered by
+	// vk_temporal_generic_catalog_test.
+	CHECK(accepted+18u+2u==VK_TEMPORAL_GENERIC_CATALOG_COUNT);
 	{ vkTemporalGenericKey_t fixedKey={0,VK_TEMPORAL_GENERIC_FIXED,qfalse,qfalse};
 		vkTemporalGenericCatalogEntry_t fixedEntry;vkTemporalGenericKey_t untouched={9,(vkTemporalGenericFamily_t)9,9,9};
 		uint32_t untouchedId=99;CHECK(VK_TemporalGenericCatalogSelect(&fixedKey,&fixedEntry));

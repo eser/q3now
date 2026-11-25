@@ -74,6 +74,31 @@ int main( void ) {
 		CHECK(plain.temporalVertex.bytes!=shadow.temporalVertex.bytes && plain.temporalWriteFragment.bytes!=shadow.temporalWriteFragment.bytes);
 	}
 
+	// Quake 1 lightstyle cohort (TASK-270): LS and LSA exist only as tx0 / no env / no fog / no shadow; they share the ordinary
+	// and the temporal vertex (q1_ls.vert) and differ in the fragments (q1_ls.frag / q1_ls_array.frag).
+	{
+		vkTemporalGenericCatalogEntry_t ls, lsa, rejected; vkTemporalGenericKey_t k2;
+		uint32_t f2;
+		for ( f2 = VK_TEMPORAL_GENERIC_LS; f2 <= VK_TEMPORAL_GENERIC_LSA; ++f2 ) for ( tx = 0; tx < 3; ++tx )
+			for ( env = 0; env < 2; ++env ) for ( fog = 0; fog < 2; ++fog ) {
+				uint32_t shadow;
+				for ( shadow = 0; shadow < 2; ++shadow ) {
+					qboolean expected = tx == 0 && env == 0 && fog == 0 && shadow == 0 ? qtrue : qfalse;
+					memset(&k2,0,sizeof(k2)); k2.textureCount=tx; k2.family=(vkTemporalGenericFamily_t)f2;
+					k2.environment=(qboolean)env; k2.shaderFog=(qboolean)fog; k2.shadowReceiver=(qboolean)shadow;
+					CHECK( VK_TemporalGenericCatalogSelect(&k2,&rejected) == expected );
+				}
+			}
+		memset(&k2,0,sizeof(k2)); k2.family=VK_TEMPORAL_GENERIC_LS; CHECK(VK_TemporalGenericCatalogSelect(&k2,&ls));
+		k2.family=VK_TEMPORAL_GENERIC_LSA; CHECK(VK_TemporalGenericCatalogSelect(&k2,&lsa));
+		CHECK(BlobGood(ls.ordinaryVertex) && BlobGood(ls.ordinaryFragment) && BlobGood(ls.temporalVertex));
+		CHECK(BlobGood(ls.temporalWriteFragment) && BlobGood(ls.temporalInvalidateFragment) && BlobGood(lsa.temporalWriteFragment));
+		CHECK(ls.ordinaryVertex.bytes==lsa.ordinaryVertex.bytes && ls.temporalVertex.bytes==lsa.temporalVertex.bytes);
+		CHECK(ls.ordinaryFragment.bytes!=lsa.ordinaryFragment.bytes && ls.temporalWriteFragment.bytes!=lsa.temporalWriteFragment.bytes);
+		CHECK(ls.temporalWriteFragment.bytes!=ls.temporalInvalidateFragment.bytes);
+		k2.family=(vkTemporalGenericFamily_t)( VK_TEMPORAL_GENERIC_LSA + 1 ); CHECK(!VK_TemporalGenericCatalogSelect(&k2,&rejected));
+	}
+
 	key=(vkTemporalGenericKey_t){0,VK_TEMPORAL_GENERIC_FIXED,qfalse,qfalse};
 	CHECK(VK_TemporalGenericCatalogSelect(&key,&fixed));
 	key.family=VK_TEMPORAL_GENERIC_ENT; CHECK(VK_TemporalGenericCatalogSelect(&key,&ent));

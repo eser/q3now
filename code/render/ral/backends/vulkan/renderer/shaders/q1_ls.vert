@@ -25,8 +25,31 @@ layout(location = 3) in vec2 in_tex_coord1;
 layout(location = 1) out vec2 frag_tex_coord0;
 layout(location = 2) out vec2 frag_tex_coord1;
 
+#ifdef USE_TEMPORAL_MOTION
+// Temporal motion sibling (as gen_vert.tmpl USE_TEMPORAL_MOTION): the draw's current/previous MVP from the temporal payload at its
+// entity-matrix slot (firstInstance), interpolated to the fragment stage, which writes the velocity.
+struct TemporalPayloadRecord {
+	mat4 currentMvp;
+	mat4 previousMvp;
+	uvec4 outcomeReserved;
+};
+layout(std430, set = 3, binding = 1) readonly buffer TemporalPayloads {
+	TemporalPayloadRecord temporalPayload[];
+} temporalPayloads;
+layout(location = 10) out vec4 temporalCurrentClip;
+layout(location = 11) out vec4 temporalPreviousClip;
+layout(location = 12) flat out uint temporalOutcome;
+#endif
+
 void main() {
 	gl_Position = ubo.mvp * vec4(in_position, 1.0);
 	frag_tex_coord0 = in_tex_coord0;
 	frag_tex_coord1 = in_tex_coord1;
+#ifdef USE_TEMPORAL_MOTION
+	TemporalPayloadRecord temporal = temporalPayloads.temporalPayload[gl_InstanceIndex];
+	vec4 temporalLocalPosition = vec4(in_position, 1.0);
+	temporalCurrentClip = temporal.currentMvp * temporalLocalPosition;
+	temporalPreviousClip = temporal.previousMvp * temporalLocalPosition;
+	temporalOutcome = temporal.outcomeReserved.x;
+#endif
 }

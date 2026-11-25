@@ -4,10 +4,10 @@
   "portableManifest": {
     "schemaVersion": 1,
     "generation": 1,
-    "byteCount": 1165154,
+    "byteCount": 1176654,
     "digest": {
-      "lane0": "f88954c18176e935",
-      "lane1": "a8f804b9421f373f"
+      "lane0": "09fcdea342374087",
+      "lane1": "064b816bfe9bbdf5"
     }
   },
   "requiredTargets": [
@@ -8282,6 +8282,116 @@
           "digest": {
             "lane0": "318bab0ff956e8a8",
             "lane1": "257e96f7c86b048b"
+          }
+        }
+      ]
+    },
+    {
+      "ordinal": 376,
+      "symbol": "q1_ls_vert_temporal_motion",
+      "stage": "RAL_STAGE_VERTEX",
+      "spirv": {
+        "byteCount": 3268,
+        "digest": {
+          "lane0": "eb90672387e0b870",
+          "lane1": "1966649ffce60ce3"
+        }
+      },
+      "artifacts": [
+        {
+          "target": "glsl460",
+          "byteCount": 1481,
+          "digest": {
+            "lane0": "098145db9c357762",
+            "lane1": "35cb2688136be097"
+          }
+        }
+      ]
+    },
+    {
+      "ordinal": 377,
+      "symbol": "q1_ls_frag_temporal_write_bindless",
+      "stage": "RAL_STAGE_FRAGMENT",
+      "spirv": {
+        "byteCount": 11252,
+        "digest": {
+          "lane0": "c2b8c984ed13bb1b",
+          "lane1": "9fb36f41970a5059"
+        }
+      },
+      "artifacts": [
+        {
+          "target": "glsl460",
+          "byteCount": 5995,
+          "digest": {
+            "lane0": "6ba8dde9c72916ed",
+            "lane1": "feb26c24264b4c20"
+          }
+        }
+      ]
+    },
+    {
+      "ordinal": 378,
+      "symbol": "q1_ls_frag_temporal_invalidate_bindless",
+      "stage": "RAL_STAGE_FRAGMENT",
+      "spirv": {
+        "byteCount": 8676,
+        "digest": {
+          "lane0": "f5b999b32150fa8d",
+          "lane1": "a554161a2dae35e8"
+        }
+      },
+      "artifacts": [
+        {
+          "target": "glsl460",
+          "byteCount": 4023,
+          "digest": {
+            "lane0": "f954c357c8ba09e2",
+            "lane1": "295d3fde11bdf3a3"
+          }
+        }
+      ]
+    },
+    {
+      "ordinal": 379,
+      "symbol": "q1_ls_array_frag_temporal_write_bindless",
+      "stage": "RAL_STAGE_FRAGMENT",
+      "spirv": {
+        "byteCount": 12176,
+        "digest": {
+          "lane0": "3c64054f18b4ff32",
+          "lane1": "ac59cb8567d67a6c"
+        }
+      },
+      "artifacts": [
+        {
+          "target": "glsl460",
+          "byteCount": 6345,
+          "digest": {
+            "lane0": "b7ed0a00ada54ab2",
+            "lane1": "74422860e2a13d6c"
+          }
+        }
+      ]
+    },
+    {
+      "ordinal": 380,
+      "symbol": "q1_ls_array_frag_temporal_invalidate_bindless",
+      "stage": "RAL_STAGE_FRAGMENT",
+      "spirv": {
+        "byteCount": 9600,
+        "digest": {
+          "lane0": "332782587be10453",
+          "lane1": "2f39716f4ed6032b"
+        }
+      },
+      "artifacts": [
+        {
+          "target": "glsl460",
+          "byteCount": 4372,
+          "digest": {
+            "lane0": "d6cbb940f960f090",
+            "lane1": "92ba56f401b7ef52"
           }
         }
       ]

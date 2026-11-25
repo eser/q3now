@@ -22,12 +22,12 @@ const exact = (bytes, digest) => {
 
 assert.equal(catalog.schemaVersion, 2);
 assert.deepEqual(catalog.requiredTargets, ['glsl460']);
-assert.equal(catalog.entries.length, 376);
-assert.equal(manifest.entries.length, 376);
+assert.equal(catalog.entries.length, 381);
+assert.equal(manifest.entries.length, 381);
 assert.equal(catalog.portableManifest.byteCount, Buffer.byteLength(manifestText));
 assert.ok(exact(Buffer.from(manifestText), catalog.portableManifest.digest));
-assert.equal(readdirSync(root).filter((name) => name.endsWith('.glsl460')).length, 376);
-for (let ordinal = 0; ordinal < 376; ++ordinal) {
+assert.equal(readdirSync(root).filter((name) => name.endsWith('.glsl460')).length, 381);
+for (let ordinal = 0; ordinal < 381; ++ordinal) {
 	const entry = catalog.entries[ordinal];
 	const portable = manifest.entries[ordinal];
 	const artifact = entry.artifacts[0];
@@ -41,7 +41,7 @@ for (let ordinal = 0; ordinal < 376; ++ordinal) {
 	assert.ok(source.startsWith('#version 460\n'));
 	assert.doesNotMatch(source, /layout\([^)]*set\s*=|push_constant|nonuniformEXT|GL_EXT_nonuniform_qualifier|#version 3/);
 }
-assert.deepEqual(catalog.entries.slice(-20).map((entry) => entry.symbol), [
+assert.deepEqual(catalog.entries.slice(-25).map((entry) => entry.symbol), [
 	'frag_tx1_ident1_shadow_fog_temporal_write_bindless',
 	'frag_tx1_ident1_shadow_fog_temporal_invalidate_bindless',
 	'vert_tx1_fixed_shadow_temporal_motion',
@@ -62,6 +62,11 @@ assert.deepEqual(catalog.entries.slice(-20).map((entry) => entry.symbol), [
 	'vert_tx2_cl_shadow_fog_temporal_motion',
 	'frag_tx2_cl_shadow_fog_temporal_write_bindless',
 	'frag_tx2_cl_shadow_fog_temporal_invalidate_bindless',
+	'q1_ls_vert_temporal_motion',
+	'q1_ls_frag_temporal_write_bindless',
+	'q1_ls_frag_temporal_invalidate_bindless',
+	'q1_ls_array_frag_temporal_write_bindless',
+	'q1_ls_array_frag_temporal_invalidate_bindless'
 ]);
 generateProductShaderCatalog({ portable: root, output: productCatalogPath, check: true });
 // Check the actual translated product shaders, not only host-side uploads.
@@ -100,4 +105,4 @@ const first = catalog.entries[0].artifacts[0];
 const bad = Buffer.from(readFileSync(join(root, `${catalog.entries[0].symbol}.glsl460`)));
 bad[bad.length - 1] ^= 1;
 assert.equal(exact(bad, first.digest), false);
-console.log('RAL OpenGL GLSL 4.60 catalog: PASS (376 modules; product artifact selected)');
+console.log('RAL OpenGL GLSL 4.60 catalog: PASS (381 modules; product artifact selected)');

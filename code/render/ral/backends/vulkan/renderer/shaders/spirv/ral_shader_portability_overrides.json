@@ -5749,6 +5749,68 @@
       ]
     },
     {
+      "symbol": "q1_ls_array_frag_temporal_invalidate_bindless",
+      "spirvDigest": {
+        "lane0": "332782587be10453",
+        "lane1": "2f39716f4ed6032b"
+      },
+      "samplerKinds": [
+        {
+          "set": 1,
+          "binding": 1,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        }
+      ],
+      "arrayCounts": [
+        {
+          "set": 1,
+          "binding": 0,
+          "arrayCount": 4096
+        },
+        {
+          "set": 1,
+          "binding": 1,
+          "arrayCount": 32
+        },
+        {
+          "set": 1,
+          "binding": 2,
+          "arrayCount": 4096
+        }
+      ]
+    },
+    {
+      "symbol": "q1_ls_array_frag_temporal_write_bindless",
+      "spirvDigest": {
+        "lane0": "3c64054f18b4ff32",
+        "lane1": "ac59cb8567d67a6c"
+      },
+      "samplerKinds": [
+        {
+          "set": 1,
+          "binding": 1,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        }
+      ],
+      "arrayCounts": [
+        {
+          "set": 1,
+          "binding": 0,
+          "arrayCount": 4096
+        },
+        {
+          "set": 1,
+          "binding": 1,
+          "arrayCount": 32
+        },
+        {
+          "set": 1,
+          "binding": 2,
+          "arrayCount": 4096
+        }
+      ]
+    },
+    {
       "symbol": "q1_ls_frag_spv",
       "spirvDigest": {
         "lane0": "7ea050c3e851d1c7",
@@ -5775,10 +5837,83 @@
       ]
     },
     {
+      "symbol": "q1_ls_frag_temporal_invalidate_bindless",
+      "spirvDigest": {
+        "lane0": "f5b999b32150fa8d",
+        "lane1": "a554161a2dae35e8"
+      },
+      "samplerKinds": [
+        {
+          "set": 1,
+          "binding": 1,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        }
+      ],
+      "arrayCounts": [
+        {
+          "set": 1,
+          "binding": 0,
+          "arrayCount": 4096
+        },
+        {
+          "set": 1,
+          "binding": 1,
+          "arrayCount": 32
+        }
+      ]
+    },
+    {
+      "symbol": "q1_ls_frag_temporal_write_bindless",
+      "spirvDigest": {
+        "lane0": "c2b8c984ed13bb1b",
+        "lane1": "9fb36f41970a5059"
+      },
+      "samplerKinds": [
+        {
+          "set": 1,
+          "binding": 1,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+        }
+      ],
+      "arrayCounts": [
+        {
+          "set": 1,
+          "binding": 0,
+          "arrayCount": 4096
+        },
+        {
+          "set": 1,
+          "binding": 1,
+          "arrayCount": 32
+        }
+      ]
+    },
+    {
       "symbol": "q1_ls_vert_spv",
       "spirvDigest": {
         "lane0": "8d229c05f05f2770",
         "lane1": "d53763e91afe98af"
+      },
+      "vertexFormats": [
+        {
+          "location": 0,
+          "format": "RAL_FORMAT_R32G32B32A32_SFLOAT"
+        },
+        {
+          "location": 2,
+          "format": "RAL_FORMAT_R32G32_SFLOAT"
+        },
+        {
+          "location": 3,
+          "format": "RAL_FORMAT_R32G32_SFLOAT"
+        }
+      ]
+    },
+    {
+      "symbol": "q1_ls_vert_temporal_motion",
+      "spirvDigest": {
+        "lane0": "eb90672387e0b870",
+        "lane1": "1966649ffce60ce3"
       },
       "vertexFormats": [
         {
