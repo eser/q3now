@@ -11338,20 +11338,9 @@ qboolean vk_alloc_vbo( const byte *vbo_data, int vbo_size )
 #endif
 
 #if FEAT_IQM
-// The IQM VBO/IBO are created by vk_create_iqm_vbo with TRANSFER_DST|VERTEX
-// and TRANSFER_DST|INDEX; the wrapper carries that exact usage so the exact
-// draw's vertex/index binds are accepted (a usage-less wrapper is refused by
-// the bind and the draw would read whatever was bound before).
 static ralBuffer_t *vk_temporal_iqm_geometry_adopt( ralBackend_t *backend,
-		void *native, size_t bytes, ralBufferUsage_t usage,
-		const char *debugName ) {
-	ralBufferCreateInfo_t info;
-	memset( &info, 0, sizeof( info ) );
-	info.size = (uint64_t)bytes;
-	info.usage = usage;
-	info.memory = RAL_MEMORY_DEVICE_LOCAL;
-	info.debugName = debugName;
-	return Ral_AdoptBufferExact( backend, native, &info );
+		void *native, size_t bytes, const char *debugName ) {
+	return Ral_AdoptBuffer( backend, native, bytes, debugName );
 }
 
 static qboolean vk_temporal_iqm_geometry_candidate_owned(
@@ -11392,6 +11381,8 @@ static qboolean vk_temporal_iqm_geometry_key( const iqmData_t *data,
 	key.backend = vk_ral_get_backend();
 	key.nativeVertexBuffer = Ral_GetBufferHandle( data->ral_vertex_buffer );
 	key.nativeIndexBuffer = Ral_GetBufferHandle( data->ral_index_buffer );
+	key.ownerVertexBuffer = data->ral_vertex_buffer;
+	key.ownerIndexBuffer = data->ral_index_buffer;
 	key.vertexBytes = data->ral_vertex_bytes;
 	key.indexBytes = data->ral_index_bytes;
 	key.modelAllocationGeneration = data->temporalModelAllocationGeneration;
@@ -11633,8 +11624,11 @@ qboolean vk_temporal_iqm_prescan_primary_command(
 			(uintptr_t)geometry.key.nativeVertexBuffer;
 		facts->rawIndexBuffer =
 			(uintptr_t)geometry.key.nativeIndexBuffer;
-		facts->ralVertexBuffer = (uintptr_t)geometry.vertex;
-		facts->ralIndexBuffer = (uintptr_t)geometry.index;
+		// The exact draw binds the model-owned buffers (VERTEX / INDEX usage).
+		// The adopted geometry wrappers carry no usage: a RAL bind refuses them
+		// and the draw then reads whatever was bound before.
+		facts->ralVertexBuffer = (uintptr_t)geometry.key.ownerVertexBuffer;
+		facts->ralIndexBuffer = (uintptr_t)geometry.key.ownerIndexBuffer;
 		facts->vertexBufferBytes = geometry.key.vertexBytes;
 		facts->indexBufferBytes = geometry.key.indexBytes;
 		facts->geometryBackend = (uintptr_t)geometry.key.backend;
@@ -11835,8 +11829,8 @@ static qboolean vk_temporal_iqm_build_observed_facts( iqmData_t *data,
 	facts.indexCount = (uint32_t)indexCount;
 	facts.rawVertexBuffer = (uintptr_t)geometry.key.nativeVertexBuffer;
 	facts.rawIndexBuffer = (uintptr_t)geometry.key.nativeIndexBuffer;
-	facts.ralVertexBuffer = (uintptr_t)geometry.vertex;
-	facts.ralIndexBuffer = (uintptr_t)geometry.index;
+	facts.ralVertexBuffer = (uintptr_t)geometry.key.ownerVertexBuffer;
+	facts.ralIndexBuffer = (uintptr_t)geometry.key.ownerIndexBuffer;
 	facts.vertexBufferBytes = geometry.key.vertexBytes;
 	facts.indexBufferBytes = geometry.key.indexBytes;
 	facts.geometryBackend = (uintptr_t)geometry.key.backend;

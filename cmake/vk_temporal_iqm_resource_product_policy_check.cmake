@@ -106,9 +106,7 @@ foreach(needle IN ITEMS
 	require_text("${VK}" "${needle}" "strict OFF/current-batch lifecycle gate")
 endforeach()
 foreach(needle IN ITEMS
-	"return Ral_AdoptBufferExact( backend, native, &info );"
-	"info.usage = usage;"
-	"info.memory = RAL_MEMORY_DEVICE_LOCAL;"
+	"return Ral_AdoptBuffer( backend, native, bytes, debugName );"
 	"ops.destroy = Ral_DestroyBuffer;"
 	"Ral_GetBufferHandle( candidate ) == native"
 	"Ral_GetBufferSize( candidate ) == (uint64_t)bytes")
@@ -437,3 +435,21 @@ foreach(api IN ITEMS VK_TemporalIqmExact3FactoryGetReceipt
 	endif()
 endforeach()
 message(STATUS "temporal IQM product resource lifecycle policy PASS")
+
+# The exact IQM draw binds the model-owned RAL buffers carried in the geometry
+# key (VERTEX / INDEX usage), like the ordinary GPU-skinned draw. The adopted
+# geometry wrappers publish no usage: a RAL bind refuses them and the draw then
+# silently reads whatever was bound before (the h5a fixture drew as a line).
+foreach(needle IN ITEMS
+	"key.ownerVertexBuffer = data->ral_vertex_buffer;"
+	"key.ownerIndexBuffer = data->ral_index_buffer;"
+	"facts->ralVertexBuffer = (uintptr_t)geometry.key.ownerVertexBuffer;"
+	"facts.ralVertexBuffer = (uintptr_t)geometry.key.ownerVertexBuffer;")
+	require_text("${VK}" "${needle}" "exact IQM draw binds the model-owned buffers")
+endforeach()
+foreach(retired IN ITEMS "ralVertexBuffer = (uintptr_t)geometry.vertex" "ralIndexBuffer = (uintptr_t)geometry.index")
+	string(FIND "${VK}" "${retired}" retired_pos)
+	if(NOT retired_pos EQUAL -1)
+		message(FATAL_ERROR "exact IQM draw binds a usage-less adopted wrapper: ${retired}")
+	endif()
+endforeach()

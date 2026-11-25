@@ -6,7 +6,6 @@
 
 #include "../../qcommon/q_shared.h"
 #include "../ral/core/ral_types.h"
-#include "../ral/core/ral_resource.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -15,6 +14,12 @@ typedef struct {
 	ralBackend_t *backend;
 	void *nativeVertexBuffer;
 	void *nativeIndexBuffer;
+	// The model's own RAL buffers (borrowed, never destroyed here). The exact
+	// IQM draw binds these, like the ordinary GPU-skinned draw: they carry the
+	// VERTEX / INDEX usage a RAL bind requires. The adopted wrappers in the
+	// receipt are identity/lifetime witnesses of the same native buffers.
+	ralBuffer_t *ownerVertexBuffer;
+	ralBuffer_t *ownerIndexBuffer;
 	uint64_t vertexBytes;
 	uint64_t indexBytes;
 	uint32_t modelAllocationGeneration;
@@ -35,11 +40,8 @@ typedef struct {
 } vkTemporalIqmGeometryOwner_t;
 
 typedef struct {
-	// usage is the exact RAL usage the native buffer was created with; the
-	// exact draw binds these wrappers, and a RAL bind refuses a buffer whose
-	// adopted usage lacks VERTEX / INDEX.
 	ralBuffer_t *(*adopt)( ralBackend_t *backend, void *native,
-		size_t bytes, ralBufferUsage_t usage, const char *debugName );
+		size_t bytes, const char *debugName );
 	void (*destroy)( ralBuffer_t *buffer );
 	qboolean (*candidateOwned)( ralBuffer_t *candidate,
 		const void *context );

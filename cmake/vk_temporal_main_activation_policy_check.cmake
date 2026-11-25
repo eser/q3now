@@ -115,8 +115,8 @@ foreach(needle IN ITEMS
 	"geometry->key.modelAllocationGeneration == facts->modelAllocationGeneration"
 	"geometry->key.geometryGeneration == facts->geometryGeneration"
 	"geometry->key.contentDigest == facts->modelContentDigest"
-	"geometry->vertex == (ralBuffer_t *)facts->ralVertexBuffer"
-	"geometry->index == (ralBuffer_t *)facts->ralIndexBuffer"
+	"geometry->key.ownerVertexBuffer == (ralBuffer_t *)facts->ralVertexBuffer"
+	"geometry->key.ownerIndexBuffer == (ralBuffer_t *)facts->ralIndexBuffer"
 	"geometry->allocationGeneration == facts->geometryAllocationGeneration"
 	"geometry->ready == qtrue")
 	require_text("${CT}" "${needle}" "full live geometry receipt field join")

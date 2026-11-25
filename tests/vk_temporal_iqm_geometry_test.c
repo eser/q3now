@@ -16,12 +16,9 @@ static void *s_alias;
 
 struct ralBuffer_s { void *native; size_t bytes; };
 
-static ralBufferUsage_t s_usages[8];
-
 static ralBuffer_t *Adopt( ralBackend_t *backend, void *native,
-		size_t bytes, ralBufferUsage_t usage, const char *name ) {
+		size_t bytes, const char *name ) {
 	(void)backend; (void)native; (void)bytes; (void)name;
-	if ( s_adopts < 8 ) s_usages[s_adopts] = usage;
 	s_adopts++;
 	if ( s_adopts == s_failAt ) return NULL;
 	if ( s_adopts == s_aliasAt ) return (ralBuffer_t *)s_alias;
@@ -57,6 +54,8 @@ static vkTemporalIqmGeometryKey_t Key( uintptr_t base ) {
 	key.backend = (ralBackend_t *)( base + 1u );
 	key.nativeVertexBuffer = (void *)( base + 2u );
 	key.nativeIndexBuffer = (void *)( base + 3u );
+	key.ownerVertexBuffer = (ralBuffer_t *)( base + 7u );
+	key.ownerIndexBuffer = (ralBuffer_t *)( base + 8u );
 	key.vertexBytes = 680;
 	key.indexBytes = 120;
 	key.modelAllocationGeneration = 4;
@@ -87,13 +86,6 @@ int main( void ) {
 	CHECK( VK_TemporalIqmGeometryEnsureAfterIdle( &owner, &key, qfalse, &ops ) );
 	CHECK( VK_TemporalIqmGeometryGetReceipt( &owner, &receipt, &ops ) );
 	CHECK( receipt.allocationGeneration == 1 && receipt.vertex != receipt.index );
-	// The exact draw binds these wrappers: each carries the native buffer's
-	// exact usage, VERTEX for the vertex buffer and INDEX for the index buffer.
-	CHECK( s_adopts >= 2 && s_adopts <= 8 );
-	CHECK( s_usages[s_adopts - 2]
-		== (ralBufferUsage_t)( RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_VERTEX ) );
-	CHECK( s_usages[s_adopts - 1]
-		== (ralBufferUsage_t)( RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_INDEX ) );
 	CHECK( !VK_TemporalIqmGeometryNeedsIdle( &owner, &key, &ops ) );
 	CHECK( VK_TemporalIqmGeometryNeedsIdle( &owner, &replacement, &ops ) );
 	snapshot = owner;
@@ -108,7 +100,7 @@ int main( void ) {
 	CHECK( VK_TemporalIqmGeometryEnsureAfterIdle( &owner, &replacement,
 		qtrue, &ops ) );
 	CHECK( owner.receipt.allocationGeneration == 2 && s_destroys == 2 );
-	for ( int mutation = 0; mutation < 8; ++mutation ) {
+	for ( int mutation = 0; mutation < 10; ++mutation ) {
 		vkTemporalIqmGeometryKey_t changed = owner.receipt.key;
 		uint32_t priorGeneration = owner.receipt.allocationGeneration;
 		switch ( mutation ) {
@@ -119,6 +111,8 @@ int main( void ) {
 		case 4: changed.contentDigest++; break;
 		case 5: changed.nativeVertexBuffer = (void *)0xaaaau; break;
 		case 6: changed.nativeIndexBuffer = (void *)0xbbbbu; break;
+		case 7: changed.ownerVertexBuffer = (ralBuffer_t *)0xddddu; break;
+		case 8: changed.ownerIndexBuffer = (ralBuffer_t *)0xeeeeu; break;
 		default: changed.backend = (ralBackend_t *)0xccccu; break;
 		}
 		CHECK( VK_TemporalIqmGeometryNeedsIdle( &owner, &changed, &ops ) );

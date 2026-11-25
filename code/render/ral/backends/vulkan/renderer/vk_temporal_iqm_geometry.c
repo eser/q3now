@@ -10,6 +10,8 @@ static qboolean KeyValid( const vkTemporalIqmGeometryKey_t *key ) {
 	return key && key->backend && key->nativeVertexBuffer
 		&& key->nativeIndexBuffer
 		&& key->nativeVertexBuffer != key->nativeIndexBuffer
+		&& key->ownerVertexBuffer && key->ownerIndexBuffer
+		&& key->ownerVertexBuffer != key->ownerIndexBuffer
 		&& key->vertexBytes && key->vertexBytes <= SIZE_MAX
 		&& key->indexBytes && key->indexBytes <= SIZE_MAX
 		&& key->modelAllocationGeneration && key->geometryGeneration
@@ -23,6 +25,8 @@ static qboolean KeyEqual( const vkTemporalIqmGeometryKey_t *a,
 	return a->backend == b->backend
 		&& a->nativeVertexBuffer == b->nativeVertexBuffer
 		&& a->nativeIndexBuffer == b->nativeIndexBuffer
+		&& a->ownerVertexBuffer == b->ownerVertexBuffer
+		&& a->ownerIndexBuffer == b->ownerIndexBuffer
 		&& a->vertexBytes == b->vertexBytes && a->indexBytes == b->indexBytes
 		&& a->modelAllocationGeneration == b->modelAllocationGeneration
 		&& a->geometryGeneration == b->geometryGeneration
@@ -101,9 +105,7 @@ qboolean VK_TemporalIqmGeometryEnsureAfterIdle(
 	candidate.key = *key;
 	candidate.allocationGeneration = generation;
 	candidate.vertex = ops->adopt( key->backend, key->nativeVertexBuffer,
-		(size_t)key->vertexBytes,
-		(ralBufferUsage_t)( RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_VERTEX ),
-		"temporal-iqm-vertex" );
+		(size_t)key->vertexBytes, "temporal-iqm-vertex" );
 	if ( !candidate.vertex || Protected( &live, key, candidate.vertex )
 			|| !ops->candidateOwned( candidate.vertex, ops->candidateContext )
 			|| !ops->matchesNative( candidate.vertex, key->nativeVertexBuffer,
@@ -112,9 +114,7 @@ qboolean VK_TemporalIqmGeometryEnsureAfterIdle(
 		return qfalse;
 	}
 	candidate.index = ops->adopt( key->backend, key->nativeIndexBuffer,
-		(size_t)key->indexBytes,
-		(ralBufferUsage_t)( RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_INDEX ),
-		"temporal-iqm-index" );
+		(size_t)key->indexBytes, "temporal-iqm-index" );
 	if ( !candidate.index || candidate.index == candidate.vertex
 			|| Protected( &live, key, candidate.index )
 			|| !ops->candidateOwned( candidate.index, ops->candidateContext )

@@ -267,8 +267,11 @@ static IqmLiveContext LiveContextFor(
 	live.geometry.key.modelAllocationGeneration = facts->modelAllocationGeneration;
 	live.geometry.key.geometryGeneration = facts->geometryGeneration;
 	live.geometry.key.contentDigest = facts->modelContentDigest;
-	live.geometry.vertex = (ralBuffer_t *)facts->ralVertexBuffer;
-	live.geometry.index = (ralBuffer_t *)facts->ralIndexBuffer;
+	live.geometry.key.ownerVertexBuffer = (ralBuffer_t *)facts->ralVertexBuffer;
+	live.geometry.key.ownerIndexBuffer = (ralBuffer_t *)facts->ralIndexBuffer;
+	// The adopted wrappers are distinct witnesses of the same native buffers.
+	live.geometry.vertex = (ralBuffer_t *)( facts->ralVertexBuffer + 0x10000u );
+	live.geometry.index = (ralBuffer_t *)( facts->ralIndexBuffer + 0x10000u );
 	live.geometry.allocationGeneration = facts->geometryAllocationGeneration;
 	live.geometry.ready = qtrue;
 	live.bindless = facts->bindless;
@@ -290,8 +293,10 @@ static qboolean RevalidateGeometry( void *context,
 	case 6: outCurrent->key.modelAllocationGeneration++; break;
 	case 7: outCurrent->key.geometryGeneration++; break;
 	case 8: outCurrent->key.contentDigest++; break;
-	case 9: outCurrent->vertex = (ralBuffer_t *)(uintptr_t)0xee03; break;
-	case 10: outCurrent->index = (ralBuffer_t *)(uintptr_t)0xee04; break;
+	// The joined buffers are the model-owned ones the exact draw binds; a
+	// re-adopted wrapper always comes with a new allocationGeneration (11).
+	case 9: outCurrent->key.ownerVertexBuffer = (ralBuffer_t *)(uintptr_t)0xee03; break;
+	case 10: outCurrent->key.ownerIndexBuffer = (ralBuffer_t *)(uintptr_t)0xee04; break;
 	case 11: outCurrent->allocationGeneration++; break;
 	case 12: outCurrent->ready = qfalse; break;
 	}
