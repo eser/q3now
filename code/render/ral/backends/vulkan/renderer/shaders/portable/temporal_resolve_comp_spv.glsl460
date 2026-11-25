@@ -723,7 +723,7 @@ void main()
                     tapMin = param_38;
                     tapMax = param_39;
                     vec3 detail = prior.xyz - _1912;
-                    displayed = vec4(clamp(resolvedRgb + (detail * (2.400000095367431640625 * confidence)), min(resolvedRgb, tapMin), max(resolvedRgb, tapMax)), current.w);
+                    displayed = vec4(clamp(resolvedRgb + (detail * (2.599999904632568359375 * confidence)), min(resolvedRgb, tapMin), max(resolvedRgb, tapMax)), current.w);
                 }
                 usedHistory = true;
             }

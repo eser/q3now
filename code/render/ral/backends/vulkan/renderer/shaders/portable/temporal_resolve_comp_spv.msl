@@ -839,7 +839,7 @@ kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buff
                     tapMin = param_38;
                     tapMax = param_39;
                     float3 detail = prior.xyz - _1912;
-                    displayed = float4(fast::clamp(resolvedRgb + (detail * (2.400000095367431640625 * confidence)), fast::min(resolvedRgb, tapMin), fast::max(resolvedRgb, tapMax)), current.w);
+                    displayed = float4(fast::clamp(resolvedRgb + (detail * (2.599999904632568359375 * confidence)), fast::min(resolvedRgb, tapMin), fast::max(resolvedRgb, tapMax)), current.w);
                 }
                 usedHistory = true;
             }

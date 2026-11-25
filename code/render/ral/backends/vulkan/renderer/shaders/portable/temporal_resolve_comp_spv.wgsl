@@ -1579,7 +1579,7 @@ fn main_1() {
                     let _e451 = tapMin_2;
                     let _e453 = resolvedRgb;
                     let _e454 = tapMax_2;
-                    let _e456 = clamp((_e444 + (_e447 * (2.4f * _e445))), min(_e450, _e451), max(_e453, _e454));
+                    let _e456 = clamp((_e444 + (_e447 * (2.6f * _e445))), min(_e450, _e451), max(_e453, _e454));
                     let _e458 = current[3u];
                     displayed = vec4<f32>(_e456.x, _e456.y, _e456.z, _e458);
                 }

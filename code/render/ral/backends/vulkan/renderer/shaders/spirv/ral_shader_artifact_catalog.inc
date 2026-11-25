@@ -54,7 +54,7 @@ RAL_SHADER_SPIRV_ARTIFACT(49u, forwardplus_depth_reduce_comp_spv, RAL_STAGE_COMP
 RAL_SHADER_SPIRV_ARTIFACT(50u, lens_occlusion_comp_spv, RAL_STAGE_COMPUTE, 5032u, 0x5cf382ea946c06edull, 0xaf40fd14e903658dull, 0xccd4b0a77e0b350eull, 0x3cc51caf223575aeull)
 RAL_SHADER_SPIRV_ARTIFACT(51u, temporal_history_store_comp_spv, RAL_STAGE_COMPUTE, 2764u, 0xf9b8885c62f41b66ull, 0x1c6c855461441b78ull, 0xc3d95a4ae5b915b9ull, 0x5760bddda0d8aacaull)
 RAL_SHADER_SPIRV_ARTIFACT(52u, temporal_history_consume_comp_spv, RAL_STAGE_COMPUTE, 5124u, 0xc3dde62c2ab8a2a2ull, 0xe5cd702edd46bb65ull, 0x912d3d57c253bcf4ull, 0xd97f6f972367e5acull)
-RAL_SHADER_SPIRV_ARTIFACT(53u, temporal_resolve_comp_spv, RAL_STAGE_COMPUTE, 47684u, 0x0e5d02bec7ab0e9eull, 0xd47305499ab3ffefull, 0x72cec47cad57b9c6ull, 0x6e2a9f66f9dde556ull)
+RAL_SHADER_SPIRV_ARTIFACT(53u, temporal_resolve_comp_spv, RAL_STAGE_COMPUTE, 47684u, 0x1a854a0ad13e9eb0ull, 0x176030541a96cab3ull, 0xbb1fb23a93a227b8ull, 0xd834ed3b11367edcull)
 RAL_SHADER_SPIRV_ARTIFACT(54u, tonemap_ao_frag_spv, RAL_STAGE_FRAGMENT, 3504u, 0xe2fc69a4ac735dc4ull, 0x7cc52ecd2fae1a5eull, 0xe26227df7b2a1f98ull, 0xaef6c343239661e7ull)
 RAL_SHADER_SPIRV_ARTIFACT(55u, tonemap_tonemap_frag_spv, RAL_STAGE_FRAGMENT, 14308u, 0xb83857da68450f3dull, 0x38e5e8b4e3f59446ull, 0xbf6e7f57af12194dull, 0xde41929de733dfecull)
 RAL_SHADER_SPIRV_ARTIFACT(56u, tonemap_colorgrade_frag_spv, RAL_STAGE_FRAGMENT, 5788u, 0xdbb6559c88ade912ull, 0x453a7e7829298bf4ull, 0x0b9a9a51834ef939ull, 0x711312a33648309aull)

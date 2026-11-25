@@ -190,7 +190,7 @@ float historyWeightForCount(float count) {
 // old bound) moves with the jitter phase and made the displayed image ripple with the 8-frame jitter cycle on items and edges. That
 // range is narrower than the jittered box, and the accumulated history (historyCountCap) is smoother still, so the gain is 2.4
 // (Vulkan aacompare edge energy vs AA off 0.990 at 2.4, 0.973 at 2.0; SMAA 0.996).
-const float outputSharpen = 2.4;
+const float outputSharpen = 2.6;
 vec3 samplePreviousBlur(vec2 texel, inout vec3 tapMin, inout vec3 tapMax) {
 	vec2 extent = vec2(pc.extent);
 	vec2 invExtent = inversesqrt(extent * extent);
