@@ -1195,7 +1195,7 @@ static qboolean vk_temporal_resolved_hdr_resolve_submit(
 						(unsigned long long)promoted.authority.drawSequence.lane1,
 						promoted.authority.drawSequence.count );
 			}
-			R_LOG( rch_ral, SEV_WARN,
+			R_LOG( rch_ral, SEV_INFO,
 				"temporal-resolved-hdr schema=3 token=%llu frame=%llu previous=%llu world=%d extent=%ux%u topology=%u plan=%u scene=%u target=%u resolve-owner=%u slot=%u serial=%llu history=%u:%u prior-producer=%u prior-token=%llu prior-frame=%llu prior-content=%llu prior-scene=%u prior-target=%u prior-resolve-owner=%u prior-store-owner=%u prior-slot=%u prior-frame-count=%u producer=resolve submit=1\n",
 				(unsigned long long)promoted.content.batchToken,
 				(unsigned long long)promoted.content.frameId,
@@ -1260,7 +1260,7 @@ finish:
 				TEMPORAL_HISTORY_WRITE_RESOLVED_FEEDBACK
 			? "resolved-feedback" : NULL;
 		if ( !producer ) return qfalse;
-		R_LOG( rch_ral, SEV_WARN,
+		R_LOG( rch_ral, SEV_INFO,
 			"temporal-history-feedback schema=1 token=%llu frame=%llu world=%d extent=%ux%u topology=%u plan=%u producer=%s content=%llu scene=%u target=%u resolve-owner=%u store-owner=%u history=%u:%u slot=%u frame-count=%u commit=1\n",
 			(unsigned long long)source->batchToken,
 			(unsigned long long)source->frameId, source->worldIndex,
