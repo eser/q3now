@@ -27,7 +27,7 @@ int main( void ) {
 	vkBindlessPublicationLedger_t ledgerSnapshot;
 	memset(&receipt,0x5a,sizeof(receipt)); snapshot=receipt;
 	VK_BindlessPublicationInit(&s_ledger);
-	CHECK(!VK_BindlessPublicationQueryOrdinary(&s_ledger,set,pool,7,views[0],
+	CHECK(!VK_BindlessPublicationQueryOrdinary(&s_ledger,set,pool,7,views[0],NULL,
 		owners[0],descriptors[0],ownerGens[0],3,samplers[0],samplerDigests[0],&receipt));
 	CHECK(memcmp(&receipt,&snapshot,sizeof(receipt))==0);
 	CHECK(VK_BindlessPublicationActivateSamplerPool(&s_ledger,pool));
@@ -42,7 +42,7 @@ int main( void ) {
 		&& s_ledger.images[9].slotGeneration==1);
 	CHECK(VK_BindlessPublicationSamplers(&s_ledger,set,pool,samplerSlots,
 		samplers,samplerDigests,2));
-	CHECK(VK_BindlessPublicationQueryOrdinary(&s_ledger,set,pool,7,views[0],
+	CHECK(VK_BindlessPublicationQueryOrdinary(&s_ledger,set,pool,7,views[0],NULL,
 		owners[0],descriptors[0],ownerGens[0],3,samplers[0],samplerDigests[0],&receipt));
 	CHECK(receipt.ready && receipt.imageBinding==0 && receipt.samplerBinding==1);
 	CHECK(receipt.imageSlotGeneration==1 && receipt.samplerSlotGeneration==1);
@@ -73,7 +73,7 @@ int main( void ) {
 	CHECK(!VK_BindlessPublicationReceiptExact(&mutation,&mutation));
 	mutation=receipt; mutation.ready=qfalse;
 	CHECK(!VK_BindlessPublicationReceiptExact(&mutation,&mutation));
-	CHECK(!VK_BindlessPublicationQueryOrdinary(&s_ledger,set,pool,9,views[1],
+	CHECK(!VK_BindlessPublicationQueryOrdinary(&s_ledger,set,pool,9,views[1],NULL,
 		owners[1],descriptors[1],ownerGens[1],4,samplers[1],samplerDigests[1],&snapshot));
 	mutation=receipt; mutation.samplerDefinitionDigest++;
 	CHECK(!VK_BindlessPublicationReceiptExact(&receipt,&mutation));
@@ -136,7 +136,7 @@ int main( void ) {
 	CHECK(VK_BindlessPublicationTombstoneImage(&s_ledger,set,7));
 	CHECK(s_ledger.images[7].tombstone
 		&& s_ledger.images[7].slotGeneration==2);
-	CHECK(!VK_BindlessPublicationQueryOrdinary(&s_ledger,set,pool,7,views[0],
+	CHECK(!VK_BindlessPublicationQueryOrdinary(&s_ledger,set,pool,7,views[0],NULL,
 		owners[0],descriptors[0],ownerGens[0],3,samplers[0],samplerDigests[0],&snapshot));
 	CHECK(VK_BindlessPublicationInvalidateSamplerPool(&s_ledger,pool));
 	CHECK(!s_ledger.samplerPoolIdentity && !s_ledger.samplers[3].populated);
@@ -147,14 +147,49 @@ int main( void ) {
 	CHECK(VK_BindlessPublicationActivateSet(&s_ledger,set));
 	CHECK(s_ledger.setGeneration==2);
 
-	// Every non-exact publication kind is an explicit ordinary-query decline.
+	CHECK(VK_BindlessPublicationSamplers(&s_ledger,set,pool,samplerSlots,
+		samplers,samplerDigests,1));
+	// Every non-exact publication kind is an ordinary-query decline unless the
+	// caller vouches for a fully resident view and the slot shows that view.
 	for ( int kind=VK_BINDLESS_PUBLICATION_RESIDENT;
 			kind<VK_BINDLESS_PUBLICATION_TOMBSTONE; ++kind ) {
 		vkBindlessPublicationKind_t nonExact=(vkBindlessPublicationKind_t)kind;
 		CHECK(VK_BindlessPublicationViews(&s_ledger,set,imageSlots,views,owners,
 			descriptors,ownerGens,&nonExact,1));
-		CHECK(!VK_BindlessPublicationQueryOrdinary(&s_ledger,set,pool,7,views[0],
+		CHECK(!VK_BindlessPublicationQueryOrdinary(&s_ledger,set,pool,7,views[0],NULL,
 			owners[0],descriptors[0],ownerGens[0],3,samplers[0],samplerDigests[0],&snapshot));
+		CHECK(!VK_BindlessPublicationQueryOrdinary(&s_ledger,set,pool,7,views[1],views[1],
+			owners[0],descriptors[0],ownerGens[0],3,samplers[0],samplerDigests[0],&snapshot));
+		CHECK(VK_BindlessPublicationQueryOrdinary(&s_ledger,set,pool,7,views[1],views[0],
+			owners[0],descriptors[0],ownerGens[0],3,samplers[0],samplerDigests[0],&snapshot)
+			== ( nonExact==VK_BINDLESS_PUBLICATION_RESIDENT ));
+	}
+
+	// A RESIDENT receipt dies when the slot is republished COARSE, even with the
+	// same view object, and a LEGACY_EXACT slot ignores the resident view.
+	{
+		vkBindlessPublicationKind_t resident=VK_BINDLESS_PUBLICATION_RESIDENT;
+		vkBindlessPublicationKind_t coarse=VK_BINDLESS_PUBLICATION_COARSE;
+		vkBindlessPublicationKind_t exact=VK_BINDLESS_PUBLICATION_LEGACY_EXACT;
+		vkBindlessOrdinaryReceipt_t residentReceipt, current;
+		CHECK(VK_BindlessPublicationViews(&s_ledger,set,imageSlots,&views[1],owners,
+			descriptors,ownerGens,&resident,1));
+		CHECK(VK_BindlessPublicationQueryOrdinary(&s_ledger,set,pool,7,views[0],views[1],
+			owners[0],descriptors[0],ownerGens[0],3,samplers[0],samplerDigests[0],&residentReceipt));
+		CHECK(residentReceipt.imageViewIdentity==(uintptr_t)views[1]);
+		CHECK(VK_BindlessPublicationViews(&s_ledger,set,imageSlots,&views[1],owners,
+			descriptors,ownerGens,&coarse,1));
+		CHECK(!VK_BindlessPublicationQueryOrdinary(&s_ledger,set,pool,7,views[0],views[1],
+			owners[0],descriptors[0],ownerGens[0],3,samplers[0],samplerDigests[0],&current));
+		CHECK(VK_BindlessPublicationViews(&s_ledger,set,imageSlots,&views[1],owners,
+			descriptors,ownerGens,&resident,1));
+		CHECK(VK_BindlessPublicationQueryOrdinary(&s_ledger,set,pool,7,views[0],views[1],
+			owners[0],descriptors[0],ownerGens[0],3,samplers[0],samplerDigests[0],&current));
+		CHECK(!VK_BindlessPublicationReceiptExact(&residentReceipt,&current));
+		CHECK(VK_BindlessPublicationViews(&s_ledger,set,imageSlots,&views[1],owners,
+			descriptors,ownerGens,&exact,1));
+		CHECK(!VK_BindlessPublicationQueryOrdinary(&s_ledger,set,pool,7,views[0],views[1],
+			owners[0],descriptors[0],ownerGens[0],3,samplers[0],samplerDigests[0],&current));
 	}
 
 	// A real descriptor write followed by ledger saturation poisons every stale
@@ -166,7 +201,7 @@ int main( void ) {
 		descriptors,ownerGens,kinds,1));
 	CHECK(VK_BindlessPublicationSamplers(&s_ledger,set,pool,samplerSlots,
 		samplers,samplerDigests,1));
-	CHECK(VK_BindlessPublicationQueryOrdinary(&s_ledger,set,pool,7,views[0],
+	CHECK(VK_BindlessPublicationQueryOrdinary(&s_ledger,set,pool,7,views[0],NULL,
 		owners[0],descriptors[0],ownerGens[0],3,samplers[0],samplerDigests[0],&receipt));
 	s_ledger.imageSlotGenerations[7]=UINT64_MAX;
 	ledgerSnapshot=s_ledger;
@@ -174,7 +209,7 @@ int main( void ) {
 		views,owners,descriptors,ownerGens,kinds,1));
 	CHECK(memcmp(&s_ledger,&ledgerSnapshot,sizeof(s_ledger))==0);
 	CHECK(VK_BindlessPublicationPoisonSetAfterWrite(&s_ledger,set));
-	CHECK(!VK_BindlessPublicationQueryOrdinary(&s_ledger,set,pool,7,views[0],
+	CHECK(!VK_BindlessPublicationQueryOrdinary(&s_ledger,set,pool,7,views[0],NULL,
 		owners[0],descriptors[0],ownerGens[0],3,samplers[0],samplerDigests[0],&snapshot));
 	puts("vk_bindless_publication_test: PASS");
 	return 0;
