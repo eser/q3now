@@ -101,7 +101,9 @@ qboolean VK_TemporalIqmGeometryEnsureAfterIdle(
 	candidate.key = *key;
 	candidate.allocationGeneration = generation;
 	candidate.vertex = ops->adopt( key->backend, key->nativeVertexBuffer,
-		(size_t)key->vertexBytes, "temporal-iqm-vertex" );
+		(size_t)key->vertexBytes,
+		(ralBufferUsage_t)( RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_VERTEX ),
+		"temporal-iqm-vertex" );
 	if ( !candidate.vertex || Protected( &live, key, candidate.vertex )
 			|| !ops->candidateOwned( candidate.vertex, ops->candidateContext )
 			|| !ops->matchesNative( candidate.vertex, key->nativeVertexBuffer,
@@ -110,7 +112,9 @@ qboolean VK_TemporalIqmGeometryEnsureAfterIdle(
 		return qfalse;
 	}
 	candidate.index = ops->adopt( key->backend, key->nativeIndexBuffer,
-		(size_t)key->indexBytes, "temporal-iqm-index" );
+		(size_t)key->indexBytes,
+		(ralBufferUsage_t)( RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_INDEX ),
+		"temporal-iqm-index" );
 	if ( !candidate.index || candidate.index == candidate.vertex
 			|| Protected( &live, key, candidate.index )
 			|| !ops->candidateOwned( candidate.index, ops->candidateContext )

@@ -6,6 +6,7 @@
 
 #include "../../qcommon/q_shared.h"
 #include "../ral/core/ral_types.h"
+#include "../ral/core/ral_resource.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -34,8 +35,11 @@ typedef struct {
 } vkTemporalIqmGeometryOwner_t;
 
 typedef struct {
+	// usage is the exact RAL usage the native buffer was created with; the
+	// exact draw binds these wrappers, and a RAL bind refuses a buffer whose
+	// adopted usage lacks VERTEX / INDEX.
 	ralBuffer_t *(*adopt)( ralBackend_t *backend, void *native,
-		size_t bytes, const char *debugName );
+		size_t bytes, ralBufferUsage_t usage, const char *debugName );
 	void (*destroy)( ralBuffer_t *buffer );
 	qboolean (*candidateOwned)( ralBuffer_t *candidate,
 		const void *context );

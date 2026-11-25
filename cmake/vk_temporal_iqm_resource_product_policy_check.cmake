@@ -106,7 +106,9 @@ foreach(needle IN ITEMS
 	require_text("${VK}" "${needle}" "strict OFF/current-batch lifecycle gate")
 endforeach()
 foreach(needle IN ITEMS
-	"return Ral_AdoptBuffer( backend, native, bytes, debugName );"
+	"return Ral_AdoptBufferExact( backend, native, &info );"
+	"info.usage = usage;"
+	"info.memory = RAL_MEMORY_DEVICE_LOCAL;"
 	"ops.destroy = Ral_DestroyBuffer;"
 	"Ral_GetBufferHandle( candidate ) == native"
 	"Ral_GetBufferSize( candidate ) == (uint64_t)bytes")

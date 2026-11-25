@@ -16,9 +16,12 @@ static void *s_alias;
 
 struct ralBuffer_s { void *native; size_t bytes; };
 
+static ralBufferUsage_t s_usages[8];
+
 static ralBuffer_t *Adopt( ralBackend_t *backend, void *native,
-		size_t bytes, const char *name ) {
+		size_t bytes, ralBufferUsage_t usage, const char *name ) {
 	(void)backend; (void)native; (void)bytes; (void)name;
+	if ( s_adopts < 8 ) s_usages[s_adopts] = usage;
 	s_adopts++;
 	if ( s_adopts == s_failAt ) return NULL;
 	if ( s_adopts == s_aliasAt ) return (ralBuffer_t *)s_alias;
@@ -84,6 +87,13 @@ int main( void ) {
 	CHECK( VK_TemporalIqmGeometryEnsureAfterIdle( &owner, &key, qfalse, &ops ) );
 	CHECK( VK_TemporalIqmGeometryGetReceipt( &owner, &receipt, &ops ) );
 	CHECK( receipt.allocationGeneration == 1 && receipt.vertex != receipt.index );
+	// The exact draw binds these wrappers: each carries the native buffer's
+	// exact usage, VERTEX for the vertex buffer and INDEX for the index buffer.
+	CHECK( s_adopts >= 2 && s_adopts <= 8 );
+	CHECK( s_usages[s_adopts - 2]
+		== (ralBufferUsage_t)( RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_VERTEX ) );
+	CHECK( s_usages[s_adopts - 1]
+		== (ralBufferUsage_t)( RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_INDEX ) );
 	CHECK( !VK_TemporalIqmGeometryNeedsIdle( &owner, &key, &ops ) );
 	CHECK( VK_TemporalIqmGeometryNeedsIdle( &owner, &replacement, &ops ) );
 	snapshot = owner;

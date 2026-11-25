@@ -11338,9 +11338,20 @@ qboolean vk_alloc_vbo( const byte *vbo_data, int vbo_size )
 #endif
 
 #if FEAT_IQM
+// The IQM VBO/IBO are created by vk_create_iqm_vbo with TRANSFER_DST|VERTEX
+// and TRANSFER_DST|INDEX; the wrapper carries that exact usage so the exact
+// draw's vertex/index binds are accepted (a usage-less wrapper is refused by
+// the bind and the draw would read whatever was bound before).
 static ralBuffer_t *vk_temporal_iqm_geometry_adopt( ralBackend_t *backend,
-		void *native, size_t bytes, const char *debugName ) {
-	return Ral_AdoptBuffer( backend, native, bytes, debugName );
+		void *native, size_t bytes, ralBufferUsage_t usage,
+		const char *debugName ) {
+	ralBufferCreateInfo_t info;
+	memset( &info, 0, sizeof( info ) );
+	info.size = (uint64_t)bytes;
+	info.usage = usage;
+	info.memory = RAL_MEMORY_DEVICE_LOCAL;
+	info.debugName = debugName;
+	return Ral_AdoptBufferExact( backend, native, &info );
 }
 
 static qboolean vk_temporal_iqm_geometry_candidate_owned(

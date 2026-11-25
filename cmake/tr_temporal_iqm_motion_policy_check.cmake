@@ -79,6 +79,8 @@ require_text(TEST "== TEMPORAL_IQM_PRODUCT_POISON" "GPU-direct partial poison mu
 require_text(GEOMETRY "ops->matchesNative" "native wrapper identity proof")
 require_text(GEOMETRY "ops->candidateOwned" "candidate ownership proof")
 forbid_text(GEOMETRY "vk_ral_lookup_buffer" "shadow buffer lookup")
+require_text(GEOMETRY "(ralBufferUsage_t)( RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_VERTEX ),\n\t\t\"temporal-iqm-vertex\"" "exact vertex adoption usage")
+require_text(GEOMETRY "(ralBufferUsage_t)( RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_INDEX ),\n\t\t\"temporal-iqm-index\"" "exact index adoption usage")
 forbid_text(LOADER "vk_ral_lookup_buffer" "shadow buffer lookup")
 forbid_text(LOADER "VK_TemporalIqmGeometryEnsureAfterIdle" "premature geometry materialization")
 forbid_text(LOADER "VK_TemporalIqmGeometryGetReceipt" "premature geometry publication")
@@ -99,7 +101,9 @@ foreach(product_file IN LISTS RENDERER_PRODUCT_C)
 			endif()
 		endforeach()
 		foreach(needle IN ITEMS
-			"return Ral_AdoptBuffer( backend, native, bytes, debugName );"
+			"return Ral_AdoptBufferExact( backend, native, &info );"
+			"info.usage = usage;"
+			"info.memory = RAL_MEMORY_DEVICE_LOCAL;"
 			"ops.destroy = Ral_DestroyBuffer;"
 			"Ral_GetBufferHandle( candidate ) == native"
 			"Ral_GetBufferSize( candidate ) == (uint64_t)bytes"
@@ -114,6 +118,9 @@ foreach(product_file IN LISTS RENDERER_PRODUCT_C)
 		math(EXPR bridge_len "${bridge_end}-${bridge_begin}")
 		string(SUBSTRING "${VK}" ${bridge_begin} ${bridge_len} GEOMETRY_BRIDGE)
 		forbid_text(GEOMETRY_BRIDGE "vk_ral_lookup_buffer" "shadow geometry adoption")
+		# A usage-less wrapper is refused by the exact draw's vertex/index bind, which
+		# then reads whatever was bound before (the h5a fixture drew as a thin line).
+		forbid_text(GEOMETRY_BRIDGE "Ral_AdoptBuffer( backend" "usage-less geometry adoption")
 		continue()
 	endif()
 	foreach(api IN ITEMS VK_TemporalIqmGeometryEnsureAfterIdle
