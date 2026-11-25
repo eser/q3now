@@ -101,10 +101,40 @@ require_text(C "if ( !submitted ) {\n\t\tmemset( &slot->ticket, 0, sizeof( slot-
 require_text(C "canonicalRecorded.content.submitted = qfalse" "exact submit-bit demotion before parse")
 require_text(C "ProductExact( &t->resolve.products, &slot->products )" "fence-time product provenance")
 # Partial R8 validity is effect trust (owner, 2026-11-25): the receipt counts it
-# (validityOther) but no longer refuses readiness on it; the oracle's own
-# acceptance threshold (validity <= 127 rejects) is the gate.
-require_text(C "if ( validity[i] <= 127u ) {" "canonical R8 validity acceptance threshold")
+# (validityOther) but no longer refuses readiness on it.
 forbid_text(C "r.validityOther == 0u" "binary-only R8 validity readiness")
+# The resolve oracle is the CPU model of the CURRENT temporal_resolve.comp
+# (tr_temporal_resolve_oracle, owner 2026-11-25): it checks both the displayed
+# colour and the written history (rgb + sample count), and a pixel it cannot
+# decide (outside the capture, or a branch flipping within the hardware
+# filter's error) is counted apart and never as a match.
+foreach(needle IN ITEMS
+	"R_TemporalResolveOraclePixel( &planes, &params, (int32_t)x, (int32_t)y, &expected )"
+	"R_TemporalResolveOracleHalf4Within( rb, expected.displayedLo, expected.displayedHi )"
+	"R_TemporalResolveOracleHalf4Within( hb, expected.historyLo, expected.historyHi )"
+	"if ( expected.ambiguous ) r.oracleAmbiguous++;"
+	"params.filterWeightError = VK_TEMPORAL_RESOLVE_READBACK_FILTER_WEIGHT_ERROR;")
+	require_text(C "${needle}" "current-resolve oracle")
+endforeach()
+foreach(retired IN ITEMS "static float MixExpanded(" "VerifyCurrentFallback" "validity[i] <= 127u"
+		"static float LinearizeDepthPrecise(")
+	forbid_text(C "${retired}" "retired bilinear/3x3/constant-weight oracle")
+endforeach()
+# The oracle duplicates the shader's constants; both sides are pinned together.
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/shaders/temporal_resolve.comp" RESOLVE_SHADER)
+file(READ "${ROOT}/code/render/renderer/tr_temporal_resolve_oracle.h" ORACLE_H)
+foreach(pair IN ITEMS
+	"const float historyCountCap = 24.0;|#define TEMPORAL_RESOLVE_ORACLE_COUNT_CAP 24.0f"
+	"const float staticMotionScale = 8.0;|#define TEMPORAL_RESOLVE_ORACLE_STATIC_MOTION_SCALE 8.0f"
+	"const float outputSharpen = 2.4;|#define TEMPORAL_RESOLVE_ORACLE_OUTPUT_SHARPEN 2.4f"
+	"const float A = -0.75;|#define TEMPORAL_RESOLVE_ORACLE_BICUBIC_A ( -0.75f )"
+	"momentMean - 1.25 * momentSigma|#define TEMPORAL_RESOLVE_ORACLE_VARIANCE_SIGMA 1.25f")
+	string(REPLACE "|" ";" pair_list "${pair}")
+	list(GET pair_list 0 shader_text)
+	list(GET pair_list 1 oracle_text)
+	require_text(RESOLVE_SHADER "${shader_text}" "resolve constant mirrored by the oracle")
+	require_text(ORACLE_H "${oracle_text}" "oracle constant mirroring the resolve")
+endforeach()
 require_text(C "r.acceptedNonzeroVelocity > 0u" "nonzero reprojection witness")
 require_text(TEST "content.acceptedInfluence == 1" "synthetic nonzero blend influence")
 require_text(C "r.planesPopulated = qtrue" "submitted full-plane copy authority")
@@ -114,9 +144,6 @@ require_text(C "jitterTexel[0] = jitterDelta[0] * (float)extent[0];" "shader-exa
 require_text(C "motionTexel[0] = velocity[0] * (float)extent[0];" "shader-exact motion texel conversion")
 require_text(C "unjittered[0] = (float)pixel[0] - motionTexel[0];" "shader-exact texel subtraction")
 require_text(C "result[0] = unjittered[0] + jitterTexel[0];" "shader-exact texel addition")
-require_text(C "volatile float fractionX = previousTexel[0] - baseX;" "shader-exact texel fraction")
-require_text(C "LinearizeDepthPrecise(" "shader-exact depth round points")
-require_text(C "static float MixExpanded(" "precise expanded interpolation")
 require_text(C "VK_TemporalResolveReadbackPreviousTexel(" "division-free texel reprojection")
 forbid_text(C "currentUv" "normalized color-path coordinates")
 forbid_text(C "Ral_MapBuffer(" "persistent legacy map")
@@ -124,7 +151,6 @@ forbid_text(C "Ral_UnmapBuffer(" "persistent legacy unmap")
 require_text(C "r.acceptedMatches == r.accepted" "precise expanded oracle acceptance")
 require_text(C "distance <= 1u" "ratified one-step contraction tolerance")
 require_text(C "VerifyZeroFallback" "nonfinite current zero fallback")
-require_text(C "VerifyCurrentFallback" "exact current fallback")
 require_text(C "width > INT32_MAX || height > INT32_MAX" "signed copy-coordinate bound")
 foreach(encoding IN ITEMS DEPTH_D16 DEPTH_X8_D24 DEPTH_D24_S8
 		DEPTH_D32 DEPTH_D16_S8 DEPTH_D32_S8)

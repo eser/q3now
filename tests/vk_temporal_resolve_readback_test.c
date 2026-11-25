@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "vk_temporal_resolve_readback.h"
+#include "tr_temporal_resolve_oracle.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -231,6 +232,52 @@ static void SetHalf4( unsigned char *base, uint32_t i,
 		uint16_t r, uint16_t g, uint16_t b, uint16_t a ) {
 	uint16_t values[4] = { r, g, b, a };
 	memcpy( base + (uint64_t)i * 8u, values, sizeof( values ) );
+}
+
+// Writes what the resolve must produce (the oracle's interval midpoint) into the
+// resolved and written-history planes of a synthetic capture, so each scenario
+// below exercises the readback's accounting against the current resolve model.
+static void FillOracleOutputs( const vkTemporalResolveReadbackTicket_t *t, unsigned char *memory ) {
+	temporalResolveOraclePlanes_t planes;
+	temporalResolveOracleParams_t params;
+	float depthPlane[64], previousDepthPlane[64];
+	uint32_t x, y, i;
+	for ( i = 0; i < 64u; ++i ) {
+		memcpy( &depthPlane[i], memory + t->currentDepthOffset + (uint64_t)i * 4u, 4u );
+		memcpy( &previousDepthPlane[i], memory + t->previousDepthOffset + (uint64_t)i * 4u, 4u );
+	}
+	memset( &planes, 0, sizeof( planes ) );
+	planes.width = t->captureWidth; planes.height = t->captureHeight;
+	planes.originX = t->captureX; planes.originY = t->captureY;
+	planes.currentColor = (const uint16_t *)( memory + t->currentColorOffset );
+	planes.currentDepth = depthPlane;
+	planes.previousColor = (const uint16_t *)( memory + t->previousColorOffset );
+	planes.previousLinearDepth = previousDepthPlane;
+	planes.velocity = (const uint16_t *)( memory + t->velocityOffset );
+	planes.validity = memory + t->validityOffset;
+	memset( &params, 0, sizeof( params ) );
+	params.extent[0] = t->resolve.push.extent[0]; params.extent[1] = t->resolve.push.extent[1];
+	params.currentEffectiveJitterUv[0] = t->resolve.push.currentEffectiveJitterUv[0];
+	params.currentEffectiveJitterUv[1] = t->resolve.push.currentEffectiveJitterUv[1];
+	params.zNear = t->resolve.push.zNear; params.zFar = t->resolve.push.zFar;
+	params.depthThresholdAbsolute = t->resolve.push.depthThresholdAbsolute;
+	params.depthThresholdRelative = t->resolve.push.depthThresholdRelative;
+	params.historyWeight = t->resolve.push.historyWeight;
+	params.qualityFlags = t->resolve.push.qualityFlags;
+	params.filterWeightError = VK_TEMPORAL_RESOLVE_READBACK_FILTER_WEIGHT_ERROR;
+	for ( y = t->coreY; y < t->coreY + t->coreHeight; ++y ) for ( x = t->coreX; x < t->coreX + t->coreWidth; ++x ) {
+		temporalResolveOracleResult_t r;
+		uint32_t li = ( y - t->captureY ) * t->captureWidth + ( x - t->captureX ), c;
+		uint16_t displayed[4], history[4];
+		if ( !R_TemporalResolveOraclePixel( &planes, &params, (int32_t)x, (int32_t)y, &r )
+				|| r.pixelClass == TEMPORAL_RESOLVE_ORACLE_UNSUPPORTED ) continue;
+		for ( c = 0; c < 4; ++c ) {
+			displayed[c] = VK_TemporalResolveReadbackFloatToHalfRne( 0.5f * ( r.displayedLo[c] + r.displayedHi[c] ) );
+			history[c] = VK_TemporalResolveReadbackFloatToHalfRne( 0.5f * ( r.historyLo[c] + r.historyHi[c] ) );
+		}
+		memcpy( memory + t->resolvedOffset + (uint64_t)li * 8u, displayed, sizeof( displayed ) );
+		memcpy( memory + t->historyWrittenOffset + (uint64_t)li * 8u, history, sizeof( history ) );
+	}
 }
 
 int main( void ) {
@@ -564,7 +611,7 @@ int main( void ) {
 		uint16_t motion[2] = { 0x1400, 0u };
 		memcpy( velocity + (uint64_t)center * 4u, motion, sizeof( motion ) );
 	}
-	SetHalf4( resolved, center, 0x3b00, 0, 0, 0x3c00 );
+	FillOracleOutputs( &readbackTicket, memory );
 	CHECK( VK_TemporalResolveReadbackCompleteAfterFence(
 		&owner, 0, qtrue, &content ) );
 	CHECK( content.fenceComplete && content.ready && content.planesPopulated
@@ -582,7 +629,8 @@ int main( void ) {
 		&& content.centerVelocity[0] == 0x1400u
 		&& content.centerVelocity[1] == 0u
 		&& content.centerValidity == 255u
-		&& content.centerResolvedColor[0] == 0x3b00u
+		&& memcmp( content.centerResolvedColor,
+			resolved + (uint64_t)center * 8u, 8u ) == 0
 		&& content.centerResolvedColor[3] == 0x3c00u );
 	CHECK( VK_TemporalResolveReadbackGetLatest( &owner, &content ) );
 	CHECK( VK_TemporalResolveReadbackPrepareAfterFence( &owner, &backend,
@@ -596,7 +644,7 @@ int main( void ) {
 	memset( memory, 0, (size_t)readbackTicket.totalBytes );
 	CHECK( VK_TemporalResolveReadbackCompleteAfterFence(
 		&owner, 0, qtrue, &content ) );
-	CHECK( content.planesPopulated && !content.ready );
+	CHECK( content.planesPopulated && !content.ready && content.mismatches > 0u );
 
 	CHECK( VK_TemporalResolveReadbackArm( &owner, 1 ) );
 	CHECK( VK_TemporalResolveReadbackPrepareAfterFence( &owner, &backend,
@@ -613,6 +661,7 @@ int main( void ) {
 	resolved = memory + readbackTicket.resolvedOffset;
 	SetHalf4( current, center, 0x7e00u, 0u, 0u, 0u );
 	validity[center] = 255u;
+	FillOracleOutputs( &readbackTicket, memory );
 	SetHalf4( resolved, center, 0u, 0u, 0u, 0u );
 	CHECK( VK_TemporalResolveReadbackCompleteAfterFence(
 		&owner, 0, qtrue, &content ) );
@@ -642,6 +691,7 @@ int main( void ) {
 		memcpy( velocity + (uint64_t)center * 4u,
 			oobMotion, sizeof( oobMotion ) );
 	}
+	FillOracleOutputs( &readbackTicket, memory );
 	CHECK( VK_TemporalResolveReadbackCompleteAfterFence(
 		&owner, 0, qtrue, &content ) );
 	CHECK( content.fallbackExpected == 64u
@@ -727,10 +777,14 @@ int main( void ) {
 			SetHalf4( current, neighbor, 0x7e00u, 0u, 0u, 0x3c00u );
 			SetHalf4( resolved, neighbor, 0u, 0u, 0u, 0u );
 		} else {
-			priorLinear = 10.0f / 0.98f + ( i == 8u ? 0.001f : 0.0f );
+			// Clearly inside (7) and clearly outside (8) the current 3x3 depth range widened by
+			// max(0.125, 2 %): a prior exactly on the edge is ambiguous to the oracle by design.
+			priorLinear = i == 8u ? 10.4f : 10.1f;
 			for ( p = 0; p < 64u; ++p ) memcpy(
 				previousDepth + (uint64_t)p * 4u, &priorLinear, 4u );
 		}
+		FillOracleOutputs( &readbackTicket, memory );
+		if ( i == 6u ) SetHalf4( resolved, neighbor, 0u, 0u, 0u, 0u );
 		CHECK( VK_TemporalResolveReadbackCompleteAfterFence(
 			&owner, 0, qtrue, &content ) );
 		CHECK( content.fallbackExact == content.fallbackExpected
@@ -738,11 +792,15 @@ int main( void ) {
 			&& content.mismatches == 0u );
 		if ( i == 7u ) CHECK( content.accepted == 1u
 			&& content.acceptedMatches == 1u );
-		else if ( i == 6u ) CHECK( content.fallbackExpected == 63u
-			&& content.zeroFallbackExpected == 1u );
+		// A NaN neighbour in the 3x3 box: min/max skip it (IEEE fmin/fmax, as the
+		// GPU's min/max), so the centre still blends its history; the NaN pixel
+		// itself resolves to zero.
+		else if ( i == 6u ) CHECK( content.fallbackExpected == 62u
+			&& content.zeroFallbackExpected == 1u && content.accepted == 1u );
 		else CHECK( content.fallbackExpected == 64u );
-		if ( i == 0u || i == 1u || i == 2u || i == 5u || i == 6u )
-			CHECK( content.nonfiniteInputs > 0u );
+		// A non-finite current colour resolves to zero (counted); non-finite motion,
+		// depth or history only refuse the history, like the shader (64 fallbacks).
+		if ( i == 6u ) CHECK( content.nonfiniteInputs > 0u );
 	}
 	CHECK( VK_TemporalResolveReadbackReleaseAfterIdle( &owner, qtrue )
 		&& !VK_TemporalResolveReadbackHasLive( &owner ) );

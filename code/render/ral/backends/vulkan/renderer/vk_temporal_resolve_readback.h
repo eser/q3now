@@ -12,6 +12,11 @@
 #define VK_TEMPORAL_RESOLVE_READBACK_APRON_MIN 4u
 #define VK_TEMPORAL_RESOLVE_READBACK_APRON_MAX 512u
 #define VK_TEMPORAL_RESOLVE_READBACK_APRON_DIVISOR 4u
+// Sub-texel weight error of the hardware bilinear filter the resolve oracle
+// assumes (8-bit weights). On the 2026-11-25 Metal/MoltenVK captures every
+// value from 1/1024 to 1/128 gave the same verdict once the oracle modelled the
+// half-precision rounding of filtered rgba16f fetches.
+#define VK_TEMPORAL_RESOLVE_READBACK_FILTER_WEIGHT_ERROR ( 1.0f / 256.0f )
 #define VK_TEMPORAL_RESOLVE_READBACK_MISMATCH_SAMPLES 4u
 
 typedef enum {
@@ -83,15 +88,9 @@ typedef struct {
 	uint32_t zeroFallbackExpected;
 	uint32_t zeroFallbackExact;
 	uint32_t unsupportedFootprint;
-	uint32_t rejectedCurrentNonfinite;
-	uint32_t rejectedValidity;
-	uint32_t rejectedVelocityNonfinite;
-	uint32_t rejectedOutside;
-	uint32_t rejectedDepthNonfinite;
-	uint32_t rejectedDepthNonpositive;
-	uint32_t rejectedDepthThreshold;
-	uint32_t rejectedPriorNonfinite;
-	uint32_t rejectedNeighborhoodNonfinite;
+	uint32_t oracleAmbiguous;   // within unsupportedFootprint: a branch flips within the filter error
+	uint32_t oracleSpatial;     // within the fallback: the spatial (edge) fallback ran
+	uint32_t oracleMoving;      // within accepted: filtered (sub-texel) history taps
 	uint32_t mismatches;
 	uint32_t mismatchGpuCurrentFallback;
 	uint32_t mismatchBlended;

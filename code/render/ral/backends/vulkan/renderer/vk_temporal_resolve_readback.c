@@ -2,10 +2,12 @@
 // SPDX-FileCopyrightText: 2026 Wired Engine contributors
 
 #include "vk_temporal_resolve_readback.h"
+#include "../../../../renderer/tr_temporal_resolve_oracle.h"
 
 #include <float.h>
 #include <limits.h>
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 typedef struct {
@@ -668,33 +670,6 @@ static uint32_t HalfOrderedDistance( uint16_t a, uint16_t b ) {
 	return ao > bo ? ao - bo : bo - ao;
 }
 
-static float MixExpanded( float x, float y, float a ) {
-	volatile float oneMinus = 1.0f - a;
-	volatile float left = x * oneMinus;
-	volatile float right = y * a;
-	volatile float result = left + right;
-	return result;
-}
-
-static float LinearizeDepthPrecise( float z, float zNear, float zFar ) {
-	volatile float range = zFar - zNear;
-	volatile float scaled = z * range;
-	volatile float denominator = zNear + scaled;
-	volatile float numerator = zNear * zFar;
-	volatile float result = numerator / denominator;
-	return result;
-}
-
-static void VerifyCurrentFallback( vkTemporalResolveReadbackContentReceipt_t *r,
-		const uint16_t current[4], const uint16_t actual[4], qboolean invalid ) {
-	r->fallbackExpected++;
-	if ( invalid ) r->invalidFallbackExpected++;
-	if ( memcmp( current, actual, 4u * sizeof( uint16_t ) ) == 0 ) {
-		r->fallbackExact++;
-		if ( invalid ) r->invalidFallbackExact++;
-	} else r->mismatches++;
-}
-
 static void VerifyZeroFallback( vkTemporalResolveReadbackContentReceipt_t *r,
 		const uint16_t actual[4] ) {
 	static const uint16_t zero[4] = { 0u, 0u, 0u, 0u };
@@ -804,187 +779,114 @@ qboolean VK_TemporalResolveReadbackCompleteAfterFence(
 		else r.validityOther++;
 	}
 	r.corePixels = t->coreWidth * t->coreHeight;
-	for ( y = t->coreY; y < t->coreY + t->coreHeight; ++y ) {
-		for ( x = t->coreX; x < t->coreX + t->coreWidth; ++x ) {
-			uint32_t i, n, c, p00, p10, p01, p11;
-			int32_t bx, by;
-			uint16_t cb[4], rb[4], tempBits[4];
-			float cur[4], actual[4], vel[2], previousTexel[2], previousCenter[2];
-			float currentLinear, priorLinear, depthLimit, fx, fy;
-			float prior[4], expected[3], lo[3], hi[3];
-			qboolean finite = qtrue, match = qtrue, influenced = qfalse;
-			uint16_t firstExpected = 0u;
-			uint32_t firstDistance = 0u, firstChannel = 0u;
-			qboolean haveFirstMismatch = qfalse;
-			if ( !LocalIndex( t, (int32_t)x, (int32_t)y, &i ) ) continue;
-			ReadHalf4( current, i, cur, cb ); ReadHalf4( resolved, i, actual, rb );
-			memcpy( &tempBits[0], velocity + (uint64_t)i * 4u, 2u );
-			memcpy( &tempBits[1], velocity + (uint64_t)i * 4u + 2u, 2u );
-			vel[0] = HalfToFloat( tempBits[0] ); vel[1] = HalfToFloat( tempBits[1] );
-			for ( c = 0; c < 4; ++c ) if ( !isfinite( cur[c] ) ) finite = qfalse;
-			if ( !finite ) { r.rejectedCurrentNonfinite++; r.nonfiniteInputs++;
-				VerifyZeroFallback( &r, rb ); continue; }
-			if ( validity[i] <= 127u ) {
-				r.rejectedValidity++;
-				VerifyCurrentFallback( &r, cb, rb, qtrue ); continue;
-			}
-			if ( !isfinite( vel[0] ) || !isfinite( vel[1] ) ) {
-				r.rejectedVelocityNonfinite++; r.nonfiniteInputs++;
-				VerifyCurrentFallback( &r, cb, rb, qfalse ); continue;
-			}
-			{
-				uint32_t pixel[2] = { x, y };
-				VK_TemporalResolveReadbackPreviousTexel( pixel,
-					t->resolve.push.extent, vel,
-				t->resolve.push.previousEffectiveJitterUv,
-					t->resolve.push.currentEffectiveJitterUv, previousTexel );
-			}
-			{
-				volatile float centerX = previousTexel[0] + 0.5f;
-				volatile float centerY = previousTexel[1] + 0.5f;
-				previousCenter[0] = centerX; previousCenter[1] = centerY;
-			}
-			if ( !isfinite( previousTexel[0] ) || !isfinite( previousTexel[1] )
-					|| previousCenter[0] < 0.0f
-					|| previousCenter[0] >= (float)t->resolve.push.extent[0]
-					|| previousCenter[1] < 0.0f
-					|| previousCenter[1] >= (float)t->resolve.push.extent[1] ) {
-				r.rejectedOutside++;
-				VerifyCurrentFallback( &r, cb, rb, qfalse ); continue;
-			}
-			{
-				float baseX = floorf( previousTexel[0] );
-				float baseY = floorf( previousTexel[1] );
-				volatile float fractionX = previousTexel[0] - baseX;
-				volatile float fractionY = previousTexel[1] - baseY;
-				bx = (int32_t)baseX; by = (int32_t)baseY;
-				fx = fractionX; fy = fractionY;
-			}
-			{
-				int32_t maxX = (int32_t)t->resolve.push.extent[0] - 1;
-				int32_t maxY = (int32_t)t->resolve.push.extent[1] - 1;
-				int32_t x0 = bx < 0 ? 0 : ( bx > maxX ? maxX : bx );
-				int32_t y0 = by < 0 ? 0 : ( by > maxY ? maxY : by );
-				int32_t x1 = bx + 1 < 0 ? 0 : ( bx + 1 > maxX ? maxX : bx + 1 );
-				int32_t y1 = by + 1 < 0 ? 0 : ( by + 1 > maxY ? maxY : by + 1 );
-				if ( !LocalIndex( t, x0, y0, &p00 )
-						|| !LocalIndex( t, x1, y0, &p10 )
-						|| !LocalIndex( t, x0, y1, &p01 )
-						|| !LocalIndex( t, x1, y1, &p11 ) ) {
-				r.unsupportedFootprint++; continue;
-				}
-			}
-			currentLinear = LinearizeDepthPrecise(
-				VK_TemporalResolveReadbackDecodeDepth(
-					depth + (uint64_t)i * depthBytes, t->currentDepthEncoding ),
-				t->resolve.push.zNear, t->resolve.push.zFar );
-			{
-				float d[4]; uint32_t pi[4] = { p00, p10, p01, p11 };
-				for ( n = 0; n < 4; ++n ) memcpy( &d[n], previousDepth + (uint64_t)pi[n] * 4u, 4u );
-				priorLinear = MixExpanded(
-					MixExpanded( d[0], d[1], fx ),
-					MixExpanded( d[2], d[3], fx ), fy );
-			}
-			depthLimit = fmaxf( t->resolve.push.depthThresholdAbsolute,
-				t->resolve.push.depthThresholdRelative * fmaxf( currentLinear, priorLinear ) );
-			if ( !isfinite( currentLinear ) || !isfinite( priorLinear )
-					|| currentLinear <= 0.0f || priorLinear <= 0.0f
-					|| fabsf( currentLinear - priorLinear ) > depthLimit ) {
-				if ( !isfinite( currentLinear ) || !isfinite( priorLinear ) ) {
-					r.rejectedDepthNonfinite++; r.nonfiniteInputs++;
-				} else if ( currentLinear <= 0.0f || priorLinear <= 0.0f )
-					r.rejectedDepthNonpositive++;
-				else r.rejectedDepthThreshold++;
-				VerifyCurrentFallback( &r, cb, rb, qfalse ); continue;
-			}
-			for ( c = 0; c < 4; ++c ) {
-				float pc[4]; uint16_t pb[4];
-				float c00, c10, c01, c11, top, bottom;
-				ReadHalf4( previous, p00, pc, pb ); c00 = pc[c];
-				ReadHalf4( previous, p10, pc, pb ); c10 = pc[c];
-				ReadHalf4( previous, p01, pc, pb ); c01 = pc[c];
-				ReadHalf4( previous, p11, pc, pb ); c11 = pc[c];
-				top = MixExpanded( c00, c10, fx );
-				bottom = MixExpanded( c01, c11, fx );
-				prior[c] = MixExpanded( top, bottom, fy );
-				if ( !isfinite( prior[c] ) ) finite = qfalse;
-			}
-			if ( !finite ) {
-				r.rejectedPriorNonfinite++; r.nonfiniteInputs++;
-				VerifyCurrentFallback( &r, cb, rb, qfalse ); continue;
-			}
-			for ( c = 0; c < 3; ++c ) { lo[c] = FLT_MAX; hi[c] = -FLT_MAX; }
-			for ( int32_t dy = -1; dy <= 1; ++dy ) for ( int32_t dx = -1; dx <= 1; ++dx ) {
-				float sample[4]; uint16_t sb[4];
-				int32_t sx = (int32_t)x + dx, sy = (int32_t)y + dy;
-				if ( sx < 0 ) sx = 0;
-				if ( sy < 0 ) sy = 0;
-				if ( sx >= (int32_t)t->resolve.push.extent[0] ) sx = (int32_t)t->resolve.push.extent[0] - 1;
-				if ( sy >= (int32_t)t->resolve.push.extent[1] ) sy = (int32_t)t->resolve.push.extent[1] - 1;
-				if ( !LocalIndex( t, sx, sy, &n ) ) finite = qfalse;
-				else {
-					ReadHalf4( current, n, sample, sb );
-					for ( c = 0; c < 3; ++c ) {
-						if ( !isfinite( sample[c] ) ) finite = qfalse;
-						if ( sample[c] < lo[c] ) lo[c] = sample[c];
-						if ( sample[c] > hi[c] ) hi[c] = sample[c];
-					}
-				}
-			}
-			if ( !finite ) {
-				r.rejectedNeighborhoodNonfinite++; r.nonfiniteInputs++;
-				VerifyCurrentFallback( &r, cb, rb, qfalse ); continue;
-			}
-			for ( c = 0; c < 3; ++c ) {
-				float w = fminf( 1.0f, fmaxf( 0.0f, t->resolve.push.historyWeight ) );
-				float clamped = fminf( hi[c], fmaxf( lo[c], prior[c] ) );
-				expected[c] = MixExpanded( cur[c], clamped, w );
-				if ( !VK_TemporalResolveReadbackHalfWithinOneStep(
-						rb[c], expected[c] ) ) {
-					match = qfalse;
-					if ( !haveFirstMismatch ) {
-						haveFirstMismatch = qtrue; firstChannel = c;
-						firstExpected =
-							VK_TemporalResolveReadbackFloatToHalfRne( expected[c] );
-						firstDistance = HalfOrderedDistance( rb[c], firstExpected );
-					}
-				}
-				if ( rb[c] != cb[c] ) influenced = qtrue;
-			}
-			if ( rb[3] != cb[3] ) {
-				match = qfalse;
-				if ( !haveFirstMismatch ) {
-					haveFirstMismatch = qtrue; firstChannel = 3u;
-					firstExpected = cb[3];
-					firstDistance = HalfOrderedDistance( rb[3], cb[3] );
-				}
-			}
-			r.oracleEligible++; r.accepted++;
-			if ( ( tempBits[0] & 0x7fffu ) != 0u
-					|| ( tempBits[1] & 0x7fffu ) != 0u ) r.acceptedNonzeroVelocity++;
-			if ( match ) r.acceptedMatches++;
-			else {
-				qboolean gpuCurrent = memcmp( rb, cb, sizeof( rb ) ) == 0
-					? qtrue : qfalse;
-				r.mismatches++;
-				if ( gpuCurrent ) r.mismatchGpuCurrentFallback++;
-				else r.mismatchBlended++;
-				if ( firstDistance > r.mismatchMaxHalfDistance )
-					r.mismatchMaxHalfDistance = firstDistance;
-				if ( r.mismatchSampleCount
-						< VK_TEMPORAL_RESOLVE_READBACK_MISMATCH_SAMPLES ) {
-					vkTemporalResolveReadbackMismatchSample_t *s =
-						&r.mismatchSamples[r.mismatchSampleCount++];
-					s->x = x; s->y = y; s->channel = (uint8_t)firstChannel;
-					s->expectedBits = firstExpected;
-					s->actualBits = rb[firstChannel];
-					s->currentBits = cb[firstChannel];
-					s->halfDistance = firstDistance;
-					s->gpuCurrentFallback = gpuCurrent ? 1u : 0u;
-				}
-			}
-			if ( influenced ) r.acceptedInfluence++;
+	{
+		// The current-resolve oracle (tr_temporal_resolve_oracle): every core pixel's displayed colour and written
+		// history must lie in the interval the CPU model of temporal_resolve.comp predicts. A pixel the model cannot
+		// decide (a read outside the capture, or a branch that flips within the hardware filter's error) counts as
+		// unsupported; it is never a match.
+		temporalResolveOraclePlanes_t planes;
+		temporalResolveOracleParams_t params;
+		float *depthPlane = (float *)malloc( (size_t)pixels * sizeof( float ) );
+		float *previousDepthPlane = (float *)malloc( (size_t)pixels * sizeof( float ) );
+		if ( !depthPlane || !previousDepthPlane ) {
+			free( depthPlane ); free( previousDepthPlane );
+			Ral_BufferMapUnmap( slot->buffer, &mapTicket );
+			return qfalse;
 		}
+		for ( uint64_t vi = 0; vi < pixels; ++vi ) {
+			depthPlane[vi] = VK_TemporalResolveReadbackDecodeDepth(
+				depth + vi * depthBytes, t->currentDepthEncoding );
+			memcpy( &previousDepthPlane[vi], previousDepth + vi * 4u, 4u );
+		}
+		memset( &planes, 0, sizeof( planes ) );
+		planes.width = t->captureWidth; planes.height = t->captureHeight;
+		planes.originX = t->captureX; planes.originY = t->captureY;
+		planes.currentColor = (const uint16_t *)current;
+		planes.currentDepth = depthPlane;
+		planes.previousColor = (const uint16_t *)previous;
+		planes.previousLinearDepth = previousDepthPlane;
+		planes.velocity = (const uint16_t *)velocity;
+		planes.validity = validity;
+		memset( &params, 0, sizeof( params ) );
+		params.extent[0] = t->resolve.push.extent[0];
+		params.extent[1] = t->resolve.push.extent[1];
+		params.currentEffectiveJitterUv[0] = t->resolve.push.currentEffectiveJitterUv[0];
+		params.currentEffectiveJitterUv[1] = t->resolve.push.currentEffectiveJitterUv[1];
+		params.zNear = t->resolve.push.zNear; params.zFar = t->resolve.push.zFar;
+		params.depthThresholdAbsolute = t->resolve.push.depthThresholdAbsolute;
+		params.depthThresholdRelative = t->resolve.push.depthThresholdRelative;
+		params.historyWeight = t->resolve.push.historyWeight;
+		params.qualityFlags = t->resolve.push.qualityFlags;
+		params.filterWeightError = VK_TEMPORAL_RESOLVE_READBACK_FILTER_WEIGHT_ERROR;
+		for ( y = t->coreY; y < t->coreY + t->coreHeight; ++y ) {
+			for ( x = t->coreX; x < t->coreX + t->coreWidth; ++x ) {
+				temporalResolveOracleResult_t expected;
+				uint32_t i, c;
+				uint16_t cb[4], rb[4], hb[4], vb[2];
+				float cur[4], actual[4], written[4];
+				qboolean currentFinite = qtrue, match, influenced = qfalse;
+				if ( !LocalIndex( t, (int32_t)x, (int32_t)y, &i ) ) continue;
+				ReadHalf4( current, i, cur, cb ); ReadHalf4( resolved, i, actual, rb );
+				ReadHalf4( historyWritten, i, written, hb );
+				memcpy( vb, velocity + (uint64_t)i * 4u, sizeof( vb ) );
+				for ( c = 0; c < 4; ++c ) if ( !isfinite( cur[c] ) ) currentFinite = qfalse;
+				if ( !R_TemporalResolveOraclePixel( &planes, &params, (int32_t)x, (int32_t)y, &expected )
+						|| expected.pixelClass == TEMPORAL_RESOLVE_ORACLE_UNSUPPORTED || expected.ambiguous ) {
+					r.unsupportedFootprint++;
+					if ( expected.ambiguous ) r.oracleAmbiguous++;
+					continue;
+				}
+				match = R_TemporalResolveOracleHalf4Within( rb, expected.displayedLo, expected.displayedHi )
+					&& R_TemporalResolveOracleHalf4Within( hb, expected.historyLo, expected.historyHi )
+					? qtrue : qfalse;
+				if ( !currentFinite ) {
+					// The resolve writes zero for a non-finite current colour.
+					r.nonfiniteInputs++;
+					VerifyZeroFallback( &r, rb );
+					continue;
+				}
+				if ( expected.pixelClass != TEMPORAL_RESOLVE_ORACLE_HISTORY ) {
+					qboolean invalid = validity[i] == 0u ? qtrue : qfalse;
+					if ( expected.pixelClass == TEMPORAL_RESOLVE_ORACLE_SPATIAL ) r.oracleSpatial++;
+					r.fallbackExpected++;
+					if ( invalid ) r.invalidFallbackExpected++;
+					if ( match ) {
+						r.fallbackExact++;
+						if ( invalid ) r.invalidFallbackExact++;
+						continue;
+					}
+				} else {
+					r.oracleEligible++; r.accepted++;
+					if ( expected.moving ) r.oracleMoving++;
+					if ( ( vb[0] & 0x7fffu ) != 0u || ( vb[1] & 0x7fffu ) != 0u ) r.acceptedNonzeroVelocity++;
+					for ( c = 0; c < 3; ++c ) if ( rb[c] != cb[c] ) influenced = qtrue;
+					if ( influenced ) r.acceptedInfluence++;
+					if ( match ) { r.acceptedMatches++; continue; }
+				}
+				r.mismatches++;
+				if ( memcmp( rb, cb, sizeof( rb ) ) == 0 ) r.mismatchGpuCurrentFallback++;
+				else r.mismatchBlended++;
+				if ( r.mismatchSampleCount < VK_TEMPORAL_RESOLVE_READBACK_MISMATCH_SAMPLES ) {
+					vkTemporalResolveReadbackMismatchSample_t *sample =
+						&r.mismatchSamples[r.mismatchSampleCount++];
+					uint32_t channel = 0u;
+					for ( c = 0; c < 4; ++c ) {
+						float v = actual[c];
+						if ( v < expected.displayedLo[c] || v > expected.displayedHi[c] ) { channel = c; break; }
+					}
+					sample->x = x; sample->y = y; sample->channel = (uint8_t)channel;
+					sample->expectedBits = VK_TemporalResolveReadbackFloatToHalfRne(
+						0.5f * ( expected.displayedLo[channel] + expected.displayedHi[channel] ) );
+					sample->actualBits = rb[channel];
+					sample->currentBits = cb[channel];
+					sample->halfDistance = HalfOrderedDistance( rb[channel], sample->expectedBits );
+					if ( sample->halfDistance > r.mismatchMaxHalfDistance )
+						r.mismatchMaxHalfDistance = sample->halfDistance;
+					sample->gpuCurrentFallback = memcmp( rb, cb, sizeof( rb ) ) == 0 ? 1u : 0u;
+				}
+			}
+		}
+		free( depthPlane ); free( previousDepthPlane );
 	}
 	r.fenceComplete = qtrue;
 	r.ready = r.planesPopulated && r.accepted > 0u

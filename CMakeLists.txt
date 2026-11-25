@@ -5370,7 +5370,8 @@ SET_TESTS_PROPERTIES(vk_temporal_resolve_contract PROPERTIES
 WIRED_CONFIGURE_HOST_TEST(vk_temporal_resolve_test vk_temporal_resolve_contract)
 ADD_EXECUTABLE(vk_temporal_resolve_readback_test
 	tests/vk_temporal_resolve_readback_test.c
-	code/render/ral/backends/vulkan/renderer/vk_temporal_resolve_readback.c)
+	code/render/ral/backends/vulkan/renderer/vk_temporal_resolve_readback.c
+	code/render/renderer/tr_temporal_resolve_oracle.c)
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_resolve_readback_test PRIVATE
 	code/qcommon code/renderer code/render/ral/core code/render/frontend code/render/ral/backends/vulkan/renderer code/render/renderer)
 ADD_TEST(NAME vk_temporal_resolve_readback_contract
@@ -5380,6 +5381,21 @@ SET_TESTS_PROPERTIES(vk_temporal_resolve_readback_contract PROPERTIES
 	TIMEOUT 30)
 WIRED_CONFIGURE_HOST_TEST(vk_temporal_resolve_readback_test
 	vk_temporal_resolve_readback_contract)
+ADD_EXECUTABLE(tr_temporal_resolve_oracle_test
+	tests/tr_temporal_resolve_oracle_test.c
+	code/render/renderer/tr_temporal_resolve_oracle.c)
+TARGET_INCLUDE_DIRECTORIES(tr_temporal_resolve_oracle_test PRIVATE
+	code/qcommon code/render/renderer)
+IF(NOT WIN32)
+	TARGET_LINK_LIBRARIES(tr_temporal_resolve_oracle_test m)
+ENDIF()
+ADD_TEST(NAME tr_temporal_resolve_oracle_contract
+	COMMAND tr_temporal_resolve_oracle_test)
+SET_TESTS_PROPERTIES(tr_temporal_resolve_oracle_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;failure.contract;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(tr_temporal_resolve_oracle_test
+	tr_temporal_resolve_oracle_contract)
 ADD_TEST(NAME vk_temporal_resolve_readback_source_policy_contract
 	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
 		-P ${CMAKE_SOURCE_DIR}/cmake/vk_temporal_resolve_readback_policy_check.cmake)

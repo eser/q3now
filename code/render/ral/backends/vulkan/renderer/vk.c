@@ -1587,14 +1587,12 @@ static void vk_temporal_resolve_readback_log_content(
 		r->centerResolvedColor[1], r->centerResolvedColor[2],
 		r->centerResolvedColor[3] );
 	R_LOG( rch_ral, SEV_INFO,
-		"temporal-resolve-rejection schema=1 frame=%llu slot=%u core=%u accepted=%u current-nonfinite=%u validity=%u velocity-nonfinite=%u outside=%u unsupported=%u depth-nonfinite=%u depth-nonpositive=%u depth-threshold=%u prior-nonfinite=%u neighborhood-nonfinite=%u\n",
+		"temporal-resolve-oracle schema=1 frame=%llu slot=%u core=%u history=%u history-moving=%u fallback=%u spatial=%u zero=%u ambiguous=%u outside=%u mismatches=%u filter-weight-error=%g\n",
 		(unsigned long long)a->frameId, r->ticket.commandSlot,
-		r->corePixels, r->accepted, r->rejectedCurrentNonfinite,
-		r->rejectedValidity, r->rejectedVelocityNonfinite,
-		r->rejectedOutside, r->unsupportedFootprint,
-		r->rejectedDepthNonfinite, r->rejectedDepthNonpositive,
-		r->rejectedDepthThreshold, r->rejectedPriorNonfinite,
-		r->rejectedNeighborhoodNonfinite );
+		r->corePixels, r->accepted, r->oracleMoving, r->fallbackExpected,
+		r->oracleSpatial, r->zeroFallbackExpected, r->oracleAmbiguous,
+		r->unsupportedFootprint - r->oracleAmbiguous, r->mismatches,
+		(double)VK_TEMPORAL_RESOLVE_READBACK_FILTER_WEIGHT_ERROR );
 	if ( r->mismatches ) {
 		uint32_t i;
 		R_LOG( rch_ral, SEV_INFO,
