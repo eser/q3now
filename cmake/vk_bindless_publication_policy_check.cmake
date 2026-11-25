@@ -72,7 +72,17 @@ string(REGEX MATCH "uint64_t[ \t]+bindlessOwnerGeneration;" owner_epoch "${TR_LO
 if(NOT owner_epoch)
 	message(FATAL_ERROR "bindless publication policy missing image owner epoch")
 endif()
-require_text("${LEDGER}" "image->kind != VK_BINDLESS_PUBLICATION_LEGACY_EXACT" "ordinary exact-kind gate")
+# The ordinary query admits exactly two publications: LEGACY_EXACT of the
+# descriptor view, and RESIDENT of a caller-vouched fully resident view. COARSE
+# (and every other kind) stays a decline; the Vulkan wrapper vouches only while
+# vk_ral_whole_texture_promotion_ready holds.
+foreach(needle IN ITEMS
+	"exactView = image->kind == VK_BINDLESS_PUBLICATION_LEGACY_EXACT\n\t\t&& image->identity == (uintptr_t)expectedView;"
+	"residentView = image->kind == VK_BINDLESS_PUBLICATION_RESIDENT\n\t\t&& expectedResidentView\n\t\t&& image->identity == (uintptr_t)expectedResidentView;"
+	"|| ( !exactView && !residentView )")
+	require_text("${LEDGER}" "${needle}" "ordinary exact/resident kind gate")
+endforeach()
+require_text("${TEXTURES}" "if ( image->ralResidencyView && vk_ral_whole_texture_promotion_ready( image ) )\n\t\tresidentView = Ral_GetTextureViewHandle( image->ralResidencyView );" "resident view vouched only when whole-texture resident")
 require_text("${LEDGER}" "!ReceiptValid( a ) || !ReceiptValid( b )" "two-sided receipt validation")
 require_text("${LEDGER}" "VK_BindlessPublicationPoisonSetAfterWrite" "post-writer poison authority")
 

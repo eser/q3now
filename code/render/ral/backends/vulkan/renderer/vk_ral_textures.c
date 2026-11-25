@@ -382,9 +382,12 @@ qboolean vk_ral_bindless_tombstone( uint32_t slot ) {
 	return qfalse;
 }
 
+static qboolean vk_ral_whole_texture_promotion_ready( const image_t *image );
+
 qboolean vk_ral_bindless_query_ordinary( const image_t *image,
 		vkBindlessOrdinaryReceipt_t *outReceipt ) {
 	const void *nativeView;
+	const void *residentView = NULL;
 	int samplerSlot;
 	if ( !image || !outReceipt || image->ralBindlessSlot < 0
 			|| image->bindlessSamplerSlot < 0 || !image->bindlessOwnerGeneration
@@ -392,11 +395,16 @@ qboolean vk_ral_bindless_query_ordinary( const image_t *image,
 		return qfalse;
 	nativeView = Ral_GetTextureViewHandle( image->ralDescriptorView );
 	if ( !nativeView ) return qfalse;
+	// Ordinary decoded images publish their full-chain residency view
+	// (vk_ral_register_image). While every mip is resident it samples exactly
+	// what the descriptor view samples; a coarse or partly resident slot does not.
+	if ( image->ralResidencyView && vk_ral_whole_texture_promotion_ready( image ) )
+		residentView = Ral_GetTextureViewHandle( image->ralResidencyView );
 	samplerSlot = image->bindlessSamplerSlot;
 	if ( samplerSlot >= vk.samplers.count ) return qfalse;
 	return VK_BindlessPublicationQueryOrdinary( &s_bindless_publication,
 		s_ral_bindless_set, &vk.samplers, (uint32_t)image->ralBindlessSlot,
-		nativeView, image, (const void *)image->descriptor,
+		nativeView, residentView, image, (const void *)image->descriptor,
 		image->bindlessOwnerGeneration, (uint32_t)samplerSlot,
 		(const void *)vk.samplers.handle[samplerSlot],
 		vk_ral_bindless_sampler_digest( &vk.samplers.def[samplerSlot] ), outReceipt );
