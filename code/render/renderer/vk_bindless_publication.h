@@ -94,17 +94,10 @@ qboolean VK_BindlessPublicationSamplers( vkBindlessPublicationLedger_t *ledger,
 qboolean VK_BindlessPublicationTombstoneImage(
 	vkBindlessPublicationLedger_t *ledger, const void *expectedSet,
 	uint32_t slot );
-// The ordinary query proves that the bindless slot shows exactly what the
-// image's ordinary descriptor shows. Two publications qualify: LEGACY_EXACT of
-// expectedView (the descriptor view itself) and RESIDENT of
-// expectedResidentView, a full-chain view of the same texture that the caller
-// passes only while every mip is resident (NULL otherwise). COARSE and any
-// other view never qualify.
 qboolean VK_BindlessPublicationQueryOrdinary(
 	const vkBindlessPublicationLedger_t *ledger,
 	const void *expectedSet, const void *expectedPool, uint32_t imageSlot,
-	const void *expectedView, const void *expectedResidentView,
-	const void *expectedOwner,
+	const void *expectedView, const void *expectedOwner,
 	const void *expectedDescriptor, uint64_t expectedOwnerGeneration,
 	uint32_t samplerSlot, const void *expectedSampler,
 	uint64_t expectedSamplerDefinitionDigest,

@@ -174,15 +174,13 @@ qboolean VK_BindlessPublicationTombstoneImage(
 qboolean VK_BindlessPublicationQueryOrdinary(
 		const vkBindlessPublicationLedger_t *ledger,
 		const void *expectedSet, const void *expectedPool, uint32_t imageSlot,
-		const void *expectedView, const void *expectedResidentView,
-		const void *expectedOwner,
+		const void *expectedView, const void *expectedOwner,
 		const void *expectedDescriptor, uint64_t expectedOwnerGeneration,
 		uint32_t samplerSlot, const void *expectedSampler,
 		uint64_t expectedSamplerDefinitionDigest,
 		vkBindlessOrdinaryReceipt_t *outReceipt ) {
 	vkBindlessOrdinaryReceipt_t candidate;
 	const vkBindlessPublicationEntry_t *image, *sampler;
-	qboolean exactView, residentView;
 	if ( !ledger || !outReceipt || !expectedSet || !expectedPool || !expectedView
 			|| !expectedOwner || !expectedDescriptor || !expectedOwnerGeneration
 			|| !expectedSampler || !expectedSamplerDefinitionDigest
@@ -192,14 +190,10 @@ qboolean VK_BindlessPublicationQueryOrdinary(
 			|| ledger->samplerPoolIdentity != (uintptr_t)expectedPool
 			|| !ledger->setGeneration || !ledger->samplerPoolGeneration ) return qfalse;
 	image = &ledger->images[imageSlot]; sampler = &ledger->samplers[samplerSlot];
-	exactView = image->kind == VK_BINDLESS_PUBLICATION_LEGACY_EXACT
-		&& image->identity == (uintptr_t)expectedView;
-	residentView = image->kind == VK_BINDLESS_PUBLICATION_RESIDENT
-		&& expectedResidentView
-		&& image->identity == (uintptr_t)expectedResidentView;
 	if ( image->populated != qtrue || image->tombstone
 			|| sampler->populated != qtrue || sampler->tombstone
-			|| ( !exactView && !residentView )
+			|| image->kind != VK_BINDLESS_PUBLICATION_LEGACY_EXACT
+			|| image->identity != (uintptr_t)expectedView
 			|| image->ownerIdentity != (uintptr_t)expectedOwner
 			|| image->descriptorIdentity != (uintptr_t)expectedDescriptor
 			|| image->ownerGeneration != expectedOwnerGeneration
