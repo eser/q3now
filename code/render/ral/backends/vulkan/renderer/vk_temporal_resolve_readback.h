@@ -46,6 +46,7 @@ typedef struct {
 	uint64_t velocityOffset;
 	uint64_t validityOffset;
 	uint64_t resolvedOffset;
+	uint64_t historyWrittenOffset;
 	uint64_t totalBytes;
 	qboolean submitted;
 } vkTemporalResolveReadbackTicket_t;
@@ -63,6 +64,7 @@ typedef struct {
 	uint64_t currentColorHash, currentDepthHash;
 	uint64_t previousColorHash, previousDepthHash;
 	uint64_t velocityHash, validityHash, resolvedHash;
+	uint64_t historyWrittenHash;
 	uint16_t centerCurrentColor[4], centerResolvedColor[4];
 	uint16_t centerVelocity[2];
 	uint32_t centerDepthRaw;

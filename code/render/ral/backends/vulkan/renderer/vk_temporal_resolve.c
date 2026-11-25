@@ -516,6 +516,8 @@ static qboolean RecordInputsValid( const vkTemporalResolveOwner_t *owner,
 		&& p->validityView == owner->key.validityView
 		&& p->resolvedTarget == owner->key.resolvedTarget
 		&& p->resolvedTargetView == owner->key.resolvedTargetView
+		&& p->historyWrittenColor
+			== owner->key.historyColor[a->historyWriteIndex]
 		? qtrue : qfalse;
 }
 
@@ -873,6 +875,7 @@ qboolean VK_TemporalResolveTicketEqualExact(
 		&& a->products.validityView == b->products.validityView
 		&& a->products.resolvedTarget == b->products.resolvedTarget
 		&& a->products.resolvedTargetView == b->products.resolvedTargetView
+		&& a->products.historyWrittenColor == b->products.historyWrittenColor
 		&& ac->batchToken == bc->batchToken && ac->frameId == bc->frameId
 		&& ac->contentSerial == bc->contentSerial
 		&& ac->commandSlot == bc->commandSlot && ac->frameCount == bc->frameCount

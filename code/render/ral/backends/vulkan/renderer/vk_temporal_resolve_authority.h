@@ -72,6 +72,10 @@ typedef struct {
 	ralTextureView_t *validityView;
 	ralTexture_t *resolvedTarget;
 	ralTextureView_t *resolvedTargetView;
+	// The history this resolve wrote (historyColor[historyWriteIndex]): rgb is
+	// the unsharpened result, alpha the accumulated sample count. The next
+	// frame's previousColor must be exactly this image's content.
+	ralTexture_t *historyWrittenColor;
 } vkTemporalResolveProductView_t;
 
 // Joins the immutable pre-submit activation receipt with the exact committed

@@ -194,6 +194,7 @@ qboolean VK_TemporalResolveBuildAuthority(
 	products.validityView = mp->validityView;
 	products.resolvedTarget = resolved->target;
 	products.resolvedTargetView = resolved->targetView;
+	products.historyWrittenColor = history->writeColor;
 	*outReceipt = receipt;
 	*outProducts = products;
 	return qtrue;

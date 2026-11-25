@@ -236,7 +236,7 @@ static void SetHalf4( unsigned char *base, uint32_t i,
 int main( void ) {
 	struct ralBackend_s backend = { 1 };
 	struct ralCommandBuffer_s command = { 2 };
-	struct ralTexture_s texture[8];
+	struct ralTexture_s texture[9];
 	struct ralTextureView_s view[6];
 	vkTemporalResolveProductView_t products, badProducts;
 	vkTemporalResolveReadbackOwner_t owner, ownerBefore;
@@ -247,7 +247,7 @@ int main( void ) {
 	unsigned char *memory, *current, *depth, *previous, *previousDepth;
 	unsigned char *velocity, *validity, *resolved;
 	uint32_t i, center = 4u * 8u + 4u, neighbor = 3u * 8u + 4u;
-	for ( i = 0; i < 8; ++i ) texture[i].id = (int)i + 1;
+	for ( i = 0; i < 9; ++i ) texture[i].id = (int)i + 1;
 	for ( i = 0; i < 6; ++i ) view[i].id = (int)i + 20;
 	memset( &products, 0, sizeof( products ) );
 	products.backend = &backend; products.currentColor = &texture[0];
@@ -257,6 +257,7 @@ int main( void ) {
 	products.velocityView = &view[2]; products.validity = &texture[5];
 	products.validityView = &view[3]; products.resolvedTarget = &texture[6];
 	products.resolvedTargetView = &view[4];
+	products.historyWrittenColor = &texture[8];
 	recorded.products = products;
 	recorded.content.backend = &backend;
 	recorded.content.sourceSceneColor = products.currentColor;
@@ -350,10 +351,10 @@ int main( void ) {
 	barriers = 0; depthCopies = 0; eventCount = 0;
 	CHECK( VK_TemporalResolveReadbackRecord( &owner, &command, 0,
 		&recorded, &products, DepthCopy, NULL ) );
-	CHECK( depthCopies == 1 && transitions == 12 && copies == 6 && barriers == 1 );
+	CHECK( depthCopies == 1 && transitions == 14 && copies == 7 && barriers == 1 );
 	CHECK( owner.slots[0].ticket.captureWidth == 8
 		&& owner.slots[0].ticket.coreWidth == 8 );
-	CHECK( eventCount == 22 && eventKind[0] == 4
+	CHECK( eventCount == 25 && eventKind[0] == 4
 		&& eventObject[0] == products.currentDepth
 		&& eventSrc[0] == RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
 		&& eventDst[0] == RAL_PIPELINE_STAGE_TRANSFER_BIT
@@ -366,65 +367,76 @@ int main( void ) {
 		&& eventKind[2] == 4
 		&& eventLayout[2] == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
 	{
-		const ralTexture_t *expectedTexture[6] = {
+		// Seven colour planes: transitions 3..9, copies 10..16, the host
+		// barrier 17, restores 18..24. The last plane is the history this
+		// resolve wrote, which the resolve leaves (and the restore returns) in
+		// GENERAL for the next frame's resolve to transition for sampling.
+		enum { PLANES = 7, COPY0 = 3 + PLANES, BARRIER = COPY0 + PLANES, RESTORE0 = BARRIER + 1 };
+		const ralTexture_t *expectedTexture[PLANES] = {
 			products.currentColor, products.previousColor, products.previousDepth,
-			products.velocity, products.validity, products.resolvedTarget
+			products.velocity, products.validity, products.resolvedTarget,
+			products.historyWrittenColor
 		};
-		const uint64_t expectedOffset[6] = {
+		const uint64_t expectedOffset[PLANES] = {
 			owner.slots[0].ticket.currentColorOffset,
 			owner.slots[0].ticket.previousColorOffset,
 			owner.slots[0].ticket.previousDepthOffset,
 			owner.slots[0].ticket.velocityOffset,
 			owner.slots[0].ticket.validityOffset,
-			owner.slots[0].ticket.resolvedOffset
+			owner.slots[0].ticket.resolvedOffset,
+			owner.slots[0].ticket.historyWrittenOffset
 		};
-		const ralTextureAspectFlags_t expectedAspects[6] = {
-			RAL_TEXTURE_ASPECT_COLOR, RAL_TEXTURE_ASPECT_COLOR,
-			RAL_TEXTURE_ASPECT_COLOR, RAL_TEXTURE_ASPECT_COLOR,
-			RAL_TEXTURE_ASPECT_COLOR, RAL_TEXTURE_ASPECT_COLOR
+		const uint32_t expectedSrc[PLANES] = {
+			RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			RAL_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+				| RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
 		};
-		for ( i = 0; i < 6; ++i ) {
-			const uint32_t expectedRestoreDst[6] = {
-				RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-				RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-				RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-				RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-				RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-				RAL_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
-					| RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
-			};
+		const uint32_t expectedRestoreDst[PLANES] = {
+			RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			RAL_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+				| RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+		};
+		const uint32_t expectedRestoreLayout[PLANES] = {
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			VK_IMAGE_LAYOUT_GENERAL
+		};
+		for ( i = 0; i < PLANES; ++i ) {
 			CHECK( eventKind[3 + i] == 1
 				&& eventObject[3 + i] == expectedTexture[i]
+				&& eventSrc[3 + i] == expectedSrc[i]
 				&& eventDst[3 + i] == RAL_PIPELINE_STAGE_TRANSFER_BIT
 				&& eventLayout[3 + i] == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL );
-			CHECK( eventKind[9 + i] == 2
-				&& eventObject[9 + i] == expectedTexture[i]
-				&& eventBuffer[9 + i] == owner.slots[0].buffer
-				&& eventOffset[9 + i] == expectedOffset[i]
-				&& eventAspects[9 + i] == expectedAspects[i]
-				&& eventX[9 + i] == 0 && eventY[9 + i] == 0
-				&& eventWidth[9 + i] == 8 && eventHeight[9 + i] == 8 );
-			CHECK( eventKind[16 + i] == 1
-				&& eventObject[16 + i] == expectedTexture[i]
-				&& eventSrc[16 + i] == RAL_PIPELINE_STAGE_TRANSFER_BIT
-				&& eventDst[16 + i] == expectedRestoreDst[i] );
+			CHECK( eventKind[COPY0 + i] == 2
+				&& eventObject[COPY0 + i] == expectedTexture[i]
+				&& eventBuffer[COPY0 + i] == owner.slots[0].buffer
+				&& eventOffset[COPY0 + i] == expectedOffset[i]
+				&& eventAspects[COPY0 + i] == RAL_TEXTURE_ASPECT_COLOR
+				&& eventX[COPY0 + i] == 0 && eventY[COPY0 + i] == 0
+				&& eventWidth[COPY0 + i] == 8 && eventHeight[COPY0 + i] == 8 );
+			CHECK( eventKind[RESTORE0 + i] == 1
+				&& eventObject[RESTORE0 + i] == expectedTexture[i]
+				&& eventSrc[RESTORE0 + i] == RAL_PIPELINE_STAGE_TRANSFER_BIT
+				&& eventDst[RESTORE0 + i] == expectedRestoreDst[i]
+				&& eventLayout[RESTORE0 + i] == expectedRestoreLayout[i] );
 		}
-		CHECK( eventKind[15] == 3
-			&& eventSrc[15] == RAL_PIPELINE_STAGE_TRANSFER_BIT
-			&& eventDst[15] == RAL_PIPELINE_STAGE_HOST_BIT );
-		CHECK( eventSrc[3] == RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
-			&& eventSrc[4] == RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
-			&& eventSrc[5] == RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
-			&& eventSrc[6] == RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-			&& eventSrc[7] == RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-			&& eventSrc[8] == ( RAL_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
-				| RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT )
-			&& eventLayout[16] == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-			&& eventLayout[17] == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-			&& eventLayout[18] == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-			&& eventLayout[19] == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-			&& eventLayout[20] == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-			&& eventLayout[21] == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+		CHECK( eventKind[BARRIER] == 3
+			&& eventSrc[BARRIER] == RAL_PIPELINE_STAGE_TRANSFER_BIT
+			&& eventDst[BARRIER] == RAL_PIPELINE_STAGE_HOST_BIT );
 	}
 	bound = recorded;
 	bound.committedWriteExpected.source.storeOwnerAllocationGeneration = 42u;

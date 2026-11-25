@@ -1525,7 +1525,7 @@ static void vk_temporal_resolve_readback_log_content(
 	if ( !r || !r->fenceComplete ) return;
 	a = &r->ticket.resolve.authority;
 	R_LOG( rch_ral, SEV_INFO,
-		"temporal-resolve-content schema=1 token=%llu frame=%llu previous=%llu content=%llu world=%d extent=%ux%u topology=%u plan=%u scene=%u history=%u:%u motion-materialization=%u motion-target=%u motion-layout=%u table=%u prior-producer=%u prior-token=%llu prior-frame=%llu prior-content=%llu prior-scene=%u prior-target=%u prior-resolve-owner=%u prior-store-owner=%u prior-slot=%u prior-frame-count=%u target=%u owner=%u slot=%u serial=%u depth=%u segments=%u written=%u invalidated=%u sequence=%016llx:%016llx:%u capture=%u,%u,%ux%u core=%u,%u,%ux%u outer-submit=1 content-submit=1 fence=1 core-pixels=%u eligible=%u accepted=%u accepted-match=%u accepted-influence=%u accepted-motion=%u fallback=%u/%u invalid=%u/%u zero=%u/%u unsupported=%u nonfinite=%u validity=%u:%u:%u planes=%d mismatches=%u hashes=%016llx:%016llx:%016llx:%016llx:%016llx:%016llx:%016llx ready=%d\n",
+		"temporal-resolve-content schema=1 token=%llu frame=%llu previous=%llu content=%llu world=%d extent=%ux%u topology=%u plan=%u scene=%u history=%u:%u motion-materialization=%u motion-target=%u motion-layout=%u table=%u prior-producer=%u prior-token=%llu prior-frame=%llu prior-content=%llu prior-scene=%u prior-target=%u prior-resolve-owner=%u prior-store-owner=%u prior-slot=%u prior-frame-count=%u target=%u owner=%u slot=%u serial=%u depth=%u segments=%u written=%u invalidated=%u sequence=%016llx:%016llx:%u capture=%u,%u,%ux%u core=%u,%u,%ux%u outer-submit=1 content-submit=1 fence=1 core-pixels=%u eligible=%u accepted=%u accepted-match=%u accepted-influence=%u accepted-motion=%u fallback=%u/%u invalid=%u/%u zero=%u/%u unsupported=%u nonfinite=%u validity=%u:%u:%u planes=%d mismatches=%u hashes=%016llx:%016llx:%016llx:%016llx:%016llx:%016llx:%016llx ready=%d history-written=%016llx\n",
 		(unsigned long long)a->batchToken, (unsigned long long)a->frameId,
 		(unsigned long long)a->previousFrameId,
 		(unsigned long long)r->ticket.resolve.content.contentSerial,
@@ -1573,7 +1573,8 @@ static void vk_temporal_resolve_readback_log_content(
 		(unsigned long long)r->previousDepthHash,
 		(unsigned long long)r->velocityHash,
 		(unsigned long long)r->validityHash,
-		(unsigned long long)r->resolvedHash, r->ready ? 1 : 0 );
+		(unsigned long long)r->resolvedHash, r->ready ? 1 : 0,
+		(unsigned long long)r->historyWrittenHash );
 	R_LOG( rch_ral, SEV_INFO,
 		"temporal-resolve-sample schema=1 token=%llu frame=%llu slot=%u serial=%u pixel=%u,%u color=%04x:%04x:%04x:%04x depth=%u:%08x velocity=%04x:%04x validity=%u resolved=%04x:%04x:%04x:%04x submit=1 fence=1\n",
 		(unsigned long long)a->batchToken, (unsigned long long)a->frameId,
@@ -13647,6 +13648,8 @@ static qboolean vk_temporal_resolve_ensure_after_fence(
 		readbackProducts.validityView = key.validityView;
 		readbackProducts.resolvedTarget = key.resolvedTarget;
 		readbackProducts.resolvedTargetView = key.resolvedTargetView;
+		readbackProducts.historyWrittenColor =
+			key.historyColor[plan->historyWriteIndex];
 		{
 			const vkTemporalResolveReadbackDepthEncoding_t readbackDepth =
 				vk_temporal_resolve_readback_depth_encoding( vk.depth_format );

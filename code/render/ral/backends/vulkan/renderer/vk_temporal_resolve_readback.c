@@ -13,10 +13,12 @@ typedef struct {
 	uint32_t coreX, coreY, coreWidth, coreHeight;
 	uint64_t currentColorOffset, currentDepthOffset;
 	uint64_t previousColorOffset, previousDepthOffset;
-	uint64_t velocityOffset, validityOffset, resolvedOffset, totalBytes;
+	uint64_t velocityOffset, validityOffset, resolvedOffset, historyWrittenOffset;
+	uint64_t totalBytes;
 } vkTemporalResolveReadbackGeometry_t;
 
-#define VK_TEMPORAL_RESOLVE_READBACK_PROTECTED 14u
+#define VK_TEMPORAL_RESOLVE_READBACK_PRODUCT_ROLES 14u
+#define VK_TEMPORAL_RESOLVE_READBACK_PROTECTED 15u
 
 static qboolean ProductProtectedSet(
 		const vkTemporalResolveProductView_t *p, const void **out ) {
@@ -25,15 +27,17 @@ static qboolean ProductProtectedSet(
 			|| !p->previousColor || !p->previousColorView || !p->previousDepth
 			|| !p->previousDepthView || !p->velocity || !p->velocityView
 			|| !p->validity || !p->validityView || !p->resolvedTarget
-			|| !p->resolvedTargetView ) return qfalse;
+			|| !p->resolvedTargetView || !p->historyWrittenColor ) return qfalse;
 	out[0] = p->backend; out[1] = p->currentColor; out[2] = p->currentDepth;
 	out[3] = p->previousColor; out[4] = p->previousColorView;
 	out[5] = p->previousDepth; out[6] = p->previousDepthView;
 	out[7] = p->velocity; out[8] = p->velocityView;
 	out[9] = p->validity; out[10] = p->validityView;
 	out[11] = p->resolvedTarget; out[12] = p->resolvedTargetView;
-	out[13] = NULL;
-	for ( i = 0; i < 13u; ++i ) for ( j = i + 1u; j < 13u; ++j )
+	out[13] = p->historyWrittenColor;
+	out[14] = NULL;
+	for ( i = 0; i < VK_TEMPORAL_RESOLVE_READBACK_PRODUCT_ROLES; ++i )
+		for ( j = i + 1u; j < VK_TEMPORAL_RESOLVE_READBACK_PRODUCT_ROLES; ++j )
 		if ( out[i] == out[j] ) return qfalse;
 	return qtrue;
 }
@@ -49,7 +53,8 @@ static qboolean ProductExact( const vkTemporalResolveProductView_t *a,
 		&& a->velocity == b->velocity && a->velocityView == b->velocityView
 		&& a->validity == b->validity && a->validityView == b->validityView
 		&& a->resolvedTarget == b->resolvedTarget
-		&& a->resolvedTargetView == b->resolvedTargetView ? qtrue : qfalse;
+		&& a->resolvedTargetView == b->resolvedTargetView
+		&& a->historyWrittenColor == b->historyWrittenColor ? qtrue : qfalse;
 }
 
 static uint64_t Align16( uint64_t value ) {
@@ -120,6 +125,7 @@ static qboolean BuildGeometry( uint32_t width, uint32_t height,
 	g.velocityOffset = cursor; cursor = Align16( cursor + pixels * 4u );
 	g.validityOffset = cursor; cursor = Align16( cursor + pixels );
 	g.resolvedOffset = cursor; cursor = Align16( cursor + pixels * 8u );
+	g.historyWrittenOffset = cursor; cursor = Align16( cursor + pixels * 8u );
 	g.totalBytes = cursor;
 	*out = g;
 	return qtrue;
@@ -154,6 +160,7 @@ static qboolean TicketMatchesSlot( const vkTemporalResolveReadbackSlot_t *slot,
 		&& ticket->velocityOffset == g.velocityOffset
 		&& ticket->validityOffset == g.validityOffset
 		&& ticket->resolvedOffset == g.resolvedOffset
+		&& ticket->historyWrittenOffset == g.historyWrittenOffset
 		&& ticket->totalBytes == g.totalBytes && g.totalBytes <= slot->bytes
 		? qtrue : qfalse;
 }
@@ -227,7 +234,7 @@ qboolean VK_TemporalResolveReadbackPrepareAfterFence(
 	for ( i = 0; i < VK_TEMPORAL_RESOLVE_READBACK_MAX_FRAMES; ++i ) {
 		const void *role = owner->slots[i].buffer;
 		if ( role ) {
-			for ( j = 0; j < 13u; ++j )
+			for ( j = 0; j < VK_TEMPORAL_RESOLVE_READBACK_PRODUCT_ROLES; ++j )
 				if ( role == protectedResources[j] ) return qfalse;
 			for ( uint32_t k = i + 1u;
 					k < VK_TEMPORAL_RESOLVE_READBACK_MAX_FRAMES; ++k ) {
@@ -240,7 +247,7 @@ qboolean VK_TemporalResolveReadbackPrepareAfterFence(
 	if ( slot->buffer && slot->bytes == g.totalBytes
 			&& slot->width == width && slot->height == height
 			&& slot->depthEncoding == depthEncoding ) {
-		for ( i = 0; i < 13u; ++i )
+		for ( i = 0; i < VK_TEMPORAL_RESOLVE_READBACK_PRODUCT_ROLES; ++i )
 			if ( (const void *)slot->buffer == protectedResources[i] ) return qfalse;
 		memset( &slot->ticket, 0, sizeof( slot->ticket ) );
 		slot->products = *protectedProducts;
@@ -262,7 +269,7 @@ qboolean VK_TemporalResolveReadbackPrepareAfterFence(
 			// and therefore must neither publish nor destroy it.
 			return qfalse;
 		}
-	for ( i = 0; i < 13u; ++i )
+	for ( i = 0; i < VK_TEMPORAL_RESOLVE_READBACK_PRODUCT_ROLES; ++i )
 		if ( (const void *)candidate == protectedResources[i] ) return qfalse;
 	if ( slot->buffer ) Ral_DestroyBuffer( slot->buffer );
 	slot->buffer = candidate; slot->bytes = g.totalBytes;
@@ -315,6 +322,11 @@ static void RestoreCopiedProducts( ralCommandBuffer_t *commandBuffer,
 		RAL_PIPELINE_STAGE_TRANSFER_BIT,
 		RAL_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+	// The resolve leaves the history it wrote in GENERAL; the next frame's
+	// resolve transitions it for sampling from there.
+	Ral_CmdTransitionTexture( commandBuffer, products->historyWrittenColor,
+		RAL_PIPELINE_STAGE_TRANSFER_BIT, RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_IMAGE_LAYOUT_GENERAL );
 }
 
 qboolean VK_TemporalResolveReadbackRecord(
@@ -360,9 +372,10 @@ qboolean VK_TemporalResolveReadbackRecord(
 			|| slot->width != recordedResolve->authority.width
 			|| slot->height != recordedResolve->authority.height
 			|| !ProductExact( products, &slot->products ) ) return qfalse;
-	for ( i = 0; i < 13u; ++i )
+	for ( i = 0; i < VK_TEMPORAL_RESOLVE_READBACK_PRODUCT_ROLES; ++i )
 		if ( protectedResources[i] == (const void *)slot->buffer ) return qfalse;
-	for ( i = 0; i < 13u; ++i ) for ( j = i + 1u; j < 13u; ++j )
+	for ( i = 0; i < VK_TEMPORAL_RESOLVE_READBACK_PRODUCT_ROLES; ++i )
+		for ( j = i + 1u; j < VK_TEMPORAL_RESOLVE_READBACK_PRODUCT_ROLES; ++j )
 		if ( protectedResources[i] == protectedResources[j] ) return qfalse;
 	memset( &ticket, 0, sizeof( ticket ) );
 	ticket.resolve = *recordedResolve;
@@ -382,6 +395,7 @@ qboolean VK_TemporalResolveReadbackRecord(
 	ticket.velocityOffset = g.velocityOffset;
 	ticket.validityOffset = g.validityOffset;
 	ticket.resolvedOffset = g.resolvedOffset;
+	ticket.historyWrittenOffset = g.historyWrittenOffset;
 	ticket.totalBytes = g.totalBytes;
 
 	// The destination must enter COPY_DESTINATION before the platform records
@@ -419,6 +433,9 @@ qboolean VK_TemporalResolveReadbackRecord(
 	Ral_CmdTransitionTexture( commandBuffer, products->resolvedTarget,
 		RAL_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 		RAL_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL );
+	Ral_CmdTransitionTexture( commandBuffer, products->historyWrittenColor,
+		RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT, RAL_PIPELINE_STAGE_TRANSFER_BIT,
+		VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL );
 	if ( !CopyRect( commandBuffer, products->currentColor, slot->buffer,
 			g.currentColorOffset, RAL_TEXTURE_ASPECT_COLOR, &g )
 			|| !CopyRect( commandBuffer, products->previousColor, slot->buffer,
@@ -430,7 +447,9 @@ qboolean VK_TemporalResolveReadbackRecord(
 			|| !CopyRect( commandBuffer, products->validity, slot->buffer,
 				g.validityOffset, RAL_TEXTURE_ASPECT_COLOR, &g )
 			|| !CopyRect( commandBuffer, products->resolvedTarget, slot->buffer,
-				g.resolvedOffset, RAL_TEXTURE_ASPECT_COLOR, &g ) ) {
+				g.resolvedOffset, RAL_TEXTURE_ASPECT_COLOR, &g )
+			|| !CopyRect( commandBuffer, products->historyWrittenColor, slot->buffer,
+				g.historyWrittenOffset, RAL_TEXTURE_ASPECT_COLOR, &g ) ) {
 		RestoreCopiedProducts( commandBuffer, products );
 		(void)TransitionReadback( commandBuffer, slot->buffer, slot->bytes,
 			RAL_RESOURCE_USAGE_COPY_DESTINATION,
@@ -712,7 +731,7 @@ qboolean VK_TemporalResolveReadbackCompleteAfterFence(
 	const vkTemporalResolveReadbackTicket_t *t;
 	vkTemporalResolveTicket_t canonicalRecorded;
 	const unsigned char *bytes, *current, *depth, *previous, *previousDepth;
-	const unsigned char *velocity, *validity, *resolved;
+	const unsigned char *velocity, *validity, *resolved, *historyWritten;
 	ralBufferMapRequest_t mapRequest;
 	ralBufferMapTicket_t mapTicket;
 	uint64_t pixels;
@@ -742,6 +761,7 @@ qboolean VK_TemporalResolveReadbackCompleteAfterFence(
 	previousDepth = bytes + t->previousDepthOffset;
 	velocity = bytes + t->velocityOffset; validity = bytes + t->validityOffset;
 	resolved = bytes + t->resolvedOffset;
+	historyWritten = bytes + t->historyWrittenOffset;
 	pixels = (uint64_t)t->captureWidth * t->captureHeight;
 	depthBytes = DepthBytes( t->currentDepthEncoding );
 	r.currentColorHash = HashBytes( current, pixels * 8u );
@@ -751,6 +771,7 @@ qboolean VK_TemporalResolveReadbackCompleteAfterFence(
 	r.velocityHash = HashBytes( velocity, pixels * 4u );
 	r.validityHash = HashBytes( validity, pixels );
 	r.resolvedHash = HashBytes( resolved, pixels * 8u );
+	r.historyWrittenHash = HashBytes( historyWritten, pixels * 8u );
 	// The exact ticket, full-plane copy command inventory, submitted receipt and
 	// completed slot fence are the population authority. Content validity remains
 	// independently fail-closed below; zero is a legitimate value for every plane.

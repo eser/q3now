@@ -232,6 +232,7 @@ static fixture_t MakeFixture( void ) {
 	f.products.validity = f.key.validity; f.products.validityView = f.key.validityView;
 	f.products.resolvedTarget = f.key.resolvedTarget;
 	f.products.resolvedTargetView = f.key.resolvedTargetView;
+	f.products.historyWrittenColor = f.key.historyColor[1];
 
 	f.current.backend = f.key.backend; f.current.attachment = f.key.currentColor;
 	f.current.postprocessGroup = H( 0x900 ); f.current.histogramGroup = H( 0x910 );
