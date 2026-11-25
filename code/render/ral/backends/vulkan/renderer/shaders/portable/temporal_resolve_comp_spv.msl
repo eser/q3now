@@ -460,7 +460,7 @@ float3 samplePreviousBlur(thread const float2& texel, thread float3& tapMin, thr
 }
 
 static inline __attribute__((always_inline))
-float fxLuma(thread const float3& c)
+float edgeLuma(thread const float3& c)
 {
     float l = dot(c, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
     float param = l;
@@ -480,138 +480,138 @@ float4 sampleCurrent(thread const int2& pixel, constant TemporalResolvePush& pc,
 }
 
 static inline __attribute__((always_inline))
-float fxLumaAt(thread const int2& p, constant TemporalResolvePush& pc, texture2d<float> currentColor, sampler nearestSampler)
+float edgeLumaAt(thread const int2& p, constant TemporalResolvePush& pc, texture2d<float> currentColor, sampler nearestSampler)
 {
     int2 param = p;
     float3 param_1 = sampleCurrent(param, pc, currentColor, nearestSampler).xyz;
-    return fxLuma(param_1);
+    return edgeLuma(param_1);
 }
 
 static inline __attribute__((always_inline))
-float fxEdgeLuma(thread const int2& base, thread const int2& across, constant TemporalResolvePush& pc, texture2d<float> currentColor, sampler nearestSampler)
+float edgeMidLuma(thread const int2& base, thread const int2& across, constant TemporalResolvePush& pc, texture2d<float> currentColor, sampler nearestSampler)
 {
     int2 param = base;
     int2 param_1 = base + across;
-    return 0.5 * (fxLumaAt(param, pc, currentColor, nearestSampler) + fxLumaAt(param_1, pc, currentColor, nearestSampler));
+    return 0.5 * (edgeLumaAt(param, pc, currentColor, nearestSampler) + edgeLumaAt(param_1, pc, currentColor, nearestSampler));
 }
 
 static inline __attribute__((always_inline))
-float4 fxSpatialAa(thread const int2& px, thread const float4& centerColor, constant TemporalResolvePush& pc, texture2d<float> currentColor, sampler nearestSampler)
+float4 spatialEdgeFilter(thread const int2& px, thread const float4& centerColor, constant TemporalResolvePush& pc, texture2d<float> currentColor, sampler nearestSampler)
 {
     float3 param = centerColor.xyz;
-    float fxM = fxLuma(param);
+    float edgeM = edgeLuma(param);
     int2 param_1 = px + int2(0, -1);
-    float fxN = fxLumaAt(param_1, pc, currentColor, nearestSampler);
+    float edgeN = edgeLumaAt(param_1, pc, currentColor, nearestSampler);
     int2 param_2 = px + int2(0, 1);
-    float fxS = fxLumaAt(param_2, pc, currentColor, nearestSampler);
+    float edgeS = edgeLumaAt(param_2, pc, currentColor, nearestSampler);
     int2 param_3 = px + int2(-1, 0);
-    float fxW = fxLumaAt(param_3, pc, currentColor, nearestSampler);
+    float edgeW = edgeLumaAt(param_3, pc, currentColor, nearestSampler);
     int2 param_4 = px + int2(1, 0);
-    float fxE = fxLumaAt(param_4, pc, currentColor, nearestSampler);
-    float fxHi = fast::max(fast::max(fxN, fxS), fast::max(fast::max(fxW, fxE), fxM));
-    float fxLo = fast::min(fast::min(fxN, fxS), fast::min(fast::min(fxW, fxE), fxM));
-    float fxSpan = fxHi - fxLo;
-    if (fxSpan < fast::max(0.031199999153614044189453125, fxHi * 0.125))
+    float edgeE = edgeLumaAt(param_4, pc, currentColor, nearestSampler);
+    float edgeHi = fast::max(fast::max(edgeN, edgeS), fast::max(fast::max(edgeW, edgeE), edgeM));
+    float edgeLo = fast::min(fast::min(edgeN, edgeS), fast::min(fast::min(edgeW, edgeE), edgeM));
+    float edgeSpan = edgeHi - edgeLo;
+    if (edgeSpan < fast::max(0.031199999153614044189453125, edgeHi * 0.125))
     {
         return centerColor;
     }
     int2 param_5 = px + int2(-1);
-    float fxNW = fxLumaAt(param_5, pc, currentColor, nearestSampler);
+    float edgeNW = edgeLumaAt(param_5, pc, currentColor, nearestSampler);
     int2 param_6 = px + int2(1, -1);
-    float fxNE = fxLumaAt(param_6, pc, currentColor, nearestSampler);
+    float edgeNE = edgeLumaAt(param_6, pc, currentColor, nearestSampler);
     int2 param_7 = px + int2(-1, 1);
-    float fxSW = fxLumaAt(param_7, pc, currentColor, nearestSampler);
+    float edgeSW = edgeLumaAt(param_7, pc, currentColor, nearestSampler);
     int2 param_8 = px + int2(1);
-    float fxSE = fxLumaAt(param_8, pc, currentColor, nearestSampler);
-    float fxNS = fxN + fxS;
-    float fxWE = fxW + fxE;
-    float fxNWSW = fxNW + fxSW;
-    float fxNESE = fxNE + fxSE;
-    float fxHorz = abs(((-2.0) * fxW) + fxNWSW) + ((abs(((-2.0) * fxM) + fxNS) * 2.0) + abs(((-2.0) * fxE) + fxNESE));
-    float fxVert = abs(((-2.0) * fxS) + (fxSW + fxSE)) + ((abs(((-2.0) * fxM) + fxWE) * 2.0) + abs(((-2.0) * fxN) + (fxNW + fxNE)));
-    bool fxHorzSpan = fxHorz >= fxVert;
-    float fxAround = ((fxNS + fxWE) * 2.0) + (fxNWSW + fxNESE);
-    float fxLoSide = fxHorzSpan ? fxN : fxW;
-    float fxHiSide = fxHorzSpan ? fxS : fxE;
-    float fxGradLo = fxLoSide - fxM;
-    float fxGradHi = fxHiSide - fxM;
-    bool fxLoSteeper = abs(fxGradLo) >= abs(fxGradHi);
-    float fxGradient = fast::max(abs(fxGradLo), abs(fxGradHi));
+    float edgeSE = edgeLumaAt(param_8, pc, currentColor, nearestSampler);
+    float edgeNS = edgeN + edgeS;
+    float edgeWE = edgeW + edgeE;
+    float edgeNWSW = edgeNW + edgeSW;
+    float edgeNESE = edgeNE + edgeSE;
+    float edgeHorz = abs(((-2.0) * edgeW) + edgeNWSW) + ((abs(((-2.0) * edgeM) + edgeNS) * 2.0) + abs(((-2.0) * edgeE) + edgeNESE));
+    float edgeVert = abs(((-2.0) * edgeS) + (edgeSW + edgeSE)) + ((abs(((-2.0) * edgeM) + edgeWE) * 2.0) + abs(((-2.0) * edgeN) + (edgeNW + edgeNE)));
+    bool edgeHorzSpan = edgeHorz >= edgeVert;
+    float edgeAround = ((edgeNS + edgeWE) * 2.0) + (edgeNWSW + edgeNESE);
+    float edgeLoSide = edgeHorzSpan ? edgeN : edgeW;
+    float edgeHiSide = edgeHorzSpan ? edgeS : edgeE;
+    float edgeGradLo = edgeLoSide - edgeM;
+    float edgeGradHi = edgeHiSide - edgeM;
+    bool edgeLoSteeper = abs(edgeGradLo) >= abs(edgeGradHi);
+    float edgeGradient = fast::max(abs(edgeGradLo), abs(edgeGradHi));
     float _1008;
-    if (fxLoSteeper)
+    if (edgeLoSteeper)
     {
-        _1008 = fxLoSide + fxM;
+        _1008 = edgeLoSide + edgeM;
     }
     else
     {
-        _1008 = fxHiSide + fxM;
+        _1008 = edgeHiSide + edgeM;
     }
-    float fxPair = _1008;
-    int2 fxAcross = select(int2(1, 0), int2(0, 1), bool2(fxHorzSpan));
-    int2 fxAlong = select(int2(0, 1), int2(1, 0), bool2(fxHorzSpan));
-    if (fxLoSteeper)
+    float edgePair = _1008;
+    int2 edgeAcross = select(int2(1, 0), int2(0, 1), bool2(edgeHorzSpan));
+    int2 edgeAlong = select(int2(0, 1), int2(1, 0), bool2(edgeHorzSpan));
+    if (edgeLoSteeper)
     {
-        fxAcross = -fxAcross;
+        edgeAcross = -edgeAcross;
     }
-    float fxInvSpan = rsqrt(fxSpan * fxSpan);
-    float fxBlendC = fast::clamp(abs((fxAround * 0.083333335816860198974609375) - fxM) * fxInvSpan, 0.0, 1.0);
-    float fxBlendF = (((-2.0) * fxBlendC) + 3.0) * (fxBlendC * fxBlendC);
-    float fxSubpixel = (fxBlendF * fxBlendF) * 0.75;
-    float fxHalfPair = fxPair * 0.5;
-    float fxScaled = fxGradient * 0.25;
-    bool fxMidNegative = (fxM - fxHalfPair) < 0.0;
-    int2 param_9 = px - fxAlong;
-    int2 param_10 = fxAcross;
-    float fxEndN = fxEdgeLuma(param_9, param_10, pc, currentColor, nearestSampler) - fxHalfPair;
-    int2 param_11 = px + fxAlong;
-    int2 param_12 = fxAcross;
-    float fxEndP = fxEdgeLuma(param_11, param_12, pc, currentColor, nearestSampler) - fxHalfPair;
-    bool fxDoneN = abs(fxEndN) >= fxScaled;
-    bool fxDoneP = abs(fxEndP) >= fxScaled;
-    int fxStepsN = 1;
-    int fxStepsP = 1;
+    float edgeInvSpan = rsqrt(edgeSpan * edgeSpan);
+    float edgeBlendC = fast::clamp(abs((edgeAround * 0.083333335816860198974609375) - edgeM) * edgeInvSpan, 0.0, 1.0);
+    float edgeBlendF = (((-2.0) * edgeBlendC) + 3.0) * (edgeBlendC * edgeBlendC);
+    float edgeSubpixel = (edgeBlendF * edgeBlendF) * 0.75;
+    float edgeHalfPair = edgePair * 0.5;
+    float edgeScaled = edgeGradient * 0.25;
+    bool edgeMidNegative = (edgeM - edgeHalfPair) < 0.0;
+    int2 param_9 = px - edgeAlong;
+    int2 param_10 = edgeAcross;
+    float edgeEndN = edgeMidLuma(param_9, param_10, pc, currentColor, nearestSampler) - edgeHalfPair;
+    int2 param_11 = px + edgeAlong;
+    int2 param_12 = edgeAcross;
+    float edgeEndP = edgeMidLuma(param_11, param_12, pc, currentColor, nearestSampler) - edgeHalfPair;
+    bool edgeDoneN = abs(edgeEndN) >= edgeScaled;
+    bool edgeDoneP = abs(edgeEndP) >= edgeScaled;
+    int edgeStepsN = 1;
+    int edgeStepsP = 1;
     for (int i = 2; i <= 12; i++)
     {
-        if (!fxDoneN)
+        if (!edgeDoneN)
         {
-            int2 param_13 = px - (fxAlong * int2(i));
-            int2 param_14 = fxAcross;
-            fxEndN = fxEdgeLuma(param_13, param_14, pc, currentColor, nearestSampler) - fxHalfPair;
-            fxDoneN = abs(fxEndN) >= fxScaled;
-            fxStepsN = i;
+            int2 param_13 = px - (edgeAlong * int2(i));
+            int2 param_14 = edgeAcross;
+            edgeEndN = edgeMidLuma(param_13, param_14, pc, currentColor, nearestSampler) - edgeHalfPair;
+            edgeDoneN = abs(edgeEndN) >= edgeScaled;
+            edgeStepsN = i;
         }
-        if (!fxDoneP)
+        if (!edgeDoneP)
         {
-            int2 param_15 = px + (fxAlong * int2(i));
-            int2 param_16 = fxAcross;
-            fxEndP = fxEdgeLuma(param_15, param_16, pc, currentColor, nearestSampler) - fxHalfPair;
-            fxDoneP = abs(fxEndP) >= fxScaled;
-            fxStepsP = i;
+            int2 param_15 = px + (edgeAlong * int2(i));
+            int2 param_16 = edgeAcross;
+            edgeEndP = edgeMidLuma(param_15, param_16, pc, currentColor, nearestSampler) - edgeHalfPair;
+            edgeDoneP = abs(edgeEndP) >= edgeScaled;
+            edgeStepsP = i;
         }
-        if (fxDoneN && fxDoneP)
+        if (edgeDoneN && edgeDoneP)
         {
             break;
         }
     }
-    bool fxTowardN = fxStepsN < fxStepsP;
-    float fxEndG = fxTowardN ? fxEndN : fxEndP;
-    bool fxGoodSpan = (fxEndG < 0.0) != fxMidNegative;
-    float fxSpanLen = float(fxStepsN + fxStepsP);
-    float fxNear = float(fxTowardN ? fxStepsN : fxStepsP);
+    bool edgeTowardN = edgeStepsN < edgeStepsP;
+    float edgeEndG = edgeTowardN ? edgeEndN : edgeEndP;
+    bool edgeGoodSpan = (edgeEndG < 0.0) != edgeMidNegative;
+    float edgeSpanLen = float(edgeStepsN + edgeStepsP);
+    float edgeNear = float(edgeTowardN ? edgeStepsN : edgeStepsP);
     float _1191;
-    if (fxGoodSpan)
+    if (edgeGoodSpan)
     {
-        _1191 = 0.5 - (fxNear * rsqrt(fxSpanLen * fxSpanLen));
+        _1191 = 0.5 - (edgeNear * rsqrt(edgeSpanLen * edgeSpanLen));
     }
     else
     {
         _1191 = 0.0;
     }
-    float fxEdgeBlend = _1191;
-    float fxBlend = fast::clamp(fast::max(fxEdgeBlend, fxSubpixel), 0.0, 1.0);
-    int2 param_17 = px + fxAcross;
-    float3 fxAcrossColor = sampleCurrent(param_17, pc, currentColor, nearestSampler).xyz;
-    return float4((centerColor.xyz * (1.0 - fxBlend)) + (fxAcrossColor * fxBlend), centerColor.w);
+    float edgeStepBlend = _1191;
+    float edgeBlend = fast::clamp(fast::max(edgeStepBlend, edgeSubpixel), 0.0, 1.0);
+    int2 param_17 = px + edgeAcross;
+    float3 edgeAcrossColor = sampleCurrent(param_17, pc, currentColor, nearestSampler).xyz;
+    return float4((centerColor.xyz * (1.0 - edgeBlend)) + (edgeAcrossColor * edgeBlend), centerColor.w);
 }
 
 static inline __attribute__((always_inline))
@@ -869,7 +869,7 @@ kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buff
     {
         int2 param_41 = pixel;
         float4 param_42 = current;
-        result = fxSpatialAa(param_41, param_42, pc, spvDescriptorSet0.currentColor, spvDescriptorSet0.nearestSampler);
+        result = spatialEdgeFilter(param_41, param_42, pc, spvDescriptorSet0.currentColor, spvDescriptorSet0.nearestSampler);
     }
     float4 param_43 = result;
     if (!finite4(param_43))

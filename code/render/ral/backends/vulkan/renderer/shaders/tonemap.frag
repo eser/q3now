@@ -14,7 +14,7 @@
 //   * tonemap operator (PBR Neutral / AgX / Lottes / Reinhard)
 //   * colour grading (tint / saturation / contrast)
 //   * saturation mix (r_saturation)
-// FXAA is removed; temporal anti-aliasing (TAA) is the engine's AA path.
+// Anti-aliasing is not part of this pass (r_aa: TAA in temporal_resolve.comp, SMAA in its own passes).
 //
 // gamma.frag downstream remains a thin "linear -> sRGB encode
 // + framebuffer-bit-depth dither" pass.
@@ -84,7 +84,7 @@ layout(constant_id = 17) const int tonemap_mode = 1;
 layout(constant_id = 18) const float tonemap_exposure = 1.0;
 // Lottes (mode 3) configurable filmic parameters wired from
 // r_lottes_* host-side. IDs 28-32 skip past color grading
-// (19-23), FXAA (24-25), and sunrays (26-27) — the lowest free
+// (19-23), chromatic aberration (24), the free id 25 and sunrays (26-27) — the lowest free
 // range. Defaults match Timothy Lottes's GDC 2016 canonical curve.
 layout(constant_id = 28) const float lottes_contrast = 1.6;
 layout(constant_id = 29) const float lottes_shoulder = 0.977;
@@ -99,8 +99,7 @@ layout(constant_id = 21) const float cg_tint_b = 1.0;
 layout(constant_id = 22) const float cg_saturation = 1.0;
 layout(constant_id = 23) const float cg_contrast = 1.0;
 #endif
-// USE_FXAA removed (TAA replaces it). Spec id 24 is reclaimed from
-// the retired FXAA range for chromatic aberration (below); id 25
+// Spec id 24 is chromatic aberration (below); id 25
 // (show_ao, a FEAT_AO debug slot) stays free — no post-process
 // variant declares it, so the host's spec entry is ignored.
 //
@@ -359,8 +358,6 @@ vec3 computeSunRays() {
 	return illumination * eb.sunrayIntensity;
 }
 #endif
-
-// applyFXAA() is removed entirely; temporal AA (temporal_resolve.comp) is the AA path.
 
 // Chromatic aberration: sample R/G/B from radially-offset UVs so the colour
 // channels fringe apart toward the screen edge (a lens dispersion look). The

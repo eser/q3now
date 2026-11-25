@@ -255,96 +255,96 @@ static float SamplePreviousDepthLinear( oracleEval_t *e, const float texel[2] ) 
 	return MixFast( MixFast( d00, d10, fx ), MixFast( d01, d11, fx ), fy );
 }
 
-// ---- spatial fallback (fxSpatialAa) ----------------------------------------------------------------------------------------
+// ---- spatial fallback (spatialEdgeFilter) ----------------------------------------------------------------------------------------
 
-static float FxLuma( const float c[3] ) {
+static float EdgeLuma( const float c[3] ) {
 	float l = c[0] * 0.2126f + c[1] * 0.7152f + c[2] * 0.0722f;
 	if ( !Finite( l ) ) return 0.0f;
 	l = Clampf( l, 0.0f, 1.0e4f );
 	return l * ( 1.0f / sqrtf( 1.0f + l * l ) );
 }
 
-static float FxLumaAt( oracleEval_t *e, int32_t x, int32_t y ) {
+static float EdgeLumaAt( oracleEval_t *e, int32_t x, int32_t y ) {
 	float c[4];
 	Fetch4( e, e->p->currentColor, x, y, c );
-	return FxLuma( c );
+	return EdgeLuma( c );
 }
 
-static float FxEdgeLuma( oracleEval_t *e, int32_t bx, int32_t by, int32_t ax, int32_t ay ) {
-	return 0.5f * ( FxLumaAt( e, bx, by ) + FxLumaAt( e, bx + ax, by + ay ) );
+static float EdgeMidLuma( oracleEval_t *e, int32_t bx, int32_t by, int32_t ax, int32_t ay ) {
+	return 0.5f * ( EdgeLumaAt( e, bx, by ) + EdgeLumaAt( e, bx + ax, by + ay ) );
 }
 
 // Returns qtrue when the fallback changed the colour (a blend was applied).
-static qboolean FxSpatialAa( oracleEval_t *e, int32_t px, int32_t py, const float center[4], float out[4] ) {
-	float fxM = FxLuma( center );
-	float fxN = FxLumaAt( e, px, py - 1 ), fxS = FxLumaAt( e, px, py + 1 );
-	float fxW = FxLumaAt( e, px - 1, py ), fxE = FxLumaAt( e, px + 1, py );
-	float fxHi = fmaxf( fmaxf( fxN, fxS ), fmaxf( fmaxf( fxW, fxE ), fxM ) );
-	float fxLo = fminf( fminf( fxN, fxS ), fminf( fminf( fxW, fxE ), fxM ) );
-	float fxSpan = fxHi - fxLo, threshold = fmaxf( 0.0312f, fxHi * 0.125f );
-	float fxNW, fxNE, fxSW, fxSE, fxNS, fxWE, fxNWSW, fxNESE, fxHorz, fxVert, fxAround;
-	float fxLoSide, fxHiSide, fxGradLo, fxGradHi, fxGradient, fxPair, fxInvSpan, fxBlendC, fxBlendF;
-	float fxSubpixel, fxHalfPair, fxScaled, fxEndN, fxEndP, fxEndG, fxSpanLen, fxNear, fxEdgeBlend, fxBlend;
+static qboolean SpatialEdgeFilter( oracleEval_t *e, int32_t px, int32_t py, const float center[4], float out[4] ) {
+	float edgeM = EdgeLuma( center );
+	float edgeN = EdgeLumaAt( e, px, py - 1 ), edgeS = EdgeLumaAt( e, px, py + 1 );
+	float edgeW = EdgeLumaAt( e, px - 1, py ), edgeE = EdgeLumaAt( e, px + 1, py );
+	float edgeHi = fmaxf( fmaxf( edgeN, edgeS ), fmaxf( fmaxf( edgeW, edgeE ), edgeM ) );
+	float edgeLo = fminf( fminf( edgeN, edgeS ), fminf( fminf( edgeW, edgeE ), edgeM ) );
+	float edgeSpan = edgeHi - edgeLo, threshold = fmaxf( 0.0312f, edgeHi * 0.125f );
+	float edgeNW, edgeNE, edgeSW, edgeSE, edgeNS, edgeWE, edgeNWSW, edgeNESE, edgeHorz, edgeVert, edgeAround;
+	float edgeLoSide, edgeHiSide, edgeGradLo, edgeGradHi, edgeGradient, edgePair, edgeInvSpan, edgeBlendC, edgeBlendF;
+	float edgeSubpixel, edgeHalfPair, edgeScaled, edgeEndN, edgeEndP, edgeEndG, edgeSpanLen, edgeNear, edgeStepBlend, edgeBlend;
 	float across[4];
 	int32_t ax, ay, lx, ly, stepsN = 1, stepsP = 1, i;
 	qboolean horzSpan, loSteeper, midNegative, doneN, doneP, towardN, goodSpan;
 	memcpy( out, center, sizeof( float ) * 4u );
-	Near( e, fxSpan, threshold );
-	if ( fxSpan < threshold ) return qfalse;
-	fxNW = FxLumaAt( e, px - 1, py - 1 ); fxNE = FxLumaAt( e, px + 1, py - 1 );
-	fxSW = FxLumaAt( e, px - 1, py + 1 ); fxSE = FxLumaAt( e, px + 1, py + 1 );
-	fxNS = fxN + fxS; fxWE = fxW + fxE; fxNWSW = fxNW + fxSW; fxNESE = fxNE + fxSE;
-	fxHorz = fabsf( -2.0f * fxW + fxNWSW ) + ( fabsf( -2.0f * fxM + fxNS ) * 2.0f + fabsf( -2.0f * fxE + fxNESE ) );
-	fxVert = fabsf( -2.0f * fxS + ( fxSW + fxSE ) ) + ( fabsf( -2.0f * fxM + fxWE ) * 2.0f + fabsf( -2.0f * fxN + ( fxNW + fxNE ) ) );
-	Near( e, fxHorz, fxVert );
-	horzSpan = fxHorz >= fxVert ? qtrue : qfalse;
-	fxAround = ( fxNS + fxWE ) * 2.0f + ( fxNWSW + fxNESE );
-	fxLoSide = horzSpan ? fxN : fxW; fxHiSide = horzSpan ? fxS : fxE;
-	fxGradLo = fxLoSide - fxM; fxGradHi = fxHiSide - fxM;
-	Near( e, fabsf( fxGradLo ), fabsf( fxGradHi ) );
-	loSteeper = fabsf( fxGradLo ) >= fabsf( fxGradHi ) ? qtrue : qfalse;
-	fxGradient = fmaxf( fabsf( fxGradLo ), fabsf( fxGradHi ) );
-	fxPair = loSteeper ? fxLoSide + fxM : fxHiSide + fxM;
+	Near( e, edgeSpan, threshold );
+	if ( edgeSpan < threshold ) return qfalse;
+	edgeNW = EdgeLumaAt( e, px - 1, py - 1 ); edgeNE = EdgeLumaAt( e, px + 1, py - 1 );
+	edgeSW = EdgeLumaAt( e, px - 1, py + 1 ); edgeSE = EdgeLumaAt( e, px + 1, py + 1 );
+	edgeNS = edgeN + edgeS; edgeWE = edgeW + edgeE; edgeNWSW = edgeNW + edgeSW; edgeNESE = edgeNE + edgeSE;
+	edgeHorz = fabsf( -2.0f * edgeW + edgeNWSW ) + ( fabsf( -2.0f * edgeM + edgeNS ) * 2.0f + fabsf( -2.0f * edgeE + edgeNESE ) );
+	edgeVert = fabsf( -2.0f * edgeS + ( edgeSW + edgeSE ) ) + ( fabsf( -2.0f * edgeM + edgeWE ) * 2.0f + fabsf( -2.0f * edgeN + ( edgeNW + edgeNE ) ) );
+	Near( e, edgeHorz, edgeVert );
+	horzSpan = edgeHorz >= edgeVert ? qtrue : qfalse;
+	edgeAround = ( edgeNS + edgeWE ) * 2.0f + ( edgeNWSW + edgeNESE );
+	edgeLoSide = horzSpan ? edgeN : edgeW; edgeHiSide = horzSpan ? edgeS : edgeE;
+	edgeGradLo = edgeLoSide - edgeM; edgeGradHi = edgeHiSide - edgeM;
+	Near( e, fabsf( edgeGradLo ), fabsf( edgeGradHi ) );
+	loSteeper = fabsf( edgeGradLo ) >= fabsf( edgeGradHi ) ? qtrue : qfalse;
+	edgeGradient = fmaxf( fabsf( edgeGradLo ), fabsf( edgeGradHi ) );
+	edgePair = loSteeper ? edgeLoSide + edgeM : edgeHiSide + edgeM;
 	ax = horzSpan ? 0 : 1; ay = horzSpan ? 1 : 0;
 	lx = horzSpan ? 1 : 0; ly = horzSpan ? 0 : 1;
 	if ( loSteeper ) { ax = -ax; ay = -ay; }
-	fxInvSpan = InvSqrtSq( fxSpan );
-	fxBlendC = Clampf( fabsf( fxAround * ( 1.0f / 12.0f ) - fxM ) * fxInvSpan, 0.0f, 1.0f );
-	fxBlendF = ( -2.0f * fxBlendC + 3.0f ) * ( fxBlendC * fxBlendC );
-	fxSubpixel = fxBlendF * fxBlendF * 0.75f;
-	fxHalfPair = fxPair * 0.5f;
-	fxScaled = fxGradient * 0.25f;
-	midNegative = fxM - fxHalfPair < 0.0f ? qtrue : qfalse;
-	Near( e, fxM, fxHalfPair );
-	fxEndN = FxEdgeLuma( e, px - lx, py - ly, ax, ay ) - fxHalfPair;
-	fxEndP = FxEdgeLuma( e, px + lx, py + ly, ax, ay ) - fxHalfPair;
-	Near( e, fabsf( fxEndN ), fxScaled ); Near( e, fabsf( fxEndP ), fxScaled );
-	doneN = fabsf( fxEndN ) >= fxScaled ? qtrue : qfalse;
-	doneP = fabsf( fxEndP ) >= fxScaled ? qtrue : qfalse;
+	edgeInvSpan = InvSqrtSq( edgeSpan );
+	edgeBlendC = Clampf( fabsf( edgeAround * ( 1.0f / 12.0f ) - edgeM ) * edgeInvSpan, 0.0f, 1.0f );
+	edgeBlendF = ( -2.0f * edgeBlendC + 3.0f ) * ( edgeBlendC * edgeBlendC );
+	edgeSubpixel = edgeBlendF * edgeBlendF * 0.75f;
+	edgeHalfPair = edgePair * 0.5f;
+	edgeScaled = edgeGradient * 0.25f;
+	midNegative = edgeM - edgeHalfPair < 0.0f ? qtrue : qfalse;
+	Near( e, edgeM, edgeHalfPair );
+	edgeEndN = EdgeMidLuma( e, px - lx, py - ly, ax, ay ) - edgeHalfPair;
+	edgeEndP = EdgeMidLuma( e, px + lx, py + ly, ax, ay ) - edgeHalfPair;
+	Near( e, fabsf( edgeEndN ), edgeScaled ); Near( e, fabsf( edgeEndP ), edgeScaled );
+	doneN = fabsf( edgeEndN ) >= edgeScaled ? qtrue : qfalse;
+	doneP = fabsf( edgeEndP ) >= edgeScaled ? qtrue : qfalse;
 	for ( i = 2; i <= 12; ++i ) {
 		if ( !doneN ) {
-			fxEndN = FxEdgeLuma( e, px - lx * i, py - ly * i, ax, ay ) - fxHalfPair;
-			Near( e, fabsf( fxEndN ), fxScaled );
-			doneN = fabsf( fxEndN ) >= fxScaled ? qtrue : qfalse;
+			edgeEndN = EdgeMidLuma( e, px - lx * i, py - ly * i, ax, ay ) - edgeHalfPair;
+			Near( e, fabsf( edgeEndN ), edgeScaled );
+			doneN = fabsf( edgeEndN ) >= edgeScaled ? qtrue : qfalse;
 			stepsN = i;
 		}
 		if ( !doneP ) {
-			fxEndP = FxEdgeLuma( e, px + lx * i, py + ly * i, ax, ay ) - fxHalfPair;
-			Near( e, fabsf( fxEndP ), fxScaled );
-			doneP = fabsf( fxEndP ) >= fxScaled ? qtrue : qfalse;
+			edgeEndP = EdgeMidLuma( e, px + lx * i, py + ly * i, ax, ay ) - edgeHalfPair;
+			Near( e, fabsf( edgeEndP ), edgeScaled );
+			doneP = fabsf( edgeEndP ) >= edgeScaled ? qtrue : qfalse;
 			stepsP = i;
 		}
 		if ( doneN && doneP ) break;
 	}
 	towardN = stepsN < stepsP ? qtrue : qfalse;
-	fxEndG = towardN ? fxEndN : fxEndP;
-	goodSpan = ( fxEndG < 0.0f ) != midNegative ? qtrue : qfalse;
-	fxSpanLen = (float)( stepsN + stepsP );
-	fxNear = (float)( towardN ? stepsN : stepsP );
-	fxEdgeBlend = goodSpan ? ( 0.5f - fxNear * InvSqrtSq( fxSpanLen ) ) : 0.0f;
-	fxBlend = Clampf( fmaxf( fxEdgeBlend, fxSubpixel ), 0.0f, 1.0f );
+	edgeEndG = towardN ? edgeEndN : edgeEndP;
+	goodSpan = ( edgeEndG < 0.0f ) != midNegative ? qtrue : qfalse;
+	edgeSpanLen = (float)( stepsN + stepsP );
+	edgeNear = (float)( towardN ? stepsN : stepsP );
+	edgeStepBlend = goodSpan ? ( 0.5f - edgeNear * InvSqrtSq( edgeSpanLen ) ) : 0.0f;
+	edgeBlend = Clampf( fmaxf( edgeStepBlend, edgeSubpixel ), 0.0f, 1.0f );
 	Fetch4( e, e->p->currentColor, px + ax, py + ay, across );
-	for ( i = 0; i < 3; ++i ) out[i] = center[i] * ( 1.0f - fxBlend ) + across[i] * fxBlend;
+	for ( i = 0; i < 3; ++i ) out[i] = center[i] * ( 1.0f - edgeBlend ) + across[i] * edgeBlend;
 	out[3] = center[3];
 	return qtrue;
 }
@@ -503,7 +503,7 @@ static temporalResolveOracleClass_t Evaluate( oracleEval_t *e, int32_t px, int32
 		}
 	}
 	if ( !usedHistory && Finite4( current ) && ( k->qualityFlags & 4u ) != 0u )
-		spatial = FxSpatialAa( e, px, py, current, result );
+		spatial = SpatialEdgeFilter( e, px, py, current, result );
 	if ( !Finite4( result ) ) memset( result, 0, sizeof( result ) );
 	if ( !usedHistory || !Finite4( displayed ) ) memcpy( displayed, result, sizeof( displayed ) );
 	memcpy( displayedOut, displayed, sizeof( displayed ) );

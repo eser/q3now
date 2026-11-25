@@ -138,7 +138,6 @@ export default [
 	{ stage: 'frag', source: 'bloom_composite.frag', output: 'bloom_composite_frag_spv' },
 	{ stage: 'frag', source: 'color.frag',        output: 'color_frag_spv'        },
 	{ stage: 'frag', source: 'fog.frag',          output: 'fog_frag_spv'          },
-	// fxaa.frag removed (SMAA replaces it).
 	{ stage: 'frag', source: 'gamma.frag',        output: 'gamma_frag_spv'        },
 	{ stage: 'frag', source: 'overlay.frag',      output: 'overlay_frag_spv'      },
 	{ stage: 'frag', source: 'tonemap.frag',      output: 'tonemap_frag_spv'      },
@@ -184,7 +183,6 @@ export default [
 	{ stage: 'frag', source: 'tonemap.frag', defines: ['USE_TONEMAP'],                                             output: 'tonemap_tonemap_frag_spv'        },
 	{ stage: 'frag', source: 'tonemap.frag', defines: ['USE_COLOR_GRADING'],                                       output: 'tonemap_colorgrade_frag_spv'     },
 	{ stage: 'frag', source: 'tonemap.frag', defines: ['USE_TONEMAP', 'USE_COLOR_GRADING'],                        output: 'tonemap_tonemap_cg_frag_spv'     },
-	// USE_FXAA variants removed (SMAA replaces it).
 	{ stage: 'frag', source: 'tonemap.frag', defines: ['USE_SUNRAYS'],                                             output: 'tonemap_sunrays_frag_spv'        },
 	// the remaining TONEMAP_VAR_* bitmask combos (varIdx 10,12,14). The three
 	// surviving feature cvars (r_tonemap=2 / r_colorGrading=4 / r_sunRays=8) are

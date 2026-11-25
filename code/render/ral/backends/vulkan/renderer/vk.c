@@ -14240,7 +14240,6 @@ static void vk_create_shader_modules( void )
 #if FEAT_COLOR_GRADING
 	vk.tonemap_variant_fs[ TONEMAP_VAR_CG ] = SHADER_MODULE( tonemap_colorgrade_frag_spv );
 #endif
-	// FXAA variants removed (SMAA replaces it).
 #if FEAT_TONEMAP && FEAT_COLOR_GRADING
 	vk.tonemap_variant_fs[ TONEMAP_VAR_BASE | TONEMAP_VAR_CG ] = SHADER_MODULE( tonemap_tonemap_cg_frag_spv );
 #endif
@@ -15700,13 +15699,9 @@ static void vk_rebuild_for_fbo_change( void )
 	vk_destroy_sync_primitives();
 
 	// Update FBO state + dependent flags BEFORE rebuilding so the
-	// create paths see the new values. Mirrors the block in
-	// vk_initialize (around the existing r_fbo / r_ext_multisample
-	// gate) that originally set these at boot.
+	// create paths see the new values. Mirrors the r_fbo gate in
+	// vk_initialize that originally set these at boot.
 	vk.fboActive = new_fbo_active;
-	if ( !vk.fboActive ) {
-		vk.msaaActive = qfalse;
-	}
 	vk_scene_depth_recompute_active();
 
 #if FEAT_SHADOW_MAPPING
@@ -17651,8 +17646,8 @@ static void vk_create_attachments( void )
 
 	// It looks like resulting performance depends from order you're creating/allocating
 	// memory for attachments in vulkan i.e. similar images grouped together will provide best results
-	// so [resolve0][resolve1][msaa0][msaa1][depth0][depth1] is most optimal
-	// while cases like [resolve0][depth0][color0][...] is the worst
+	// so [color0][color1][depth0][depth1] is most optimal
+	// while cases like [color0][depth0][color1][...] is the worst
 
 	// TODO: preallocate first image chunk in attachment' memory pool?
 	if ( vk.fboActive ) {
@@ -17685,7 +17680,7 @@ static void vk_create_attachments( void )
 			}
 		}
 
-		// post-processing/msaa-resolve
+		// post-processing
 		vk.ral_color_image = vk_create_attachment_texture( glConfig.vidWidth,
 			glConfig.vidHeight, vk.color_format,
 			usage | RAL_TEXTURE_USAGE_TRANSFER_SRC
@@ -23699,12 +23694,6 @@ qboolean vk_initialize( void )
 	} else {
 		vk.fboActive = qfalse;
 	}
-	// MSAA retired (SMAA + future TAA cover
-	// AA needs; r_ext_multisample cvar removed). vk.msaaActive stays at its
-	// initialized qfalse permanently — the dead-but-present branches below
-	// (render_pass.main 3-attachment-with-resolve variant, vk.msaa_image
-	// allocation, etc.) are deleted alongside this retire.
-
 	// The scene-depth copy needs the FBO; the consumer set (depth fade, AO,
 	// god rays, lens occlusion) lives in s_sceneDepthConsumers.
 	vk_scene_depth_recompute_active();
@@ -26158,7 +26147,7 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 		//   id 11      srgb_swapchain          (gamma.frag)
 		//   id 17..18  tonemap_mode/exposure   (tonemap.frag)
 		//   id 19..23  cg_tint_r/g/b/sat/con   (tonemap.frag)
-		//   id 24      chromatic_strength      (tonemap.frag; was FXAA, reclaimed)
+		//   id 24      chromatic_strength      (tonemap.frag)
 		//   id 25      show_ao / FREE          (no post-process variant declares it)
 		//   id 26..27  sunrays_samples/density (tonemap.frag)
 		//   id 28..32  lottes_*                (tonemap.frag)
@@ -26460,7 +26449,7 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	spec_entries[11].size = sizeof(frag_spec_data.tonemap_exposure);
 
 	// Lottes spec constants — IDs 28-32 (skip past color grading 19-23,
-	// FXAA 24-25, sunrays 26-27, which is the lowest free range).
+	// chromatic aberration 24, free 25, sunrays 26-27: the lowest free range).
 	spec_entries[12].constantID = 28;
 	spec_entries[12].offset = offsetof(struct FragSpecData, lottes_contrast);
 	spec_entries[12].size = sizeof(frag_spec_data.lottes_contrast);
@@ -26522,9 +26511,8 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	spec_entries[24].offset = offsetof(struct FragSpecData, hdr_peak_norm);
 	spec_entries[24].size = sizeof(frag_spec_data.hdr_peak_norm);
 
-	// Chromatic aberration strength — tonemap.frag id 24 (reclaimed from the
-	// retired FXAA range). gamma / non-tonemap variants don't declare it and
-	// ignore the entry.
+	// Chromatic aberration strength — tonemap.frag id 24. gamma / non-tonemap
+	// variants don't declare it and ignore the entry.
 	spec_entries[25].constantID = 24;
 	spec_entries[25].offset = offsetof(struct FragSpecData, chromatic_strength);
 	spec_entries[25].size = sizeof(frag_spec_data.chromatic_strength);

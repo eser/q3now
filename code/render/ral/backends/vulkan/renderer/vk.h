@@ -3212,9 +3212,8 @@ typedef struct {
 	// passthrough/default tonemap (no feature defines set); tonemap_variants[]
 	// holds the feature-combinatorial pipelines indexed by TONEMAP_VAR_*
 	// bits.
-	// FXAA (was bit 3) was removed; SMAA is the AA path
-	// going forward. SUNRAYS renumbered down from bit 4 to bit 3 to
-	// keep the bitmap contiguous and shrink the variant array by half.
+	// Anti-aliasing has no tonemap variant (r_aa runs TAA or SMAA in
+	// their own passes); the bitmap stays contiguous.
 	// GAMMA_VAR_* renamed to TONEMAP_VAR_* to
 	// reflect that the variant bits gate features in tonemap.frag, not
 	// gamma.frag. GAMMA_VAR_TONEMAP became TONEMAP_VAR_BASE per the
@@ -3314,7 +3313,6 @@ typedef struct {
 
 	qboolean clearAttachment;		// requires VK_IMAGE_USAGE_TRANSFER_DST_BIT for swapchains
 	qboolean fboActive;
-	qboolean msaaActive;
 
 	qboolean offscreenRender;
 
