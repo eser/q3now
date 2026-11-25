@@ -17,6 +17,13 @@
 #define RENDER_AA_TAA  1
 #define RENDER_AA_SMAA 2
 
+/* Where each technique runs in the frame, on every renderer:
+ *   TAA   on the HDR scene, before bloom, exposure metering and the tone map: it accumulates linear radiance, and the effects after
+ *         it see the anti-aliased scene.
+ *   SMAA  on the tone-mapped scene (display-linear values in [0, 1], before the display encoding), before the UI: it finds and
+ *         blends edges as they will look, which is what its thresholds are tuned for. Exposure metering sees the scene before SMAA.
+ */
+
 /* The SMAA preset every renderer runs (presets 1 low .. 4 ultra; 3 is high: relative-luma threshold 0.10, 16 search steps, diagonal
  * search and corner rounding). */
 #define RENDER_AA_SMAA_QUALITY 3

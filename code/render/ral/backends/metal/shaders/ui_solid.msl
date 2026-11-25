@@ -159,6 +159,12 @@ static float3 wired_tonemap_lottes(float3 color,
 		/ (pow(max(color, float3(0.0)), a * d) * b + c);
 }
 
+// r_aa 2: the tone-mapped, SMAA-resolved scene (RGBA16F, the values wired_tonemap_fragment writes) copied into the drawable.
+fragment float4 wired_output_copy_fragment(FullscreenVertexOut in [[stage_in]],
+		texture2d<float> scene [[texture(0)]], sampler sceneSampler [[sampler(0)]]) {
+	return float4(scene.sample(sceneSampler, in.uv).rgb, 1.0);
+}
+
 fragment float4 wired_tonemap_fragment(FullscreenVertexOut in [[stage_in]],
 		texture2d<float> scene [[texture(0)]], sampler sceneSampler [[sampler(0)]],
 		constant ToneMapParams &params [[buffer(0)]],

@@ -33,3 +33,24 @@ foreach(path IN LISTS SOURCES)
 		endif()
 	endforeach()
 endforeach()
+
+# SMAA runs on the tone-mapped scene, before the UI (render_antialiasing.h). Vulkan: vk_smaa() after vk_tonemap() at the 3D->2D
+# transition. Metal: the tone map renders into smaaColor and SMAA resolves it there, after exposure metering.
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_backend.c" VK_BACKEND)
+string(FIND "${VK_BACKEND}" "vk_tonemap();\n\tif ( R_AntialiasingSmaaQuality() > 0 )\n\t\tvk_smaa();" vk_order)
+if(vk_order EQUAL -1)
+	message(FATAL_ERROR "Vulkan: SMAA must follow the tone map (vk_tonemap(); then vk_smaa())")
+endif()
+file(READ "${ROOT}/code/render/ral/backends/metal/ral_metal_present.mm" METAL_PRESENT)
+foreach(needle IN ITEMS
+		"RalMetal_SmaaEncode( present->smaa, command, present->smaaColor, present->smaaQuality )"
+		"[toneMapEncoder setRenderPipelineState:present->smaaToneMapPipeline];")
+	string(FIND "${METAL_PRESENT}" "${needle}" pos)
+	if(pos EQUAL -1)
+		message(FATAL_ERROR "Metal: SMAA must run on the tone-mapped target: missing ${needle}")
+	endif()
+endforeach()
+string(FIND "${METAL_PRESENT}" "RalMetal_SmaaEncode( present->smaa, command, present->sceneColorCache" metal_hdr)
+if(NOT metal_hdr EQUAL -1)
+	message(FATAL_ERROR "Metal: SMAA must not run on the HDR scene")
+endif()

@@ -156,6 +156,11 @@ struct ralMetalPresent_s {
 	id<MTLRenderPipelineState> uiMsdfPipeline;
 	id<MTLRenderPipelineState> uiBackdropPipeline;
 	id<MTLRenderPipelineState> toneMapPipeline;
+	/* r_aa 2: SMAA runs on the tone-mapped scene (render_antialiasing.h): the tone map renders into smaaColor (RGBA16F, the values the
+	 * output pass would write), SMAA resolves it in place and the output pass copies it to the drawable before the UI. */
+	id<MTLRenderPipelineState> smaaToneMapPipeline, outputCopyPipeline;
+	id<MTLTexture> smaaColor;
+	uint32_t smaaColorWidth, smaaColorHeight;
 	id<MTLRenderPipelineState> worldPipeline;
 	id<MTLRenderPipelineState> worldBlendPipeline;
 	id<MTLRenderPipelineState> worldAlphaAdditivePipeline;
@@ -298,7 +303,7 @@ qboolean effectParity;
 	uint32_t uiMaterialCount;
 	MTLPixelFormat uiPixelFormat;
 	MTLPixelFormat worldPixelFormat;
-	MTLPixelFormat toneMapPixelFormat;
+	MTLPixelFormat toneMapPixelFormat, outputCopyPixelFormat;
 	byte *captureRgb;
 	uint32_t captureWidth;
 	uint32_t captureHeight;
@@ -1175,6 +1180,65 @@ static qboolean EnsureToneMapPipeline( ralMetalPresent_t *present ) {
 	}
 	present->toneMapPixelFormat = outputFormat;
 	return qtrue;
+}
+
+/* r_aa 2 resources: the tone map into an RGBA16F target, the copy of that target into the drawable, and the target itself. */
+static qboolean EnsureSmaaToneMap( ralMetalPresent_t *present, uint32_t width, uint32_t height ) {
+	id<MTLDevice> device;
+	NSError *error = nil;
+	if ( !present || !width || !height || !EnsureToneMapPipeline( present ) ) return qfalse;
+	device = RalMetal_CoreNativeDevice( present->core );
+	if ( !present->smaaToneMapPipeline || !present->outputCopyPipeline
+			|| present->outputCopyPixelFormat != present->layer.pixelFormat ) {
+		id<MTLFunction> vertexFunction = [present->uiLibrary newFunctionWithName:@"wired_fullscreen_vertex"];
+		id<MTLFunction> toneMapFunction = [present->uiLibrary newFunctionWithName:@"wired_tonemap_fragment"];
+		id<MTLFunction> copyFunction = [present->uiLibrary newFunctionWithName:@"wired_output_copy_fragment"];
+		[present->smaaToneMapPipeline release]; present->smaaToneMapPipeline = nil;
+		[present->outputCopyPipeline release]; present->outputCopyPipeline = nil;
+		if ( vertexFunction && toneMapFunction && copyFunction ) {
+			MTLRenderPipelineDescriptor *pipeline = [[[MTLRenderPipelineDescriptor alloc] init] autorelease];
+			pipeline.vertexFunction = vertexFunction;
+			pipeline.fragmentFunction = toneMapFunction;
+			pipeline.colorAttachments[0].pixelFormat = MTLPixelFormatRGBA16Float;
+			present->smaaToneMapPipeline = [device newRenderPipelineStateWithDescriptor:pipeline error:&error];
+			pipeline.fragmentFunction = copyFunction;
+			pipeline.colorAttachments[0].pixelFormat = present->layer.pixelFormat;
+			if ( !error ) present->outputCopyPipeline = [device newRenderPipelineStateWithDescriptor:pipeline error:&error];
+		}
+		[vertexFunction release]; [toneMapFunction release]; [copyFunction release];
+		if ( !present->smaaToneMapPipeline || !present->outputCopyPipeline || error ) {
+			[present->smaaToneMapPipeline release]; present->smaaToneMapPipeline = nil;
+			[present->outputCopyPipeline release]; present->outputCopyPipeline = nil;
+			return qfalse;
+		}
+		present->outputCopyPixelFormat = present->layer.pixelFormat;
+	}
+	if ( !present->smaaColor || present->smaaColorWidth != width || present->smaaColorHeight != height ) {
+		MTLTextureDescriptor *descriptor = [MTLTextureDescriptor
+			texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA16Float width:width height:height mipmapped:NO];
+		descriptor.storageMode = MTLStorageModePrivate;
+		descriptor.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+		id<MTLTexture> replacement = [device newTextureWithDescriptor:descriptor];
+		if ( !replacement ) return qfalse;
+		[present->smaaColor release];
+		present->smaaColor = replacement;
+		present->smaaColorWidth = width; present->smaaColorHeight = height;
+	}
+	return qtrue;
+}
+
+/* The tone map's fragment inputs: the scene, the clamp sampler, the tone-map parameters and the adapted exposure (1 when metering
+ * is off). Shared by the output pass and the r_aa 2 tone-map pass so both write the same values. */
+static void BindToneMapInputs( ralMetalPresent_t *present, id<MTLRenderCommandEncoder> encoder, id<MTLBuffer> adaptedExposure ) {
+	[encoder setFragmentTexture:present->sceneColorCache atIndex:0u];
+	[encoder setFragmentSamplerState:present->uiClampSampler atIndex:0u];
+	[encoder setFragmentBytes:&present->toneMap length:sizeof( present->toneMap ) atIndex:0u];
+	if ( adaptedExposure )
+		[encoder setFragmentBuffer:adaptedExposure offset:0u atIndex:1u];
+	else {
+		const float identityExposure = 1.0f;
+		[encoder setFragmentBytes:&identityExposure length:sizeof( identityExposure ) atIndex:1u];
+	}
 }
 
 static qboolean EnsureSceneColor( ralMetalPresent_t *present,
@@ -5557,6 +5621,9 @@ void RalMetal_PresentDestroy( ralMetalPresent_t *present ) {
 	[present->uiMsdfPipeline release];
 	[present->uiBackdropPipeline release];
 	[present->toneMapPipeline release];
+	[present->smaaToneMapPipeline release];
+	[present->outputCopyPipeline release];
+	[present->smaaColor release];
 	RalMetal_ExposureDestroy( present->exposure );
 	RalMetal_BloomDestroy( present->bloom );
 	RalMetal_SmaaDestroy( present->smaa );
@@ -7713,16 +7780,6 @@ static qboolean RenderAndSubmit( ralMetalPresent_t *present,
 					return PresentFailure( "bloom" );
 				}
 			}
-			if ( present->smaaQuality > 0 ) {
-				if ( !present->smaa ) present->smaa =
-					RalMetal_SmaaCreate( RalMetal_CoreNativeDevice( present->core ) );
-				if ( !RalMetal_SmaaEncode( present->smaa, command, present->sceneColorCache, present->smaaQuality ) ) {
-					[worldVertices release]; [worldIndices release]; [worldDepth release];
-					[entityVertices release]; [entityIndices release]; free( entityBatches );
-					[uiVertices release]; [readback release];
-					return PresentFailure( "smaa" );
-				}
-			}
 			if ( present->exposureSettings.enabled ) {
 				if ( !present->exposure ) present->exposure =
 					RalMetal_ExposureCreate( RalMetal_CoreNativeDevice( present->core ) );
@@ -7755,6 +7812,39 @@ static qboolean RenderAndSubmit( ralMetalPresent_t *present,
 						}
 						[adaptedRef release];
 					}];
+				}
+			}
+			/* r_aa 2: SMAA after the tone map, on the values the output pass would write (render_antialiasing.h). */
+			const qboolean smaaAfterToneMap = present->smaaQuality > 0 ? qtrue : qfalse;
+			if ( smaaAfterToneMap ) {
+				if ( !present->smaa ) present->smaa =
+					RalMetal_SmaaCreate( RalMetal_CoreNativeDevice( present->core ) );
+				MTLRenderPassDescriptor *toneMapPass = [MTLRenderPassDescriptor renderPassDescriptor];
+				id<MTLRenderCommandEncoder> toneMapEncoder = nil;
+				if ( EnsureSmaaToneMap( present, receipt.width, receipt.height ) ) {
+					toneMapPass.colorAttachments[0].texture = present->smaaColor;
+					toneMapPass.colorAttachments[0].loadAction = MTLLoadActionDontCare;
+					toneMapPass.colorAttachments[0].storeAction = MTLStoreActionStore;
+					toneMapEncoder = [command renderCommandEncoderWithDescriptor:toneMapPass];
+				}
+				if ( !present->smaa || !toneMapEncoder ) {
+					[adaptedExposure release];
+					[worldVertices release]; [worldIndices release]; [worldDepth release];
+					[entityVertices release]; [entityIndices release]; free( entityBatches );
+					[uiVertices release]; [readback release];
+					return PresentFailure( "smaa-tonemap" );
+				}
+				toneMapEncoder.label = @"wired.smaa.tonemap";
+				[toneMapEncoder setRenderPipelineState:present->smaaToneMapPipeline];
+				BindToneMapInputs( present, toneMapEncoder, adaptedExposure );
+				[toneMapEncoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0u vertexCount:3u];
+				[toneMapEncoder endEncoding];
+				if ( !RalMetal_SmaaEncode( present->smaa, command, present->smaaColor, present->smaaQuality ) ) {
+					[adaptedExposure release];
+					[worldVertices release]; [worldIndices release]; [worldDepth release];
+					[entityVertices release]; [entityIndices release]; free( entityBatches );
+					[uiVertices release]; [readback release];
+					return PresentFailure( "smaa" );
 				}
 			}
 			if ( lateAcquire ) {
@@ -7796,17 +7886,14 @@ static qboolean RenderAndSubmit( ralMetalPresent_t *present,
 				[uiVertices release]; [readback release];
 				return PresentFailure( "output-encoder" );
 			}
-			[outputEncoder setRenderPipelineState:present->toneMapPipeline];
-			[outputEncoder setFragmentTexture:present->sceneColorCache atIndex:0u];
-			[outputEncoder setFragmentSamplerState:present->uiClampSampler atIndex:0u];
-			[outputEncoder setFragmentBytes:&present->toneMap
-				length:sizeof( present->toneMap ) atIndex:0u];
-			if ( adaptedExposure )
-				[outputEncoder setFragmentBuffer:adaptedExposure offset:0u atIndex:1u];
-			else {
-				const float identityExposure = 1.0f;
-				[outputEncoder setFragmentBytes:&identityExposure
-					length:sizeof( identityExposure ) atIndex:1u];
+			if ( smaaAfterToneMap ) {
+				/* The scene was tone-mapped and anti-aliased into smaaColor: copy it, then the UI. */
+				[outputEncoder setRenderPipelineState:present->outputCopyPipeline];
+				[outputEncoder setFragmentTexture:present->smaaColor atIndex:0u];
+				[outputEncoder setFragmentSamplerState:present->uiClampSampler atIndex:0u];
+			} else {
+				[outputEncoder setRenderPipelineState:present->toneMapPipeline];
+				BindToneMapInputs( present, outputEncoder, adaptedExposure );
 			}
 			[adaptedExposure release];
 			[outputEncoder drawPrimitives:MTLPrimitiveTypeTriangle
