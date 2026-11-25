@@ -54,3 +54,28 @@ string(FIND "${METAL_PRESENT}" "RalMetal_SmaaEncode( present->smaa, command, pre
 if(NOT metal_hdr EQUAL -1)
 	message(FATAL_ERROR "Metal: SMAA must not run on the HDR scene")
 endif()
+# WebGPU: meter and tone-map into the RGBA16F linear target, SMAA there, copy into the canvas. OpenGL: tone-map into the RGBA16F
+# target, SMAA resolves it into the output attachment.
+file(READ "${ROOT}/code/render/ral/backends/webgpu/ral_webgpu_product.c" WEBGPU_PRODUCT)
+foreach(needle IN ITEMS
+		"RalWebGpu_ExposureRecordLinear( product->exposure, command, recording )"
+		"RalWebGpu_SmaaRecord( product->smaa, runtimeReceipt, command, recording, linear,"
+		"RalWebGpu_ExposureRecordCopy( product->exposure, command, recording, target, resolved )")
+	string(FIND "${WEBGPU_PRODUCT}" "${needle}" pos)
+	if(pos EQUAL -1)
+		message(FATAL_ERROR "WebGPU: SMAA must run on the tone-mapped target: missing ${needle}")
+	endif()
+endforeach()
+string(FIND "${WEBGPU_PRODUCT}" "RalWebGpu_SmaaRecord( product->smaa, runtimeReceipt, command, recording, sceneTarget" webgpu_hdr)
+if(NOT webgpu_hdr EQUAL -1)
+	message(FATAL_ERROR "WebGPU: SMAA must not run on the HDR scene")
+endif()
+file(READ "${ROOT}/code/render/ral/backends/opengl/ral_opengl_product.c" GL_PRODUCT)
+string(FIND "${GL_PRODUCT}" "RalOpenGl_AaSmaaInto( product->aa, product->smaaToneTexture," gl_tone)
+if(gl_tone EQUAL -1)
+	message(FATAL_ERROR "OpenGL: SMAA must resolve the tone-mapped target into the output attachment")
+endif()
+string(FIND "${GL_PRODUCT}" "RalOpenGl_AaSmaa( product->aa, product->hdrTextures[0]" gl_hdr)
+if(NOT gl_hdr EQUAL -1)
+	message(FATAL_ERROR "OpenGL: SMAA must not run on the HDR scene")
+endif()

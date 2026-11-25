@@ -8,6 +8,7 @@
 #include <string.h>
 
 enum { HIST, ACCUM, BLOCK, DIMS, DELTA, VERTEX, INDEX, BUFFER_COUNT };
+enum { PIPE_HISTOGRAM, PIPE_REDUCE, PIPE_TONE, PIPE_TONE_LINEAR, PIPE_COPY, PIPELINE_COUNT };
 struct ralWebGpuExposure_s {
     ralWebGpuRuntime_t *runtime;
     ralWebGpuBrowserBridge_t *bridge;
@@ -15,12 +16,16 @@ struct ralWebGpuExposure_s {
     uint64_t nextPipelineGeneration;
     int toneMode;
     float toneExposure;
-    ralWebGpuPipeline_t *pipelines[3];
-    ralWebGpuPipelineReceipt_t pipelineReceipts[3];
-    ralWebGpuResource_t *buffers[BUFFER_COUNT], *hdr, *sampler;
-    ralWebGpuResourceReceipt_t receipts[BUFFER_COUNT], hdrReceipt, samplerReceipt;
+    /* histogram, reduce, tone map into the canvas; r_aa 2: tone map into `linear` (RGBA16F) and the copy of the SMAA result into the
+     * canvas (render_antialiasing.h: SMAA runs on the tone-mapped scene). */
+    ralWebGpuPipeline_t *pipelines[PIPELINE_COUNT];
+    ralWebGpuPipelineReceipt_t pipelineReceipts[PIPELINE_COUNT];
+    ralWebGpuResource_t *buffers[BUFFER_COUNT], *hdr, *sampler, *linear;
+    ralWebGpuResourceReceipt_t receipts[BUFFER_COUNT], hdrReceipt, samplerReceipt, linearReceipt;
     uintptr_t groups[5]; /* histogram, reduce, tonemap groups 0/1/2 */
     uintptr_t sourceGroups[2], source; /* histogram and tonemap group 0 for another HDR input (the TAA output) */
+    uintptr_t linearGroups[3];          /* tone map into `linear`: groups 0/1/2 */
+    uintptr_t copyGroup, copySource;    /* copy of `copySource` into the canvas */
     uint32_t width, height;
     uint64_t worldGeneration, pendingWorld;
     int timeMs, pendingTime;
@@ -31,6 +36,12 @@ static const char vertexSource[] =
     "@vertex fn main(@builtin(vertex_index)i:u32)->O{"
     "let p=array<vec2<f32>,3>(vec2(-1.,-1.),vec2(3.,-1.),vec2(-1.,3.));"
     "var o:O;o.p=vec4(p[i],0.,1.);o.uv=vec2(p[i].x*.5+.5,.5-p[i].y*.5);return o;}";
+/* r_aa 2: the tone-mapped, SMAA-resolved scene copied into the canvas -srgb view (the values the tone map would have written). */
+static const char copySource[] =
+    "@group(0) @binding(0) var scene:texture_2d<f32>;"
+    "@group(0) @binding(32) var sceneSampler:sampler;"
+    "struct O{@builtin(position)p:vec4<f32>,@location(0)uv:vec2<f32>};"
+    "@fragment fn main(i:O)->@location(0) vec4<f32>{return vec4(textureSampleLevel(scene,sceneSampler,i.uv,0.).rgb,1.);}";
 
 static qboolean Module( ralShaderModuleAbi_t *m, uint32_t stage,
         const char *source, uint32_t size, uint64_t generation ) {
@@ -73,38 +84,41 @@ static qboolean Pipeline( ralWebGpuExposure_t *e, ralWebGpuRuntimeReceipt_t *rr,
         (const ralBindGroupLayout_t *)(uintptr_t)1,
         (const ralBindGroupLayout_t *)(uintptr_t)2,
         (const ralBindGroupLayout_t *)(uintptr_t)3};
-    const qboolean tone=index==2;
+    const qboolean graphicsPipeline=index>=PIPE_TONE;
+    const qboolean tone=index==PIPE_TONE||index==PIPE_TONE_LINEAR;
     const uint64_t generation=e->nextPipelineGeneration;
     if (!generation || generation>UINT64_MAX-4u) return qfalse;
-    if (!Module(&modules[0],tone?RAL_STAGE_VERTEX:RAL_STAGE_COMPUTE,
-        tone?vertexSource:(const char *)source,
-        tone?(uint32_t)sizeof(vertexSource)-1:size,generation)) return qfalse;
-    wgsl[0]=(ralWebGpuWgslModule_t){tone?vertexSource:(const char *)source,
-        tone?(uint32_t)sizeof(vertexSource)-1:size};
-    if (tone) {
+    if (!Module(&modules[0],graphicsPipeline?RAL_STAGE_VERTEX:RAL_STAGE_COMPUTE,
+        graphicsPipeline?vertexSource:(const char *)source,
+        graphicsPipeline?(uint32_t)sizeof(vertexSource)-1:size,generation)) return qfalse;
+    wgsl[0]=(ralWebGpuWgslModule_t){graphicsPipeline?vertexSource:(const char *)source,
+        graphicsPipeline?(uint32_t)sizeof(vertexSource)-1:size};
+    if (graphicsPipeline) {
         if (!Module(&modules[1],RAL_STAGE_FRAGMENT,(const char *)source,size,generation+2)) return qfalse;
         wgsl[1]=(ralWebGpuWgslModule_t){(const char *)source,size};
     }
     manifest.schemaVersion=RAL_SHADER_ABI_SCHEMA_VERSION;
     manifest.generation=generation;
-    manifest.pipelineKind=tone?RAL_SHADER_PIPELINE_GRAPHICS:RAL_SHADER_PIPELINE_COMPUTE;
-    manifest.modules=modules; manifest.moduleCount=tone?2:1;
+    manifest.pipelineKind=graphicsPipeline?RAL_SHADER_PIPELINE_GRAPHICS:RAL_SHADER_PIPELINE_COMPUTE;
+    manifest.modules=modules; manifest.moduleCount=graphicsPipeline?2:1;
     manifest.bindings=bindings; manifest.bindingCount=bindingCount;
     variant.artifactTarget=RAL_SHADER_ARTIFACT_WGSL; variant.generation=generation;
-    if (tone) {
-        manifest.specConstants=toneSpecs; manifest.specConstantCount=2;
-        variant.specValues=toneValues; variant.specValueCount=2;
-        graphics.specConstants=nativeToneValues; graphics.numSpecConstants=2;
+    if (graphicsPipeline) {
+        if (tone) {
+            manifest.specConstants=toneSpecs; manifest.specConstantCount=2;
+            variant.specValues=toneValues; variant.specValueCount=2;
+            graphics.specConstants=nativeToneValues; graphics.numSpecConstants=2;
+        }
         vertex.stride=sizeof(float); vertex.inputRate=RAL_VERTEX_INPUT_PER_VERTEX;
         blend.writeMask=RAL_COLOR_WRITE_ALL; blend.writeMaskExplicit=qtrue;
         graphics.vertexBindings=&vertex; graphics.numVertexBindings=1;
         graphics.topology=RAL_TOPOLOGY_TRIANGLE_LIST;
         graphics.raster.polygonMode=RAL_POLYGON_FILL; graphics.raster.lineWidth=1;
         graphics.colorBlends=&blend; graphics.numColorBlends=1;
-        /* Tonemapped LDR linear light into the canvas -srgb view. */
-        graphics.colorFormats[0]=RAL_FORMAT_B8G8R8A8_SRGB;
+        /* Tonemapped LDR linear light into the canvas -srgb view; r_aa 2 tone-maps into an RGBA16F target with the same values. */
+        graphics.colorFormats[0]=index==PIPE_TONE_LINEAR?RAL_FORMAT_R16G16B16A16_SFLOAT:RAL_FORMAT_B8G8R8A8_SRGB;
         graphics.numColorFormats=1; graphics.sampleCount=1;
-        graphics.bindGroupLayouts=layouts; graphics.numBindGroupLayouts=3;
+        graphics.bindGroupLayouts=layouts; graphics.numBindGroupLayouts=tone?3:1;
         if (Ral_GraphicsPipelineSemanticDigest(&graphics,&variant.semanticStateDigest)!=ralSuccess) return qfalse;
         info.graphicsState=&graphics;
     } else {
@@ -146,12 +160,17 @@ static qboolean Pipelines( ralWebGpuExposure_t *e, ralWebGpuRuntimeReceipt_t *rr
         B(2,0,RAL_SHADER_BIND_UNIFORM_BUFFER,RAL_STAGE_FRAGMENT,64)};
     hist[0].viewDimension=tone[0].viewDimension=RAL_SHADER_VIEW_2D;
     hist[0].sampleType=tone[0].sampleType=RAL_SHADER_SAMPLE_FLOAT;
-    return Pipeline(e,rr,0,ral_webgpu_exposure_histogram_wgsl,
+    ralShaderBindingAbi_t copy[]={tone[0],tone[1]};
+    return Pipeline(e,rr,PIPE_HISTOGRAM,ral_webgpu_exposure_histogram_wgsl,
         sizeof(ral_webgpu_exposure_histogram_wgsl),hist,4)
-        && Pipeline(e,rr,1,ral_webgpu_exposure_reduce_wgsl,
+        && Pipeline(e,rr,PIPE_REDUCE,ral_webgpu_exposure_reduce_wgsl,
         sizeof(ral_webgpu_exposure_reduce_wgsl),reduce,4)
-        && Pipeline(e,rr,2,ral_webgpu_exposure_tonemap_wgsl,
-        sizeof(ral_webgpu_exposure_tonemap_wgsl),tone,3);
+        && Pipeline(e,rr,PIPE_TONE,ral_webgpu_exposure_tonemap_wgsl,
+        sizeof(ral_webgpu_exposure_tonemap_wgsl),tone,3)
+        && Pipeline(e,rr,PIPE_TONE_LINEAR,ral_webgpu_exposure_tonemap_wgsl,
+        sizeof(ral_webgpu_exposure_tonemap_wgsl),tone,3)
+        && Pipeline(e,rr,PIPE_COPY,(const unsigned char *)copySource,
+        (uint32_t)sizeof(copySource)-1,copy,2);
 }
 #undef B
 qboolean RalWebGpu_ExposureSetToneMap(ralWebGpuExposure_t *e,int mode,float exposure) {
@@ -172,7 +191,9 @@ qboolean RalWebGpu_ExposureSetToneMap(ralWebGpuExposure_t *e,int mode,float expo
     }
     const int oldMode=e->toneMode; const float oldExposure=e->toneExposure;
     e->toneMode=mode; e->toneExposure=exposure;
-    if (!Pipeline(e,&rr,2,ral_webgpu_exposure_tonemap_wgsl,
+    if (!Pipeline(e,&rr,PIPE_TONE,ral_webgpu_exposure_tonemap_wgsl,
+            sizeof(ral_webgpu_exposure_tonemap_wgsl),bindings,3)
+        || !Pipeline(e,&rr,PIPE_TONE_LINEAR,ral_webgpu_exposure_tonemap_wgsl,
             sizeof(ral_webgpu_exposure_tonemap_wgsl),bindings,3)) {
         e->toneMode=oldMode; e->toneExposure=oldExposure; return qfalse;
     }
@@ -187,8 +208,17 @@ static void SourceGroupsDestroy( ralWebGpuExposure_t *e ) {
     }
     e->source=0;
 }
+static void LinearGroupsDestroy( ralWebGpuExposure_t *e ) {
+    for(unsigned i=0;i<3;++i) if(e->linearGroups[i]) {
+        RalWebGpu_BrowserBridgeDestroyBindGroup(e->bridge,e->linearGroups[i]);
+        e->linearGroups[i]=0;
+    }
+    if(e->copyGroup) RalWebGpu_BrowserBridgeDestroyBindGroup(e->bridge,e->copyGroup);
+    e->copyGroup=0; e->copySource=0;
+}
 static void GroupsDestroy( ralWebGpuExposure_t *e ) {
     SourceGroupsDestroy(e);
+    LinearGroupsDestroy(e);
     for(unsigned i=5;i>0;--i) if(e->groups[i-1]) {
         RalWebGpu_BrowserBridgeDestroyBindGroup(e->bridge,e->groups[i-1]);
         e->groups[i-1]=0;
@@ -255,12 +285,13 @@ void RalWebGpu_ExposureDestroy( ralWebGpuExposure_t *e,const ralWebGpuRuntimeRec
     GroupsDestroy(e);
     ralWebGpuResourceLayer_t *r=RalWebGpu_RuntimeResources(e->runtime,rr);
     if(r) {
+        if(e->linear) RalWebGpu_DestroyResource(r,e->linear,&e->linearReceipt);
         if(e->hdr) RalWebGpu_DestroyResource(r,e->hdr,&e->hdrReceipt);
         if(e->sampler) RalWebGpu_DestroyResource(r,e->sampler,&e->samplerReceipt);
         for(unsigned i=BUFFER_COUNT;i>0;--i) if(e->buffers[i-1])
             RalWebGpu_DestroyResource(r,e->buffers[i-1],&e->receipts[i-1]);
     }
-    for(unsigned i=3;i>0;--i) if(e->pipelines[i-1])
+    for(unsigned i=PIPELINE_COUNT;i>0;--i) if(e->pipelines[i-1])
         RalWebGpu_RuntimeDestroyPipeline(e->runtime,e->pipelines[i-1],&e->pipelineReceipts[i-1]);
     free(e);
 }
@@ -274,6 +305,8 @@ qboolean RalWebGpu_ExposurePrepare( ralWebGpuExposure_t *e,
     if(!r) return qfalse;
     if(width!=e->width||height!=e->height||!e->groups[0]) {
         GroupsDestroy(e);
+        if(e->linear) RalWebGpu_DestroyResource(r,e->linear,&e->linearReceipt);
+        e->linear=NULL;
         if(e->hdr) RalWebGpu_DestroyResource(r,e->hdr,&e->hdrReceipt);
         e->hdr=NULL; e->width=e->height=0; e->history=qfalse;
         ralWebGpuTextureDesc_t d={0};
@@ -323,11 +356,7 @@ static qboolean SourceGroups( ralWebGpuExposure_t *e, uintptr_t source ) {
     }
     e->source=source; return qtrue;
 }
-qboolean RalWebGpu_ExposureRecord( ralWebGpuExposure_t *e,
-        ralWebGpuCommand_t *cmd,ralWebGpuCommandReceipt_t *rec,uintptr_t output,uintptr_t source ) {
-    if(!e||!e->active||e->recorded||!cmd||!rec||!output) return qfalse;
-    if(source&&source!=e->hdrReceipt.resourceIdentity&&!SourceGroups(e,source)) return qfalse;
-    const qboolean alt=source&&source!=e->hdrReceipt.resourceIdentity;
+static qboolean RecordMetering( ralWebGpuExposure_t *e, ralWebGpuCommand_t *cmd, ralWebGpuCommandReceipt_t *rec, qboolean alt ) {
     ralWebGpuCommandReceipt_t next;
     ralWebGpuPassDesc_t pass={0};
     if(e->pendingEnabled) {
@@ -345,20 +374,80 @@ qboolean RalWebGpu_ExposureRecord( ralWebGpuExposure_t *e,
             *rec=next;
         }
     }
-    memset(&pass,0,sizeof(pass)); pass.kind=RAL_WEBGPU_PASS_RENDER;
+    return qtrue;
+}
+/* One full-screen draw of `pipeline` with `groups` into `output`. */
+static qboolean RecordFullscreen( ralWebGpuExposure_t *e, ralWebGpuCommand_t *cmd, ralWebGpuCommandReceipt_t *rec,
+        uintptr_t output, unsigned pipeline, const uintptr_t *groups, unsigned groupCount ) {
+    ralWebGpuCommandReceipt_t next;
+    ralWebGpuPassDesc_t pass={0};
+    pass.kind=RAL_WEBGPU_PASS_RENDER;
     pass.targetIdentity=output; pass.colorLoadOp=RAL_WEBGPU_LOAD_CLEAR;
     if(!RalWebGpu_CommandNextPass(cmd,rec,&pass,&next)) return qfalse;
     *rec=next;
     ralWebGpuIndexedDraw_t draw={0}; draw.kind=RAL_WEBGPU_DRAW_EFFECT;
-    draw.pipelineIdentity=e->pipelineReceipts[2].pipelineIdentity;
+    draw.pipelineIdentity=e->pipelineReceipts[pipeline].pipelineIdentity;
     draw.vertexBufferIdentity=e->receipts[VERTEX].resourceIdentity;
     draw.indexBufferIdentity=e->receipts[INDEX].resourceIdentity;
     draw.indexCount=3; draw.instanceCount=1; draw.contentDigest=e->generation;
-    draw.bindGroupCount=3;
-    for(unsigned i=0;i<3;++i) draw.bindGroupIdentities[i]=e->groups[i+2];
-    if(alt) draw.bindGroupIdentities[0]=e->sourceGroups[1];
+    draw.bindGroupCount=groupCount;
+    for(unsigned i=0;i<groupCount;++i) draw.bindGroupIdentities[i]=groups[i];
     if(!RalWebGpu_CommandRecordIndexedDraw(cmd,rec,&draw,&next)) return qfalse;
-    *rec=next; e->recorded=qtrue; return qtrue;
+    *rec=next; return qtrue;
+}
+qboolean RalWebGpu_ExposureRecord( ralWebGpuExposure_t *e,
+        ralWebGpuCommand_t *cmd,ralWebGpuCommandReceipt_t *rec,uintptr_t output,uintptr_t source ) {
+    if(!e||!e->active||e->recorded||!cmd||!rec||!output) return qfalse;
+    if(source&&source!=e->hdrReceipt.resourceIdentity&&!SourceGroups(e,source)) return qfalse;
+    const qboolean alt=source&&source!=e->hdrReceipt.resourceIdentity;
+    uintptr_t groups[3]={e->groups[2],e->groups[3],e->groups[4]};
+    if(alt) groups[0]=e->sourceGroups[1];
+    if(!RecordMetering(e,cmd,rec,alt)||!RecordFullscreen(e,cmd,rec,output,PIPE_TONE,groups,3)) return qfalse;
+    e->recorded=qtrue; return qtrue;
+}
+qboolean RalWebGpu_ExposurePrepareLinear( ralWebGpuExposure_t *e, const ralWebGpuRuntimeReceipt_t *rr, uintptr_t *outLinear ) {
+    if(!e||!e->active||!e->width||!e->height||!outLinear) return qfalse;
+    if(!e->linear) {
+        ralWebGpuResourceLayer_t *r=RalWebGpu_RuntimeResources(e->runtime,rr);
+        ralWebGpuTextureDesc_t d={0};
+        if(!r) return qfalse;
+        d.width=e->width; d.height=e->height; d.depth=d.mipLevelCount=1;
+        d.bytesPerTexel=8; d.format=RAL_FORMAT_R16G16B16A16_SFLOAT;
+        d.usage=RAL_WEBGPU_TEXTURE_SAMPLED|RAL_WEBGPU_TEXTURE_RENDER_ATTACHMENT;
+        if(!RalWebGpu_CreateTexture(r,&d,&e->linear,&e->linearReceipt)) return qfalse;
+    }
+    if(!e->linearGroups[0]) {
+        ralWebGpuBrowserBindResource_t tone[]={
+            {0,RAL_WEBGPU_BROWSER_BIND_RESOURCE_TEXTURE,e->hdrReceipt.resourceIdentity,0,0},
+            {32,RAL_WEBGPU_BROWSER_BIND_RESOURCE_SAMPLER,e->samplerReceipt.resourceIdentity,0,0}};
+        ralWebGpuBrowserBindResource_t block=BufferBinding(e,0,BLOCK);
+        if(!RalWebGpu_BrowserBridgeCreateBindGroup(e->bridge,e->pipelineReceipts[PIPE_TONE_LINEAR].bindGroupLayoutIdentities[0],tone,2,&e->linearGroups[0])
+            ||!RalWebGpu_BrowserBridgeCreateBindGroup(e->bridge,e->pipelineReceipts[PIPE_TONE_LINEAR].bindGroupLayoutIdentities[1],NULL,0,&e->linearGroups[1])
+            ||!RalWebGpu_BrowserBridgeCreateBindGroup(e->bridge,e->pipelineReceipts[PIPE_TONE_LINEAR].bindGroupLayoutIdentities[2],&block,1,&e->linearGroups[2])) {
+            LinearGroupsDestroy(e); return qfalse;
+        }
+    }
+    *outLinear=e->linearReceipt.resourceIdentity; return qtrue;
+}
+qboolean RalWebGpu_ExposureRecordLinear( ralWebGpuExposure_t *e, ralWebGpuCommand_t *cmd, ralWebGpuCommandReceipt_t *rec ) {
+    if(!e||!e->active||e->recorded||!cmd||!rec||!e->linear||!e->linearGroups[0]) return qfalse;
+    if(!RecordMetering(e,cmd,rec,qfalse)
+        ||!RecordFullscreen(e,cmd,rec,e->linearReceipt.resourceIdentity,PIPE_TONE_LINEAR,e->linearGroups,3)) return qfalse;
+    e->recorded=qtrue; return qtrue;
+}
+qboolean RalWebGpu_ExposureRecordCopy( ralWebGpuExposure_t *e, ralWebGpuCommand_t *cmd, ralWebGpuCommandReceipt_t *rec,
+        uintptr_t output, uintptr_t source ) {
+    if(!e||!e->active||!e->recorded||!cmd||!rec||!output||!source) return qfalse;
+    if(e->copySource!=source||!e->copyGroup) {
+        ralWebGpuBrowserBindResource_t copy[]={
+            {0,RAL_WEBGPU_BROWSER_BIND_RESOURCE_TEXTURE,source,0,0},
+            {32,RAL_WEBGPU_BROWSER_BIND_RESOURCE_SAMPLER,e->samplerReceipt.resourceIdentity,0,0}};
+        if(e->copyGroup) RalWebGpu_BrowserBridgeDestroyBindGroup(e->bridge,e->copyGroup);
+        e->copyGroup=0; e->copySource=0;
+        if(!RalWebGpu_BrowserBridgeCreateBindGroup(e->bridge,e->pipelineReceipts[PIPE_COPY].bindGroupLayoutIdentities[0],copy,2,&e->copyGroup)) return qfalse;
+        e->copySource=source;
+    }
+    return RecordFullscreen(e,cmd,rec,output,PIPE_COPY,&e->copyGroup,1);
 }
 void RalWebGpu_ExposureComplete( ralWebGpuExposure_t *e,qboolean success ) {
     if(!e||!e->active) return;

@@ -510,10 +510,10 @@ static void SmaaPass( const ralOpenGlAa_t *aa, int target, int program, const aa
 	gl->DrawArrays( AA_GL_TRIANGLES, 0, 3 );
 }
 
-qboolean RalOpenGl_AaSmaa( ralOpenGlAa_t *aa, uint32_t sceneColor, uint32_t width, uint32_t height, int quality,
-		uint32_t *outColor ) {
+static qboolean Smaa( ralOpenGlAa_t *aa, uint32_t sceneColor, uint32_t width, uint32_t height, int quality,
+		qboolean intoFramebuffer, uint32_t framebuffer, uint32_t *outColor ) {
 	const aaDispatch_t *gl;
-	if ( !aa || !sceneColor || !outColor ) return qfalse;
+	if ( !aa || !sceneColor || ( !intoFramebuffer && !outColor ) ) return qfalse;
 	quality = quality >= 1 && quality <= 4 ? quality : 3;
 	if ( !PrepareSmaa( aa, width, height, quality ) ) return qfalse;
 	gl = &aa->gl;
@@ -531,11 +531,31 @@ qboolean RalOpenGl_AaSmaa( ralOpenGlAa_t *aa, uint32_t sceneColor, uint32_t widt
 		const aaName_t resolveSamplers[2] = { aa->linearSampler, aa->linearSampler };
 		SmaaPass( aa, SMAA_EDGES, PROGRAM_SMAA_EDGE, edgeTextures, edgeSamplers, 1u, qtrue );
 		SmaaPass( aa, SMAA_BLEND, PROGRAM_SMAA_BLEND, blendTextures, blendSamplers, 3u, qtrue );
-		SmaaPass( aa, SMAA_OUTPUT, PROGRAM_SMAA_RESOLVE, resolveTextures, resolveSamplers, 2u, qfalse );
+		if ( intoFramebuffer ) {
+			/* The neighbourhood blend draws straight into the caller's framebuffer (the output attachment). */
+			gl->BindFramebuffer( AA_GL_FRAMEBUFFER, framebuffer );
+			gl->UseProgram( aa->programs[PROGRAM_SMAA_RESOLVE] );
+			for ( unsigned int unit = 0u; unit < 2u; ++unit ) {
+				gl->BindTextureUnit( unit, resolveTextures[unit] );
+				gl->BindSampler( unit, resolveSamplers[unit] );
+			}
+			gl->DrawArrays( AA_GL_TRIANGLES, 0, 3 );
+		} else
+			SmaaPass( aa, SMAA_OUTPUT, PROGRAM_SMAA_RESOLVE, resolveTextures, resolveSamplers, 2u, qfalse );
 	}
 	for ( unsigned int unit = 0u; unit < 3u; ++unit ) gl->BindSampler( unit, 0u );
 	gl->BindVertexArray( 0u );
 	if ( gl->GetError() != AA_GL_NO_ERROR ) return qfalse;
-	*outColor = aa->smaaTargets[SMAA_OUTPUT];
+	if ( outColor ) *outColor = intoFramebuffer ? 0u : aa->smaaTargets[SMAA_OUTPUT];
 	return qtrue;
+}
+
+qboolean RalOpenGl_AaSmaa( ralOpenGlAa_t *aa, uint32_t sceneColor, uint32_t width, uint32_t height, int quality,
+		uint32_t *outColor ) {
+	return Smaa( aa, sceneColor, width, height, quality, qfalse, 0u, outColor );
+}
+
+qboolean RalOpenGl_AaSmaaInto( ralOpenGlAa_t *aa, uint32_t sceneColor, uint32_t width, uint32_t height, int quality,
+		uint32_t framebuffer ) {
+	return Smaa( aa, sceneColor, width, height, quality, qtrue, framebuffer, NULL );
 }

@@ -22,6 +22,13 @@ qboolean RalWebGpu_ExposurePrepare( ralWebGpuExposure_t *e,
 qboolean RalWebGpu_ExposureRecord( ralWebGpuExposure_t *e,
     ralWebGpuCommand_t *command, ralWebGpuCommandReceipt_t *recording,
     uintptr_t outputTarget, uintptr_t source );
+/* r_aa 2 (render_antialiasing.h: SMAA on the tone-mapped scene): PrepareLinear returns the RGBA16F target the tone map writes,
+ * RecordLinear meters and tone-maps the scene HDR into it, RecordCopy copies the SMAA result into the canvas. */
+qboolean RalWebGpu_ExposurePrepareLinear( ralWebGpuExposure_t *e, const ralWebGpuRuntimeReceipt_t *rr, uintptr_t *outLinear );
+qboolean RalWebGpu_ExposureRecordLinear( ralWebGpuExposure_t *e, ralWebGpuCommand_t *command,
+    ralWebGpuCommandReceipt_t *recording );
+qboolean RalWebGpu_ExposureRecordCopy( ralWebGpuExposure_t *e, ralWebGpuCommand_t *command,
+    ralWebGpuCommandReceipt_t *recording, uintptr_t outputTarget, uintptr_t source );
 void RalWebGpu_ExposureComplete( ralWebGpuExposure_t *e, qboolean success );
 void RalWebGpu_ExposureReset( ralWebGpuExposure_t *e );
 qboolean RalWebGpu_ExposureSetToneMap(ralWebGpuExposure_t *e,

@@ -2557,10 +2557,22 @@ static qboolean RecordToneMap( ralWebGpuProduct_t *product, const ralWebGpuRunti
 		product->taaPendingCamera = taaFrame->current; product->taaPendingResolved = taaFrame->historyValid ? qtrue : qfalse;
 	}
 	else if ( product->smaa && product->smaaEnabled ) {
-		if ( !RalWebGpu_SmaaRecord( product->smaa, runtimeReceipt, command, recording, sceneTarget, product->viewportWidth,
-				product->viewportHeight, &source ) ) {
+		/* r_aa 2: SMAA on the tone-mapped scene (render_antialiasing.h): meter and tone-map into an RGBA16F target, resolve SMAA
+		 * there, copy the result into the canvas. */
+		uintptr_t linear = 0, resolved = 0;
+		if ( !RalWebGpu_ExposurePrepareLinear( product->exposure, runtimeReceipt, &linear )
+				|| !RalWebGpu_ExposureRecordLinear( product->exposure, command, recording ) ) {
+			s_productFailureStage = 210u; return qfalse;
+		}
+		if ( !RalWebGpu_SmaaRecord( product->smaa, runtimeReceipt, command, recording, linear, product->viewportWidth,
+				product->viewportHeight, &resolved ) ) {
 			s_productFailureStage = 200u + RalWebGpu_SmaaLastFailure(); return qfalse;
 		}
+		if ( !RalWebGpu_ExposureRecordCopy( product->exposure, command, recording, target, resolved ) ) {
+			s_productFailureStage = 211u; return qfalse;
+		}
+		candidate->toneMapDrawCount = 1;
+		return qtrue;
 	}
 	if ( !RalWebGpu_ExposureRecord( product->exposure, command, recording, target, source ) ) {
 		s_productFailureStage = source ? 99u : 98u; return qfalse;

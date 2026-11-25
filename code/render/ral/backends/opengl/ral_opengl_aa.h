@@ -56,6 +56,10 @@ qboolean RalOpenGl_AaTaa( ralOpenGlAa_t *aa, uint32_t sceneColor, uint32_t scene
 /* SMAA edge detection, blend weights and neighbourhood resolve: three draws. `quality` 1 low .. 4 ultra (0 selects 3). */
 qboolean RalOpenGl_AaSmaa( ralOpenGlAa_t *aa, uint32_t sceneColor, uint32_t width, uint32_t height, int quality,
 	uint32_t *outColor );
+/* The same, with the neighbourhood resolve drawn into `framebuffer` (0 is the default framebuffer) instead of returned: r_aa 2
+ * resolves the tone-mapped scene straight into the output attachment (render_antialiasing.h). */
+qboolean RalOpenGl_AaSmaaInto( ralOpenGlAa_t *aa, uint32_t sceneColor, uint32_t width, uint32_t height, int quality,
+	uint32_t framebuffer );
 
 #ifdef __cplusplus
 }

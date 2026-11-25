@@ -371,6 +371,10 @@ typedef char productLensSourceMustMatchStd430[sizeof( productLensSource_t ) == 3
 struct ralOpenGlProduct_s {
 	ralExposureSettings_t exposureSettings;
 	glName_t hdrFramebuffer, hdrTextures[2], hdrPrograms[3], hdrBuffers[5], hdrVao;
+	/* r_aa 2 (render_antialiasing.h: SMAA on the tone-mapped scene): the tone map renders into smaaToneTexture (RGBA16F, linear, the
+	 * values the output pass would encode) and the SMAA neighbourhood resolve draws it into the output's sRGB attachment. */
+	glName_t smaaToneFramebuffer, smaaToneTexture;
+	uint32_t smaaToneWidth, smaaToneHeight;
 	uint32_t hdrWidth, hdrHeight, exposureParity, tonemapMode;
 	float tonemapExposure;
 	qboolean exposureHistoryValid;
@@ -1054,6 +1058,8 @@ void RalOpenGl_ProductDestroy( ralOpenGlProduct_t *product )
 	product->gl.DeleteBuffers(3,product->skyCaptureBuffers);
 	if ( product->hdrFramebuffer ) product->gl.DeleteFramebuffers( 1, &product->hdrFramebuffer );
 	product->gl.DeleteTextures( 2, product->hdrTextures );
+	if ( product->smaaToneFramebuffer ) product->gl.DeleteFramebuffers( 1, &product->smaaToneFramebuffer );
+	if ( product->smaaToneTexture ) product->gl.DeleteTextures( 1, &product->smaaToneTexture );
 	product->gl.DeleteBuffers( 5, product->hdrBuffers );
 	if ( product->hdrVao ) product->gl.DeleteVertexArrays( 1, &product->hdrVao );
 	for ( unsigned i = 0; i < 3; ++i )
@@ -1304,6 +1310,30 @@ typedef struct {
 	qboolean smaa;                      /* SMAA for this frame (r_aa 2) */
 } productSceneComplete_t;
 
+static qboolean EnsureSmaaToneTarget( ralOpenGlProduct_t *product ) {
+	productDispatch_t *gl = &product->gl;
+	if ( product->smaaToneTexture && product->smaaToneWidth == product->outputWidth
+			&& product->smaaToneHeight == product->outputHeight ) return qtrue;
+	if ( product->smaaToneFramebuffer ) gl->DeleteFramebuffers( 1, &product->smaaToneFramebuffer );
+	if ( product->smaaToneTexture ) gl->DeleteTextures( 1, &product->smaaToneTexture );
+	product->smaaToneFramebuffer = product->smaaToneTexture = 0u;
+	product->smaaToneWidth = product->smaaToneHeight = 0u;
+	gl->CreateTextures( GL_TEXTURE_2D_VALUE, 1, &product->smaaToneTexture );
+	gl->CreateFramebuffers( 1, &product->smaaToneFramebuffer );
+	if ( !product->smaaToneTexture || !product->smaaToneFramebuffer ) return qfalse;
+	gl->TextureStorage2D( product->smaaToneTexture, 1, GL_RGBA16F_VALUE,
+		(glSize_t)product->outputWidth, (glSize_t)product->outputHeight );
+	gl->TextureParameteri( product->smaaToneTexture, GL_TEXTURE_MIN_FILTER_VALUE, GL_LINEAR_VALUE );
+	gl->TextureParameteri( product->smaaToneTexture, GL_TEXTURE_MAG_FILTER_VALUE, GL_LINEAR_VALUE );
+	gl->TextureParameteri( product->smaaToneTexture, GL_TEXTURE_WRAP_S_VALUE, GL_CLAMP_TO_EDGE_VALUE );
+	gl->TextureParameteri( product->smaaToneTexture, GL_TEXTURE_WRAP_T_VALUE, GL_CLAMP_TO_EDGE_VALUE );
+	gl->NamedFramebufferTexture( product->smaaToneFramebuffer, GL_COLOR_ATTACHMENT0_VALUE, product->smaaToneTexture, 0 );
+	if ( gl->CheckNamedFramebufferStatus( product->smaaToneFramebuffer, GL_FRAMEBUFFER_VALUE )
+			!= GL_FRAMEBUFFER_COMPLETE_VALUE || gl->GetError() != GL_NO_ERROR_VALUE ) return qfalse;
+	product->smaaToneWidth = product->outputWidth; product->smaaToneHeight = product->outputHeight;
+	return qtrue;
+}
+
 static void RestoreOutputFramebuffer( productSceneComplete_t *frame ) {
 	productDispatch_t *gl = &frame->product->gl;
 	gl->BindFramebuffer( GL_DRAW_FRAMEBUFFER_VALUE, (glName_t)frame->drawFramebuffer );
@@ -1328,20 +1358,14 @@ static qboolean CompleteHdrScene( void *context ) {
 	/* Read scene depth while the HDR framebuffer is still bound, never UI depth. */
 	if ( !EncodeLensVisibility( product, frame->frontend, frame->view, frame->receipt ) )
 		return qfalse;
-	/* Anti-aliasing on the HDR scene, before exposure metering and tone mapping (as on Vulkan, Metal and WebGPU): both read the
-	 * anti-aliased colour. The scene pass is over, so the HDR framebuffer draws to attachment 0 only again. */
-	if ( frame->taa || frame->smaa ) {
+	/* TAA on the HDR scene, before exposure metering and tone mapping: both read the anti-aliased colour. SMAA runs after the tone
+	 * map (render_antialiasing.h). The scene pass is over, so the HDR framebuffer draws to attachment 0 only again. */
+	if ( frame->taa ) {
 		uint32_t resolved = 0u;
-		if ( frame->taa ) {
-			if ( !RalOpenGl_AaAttachCoverage( product->aa, product->hdrFramebuffer, 0u )
-					|| !RalOpenGl_AaTaa( product->aa, product->hdrTextures[0], product->hdrTextures[1], frame->taa, &resolved ) )
-				return qfalse;
-			frame->receipt->aaDispatchCount = 2u;
-		} else {
-			if ( !RalOpenGl_AaSmaa( product->aa, product->hdrTextures[0], product->outputWidth, product->outputHeight,
-					product->smaaQuality, &resolved ) ) return qfalse;
-			frame->receipt->aaDrawCount = 3u;
-		}
+		if ( !RalOpenGl_AaAttachCoverage( product->aa, product->hdrFramebuffer, 0u )
+				|| !RalOpenGl_AaTaa( product->aa, product->hdrTextures[0], product->hdrTextures[1], frame->taa, &resolved ) )
+			return qfalse;
+		frame->receipt->aaDispatchCount = 2u;
 		sceneSource = (glName_t)resolved;
 	}
 	block.exposure_bias = product->displayVisibility.exposureScale;
@@ -1386,13 +1410,38 @@ static qboolean CompleteHdrScene( void *context ) {
 		frame->receipt->exposureDispatchCount = 2u;
 		frame->receipt->exposureHistoryReset = reset;
 	}
-	RestoreOutputFramebuffer( frame );
-	/* Canonical tonemap and UI return linear RGB. Encode once at the sRGB
-	 * attachment, with UI blending performed in linear space by OpenGL. */
-	gl->Enable( GL_FRAMEBUFFER_SRGB_VALUE );
-	gl->UseProgram( product->hdrPrograms[2] );
-	gl->BindTextureUnit( 0, sceneSource );
-	gl->BindBufferBase( GL_UNIFORM_BUFFER_VALUE, 0, product->hdrBuffers[3] );
+	if ( frame->smaa ) {
+		/* r_aa 2: tone-map into the RGBA16F target (linear, no sRGB encode); SMAA resolves it into the output attachment. */
+		if ( !EnsureSmaaToneTarget( product ) ) return qfalse;
+		gl->BindFramebuffer( GL_DRAW_FRAMEBUFFER_VALUE, product->smaaToneFramebuffer );
+		gl->Viewport( 0, 0, (glSize_t)product->outputWidth, (glSize_t)product->outputHeight );
+		gl->Disable( GL_FRAMEBUFFER_SRGB_VALUE );
+		gl->UseProgram( product->hdrPrograms[2] );
+		gl->BindTextureUnit( 0, sceneSource );
+		gl->BindBufferBase( GL_UNIFORM_BUFFER_VALUE, 0, product->hdrBuffers[3] );
+		gl->Disable( GL_BLEND_VALUE ); gl->Disable( GL_DEPTH_TEST_VALUE );
+		gl->Disable( GL_CULL_FACE_VALUE ); gl->DepthMask( 0 );
+		gl->BindVertexArray( product->hdrVao );
+		gl->DrawArrays( GL_TRIANGLE_STRIP_VALUE, 0, 4 );
+		RestoreOutputFramebuffer( frame );
+		gl->Enable( GL_FRAMEBUFFER_SRGB_VALUE );
+		if ( !RalOpenGl_AaSmaaInto( product->aa, product->smaaToneTexture, product->outputWidth, product->outputHeight,
+				product->smaaQuality, (uint32_t)frame->drawFramebuffer ) ) return qfalse;
+		RestoreOutputFramebuffer( frame );
+		frame->receipt->aaDrawCount = 3u;
+		if ( gl->GetError() != GL_NO_ERROR_VALUE ) return qfalse;
+		frame->completed = qtrue;
+		frame->receipt->postprocessDrawCount = 1u;
+		return qtrue;
+	} else {
+		RestoreOutputFramebuffer( frame );
+		/* Canonical tonemap and UI return linear RGB. Encode once at the sRGB
+		 * attachment, with UI blending performed in linear space by OpenGL. */
+		gl->Enable( GL_FRAMEBUFFER_SRGB_VALUE );
+		gl->UseProgram( product->hdrPrograms[2] );
+		gl->BindTextureUnit( 0, sceneSource );
+		gl->BindBufferBase( GL_UNIFORM_BUFFER_VALUE, 0, product->hdrBuffers[3] );
+	}
 	gl->Disable( GL_BLEND_VALUE ); gl->Disable( GL_DEPTH_TEST_VALUE );
 	gl->Disable( GL_CULL_FACE_VALUE ); gl->DepthMask( 0 );
 	gl->BindVertexArray( product->hdrVao );
