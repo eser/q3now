@@ -398,14 +398,14 @@ float4 samplePreviousColor(thread const float2& texel, thread float3& tapMin, th
 static inline __attribute__((always_inline))
 float movingHistoryCount(thread const float& movingWeight)
 {
-    float rest = fast::max(1.0 - movingWeight, 0.0416666679084300994873046875);
+    float rest = fast::max(1.0 - movingWeight, 0.02083333395421504974365234375);
     return movingWeight * rsqrt(rest * rest);
 }
 
 static inline __attribute__((always_inline))
 float accumulatedHistoryCount(thread const float& storedCount, thread const float& movingWeight, thread const float2& motionPixels)
 {
-    float count = fast::clamp(storedCount, 1.0, 24.0);
+    float count = fast::clamp(storedCount, 1.0, 48.0);
     float moving = fast::clamp(length(motionPixels) * 8.0, 0.0, 1.0);
     float param = movingWeight;
     return count + ((fast::min(count, movingHistoryCount(param)) - count) * moving);
@@ -829,7 +829,7 @@ kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buff
                 float3 resolvedRgb = mixPrecise(param_34, param_35, param_36);
                 result = float4(resolvedRgb, current.w);
                 displayed = result;
-                historyCount = fast::min((priorCount * confidence) + 1.0, 24.0);
+                historyCount = fast::min((priorCount * confidence) + 1.0, 48.0);
                 if ((pc.qualityFlags & 8u) == 0u)
                 {
                     float2 param_37 = previousTexel;

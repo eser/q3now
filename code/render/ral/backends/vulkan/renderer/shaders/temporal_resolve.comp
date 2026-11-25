@@ -153,7 +153,12 @@ vec4 samplePreviousColor(vec2 texel, inout vec3 tapMin, inout vec3 tapMax, inout
 // (the pixel's own texel when it does not move). History the clamp had to move far, relative to the size of the neighbourhood
 // box, is content the pixel no longer shows: its count drops accordingly, so a mismatch fades at the moving rate or faster
 // instead of the static one. The small clamps the jitter causes on static edges leave the count alone.
-const float historyCountCap = 24.0;   // weight 0.96
+// The cap sets the static residue: an exponential mean keeps about 1 / (cap + 1) of the jitter-phase variation. 48 (weight 0.98)
+// against 24, Vulkan arena17/arena6 2026-11-25: static item shimmer 0.70 -> 0.53, edges 0.76 -> 0.67, consecutive-frame pixels
+// above 8/255 0.57 % -> 0.01 %, while first-settled (0.264 -> 0.234), old-frame residual (0.72 -> 0.62 %) and the effect and
+// mover trails are unchanged or better: a real content change exceeds the 3x3 box, is clamped and rectified, so the higher cap
+// does not lengthen the response to it.
+const float historyCountCap = 48.0;   // weight 0.98
 const float staticMotionScale = 8.0;  // fully moving from 1/8 pixel of motion per frame
 float movingHistoryCount(float movingWeight) {
 	// m = w / (1 - w); 1 / x as inversesqrt(x * x) (the reflection contract admits one division, in linearizeDepth)

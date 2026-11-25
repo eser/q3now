@@ -286,13 +286,13 @@ vec4 samplePreviousColor(vec2 texel, inout vec3 tapMin, inout vec3 tapMax, inout
 
 float movingHistoryCount(float movingWeight)
 {
-    float rest = max(1.0 - movingWeight, 0.0416666679084300994873046875);
+    float rest = max(1.0 - movingWeight, 0.02083333395421504974365234375);
     return movingWeight * inversesqrt(rest * rest);
 }
 
 float accumulatedHistoryCount(float storedCount, float movingWeight, vec2 motionPixels)
 {
-    float count = clamp(storedCount, 1.0, 24.0);
+    float count = clamp(storedCount, 1.0, 48.0);
     float moving = clamp(length(motionPixels) * 8.0, 0.0, 1.0);
     float param = movingWeight;
     return count + ((min(count, movingHistoryCount(param)) - count) * moving);
@@ -713,7 +713,7 @@ void main()
                 vec3 resolvedRgb = mixPrecise(param_34, param_35, param_36);
                 result = vec4(resolvedRgb, current.w);
                 displayed = result;
-                historyCount = min((priorCount * confidence) + 1.0, 24.0);
+                historyCount = min((priorCount * confidence) + 1.0, 48.0);
                 if ((pc.qualityFlags & 8u) == 0u)
                 {
                     vec2 param_37 = previousTexel;

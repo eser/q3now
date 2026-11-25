@@ -25,7 +25,7 @@
 
 // Constants duplicated from temporal_resolve.comp (pinned in both files by the
 // resolve policy check).
-#define TEMPORAL_RESOLVE_ORACLE_COUNT_CAP 24.0f
+#define TEMPORAL_RESOLVE_ORACLE_COUNT_CAP 48.0f
 #define TEMPORAL_RESOLVE_ORACLE_STATIC_MOTION_SCALE 8.0f
 #define TEMPORAL_RESOLVE_ORACLE_OUTPUT_SHARPEN 2.4f
 #define TEMPORAL_RESOLVE_ORACLE_BICUBIC_A ( -0.75f )

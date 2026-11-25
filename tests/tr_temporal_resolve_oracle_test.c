@@ -77,11 +77,11 @@ int main( void ) {
 	CHECK( Near( r.historyLo[0], current * ( 1.0f - w ) + 0.5f * w ) && Near( r.historyHi[0], r.historyLo[0] ) );
 	CHECK( Near( r.historyLo[3], 4.0f ) && Near( r.displayedLo[0], r.historyLo[0] ) );
 
-	// 2. The count saturates at 24 (weight 24 / 25).
-	Scene( -1.0f, 0.5f, 24.0f );
+	// 2. The count saturates at the cap (weight cap / (cap + 1)).
+	Scene( -1.0f, 0.5f, TEMPORAL_RESOLVE_ORACLE_COUNT_CAP );
 	CHECK( R_TemporalResolveOraclePixel( &p, &k, 4, 4, &r ) );
 	CHECK( Near( r.historyLo[3], TEMPORAL_RESOLVE_ORACLE_COUNT_CAP ) );
-	w = 24.0f / 25.0f;
+	w = TEMPORAL_RESOLVE_ORACLE_COUNT_CAP / ( TEMPORAL_RESOLVE_ORACLE_COUNT_CAP + 1.0f );
 	CHECK( Near( r.historyLo[0], current * ( 1.0f - w ) + 0.5f * w ) );
 
 	// 3. A pixel moving a whole texel (>= 1/8 px: fully moving) keeps at most the

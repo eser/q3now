@@ -582,7 +582,7 @@ fn movingHistoryCount_u0028_f1_u003b(movingWeight: ptr<function, f32>) -> f32 {
     var rest: f32;
 
     let _e93 = (*movingWeight);
-    rest = max((1f - _e93), 0.041666668f);
+    rest = max((1f - _e93), 0.020833334f);
     let _e96 = (*movingWeight);
     let _e97 = rest;
     let _e98 = rest;
@@ -595,7 +595,7 @@ fn accumulatedHistoryCount_u0028_f1_u003b_f1_u003b_vf2_u003b(storedCount: ptr<fu
     var param_23: f32;
 
     let _e97 = (*storedCount);
-    count_2 = clamp(_e97, 1f, 24f);
+    count_2 = clamp(_e97, 1f, 48f);
     let _e99 = (*motionPixels);
     moving = clamp((length(_e99) * 8f), 0f, 1f);
     let _e103 = count_2;
@@ -1556,7 +1556,7 @@ fn main_1() {
                 displayed = _e425;
                 let _e426 = priorCount;
                 let _e427 = confidence_1;
-                historyCount = min(((_e426 * _e427) + 1f), 24f);
+                historyCount = min(((_e426 * _e427) + 1f), 48f);
                 let _e432 = pc.qualityFlags;
                 if ((_e432 & 8u) == 0u) {
                     let _e435 = prior;
