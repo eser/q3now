@@ -972,7 +972,6 @@ qboolean VK_TemporalResolveReadbackCompleteAfterFence(
 		&& r.fallbackExact == r.fallbackExpected
 		&& r.invalidFallbackExact == r.invalidFallbackExpected
 		&& r.zeroFallbackExact == r.zeroFallbackExpected
-		&& r.validityOther == 0u
 		&& r.nonfiniteInputs == 0u ? qtrue : qfalse;
 	if ( Ral_BufferMapUnmap( slot->buffer, &mapTicket ) != ralSuccess ) return qfalse;
 	owner->latest = r;

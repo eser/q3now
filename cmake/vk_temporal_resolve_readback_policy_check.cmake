@@ -97,7 +97,11 @@ require_text(C "slot->ticket.resolve = *boundResolve;" "output-atomic bound tick
 require_text(C "if ( !submitted ) {\n\t\tmemset( &slot->ticket, 0, sizeof( slot->ticket ) );\n\t\tslot->state = VK_TEMPORAL_RESOLVE_READBACK_READY;\n\t\treturn qtrue;\n\t}" "exact diagnostic cancellation acknowledgement")
 require_text(C "canonicalRecorded.content.submitted = qfalse" "exact submit-bit demotion before parse")
 require_text(C "ProductExact( &t->resolve.products, &slot->products )" "fence-time product provenance")
-require_text(C "r.validityOther == 0u" "canonical R8 validity gate")
+# Partial R8 validity is effect trust (owner, 2026-11-25): the receipt counts it
+# (validityOther) but no longer refuses readiness on it; the oracle's own
+# acceptance threshold (validity <= 127 rejects) is the gate.
+require_text(C "if ( validity[i] <= 127u ) {" "canonical R8 validity acceptance threshold")
+forbid_text(C "r.validityOther == 0u" "binary-only R8 validity readiness")
 require_text(C "r.acceptedNonzeroVelocity > 0u" "nonzero reprojection witness")
 require_text(TEST "content.acceptedInfluence == 1" "synthetic nonzero blend influence")
 require_text(C "r.planesPopulated = qtrue" "submitted full-plane copy authority")

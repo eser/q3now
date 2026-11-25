@@ -400,13 +400,14 @@ qboolean VK_TemporalMotionReadbackCompleteAfterFence(
 		else receipt.validityOther++;
 		if ( finite ) receipt.finiteVelocity++;
 		else receipt.nonfiniteVelocity++;
-		if ( validity[i] == 255 && finite && nonzero )
+		// Partial validity is the effect-trust weight (translucent effects over
+		// a surface); the resolve accepts history above 127, so does this count.
+		if ( validity[i] > 127 && finite && nonzero )
 			receipt.nonzeroValidVelocity++;
 		if ( validity[i] == 0 && nonzero ) receipt.nonzeroInvalidVelocity++;
 	}
 	receipt.fenceComplete = qtrue;
-	receipt.ready = receipt.validityOther == 0
-		&& receipt.nonfiniteVelocity == 0
+	receipt.ready = receipt.nonfiniteVelocity == 0
 		&& receipt.validityFull > 0
 		&& receipt.nonzeroValidVelocity > 0
 		&& receipt.nonzeroInvalidVelocity == 0 ? qtrue : qfalse;

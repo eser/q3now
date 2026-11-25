@@ -316,11 +316,14 @@ int main( void ) {
 	memset( halfs, 0, (size_t)owner.slots[1].ticket.velocityBytes );
 	memset( valid, 0, 8 );
 	halfs[0] = 0x7e00; valid[0] = 7;
+	// Partial validity is effect trust: above 127 it is a valid, moving pixel.
+	halfs[2] = 0x3c00; valid[1] = 200;
 	CHECK( !VK_TemporalMotionReadbackReleaseAfterIdle( &owner, qtrue ) );
 	CHECK( VK_TemporalMotionReadbackCompleteAfterFence(
 		&owner, 1, qtrue, &content ) );
-	CHECK( !content.ready && content.validityOther == 1
-		&& content.nonfiniteVelocity == 1 );
+	CHECK( !content.ready && content.validityOther == 2
+		&& content.nonfiniteVelocity == 1
+		&& content.nonzeroValidVelocity == 1 );
 	CHECK( !VK_TemporalMotionReadbackIsArmed( &owner ) );
 	CHECK( !VK_TemporalMotionReadbackReleaseAfterIdle( &owner, qfalse ) );
 	CHECK( VK_TemporalMotionReadbackReleaseAfterIdle( &owner, qtrue ) );
