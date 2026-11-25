@@ -583,6 +583,10 @@ static void FakeSetEnabled(fakeEnum_t state, fakeBool_t enabled) {
 }
 static void FakeEnable( fakeEnum_t state ) { FakeSetEnabled(state, 1); }
 static void FakeDisable( fakeEnum_t state ) { FakeSetEnabled(state, 0); }
+/* Face culling (TASK-266): the world pass sets the front-face winding once and culls per material; the last mode is kept. */
+static fakeEnum_t s_frontFace, s_cullFace; static unsigned s_cullFaceCalls;
+static void FakeFrontFace( fakeEnum_t mode ) { s_frontFace = mode; }
+static void FakeCullFace( fakeEnum_t mode ) { s_cullFace = mode; s_cullFaceCalls++; }
 static void FakeBlendFunc( fakeEnum_t source, fakeEnum_t destination ) {
 	s_blendSource = source; s_blendDestination = destination;
 }
@@ -802,6 +806,8 @@ static ralOpenGlProc_t FakeResolve( const char *name, void *userData ) {
 	if ( !strcmp( name, "glGetFramebufferAttachmentParameteriv" ) ) RETURN_PROC( FakeGetFramebufferAttachmentParameteriv );
 	if ( !strcmp( name, "glEnable" ) ) RETURN_PROC( FakeEnable );
 	if ( !strcmp( name, "glDisable" ) ) RETURN_PROC( FakeDisable );
+	if ( !strcmp( name, "glFrontFace" ) ) RETURN_PROC( FakeFrontFace );
+	if ( !strcmp( name, "glCullFace" ) ) RETURN_PROC( FakeCullFace );
 	if ( !strcmp( name, "glBlendFunc" ) ) RETURN_PROC( FakeBlendFunc );
 	if ( !strcmp( name, "glDepthMask" ) ) RETURN_PROC( FakeDepthMask );
 	if ( !strcmp( name, "glDepthFunc" ) ) RETURN_PROC( FakeState );
@@ -1336,6 +1342,9 @@ int main( void ) {
 	CHECK( RalOpenGl_WorldLower( coreOwner, &core, &frontend, &submission,
 		&plan, &lowerInfo, &worldReceipt ) );
 	CHECK( s_gl.depthClearCount == 1u && s_gl.maskedDepthClearCount == 0u );
+	/* The world batch culls its back faces (default material mode) with a clockwise front face, as Metal does, and the pass
+	 * leaves culling off for the passes after it. */
+	CHECK( s_frontFace == 0x0900u && s_cullFaceCalls > 0u && s_cullFace == 0x0405u && !FakeIsEnabled( 0x0b44u ) );
 	/* Unbounded authored visibility must match the compute producer range,
 	 * even when later UI draws overwrite the last generic draw uniforms. */
 	CHECK( atmosphere.visibility == 0.0f && s_lastFullAtmosphereFar == 65536.0f );

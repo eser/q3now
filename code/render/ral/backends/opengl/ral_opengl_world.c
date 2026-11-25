@@ -50,6 +50,10 @@ enum {
 	GL_CLAMP_TO_EDGE_VALUE = 0x812f,
 	GL_BLEND_VALUE = 0x0be2,
 	GL_CULL_FACE_VALUE = 0x0b44,
+	GL_FRONT_VALUE = 0x0404,
+	GL_BACK_VALUE = 0x0405,
+	GL_CW_VALUE = 0x0900,
+	GL_CCW_VALUE = 0x0901,
 	GL_DEPTH_TEST_VALUE = 0x0b71,
 	GL_LEQUAL_VALUE = 0x0203,
 	GL_COLOR_BUFFER_BIT_VALUE = 0x00004000,
@@ -103,6 +107,8 @@ typedef void ( RAL_GL_APIENTRY *drawArraysInstancedFn )( glEnum_t, glInt_t,
 	glSize_t, glSize_t );
 typedef void ( RAL_GL_APIENTRY *enableFn )( glEnum_t );
 typedef void ( RAL_GL_APIENTRY *disableFn )( glEnum_t );
+typedef void ( RAL_GL_APIENTRY *cullFaceFn )( glEnum_t );
+typedef void ( RAL_GL_APIENTRY *frontFaceFn )( glEnum_t );
 typedef void ( RAL_GL_APIENTRY *blendFuncFn )( glEnum_t, glEnum_t );
 typedef void ( RAL_GL_APIENTRY *blendEquationiFn )( unsigned int, glEnum_t );
 typedef void ( RAL_GL_APIENTRY *depthMaskFn )( glBool_t );
@@ -140,6 +146,8 @@ typedef struct {
 	drawArraysInstancedFn DrawArraysInstanced;
 	enableFn Enable;
 	disableFn Disable;
+	cullFaceFn CullFace;
+	frontFaceFn FrontFace;
 	blendFuncFn BlendFunc;
 	blendEquationiFn BlendEquationi;
 	depthMaskFn DepthMask;
@@ -254,6 +262,8 @@ static qboolean LoadDispatch( const ralOpenGlCore_t *core,
 		drawArraysInstancedFn );
 	LOAD_GL( Enable, "glEnable", enableFn );
 	LOAD_GL( Disable, "glDisable", disableFn );
+	LOAD_GL( CullFace, "glCullFace", cullFaceFn );
+	LOAD_GL( FrontFace, "glFrontFace", frontFaceFn );
 	LOAD_GL( BlendFunc, "glBlendFunc", blendFuncFn );
 	LOAD_GL( BlendEquationi, "glBlendEquationi", blendEquationiFn );
 	LOAD_GL( DepthMask, "glDepthMask", depthMaskFn );
@@ -547,6 +557,18 @@ static qboolean ApplyAtmosphere( productDrawUniforms_t *uniforms,
 	return qtrue;
 }
 
+/* Face culling from the material, as Metal and Vulkan take it (world batches carry it in renderWorldBatch_t.cullMode, model batches in
+ * their material snapshot). ApplyRaster leaves culling off for the effects and beams that call it; the world, sky and model draws
+ * apply their own mode after it. Drawing every face two-sided showed back faces the other renderers cull: from above a Quake 1 map
+ * the inside of its sky ceiling covered the room below (TASK-266). RAL_OPENGL_WORLD_FRONT_FACE is the winding of a front face in
+ * this renderer's window space (set once per world pass). */
+#define RAL_OPENGL_WORLD_FRONT_FACE GL_CW_VALUE
+static void ApplyCull( const worldDispatch_t *gl, renderCullMode_t mode ) {
+	if ( mode != RENDER_CULL_BACK && mode != RENDER_CULL_FRONT ) { gl->Disable( GL_CULL_FACE_VALUE ); return; }
+	gl->Enable( GL_CULL_FACE_VALUE );
+	gl->CullFace( mode == RENDER_CULL_FRONT ? GL_FRONT_VALUE : GL_BACK_VALUE );
+}
+
 static qboolean DrawSkyBatch( const worldDispatch_t *gl,
 		glName_t uniformBuffer, glName_t materialUniformBuffer,
 		productDrawUniforms_t *uniforms,
@@ -567,6 +589,7 @@ static qboolean DrawSkyBatch( const worldDispatch_t *gl,
 	ApplyRaster( gl, uniformBuffer, materialUniformBuffer, uniforms, NULL,
 		RENDER_ALPHA_OPAQUE, 0.0f, qfalse, 0.0f, qtrue,
 		NULL, NULL, NULL, NULL, NULL, 0.0f, NULL );
+	ApplyCull( gl, batch->cullMode );
 	gl->NamedBufferSubData( materialUniformBuffer, 0, sizeof( params ), &params );
 	for ( uint32_t i = 0u; i < 8u; ++i ) gl->BindTextureUnit( i, images[i] );
 	gl->BindTextureUnit( 8u, owner );
@@ -650,6 +673,7 @@ static qboolean DrawWorldBatch( const worldDispatch_t *gl,
 		frontend->pbrEnabled && info->skyRadianceConsumer.ready
 			? &materialSnapshot.factors : NULL,
 		info->skyRadianceConsumer.previousToCurrentBlend, NULL );
+	ApplyCull( gl, batch->cullMode );
 	if ( binding ) {
 		uint64_t identity = binding->surfaceId
 			^ ( (uint64_t)binding->diffuseAuthority << 56u )
@@ -747,15 +771,17 @@ typedef struct {
 	float alphaCutoff;
 	qboolean depthWrite;
 	qboolean visible;
+	renderCullMode_t cullMode;
 } modelBatchRaster_t;
 
 static modelBatchRaster_t ModelBatchRaster( const renderSubmissionState_t *frontend, qhandle_t material ) {
-	modelBatchRaster_t raster = { RENDER_ALPHA_OPAQUE, 0.5f, qtrue, qtrue };
+	modelBatchRaster_t raster = { RENDER_ALPHA_OPAQUE, 0.5f, qtrue, qtrue, RENDER_CULL_BACK };
 	renderMaterialSnapshot_t snapshot;
 	if ( material > 0 && RenderSubmission_MaterialSnapshot( frontend, material, &snapshot ) ) {
 		raster.alphaMode = snapshot.alphaMode;
 		raster.alphaCutoff = snapshot.alphaCutoff;
 		raster.depthWrite = snapshot.depthWrite;
+		raster.cullMode = snapshot.cullMode;
 		if ( snapshot.noDraw ) raster.visible = qfalse;
 	}
 	return raster;
@@ -785,7 +811,7 @@ static qboolean DrawModelEntity( const worldDispatch_t *gl,
 		productDrawUniforms_t *uniforms,
 		const renderSubmissionState_t *frontend, const glName_t *textures,
 		const renderEntityCommand_t *command, const entityMotionState_t *motion, uint32_t phase,
-		uint32_t *outIndices, uint32_t *outDraws ) {
+		qboolean twoSided, uint32_t *outIndices, uint32_t *outDraws ) {
 	renderModelSnapshot_t model;
 	effectVertex_t *vertices = NULL;
 	transientGeometry_t geometry;
@@ -853,6 +879,7 @@ static qboolean DrawModelEntity( const worldDispatch_t *gl,
 			raster.alphaMode,
 			raster.alphaCutoff, raster.depthWrite, 0.0f, qfalse, command, NULL, NULL, NULL,
 			NULL, 1.0f, entityColor );
+		ApplyCull( gl, twoSided ? RENDER_CULL_NONE : raster.cullMode );
 		gl->DrawElements( GL_TRIANGLES_VALUE, (glSize_t)model.batches[i].indexCount,
 			GL_UNSIGNED_INT_VALUE, (const void *)(uintptr_t)( model.batches[i].firstIndex
 				* sizeof( uint32_t ) ) );
@@ -969,6 +996,7 @@ static qboolean DrawEntityMotion( const worldDispatch_t *gl, const renderSubmiss
 		const modelBatchRaster_t raster = ModelBatchRaster( frontend, material );
 		if ( !raster.visible || RasterPhase( raster.alphaMode ) != 0u || !EntityBatchWritesMotion( frontend, material, motion ) )
 			continue;
+		ApplyCull( gl, raster.cullMode );   /* the faces the colour pass drew, so the offset lands on the same pixels */
 		gl->DrawElements( GL_TRIANGLES_VALUE, (glSize_t)model.batches[i].indexCount, GL_UNSIGNED_INT_VALUE,
 			(const void *)(uintptr_t)( model.batches[i].firstIndex * sizeof( uint32_t ) ) );
 		( *outDraws )++;
@@ -1131,6 +1159,7 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 	worldDispatch_t gl;
 	ralOpenGlWorldReceipt_t receipt = { 0 };
 	renderWorldSnapshot_t world = { 0 };
+	qboolean entityTwoSided = qfalse;
 	const renderDistantWorldSubmission_t *distant = info
 		? info->distantWorld : NULL;
 	const renderPolyCommand_t *polygons = NULL;
@@ -1240,6 +1269,13 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 	} else if ( plan->loweredWorldVertexCount || plan->loweredWorldIndexCount
 			|| plan->loweredWorldBatchCount ) return qfalse;
 	entities = RenderSubmission_EntityCommands( frontend, &entityCount );
+	{
+		/* A UI model view (RDF_NOWORLDMODEL) draws its entities two-sided, as Metal does; read from the scene view, which exists
+		 * whether or not a world is loaded. */
+		renderWorldSnapshot_t sceneView;
+		entityTwoSided = RenderSubmission_WorldSnapshot( frontend, &sceneView )
+			&& ( sceneView.rdflags & RDF_NOWORLDMODEL ) ? qtrue : qfalse;
+	}
 	ui = RenderSubmission_UiPrimitives( frontend, &uiCount );
 	if ( entityCount != submission->entityCount || uiCount != submission->uiPrimitiveCount
 			|| ( entityCount && !entities ) || ( uiCount && !ui ) ) return qfalse;
@@ -1558,6 +1594,7 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 	gl.BindTextureUnit( 9u, info->previousSkyIrradianceTextureName );
 	gl.Viewport( 0, 0, (glSize_t)info->outputWidth,
 		(glSize_t)info->outputHeight );
+	gl.FrontFace( RAL_OPENGL_WORLD_FRONT_FACE );
 	gl.ClearColor( 0.015f, 0.02f, 0.03f, 1.0f );
 	/* Clear owns its write state; the preceding frame may end in UI/alpha. */
 	gl.DepthMask( 1u );
@@ -1790,6 +1827,7 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 			if ( !DrawModelEntity( &gl, uniformBuffer, materialUniformBuffer,
 				&uniforms, frontend, textures,
 				&entities[i], entityMotionStates ? &entityMotionStates[i] : NULL, phase,
+				entityTwoSided,
 				&receipt.entityIndexCount, &receipt.entityDrawCount ) ) goto cleanup;
 			if ( phase == 0u ) receipt.modelEntityCount++;
 		} else if ( phase == 1u ) {
@@ -1942,6 +1980,8 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 cleanup:
 	/* A failed pass must not leave the trust attachment's REVERSE_SUBTRACT equation behind (gl is loaded once coverage is set). */
 	if ( !ok && info->coverageActive && gl.BlendEquationi ) gl.BlendEquationi( 1u, GL_FUNC_ADD_VALUE );
+	/* Culling is global state too: the passes after this one (tone map, anti-aliasing, UI) draw with it off. */
+	if ( gl.Disable ) gl.Disable( GL_CULL_FACE_VALUE );
 	/* Leave the attachment-1 colour mask open: it is global state, and the next pass clears through it. */
 	if ( info->coverageActive && gl.ColorMaski ) gl.ColorMaski( 1u, 1u, 1u, 1u, 1u );
 	free( entityMotionStates );
