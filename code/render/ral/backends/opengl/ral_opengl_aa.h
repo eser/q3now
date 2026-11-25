@@ -46,6 +46,9 @@ qboolean RalOpenGl_AaCreate( const ralOpenGlCore_t *core, const ralOpenGlAaSourc
 void RalOpenGl_AaDestroy( ralOpenGlAa_t *aa );
 /* The R8 coverage target the scene pass writes as colour attachment 1 while TAA runs (sized to the scene); 0 on failure. */
 uint32_t RalOpenGl_AaCoverageTexture( ralOpenGlAa_t *aa, uint32_t width, uint32_t height );
+/* The object motion program (vertex: current and previous world position at locations 0 and 1, ProductDraw block at binding 0;
+ * fragment: effect-mask gba at colour location 1). Built on first use; 0 when it does not compile. */
+uint32_t RalOpenGl_AaObjectMotionProgram( ralOpenGlAa_t *aa );
 /* Attaches the coverage target to `framebuffer` as colour attachment 1 and draws to both attachments, or (coverage 0) detaches it
  * and draws to attachment 0 only, leaving the scene pass exactly as without anti-aliasing. */
 qboolean RalOpenGl_AaAttachCoverage( ralOpenGlAa_t *aa, uint32_t framebuffer, uint32_t coverage );

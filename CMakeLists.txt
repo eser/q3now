@@ -2339,6 +2339,8 @@ ADD_LIBRARY(ral_opengl STATIC
 	code/render/ral/backends/opengl/ral_opengl_product.c
 	code/render/ral/backends/opengl/ral_opengl_world.c
 	code/render/frontend/render_material_runtime_catalog.c
+	code/render/frontend/render_temporal_entity.c
+	code/render/renderer/tr_temporal_motion.c
 	code/render/ral/core/ral_temporal.c
 	code/render/ral/core/ral_allocation.c
 	code/render/ral/core/ral_atmosphere.c

@@ -101,7 +101,8 @@ enum { TEX_VELOCITY, TEX_VALIDITY, TEX_REVERSE_DEPTH, TEX_OUTPUT, TEX_HISTORY_CO
 	TEX_HISTORY_DEPTH1, TEX_COVERAGE, TAA_TEX_COUNT };
 enum { SMAA_EDGES, SMAA_BLEND, SMAA_OUTPUT, SMAA_TARGET_COUNT };
 enum { UBO_MOTION, UBO_BOOTSTRAP, UBO_RESOLVE, UBO_METRICS, UBO_COUNT };
-enum { PROGRAM_MOTION, PROGRAM_BOOTSTRAP, PROGRAM_RESOLVE, PROGRAM_SMAA_EDGE, PROGRAM_SMAA_BLEND, PROGRAM_SMAA_RESOLVE, PROGRAM_COUNT };
+enum { PROGRAM_MOTION, PROGRAM_BOOTSTRAP, PROGRAM_RESOLVE, PROGRAM_SMAA_EDGE, PROGRAM_SMAA_BLEND, PROGRAM_SMAA_RESOLVE,
+	PROGRAM_OBJECT_MOTION, PROGRAM_COUNT };
 
 typedef struct { float co[4], cf[4], cl[4], cu[4], cp[4], po[4], pf[4], pl[4], pu[4], pp[4], jitter[4]; uint32_t extent[4]; } motionParams_t;
 typedef struct { uint32_t extent[2]; float zNear, zFar; } bootstrapParams_t;
@@ -114,10 +115,13 @@ typedef char motionParamsStd140[sizeof( motionParams_t ) == 192u ? 1 : -1];
 /* The resolve block's last member sits at offset 48 (std140 block size 64; the buffer is allocated rounded up to 16). */
 typedef char resolveParamsStd140[sizeof( resolveParams_t ) == 56u ? 1 : -1];
 
-/* Camera motion from the scene depth. Texel row 0 is the bottom of the GL image (NDC y = -1); every AA texture uses that same
+/* Camera motion from the scene depth, object motion from the effect mask. Texel row 0 is the bottom of the GL image (NDC y = -1); every AA texture uses that same
  * orientation, so the velocity is a GL texture-space uv offset (current - previous) like the other backends' in theirs. The product
  * clip z is forward - near over w = forward with the default [-1, 1] clip range, so the window depth is d = 1 - near / (2 forward).
- * The jitter is removed before reconstruction: the velocity is the unjittered camera motion the resolve expects. */
+ * The jitter is removed before reconstruction: the velocity is the unjittered camera motion the resolve expects. Where the object
+ * motion draw wrote the effect mask's gba (a moving entity's surface: its previous world position minus its current one), the
+ * previous position is the reconstructed one plus that offset, projected through the same previous camera; elsewhere gba holds
+ * RAL_OPENGL_WORLD_CAMERA_MOTION (65504) and the point is static. r is the history trust either way. */
 static const char s_motionSource[] =
 	"#version 460\n"
 	"layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;\n"
@@ -137,14 +141,44 @@ static const char s_motionSource[] =
 	"	float rd = clamp((n * f / forward - n) / (f - n), 0.0, 1.0);\n"
 	"	vec2 ndc = (vec2(gid) + 0.5) / vec2(p.extent.xy) * 2.0 - 1.0 - p.jitter.xy;\n"
 	"	vec3 world = p.co.xyz + p.cf.xyz * forward - p.cl.xyz * (ndc.x * forward / p.cp.x) + p.cu.xyz * (ndc.y * forward / p.cp.y);\n"
-	"	vec3 delta = world - p.po.xyz;\n"
+	"	vec4 mask = texelFetch(coverage, texel, 0);\n"
+	"	vec3 previousWorld = mask.y < 60000.0 ? world + mask.yzw : world;\n"
+	"	vec3 delta = previousWorld - p.po.xyz;\n"
 	"	float previousForward = dot(delta, p.pf.xyz);\n"
 	"	bool reprojected = previousForward > 1.0e-3;\n"
 	"	vec2 previous = reprojected ? vec2(-dot(delta, p.pl.xyz) * p.pp.x, dot(delta, p.pu.xyz) * p.pp.y) / previousForward : ndc;\n"
-	"	float trust = clamp(texelFetch(coverage, texel, 0).r, 0.0, 1.0);\n"
+	"	float trust = clamp(mask.x, 0.0, 1.0);\n"
 	"	imageStore(velocity, texel, vec4((ndc - previous) * 0.5, 0.0, 0.0));\n"
 	"	imageStore(validity, texel, vec4(reprojected ? trust : 0.0, 0.0, 0.0, 0.0));\n"
 	"	imageStore(reverseDepth, texel, vec4(rd, 0.0, 0.0, 0.0));\n"
+	"}\n";
+
+/* Object motion: a moving entity's batches drawn again over the finished opaque scene, depth-tested (LEQUAL, no depth write)
+ * so only its visible surface passes, writing the effect mask's gba = previous world position - current world position. The
+ * clip position is the product vertex stage's world branch (ral_opengl_product.vert) over the same ProductDraw block (binding 0,
+ * the world pass's jittered view), so it rasterizes exactly where the entity was drawn. */
+static const char s_objectMotionVertex[] =
+	"#version 460\n"
+	"layout(std140, binding = 0) uniform ProductDraw { vec4 viewOriginDrawSpace, viewForward, viewLeft, viewUp, projectionLightmap; } productDraw;\n"
+	"layout(location = 0) in vec3 in_position;\n"
+	"layout(location = 1) in vec3 in_previous_position;\n"
+	"layout(location = 0) out vec3 motionOffset;\n"
+	"void main() {\n"
+	"	vec3 delta = in_position - productDraw.viewOriginDrawSpace.xyz;\n"
+	"	float forward = dot(delta, productDraw.viewForward.xyz);\n"
+	"	gl_Position = vec4(-dot(delta, productDraw.viewLeft.xyz) * productDraw.projectionLightmap.x,\n"
+	"		dot(delta, productDraw.viewUp.xyz) * productDraw.projectionLightmap.y,\n"
+	"		forward - productDraw.projectionLightmap.z, forward);\n"
+	"	motionOffset = in_previous_position - in_position;\n"
+	"}\n";
+static const char s_objectMotionFragment[] =
+	"#version 460\n"
+	"layout(location = 0) in vec3 motionOffset;\n"
+	"layout(location = 0) out vec4 outColor;\n"
+	"layout(location = 1) out vec4 outMask;\n"
+	"void main() {\n"
+	"	outColor = vec4(0.0);\n"
+	"	outMask = vec4(1.0, motionOffset);\n"
 	"}\n";
 
 struct ralOpenGlAa_s {
@@ -291,7 +325,7 @@ static void DestroySmaaTargets( ralOpenGlAa_t *aa ) {
 
 static qboolean PrepareTaa( ralOpenGlAa_t *aa, uint32_t width, uint32_t height ) {
 	static const aaEnum_t formats[TAA_TEX_COUNT] = { AA_GL_RGBA16F, AA_GL_RGBA16F, AA_GL_R32F, AA_GL_RGBA16F, AA_GL_RGBA16F,
-		AA_GL_RGBA16F, AA_GL_R32F, AA_GL_R32F, AA_GL_R8 };
+		AA_GL_RGBA16F, AA_GL_R32F, AA_GL_R32F, AA_GL_RGBA16F };
 	if ( !width || !height || width > 16384u || height > 16384u ) return qfalse;
 	if ( aa->taaWidth == width && aa->taaHeight == height && aa->taaTextures[TEX_COVERAGE] ) return qtrue;
 	DestroyTaaTextures( aa );
@@ -359,6 +393,18 @@ void RalOpenGl_AaDestroy( ralOpenGlAa_t *aa ) {
 	if ( aa->pointSampler ) aa->gl.DeleteSamplers( 1, &aa->pointSampler );
 	if ( aa->emptyVao ) aa->gl.DeleteVertexArrays( 1, &aa->emptyVao );
 	free( aa );
+}
+
+uint32_t RalOpenGl_AaObjectMotionProgram( ralOpenGlAa_t *aa ) {
+	if ( !aa ) return 0u;
+	if ( !aa->programs[PROGRAM_OBJECT_MOTION] ) {
+		const ralOpenGlAaSource_t vertex = { (const unsigned char *)s_objectMotionVertex,
+			(uint32_t)sizeof( s_objectMotionVertex ) - 1u };
+		const ralOpenGlAaSource_t fragment = { (const unsigned char *)s_objectMotionFragment,
+			(uint32_t)sizeof( s_objectMotionFragment ) - 1u };
+		aa->programs[PROGRAM_OBJECT_MOTION] = GraphicsProgram( &aa->gl, &vertex, NULL, &fragment, NULL );
+	}
+	return aa->programs[PROGRAM_OBJECT_MOTION];
 }
 
 uint32_t RalOpenGl_AaCoverageTexture( ralOpenGlAa_t *aa, uint32_t width, uint32_t height ) {

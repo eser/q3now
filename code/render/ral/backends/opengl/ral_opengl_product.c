@@ -9,6 +9,7 @@
 #include "../../../frontend/render_material_stage_gpu.h"
 #include "../../../frontend/render_atmosphere_gpu.h"
 #include "../../../frontend/render_temporal_view.h"
+#include "../../../frontend/render_temporal_entity.h"
 
 #include <limits.h>
 #include <math.h>
@@ -459,8 +460,14 @@ struct ralOpenGlProduct_s {
 	uint64_t taaWorldGeneration;
 	renderTemporalCutLatch_t taaCut;   /* camera cuts held until a temporal frame commits (render_temporal_view.h) */
 	uint32_t taaTopologyEpoch;
+	/* The entity pose cache transaction of the planned TAA frame (0: none open); its poses become "previous" exactly when the
+	 * frame commits, like the camera and the history. */
+	int entityMotionWorld;
+	uint64_t entityMotionFrame;
 	ralOpenGlAaCamera_t taaPreviousCamera;
 	uint32_t taaResolvedFrames, taaBootstrapFrames, smaaFrames;
+	/* Entity motion totals over committed TAA frames (world receipt): poses recorded, of them with a previous pose, motion draws. */
+	uint32_t entityMotionRecorded, entityMotionPrevious, entityMotionDraws;
 	productMaterialEntry_t materials[RENDER_SUBMISSION_MAX_TEXTURE_RESOURCES];
 	uint32_t materialTextureNames[RENDER_SUBMISSION_MAX_TEXTURE_RESOURCES];
 	uint32_t cookedMaterialTextureNames[RENDER_SUBMISSION_MAX_MATERIALS];
@@ -792,6 +799,20 @@ qboolean RalOpenGl_ProductFrameReceiptExact( const ralOpenGlProductFrameReceipt_
 											 const ralOpenGlProductFrameReceipt_t *b )
 {
 	return FrameValid( a ) && FrameValid( b ) && !memcmp( a, b, sizeof( *a ) );
+}
+
+/* The entity pose cache is process-wide while TAA frame ids belong to this product's history: every point that restarts the history
+ * (AA creation, TAA off, a world change) restarts the cache with it, or Begin would refuse the lower ids (as on WebGPU and Metal). */
+static void EntityMotionReset( ralOpenGlProduct_t *product ) {
+	R_TemporalEntityCacheResetAll();
+	product->entityMotionFrame = 0u;
+}
+
+/* Publishes (committed) or drops the poses recorded for the planned TAA frame. */
+static void EntityMotionFinish( ralOpenGlProduct_t *product, qboolean committed ) {
+	if ( !product->entityMotionFrame ) return;
+	(void)R_TemporalEntityCacheFinish( product->entityMotionWorld, product->entityMotionFrame, committed );
+	product->entityMotionFrame = 0u;
 }
 
 qboolean RalOpenGl_ProductCreate( ralOpenGlCore_t *core, const ralOpenGlCoreReceipt_t *coreReceipt, uint64_t generation,
@@ -1924,6 +1945,13 @@ qboolean RalOpenGl_ProductSetAntiAliasing( ralOpenGlProduct_t *product, const re
 	return qtrue;
 }
 
+void RalOpenGl_ProductEntityMotionCounts( const ralOpenGlProduct_t *product, uint32_t *recorded, uint32_t *previous,
+		uint32_t *draws ) {
+	if ( recorded ) *recorded = product ? product->entityMotionRecorded : 0u;
+	if ( previous ) *previous = product ? product->entityMotionPrevious : 0u;
+	if ( draws ) *draws = product ? product->entityMotionDraws : 0u;
+}
+
 void RalOpenGl_ProductAntiAliasingCounts( const ralOpenGlProduct_t *product, uint32_t *taaResolved, uint32_t *taaBootstrap,
 		uint32_t *smaa ) {
 	if ( taaResolved ) *taaResolved = product ? product->taaResolvedFrames : 0u;
@@ -1942,6 +1970,7 @@ static qboolean EnsureAa( ralOpenGlProduct_t *product ) {
 	AA_SOURCE( smaaResolveVertex, SmaaResolveVertex ); AA_SOURCE( smaaResolveFragment, SmaaResolveFragment );
 #undef AA_SOURCE
 	Ral_TemporalInit( &product->taaState );
+	EntityMotionReset( product );
 	return RalOpenGl_AaCreate( product->core, &sources, &product->aa );
 }
 
@@ -3192,7 +3221,11 @@ qboolean RalOpenGl_ProductRender( ralOpenGlProduct_t *product, renderSubmissionS
 	 * world view (folded into the view axes by the world pass) and binds the coverage target as attachment 1 of the HDR scene. */
 	if ( product->taaState.pending )
 		(void)Ral_TemporalCancelFrame( &product->taaState, product->taaState.pendingPlan.frameId );
-	if ( !product->taaEnabled && product->taaState.active ) Ral_TemporalInit( &product->taaState );
+	EntityMotionFinish( product, qfalse );   /* a transaction left open by a failed frame */
+	if ( !product->taaEnabled && product->taaState.active ) {
+		Ral_TemporalInit( &product->taaState );
+		EntityMotionReset( product );
+	}
 	RenderTemporal_ObserveCut( &product->taaCut, RenderSubmission_ViewCameraCut( frontend ) );
 	memset( &taaFrame, 0, sizeof( taaFrame ) );
 	{
@@ -3209,6 +3242,7 @@ qboolean RalOpenGl_ProductRender( ralOpenGlProduct_t *product, renderSubmissionS
 			if ( product->taaWorldGeneration != lifecycle ) {
 				product->taaWorldGeneration = lifecycle;
 				if ( !++product->taaTopologyEpoch ) product->taaTopologyEpoch = 1u;
+				EntityMotionReset( product );
 			}
 			input.frameId = RenderSubmission_FrameSerial( frontend );
 			input.width = product->outputWidth; input.height = product->outputHeight;
@@ -3239,6 +3273,17 @@ qboolean RalOpenGl_ProductRender( ralOpenGlProduct_t *product, renderSubmissionS
 				if ( !coverage ) return qfalse;
 				lower.jitterNdc[0] = taaFrame.jitterNdc[0]; lower.jitterNdc[1] = taaFrame.jitterNdc[1];
 				lower.coverageActive = qtrue;
+				/* Entity motion: open this frame's pose cache transaction; without the object motion program the entities
+				 * keep invalidating the history under them. */
+				lower.objectMotionProgramName = RalOpenGl_AaObjectMotionProgram( product->aa );
+				if ( lower.objectMotionProgramName
+						&& R_TemporalEntityCacheBegin( frontend->activeWorldIndex, product->taaTopologyEpoch, 1u, input.frameId ) ) {
+					product->entityMotionWorld = frontend->activeWorldIndex;
+					product->entityMotionFrame = input.frameId;
+					lower.entityMotionActive = qtrue;
+					lower.entityMotionWorld = frontend->activeWorldIndex;
+					lower.entityMotionFrame = input.frameId;
+				}
 				sceneComplete.taa = &taaFrame;
 				taaPlanFrame = plan.frameId;
 			}
@@ -3292,6 +3337,10 @@ qboolean RalOpenGl_ProductRender( ralOpenGlProduct_t *product, renderSubmissionS
 	product->lastFrameGeneration = frameGeneration;
 	if ( taaPlanFrame && receipt.aaDispatchCount == 2u
 			&& Ral_TemporalCommitFrame( &product->taaState, taaPlanFrame ) ) {
+		EntityMotionFinish( product, qtrue );
+		product->entityMotionRecorded += receipt.native.entityMotionRecorded;
+		product->entityMotionPrevious += receipt.native.entityMotionPrevious;
+		product->entityMotionDraws += receipt.native.entityMotionDraws;
 		RenderTemporal_CutConsumed( &product->taaCut );
 		product->taaPreviousCamera = taaFrame.current;
 		if ( taaFrame.historyValid ) product->taaResolvedFrames++; else product->taaBootstrapFrames++;

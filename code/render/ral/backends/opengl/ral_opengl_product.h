@@ -78,6 +78,9 @@ qboolean RalOpenGl_ProductSetAerialHaze( ralOpenGlProduct_t *product,
  * TAA drops its history, so switching back starts from the bootstrap frame. */
 qboolean RalOpenGl_ProductSetAntiAliasing( ralOpenGlProduct_t *product, const renderAntialiasingPlan_t *plan );
 /* Frames completed per anti-aliasing path since the product was created (r_aa diagnostics). */
+/* Entity motion totals over committed TAA frames: poses recorded, of them with a previous pose, object motion draws. */
+void RalOpenGl_ProductEntityMotionCounts( const ralOpenGlProduct_t *product, uint32_t *recorded, uint32_t *previous,
+	uint32_t *draws );
 void RalOpenGl_ProductAntiAliasingCounts( const ralOpenGlProduct_t *product, uint32_t *taaResolved, uint32_t *taaBootstrap,
 	uint32_t *smaa );
 /* r_lightmapBoost: world-lightmap overbright in linear space (1..24, default 4.6), as on every RAL backend. */

@@ -6,6 +6,7 @@
 #include "ral_opengl_internal.h"
 #include "render_material_stage_gpu.h"
 #include "render_material_script.h"
+#include "render_temporal_entity_submission.h"
 
 #include <limits.h>
 #include <math.h>
@@ -275,6 +276,7 @@ static qboolean ReceiptValid( const ralOpenGlWorldReceipt_t *receipt ) {
 		&& receipt->localIrradianceEntityCount
 			<= receipt->modelEntityCount + receipt->primitiveEntityCount
 		&& receipt->localIrradianceDrawCount <= receipt->entityDrawCount
+		&& receipt->entityMotionPrevious <= receipt->entityMotionRecorded
 		&& receipt->legacyLightmapDrawCount + receipt->directionalStaticDrawCount
 			<= receipt->worldDrawCount + receipt->distantWorldDrawCount
 		&& receipt->distantWorldDrawCount <= RAL_SKY_DISTANT_MAX_VISIBLE_DRAWS
@@ -574,7 +576,7 @@ static qboolean DrawSkyBatch( const worldDispatch_t *gl,
 	if ( info->coverageActive ) gl->ColorMaski( 1u, 0u, 0u, 0u, 0u );
 	gl->DrawElements( GL_TRIANGLES_VALUE, (glSize_t)batch->indexCount,
 		GL_UNSIGNED_INT_VALUE, (const void *)(uintptr_t)(batch->firstIndex * sizeof(uint32_t)) );
-	if ( info->coverageActive ) gl->ColorMaski( 1u, 1u, 1u, 1u, 1u );
+	if ( info->coverageActive ) gl->ColorMaski( 1u, 1u, 0u, 0u, 0u );   /* scene programs write the trust (r) only */
 	// Restore the product's global inputs; later world/entity/FX draws own 0..4.
 	gl->UseProgram( info->programName );
 	gl->BindTextureUnit( 5u, info->physicalSkyTextureName );
@@ -764,12 +766,26 @@ static uint32_t RasterPhase( renderAlphaMode_t alpha ) {
 	return alpha == RENDER_ALPHA_BLEND || alpha == RENDER_ALPHA_ADDITIVE || alpha == RENDER_ALPHA_ALPHA_ADDITIVE ? 1u : 0u;
 }
 
+/* An entity's motion this TAA frame: its pose went into the entity pose cache, and with a committed previous pose (in range of the
+ * model's frames) its batches can carry object motion instead of invalidating the history under them. */
+typedef struct {
+	qboolean hasPrevious;
+	qboolean rotated;
+	temporalEntityPose_t previous;
+} entityMotionState_t;
+
+static qboolean EntityBatchWritesMotion( const renderSubmissionState_t *frontend, qhandle_t material,
+		const entityMotionState_t *motion ) {
+	return motion && motion->hasPrevious
+		&& RenderTemporal_EntityBatchWritesMotion( frontend, material, motion->rotated ) ? qtrue : qfalse;
+}
+
 static qboolean DrawModelEntity( const worldDispatch_t *gl,
 		glName_t uniformBuffer, glName_t materialUniformBuffer,
 		productDrawUniforms_t *uniforms,
 		const renderSubmissionState_t *frontend, const glName_t *textures,
-		const renderEntityCommand_t *command, uint32_t phase, uint32_t *outIndices,
-		uint32_t *outDraws ) {
+		const renderEntityCommand_t *command, const entityMotionState_t *motion, uint32_t phase,
+		uint32_t *outIndices, uint32_t *outDraws ) {
 	renderModelSnapshot_t model;
 	effectVertex_t *vertices = NULL;
 	transientGeometry_t geometry;
@@ -830,7 +846,10 @@ static qboolean DrawModelEntity( const worldDispatch_t *gl,
 		if ( !raster.visible || RasterPhase( raster.alphaMode ) != phase ) continue;
 		EntityStageColor( frontend, material, &command->entity, entityColor );
 		gl->BindTextureUnit( 0u, MaterialTexture( frontend, textures, material ) );
-		ApplyRaster( gl, uniformBuffer, materialUniformBuffer, uniforms, &s_coverageParams,
+		/* A batch that carries its object motion keeps full trust (the motion draw supplies its offset); every other entity batch
+		 * marks the history under it as untrusted. */
+		ApplyRaster( gl, uniformBuffer, materialUniformBuffer, uniforms,
+			EntityBatchWritesMotion( frontend, material, motion ) ? NULL : &s_coverageParams,
 			raster.alphaMode,
 			raster.alphaCutoff, raster.depthWrite, 0.0f, qfalse, command, NULL, NULL, NULL,
 			NULL, 1.0f, entityColor );
@@ -844,6 +863,119 @@ static qboolean DrawModelEntity( const worldDispatch_t *gl,
 cleanup:
 	free( vertices );
 	return ok;
+}
+
+/* Records the pose of every model entity with a motion identity into this TAA frame's entity pose cache transaction (the view
+ * weapon excepted: it moves with the camera and stays invalidated), keeping the committed previous pose where there is one. The
+ * same rule set as Metal and WebGPU (render_temporal_entity_submission.h). */
+static void PrepareEntityMotion( const ralOpenGlWorldLowerInfo_t *info, const renderSubmissionState_t *frontend,
+		const renderEntityCommand_t *entities, uint32_t entityCount, entityMotionState_t *states,
+		ralOpenGlWorldReceipt_t *receipt ) {
+	if ( !info->coverageActive || !info->entityMotionActive || !states ) return;
+	for ( uint32_t i = 0u; i < entityCount; ++i ) {
+		const refEntity_t *entity = &entities[i].entity;
+		renderModelSnapshot_t model;
+		temporalEntityPose_t pose;
+		temporalEntityPoseReceipt_t poseReceipt;
+		if ( !entities[i].hasTemporal || entity->reType != RT_MODEL || entity->hModel <= 0
+				|| ( entity->renderfx & ( RF_DEPTHHACK | RF_FIRST_PERSON ) )
+				|| !RalOpenGl_EntityInPrimaryView( entity )
+				|| !RenderSubmission_ModelSnapshot( frontend, entity->hModel, &model ) || !model.ready
+				|| !model.positions || !model.frameCount ) continue;
+		RenderTemporal_EntityPose( entity, &model, &pose );
+		if ( !R_TemporalEntityCacheRecord( info->entityMotionWorld, info->entityMotionFrame, (uintptr_t)&entities[i],
+				&entities[i].motion, &pose, &poseReceipt ) ) continue;
+		receipt->entityMotionRecorded++;
+		if ( poseReceipt.previousValid && poseReceipt.previous.frame >= 0 && poseReceipt.previous.oldframe >= 0
+				&& (uint32_t)poseReceipt.previous.frame < model.frameCount
+				&& (uint32_t)poseReceipt.previous.oldframe < model.frameCount ) {
+			states[i].hasPrevious = qtrue;
+			states[i].previous = poseReceipt.previous;
+			states[i].rotated = RenderTemporal_PoseRotated( &poseReceipt.previous, &pose );
+			receipt->entityMotionPrevious++;
+		}
+	}
+}
+
+typedef struct {
+	float current[3];
+	float previous[3];
+} motionVertex_t;
+
+static void ModelLocalPosition( const renderModelSnapshot_t *model, uint32_t frame, uint32_t oldFrame, float backlerp,
+		uint32_t vertex, float out[3] ) {
+	for ( uint32_t axis = 0u; axis < 3u; ++axis ) {
+		const float current = model->positions[( (size_t)frame * model->vertexCount + vertex ) * 3u + axis];
+		const float previous = model->positions[( (size_t)oldFrame * model->vertexCount + vertex ) * 3u + axis];
+		out[axis] = current + ( previous - current ) * backlerp;
+	}
+}
+
+/* The object motion draw of one entity: its motion-carrying batches over the finished opaque scene, depth-tested without depth
+ * write, writing previous minus current world position into the effect mask's gba (the program from RalOpenGl_AaObjectMotion
+ * Program). The current position is the one DrawModelEntity drew; the previous one is the model at its previous animation frame
+ * under its previous transform. */
+static qboolean DrawEntityMotion( const worldDispatch_t *gl, const renderSubmissionState_t *frontend,
+		const renderEntityCommand_t *command, const entityMotionState_t *motion, uint32_t *outDraws ) {
+	renderModelSnapshot_t model;
+	motionVertex_t *vertices;
+	glName_t buffers[2] = { 0u }, vao = 0u;
+	const temporalEntityPose_t *previousPose = &motion->previous;
+	uint32_t frame, oldFrame, batches = 0u;
+	if ( !RenderSubmission_ModelSnapshot( frontend, command->entity.hModel, &model ) || !model.ready
+			|| !model.vertexCount || !model.indexCount || !model.positions || !model.indices || !model.batches
+			|| !model.frameCount ) return qfalse;
+	for ( uint32_t i = 0u; i < model.batchCount; ++i ) {
+		const qhandle_t material = RenderSubmission_EntityBatchMaterial( frontend, command, &model.batches[i] );
+		const modelBatchRaster_t raster = ModelBatchRaster( frontend, material );
+		if ( raster.visible && RasterPhase( raster.alphaMode ) == 0u && EntityBatchWritesMotion( frontend, material, motion ) )
+			batches++;
+	}
+	if ( !batches ) return qtrue;
+	frame = command->entity.frame < 0 ? 0u : (uint32_t)command->entity.frame;
+	oldFrame = command->entity.oldframe < 0 ? 0u : (uint32_t)command->entity.oldframe;
+	if ( frame >= model.frameCount || oldFrame >= model.frameCount
+			|| command->entity.backlerp < 0.0f || command->entity.backlerp > 1.0f ) return qfalse;
+	vertices = calloc( model.vertexCount, sizeof( *vertices ) );
+	if ( !vertices ) return qfalse;
+	for ( uint32_t i = 0u; i < model.vertexCount; ++i ) {
+		float local[3];
+		ModelLocalPosition( &model, frame, oldFrame, command->entity.backlerp, i, local );
+		EntityTransform( &command->entity, local, vertices[i].current );
+		ModelLocalPosition( &model, (uint32_t)previousPose->frame, (uint32_t)previousPose->oldframe,
+			previousPose->backlerp, i, local );
+		for ( uint32_t axis = 0u; axis < 3u; ++axis )
+			vertices[i].previous[axis] = previousPose->origin[axis]
+				+ previousPose->axis[0u * 3u + axis] * local[0]
+				+ previousPose->axis[1u * 3u + axis] * local[1]
+				+ previousPose->axis[2u * 3u + axis] * local[2];
+	}
+	gl->CreateBuffers( 2, buffers );
+	gl->NamedBufferStorage( buffers[0], (glSizePtr_t)( model.vertexCount * sizeof( *vertices ) ), vertices, 0u );
+	gl->NamedBufferStorage( buffers[1], (glSizePtr_t)( model.indexCount * sizeof( *model.indices ) ), model.indices, 0u );
+	free( vertices );
+	gl->CreateVertexArrays( 1, &vao );
+	gl->VertexArrayVertexBuffer( vao, 0u, buffers[0], 0, (glSize_t)sizeof( motionVertex_t ) );
+	gl->VertexArrayElementBuffer( vao, buffers[1] );
+	for ( unsigned int attribute = 0u; attribute < 2u; ++attribute ) {
+		gl->EnableVertexArrayAttrib( vao, attribute );
+		gl->VertexArrayAttribBinding( vao, attribute, 0u );
+		gl->VertexArrayAttribFormat( vao, attribute, 3, GL_FLOAT_VALUE, 0u,
+			attribute ? (unsigned int)offsetof( motionVertex_t, previous ) : (unsigned int)offsetof( motionVertex_t, current ) );
+	}
+	gl->BindVertexArray( vao );
+	for ( uint32_t i = 0u; i < model.batchCount; ++i ) {
+		const qhandle_t material = RenderSubmission_EntityBatchMaterial( frontend, command, &model.batches[i] );
+		const modelBatchRaster_t raster = ModelBatchRaster( frontend, material );
+		if ( !raster.visible || RasterPhase( raster.alphaMode ) != 0u || !EntityBatchWritesMotion( frontend, material, motion ) )
+			continue;
+		gl->DrawElements( GL_TRIANGLES_VALUE, (glSize_t)model.batches[i].indexCount, GL_UNSIGNED_INT_VALUE,
+			(const void *)(uintptr_t)( model.batches[i].firstIndex * sizeof( uint32_t ) ) );
+		( *outDraws )++;
+	}
+	gl->DeleteVertexArrays( 1, &vao );
+	gl->DeleteBuffers( 2, buffers );
+	return qtrue;
 }
 
 static qboolean DrawPrimitiveEntity( const worldDispatch_t *gl,
@@ -1022,6 +1154,7 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 	const glName_t *textures;
 	effectVertex_t *effectVertices = NULL;
 	uint32_t *effectIndices = NULL;
+	entityMotionState_t *entityMotionStates = NULL;
 	uint32_t effectVertexCount, effectIndexCount, effectVertexCursor = 0u;
 	uint32_t effectIndexCursor = 0u;
 	qboolean ok = qfalse;
@@ -1431,8 +1564,13 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 	gl.Clear( GL_COLOR_BUFFER_BIT_VALUE | GL_DEPTH_BUFFER_BIT_VALUE );
 	if ( info->coverageActive ) {
 		/* TAA history trust starts at 1; draws reduce it through their own blend factors (REVERSE_SUBTRACT on this attachment). */
-		static const float fullTrust[4] = { 1.0f, 0.0f, 0.0f, 0.0f };
+		static const float fullTrust[4] = { 1.0f, RAL_OPENGL_WORLD_CAMERA_MOTION, RAL_OPENGL_WORLD_CAMERA_MOTION,
+			RAL_OPENGL_WORLD_CAMERA_MOTION };
+		/* The effect mask: r = full trust, gba = camera motion. The clear honours the colour mask, so open it first; afterwards the
+		 * scene programs write r only and the object motion draw gba only. */
+		gl.ColorMaski( 1u, 1u, 1u, 1u, 1u );
 		gl.ClearBufferfv( GL_COLOR_VALUE, 1, fullTrust );
+		gl.ColorMaski( 1u, 1u, 0u, 0u, 0u );
 		gl.BlendEquationi( 1u, GL_FUNC_REVERSE_SUBTRACT_VALUE );
 	}
 	gl.Enable( GL_DEPTH_TEST_VALUE );
@@ -1618,15 +1756,40 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 		}
 		gl.Enable( GL_DEPTH_TEST_VALUE );
 	}
-	/* Two phases: depth-writing entity geometry, then blended batches and the primitive (sprite/beam) entities, which blend. */
+	if ( entityCount && info->coverageActive && info->entityMotionActive ) {
+		entityMotionStates = calloc( entityCount, sizeof( *entityMotionStates ) );
+		if ( !entityMotionStates ) goto cleanup;
+		PrepareEntityMotion( info, frontend, entities, entityCount, entityMotionStates, &receipt );
+	}
+	/* Two phases: depth-writing entity geometry, then blended batches and the primitive (sprite/beam) entities, which blend. Between
+	 * them, with the opaque depth final, the moving entities draw their object motion into the effect mask. */
 	for ( uint32_t phase = 0u; phase < 2u; ++phase ) for ( uint32_t i = 0u; i < entityCount; ++i ) {
 		uint32_t drawsBefore = receipt.entityDrawCount;
+		if ( phase == 1u && i == 0u && entityMotionStates && receipt.entityMotionPrevious ) {
+			if ( !info->objectMotionProgramName ) goto cleanup;
+			gl.UseProgram( info->objectMotionProgramName );
+			gl.Disable( GL_BLEND_VALUE );
+			gl.Enable( GL_DEPTH_TEST_VALUE );
+			gl.DepthFunc( GL_LEQUAL_VALUE );
+			gl.DepthMask( 0u );
+			gl.ColorMaski( 0u, 0u, 0u, 0u, 0u );
+			gl.ColorMaski( 1u, 0u, 1u, 1u, 1u );
+			UploadProductDraw( &gl, uniformBuffer, &uniforms );
+			for ( uint32_t m = 0u; m < entityCount; ++m ) {
+				if ( !entityMotionStates[m].hasPrevious ) continue;
+				if ( !DrawEntityMotion( &gl, frontend, &entities[m], &entityMotionStates[m], &receipt.entityMotionDraws ) )
+					goto cleanup;
+			}
+			gl.ColorMaski( 0u, 1u, 1u, 1u, 1u );
+			gl.ColorMaski( 1u, 1u, 0u, 0u, 0u );
+			gl.UseProgram( info->programName );
+		}
 		if ( !RalOpenGl_EntityInPrimaryView( &entities[i].entity ) ) continue;
 		if ( entities[i].entity.reType == RT_MODEL
 				&& entities[i].entity.hModel > 0 ) {
 			if ( !DrawModelEntity( &gl, uniformBuffer, materialUniformBuffer,
 				&uniforms, frontend, textures,
-				&entities[i], phase,
+				&entities[i], entityMotionStates ? &entityMotionStates[i] : NULL, phase,
 				&receipt.entityIndexCount, &receipt.entityDrawCount ) ) goto cleanup;
 			if ( phase == 0u ) receipt.modelEntityCount++;
 		} else if ( phase == 1u ) {
@@ -1704,6 +1867,9 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 		receipt.modelEntityCount = content.modelEntityCount;
 		receipt.primitiveEntityCount = content.primitiveEntityCount;
 		receipt.temporalEntityCount = content.temporalEntityCount;
+		receipt.entityMotionRecorded = content.entityMotionRecorded;
+		receipt.entityMotionPrevious = content.entityMotionPrevious;
+		receipt.entityMotionDraws = content.entityMotionDraws;
 		receipt.localIrradianceEntityCount = content.localIrradianceEntityCount;
 		receipt.localIrradianceDrawCount = content.localIrradianceDrawCount;
 		receipt.entityIndexCount = content.entityIndexCount;
@@ -1776,6 +1942,9 @@ qboolean RalOpenGl_WorldLower( ralOpenGlCore_t *core,
 cleanup:
 	/* A failed pass must not leave the trust attachment's REVERSE_SUBTRACT equation behind (gl is loaded once coverage is set). */
 	if ( !ok && info->coverageActive && gl.BlendEquationi ) gl.BlendEquationi( 1u, GL_FUNC_ADD_VALUE );
+	/* Leave the attachment-1 colour mask open: it is global state, and the next pass clears through it. */
+	if ( info->coverageActive && gl.ColorMaski ) gl.ColorMaski( 1u, 1u, 1u, 1u, 1u );
+	free( entityMotionStates );
 	if ( materialUniformBuffer ) gl.DeleteBuffers( 1, &materialUniformBuffer );
 	if ( uniformBuffer ) gl.DeleteBuffers( 1, &uniformBuffer );
 	if ( vaos[0] || vaos[1] || vaos[2] ) gl.DeleteVertexArrays( 3, vaos );

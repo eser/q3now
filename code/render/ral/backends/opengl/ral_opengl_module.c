@@ -829,9 +829,12 @@ static qboolean ApplyAntiAliasing( void ) {
 	if ( !RalOpenGl_ProductSetAntiAliasing( s_module.product, &plan ) ) return qfalse;
 	RalOpenGl_ProductAntiAliasingCounts( s_module.product, &resolved, &bootstrap, &smaaFrames );
 	if ( resolved + bootstrap + smaaFrames >= lastLoggedFrames + 1000u && s_module.imports.LogCh && s_module.logChannel >= 0 ) {
+		uint32_t motionRecorded = 0u, motionPrevious = 0u, motionDraws = 0u;
 		lastLoggedFrames = resolved + bootstrap + smaaFrames;
+		RalOpenGl_ProductEntityMotionCounts( s_module.product, &motionRecorded, &motionPrevious, &motionDraws );
 		s_module.imports.LogCh( s_module.logChannel, SEV_INFO,
-			"Wired native OpenGL RAL: aa frames taa-resolved=%u taa-bootstrap=%u smaa=%u\n", resolved, bootstrap, smaaFrames );
+			"Wired native OpenGL RAL: aa frames taa-resolved=%u taa-bootstrap=%u smaa=%u entity-motion recorded=%u previous=%u draws=%u\n",
+			resolved, bootstrap, smaaFrames, motionRecorded, motionPrevious, motionDraws );
 	}
 	return qtrue;
 }

@@ -14,7 +14,9 @@
 extern "C" {
 #endif
 
-#define RAL_OPENGL_WORLD_SCHEMA_VERSION 12u
+#define RAL_OPENGL_WORLD_SCHEMA_VERSION 13u
+/* Effect-mask gba value that selects the camera motion (no object offset): half-float max, far outside any per-frame offset. */
+#define RAL_OPENGL_WORLD_CAMERA_MOTION 65504.0f
 
 typedef struct {
 	uint64_t generation;
@@ -44,10 +46,18 @@ typedef struct {
 	ralDisplayVisibilityPlan_t displayVisibility;
 	float aerialHaze; /* r_atmosphereAerialHaze weight, 0..1 */
 	float lightmapBoost; /* r_lightmapBoost, linear world-lightmap overbright (1..24) */
-	/* TAA: the sub-pixel jitter (NDC) folded into the world view axes, and colour attachment 1 (the R8 coverage target) being bound:
-	 * the pass clears it, entity and effect draws mark it, and programs that do not write it are masked off it. */
+	/* TAA: the sub-pixel jitter (NDC) folded into the world view axes, and colour attachment 1 (the RGBA16F effect mask) being
+	 * bound: r = history trust (cleared to 1, reduced by the draws that mark it), gba = the object motion offset (the surface's
+	 * previous world position minus its current one) or RAL_OPENGL_WORLD_CAMERA_MOTION where the camera motion applies. Scene
+	 * programs write r only; the object motion draw writes gba only. */
 	float jitterNdc[2];
 	qboolean coverageActive;
+	/* Entity motion (with coverageActive): the open entity pose cache transaction of this TAA frame (render_temporal_entity.h)
+	 * and the program that draws the recorded entities' motion offsets depth-tested against the finished opaque scene. */
+	qboolean entityMotionActive;
+	int entityMotionWorld;
+	uint64_t entityMotionFrame;
+	uint32_t objectMotionProgramName;
 	const renderDistantWorldSubmission_t *distantWorld;
 	const renderEffectDecalPool_t *effectDecalPool;
 	renderEffectDecalPoolReceipt_t effectDecalPoolReceipt;
@@ -85,6 +95,10 @@ typedef struct {
 	uint32_t modelEntityCount;
 	uint32_t primitiveEntityCount;
 	uint32_t temporalEntityCount;
+	/* Entity motion: poses recorded into the pose cache, of them with a committed previous pose, and motion offset draws. */
+	uint32_t entityMotionRecorded;
+	uint32_t entityMotionPrevious;
+	uint32_t entityMotionDraws;
 	uint32_t localIrradianceEntityCount;
 	uint32_t localIrradianceDrawCount;
 	uint32_t entityIndexCount;
