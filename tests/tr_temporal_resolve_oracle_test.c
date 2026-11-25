@@ -115,7 +115,24 @@ int main( void ) {
 	CHECK( r.pixelClass == TEMPORAL_RESOLVE_ORACLE_HISTORY );
 	CHECK( Near( r.historyLo[0], 1.0f ) && Near( r.displayedHi[0], 1.0f ) && Near( r.displayedLo[0], 1.0f ) );
 
-	// 7. Half-precision comparison: inside the interval passes, a step outside fails.
+	// 7. Spatial fallback: an invalid pixel on a hard vertical edge (0 | 1) is blended
+	//    toward the neighbour across the edge; displayed == history rgb, count 1.
+	{
+		int x, y;
+		Scene( 0.0f, 0.0f, 1.0f );
+		for ( y = 0; y < H; ++y ) for ( x = 4; x < W; ++x ) SetColor( s_current, x, y, 1.0f, 1.0f, 1.0f, 1.0f );
+		s_validity[4 * W + 4] = 0u;
+		Setup( &p, &k, 4u );
+		CHECK( R_TemporalResolveOraclePixel( &p, &k, 4, 4, &r ) );
+		CHECK( r.pixelClass == TEMPORAL_RESOLVE_ORACLE_SPATIAL && !r.ambiguous );
+		CHECK( r.displayedLo[0] > 0.0f && r.displayedHi[0] < 1.0f
+			&& Near( r.historyLo[0], r.displayedLo[0] ) && Near( r.historyLo[3], 1.0f ) );
+		Setup( &p, &k, 0u ); // fallback off: the current colour stays
+		CHECK( R_TemporalResolveOraclePixel( &p, &k, 4, 4, &r ) );
+		CHECK( r.pixelClass == TEMPORAL_RESOLVE_ORACLE_CURRENT && Near( r.displayedLo[0], 1.0f ) );
+	}
+
+	// 8. Half-precision comparison: inside the interval passes, a step outside fails.
 	{
 		uint16_t inside[4] = { FloatToHalf( 0.5f ), FloatToHalf( 0.5f ), FloatToHalf( 0.5f ), FloatToHalf( 1.0f ) };
 		uint16_t outside[4] = { FloatToHalf( 0.5f ), FloatToHalf( 0.5f ), FloatToHalf( 0.53125f ), FloatToHalf( 1.0f ) };

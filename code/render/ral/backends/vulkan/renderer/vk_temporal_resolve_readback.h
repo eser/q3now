@@ -13,9 +13,9 @@
 #define VK_TEMPORAL_RESOLVE_READBACK_APRON_MAX 512u
 #define VK_TEMPORAL_RESOLVE_READBACK_APRON_DIVISOR 4u
 // Sub-texel weight error of the hardware bilinear filter the resolve oracle
-// assumes (8-bit weights). On the 2026-11-25 Metal/MoltenVK captures every
-// value from 1/1024 to 1/128 gave the same verdict once the oracle modelled the
-// half-precision rounding of filtered rgba16f fetches.
+// assumes (8-bit weights). Swept on eight 2026-11-25 MoltenVK/Apple captures
+// (fixture, textured world, static quality scene): 0 left 12 values outside
+// their interval; 1/1024, 1/512, 1/256 and 1/128 all left none.
 #define VK_TEMPORAL_RESOLVE_READBACK_FILTER_WEIGHT_ERROR ( 1.0f / 256.0f )
 #define VK_TEMPORAL_RESOLVE_READBACK_MISMATCH_SAMPLES 4u
 

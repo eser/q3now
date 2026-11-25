@@ -52,8 +52,8 @@ typedef struct {
 	float depthThresholdAbsolute, depthThresholdRelative;
 	float historyWeight;
 	uint32_t qualityFlags;
-	// Relative sub-texel weight error of the hardware bilinear filter (e.g.
-	// 1/512 for 8-bit weights rounded to nearest). Measured, not assumed.
+	// Sub-texel weight error of the hardware bilinear filter (8-bit weights:
+	// 1/256). See VK_TEMPORAL_RESOLVE_READBACK_FILTER_WEIGHT_ERROR for the sweep.
 	float filterWeightError;
 } temporalResolveOracleParams_t;
 

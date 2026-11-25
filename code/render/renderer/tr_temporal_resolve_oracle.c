@@ -14,7 +14,11 @@
 // The shader's `precise` chains forbid fused multiply-add; keep the CPU model
 // unfused everywhere (the non-precise GPU steps may fuse, which the float floor
 // of the comparison absorbs).
+#if defined( __clang__ )
 #pragma STDC FP_CONTRACT OFF
+#elif defined( __GNUC__ )
+#pragma GCC optimize ( "fp-contract=off" )
+#endif
 
 #define FLT_BIG 3.402823466e+38f
 
@@ -104,7 +108,15 @@ static void Bilinear( oracleEval_t *e, const uint16_t *plane, float u, float v, 
 	float tx = u * (float)e->k->extent[0] - 0.5f, ty = v * (float)e->k->extent[1] - 0.5f;
 	float bx = floorf( tx ), by = floorf( ty ), fx = tx - bx, fy = ty - by;
 	float c00[4], c10[4], c01[4], c11[4];
-	int32_t x0 = (int32_t)bx, y0 = (int32_t)by, c;
+	int32_t x0, y0, c;
+	// A texel-centre uv built as (texel + 0.5) / extent is not exact in float: the fraction comes out as noise
+	// (~1e-5) or just below 1. The sampler resolves sub-texel position far more coarsely (8 bits), so such a
+	// fetch is an exact texel read: snap fractions within 1/4096 of a texel boundary.
+	if ( fx < 1.0f / 4096.0f ) fx = 0.0f;
+	else if ( fx > 1.0f - 1.0f / 4096.0f ) { bx += 1.0f; fx = 0.0f; }
+	if ( fy < 1.0f / 4096.0f ) fy = 0.0f;
+	else if ( fy > 1.0f - 1.0f / 4096.0f ) { by += 1.0f; fy = 0.0f; }
+	x0 = (int32_t)bx; y0 = (int32_t)by;
 	Fetch4( e, plane, x0, y0, c00 ); Fetch4( e, plane, x0 + 1, y0, c10 );
 	Fetch4( e, plane, x0, y0 + 1, c01 ); Fetch4( e, plane, x0 + 1, y0 + 1, c11 );
 	if ( fx != 0.0f || fy != 0.0f ) e->filteredHistory = qtrue;
@@ -213,6 +225,7 @@ static void SamplePreviousBlur( oracleEval_t *e, const float texel[2], float tap
 		float tapMax[3], float out[3] ) {
 	float inv[2] = { InvSqrtSq( (float)e->k->extent[0] ), InvSqrtSq( (float)e->k->extent[1] ) };
 	float sum[3] = { 0, 0, 0 }, mode = e->mode;
+	qboolean filtered = e->filteredHistory; // the blur is always half a texel off: not a sub-texel reprojection
 	int i, c;
 	// The displayed colour grows with the bicubic history and shrinks with this blur (detail = history - blur, gain
 	// 2.4), so the blur's interval end is taken opposite to the history's: the hull then holds both extremes.
@@ -228,6 +241,7 @@ static void SamplePreviousBlur( oracleEval_t *e, const float texel[2], float tap
 	}
 	for ( c = 0; c < 3; ++c ) out[c] = sum[c] * 0.25f;
 	e->mode = mode;
+	e->filteredHistory = filtered;
 }
 
 static float SamplePreviousDepthLinear( oracleEval_t *e, const float texel[2] ) {
