@@ -401,8 +401,9 @@ qboolean VK_TemporalMotionReadbackCompleteAfterFence(
 		if ( finite ) receipt.finiteVelocity++;
 		else receipt.nonfiniteVelocity++;
 		// Partial validity is the effect-trust weight (translucent effects over
-		// a surface); the resolve accepts history above 127, so does this count.
-		if ( validity[i] > 127 && finite && nonzero )
+		// a surface): the resolve reprojects any validity above zero and scales
+		// the history weight by it, so any nonzero validity is valid motion.
+		if ( validity[i] > 0 && finite && nonzero )
 			receipt.nonzeroValidVelocity++;
 		if ( validity[i] == 0 && nonzero ) receipt.nonzeroInvalidVelocity++;
 	}

@@ -156,7 +156,7 @@ iam=[re.fullmatch(iqm_activation_pat,x[2]) for x in iqm_activations]
 iqm_payload_pat=(r"temporal-iqm-payload schema=1 token=([1-9][0-9]*) frame=([1-9][0-9]*) slot=([01]) serial=([1-9][0-9]*) records=([1-9][0-9]*) owner=([1-9][0-9]*) slot-generation=([1-9][0-9]*) prepare=([1-9][0-9]*) content=([0-9a-f]{16}) current=([0-9a-f]{16}) previous=([0-9a-f]{16}) raster="+r":".join([r"([0-9a-f]{8})"]*16)+r" submit=1 fence=1")
 iqm_payloads=exact("temporal-iqm-payload ",iqm_payload_pat,"INFO","renderer.ral",2)
 ipm=[re.fullmatch(iqm_payload_pat,x[2]) for x in iqm_payloads]
-sample_pat=(r"temporal-resolve-sample schema=1 token=([1-9][0-9]*) frame=([1-9][0-9]*) slot=([01]) serial=([1-9][0-9]*) pixel=([0-9]+),([0-9]+) color=([0-9a-f]{4}):([0-9a-f]{4}):([0-9a-f]{4}):([0-9a-f]{4}) depth=([1-6]):([0-9a-f]{8}) velocity=([0-9a-f]{4}):([0-9a-f]{4}) validity=(?:25[0-5]|2[0-4][0-9]|1[3-9][0-9]|12[89]) resolved=([0-9a-f]{4}):([0-9a-f]{4}):([0-9a-f]{4}):([0-9a-f]{4}) submit=1 fence=1")
+sample_pat=(r"temporal-resolve-sample schema=1 token=([1-9][0-9]*) frame=([1-9][0-9]*) slot=([01]) serial=([1-9][0-9]*) pixel=([0-9]+),([0-9]+) color=([0-9a-f]{4}):([0-9a-f]{4}):([0-9a-f]{4}):([0-9a-f]{4}) depth=([1-6]):([0-9a-f]{8}) velocity=([0-9a-f]{4}):([0-9a-f]{4}) validity=(?:[1-9][0-9]*) resolved=([0-9a-f]{4}):([0-9a-f]{4}):([0-9a-f]{4}):([0-9a-f]{4}) submit=1 fence=1")
 samples=exact("temporal-resolve-sample ",sample_pat,"INFO","renderer.ral",2)
 sam=[re.fullmatch(sample_pat,x[2]) for x in samples]
 for n,(s,a,p,z) in enumerate(zip(sm,iam,ipm,sam)):
