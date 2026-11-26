@@ -31,10 +31,12 @@ static void test_flatten_and_resolve( void ) {
 	char error[256];
 	char resolved[WIRED_FS_ALIAS_PATH_MAX];
 
-	expect_true( wired_fs_alias_build( pairs, 2, 7, target_exists,
+	expect_true( wired_fs_alias_build( pairs, 2, target_exists,
 		"weapons/machinegun/sounds/ric1.opus", storage, 4, &catalog,
 		error, sizeof( error ) ), "valid catalog builds" );
-	expect_true( catalog.generation == 7, "generation preserved" );
+	/* Known answer (FNV-1a 64 over the count and the sorted, flattened pairs, folded): pins the identity shared by every process,
+	 * platform and the cooks written to disk. */
+	expect_true( catalog.generation == 0x781d6725u, "generation is the catalog's content digest" );
 	expect_true( wired_fs_alias_resolve( &catalog, "SOUND\\WEAPONS\\RIC1.WAV",
 		resolved, sizeof( resolved ) ), "separator and case normalize" );
 	expect_true( strcmp( resolved, "weapons/machinegun/sounds/ric1.opus" ) == 0,
@@ -71,21 +73,21 @@ static void test_rejections( void ) {
 		{ "TEXTURES\\LEGACY.PNG", "textures/second.png" }
 	};
 
-	expect_true( !wired_fs_alias_build( cycle, 2, 1, NULL, NULL, storage, 4,
+	expect_true( !wired_fs_alias_build( cycle, 2, NULL, NULL, storage, 4,
 		&catalog, error, sizeof( error ) ), "cycle rejected" );
 	expect_true( strstr( error, "cycle" ) != NULL, "cycle diagnostic" );
-	expect_true( !wired_fs_alias_build( &forbidden, 1, 1, NULL, NULL, storage, 4,
+	expect_true( !wired_fs_alias_build( &forbidden, 1, NULL, NULL, storage, 4,
 		&catalog, error, sizeof( error ) ), "VM target rejected" );
-	expect_true( !wired_fs_alias_build( &traversal, 1, 1, NULL, NULL, storage, 4,
+	expect_true( !wired_fs_alias_build( &traversal, 1, NULL, NULL, storage, 4,
 		&catalog, error, sizeof( error ) ), "traversal rejected" );
-	expect_true( !wired_fs_alias_build( &missing, 1, 1, target_exists,
+	expect_true( !wired_fs_alias_build( &missing, 1, target_exists,
 		"textures/other.png", storage, 4, &catalog, error, sizeof( error ) ),
 		"missing target rejected" );
-	expect_true( !wired_fs_alias_build( &absolute, 1, 1, NULL, NULL, storage, 4,
+	expect_true( !wired_fs_alias_build( &absolute, 1, NULL, NULL, storage, 4,
 		&catalog, error, sizeof( error ) ), "absolute path rejected" );
-	expect_true( !wired_fs_alias_build( &config, 1, 1, NULL, NULL, storage, 4,
+	expect_true( !wired_fs_alias_build( &config, 1, NULL, NULL, storage, 4,
 		&catalog, error, sizeof( error ) ), "config alias rejected" );
-	expect_true( !wired_fs_alias_build( duplicates, 2, 1, NULL, NULL, storage, 4,
+	expect_true( !wired_fs_alias_build( duplicates, 2, NULL, NULL, storage, 4,
 		&catalog, error, sizeof( error ) ), "normalized duplicate rejected" );
 	expect_true( !wired_fs_alias_path_allowed( "fs-aliases.lua" ),
 		"authored alias manifest cannot alias itself" );
@@ -100,7 +102,7 @@ static void test_exact_extensions( void ) {
 	char error[256];
 	char resolved[WIRED_FS_ALIAS_PATH_MAX];
 
-	expect_true( wired_fs_alias_build( &pair, 1, 3, NULL, NULL, storage, 1,
+	expect_true( wired_fs_alias_build( &pair, 1, NULL, NULL, storage, 1,
 		&catalog, error, sizeof( error ) ), "extension-changing alias builds" );
 	expect_true( wired_fs_alias_resolve( &catalog, "textures/panel.tga",
 		resolved, sizeof( resolved ) ), "exact source extension resolves" );
@@ -110,8 +112,40 @@ static void test_exact_extensions( void ) {
 		resolved, sizeof( resolved ) ), "extensionless spelling does not match" );
 }
 
+static void test_content_generation( void ) {
+	wired_fs_alias_pair_t forward[2] = {
+		{ "sound/a.wav", "sounds/a.opus" }, { "sound/b.wav", "sounds/b.opus" } };
+	wired_fs_alias_pair_t reversed[2] = {
+		{ "SOUND\\B.WAV", "sounds/b.opus" }, { "sound/a.wav", "sounds/a.opus" } };
+	wired_fs_alias_pair_t changed[2] = {
+		{ "sound/a.wav", "sounds/a.opus" }, { "sound/b.wav", "sounds/c.opus" } };
+	wired_fs_alias_entry_t storage[2], stale[2];
+	wired_fs_alias_catalog_t a, b, c;
+	char error[256];
+	unsigned generationA;
+
+	expect_true( wired_fs_alias_digest( NULL, 0 ) == WIRED_FS_ALIAS_EMPTY_GENERATION,
+		"the empty catalog has the fixed generation" );
+	expect_true( WIRED_FS_ALIAS_EMPTY_GENERATION != 0u, "the empty generation is never 0" );
+	expect_true( wired_fs_alias_build( forward, 2, NULL, NULL, storage, 2, &a, error, sizeof( error ) ),
+		"forward catalog builds" );
+	generationA = a.generation;
+	memcpy( stale, storage, sizeof( stale ) );
+	expect_true( wired_fs_alias_build( reversed, 2, NULL, NULL, storage, 2, &b, error, sizeof( error ) ),
+		"reordered catalog builds" );
+	expect_true( b.generation == generationA, "manifest order and spelling do not change the generation" );
+	expect_true( wired_fs_alias_build( changed, 2, NULL, NULL, storage, 2, &c, error, sizeof( error ) ),
+		"changed catalog builds" );
+	expect_true( c.generation != generationA, "a changed target changes the generation" );
+	/* Bytes after the NUL are not part of the identity. */
+	memset( stale[0].source + strlen( stale[0].source ) + 1, 'x', 4 );
+	memset( stale[1].target + strlen( stale[1].target ) + 1, 'y', 4 );
+	expect_true( wired_fs_alias_digest( stale, 2 ) == generationA, "stale bytes after the NUL are ignored" );
+}
+
 int main( void ) {
 	test_flatten_and_resolve();
+	test_content_generation();
 	test_rejections();
 	test_exact_extensions();
 	if ( failures ) {

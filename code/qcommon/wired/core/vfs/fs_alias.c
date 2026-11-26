@@ -136,8 +136,41 @@ static bool wired_fs_alias_flatten( wired_fs_alias_entry_t *entries,
 	return true;
 }
 
+static unsigned long long wired_fs_alias_fnv( unsigned long long hash, const unsigned char *bytes, size_t length ) {
+	size_t i;
+	for ( i = 0; i < length; i++ ) {
+		hash ^= bytes[i];
+		hash *= 0x100000001b3ull;
+	}
+	return hash;
+}
+
+unsigned wired_fs_alias_digest( const wired_fs_alias_entry_t *entries, size_t count ) {
+	unsigned long long hash = 0xcbf29ce484222325ull;
+	unsigned char countBytes[8];
+	const unsigned char separator = 0;
+	unsigned folded;
+	size_t i;
+
+	for ( i = 0; i < sizeof( countBytes ); i++ ) {
+		countBytes[i] = (unsigned char)( ( (unsigned long long)count >> ( 8u * i ) ) & 0xffu );
+	}
+	hash = wired_fs_alias_fnv( hash, countBytes, sizeof( countBytes ) );
+	for ( i = 0; entries && i < count; i++ ) {
+		/* Up to the NUL: the fixed-size arrays may hold stale bytes after it. */
+		hash = wired_fs_alias_fnv( hash, (const unsigned char *)entries[i].source,
+			strnlen( entries[i].source, sizeof( entries[i].source ) ) );
+		hash = wired_fs_alias_fnv( hash, &separator, 1 );
+		hash = wired_fs_alias_fnv( hash, (const unsigned char *)entries[i].target,
+			strnlen( entries[i].target, sizeof( entries[i].target ) ) );
+		hash = wired_fs_alias_fnv( hash, &separator, 1 );
+	}
+	folded = (unsigned)( ( hash ^ ( hash >> 32 ) ) & 0xffffffffu );
+	return folded ? folded : 1u;
+}
+
 bool wired_fs_alias_build( const wired_fs_alias_pair_t *pairs, size_t pairCount,
-	unsigned generation, wired_fs_alias_target_exists_fn targetExists,
+	wired_fs_alias_target_exists_fn targetExists,
 	void *targetExistsCtx, wired_fs_alias_entry_t *storage, size_t storageCapacity,
 	wired_fs_alias_catalog_t *outCatalog, char *error, size_t errorSize ) {
 	unsigned char state[WIRED_FS_ALIAS_MAX_ENTRIES];
@@ -203,7 +236,7 @@ bool wired_fs_alias_build( const wired_fs_alias_pair_t *pairs, size_t pairCount,
 	}
 
 	qsort( storage, pairCount, sizeof( *storage ), wired_fs_alias_compare );
-	outCatalog->generation = generation ? generation : 1;
+	outCatalog->generation = wired_fs_alias_digest( storage, pairCount );
 	outCatalog->count = pairCount;
 	outCatalog->capacity = storageCapacity;
 	outCatalog->entries = storage;

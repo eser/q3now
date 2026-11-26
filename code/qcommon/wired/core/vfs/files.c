@@ -361,13 +361,13 @@ static qboolean		fs_sw3z_deferOpen = qfalse;
 
 static wired_fs_alias_entry_t
 	fs_aliasEntries[2][WIRED_FS_ALIAS_MAX_ENTRIES];
+/* The live catalog's generation (its content digest, fs_alias.h) is the fsGeneration every resolved resource reports. */
 static wired_fs_alias_catalog_t fs_aliasCatalog = {
-	1, 0, WIRED_FS_ALIAS_MAX_ENTRIES, fs_aliasEntries[0]
+	WIRED_FS_ALIAS_EMPTY_GENERATION, 0, WIRED_FS_ALIAS_MAX_ENTRIES, fs_aliasEntries[0]
 };
 static int fs_aliasCatalogIndex;
 static sys_mutex_t fs_aliasCatalogMutex;
 static qboolean fs_aliasCatalogMutexInitialized;
-static unsigned fs_resourceGeneration = 1;
 static uint64_t fs_resourceResolveRequests;
 static uint64_t fs_resourceResolveAliasHits;
 static uint64_t fs_fileOpenAliasHits;
@@ -381,14 +381,6 @@ static void FS_CheckIdPaks( void );
 static qboolean FS_ResolveResourceDirect( const char *qpath,
 	fsResolvedResource_t *out, unsigned generation );
 void FS_Reload( void );
-
-static unsigned FS_NextResourceGeneration( void ) {
-	fs_resourceGeneration++;
-	if ( fs_resourceGeneration == 0 ) {
-		fs_resourceGeneration = 1;
-	}
-	return fs_resourceGeneration;
-}
 
 static void FS_LockAliasCatalog( void ) {
 	if ( fs_aliasCatalogMutexInitialized ) {
@@ -406,26 +398,21 @@ static bool FS_AliasTargetExists( const char *qpath, void *ctx ) {
 	fsResolvedResource_t resolved;
 	(void)ctx;
 	return FS_ResolveResourceDirect( qpath, &resolved,
-		fs_resourceGeneration ) == qtrue;
+		fs_aliasCatalog.generation ) == qtrue;
 }
 
 qboolean FS_InstallFileAliases( const wired_fs_alias_pair_t *pairs,
 	size_t pairCount, char *error, size_t errorSize ) {
 	wired_fs_alias_catalog_t candidate;
 	int candidateIndex;
-	unsigned previousGeneration;
-	unsigned generation;
 
 	FS_LockAliasCatalog();
 	candidateIndex = 1 - fs_aliasCatalogIndex;
-	previousGeneration = fs_resourceGeneration;
-	generation = FS_NextResourceGeneration();
 
-	if ( !wired_fs_alias_build( pairs, pairCount, generation,
+	if ( !wired_fs_alias_build( pairs, pairCount,
 		FS_AliasTargetExists, NULL, fs_aliasEntries[candidateIndex],
 		WIRED_FS_ALIAS_MAX_ENTRIES, &candidate, error, errorSize ) ) {
 		/* Candidate-first publication: the previous catalog remains live. */
-		fs_resourceGeneration = previousGeneration;
 		FS_UnlockAliasCatalog();
 		return qfalse;
 	}
@@ -438,16 +425,14 @@ qboolean FS_InstallFileAliases( const wired_fs_alias_pair_t *pairs,
 
 void FS_ClearFileAliases( void ) {
 	int candidateIndex;
-	unsigned generation;
 
 	FS_LockAliasCatalog();
 	candidateIndex = 1 - fs_aliasCatalogIndex;
-	generation = FS_NextResourceGeneration();
 
 	memset( fs_aliasEntries[candidateIndex], 0,
 		sizeof( fs_aliasEntries[candidateIndex] ) );
 	fs_aliasCatalogIndex = candidateIndex;
-	fs_aliasCatalog.generation = generation;
+	fs_aliasCatalog.generation = WIRED_FS_ALIAS_EMPTY_GENERATION;
 	fs_aliasCatalog.count = 0;
 	fs_aliasCatalog.capacity = WIRED_FS_ALIAS_MAX_ENTRIES;
 	fs_aliasCatalog.entries = fs_aliasEntries[candidateIndex];
@@ -2141,7 +2126,7 @@ qboolean FS_ResolveResource( const char *qpath, fsResolvedResource_t *out ) {
 		resolvedPath = canonical;
 		fs_resourceResolveAliasHits++;
 	}
-	generation = fs_resourceGeneration;
+	generation = fs_aliasCatalog.generation;
 	FS_UnlockAliasCatalog();
 	return FS_ResolveResourceDirect( resolvedPath, out, generation );
 }
