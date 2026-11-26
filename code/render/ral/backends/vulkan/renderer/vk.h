@@ -1952,6 +1952,24 @@ typedef struct {
 	// PARTICLES_PER_POOL / *_BYTES constants live above this struct,
 	// outside the Vk_Instance typedef — C disallows nested typedefs
 	// inside a struct.
+	//
+	// The game world's clock for the GPU simulations that run at the start
+	// of a frame (particles, weather), before this frame's scene exists: the
+	// first world-scene draw command of a frame samples its scene time and
+	// view origin (vk_world_scene_sample), and vk_world_scene_latch hands
+	// the sample to the next frame's computes. A frame without a world scene
+	// (menu) latches nothing and the simulations step by zero. The backend's
+	// refdef at that point is whatever scene was drawn last - the UI's, on
+	// the wall clock - which made particles and rain move while paused.
+	struct {
+		int						sampleTimeMs;
+		vec3_t					sampleViewOrigin;
+		qboolean				sampled;
+		int						timeMs;              // latched for this frame's computes
+		vec3_t					viewOrigin;          // last latched; kept through menu frames
+		qboolean				valid;               // a world scene was sampled last frame
+	} worldScene;
+
 	struct {
 		// pipeline state
 		VkDescriptorSetLayout	compute_set_layout;  // 8 bindings: UBO + pools/classes + spawn/profile/event/heightgrid
@@ -2036,11 +2054,6 @@ typedef struct {
 		uint32_t				pingPongRead;        // 0 or 1, flipped each frame
 		float					prevSceneTime;       // world scene time at the last
 		                                             // RB_RunParticleCompute step
-		// The particle clock is the game world's time: the scene time of the first world-scene draw
-		// command of a frame (vk_particle_sample_world_time), consumed by the next compute. Frames
-		// without a world scene leave it unsampled and step by zero.
-		int						worldSceneTimeMs;
-		qboolean				worldSceneTimeSampled;
 
 		// Request-time ring reservation. CPU advances once per bounded emitter;
 		// the specialized GPU spawn pass expands individual particle slots.
@@ -2161,7 +2174,8 @@ typedef struct {
 
 		// frame-to-frame state
 		uint32_t				pingPongRead;        // 0 or 1, flipped each frame
-		float					prevSceneTime;       // floatTime at last compute
+		float					prevSceneTime;       // world scene time at last compute
+		qboolean				resetBaseline;       // weather changed: next compute steps by zero
 
 		// live weather descriptor (set by RE_SetAtmosphere). type == 0 →
 		// pool inert (compute + draw skipped).

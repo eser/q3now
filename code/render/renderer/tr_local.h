@@ -2367,7 +2367,8 @@ void RB_DrawBeams( void );
 void vk_init_particle( void );
 void vk_shutdown_particle( void );
 void RB_RunParticleCompute( void );
-void vk_particle_sample_world_time( const trRefdef_t *refdef );
+void vk_world_scene_sample( const trRefdef_t *refdef );
+void vk_world_scene_latch( void );
 void RB_DrawParticles( void );
 
 // vk.c — GPU decal ring + projector render pass (surface-aligned quads)

@@ -2295,7 +2295,7 @@ static const void *RB_DrawSurfs( const void *data ) {
 	backEnd.refdef = cmd->refdef;
 	backEnd.viewParms = cmd->viewParms;
 #ifdef USE_VULKAN
-	vk_particle_sample_world_time( &cmd->refdef );
+	vk_world_scene_sample( &cmd->refdef );
 #endif
 	if ( cmd->finalizeView && cmd->viewParms.temporalFrameId ) {
 		R_TemporalBackendRecorded( cmd->viewParms.temporalWorldIndex,

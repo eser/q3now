@@ -8183,8 +8183,6 @@ void vk_init_particle( void )
 
 	vk.particle.pingPongRead  = 0;
 	vk.particle.prevSceneTime = 0.0f;
-	vk.particle.worldSceneTimeMs = 0;
-	vk.particle.worldSceneTimeSampled = qfalse;
 	vk.particle.numClasses    = 0;
 	vk.particle.nextSlot      = 0;
 	vk.particle.available     = qtrue;
@@ -9714,6 +9712,7 @@ void vk_init_atmospheric( void )
 
 	vk.atm.pingPongRead  = 0;
 	vk.atm.prevSceneTime = 0.0f;
+	vk.atm.resetBaseline = qtrue;
 	vk.atm.type          = 0;
 	vk.atm.gridSize      = (int)ATM_HEIGHTGRID_SIZE;
 	vk.atm.available     = qtrue;
@@ -9863,8 +9862,8 @@ void RE_SetAtmosphere( const atmosphericDesc_t *desc )
 	}
 
 	// A weather change resets the dt baseline so the first compute pass after
-	// the change integrates a small step (not a huge map-load delta).
-	vk.atm.prevSceneTime = (float)tr.refdef.floatTime;
+	// the change steps by zero (not a huge map-load delta).
+	vk.atm.resetBaseline = qtrue;
 }
 
 void RE_SetAtmosphereSurfaceTiles( const ralAtmosphereSurfaceTile_t *tiles,
@@ -10011,15 +10010,22 @@ void RB_RunAtmosphericCompute( void )
 	if ( !VK_AtmosphericFrameGetShadow( &vk_atmospheric_frame,
 			(uint32_t)frameIdx, (void **)&frameDst ) ) return;
 
-	// dt from the previous frame's scene time (refdef isn't updated for the
-	// current frame until RB_BeginDrawingView, later inside the render pass).
-	// One frame of integration latency — acceptable for weather. Clamp covers
-	// map-change resets (negative → 0) and long pauses (huge → 100ms).
-	currentSceneTime = (float)backEnd.refdef.floatTime;
-	dt = currentSceneTime - vk.atm.prevSceneTime;
-	if ( dt < 0.0f ) dt = 0.0f;
-	if ( dt > 0.1f ) dt = 0.1f;
-	vk.atm.prevSceneTime = currentSceneTime;
+	// dt from the game world's scene time of the previous frame (vk.worldScene;
+	// this frame's scene is not submitted yet). One frame of integration
+	// latency — acceptable for weather. Clamp covers map-change resets
+	// (negative → 0) and long hitches (huge → 100ms); a weather change or a
+	// frame without a world scene steps by zero.
+	if ( vk.worldScene.valid ) {
+		currentSceneTime = (float)vk.worldScene.timeMs * 0.001f;
+		dt = vk.atm.resetBaseline ? 0.0f : currentSceneTime - vk.atm.prevSceneTime;
+		if ( dt < 0.0f ) dt = 0.0f;
+		if ( dt > 0.1f ) dt = 0.1f;
+		vk.atm.prevSceneTime = currentSceneTime;
+		vk.atm.resetBaseline = qfalse;
+	} else {
+		currentSceneTime = vk.atm.prevSceneTime;
+		dt = 0.0f;
+	}
 
 	// Join the shipping Vulkan weather pass to the same backend-neutral
 	// lifecycle used by the portable full-atmosphere plan. Extent changes and
@@ -10052,13 +10058,13 @@ void RB_RunAtmosphericCompute( void )
 				&vk.atm.runtimeReceipt )
 			|| !vk.atm.runtimeReceipt.renderAllowed ) return;
 
-	// Fill the COMPUTE region of the per-frame UBO. eyeWorld is taken from the
-	// previous frame's refdef view origin (vieworg is valid here from the prior
-	// frame); the render region (mvp/viewLeft/viewUp) is filled later in
+	// Fill the COMPUTE region of the per-frame UBO. eyeWorld is the previous
+	// frame's world-scene view origin (vk.worldScene, kept through menu
+	// frames); the render region (mvp/viewLeft/viewUp) is filled later in
 	// RB_DrawAtmospheric. Field-by-field writes leave the render region intact.
-	frameDst->eyeWorld[0]   = backEnd.refdef.vieworg[0];
-	frameDst->eyeWorld[1]   = backEnd.refdef.vieworg[1];
-	frameDst->eyeWorld[2]   = backEnd.refdef.vieworg[2];
+	frameDst->eyeWorld[0]   = vk.worldScene.viewOrigin[0];
+	frameDst->eyeWorld[1]   = vk.worldScene.viewOrigin[1];
+	frameDst->eyeWorld[2]   = vk.worldScene.viewOrigin[2];
 	/* Weather is transformed by the final Vulkan tonemap; publish identity in
 	 * the shared direct-present weather ABI to avoid applying visibility twice. */
 	frameDst->viewLeft[3]   = 1.0f;
@@ -10533,13 +10539,24 @@ static qboolean vk_particle_child_telemetry_record(
 	return qtrue;
 }
 
-void vk_particle_sample_world_time( const trRefdef_t *refdef )
+void vk_world_scene_sample( const trRefdef_t *refdef )
 {
 	if ( !refdef || ( refdef->rdflags & RDF_NOWORLDMODEL )
-			|| vk.particle.worldSceneTimeSampled )
+			|| vk.worldScene.sampled )
 		return;
-	vk.particle.worldSceneTimeMs = refdef->sceneTime;
-	vk.particle.worldSceneTimeSampled = qtrue;
+	vk.worldScene.sampleTimeMs = refdef->sceneTime;
+	VectorCopy( refdef->vieworg, vk.worldScene.sampleViewOrigin );
+	vk.worldScene.sampled = qtrue;
+}
+
+void vk_world_scene_latch( void )
+{
+	vk.worldScene.valid = vk.worldScene.sampled;
+	if ( vk.worldScene.sampled ) {
+		vk.worldScene.timeMs = vk.worldScene.sampleTimeMs;
+		VectorCopy( vk.worldScene.sampleViewOrigin, vk.worldScene.viewOrigin );
+	}
+	vk.worldScene.sampled = qfalse;
 }
 
 void RB_RunParticleCompute( void )
@@ -10567,24 +10584,20 @@ void RB_RunParticleCompute( void )
 	vk_particle_child_telemetry_consume( (uint32_t)frameIdx );
 
 	// The step is the game world's time between the world scenes of the
-	// previous two frames (the current frame's scene is not submitted yet):
-	// one frame of integration latency, acceptable for particles. It used
-	// to read backEnd.refdef.floatTime, which is whatever scene the backend
-	// drew last - the UI's, on the wall clock - so particles kept moving
-	// while the game was paused and ignored fixedtime/timescale. The scene
-	// time is the refdef's own time, not the shader-pinned one.
+	// previous two frames (vk.worldScene; the current frame's scene is not
+	// submitted yet): one frame of integration latency, acceptable for
+	// particles.
 	//
 	// dt clamp: covers map-change resets (negative delta, clamp to 0)
 	// and long hitches (huge delta, clamp to 100ms so particles skip a
 	// frame instead of teleporting). A frame without a world scene (menu)
 	// steps by zero.
-	if ( vk.particle.worldSceneTimeSampled ) {
-		currentSceneTime = (float)vk.particle.worldSceneTimeMs * 0.001f;
+	if ( vk.worldScene.valid ) {
+		currentSceneTime = (float)vk.worldScene.timeMs * 0.001f;
 		dt = currentSceneTime - vk.particle.prevSceneTime;
 		if ( dt < 0.0f ) dt = 0.0f;
 		if ( dt > 0.1f ) dt = 0.1f;
 		vk.particle.prevSceneTime = currentSceneTime;
-		vk.particle.worldSceneTimeSampled = qfalse;
 	} else {
 		currentSceneTime = vk.particle.prevSceneTime;
 		dt = 0.0f;
@@ -35495,6 +35508,7 @@ _retry:
 	// updates only the compute region of its per-frame UBO; the render
 	// region is filled later by RB_DrawParticles when
 	// backEnd.viewParms is valid for this frame.
+	vk_world_scene_latch();
 	RB_RunParticleCompute();
 	vk_gpu_ts_write( "particle_compute" );
 
