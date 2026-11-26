@@ -268,7 +268,11 @@ static qboolean SV_WiredNetWriteContentManifests( byte *buf, int bufsize, int *o
 	return qtrue;
 }
 
-static qboolean SV_WiredNetWriteBootstrap( client_t *client, byte *buf, int bufsize, int *outLen )
+/* On failure *outSection names the section that could not be written: every writer stops at the first value that does not fit
+ * the buffer, and the content-manifest section also fails when the manifest catalog could not be built (a package whose
+ * manifest does not match it), which is not a size problem. */
+#define BOOTSTRAP_FAIL( section ) do { if ( outSection ) *outSection = ( section ); return qfalse; } while ( 0 )
+static qboolean SV_WiredNetWriteBootstrap( client_t *client, byte *buf, int bufsize, int *outLen, const char **outSection )
 {
 	int offset = 0;
 	int lenPos;
@@ -280,37 +284,39 @@ static qboolean SV_WiredNetWriteBootstrap( client_t *client, byte *buf, int bufs
 
 	buf[offset++] = WN_BOOTSTRAP_MSG_STATE;
 
-	if ( !SV_WiredNetBeginSection( buf, bufsize, &offset, WN_BOOTSTRAP_SEC_ACK, &lenPos ) ) return qfalse;
+	if ( !SV_WiredNetBeginSection( buf, bufsize, &offset, WN_BOOTSTRAP_SEC_ACK, &lenPos ) ) BOOTSTRAP_FAIL( "acknowledge" );
 	sectionStart = offset;
-	if ( !SV_WiredNetWriteS32( buf, bufsize, &offset, client->lastClientCommand ) ) return qfalse;
+	if ( !SV_WiredNetWriteS32( buf, bufsize, &offset, client->lastClientCommand ) ) BOOTSTRAP_FAIL( "acknowledge" );
 	SV_WiredNetFinishSection( buf, lenPos, sectionStart, offset );
 
-	if ( !SV_WiredNetBeginSection( buf, bufsize, &offset, WN_BOOTSTRAP_SEC_SERVER_CMDS, &lenPos ) ) return qfalse;
+	if ( !SV_WiredNetBeginSection( buf, bufsize, &offset, WN_BOOTSTRAP_SEC_SERVER_CMDS, &lenPos ) ) BOOTSTRAP_FAIL( "server commands" );
 	sectionStart = offset;
 	count = client->reliableSequence - client->reliableAcknowledge;
-	if ( !SV_WiredNetWriteU16( buf, bufsize, &offset, (uint16_t)count ) ) return qfalse;
+	if ( !SV_WiredNetWriteU16( buf, bufsize, &offset, (uint16_t)count ) ) BOOTSTRAP_FAIL( "server commands" );
 	for ( start = 0; start < count; start++ ) {
 		const int index = client->reliableAcknowledge + 1 + start;
 		if ( !SV_WiredNetWriteS32( buf, bufsize, &offset, index ) ||
 			!SV_WiredNetWriteString( buf, bufsize, &offset,
 				client->reliableCommands[index & (MAX_RELIABLE_COMMANDS-1)] ) ) {
-			return qfalse;
+			BOOTSTRAP_FAIL( "server commands" );
 		}
 	}
 	SV_WiredNetFinishSection( buf, lenPos, sectionStart, offset );
 
-	if ( !SV_WiredNetBeginSection( buf, bufsize, &offset, WN_BOOTSTRAP_SEC_CONTENT_MANIFESTS, &lenPos ) ) return qfalse;
+	if ( !SV_WiredNetBeginSection( buf, bufsize, &offset, WN_BOOTSTRAP_SEC_CONTENT_MANIFESTS, &lenPos ) ) BOOTSTRAP_FAIL( "content manifests" );
 	sectionStart = offset;
-	if ( !SV_WiredNetWriteContentManifests( buf, bufsize, &offset ) ) return qfalse;
+	if ( !SV_BuildContentManifestCatalog() )
+		BOOTSTRAP_FAIL( "content manifests (catalog unavailable: a package does not match its manifest)" );
+	if ( !SV_WiredNetWriteContentManifests( buf, bufsize, &offset ) ) BOOTSTRAP_FAIL( "content manifests" );
 	SV_WiredNetFinishSection( buf, lenPos, sectionStart, offset );
 
-	if ( !SV_WiredNetBeginSection( buf, bufsize, &offset, WN_BOOTSTRAP_SEC_CONFIGSTRINGS, &lenPos ) ) return qfalse;
+	if ( !SV_WiredNetBeginSection( buf, bufsize, &offset, WN_BOOTSTRAP_SEC_CONFIGSTRINGS, &lenPos ) ) BOOTSTRAP_FAIL( "configstrings" );
 	sectionStart = offset;
 	count = 0;
 	for ( start = 0; start < MAX_CONFIGSTRINGS; start++ ) {
 		if ( *sv.configstrings[start] != '\0' ) count++;
 	}
-	if ( !SV_WiredNetWriteU16( buf, bufsize, &offset, (uint16_t)count ) ) return qfalse;
+	if ( !SV_WiredNetWriteU16( buf, bufsize, &offset, (uint16_t)count ) ) BOOTSTRAP_FAIL( "configstrings" );
 	for ( start = 0; start < MAX_CONFIGSTRINGS; start++ ) {
 		const char *value;
 		if ( *sv.configstrings[start] == '\0' ) continue;
@@ -322,39 +328,40 @@ static qboolean SV_WiredNetWriteBootstrap( client_t *client, byte *buf, int bufs
 		}
 		if ( !SV_WiredNetWriteU16( buf, bufsize, &offset, (uint16_t)start ) ||
 			!SV_WiredNetWriteString( buf, bufsize, &offset, value ) ) {
-			return qfalse;
+			BOOTSTRAP_FAIL( "configstrings" );
 		}
 	}
 	SV_WiredNetFinishSection( buf, lenPos, sectionStart, offset );
 
-	if ( !SV_WiredNetBeginSection( buf, bufsize, &offset, WN_BOOTSTRAP_SEC_BASELINES, &lenPos ) ) return qfalse;
+	if ( !SV_WiredNetBeginSection( buf, bufsize, &offset, WN_BOOTSTRAP_SEC_BASELINES, &lenPos ) ) BOOTSTRAP_FAIL( "baselines" );
 	sectionStart = offset;
 	count = 0;
 	for ( start = 0; start < MAX_GENTITIES; start++ ) {
 		if ( sv.baselineUsed[start] ) count++;
 	}
-	if ( !SV_WiredNetWriteU16( buf, bufsize, &offset, (uint16_t)count ) ) return qfalse;
+	if ( !SV_WiredNetWriteU16( buf, bufsize, &offset, (uint16_t)count ) ) BOOTSTRAP_FAIL( "baselines" );
 	for ( start = 0; start < MAX_GENTITIES; start++ ) {
 		if ( !sv.baselineUsed[start] ) continue;
 		svEnt = &sv.svEntities[start];
 		if ( !SV_WiredNetWriteU16( buf, bufsize, &offset, (uint16_t)start ) ||
 			!SV_WiredNetWriteEntityState( buf, bufsize, &offset, &svEnt->baseline ) ) {
-			return qfalse;
+			BOOTSTRAP_FAIL( "baselines" );
 		}
 	}
 	SV_WiredNetFinishSection( buf, lenPos, sectionStart, offset );
 
-	if ( !SV_WiredNetBeginSection( buf, bufsize, &offset, WN_BOOTSTRAP_SEC_CLIENT_INFO, &lenPos ) ) return qfalse;
+	if ( !SV_WiredNetBeginSection( buf, bufsize, &offset, WN_BOOTSTRAP_SEC_CLIENT_INFO, &lenPos ) ) BOOTSTRAP_FAIL( "client info" );
 	sectionStart = offset;
 	if ( !SV_WiredNetWriteS32( buf, bufsize, &offset, client - svs.clients ) ||
 		!SV_WiredNetWriteS32( buf, bufsize, &offset, sv.checksumFeed ) ) {
-		return qfalse;
+		BOOTSTRAP_FAIL( "client info" );
 	}
 	SV_WiredNetFinishSection( buf, lenPos, sectionStart, offset );
 
 	*outLen = offset;
 	return qtrue;
 }
+#undef BOOTSTRAP_FAIL
 
 
 /*
@@ -1473,9 +1480,10 @@ void SV_SendClientGameState( client_t *client ) {
 		/* WiredNet QUIC client: send typed bootstrap sections on the reliable
 		 * bootstrap channel. Buffer is heap-allocated: reliable QUIC stream has
 		 * no UDP MTU limit, so we can pack all configstrings + baselines. */
-		if ( !SV_WiredNetWriteBootstrap( client, bootbuf, WN_BOOTSTRAP_MAX, &bootlen ) ) {
+		const char *failedSection = "unknown";
+		if ( !SV_WiredNetWriteBootstrap( client, bootbuf, WN_BOOTSTRAP_MAX, &bootlen, &failedSection ) ) {
 			Z_Free( bootbuf );
-			Com_Terminate( TERM_CLIENT_DROP, "WiredNet bootstrap overflow" );
+			Com_Terminate( TERM_CLIENT_DROP, "WiredNet bootstrap failed: %s (limit %d bytes)", failedSection, WN_BOOTSTRAP_MAX );
 		}
 		transport_for_handle( client->quic_conn )->send_reliable( client->quic_conn, CHAN_BOOTSTRAP, bootbuf, bootlen );
 		Z_Free( bootbuf );
