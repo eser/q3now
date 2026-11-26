@@ -1407,13 +1407,18 @@ static float	CG_BarrelSpinAngle( centity_t *cent ) {
 CG_AddWeaponWithPowerups
 ========================
 */
-static void CG_AddWeaponWithPowerups( centity_t *cent, refEntity_t *gun, int powerups ) {
+static void CG_AddWeaponWithPowerups( centity_t *cent, refEntity_t *gun, int powerups, refEntityMotionRole_t viewRole ) {
 	// add powerup effects
 	if ( CG_IsPlayerInvisible(cent) ) {
 		gun->customShader = cgs.media.invisShader;
 		trap_R_AddRefEntityToScene( gun );
 	} else {
-		trap_R_AddRefEntityToScene( gun );
+		// The first-person weapon's base draw carries the local player's temporal identity: the renderer then knows its previous
+		// pose (bob, recoil, the spinning barrel) and treats it like any other moving entity. Powerup overlays stay ordinary.
+		if ( gun->renderfx & RF_FIRST_PERSON )
+			CG_AddRefEntityTemporalBase( cent, gun, viewRole );
+		else
+			trap_R_AddRefEntityToScene( gun );
 
 		if ( powerups & ( 1 << PW_QUAD ) ) {
 			gun->customShader = cgs.media.quadWeaponShader;
@@ -1616,7 +1621,7 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
 	MatrixMultiply(lerped.axis, ((refEntity_t *)parent)->axis, gun.axis);
 	gun.backlerp = parent->backlerp;
 
-	CG_AddWeaponWithPowerups( cent, &gun, cent->currentState.powerups );
+	CG_AddWeaponWithPowerups( cent, &gun, cent->currentState.powerups, REF_ENTITY_MOTION_ROLE_VIEW_WEAPON );
 
 	// add the spinning barrel
 	if ( weapon->barrelModel ) {
@@ -1632,7 +1637,7 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
 
 		CG_PositionRotatedEntityOnTag( &barrel, &gun, weapon->weaponModel, "tag_barrel" );
 
-		CG_AddWeaponWithPowerups( cent, &barrel, cent->currentState.powerups );
+		CG_AddWeaponWithPowerups( cent, &barrel, cent->currentState.powerups, REF_ENTITY_MOTION_ROLE_VIEW_WEAPON_BARREL );
 	} else {
 		// No barrel model: invalidate ownership so the next barrel-equipped weapon
 		// always gets a clean reset regardless of which weapon came before.

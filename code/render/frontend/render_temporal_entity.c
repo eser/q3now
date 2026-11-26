@@ -311,14 +311,14 @@ temporalMotionOutcome_t R_TemporalMotionClassify(
 	opaque = facts->opaque || ( facts->transparent && facts->opaqueBase && !facts->blended ) ? qtrue : qfalse;
 	textureAnimated = facts->textureAnimated || ( facts->environmentMapped && facts->entityRotated ) ? qtrue : qfalse;
 	if ( facts->effectMask && !facts->ui && !facts->crosshair && !facts->sky
-			&& ( transparent || facts->decal || facts->depthHack ) )
+			&& ( transparent || facts->decal ) )
 		return TEMPORAL_MOTION_INVALIDATE_OPAQUE;
 	if ( facts->effectMask && textureAnimated && !facts->ui && !facts->crosshair && !facts->sky
 			&& !facts->blended && opaque && facts->depthAuthoritative )
 		return TEMPORAL_MOTION_INVALIDATE_OPAQUE;
 	if ( facts->ui || transparent || facts->blended || facts->decal
 			|| facts->additive || !opaque || facts->polygonOffset
-			|| facts->depthHack || facts->crosshair ) return TEMPORAL_MOTION_PRESERVE;
+			|| facts->crosshair ) return TEMPORAL_MOTION_PRESERVE;
 	if ( !facts->depthAuthoritative ) return TEMPORAL_MOTION_PRESERVE;
 	if ( facts->alphaTested && facts->deferAlphaTested )
 		return TEMPORAL_MOTION_DEFER_ATEST;

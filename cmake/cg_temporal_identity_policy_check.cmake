@@ -56,11 +56,15 @@ require_text("code/cgame/cg_creature.c" "REF_ENTITY_MOTION_ROLE_CREATURE_BODY")
 # Pin the live producer surface.  Seven occurrences in cg_ents are the helper
 # definition plus GENERAL, ITEM primary/barrel, GRAPPLE and MOVER primary/
 # secondary.  The sole player-side occurrence is the visible base draw inside
-# CG_AddRefEntityWithPowerups; overlays and first-person weapons stay ordinary.
+# CG_AddRefEntityWithPowerups; overlays stay ordinary.  The first-person weapon's
+# base draw (gun and barrel) carries the local player's identity in
+# CG_AddWeaponWithPowerups, so TAA treats it like any other moving entity.
 require_count("code/cgame/cg_ents.c" "CG_AddRefEntityTemporalBase(" 7)
 require_count("code/cgame/cg_players.c" "CG_AddRefEntityTemporalBase(" 1)
 require_count("code/cgame/cg_players.c" "trap_R_AddRefEntityToScene( ent );" 8)
-require_absent("code/cgame/cg_weapons.c" "CG_AddRefEntityTemporalBase(")
+require_count("code/cgame/cg_weapons.c" "CG_AddRefEntityTemporalBase(" 1)
+require_text("code/cgame/cg_weapons.c" "REF_ENTITY_MOTION_ROLE_VIEW_WEAPON )")
+require_text("code/cgame/cg_weapons.c" "REF_ENTITY_MOTION_ROLE_VIEW_WEAPON_BARREL )")
 require_absent("code/cgame/cg_localents.c" "CG_AddRefEntityTemporalBase(")
 require_absent("code/cgame/cg_effects.c" "CG_AddRefEntityTemporalBase(")
 require_absent("code/cgame/cg_players.c" "if ( cg.mapRestart )")

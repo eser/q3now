@@ -30817,7 +30817,6 @@ static qboolean vk_temporal_motion_prepare_bound_draw( uint32_t pipelineSlot )
 		&& !( shader->stages[0]->stateBits & GLS_BLEND_BITS )
 		&& ( shader->stages[0]->stateBits & GLS_DEPTHMASK_TRUE ) ? qtrue : qfalse;
 	if ( entity ) {
-		facts.depthHack = ( entity->e.renderfx & RF_DEPTHHACK ) ? qtrue : qfalse;
 		facts.crosshair = ( entity->e.renderfx & RF_CROSSHAIR ) ? qtrue : qfalse;
 	}
 	if ( entity == &tr.worldEntity ) {

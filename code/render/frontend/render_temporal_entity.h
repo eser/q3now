@@ -111,10 +111,10 @@ typedef struct {
 	qboolean ui;
 	qboolean sky;
 	qboolean polygonOffset;
-	qboolean depthHack;
 	qboolean crosshair;
-	// Effect mask: draws of translucent surfaces (sort after opaque: water, glass, sprites, beams, explosion models), decals and
-	// first-person (depthHack) draws do not inherit the history of the opaque surface beneath them. A blended STAGE of an opaque
+	// Effect mask: draws of translucent surfaces (sort after opaque: water, glass, sprites, beams, explosion models) and decals do
+	// not inherit the history of the opaque surface beneath them. First-person geometry is not special: the view weapon carries
+	// its own temporal identity and follows the entity rules (its own motion when its pose is rigid, invalidated otherwise). A blended STAGE of an opaque
 	// surface (a lightmap multiply, a detail overlay) is not an effect and stays PRESERVE; they invalidate it, so the resolve filters those pixels spatially instead of reprojecting them.
 	qboolean effectMask;
 	// The shader animates its texture coordinates over time (tcMod scroll/rotate/stretch/turb, entity-driven translate). Such a

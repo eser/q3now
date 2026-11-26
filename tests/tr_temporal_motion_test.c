@@ -149,7 +149,6 @@ static int TestClassification( void ) {
 	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_PRESERVE ); \
 } while (0)
 	EXPECT_EFFECT( decal );
-	EXPECT_EFFECT( depthHack );
 #undef EXPECT_EFFECT
 	// Sorted after SS_OPAQUE: without an opaque base the material is a translucent effect; with one (an item frame whose opaque base
 	// carries a blended detail stage) its base draw is opaque geometry and its blended stage keeps the base's history.
@@ -225,7 +224,6 @@ static int TestClassification( void ) {
 	EXPECT_PRESERVE( additive );
 	EXPECT_PRESERVE( ui );
 	EXPECT_PRESERVE( polygonOffset );
-	EXPECT_PRESERVE( depthHack );
 	EXPECT_PRESERVE( crosshair );
 #undef EXPECT_PRESERVE
 	facts = WritableFacts( TEMPORAL_MOTION_GEOMETRY_WORLD_STATIC );
@@ -431,10 +429,11 @@ static int TestReceiptRejection( void ) {
 	REJECT_ENTITY( changed.current.origin[0] = NAN );
 	REJECT_ENTITY( changed.previous.axis[0] = INFINITY );
 	REJECT_ENTITY( changed.current.nonNormalizedAxes = 2 );
-	// A mesh (MD3) is rigid only while its animation frames and blend stay the same.
+	// A mesh (MD3) is rigid only while its animation frames and blend stay the same; the blend matters only between two frames.
 	REJECT_ENTITY( changed.current.modelType = 2; changed.previous.modelType = 2; changed.current.frame++ );
 	REJECT_ENTITY( changed.current.modelType = 2; changed.previous.modelType = 2; changed.current.oldframe++ );
-	REJECT_ENTITY( changed.current.modelType = 2; changed.previous.modelType = 2; changed.current.backlerp = 0.5f );
+	REJECT_ENTITY( changed.current.modelType = 2; changed.previous.modelType = 2; changed.current.oldframe = 1;
+		changed.previous.oldframe = 1; changed.current.backlerp = 0.5f );
 	REJECT_ENTITY( changed.current.modelType = 3; changed.previous.modelType = 3 );
 #undef REJECT_ENTITY
 
@@ -443,6 +442,14 @@ static int TestReceiptRejection( void ) {
 	changed.current.modelType = changed.previous.modelType = 2;
 	changed.current.origin[0] = 4.0f;
 	CHECK( R_TemporalEntityPoseRigid( &changed ) );
+	// A mesh blending a frame with itself ignores the blend factor (a view weapon copies its hand's changing backlerp).
+	changed.current.oldframe = changed.current.frame;
+	changed.previous.frame = changed.current.frame; changed.previous.oldframe = changed.current.frame;
+	changed.current.backlerp = 0.75f; changed.previous.backlerp = 0.25f;
+	CHECK( R_TemporalEntityPoseRigid( &changed ) );
+	changed = entity;
+	changed.current.modelType = changed.previous.modelType = 2;
+	changed.current.origin[0] = 4.0f;
 	CHECK( R_TemporalMotionBuildMatrices(
 		TEMPORAL_MOTION_GEOMETRY_MOD_BRUSH_RIGID, &camera, &changed, &matrices ) );
 

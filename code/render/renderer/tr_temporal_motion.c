@@ -84,10 +84,13 @@ qboolean R_TemporalEntityPoseRigid( const temporalEntityPoseReceipt_t *receipt )
 	if ( !receipt || !receipt->valid || !receipt->previousValid
 			|| receipt->current.modelType != receipt->previous.modelType ) return qfalse;
 	if ( receipt->current.modelType == TEMPORAL_MOTION_MOD_BRUSH_MODEL_TYPE ) return qtrue;
+	/* The vertices are the same when the frames are. The lerp factor matters only between two different frames: an MD3 that
+	 * blends a frame with itself (frame == oldframe, e.g. a gun that copies its hand's backlerp) is rigid whatever it reads. */
 	return receipt->current.modelType == TEMPORAL_MOTION_MOD_MESH_MODEL_TYPE
 		&& receipt->current.frame == receipt->previous.frame
 		&& receipt->current.oldframe == receipt->previous.oldframe
-		&& receipt->current.backlerp == receipt->previous.backlerp ? qtrue : qfalse;
+		&& ( receipt->current.backlerp == receipt->previous.backlerp
+			|| receipt->current.frame == receipt->current.oldframe ) ? qtrue : qfalse;
 }
 
 static qboolean EntityReceiptValid( const temporalCameraPoseReceipt_t *camera,

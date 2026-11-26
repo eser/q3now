@@ -27,6 +27,8 @@ _Static_assert( REF_ENTITY_MOTION_ROLE_ITEM_SECONDARY == 9, "role ITEM_SECONDARY
 _Static_assert( REF_ENTITY_MOTION_ROLE_MOVER_PRIMARY == 10, "role MOVER_PRIMARY" );
 _Static_assert( REF_ENTITY_MOTION_ROLE_MOVER_SECONDARY == 11, "role MOVER_SECONDARY" );
 _Static_assert( REF_ENTITY_MOTION_ROLE_GRAPPLE == 12, "role GRAPPLE" );
+_Static_assert( REF_ENTITY_MOTION_ROLE_VIEW_WEAPON == 13, "role VIEW_WEAPON" );
+_Static_assert( REF_ENTITY_MOTION_ROLE_VIEW_WEAPON_BARREL == 14, "role VIEW_WEAPON_BARREL" );
 
 static int ordinaryCalls, temporalCalls;
 static refEntityMotion_t submittedMotion;
