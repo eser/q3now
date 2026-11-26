@@ -2523,10 +2523,9 @@ static qboolean BuildEntityVertices( const ralMetalPresent_t *present,
 				batch->entityColor = entity->shader;
 				EntityBatchLighting( &commands[i], batch );
 			}
-			/* A model entity with a motion identity (brush entity, MD3 item or creature, IQM) is a candidate for object motion: its
-			 * previous pose replays its own animation frames. The first-person weapon moves with the camera and stays invalidated. */
-			if ( motion && commands[i].hasTemporal && model.frameCount && model.positions
-					&& !( entity->renderfx & ( RF_DEPTHHACK | RF_FIRST_PERSON ) ) ) {
+			/* A model entity with a motion identity (brush entity, MD3 item or creature, IQM, the first-person weapon) is a candidate
+			 * for object motion: its previous pose replays its own animation frames. */
+			if ( motion && commands[i].hasTemporal && model.frameCount && model.positions ) {
 				if ( motion->candidateCount == motion->candidateCapacity ) {
 					const uint32_t capacity = motion->candidateCapacity ? motion->candidateCapacity * 2u : 64u;
 					ralMetalEntityMotionCandidate_t *grown = (ralMetalEntityMotionCandidate_t *)realloc(
@@ -2900,6 +2899,22 @@ static id<MTLDepthStencilState> MaterialDepthState( ralMetalPresent_t *present,
 }
 
 
+/* The scene viewport of the entity batches (full depth range; a first-person batch narrows zfar to 0.3 per draw). */
+static MTLViewport EntityBatchViewport( const renderWorldSnapshot_t *sceneView, const ralMetalPresentReceipt_t *receipt ) {
+	MTLViewport viewport;
+	const uint32_t viewportX = sceneView->viewportX > 0
+		? (uint32_t)sceneView->viewportX : 0u;
+	const uint32_t viewportY = sceneView->viewportY > 0
+		? (uint32_t)sceneView->viewportY : 0u;
+	viewport.originX = viewportX; viewport.originY = viewportY;
+	viewport.width = sceneView->viewportWidth && viewportX < receipt->width
+		? MIN( sceneView->viewportWidth, receipt->width - viewportX ) : receipt->width;
+	viewport.height = sceneView->viewportHeight && viewportY < receipt->height
+		? MIN( sceneView->viewportHeight, receipt->height - viewportY ) : receipt->height;
+	viewport.znear = 0.0; viewport.zfar = 1.0;
+	return viewport;
+}
+
 static qboolean DrawEntityBatches( id<MTLRenderCommandEncoder> encoder,
 		ralMetalPresent_t *present, const renderSubmissionState_t *frontend,
 		wiredMetalDrawUniforms &uniforms,
@@ -2909,29 +2924,14 @@ static qboolean DrawEntityBatches( id<MTLRenderCommandEncoder> encoder,
 		id<MTLTexture> sceneDepth, const float *sceneFogParams,
 		ralMetalPresentReceipt_t *receipt,
 		id<MTLRenderPipelineState> const *trustPipelines = nullptr ) {
-	MTLViewport viewport;
+	MTLViewport viewport = EntityBatchViewport( sceneView, receipt );
 	MTLScissorRect scissor;
-	const uint32_t viewportX = sceneView->viewportX > 0
-		? (uint32_t)sceneView->viewportX : 0u;
-	const uint32_t viewportY = sceneView->viewportY > 0
-		? (uint32_t)sceneView->viewportY : 0u;
-	const uint32_t viewportWidth = sceneView->viewportWidth
-		&& viewportX < receipt->width
-		? MIN( sceneView->viewportWidth, receipt->width - viewportX )
-		: receipt->width;
-	const uint32_t viewportHeight = sceneView->viewportHeight
-		&& viewportY < receipt->height
-		? MIN( sceneView->viewportHeight, receipt->height - viewportY )
-		: receipt->height;
-	viewport.originX = viewportX; viewport.originY = viewportY;
-	viewport.width = viewportWidth; viewport.height = viewportHeight;
-	viewport.znear = 0.0; viewport.zfar = 1.0;
 	/* wired_world_fragment scene-depth fog inputs (texture 19 / buffer 3). */
 	if ( sceneDepth ) [encoder setFragmentTexture:sceneDepth atIndex:19u];
 	[encoder setFragmentBytes:sceneFogParams ? sceneFogParams : s_sceneFogOff
 		length:4u * sizeof( float ) atIndex:3u];
-	scissor.x = viewportX; scissor.y = viewportY;
-	scissor.width = viewportWidth; scissor.height = viewportHeight;
+	scissor.x = (NSUInteger)viewport.originX; scissor.y = (NSUInteger)viewport.originY;
+	scissor.width = (NSUInteger)viewport.width; scissor.height = (NSUInteger)viewport.height;
 	[encoder setViewport:viewport];
 	[encoder setScissorRect:scissor];
 	[encoder setVertexBuffer:entityVertices offset:0u atIndex:0u];
@@ -3096,7 +3096,7 @@ static MTLVertexDescriptor *WorldVertexDescriptor( void ) {
 }
 
 /* TAA history trust. The Metal scene pass has no velocity attachment, so every pixel would otherwise be reprojected as static world.
- * Entities (their motion is not tracked) and the first-person weapon (it moves with the camera) must not inherit history that way, and
+ * Entities without a rigid previous pose (their motion is not tracked) must not inherit history that way, and
  * a translucent effect may only reduce it by what it shows (the Vulkan renderer's validity rule, 73ffcbeba). The entity batches are
  * drawn again through DrawEntityBatches - the same vertex function, material bindings and stage programs as the scene - against the
  * finished scene depth into an R8 target cleared to 1: opaque batches write 0, blended batches run the world material fragment
@@ -3228,7 +3228,7 @@ static qboolean EntityMotionPrepare( ralMetalPresent_t *present, const renderSub
 			}
 		}
 		for ( uint32_t b = candidate->firstBatch; b < candidate->firstBatch + candidate->batchCount; ++b ) {
-			if ( !batches[b].visible || batches[b].depthHack
+			if ( !batches[b].visible
 					|| !RenderTemporal_EntityBatchWritesMotion( frontend, batches[b].material,
 						RenderTemporal_PoseRotated( &receipt.previous, &pose ) ) ) continue;
 			batches[b].motion = qtrue; motion->motionBatches++;
@@ -3290,9 +3290,18 @@ static qboolean EncodeTaaEffectMask( id<MTLCommandBuffer> command, ralMetalPrese
 			[encoder setVertexBytes:viewParams length:sizeof( *viewParams ) atIndex:1u];
 			[encoder setVertexBytes:motionViews length:2u * sizeof( *viewParams ) atIndex:3u];
 			[encoder setVertexBuffer:motionPrevious offset:0u atIndex:4u];
+			/* Depth-equal against the scene: each batch needs the depth range it was drawn with (a first-person batch 0..0.3). A
+			 * motion draw that missed its surface would leave it at the cleared camera reprojection. */
+			MTLViewport viewport = EntityBatchViewport( sceneView, receipt );
+			[encoder setViewport:viewport];
 			for ( uint32_t b = 0u; b < entityBatchCount; ++b ) {
 				const ralMetalEntityBatch_t *batch = &entityBatches[b];
 				if ( !batch->motion || !batch->visible || !batch->indexCount ) continue;
+				const double depthFar = batch->depthHack ? 0.3 : 1.0;
+				if ( viewport.zfar != depthFar ) {
+					viewport.zfar = depthFar;
+					[encoder setViewport:viewport];
+				}
 				[encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:batch->indexCount
 					indexType:MTLIndexTypeUInt32 indexBuffer:entityIndices
 					indexBufferOffset:(NSUInteger)batch->firstIndex * sizeof( uint32_t )];
