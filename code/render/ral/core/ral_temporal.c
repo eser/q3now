@@ -67,8 +67,8 @@ int Ral_TemporalBeginFrame( ralTemporalState_t *state,
 			if ( state->topologyEpoch != input->topologyEpoch ) {
 				resetMask |= RAL_TEMPORAL_RESET_TOPOLOGY;
 			}
-			if ( state->lastCommittedFrame
-					&& input->frameId != state->lastCommittedFrame + 1u ) {
+			if ( state->sequenceRestarted || ( state->lastCommittedFrame
+					&& input->frameId != state->lastCommittedFrame + 1u ) ) {
 				resetMask |= RAL_TEMPORAL_RESET_FRAME_GAP;
 			}
 			resetHistory = resetMask != RAL_TEMPORAL_RESET_NONE;
@@ -122,6 +122,7 @@ int Ral_TemporalCommitFrame( ralTemporalState_t *state, uint64_t frameId ) {
 	plan = &state->pendingPlan;
 	state->generation = plan->generation;
 	state->lastCommittedFrame = frameId;
+	state->sequenceRestarted = 0u;
 	state->width = state->pendingWidth;
 	state->height = state->pendingHeight;
 	state->viewId = state->pendingViewId;
@@ -144,6 +145,16 @@ int Ral_TemporalCommitFrame( ralTemporalState_t *state, uint64_t frameId ) {
 	state->pending = 0u;
 	memset( &state->pendingPlan, 0, sizeof( state->pendingPlan ) );
 	return 1;
+}
+
+void Ral_TemporalRestartFrameSequence( ralTemporalState_t *state ) {
+	if ( !state ) {
+		return;
+	}
+	state->pending = 0u;
+	memset( &state->pendingPlan, 0, sizeof( state->pendingPlan ) );
+	state->lastCommittedFrame = 0u;
+	state->sequenceRestarted = 1u;
 }
 
 int Ral_TemporalCancelFrame( ralTemporalState_t *state, uint64_t frameId ) {

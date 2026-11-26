@@ -87,6 +87,10 @@ void R_TemporalWorldLoaded( int worldIndex ) {
 		Ral_TemporalCancelFrame( &s_temporalStates[ worldIndex ],
 			s_temporalStates[ worldIndex ].pendingPlan.frameId );
 	}
+	// The frame IDs are tr.frameCount + 1, and R_Init clears tr before every level: the counter starts again while this state
+	// remembers the previous level's last frame. Without the restart, R_TemporalProjectionPrepare refuses every frame until the
+	// counter passes that one, so TAA stayed off on a new map for as many frames as the previous map had run.
+	Ral_TemporalRestartFrameSequence( &s_temporalStates[ worldIndex ] );
 	R_Backend_TemporalHistoryShutdown();
 	R_TemporalHistoryRelease( &s_temporalHistory[ worldIndex ] );
 	memset( s_temporalCommittedHistory[worldIndex], 0,

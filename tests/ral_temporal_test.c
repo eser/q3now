@@ -378,6 +378,39 @@ int main( void ) {
 		CHECK( Ral_TemporalCommitFrame( &state, frame ) );
 	}
 
+	/* A restarted frame counter: the new sequence is accepted from frame 1, as a frame gap (new generation, no history read,
+	 * unjittered), and continues normally after its first commit. A pending plan of the old sequence is dropped. */
+	{
+		const uint32_t generationBefore = state.generation;
+		input = Input( RAL_TEMPORAL_JITTER_PHASES + 3u, 1024, 512, 1, 1, 1, 0 );
+		CHECK( Ral_TemporalBeginFrame( &state, &input, &plan ) );
+		Ral_TemporalRestartFrameSequence( &state );
+		CHECK( !state.pending && state.lastCommittedFrame == 0 && state.active );
+		input = Input( 1, 1024, 512, 1, 1, 1, 0 );
+		CHECK( Ral_TemporalBeginFrame( &state, &input, &plan ) );
+		CHECK( plan.resetMask == RAL_TEMPORAL_RESET_FRAME_GAP );
+		CHECK( !plan.historyValid && plan.generation == generationBefore + 1u && plan.jitterPhase == 0 );
+		CHECK( CLOSE( plan.sceneJitterPixels[0], 0.0f ) && CLOSE( plan.sceneJitterPixels[1], 0.0f ) );
+		CHECK( Ral_TemporalCancelFrame( &state, 1 ) );
+		CHECK( Ral_TemporalBeginFrame( &state, &input, &plan ) );   /* a cancel keeps the restart pending */
+		CHECK( plan.resetMask == RAL_TEMPORAL_RESET_FRAME_GAP );
+		CHECK( Ral_TemporalCommitFrame( &state, 1 ) );
+		input = Input( 2, 1024, 512, 1, 1, 1, 0 );
+		CHECK( Ral_TemporalBeginFrame( &state, &input, &plan ) );
+		CHECK( plan.resetMask == 0 && plan.historyValid && plan.generation == generationBefore + 1u );
+		CHECK( Ral_TemporalCommitFrame( &state, 2 ) );
+		/* With a new topology as well, both reasons are reported. */
+		Ral_TemporalRestartFrameSequence( &state );
+		input = Input( 1, 1024, 512, 1, 2, 1, 0 );
+		CHECK( Ral_TemporalBeginFrame( &state, &input, &plan ) );
+		CHECK( plan.resetMask == ( RAL_TEMPORAL_RESET_TOPOLOGY | RAL_TEMPORAL_RESET_FRAME_GAP ) );
+		CHECK( !plan.historyValid && plan.generation == generationBefore + 2u );
+		CHECK( Ral_TemporalCommitFrame( &state, 1 ) );
+		/* Without a restart, an old frame ID is still refused. */
+		input = Input( 1, 1024, 512, 1, 2, 1, 0 );
+		CHECK( !Ral_TemporalBeginFrame( &state, &input, &plan ) );
+	}
+
 	puts( "PASS RAL temporal frame contract" );
 	return 0;
 }

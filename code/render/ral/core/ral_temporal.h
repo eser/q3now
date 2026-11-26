@@ -59,6 +59,7 @@ typedef struct {
 	uint8_t  historyValid;
 	uint8_t  lastWriteIndex;
 	uint8_t  nextJitterPhase;
+	uint8_t  sequenceRestarted;
 	float    previousJitterPixels[2];
 
 	uint8_t  pending;
@@ -84,5 +85,10 @@ int Ral_TemporalBeginFrame( ralTemporalState_t *state,
 // Both operations require the exact pending frame ID.
 int Ral_TemporalCommitFrame( ralTemporalState_t *state, uint64_t frameId );
 int Ral_TemporalCancelFrame( ralTemporalState_t *state, uint64_t frameId );
+
+// The frame IDs come from a counter that restarted (a renderer whose frame counter is reset with each level). Drops a pending
+// plan and forgets the last committed frame, so the new sequence is accepted from its first frame; the next enabled frame is a
+// frame-gap reset, so history never carries from the old sequence into the new one.
+void Ral_TemporalRestartFrameSequence( ralTemporalState_t *state );
 
 #endif // WIRED_RAL_TEMPORAL_H
