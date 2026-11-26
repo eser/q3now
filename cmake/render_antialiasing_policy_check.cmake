@@ -79,3 +79,28 @@ string(FIND "${GL_PRODUCT}" "RalOpenGl_AaSmaa( product->aa, product->hdrTextures
 if(NOT gl_hdr EQUAL -1)
 	message(FATAL_ERROR "OpenGL: SMAA must not run on the HDR scene")
 endif()
+
+# Owner decision (2026-11-24): r_aa 0 off, 1 TAA (the default and the recommended mode), 2 SMAA (kept, discouraged: only for players
+# whom TAA ghosting bothers). Every renderer registers r_aa with the default 1, and the video menu offers Off / TAA / SMAA with the
+# tooltip that recommends TAA.
+foreach(path IN LISTS RENDERERS)
+	file(READ "${ROOT}/${path}" TEXT)
+	string(FIND "${TEXT}" "\"r_aa\", \"1\"" pos)
+	if(pos EQUAL -1)
+		message(FATAL_ERROR "${path}: r_aa must default to 1 (TAA)")
+	endif()
+	string(REGEX MATCH "\"r_aa\", \"[02]\"" other "${TEXT}")
+	if(other)
+		message(FATAL_ERROR "${path}: r_aa must not default to off or SMAA (${other})")
+	endif()
+endforeach()
+file(READ "${ROOT}/modfiles/ui/video.wui" VIDEO_MENU)
+foreach(needle IN ITEMS
+		"cvar \"r_aa\""
+		"cvarFloatList { \"Off\" 0 \"TAA\" 1 \"SMAA\" 2 }"
+		"tooltip \"TAA is recommended. Use SMAA only if TAA ghosting trails bother you.\"")
+	string(FIND "${VIDEO_MENU}" "${needle}" pos)
+	if(pos EQUAL -1)
+		message(FATAL_ERROR "video.wui: the anti-aliasing row must offer Off / TAA / SMAA and discourage SMAA: missing ${needle}")
+	endif()
+endforeach()
