@@ -170,6 +170,15 @@ float movingSpeedScale(float pixelsPerFrame) {
 	float s = 1.0 + movingSpeedFalloff * pixelsPerFrame;
 	return inversesqrt(s * s);
 }
+// The count falls faster than the sharpening: with the current frame reconstructed exactly (reconstructCurrent), less resampled
+// history in motion brings the image closer to the AA-off frame (WebGPU arena1 turning at ~12 px/frame: distance to AA off
+// 1.38 -> 1.22, finest band 0.921 -> 0.934 of AA off at 0.5), while a faster sharpening falloff only softens it (0.5 for both:
+// mid band 0.988 -> 0.977).
+const float movingHistoryFalloff = 0.5;
+float movingHistoryScale(float pixelsPerFrame) {
+	float s = 1.0 + movingHistoryFalloff * pixelsPerFrame;
+	return inversesqrt(s * s);
+}
 float movingHistoryCount(float movingWeight) {
 	// m = w / (1 - w); 1 / x as inversesqrt(x * x) (the reflection contract admits one division, in linearizeDepth)
 	float rest = max(1.0 - movingWeight, 1.0 / historyCountCap);
@@ -179,7 +188,7 @@ float accumulatedHistoryCount(float storedCount, float movingWeight, vec2 motion
 	float count = clamp(storedCount, 1.0, historyCountCap);
 	float speed = length(motionPixels);
 	float moving = clamp(speed * staticMotionScale, 0.0, 1.0);
-	float movingCount = max(1.0, movingHistoryCount(movingWeight) * movingSpeedScale(speed));
+	float movingCount = max(1.0, movingHistoryCount(movingWeight) * movingHistoryScale(speed));
 	return count + (min(count, movingCount) - count) * moving;
 }
 float rectifiedHistoryCount(float count, vec3 clampMove, vec3 boxExtent) {

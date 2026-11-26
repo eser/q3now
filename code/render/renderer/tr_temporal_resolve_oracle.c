@@ -164,9 +164,9 @@ static float AccumulatedHistoryCount( float storedCount, float movingWeight, con
 	float count = Clampf( storedCount, 1.0f, TEMPORAL_RESOLVE_ORACLE_COUNT_CAP );
 	float speed = sqrtf( motion[0] * motion[0] + motion[1] * motion[1] );
 	float moving = Clampf( speed * TEMPORAL_RESOLVE_ORACLE_STATIC_MOTION_SCALE, 0.0f, 1.0f );
-	/* temporal_resolve.comp movingSpeedScale: the moving count falls with the speed. */
+	/* temporal_resolve.comp movingHistoryScale: the moving count falls with the speed. */
 	float movingCount = fmaxf( 1.0f, MovingHistoryCount( movingWeight )
-		* InvSqrtSq( 1.0f + TEMPORAL_RESOLVE_ORACLE_MOVING_SPEED_FALLOFF * speed ) );
+		* InvSqrtSq( 1.0f + TEMPORAL_RESOLVE_ORACLE_MOVING_HISTORY_FALLOFF * speed ) );
 	return count + ( fminf( count, movingCount ) - count ) * moving;
 }
 

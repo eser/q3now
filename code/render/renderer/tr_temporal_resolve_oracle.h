@@ -27,7 +27,8 @@
 // resolve policy check).
 #define TEMPORAL_RESOLVE_ORACLE_COUNT_CAP 48.0f
 #define TEMPORAL_RESOLVE_ORACLE_STATIC_MOTION_SCALE 8.0f
-#define TEMPORAL_RESOLVE_ORACLE_MOVING_SPEED_FALLOFF 0.25f   // temporal_resolve.comp movingSpeedFalloff
+#define TEMPORAL_RESOLVE_ORACLE_MOVING_SPEED_FALLOFF 0.25f   // temporal_resolve.comp movingSpeedFalloff (sharpening)
+#define TEMPORAL_RESOLVE_ORACLE_MOVING_HISTORY_FALLOFF 0.5f  // temporal_resolve.comp movingHistoryFalloff (count)
 #define TEMPORAL_RESOLVE_ORACLE_OUTPUT_SHARPEN 1.1f
 #define TEMPORAL_RESOLVE_ORACLE_BICUBIC_A ( -0.75f )
 #define TEMPORAL_RESOLVE_ORACLE_VARIANCE_SIGMA 1.25f
