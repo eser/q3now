@@ -8183,6 +8183,8 @@ void vk_init_particle( void )
 
 	vk.particle.pingPongRead  = 0;
 	vk.particle.prevSceneTime = 0.0f;
+	vk.particle.worldSceneTimeMs = 0;
+	vk.particle.worldSceneTimeSampled = qfalse;
 	vk.particle.numClasses    = 0;
 	vk.particle.nextSlot      = 0;
 	vk.particle.available     = qtrue;
@@ -10531,6 +10533,15 @@ static qboolean vk_particle_child_telemetry_record(
 	return qtrue;
 }
 
+void vk_particle_sample_world_time( const trRefdef_t *refdef )
+{
+	if ( !refdef || ( refdef->rdflags & RDF_NOWORLDMODEL )
+			|| vk.particle.worldSceneTimeSampled )
+		return;
+	vk.particle.worldSceneTimeMs = refdef->sceneTime;
+	vk.particle.worldSceneTimeSampled = qtrue;
+}
+
 void RB_RunParticleCompute( void )
 {
 	int frameIdx;
@@ -10555,22 +10566,29 @@ void RB_RunParticleCompute( void )
 	frameIdx = vk.cmd_index;
 	vk_particle_child_telemetry_consume( (uint32_t)frameIdx );
 
-	// backEnd.refdef.floatTime here holds the PREVIOUS frame's value
-	// — refdef isn't updated for the current frame until
-	// RB_BeginDrawingView runs (later, inside the main render pass).
-	// The dt computed here is therefore the delta from frame N-2 to
-	// frame N-1, applied to particles being integrated for frame N's
-	// render. One frame of integration latency. Acceptable for
-	// particles; not a bug; do not "fix" by reading time elsewhere.
+	// The step is the game world's time between the world scenes of the
+	// previous two frames (the current frame's scene is not submitted yet):
+	// one frame of integration latency, acceptable for particles. It used
+	// to read backEnd.refdef.floatTime, which is whatever scene the backend
+	// drew last - the UI's, on the wall clock - so particles kept moving
+	// while the game was paused and ignored fixedtime/timescale. The scene
+	// time is the refdef's own time, not the shader-pinned one.
 	//
 	// dt clamp: covers map-change resets (negative delta, clamp to 0)
-	// and long pauses / breakpoints (huge delta, clamp to 100ms so
-	// particles skip a frame instead of teleporting).
-	currentSceneTime = (float)backEnd.refdef.floatTime;
-	dt = currentSceneTime - vk.particle.prevSceneTime;
-	if ( dt < 0.0f ) dt = 0.0f;
-	if ( dt > 0.1f ) dt = 0.1f;
-	vk.particle.prevSceneTime = currentSceneTime;
+	// and long hitches (huge delta, clamp to 100ms so particles skip a
+	// frame instead of teleporting). A frame without a world scene (menu)
+	// steps by zero.
+	if ( vk.particle.worldSceneTimeSampled ) {
+		currentSceneTime = (float)vk.particle.worldSceneTimeMs * 0.001f;
+		dt = currentSceneTime - vk.particle.prevSceneTime;
+		if ( dt < 0.0f ) dt = 0.0f;
+		if ( dt > 0.1f ) dt = 0.1f;
+		vk.particle.prevSceneTime = currentSceneTime;
+		vk.particle.worldSceneTimeSampled = qfalse;
+	} else {
+		currentSceneTime = vk.particle.prevSceneTime;
+		dt = 0.0f;
+	}
 
 	// Update the COMPUTE region of the per-frame UBO (bytes 112..127)
 	// and the SHARED region (bytes 128..143). The render region

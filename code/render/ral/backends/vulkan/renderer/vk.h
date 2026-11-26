@@ -2034,8 +2034,13 @@ typedef struct {
 
 		// frame-to-frame state
 		uint32_t				pingPongRead;        // 0 or 1, flipped each frame
-		float					prevSceneTime;       // backEnd.refdef.floatTime at last
-		                                             // RB_RunParticleCompute call
+		float					prevSceneTime;       // world scene time at the last
+		                                             // RB_RunParticleCompute step
+		// The particle clock is the game world's time: the scene time of the first world-scene draw
+		// command of a frame (vk_particle_sample_world_time), consumed by the next compute. Frames
+		// without a world scene leave it unsampled and step by zero.
+		int						worldSceneTimeMs;
+		qboolean				worldSceneTimeSampled;
 
 		// Request-time ring reservation. CPU advances once per bounded emitter;
 		// the specialized GPU spawn pass expands individual particle slots.
