@@ -384,7 +384,8 @@ vec2 dlMotionVelocity(ivec2 px, int tileIndex, float centerValid) {
 // with the jitter every frame (which showed as frame-to-frame shimmer on a static scene). A single bilinear fetch at pixel + jitter
 // (5805f7cf1, cheaper by ~0.14 ms at 2560x1440) blurs by up to half a texel every frame: the static scene needed a sharpening gain
 // of 2.6 to make that up and a moving one could not be (WebGPU arena1 turning at ~12 px/frame: edge energy vs AA off 0.949 against
-// 0.981 with this reconstruction, SMAA 0.995; the distance to the AA-off frame drops by 15-30 % at rest and in motion).
+// 0.989 with this reconstruction and gain 1.1, SMAA 0.995; mean distance to the AA-off frame at rest -21 % on Vulkan 2560x1440,
+// moving weapon + rocket pixels further than 24/255 from AA off -21 %).
 //
 // Box: the 3x3 min/max, tightened by variance clipping (mean +/- 1.25 sigma) when qualityFlags bit 0 is set. The box is an
 // intersection, so it can only get smaller; the mean lies inside both, hence it is never empty.
