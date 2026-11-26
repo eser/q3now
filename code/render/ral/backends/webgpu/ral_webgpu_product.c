@@ -593,7 +593,6 @@ typedef struct {
 	qhandle_t material;
 	uint64_t contentDigest;
 	float localSh[4][4];
-	qboolean viewWeapon;   /* first-person (RF_DEPTHHACK / RF_FIRST_PERSON): moves with the camera, no motion of its own */
 	qboolean motion;       /* writes its object velocity into the TAA effect mask (its entity has a committed previous pose) */
 	uint32_t motionFirstIndex;   /* the batch's indices into the motion copy of the entity vertices */
 } entityDrawPlan_t;
@@ -790,10 +789,9 @@ static qboolean BuildEntityGeometry( const renderSubmissionState_t *frontend,
 			if ( !RenderSubmission_ModelSnapshot( frontend, entity->hModel, &model )
 					|| !model.ready || !model.positions || !model.normals || !model.texCoords
 					|| !model.indices || !model.batches ) goto fail;
-			/* Model entities with a motion identity (brush, MD3, IQM) record their pose; one with a committed previous pose gets each
-			 * vertex's previous-frame world position (the view weapon moves with the camera and stays invalidated). */
-			if ( motion && entities[i].hasTemporal
-					&& !( entity->renderfx & ( RF_DEPTHHACK | RF_FIRST_PERSON ) ) ) {
+			/* Model entities with a motion identity (brush, MD3, IQM, the first-person weapon) record their pose; one with a committed
+			 * previous pose gets each vertex's previous-frame world position. */
+			if ( motion && entities[i].hasTemporal ) {
 				temporalEntityPose_t pose;
 				RenderTemporal_EntityPose( entity, &model, &pose );
 				if ( R_TemporalEntityCacheRecord( motion->worldIndex, motion->frameId, (uintptr_t)&entities[i],
@@ -876,7 +874,6 @@ static qboolean BuildEntityGeometry( const renderSubmissionState_t *frontend,
 				draw->indexCount = batch->indexCount;
 				draw->material = RenderSubmission_EntityBatchMaterial(
 					frontend, &entities[i], batch );
-				draw->viewWeapon = ( entity->renderfx & ( RF_DEPTHHACK | RF_FIRST_PERSON ) ) ? qtrue : qfalse;
 				draw->motion = previousPose && RenderTemporal_EntityBatchWritesMotion( frontend, draw->material, rotated ) ? qtrue : qfalse;
 				if ( draw->motion ) motion->motionDraws++;
 				draw->contentDigest = HashU64( model.digest,
@@ -2533,9 +2530,8 @@ static qboolean RecordToneMap( ralWebGpuProduct_t *product, const ralWebGpuRunti
 	if ( taaFrame ) {
 		uint32_t dispatches = 0u;
 		/* Effect mask: the entity draws of this frame again, against the finished scene depth. Rigid and IQM batches with a previous
-		 * pose write their object velocity (motion pipeline); the other entities and the first-person weapon (which moves with the
-		 * camera) are invalidated and take the resolve's spatial fallback, as in the Vulkan renderer; translucents add their visible
-		 * contribution. */
+		 * pose (the first-person weapon included) write their object velocity (motion pipeline); the other entities are invalidated
+		 * and take the resolve's spatial fallback, as in the Vulkan renderer; translucents add their visible contribution. */
 		const uintptr_t mask = RalWebGpu_TaaEffectMask( product->taa, runtimeReceipt, sceneTarget, taaFrame->width, taaFrame->height );
 		ralWebGpuPassDesc_t pass;
 		ralWebGpuCommandReceipt_t next;
@@ -3340,9 +3336,8 @@ qboolean RalWebGpu_ProductRenderPlan( ralWebGpuProduct_t *product,
 				&updated ) ) goto fail;
 		recording = updated; candidate.entityDrawCount++;
 		if ( taaMaskDraws ) {
-			/* Opaque batches mark their geometry in the effect mask; translucent ones add their visible contribution, except the
-			 * first-person weapon: it moves with the camera, so camera reprojection is wrong for every layer of it (fully marked). */
-			draw.pipelineIdentity = blendIndex && !entityDraws[i].viewWeapon
+			/* Opaque batches mark their geometry in the effect mask; translucent ones add their visible contribution. */
+			draw.pipelineIdentity = blendIndex
 				? product->taaTrustPipelines[blendIndex - 1u].pipelineIdentity
 				: product->taaMaskPipeline.pipelineIdentity;
 			/* An opaque rigid / IQM batch with a previous pose writes its object velocity instead (motion copy of its vertices). */
