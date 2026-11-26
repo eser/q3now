@@ -224,6 +224,9 @@ for row, message in zip(rows, messages):
 # Palindromic order (off, TAA, SMAA, SMAA, TAA, off) at one fixed, pinned view: TAA and SMAA are measured next to each other, so
 # a GPU clock/presentation regime that drifts during the run hits both alike. The view used to be wherever the quality pan
 # stopped (real-time +right with fixedtime 0), a different yaw on every run.
+# The TAA arms use the product setting (r_aa 1), not the r_temporalInputTest hook the quality captures use: after a live switch
+# from SMAA that hook's TAA window read 0.2-0.7 ms more resolve time than the one before it (5 of 6 launches), while r_aa 1 reads
+# the same after SMAA as after TAA.
 expected = [("off", 1), ("on", 1), ("smaa", 1), ("smaa", 2), ("on", 2), ("off", 2)]
 if list(buckets) != expected:
     raise SystemExit(f"FAIL temporal-quality performance bucket order {list(buckets)}")
@@ -273,30 +276,61 @@ print(
     f"pan={motion_delta:.3f}, "
     f"first-settled={first_settled_delta:.3f}, old-frame-residual={ghost_ratio:.2%}, history-roi={history_share:.1%}, "
     f"edge-ratio={edge_ratio:.3f}, AA-off-reference-delta={reference_delta:.3f}")
-# Budget (owner, 2026-11-24): TAA's anti-aliasing work must not exceed SMAA's by more than TQ_SMAA_MARGIN_MS (lanes above). The
-# former absolute terms (whole frame within 4.0 ms, TAA within 0.75 ms of AA off) compared presentation cadence and were dropped.
-smaa_margin = float(os.environ.get("TQ_SMAA_MARGIN_MS", "0.35"))
 regime_text = " ".join(f"{mode}={spread:.1%}" for mode, spread in spreads.items())
-print(f"temporal GPU budget arms: TAA/SMAA ratio={ratio:.3f}, window spread {regime_text} (limit {regime_limit:.0%})")
-if max(spreads.values()) > regime_limit:
-    print(f"INCONCLUSIVE temporal-quality GPU budget: the arms straddle a GPU regime change ({regime_text}); rerun")
-    sys.exit(75)
-if delta_ms > smaa_margin:
-    raise SystemExit(
-        f"FAIL temporal-quality GPU budget (anti-aliasing work) TAA={on_ms:.3f}ms SMAA={smaa_ms:.3f}ms "
-        f"TAA-SMAA={delta_ms:+.3f}ms > {smaa_margin:.2f}ms ratio={ratio:.3f} (AA-off scene lanes {off_ms:.3f}ms)")
+consistent = 1 if max(spreads.values()) <= regime_limit else 0
+# One launch's budget sample; the verdict is taken over several launches (budget() below).
+print(f"TQ_BUDGET_SAMPLE on={on_ms:.4f} smaa={smaa_ms:.4f} off={off_ms:.4f} ratio={ratio:.4f} consistent={consistent} "
+    f"spread={regime_text}")
+PYEOF
+}
 
-print(
-    f"PASS temporal GPU budget (anti-aliasing work): TAA={on_ms:.3f}ms SMAA={smaa_ms:.3f}ms TAA-SMAA={delta_ms:+.3f}ms "
-    f"ratio={ratio:.3f} (margin {smaa_margin:.2f}ms, AA-off scene lanes {off_ms:.3f}ms)")
+# Budget (owner, 2026-11-24 / 2026-11-26): TAA's anti-aliasing work must not exceed SMAA's by more than TQ_SMAA_MARGIN_MS, judged
+# on the median over launches. One launch cannot decide it: the same binary at the same pinned view gives TAA-SMAA from -0.24 to
+# +0.61 ms on different launches while the route, the exact-draw share and the history are identical in every launch (the
+# variation is per-launch GPU state; 8 launches, TASK-272). A launch whose arms straddle a GPU regime change (its two windows of
+# one arm differ by more than TQ_REGIME_SPREAD) is not counted; with fewer than half of the launches (and at least one) left,
+# the gate is inconclusive (exit 75), not PASS/FAIL.
+budget() {
+	python3 - "$@" <<'PYEOF'
+import os, re, statistics, sys
+pattern = re.compile(r"TQ_BUDGET_SAMPLE on=([0-9.]+) smaa=([0-9.]+) off=([0-9.]+) ratio=([0-9.inf]+) consistent=([01]) spread=(.*)")
+samples = []
+for path in sys.argv[1:]:
+    found = [pattern.fullmatch(line.strip()) for line in open(path, encoding="utf-8")]
+    found = [m for m in found if m]
+    if len(found) != 1:
+        raise SystemExit(f"FAIL temporal-quality budget sample missing in {path}")
+    m = found[0]
+    samples.append({"on": float(m.group(1)), "smaa": float(m.group(2)), "off": float(m.group(3)),
+        "consistent": m.group(5) == "1", "spread": m.group(6)})
+for i, x in enumerate(samples, 1):
+    print(f"  launch {i}: TAA={x['on']:.3f}ms SMAA={x['smaa']:.3f}ms TAA-SMAA={x['on'] - x['smaa']:+.3f}ms "
+        f"AA-off scene lanes {x['off']:.3f}ms window spread {x['spread']}{'' if x['consistent'] else ' (regime change: not counted)'}")
+used = [x for x in samples if x["consistent"]]
+if not used or len(used) * 2 < len(samples):
+    print(f"INCONCLUSIVE temporal-quality GPU budget: {len(used)} of {len(samples)} launches are regime-consistent; rerun")
+    sys.exit(75)
+margin = float(os.environ.get("TQ_SMAA_MARGIN_MS", "0.35"))
+delta = statistics.median(x["on"] - x["smaa"] for x in used)
+on = statistics.median(x["on"] for x in used); smaa = statistics.median(x["smaa"] for x in used)
+ratio = statistics.median(x["on"] / x["smaa"] for x in used if x["smaa"] > 0)
+summary = (f"median over {len(used)} of {len(samples)} launches: TAA={on:.3f}ms SMAA={smaa:.3f}ms TAA-SMAA={delta:+.3f}ms "
+    f"ratio={ratio:.3f} (margin {margin:.2f}ms)")
+if delta > margin:
+    raise SystemExit(f"FAIL temporal-quality GPU budget (anti-aliasing work), {summary}")
+print(f"PASS temporal GPU budget (anti-aliasing work), {summary}")
 PYEOF
 }
 
 if [ "${1:-}" = --analyze ]; then
 	[ -f "${2:-}" ] && [ -d "${3:-}" ] || {
 		echo "usage: $0 --analyze qconsole.jsonl screenshots-dir"; exit 64; }
-	analyze "$2" "$3"
-	exit $?
+	SAMPLE="$(mktemp -t ral-temporal-quality-sample-XXXXXX)"
+	analyze "$2" "$3" | tee "$SAMPLE"
+	RC=${PIPESTATUS[0]}
+	[ "$RC" -eq 0 ] && { budget "$SAMPLE"; RC=$?; }
+	rm -f "$SAMPLE"
+	exit "$RC"
 fi
 
 WIRED="${1:-${WIRED_BINARY:-}}"
@@ -327,9 +361,9 @@ PAX21="$(find_required pax21.sw3z "$WD/base" "$WD/../Resources/base" "$WIRED_SOU
 [ -f "$WIRED_BASE/pax01.sw3z" ] || {
 	echo "SKIP: licensed base content unavailable in $WIRED_BASE"; exit 77; }
 
+LAUNCHES="${TQ_LAUNCHES:-6}"
+case "$LAUNCHES" in ''|*[!0-9]*|0) echo "usage: TQ_LAUNCHES must be a positive integer"; exit 64 ;; esac
 ROOT="$(mktemp -d -t ral-temporal-quality-XXXXXX 2>/dev/null || mktemp -d)"
-HOME_DIR="$ROOT/home"
-SHOT_DIR="$HOME_DIR/base/screenshots"
 cleanup() {
 	local status=$?; trap - EXIT INT TERM
 	if [ "${WIRED_KEEP_ARTIFACTS:-0}" = 1 ] || [ "$status" -ne 0 ]; then
@@ -342,8 +376,13 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+
+# One launch: its own home, the quality capture, the six budget windows and the analysis (quality verdict + budget sample).
+launch() {
+HOME_DIR="$ROOT/launch-$1/home"
+SHOT_DIR="$HOME_DIR/base/screenshots"
 mkdir -p "$SHOT_DIR"
-wired_link_content_into_home "$HOME_DIR" "$WIRED_BASE" || exit 1
+wired_link_content_into_home "$HOME_DIR" "$WIRED_BASE" || return 1
 ln -sfn "$PAX21" "$HOME_DIR/base/pax21.sw3z"
 ln -sfn "$GAMECL" "$HOME_DIR/base/gameclarm64.dylib"
 ln -sfn "$GAMESV" "$HOME_DIR/base/gamesvarm64.dylib"
@@ -368,17 +407,17 @@ set tqSetup "cg_draw2D 0; cg_drawGun 0; cg_thirdPerson 0; con_notifytime 0; cl_y
 set tqTemporalA "r_temporalInputTest 1; setviewpos 888 -768 434 180 0; r_pinFrameTime 0; fixedtime 20; wait 90; fixedtime 0; r_pinFrameTime 2.0; wait 96; screenshot temporal_taa_a_1 png silent; wait 8; screenshot temporal_taa_a_2 png silent; wait 1; screenshot temporal_taa_a_3 png silent; wait 1; screenshot temporal_taa_a_4 png silent; wait 1; screenshot temporal_taa_a_5 png silent; wait 1; screenshot temporal_taa_a_6 png silent; wait 1; screenshot temporal_taa_a_7 png silent; wait 1; screenshot temporal_taa_a_8 png silent; wait 1; screenshot temporal_taa_a_9 png silent; wait 1; screenshot temporal_taa_a_10 png silent; ral_dump live temporal-motion-arm; wait 4; +right; wait 12; -right; wait 4; screenshot temporal_taa_b_first png silent; wait 96; screenshot temporal_taa_b_steady png silent; wait 4; echo Q3_TEMPORAL_QUALITY_CAPTURED; vstr tqPerfView"
 set tqPerfView "set r_aa 0; r_temporalInputTest 0; setviewpos 888 -768 434 180 0; r_pinFrameTime 0; fixedtime 20; wait 90; fixedtime 0; r_pinFrameTime 2.0; wait 16; echo Q3_TEMPORAL_PERF_VIEW; vstr tqPerfOff1"
 set tqPerfOff1 "set r_aa 0; r_temporalInputTest 0; wait 96; set r_gpuSpeeds 0; wait 4; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_OFF_1_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_OFF_1_END; set r_gpuSpeeds 0; wait 16; vstr tqPerfOn1"
-set tqPerfOn1 "set r_aa 0; r_temporalInputTest 1; wait 96; ral_dump live temporal-motion-arm; wait 16; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_ON_1_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_ON_1_END; set r_gpuSpeeds 0; wait 16; vstr tqPerfSmaa1"
+set tqPerfOn1 "r_temporalInputTest 0; set r_aa 1; wait 96; ral_dump live temporal-motion-arm; wait 16; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_ON_1_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_ON_1_END; set r_gpuSpeeds 0; wait 16; vstr tqPerfSmaa1"
 set tqPerfSmaa1 "r_temporalInputTest 0; set r_aa 2; wait 96; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_SMAA_1_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_SMAA_1_END; set r_gpuSpeeds 0; wait 16; vstr tqPerfSmaa2"
 set tqPerfSmaa2 "r_temporalInputTest 0; set r_aa 2; wait 96; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_SMAA_2_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_SMAA_2_END; set r_gpuSpeeds 0; wait 16; vstr tqPerfOn2"
-set tqPerfOn2 "set r_aa 0; r_temporalInputTest 1; wait 96; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_ON_2_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_ON_2_END; set r_gpuSpeeds 0; wait 16; vstr tqPerfOff2"
+set tqPerfOn2 "r_temporalInputTest 0; set r_aa 1; wait 96; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_ON_2_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_ON_2_END; set r_gpuSpeeds 0; wait 16; vstr tqPerfOff2"
 set tqPerfOff2 "set r_aa 0; r_temporalInputTest 0; wait 96; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_OFF_2_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_OFF_2_END; set r_gpuSpeeds 0; echo Q3_TEMPORAL_QUALITY_COMPLETE; quit"
 set activeAction "vstr tqSetup"
 map arena6
 CFGEOF
 
 QCONSOLE="$HOME_DIR/qconsole.jsonl"
-STDOUT="$ROOT/stdout.log"
+STDOUT="$ROOT/launch-$1/stdout.log"
 python3 "$TIMEOUT_RUNNER" --timeout 180 --kill-after 15 --cwd "$WD" --stdout "$STDOUT" -- \
 	"$WIRED" +set fs_basepath "$HOME_DIR" +set fs_homepath "$HOME_DIR" +set fs_game base \
 	+set com_automated 1 +set com_noHardReboot 1 +set s_initsound 0 \
@@ -390,6 +429,18 @@ python3 "$TIMEOUT_RUNNER" --timeout 180 --kill-after 15 --cwd "$WD" --stdout "$S
 	+set log_file_severity DEBUG +set log_file_mode overwrite_synced \
 	+exec ral-temporal-quality.cfg
 RC=$?
-[ "$RC" -eq 0 ] || { echo "FAIL temporal-quality process rc=$RC"; exit 1; }
-[ -f "$QCONSOLE" ] || { echo "FAIL temporal-quality missing qconsole"; exit 1; }
-analyze "$QCONSOLE" "$SHOT_DIR"
+[ "$RC" -eq 0 ] || { echo "FAIL temporal-quality process rc=$RC (launch $1)"; return 1; }
+[ -f "$QCONSOLE" ] || { echo "FAIL temporal-quality missing qconsole (launch $1)"; return 1; }
+analyze "$QCONSOLE" "$SHOT_DIR" > "$ROOT/launch-$1/analysis.log"
+RC=$?
+cat "$ROOT/launch-$1/analysis.log"
+return "$RC"
+}
+
+SAMPLES=()
+for (( n = 1; n <= LAUNCHES; n++ )); do
+	echo "==> temporal quality launch $n/$LAUNCHES"
+	launch "$n" || exit 1
+	SAMPLES+=("$ROOT/launch-$n/analysis.log")
+done
+budget "${SAMPLES[@]}"
