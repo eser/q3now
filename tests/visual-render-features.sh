@@ -31,7 +31,7 @@ while [ $# -gt 0 ]; do
         *) echo "unknown arg: $1" >&2; exit 2;;
     esac
 done
-[ -n "$MODE" ]   || { echo "FAIL: --mode {gtao|fwdplus|viewport|shadow_atest|scene|chromatic|crowd|crowdpromo|entitylight|scenegolden|crowdwasm|gpucull|worldindirect|worldphase|worlddecal|exacthold|temporalfold|bootstrapaa|gunsmear|competitive|portalworld|aaportal|aacompare|aalatency|capturenoise|cullref|dlight-shadow|dlight-shadow-lifecycle|dlight-shadow-probe|selftest} required" >&2; exit 2; }
+[ -n "$MODE" ]   || { echo "FAIL: --mode {gtao|fwdplus|viewport|shadow_atest|scene|chromatic|crowd|crowdpromo|entitylight|scenegolden|crowdwasm|gpucull|worldindirect|worldphase|worlddecal|exacthold|temporalfold|bootstrapaa|gunsmear|competitive|windowmove|portalworld|aaportal|aacompare|aalatency|capturenoise|cullref|dlight-shadow|dlight-shadow-lifecycle|dlight-shadow-probe|selftest} required" >&2; exit 2; }
 # selftest needs no engine (it exercises the assertion math on synthetic inputs).
 if [ "$MODE" != "selftest" ]; then
     [ -n "$ENGINE" ] || { echo "FAIL: --engine <wired.x64> required" >&2; exit 2; }
@@ -3011,6 +3011,28 @@ PYEOF
         else print "OK(no measurable mask effect: mask0 " d0 " mask1 " d1 " noise " nz ")" }')"
     [ "${v:0:2}" = "OK" ] || FAIL=1
     printf "  rocketghost: explosion %s px, old-only %s px, deviation from AA-off mask0=%s mask1=%s repeat-noise=%s -> %s\n" "$1" "$2" "$3" "$4" "$5" "$v"
+    ;;
+
+windowmove)
+    # TASK-277: a window move mid-game (the display catalog marks the active output dirty and the swapchain is rebuilt between
+    # two frames) must not end the game. The cheat-only `vid_movewindow` moves the window three times during gameplay, so SDL
+    # reports real move events. Before the fix the first move ended in "RAL command begin failed in vk_end_frame present split"
+    # (the split present buffer was never recycled) and, once that was fixed, in a device loss (the fence worker kept the
+    # destroyed slot fences); the shutdown that followed the fatal also double-freed the swapped command buffer.
+    WM_AA="${WM_AA:-0 1 2}"
+    for aa in $WM_AA; do
+        printf 'wait 120\nvid_movewindow 120 120\nwait 60\nvid_movewindow 240 160\nwait 60\nvid_movewindow 80 90\nwait 60\n' > "$SMOKE_HOME/base/vrf_wm.cfg"
+        if CAP_POST_CMD="exec vrf_wm.cfg" CAP_EXTRA_WAIT=320 capture_fixed_cam arena1 "1052 1432 50 135" "wm_$aa" +set r_aa "$aa" >/dev/null; then
+            log="$VRF_TMP/vrf-wm_$aa.log"
+            fatal="$(grep -c 'FATAL' "$log" || true)"
+            restarts="$(grep -c 'presentation-change(): restarting swapchain' "$log" || true)"
+            v="$(awk -v f="$fatal" -v r="$restarts" 'BEGIN{ if (f > 0) print "FAIL(fatal after a window move)"; else if (r < 4) print "FAIL(only " r " swapchain restarts: the moves did not reach the presentation path)"; else print "OK" }')"
+        else
+            v="FAIL(no capture after the moves)"; fatal="?"; restarts="?"
+        fi
+        [ "${v:0:2}" = "OK" ] || FAIL=1
+        printf "  windowmove r_aa %s: %s swapchain restarts (map start + 3 moves), %s fatal -> %s\n" "$aa" "$restarts" "$fatal" "$v"
+    done
     ;;
 
 competitive)
