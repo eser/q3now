@@ -3185,6 +3185,8 @@ static void vk_ral_reset_command_after_idle( ralCommandBuffer_t *command,
 	ralResult_t result;
 	if ( Ral_GetCommandBufferReceipt( command, &authority ) != ralSuccess )
 		return;
+	if ( authority.state == RAL_COMMAND_IDLE )
+		return;   // already reusable (e.g. a present buffer this slot never split into)
 	if ( authority.state == RAL_COMMAND_SUBMITTED )
 		result = Ral_RecycleCommandBufferExact( command, &authority );
 	else
@@ -17908,8 +17910,25 @@ static void vk_create_sync_primitives( void ) {
 }
 
 
+static qboolean vk_slot_wait( int slot, ralResult_t *waitResult, ralResult_t *resetResult );
+
 static void vk_destroy_sync_primitives( void  ) {
 	uint32_t i;
+
+	// A slot whose fence was handed to the fence worker (waitForFence) still owns a completion the worker will report. The device
+	// is idle here (callers wait first), so consume it now: destroying the fence under the worker let it wait on and reset a
+	// recreated fence, and left the slot's ready flag set, so the next frame's slot wait returned before its own submission had
+	// finished and frames overlapped until the device was lost (a window move mid-game, TASK-277).
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		if ( vk.tess[i].waitForFence ) {
+			ralResult_t waitResult, resetResult;
+			if ( !vk_slot_wait( (int)i, &waitResult, &resetResult ) )
+				R_LOG( rch_timing, SEV_WARN,
+					"slot %u fence drain during sync teardown: wait=%s reset=%s\n", i,
+					ral_result_string( waitResult ), ral_result_string( resetResult ) );
+			vk.tess[i].waitForFence = qfalse;
+		}
+	}
 
 #ifdef USE_UPLOAD_QUEUE
 	if ( vk.ral_image_uploaded2 ) { Ral_DestroySemaphore( vk.ral_image_uploaded2 ); vk.ral_image_uploaded2 = NULL; }
@@ -18061,6 +18080,12 @@ static void vk_restart_swapchain( const char *funcname, VkResult res )
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		vk_ral_reset_command_after_idle( vk.tess[i].ral_cmd,
 			"vk_restart_swapchain" );
+		// The split present buffer is recycled by the next vk_begin_frame only when that frame waits the slot fence; after
+		// this idle wait it may not, and the present buffer then stayed SUBMITTED until vk_end_frame failed to begin it
+		// ("RAL command begin failed in vk_end_frame present split", TASK-277). Recycle it here with the scene buffer.
+		vk_ral_reset_command_after_idle( vk.tess[i].ral_cmd_present,
+			"vk_restart_swapchain present split" );
+		vk.tess[i].split_pending_recycle = qfalse;
 	}
 
 #ifdef USE_UPLOAD_QUEUE
@@ -24885,15 +24910,18 @@ void vk_shutdown( refShutdownCode_t code )
 	// VkCommandBuffer back to b->cmdPools[GRAPHICS], so the backend must
 	// still be live.
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		if ( vk.tess[i].ral_cmd != NULL ) {
-			Ral_DestroyCommandBuffer( vk.tess[i].ral_cmd );
-			vk.tess[i].ral_cmd = NULL;
-			vk.tess[i].command_buffer = VK_NULL_HANDLE;
+		// A present split swaps the slot's buffers (ral_cmd_scene <- ral_cmd <- ral_cmd_present) for the rest of the frame.
+		// A fatal error inside that window leaves ral_cmd and ral_cmd_present naming one buffer and the scene buffer only in
+		// ral_cmd_scene, so destroy each distinct buffer of the three exactly once (TASK-277: a double free here aborted the
+		// shutdown that followed the fatal).
+		ralCommandBuffer_t *owned[3] = { vk.tess[i].ral_cmd, vk.tess[i].ral_cmd_present, vk.tess[i].ral_cmd_scene };
+		for ( int k = 0; k < 3; ++k ) {
+			if ( !owned[k] || ( k > 0 && owned[k] == owned[0] ) || ( k > 1 && owned[k] == owned[1] ) ) continue;
+			Ral_DestroyCommandBuffer( owned[k] );
 		}
-		if ( vk.tess[i].ral_cmd_present != NULL ) {
-			Ral_DestroyCommandBuffer( vk.tess[i].ral_cmd_present );
-			vk.tess[i].ral_cmd_present = NULL;
-		}
+		vk.tess[i].ral_cmd = NULL;
+		vk.tess[i].command_buffer = VK_NULL_HANDLE;
+		vk.tess[i].ral_cmd_present = NULL;
 		if ( vk.tess[i].ral_scene_finished != NULL ) {
 			Ral_DestroySemaphore( vk.tess[i].ral_scene_finished );
 			vk.tess[i].ral_scene_finished = NULL;

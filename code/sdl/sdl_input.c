@@ -1454,6 +1454,28 @@ static void IN_Minimize( void )
 	SDL_MinimizeWindow( SDL_window );
 }
 
+/*
+===============
+IN_MoveWindow_f
+
+`vid_movewindow <x> <y>`: moves the window, so SDL reports the move as a real event and the display catalog and presentation
+change follow their normal path. Cheat-only: it exists to reproduce a mid-game presentation change in tests (TASK-277).
+===============
+*/
+static void IN_MoveWindow_f( void )
+{
+	if ( !SDL_window ) return;
+	if ( !Cvar_VariableIntegerValue( "sv_cheats" ) ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_client), "vid_movewindow: needs sv_cheats 1\n" );
+		return;
+	}
+	if ( Cmd_Argc() < 3 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "usage: vid_movewindow <x> <y>\n" );
+		return;
+	}
+	SDL_SetWindowPosition( SDL_window, atoi( Cmd_Argv( 1 ) ), atoi( Cmd_Argv( 2 ) ) );
+}
+
 
 /*
 ===============
@@ -1609,6 +1631,7 @@ void IN_Init( void )
 #endif
 
 	Cmd_AddCommand( "minimize", IN_Minimize );
+	Cmd_AddCommand( "vid_movewindow", IN_MoveWindow_f );
 	Cmd_AddCommand( "in_restart", IN_Restart );
 
 	Com_Log( SEV_DEBUG, LOG_CH(ch_client), "------------------------------------\n" );
@@ -1634,5 +1657,6 @@ void IN_Shutdown( void )
 #endif
 
 	Cmd_RemoveCommand( "minimize" );
+	Cmd_RemoveCommand( "vid_movewindow" );
 	Cmd_RemoveCommand( "in_restart" );
 }
