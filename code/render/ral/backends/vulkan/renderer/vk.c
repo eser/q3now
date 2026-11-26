@@ -34229,6 +34229,7 @@ static struct {
 	uint32_t    count;
 	const char *labels[ VK_GPU_TS_MAX ];
 } vk_gpu_ts_inflight[ NUM_COMMAND_BUFFERS ];
+static qboolean vk_gpu_ts_window_open;   // r_gpuSpeeds was on at the previous frame begin
 
 // Per-frame GPU spike attribution inside the 200-frame averaged report. The
 // averaged lanes cannot show single-frame spikes, so each completed sample also
@@ -34613,8 +34614,20 @@ static void vk_gpu_ts_frame_begin( void )
 	if ( !vk_gpu_ts_active )
 		return;
 
-	if ( !r_gpuSpeeds || !r_gpuSpeeds->integer )
+	if ( !r_gpuSpeeds || !r_gpuSpeeds->integer ) {
+		vk_gpu_ts_window_open = qfalse;
 		return;
+	}
+
+	// A measurement window (r_gpuSpeeds turned on) starts clean: frames accumulated before it was turned off, and timestamps
+	// still in flight from then, belong to whatever was rendered before. Without this a window whose 200 samples were not all
+	// ready by its end handed them to the next window, which then printed mostly the previous configuration's timings.
+	if ( !vk_gpu_ts_window_open ) {
+		vk_gpu_ts_window_open = qtrue;
+		Ral_ProfileAccumulatorClearSamples( &vk_gpu_ts_accum );
+		for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) vk_gpu_ts_inflight[ i ].pending = qfalse;
+		return;
+	}
 
 	gate = r_gpuSpeeds->integer;
 	slot = vk.cmd_index;
