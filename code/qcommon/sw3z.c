@@ -371,6 +371,7 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 			/* store SW3Z entry index in pos, uncompressed size in size */
 			buildBuffer[fi].pos  = (unsigned long)i;
 			buildBuffer[fi].size = (unsigned long)e->uncompressedSize;
+			buildBuffer[fi].crc  = e->crc32c;   /* over the uncompressed bytes */
 
 			/* insert into hash table (chaining, same as FS_LoadZipFile) */
 			unsigned long hash = Com_GenerateHashValue( buildBuffer[fi].name, (unsigned int)hashSize );

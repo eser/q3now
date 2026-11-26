@@ -17,6 +17,7 @@
 #include "q_feats.h"
 #include "maps/meta.h"
 #include "fs_qpath.h"
+#include "fs_resource_identity.h"
 #include "util/crypto.h"
 #include "wired/core/scripting/wired_scripting.h"
 
@@ -2011,29 +2012,6 @@ extern qboolean		com_fullyInitialized;
 // serve banned config files (autoexec.cfg / WIRED_CONFIG_CFG) out of non-static dirs
 static qboolean FS_BannedPakFile( const char *filename );
 
-static uint64_t FS_ResourceHashBytes( uint64_t hash, const void *bytes,
-	size_t byteCount ) {
-	const unsigned char *cursor = (const unsigned char *)bytes;
-	size_t i;
-	for ( i = 0; i < byteCount; i++ ) {
-		hash ^= cursor[i];
-		hash *= UINT64_C( 1099511628211 );
-	}
-	return hash;
-}
-
-static uint64_t FS_ResourceHashPath( uint64_t hash, const char *path ) {
-	while ( path && *path ) {
-		unsigned char c = (unsigned char)*path++;
-		if ( c == '\\' ) {
-			c = '/';
-		}
-		c = (unsigned char)tolower( c );
-		hash = FS_ResourceHashBytes( hash, &c, 1 );
-	}
-	return hash;
-}
-
 static qboolean FS_ResolveResourceDirect( const char *qpath,
 	fsResolvedResource_t *out, unsigned generation ) {
 	const searchpath_t *search;
@@ -2059,18 +2037,14 @@ static qboolean FS_ResolveResourceDirect( const char *qpath,
 			}
 			do {
 				if ( !FS_FilenameCompare( pakFile->name, qpath ) ) {
-					uint64_t sourceId = UINT64_C( 1469598103934665603 );
-					unsigned char kind = (unsigned char)search->pack->type;
 					memset( out, 0, sizeof( *out ) );
 					Q_strncpyz( out->canonicalPath, pakFile->name,
 						sizeof( out->canonicalPath ) );
-					sourceId = FS_ResourceHashBytes( sourceId, &kind,
-						sizeof( kind ) );
-					sourceId = FS_ResourceHashBytes( sourceId,
-						&search->pack->checksum,
-						sizeof( search->pack->checksum ) );
-					sourceId = FS_ResourceHashPath( sourceId, pakFile->name );
-					out->sourceId = sourceId;
+					/* The member's own content, not the archive checksum: a repack
+					 * that changes another file keeps this identity. */
+					out->sourceId = wired_fs_member_identity(
+						(uint8_t)search->pack->type, pakFile->crc,
+						(uint64_t)pakFile->size, pakFile->name );
 					out->size = pakFile->size;
 					out->fsGeneration = generation;
 #if FEAT_SW3Z
@@ -2100,8 +2074,7 @@ static qboolean FS_ResolveResourceDirect( const char *qpath,
 			}
 			length = FS_FileLength( file );
 			fclose( file );
-			sourceId = FS_ResourceHashPath( UINT64_C( 1469598103934665603 ),
-				netpath );
+			sourceId = wired_fs_identity_path( WIRED_FS_IDENTITY_SEED, netpath );
 			memset( out, 0, sizeof( *out ) );
 			Q_strncpyz( out->canonicalPath, qpath,
 				sizeof( out->canonicalPath ) );
@@ -2144,7 +2117,7 @@ qboolean FS_ResolveResource( const char *qpath, fsResolvedResource_t *out ) {
 		}
 		*out = file;
 		Com_sprintf( out->canonicalPath, sizeof( out->canonicalPath ), "%s#%s", file.canonicalPath, member );
-		out->sourceId = FS_ResourceHashPath( FS_ResourceHashBytes( file.sourceId, "#", 1u ), member );
+		out->sourceId = wired_fs_identity_path( wired_fs_identity_bytes( file.sourceId, "#", 1u ), member );
 		return qtrue;
 	}
 	FS_LockAliasCatalog();
@@ -3052,7 +3025,9 @@ static qboolean fs_cacheSynced = qtrue;
 // non-matching header will cause whole file being ignored
 static const byte cache_header[ 4 ] = {
 #if FEAT_SW3Z
-	3, //version 3 — adds maxCompressedSize to the SW3Z tail
+	4, //version 4 — every file item carries its content checksum
+	   //              (fileInPack_t.crc, the resource identity).
+	   //          v3 added maxCompressedSize to the SW3Z tail
 	   //              so disk-cache-loaded packs know the scratch
 	   //              buffer cap without re-walking entries.
 	   //          v2 added full SW3Z record persistence with
@@ -3060,7 +3035,8 @@ static const byte cache_header[ 4 ] = {
 	   //          v1 had the packType field present but only PK3
 	   //              records on disk; SW3Z packs lived in-memory only.
 #else
-	0, //version 0 — pre-FEAT_SW3Z, no packType field
+	0x10, //no packType field; file items carry their content checksum
+	      //(version 0 had no checksum)
 #endif
 #if !Q_BIG_ENDIAN
 	0x0,
@@ -3089,6 +3065,7 @@ typedef struct pakcacheFileItem_s {
 	unsigned long name; // offset in namebuffer
 	unsigned long size;
 	unsigned long pos;	// info position in pk3 file
+	uint32_t crc;		// content checksum (fileInPack_t.crc)
 } pakcacheFileItem_t;
 
 #pragma pack( pop )
@@ -3346,6 +3323,7 @@ static qboolean FS_SavePackToFile( const pack_t *pak, FILE *f )
 		it.name = (unsigned long)(pak->buildBuffer[i].name - namePtr);
 		it.size = pak->buildBuffer[i].size;
 		it.pos = pak->buildBuffer[i].pos;
+		it.crc = pak->buildBuffer[i].crc;
 		fwrite( &it, sizeof( it ), 1, f );
 	}
 
@@ -3619,6 +3597,7 @@ static qboolean FS_LoadPakFromFile( FILE *f )
 			curFile->name = filename_inzip;
 			curFile->size = it.size;
 			curFile->pos = it.pos;
+			curFile->crc = it.crc;
 
 			// update hash table
 			hash = FS_HashFileName( filename_inzip, pack->hashSize );
@@ -4005,6 +3984,7 @@ static pack_t *FS_LoadZipFile( const char *zipfile )
 			// store the file position in the zip
 			unzGetCurrentFileInfoPosition( uf, &curFile->pos );
 			curFile->size = file_info.uncompressed_size;
+			curFile->crc = (uint32_t)file_info.crc;
 			curFile->name = namePtr;
 			strcpy( curFile->name, filename_inzip );
 			namePtr += strlen( filename_inzip ) + 1;

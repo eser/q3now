@@ -784,6 +784,7 @@ typedef struct fileInPack_s {
 	char					*name;		// name of the file
 	unsigned long			pos;		// file info position in zip
 	unsigned long			size;		// file size
+	uint32_t				crc;		// content checksum as the archive stores it (pk3 CRC-32, sw3z CRC-32C)
 	struct	fileInPack_s*	next;		// next file in the hash
 } fileInPack_t;
 

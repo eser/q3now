@@ -6506,6 +6506,18 @@ SET_TESTS_PROPERTIES(fs_alias_contract PROPERTIES
 )
 WIRED_CONFIGURE_HOST_TEST(fs_alias_test fs_alias_contract)
 
+ADD_EXECUTABLE(fs_resource_identity_test
+	tests/fs_resource_identity_test.c
+	code/qcommon/wired/core/vfs/fs_resource_identity.c
+)
+TARGET_COMPILE_OPTIONS(fs_resource_identity_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME fs_resource_identity_contract COMMAND fs_resource_identity_test)
+SET_TESTS_PROPERTIES(fs_resource_identity_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.wired-vfs;failure.contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(fs_resource_identity_test fs_resource_identity_contract)
+
 ADD_EXECUTABLE(mod_manifest_test
 	tests/mod_manifest_test.c
 	code/qcommon/mod_manifest.c
