@@ -1296,8 +1296,12 @@ void vk_temporal_scene_color_attachment_published( void ) {
 		++vk_scene_color_attachment_generation_counter;
 }
 
-static void *vk_temporal_recipe_alloc( size_t bytes ) { return ri.Malloc( bytes ); }
-static void vk_temporal_recipe_free( void *memory ) { ri.Free( memory ); }
+/* The temporal recipe and pipeline tables live as long as the renderer, across map loads. ri.Malloc is TAG_RENDERER zone memory,
+ * which R_InitImages releases wholesale (ri.FreeAll) on every map load while the tables still pointed into it, so the next map
+ * read freed memory: in Debug every pipeline-table slot then read occupied and the second map died with 'slot reused before
+ * lifecycle eviction'. The tables own their memory, like the RAL backend's internal allocations. */
+static void *vk_temporal_recipe_alloc( size_t bytes ) { return malloc( bytes ); }
+static void vk_temporal_recipe_free( void *memory ) { free( memory ); }
 static vkTemporalRecipeTableOps_t vk_temporal_recipe_ops( void ) {
 	vkTemporalRecipeTableOps_t ops = {
 		vk_temporal_recipe_alloc, vk_temporal_recipe_free
@@ -1305,8 +1309,8 @@ static vkTemporalRecipeTableOps_t vk_temporal_recipe_ops( void ) {
 	return ops;
 }
 
-static void *vk_temporal_pipeline_table_alloc( size_t bytes ) { return ri.Malloc( bytes ); }
-static void vk_temporal_pipeline_table_free( void *memory ) { ri.Free( memory ); }
+static void *vk_temporal_pipeline_table_alloc( size_t bytes ) { return malloc( bytes ); }
+static void vk_temporal_pipeline_table_free( void *memory ) { free( memory ); }
 static vkTemporalGenericPipelineTableMemoryOps_t vk_temporal_pipeline_table_memory_ops( void ) {
 	vkTemporalGenericPipelineTableMemoryOps_t ops = {
 		vk_temporal_pipeline_table_alloc, vk_temporal_pipeline_table_free
