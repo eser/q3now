@@ -604,6 +604,15 @@ if command -v otool >/dev/null 2>&1;then
 	done
 fi
 
+# TP_IQM_MATERIAL (TASK-267): give the IQM fixture's material a shader the old exact-IQM admission refused (it took only a single
+# opaque stage 0), so the same contract proves such a surface is now admitted with real motion instead of poisoning the frame.
+#   twostage  the fixture texture plus a modulated second stage      blend  the fixture texture drawn additively
+case "${TP_IQM_MATERIAL:-}" in
+	"") ;;
+	twostage) mkdir -p "$HOME_DIR/base/scripts";printf 'textures/h5a/fixture\n{\n\t{\n\t\tmap textures/h5a/fixture.tga\n\t}\n\t{\n\t\tmap $whiteimage\n\t\tblendFunc GL_DST_COLOR GL_ZERO\n\t}\n}\n' >"$HOME_DIR/base/scripts/h5a_fixture_material.shader";;
+	blend) mkdir -p "$HOME_DIR/base/scripts";printf 'textures/h5a/fixture\n{\n\t{\n\t\tmap textures/h5a/fixture.tga\n\t\tblendFunc GL_ONE GL_ONE\n\t}\n}\n' >"$HOME_DIR/base/scripts/h5a_fixture_material.shader";;
+	*) echo "FAIL unknown TP_IQM_MATERIAL=${TP_IQM_MATERIAL}";exit 2;;
+esac
 BOOT="$HOME_DIR/base/ral-temporal-projection.cfg";printf '%s' "$BOOT_CONTENT" >"$BOOT"
 MANIFEST="$ROOT/manifest.jsonl";python3 - "$MANIFEST" "$RUN/wired" "$RUN/Contents/MacOS/wired_vulkan_arm64.dylib" "$HOME_DIR/base/gameclarm64.dylib" "$HOME_DIR/base/gamesvarm64.dylib" "$RUN/Contents/MacOS/libMoltenVK.dylib" "$HOME_DIR/base/pax21.sw3z" "$HOME_DIR/base/$(basename "$BASE")" "$IQM_FIXTURE" "$HOME_DIR/base/characters/h5a_fixture/models/body.iqm" "$HOME_DIR/base/characters/h5a_fixture/main.lua" "$HOME_DIR/base/textures/h5a/fixture.tga" "$0" "$BOOT" <<'PYEOF'
 import hashlib,json,os,sys
