@@ -160,6 +160,16 @@ vec4 samplePreviousColor(vec2 texel, inout vec3 tapMin, inout vec3 tapMax, inout
 // does not lengthen the response to it.
 const float historyCountCap = 48.0;   // weight 0.98
 const float staticMotionScale = 8.0;  // fully moving from 1/8 pixel of motion per frame
+// A moving pixel's history is resampled every frame, which averages its texture detail away from the current frame; the faster
+// it moves, the less of that history it keeps, and the less output sharpening (built from the same resampled history) it gets:
+// both scale by 1 / (1 + movingSpeedFalloff * pixels per frame). Measured on a firing view weapon and a rocket in flight (arena1,
+// Vulkan, 2026-11-26), against the same frames with AA off: pixels further than 24/255 -19 % (weapon -23 %); a still pixel is
+// unchanged.
+const float movingSpeedFalloff = 0.25;
+float movingSpeedScale(float pixelsPerFrame) {
+	float s = 1.0 + movingSpeedFalloff * pixelsPerFrame;
+	return inversesqrt(s * s);
+}
 float movingHistoryCount(float movingWeight) {
 	// m = w / (1 - w); 1 / x as inversesqrt(x * x) (the reflection contract admits one division, in linearizeDepth)
 	float rest = max(1.0 - movingWeight, 1.0 / historyCountCap);
@@ -167,8 +177,10 @@ float movingHistoryCount(float movingWeight) {
 }
 float accumulatedHistoryCount(float storedCount, float movingWeight, vec2 motionPixels) {
 	float count = clamp(storedCount, 1.0, historyCountCap);
-	float moving = clamp(length(motionPixels) * staticMotionScale, 0.0, 1.0);
-	return count + (min(count, movingHistoryCount(movingWeight)) - count) * moving;
+	float speed = length(motionPixels);
+	float moving = clamp(speed * staticMotionScale, 0.0, 1.0);
+	float movingCount = max(1.0, movingHistoryCount(movingWeight) * movingSpeedScale(speed));
+	return count + (min(count, movingCount) - count) * moving;
 }
 float rectifiedHistoryCount(float count, vec3 clampMove, vec3 boxExtent) {
 	// rectified: clamp distance over box size, 1 / x as inversesqrt(x * x)
@@ -513,7 +525,7 @@ void main() {
 				// qualityFlags bit 3 turns it off (a diagnostic; every backend passes 7).
 				if ((pc.qualityFlags & 8u) == 0u) {
 					vec3 detail = prior.rgb - samplePreviousBlur(previousTexel, tapMin, tapMax);
-					displayed = vec4(clamp(resolvedRgb + outputSharpen * confidence * detail,
+					displayed = vec4(clamp(resolvedRgb + outputSharpen * confidence * movingSpeedScale(length(motionTexel)) * detail,
 						min(resolvedRgb, tapMin), max(resolvedRgb, tapMax)), current.a);
 				}
 				usedHistory = true;

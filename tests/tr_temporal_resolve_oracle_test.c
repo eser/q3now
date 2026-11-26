@@ -85,11 +85,12 @@ int main( void ) {
 	CHECK( Near( r.historyLo[0], current * ( 1.0f - w ) + 0.5f * w ) );
 
 	// 3. A pixel moving a whole texel (>= 1/8 px: fully moving) keeps at most the
-	//    backend count m = w / (1 - w) = 7 for historyWeight 0.875: written 8.
+	//    backend count m = w / (1 - w) = 7 for historyWeight 0.875, scaled by the
+	//    speed falloff 1 / (1 + 0.25 * 1 px) = 0.8: 5.6, written 6.6.
 	Scene( -1.0f, 0.5f, 20.0f );
 	s_velocity[( 4 * W + 4 ) * 2] = FloatToHalf( 1.0f / (float)W ); // one texel to the right
 	CHECK( R_TemporalResolveOraclePixel( &p, &k, 4, 4, &r ) );
-	CHECK( r.pixelClass == TEMPORAL_RESOLVE_ORACLE_HISTORY && Near( r.historyLo[3], 8.0f ) );
+	CHECK( r.pixelClass == TEMPORAL_RESOLVE_ORACLE_HISTORY && Near( r.historyLo[3], 6.6f ) );
 
 	// 4. A history depth outside the current 3x3 range (+ max(0.125, 2 %)) is a
 	//    disocclusion: no history, the current colour, count 1.
