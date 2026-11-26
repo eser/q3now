@@ -163,7 +163,7 @@ const float staticMotionScale = 8.0;  // fully moving from 1/8 pixel of motion p
 // A moving pixel's history is resampled every frame, which averages its texture detail away from the current frame; the faster
 // it moves, the less of that history it keeps, and the less output sharpening (built from the same resampled history) it gets:
 // both scale by 1 / (1 + movingSpeedFalloff * pixels per frame). Measured on a firing view weapon and a rocket in flight (arena1,
-// Vulkan, 2026-11-26), against the same frames with AA off: pixels further than 24/255 -19 % (weapon -23 %); a still pixel is
+// Vulkan, 2026-11-26), against the same frames with AA off: pixels further than 24/255 -3 % (weapon -10 %); a still pixel is
 // unchanged.
 const float movingSpeedFalloff = 0.25;
 float movingSpeedScale(float pixelsPerFrame) {
@@ -200,9 +200,10 @@ float historyWeightForCount(float count) {
 // The range the sharpened colour is kept in (no halos) is the range of the history taps both fetches already read (the five bicubic
 // taps and the four blur taps), so it costs no fetch. It comes from the history, like the detail: the current frame's 3x3 box (the
 // old bound) moves with the jitter phase and made the displayed image ripple with the 8-frame jitter cycle on items and edges. That
-// range is narrower than the jittered box, and the accumulated history (historyCountCap) is smoother still, so the gain is 2.4
-// (Vulkan aacompare edge energy vs AA off 0.990 at 2.4, 0.973 at 2.0; SMAA 0.996).
-const float outputSharpen = 2.6;
+// range is narrower than the jittered box, and the accumulated history (historyCountCap) is smoother still. The gain only has to
+// restore what the accumulation of jitter phases averages away: the current frame itself is reconstructed exactly (see
+// reconstructCurrent), not through a bilinear fetch, whose blur needed a gain of 2.6 and could not be made up in motion.
+const float outputSharpen = 1.1;
 vec3 samplePreviousBlur(vec2 texel, inout vec3 tapMin, inout vec3 tapMax) {
 	vec2 extent = vec2(pc.extent);
 	vec2 invExtent = inversesqrt(extent * extent);
@@ -373,49 +374,55 @@ vec2 dlMotionVelocity(ivec2 px, int tileIndex, float centerValid) {
 	return finite2(dv) ? dv : centerVelocity;
 }
 
-// The colour box the reprojected history is clamped into: min/max of the 3x3 current-colour neighbourhood, tightened by variance
-// clipping when enabled. Deliberately a separate, non-precise function. `precise` propagates backwards through every operation
-// that feeds a precise result, and each such operation is emitted by SPIRV-Cross as an optnone spvFAdd/spvFMul call that the
-// Metal compiler does not inline: measured at ~0.9 ms of this pass at 1280x720. The box needs no bit-exact arithmetic (it only
-// bounds a clamp), whereas the reprojection and the final blend keep their precise chains.
 // One pass over the 3x3 tile the workgroup already holds yields both the current frame reconstructed at the pixel centre and the
 // neighbourhood box the history is clamped into.
 //
 // Reconstruction: the current frame was rendered with its geometry displaced by the jitter (currentEffectiveJitterUv, in the texture
-// space of the tile), so the tile texel at offset o shows the scene at o - jitter from this pixel's centre. Separable quadratic
-// Lagrange weights interpolate the scene exactly at the pixel centre (weights 0,1,0 without jitter); the result is clamped into the
-// 3x3 range so the interpolation cannot overshoot. The resolved image and its history therefore stay on the fixed pixel grid instead
-// of moving with the jitter every frame (which showed as frame-to-frame shimmer on a static scene).
+// space of the tile), so the scene at this pixel's centre lies at pixel + jitter in the current image. Separable quadratic Lagrange
+// weights interpolate it there exactly from the 3x3 tile (weights 0,1,0 without jitter); the result is clamped into the 3x3 range so
+// the interpolation cannot overshoot. The resolved image and its history therefore stay on the fixed pixel grid instead of moving
+// with the jitter every frame (which showed as frame-to-frame shimmer on a static scene). A single bilinear fetch at pixel + jitter
+// (5805f7cf1, cheaper by ~0.14 ms at 2560x1440) blurs by up to half a texel every frame: the static scene needed a sharpening gain
+// of 2.6 to make that up and a moving one could not be (WebGPU arena1 turning at ~12 px/frame: edge energy vs AA off 0.949 against
+// 0.981 with this reconstruction, SMAA 0.995; the distance to the AA-off frame drops by 15-30 % at rest and in motion).
 //
 // Box: the 3x3 min/max, tightened by variance clipping (mean +/- 1.25 sigma) when qualityFlags bit 0 is set. The box is an
 // intersection, so it can only get smaller; the mean lies inside both, hence it is never empty.
-// The current frame was rendered with its geometry displaced by the jitter (currentEffectiveJitterUv, in the texture space of the
-// tile), so the scene at this pixel's centre lies at pixel + jitter in the current image. One bilinear fetch there reconstructs it on
-// the fixed pixel grid (exact without jitter, never outside the range of its four texels); the resolved image and its history
-// therefore stay on that grid instead of moving with the jitter every frame (which showed as frame-to-frame shimmer on a static
-// scene). A filtered fetch instead of weighting the 3x3 tile keeps the per-pixel cost of the old resolve (the unconditional 3x3 pass
-// cost ~0.23 ms at 2560x1440).
-vec4 reconstructCurrent(ivec2 pixel, int tileIndex) {
-	vec2 extent = vec2(pc.extent);
-	vec2 sampleAt = (vec2(pixel) + 0.5) * inversesqrt(extent * extent) + pc.currentEffectiveJitterUv;
-	return vec4(textureLod(sampler2D(currentColor, nearestSampler), sampleAt, 0.0).rgb, tileColor[tileIndex].a);
+//
+// Deliberately a separate, non-precise function. `precise` propagates backwards through every operation that feeds a precise
+// result, and each such operation is emitted by SPIRV-Cross as an optnone spvFAdd/spvFMul call that the Metal compiler does not
+// inline: measured at ~0.9 ms of this pass at 1280x720. Neither the box nor the interpolation needs bit-exact arithmetic, whereas
+// the reprojection and the final blend keep their precise chains.
+void accumulateTap(int index, float weight, inout vec3 sum, inout vec3 lo, inout vec3 hi, inout vec3 moments,
+		inout vec3 squares) {
+	vec3 c = tileColor[index].rgb;
+	sum += c * weight;
+	lo = min(lo, c);
+	hi = max(hi, c);
+	moments += c;
+	squares += c * c;
 }
 
-bool neighborhoodBox(int tileIndex, out vec3 boxMin, out vec3 boxMax) {
+vec4 reconstructCurrent(int tileIndex, out vec3 boxMin, out vec3 boxMax) {
+	vec2 t = pc.currentEffectiveJitterUv * vec2(pc.extent);
+	vec3 wx = vec3(0.5 * t.x * (t.x - 1.0), 1.0 - t.x * t.x, 0.5 * t.x * (t.x + 1.0));
+	vec3 wy = vec3(0.5 * t.y * (t.y - 1.0), 1.0 - t.y * t.y, 0.5 * t.y * (t.y + 1.0));
+	vec3 sum = vec3(0.0);
 	vec3 neighborhoodMin = vec3(3.402823466e+38);
 	vec3 neighborhoodMax = vec3(-3.402823466e+38);
 	vec3 momentSum = vec3(0.0);
 	vec3 momentSquares = vec3(0.0);
-	for (int y = -1; y <= 1; ++y) {
-		for (int x = -1; x <= 1; ++x) {
-			vec3 c = tileColor[tileIndex + y * tileSide + x].rgb;
-			neighborhoodMin = min(neighborhoodMin, c);
-			neighborhoodMax = max(neighborhoodMax, c);
-			momentSum += c;
-			momentSquares += c * c;
-		}
-	}
-	if (!(finite3(neighborhoodMin) && finite3(neighborhoodMax))) return false;
+	// Nine explicit taps with constant weight components: a runtime index into the weight vectors would keep them in memory on
+	// some targets (it cost ~0.3 ms at 2560x1440 through MoltenVK).
+	accumulateTap(tileIndex - tileSide - 1, wx.x * wy.x, sum, neighborhoodMin, neighborhoodMax, momentSum, momentSquares);
+	accumulateTap(tileIndex - tileSide,     wx.y * wy.x, sum, neighborhoodMin, neighborhoodMax, momentSum, momentSquares);
+	accumulateTap(tileIndex - tileSide + 1, wx.z * wy.x, sum, neighborhoodMin, neighborhoodMax, momentSum, momentSquares);
+	accumulateTap(tileIndex - 1,            wx.x * wy.y, sum, neighborhoodMin, neighborhoodMax, momentSum, momentSquares);
+	accumulateTap(tileIndex,                wx.y * wy.y, sum, neighborhoodMin, neighborhoodMax, momentSum, momentSquares);
+	accumulateTap(tileIndex + 1,            wx.z * wy.y, sum, neighborhoodMin, neighborhoodMax, momentSum, momentSquares);
+	accumulateTap(tileIndex + tileSide - 1, wx.x * wy.z, sum, neighborhoodMin, neighborhoodMax, momentSum, momentSquares);
+	accumulateTap(tileIndex + tileSide,     wx.y * wy.z, sum, neighborhoodMin, neighborhoodMax, momentSum, momentSquares);
+	accumulateTap(tileIndex + tileSide + 1, wx.z * wy.z, sum, neighborhoodMin, neighborhoodMax, momentSum, momentSquares);
 	boxMin = neighborhoodMin;
 	boxMax = neighborhoodMax;
 	if ((pc.qualityFlags & 1u) != 0u) {
@@ -424,7 +431,7 @@ bool neighborhoodBox(int tileIndex, out vec3 boxMin, out vec3 boxMax) {
 		boxMin = max(neighborhoodMin, momentMean - 1.25 * momentSigma);
 		boxMax = min(neighborhoodMax, momentMean + 1.25 * momentSigma);
 	}
-	return true;
+	return vec4(clamp(sum, neighborhoodMin, neighborhoodMax), tileColor[tileIndex].a);
 }
 
 void main() {
@@ -442,7 +449,7 @@ void main() {
 	int tileIndex = (int(gl_LocalInvocationID.y) + 1) * tileSide + int(gl_LocalInvocationID.x) + 1;
 	vec3 clipMin = vec3(0.0);
 	vec3 clipMax = vec3(0.0);
-	vec4 current = reconstructCurrent(pixel, tileIndex);
+	vec4 current = reconstructCurrent(tileIndex, clipMin, clipMax);
 	vec4 result = current;
 	vec4 displayed = current;
 	bool usedHistory = false;
@@ -495,9 +502,8 @@ void main() {
 				&& currentLinear > 0.0 && priorLinear > 0.0
 				&& priorLinear >= min(rangeA, rangeB) - depthLimit
 				&& priorLinear <= max(rangeA, rangeB) + depthLimit) {
-			// The current-frame box first: the history tap range is then live only from the history fetches to the sharpening, not
-			// across the 3x3 moment loop (fewer registers held in this latency-bound pass).
-			bool boxValid = neighborhoodBox(tileIndex, clipMin, clipMax);
+			// The box comes from the reconstruction pass (reconstructCurrent); a non-finite tile leaves it unusable.
+			bool boxValid = finite3(clipMin) && finite3(clipMax);
 			vec3 tapMin = vec3(3.402823466e+38);
 			vec3 tapMax = vec3(-3.402823466e+38);
 			float centreCount = 3.402823466e+38;

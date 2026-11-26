@@ -127,7 +127,7 @@ foreach(pair IN ITEMS
 	"const float historyCountCap = 48.0;|#define TEMPORAL_RESOLVE_ORACLE_COUNT_CAP 48.0f"
 	"const float staticMotionScale = 8.0;|#define TEMPORAL_RESOLVE_ORACLE_STATIC_MOTION_SCALE 8.0f"
 	"const float movingSpeedFalloff = 0.25;|#define TEMPORAL_RESOLVE_ORACLE_MOVING_SPEED_FALLOFF 0.25f"
-	"const float outputSharpen = 2.6;|#define TEMPORAL_RESOLVE_ORACLE_OUTPUT_SHARPEN 2.6f"
+	"const float outputSharpen = 1.1;|#define TEMPORAL_RESOLVE_ORACLE_OUTPUT_SHARPEN 1.1f"
 	"const float A = -0.75;|#define TEMPORAL_RESOLVE_ORACLE_BICUBIC_A ( -0.75f )"
 	"momentMean - 1.25 * momentSigma|#define TEMPORAL_RESOLVE_ORACLE_VARIANCE_SIGMA 1.25f")
 	string(REPLACE "|" ";" pair_list "${pair}")

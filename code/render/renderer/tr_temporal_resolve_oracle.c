@@ -411,9 +411,23 @@ static temporalResolveOracleClass_t Evaluate( oracleEval_t *e, int32_t px, int32
 	qboolean usedHistory = qfalse, inside, spatial = qfalse;
 	int c;
 	{
-		float inv[2] = { InvSqrtSq( (float)k->extent[0] ), InvSqrtSq( (float)k->extent[1] ) };
-		Bilinear( e, e->p->currentColor, ( (float)px + 0.5f ) * inv[0] + k->currentEffectiveJitterUv[0],
-			( (float)py + 0.5f ) * inv[1] + k->currentEffectiveJitterUv[1], current );
+		/* temporal_resolve.comp reconstructCurrent: separable quadratic Lagrange weights at the jitter offset over the 3x3
+		 * neighbourhood, clamped into its min/max. */
+		const float tx = k->currentEffectiveJitterUv[0] * (float)k->extent[0];
+		const float ty = k->currentEffectiveJitterUv[1] * (float)k->extent[1];
+		const float wx[3] = { 0.5f * tx * ( tx - 1.0f ), 1.0f - tx * tx, 0.5f * tx * ( tx + 1.0f ) };
+		const float wy[3] = { 0.5f * ty * ( ty - 1.0f ), 1.0f - ty * ty, 0.5f * ty * ( ty + 1.0f ) };
+		float sum[3] = { 0, 0, 0 }, mn[3] = { FLT_BIG, FLT_BIG, FLT_BIG }, mx[3] = { -FLT_BIG, -FLT_BIG, -FLT_BIG };
+		int32_t x, y;
+		for ( y = -1; y <= 1; ++y ) for ( x = -1; x <= 1; ++x ) {
+			float s[4];
+			Fetch4( e, e->p->currentColor, px + x, py + y, s );
+			for ( c = 0; c < 3; ++c ) {
+				sum[c] += s[c] * ( wx[x + 1] * wy[y + 1] );
+				mn[c] = fminf( mn[c], s[c] ); mx[c] = fmaxf( mx[c], s[c] );
+			}
+		}
+		for ( c = 0; c < 3; ++c ) current[c] = Clampf( sum[c], mn[c], mx[c] );
 		Fetch4( e, e->p->currentColor, px, py, centerTexel );
 		current[3] = centerTexel[3];
 	}

@@ -10,9 +10,9 @@
 // and the history (historyOutColor: unsharpened rgb, sample count in alpha).
 //
 // The arithmetic follows the shader step for step. The one input the CPU cannot
-// reproduce bit for bit is a hardware-filtered fetch (the reconstruction of the
-// current frame at the jittered position, the bicubic history taps, the blur
-// taps): its weights are quantized by the sampler. Every filtered fetch therefore
+// reproduce bit for bit is a hardware-filtered fetch (the bicubic history taps,
+// the blur taps): its weights are quantized by the sampler. The current frame is
+// reconstructed from integer texel fetches (3x3 Lagrange), so it is exact. Every filtered fetch therefore
 // returns an interval, and the pixel is evaluated at the low end, nominally and at
 // the high end of every interval. The expected value is the hull of the three
 // results widened by a float floor; a pixel whose branches (history used or not,
@@ -28,7 +28,7 @@
 #define TEMPORAL_RESOLVE_ORACLE_COUNT_CAP 48.0f
 #define TEMPORAL_RESOLVE_ORACLE_STATIC_MOTION_SCALE 8.0f
 #define TEMPORAL_RESOLVE_ORACLE_MOVING_SPEED_FALLOFF 0.25f   // temporal_resolve.comp movingSpeedFalloff
-#define TEMPORAL_RESOLVE_ORACLE_OUTPUT_SHARPEN 2.6f
+#define TEMPORAL_RESOLVE_ORACLE_OUTPUT_SHARPEN 1.1f
 #define TEMPORAL_RESOLVE_ORACLE_BICUBIC_A ( -0.75f )
 #define TEMPORAL_RESOLVE_ORACLE_VARIANCE_SIGMA 1.25f
 
