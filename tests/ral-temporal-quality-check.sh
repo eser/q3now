@@ -27,12 +27,13 @@ if any("VUID-" in message for message in messages):
 
 expected_markers = [
     "Q3_TEMPORAL_QUALITY_BEGIN", "Q3_TEMPORAL_QUALITY_CAPTURED",
+    "Q3_TEMPORAL_PERF_VIEW",
     "Q3_TEMPORAL_PERF_OFF_1_BEGIN", "Q3_TEMPORAL_PERF_OFF_1_END",
     "Q3_TEMPORAL_PERF_ON_1_BEGIN", "Q3_TEMPORAL_PERF_ON_1_END",
-    "Q3_TEMPORAL_PERF_ON_2_BEGIN", "Q3_TEMPORAL_PERF_ON_2_END",
-    "Q3_TEMPORAL_PERF_OFF_2_BEGIN", "Q3_TEMPORAL_PERF_OFF_2_END",
     "Q3_TEMPORAL_PERF_SMAA_1_BEGIN", "Q3_TEMPORAL_PERF_SMAA_1_END",
     "Q3_TEMPORAL_PERF_SMAA_2_BEGIN", "Q3_TEMPORAL_PERF_SMAA_2_END",
+    "Q3_TEMPORAL_PERF_ON_2_BEGIN", "Q3_TEMPORAL_PERF_ON_2_END",
+    "Q3_TEMPORAL_PERF_OFF_2_BEGIN", "Q3_TEMPORAL_PERF_OFF_2_END",
     "Q3_TEMPORAL_QUALITY_COMPLETE",
 ]
 markers = [(i, message) for i, message in enumerate(messages) if message.startswith("Q3_TEMPORAL_")]
@@ -56,6 +57,8 @@ if not any(message.startswith("temporal-history-feedback ") for message in messa
 # The static TAA view must actually take the history branch. Its motion validity is read back over the centre ROI (world
 # geometry only); a run whose validity is zero there resolves every pixel without history (reconstruction plus the spatial
 # fallback) and measures nothing about TAA. This is what a teleport-in effect around the camera did to every capture.
+# The performance view is read back the same way (once, before its first TAA window): a resolve without history costs about
+# half, so a budget measured on it would flatter TAA.
 content_pattern = re.compile(r"temporal-motion-content schema=1 .* pixels=([1-9][0-9]*) validity-zero=([0-9]+) ")
 contents = [content_pattern.match(message) for message in messages]
 contents = [match for match in contents if match]
@@ -218,7 +221,10 @@ for row, message in zip(rows, messages):
         if match:
             current["gpu"][-1][match.group(1)] = float(match.group(2))
 
-expected = [("off", 1), ("on", 1), ("on", 2), ("off", 2), ("smaa", 1), ("smaa", 2)]
+# Palindromic order (off, TAA, SMAA, SMAA, TAA, off) at one fixed, pinned view: TAA and SMAA are measured next to each other, so
+# a GPU clock/presentation regime that drifts during the run hits both alike. The view used to be wherever the quality pan
+# stopped (real-time +right with fixedtime 0), a different yaw on every run.
+expected = [("off", 1), ("on", 1), ("smaa", 1), ("smaa", 2), ("on", 2), ("off", 2)]
 if list(buckets) != expected:
     raise SystemExit(f"FAIL temporal-quality performance bucket order {list(buckets)}")
 for key, bucket in buckets.items():
@@ -233,7 +239,7 @@ for key, bucket in buckets.items():
 #   SMAA: smaa_passes (copy, edges, blend weights, resolve; the "smaa" lane before it is the post chain)
 scene_lanes = ("particle_compute", "atmosphere_compute", "dlight_shadow_start", "dlight_shadow", "opaque_to_depth",
     "depth_transfer", "gtao_denoise", "lens_depth")
-def lane_mean(mode, names):
+def lane_values(mode, names):
     values = []
     for i in (1, 2):
         lanes = buckets[(mode, i)]["lanes"]
@@ -241,12 +247,24 @@ def lane_mean(mode, names):
         if missing:
             raise SystemExit(f"FAIL temporal-quality GPU aggregate {mode}{i} misses lanes {missing}")
         values.append(sum(lanes[name] for name in names))
-    return statistics.mean(values)
+    return values
+def lane_mean(mode, names):
+    return statistics.mean(lane_values(mode, names))
 scene_off = lane_mean("off", scene_lanes)
 on_ms = lane_mean("on", ("temporal_resolve", "temporal_store")) + lane_mean("on", scene_lanes) - scene_off
 smaa_ms = lane_mean("smaa", ("smaa_passes",)) + lane_mean("smaa", scene_lanes) - scene_off
 off_ms = scene_off
 delta_ms = on_ms - smaa_ms
+ratio = on_ms / smaa_ms if smaa_ms > 0 else float("inf")
+# Same-regime check: the two windows of every arm must agree. On this machine the same binary switches between GPU
+# clock/presentation regimes on a minutes timescale and every lane scales with it (TAA about 2x, SMAA about 1.6x); a run whose
+# arms straddle a switch measures the switch, not the anti-aliasing, and is reported as inconclusive (exit 75), not PASS/FAIL.
+regime_limit = float(os.environ.get("TQ_REGIME_SPREAD", "0.20"))
+spreads = {}
+for mode, names in (("off", scene_lanes), ("on", ("temporal_resolve", "temporal_store") + scene_lanes),
+        ("smaa", ("smaa_passes",) + scene_lanes)):
+    a, b = lane_values(mode, names)
+    spreads[mode] = abs(a - b) / max(1e-6, 0.5 * (a + b))
 # The quality criteria above already passed (each raises on failure); report them even when the budget below fails.
 print(
     f"PASS temporal quality: static AA-off={static_baseline_delta:.3f} TAA={static_delta:.3f} "
@@ -258,14 +276,19 @@ print(
 # Budget (owner, 2026-11-24): TAA's anti-aliasing work must not exceed SMAA's by more than TQ_SMAA_MARGIN_MS (lanes above). The
 # former absolute terms (whole frame within 4.0 ms, TAA within 0.75 ms of AA off) compared presentation cadence and were dropped.
 smaa_margin = float(os.environ.get("TQ_SMAA_MARGIN_MS", "0.35"))
+regime_text = " ".join(f"{mode}={spread:.1%}" for mode, spread in spreads.items())
+print(f"temporal GPU budget arms: TAA/SMAA ratio={ratio:.3f}, window spread {regime_text} (limit {regime_limit:.0%})")
+if max(spreads.values()) > regime_limit:
+    print(f"INCONCLUSIVE temporal-quality GPU budget: the arms straddle a GPU regime change ({regime_text}); rerun")
+    sys.exit(75)
 if delta_ms > smaa_margin:
     raise SystemExit(
         f"FAIL temporal-quality GPU budget (anti-aliasing work) TAA={on_ms:.3f}ms SMAA={smaa_ms:.3f}ms "
-        f"TAA-SMAA={delta_ms:+.3f}ms > {smaa_margin:.2f}ms (AA-off scene lanes {off_ms:.3f}ms)")
+        f"TAA-SMAA={delta_ms:+.3f}ms > {smaa_margin:.2f}ms ratio={ratio:.3f} (AA-off scene lanes {off_ms:.3f}ms)")
 
 print(
     f"PASS temporal GPU budget (anti-aliasing work): TAA={on_ms:.3f}ms SMAA={smaa_ms:.3f}ms TAA-SMAA={delta_ms:+.3f}ms "
-    f"(margin {smaa_margin:.2f}ms, AA-off scene lanes {off_ms:.3f}ms)")
+    f"ratio={ratio:.3f} (margin {smaa_margin:.2f}ms, AA-off scene lanes {off_ms:.3f}ms)")
 PYEOF
 }
 
@@ -342,13 +365,14 @@ set vm_cgame 0
 set sv_cheats 1
 set sv_pure 0
 set tqSetup "cg_draw2D 0; cg_drawGun 0; cg_thirdPerson 0; con_notifytime 0; cl_yawspeed 90; sv_fps 125; timescale 1; fixedtime 0; r_pinShaderTime 2.0; r_pinFrameTime 2.0; wait 512; noclip; wait 150; echo Q3_TEMPORAL_QUALITY_BEGIN; setviewpos 888 -768 434 180 0; r_temporalInputTest 0; r_pinFrameTime 0; fixedtime 20; wait 90; fixedtime 0; r_pinFrameTime 2.0; wait 96; screenshot temporal_off_a png silent; wait 8; screenshot temporal_off_a_2 png silent; wait 1; screenshot temporal_off_a_3 png silent; wait 4; +right; wait 12; -right; wait 8; screenshot temporal_off_b png silent; wait 4; vstr tqTemporalA"
-set tqTemporalA "r_temporalInputTest 1; setviewpos 888 -768 434 180 0; r_pinFrameTime 0; fixedtime 20; wait 90; fixedtime 0; r_pinFrameTime 2.0; wait 96; screenshot temporal_taa_a_1 png silent; wait 8; screenshot temporal_taa_a_2 png silent; wait 1; screenshot temporal_taa_a_3 png silent; wait 1; screenshot temporal_taa_a_4 png silent; wait 1; screenshot temporal_taa_a_5 png silent; wait 1; screenshot temporal_taa_a_6 png silent; wait 1; screenshot temporal_taa_a_7 png silent; wait 1; screenshot temporal_taa_a_8 png silent; wait 1; screenshot temporal_taa_a_9 png silent; wait 1; screenshot temporal_taa_a_10 png silent; ral_dump live temporal-motion-arm; wait 4; +right; wait 12; -right; wait 4; screenshot temporal_taa_b_first png silent; wait 96; screenshot temporal_taa_b_steady png silent; wait 4; echo Q3_TEMPORAL_QUALITY_CAPTURED; vstr tqPerfOff1"
-set tqPerfOff1 "r_temporalInputTest 0; wait 96; set r_gpuSpeeds 0; wait 4; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_OFF_1_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_OFF_1_END; set r_gpuSpeeds 0; wait 16; vstr tqPerfOn1"
-set tqPerfOn1 "r_temporalInputTest 1; wait 96; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_ON_1_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_ON_1_END; set r_gpuSpeeds 0; wait 16; vstr tqPerfOn2"
-set tqPerfOn2 "wait 96; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_ON_2_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_ON_2_END; set r_gpuSpeeds 0; wait 16; vstr tqPerfOff2"
-set tqPerfOff2 "r_temporalInputTest 0; wait 96; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_OFF_2_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_OFF_2_END; set r_gpuSpeeds 0; wait 16; vstr tqPerfSmaa1"
-set tqPerfSmaa1 "set r_aa 2; wait 96; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_SMAA_1_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_SMAA_1_END; set r_gpuSpeeds 0; wait 16; vstr tqPerfSmaa2"
-set tqPerfSmaa2 "wait 96; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_SMAA_2_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_SMAA_2_END; set r_gpuSpeeds 0; set r_aa 0; echo Q3_TEMPORAL_QUALITY_COMPLETE; quit"
+set tqTemporalA "r_temporalInputTest 1; setviewpos 888 -768 434 180 0; r_pinFrameTime 0; fixedtime 20; wait 90; fixedtime 0; r_pinFrameTime 2.0; wait 96; screenshot temporal_taa_a_1 png silent; wait 8; screenshot temporal_taa_a_2 png silent; wait 1; screenshot temporal_taa_a_3 png silent; wait 1; screenshot temporal_taa_a_4 png silent; wait 1; screenshot temporal_taa_a_5 png silent; wait 1; screenshot temporal_taa_a_6 png silent; wait 1; screenshot temporal_taa_a_7 png silent; wait 1; screenshot temporal_taa_a_8 png silent; wait 1; screenshot temporal_taa_a_9 png silent; wait 1; screenshot temporal_taa_a_10 png silent; ral_dump live temporal-motion-arm; wait 4; +right; wait 12; -right; wait 4; screenshot temporal_taa_b_first png silent; wait 96; screenshot temporal_taa_b_steady png silent; wait 4; echo Q3_TEMPORAL_QUALITY_CAPTURED; vstr tqPerfView"
+set tqPerfView "set r_aa 0; r_temporalInputTest 0; setviewpos 888 -768 434 180 0; r_pinFrameTime 0; fixedtime 20; wait 90; fixedtime 0; r_pinFrameTime 2.0; wait 16; echo Q3_TEMPORAL_PERF_VIEW; vstr tqPerfOff1"
+set tqPerfOff1 "set r_aa 0; r_temporalInputTest 0; wait 96; set r_gpuSpeeds 0; wait 4; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_OFF_1_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_OFF_1_END; set r_gpuSpeeds 0; wait 16; vstr tqPerfOn1"
+set tqPerfOn1 "set r_aa 0; r_temporalInputTest 1; wait 96; ral_dump live temporal-motion-arm; wait 16; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_ON_1_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_ON_1_END; set r_gpuSpeeds 0; wait 16; vstr tqPerfSmaa1"
+set tqPerfSmaa1 "r_temporalInputTest 0; set r_aa 2; wait 96; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_SMAA_1_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_SMAA_1_END; set r_gpuSpeeds 0; wait 16; vstr tqPerfSmaa2"
+set tqPerfSmaa2 "r_temporalInputTest 0; set r_aa 2; wait 96; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_SMAA_2_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_SMAA_2_END; set r_gpuSpeeds 0; wait 16; vstr tqPerfOn2"
+set tqPerfOn2 "set r_aa 0; r_temporalInputTest 1; wait 96; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_ON_2_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_ON_2_END; set r_gpuSpeeds 0; wait 16; vstr tqPerfOff2"
+set tqPerfOff2 "set r_aa 0; r_temporalInputTest 0; wait 96; set r_gpuSpeeds 1; echo Q3_TEMPORAL_PERF_OFF_2_BEGIN; wait 220; echo Q3_TEMPORAL_PERF_OFF_2_END; set r_gpuSpeeds 0; echo Q3_TEMPORAL_QUALITY_COMPLETE; quit"
 set activeAction "vstr tqSetup"
 map arena6
 CFGEOF
