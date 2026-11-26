@@ -3059,8 +3059,9 @@ competitive)
         #   1. qualification: the two AA-off processes give identical frames (otherwise nothing below can be judged);
         #   2. receipt: the TAA run resolved with history;
         #   3. regression: TAA pixels further than 24/255 from the same frame with AA off, summed over the frames, stay under
-        #      CP_MAX_FAR (measured 126.0 k after eade72ac3, SMAA 0.9 k: the rest is texture-level on the moving weapon);
-        #   4. sensitivity: the known-bad arm is at least CP_BAD_RATIO times worse (measured 1.35), or the gate cannot fail.
+        #      CP_MAX_FAR (measured 99.6 k after 90c6c78d0, SMAA 0.9 k: the rest is texture-level on the moving weapon; the
+        #      limit keeps the earlier ~15 % headroom and stays below the known-bad arm, 140 k);
+        #   4. sensitivity: the known-bad arm is at least CP_BAD_RATIO times worse (measured 1.40), or the gate cannot fail.
         CP_STAGE=motion; CP_FLIGHT="${CP_FLIGHT_GATE:-2}"; CP_MOTION_FRAMES="${CP_MOTION_FRAMES:-8}"
         CP_MOTION_ARMS="cpm_off:0:1 cpm_off2:0:1 cpm_taa:1:1 cpm_bad:1:1:set@r_dbgTemporalQuality@6 cpm_smaa:2:1"
         CP_VERDICT=1
@@ -3098,7 +3099,7 @@ print(rep, taa, bad, smaa)
 PYEOF2
 )"
             set -- $res
-            v="$(awk -v rep="$1" -v taa="$2" -v bad="$3" -v smaa="$4" -v res="${resolved:-0}" -v max="${CP_MAX_FAR:-145000}" -v ratio="${CP_BAD_RATIO:-1.2}" 'BEGIN{
+            v="$(awk -v rep="$1" -v taa="$2" -v bad="$3" -v smaa="$4" -v res="${resolved:-0}" -v max="${CP_MAX_FAR:-115000}" -v ratio="${CP_BAD_RATIO:-1.2}" 'BEGIN{
                 if (rep > 0) print "FAIL(instrument: the two AA-off processes differ in " rep " px; the scene is not repeatable)";
                 else if (res < 100) print "FAIL(receipt: only " res " resolved TAA frames)";
                 else if (bad < taa * ratio) print "FAIL(sensitivity: the known-bad arm " bad " is not " ratio "x the TAA arm " taa ")";
@@ -3106,7 +3107,7 @@ PYEOF2
                 else print "OK" }')"
             [ "${v:0:2}" = "OK" ] || FAIL=1
             printf "  competitive gate: %s frames, AA-off repeat %s px, px >24/255 from AA off: TAA %s (limit %s), known-bad %s, SMAA %s; %s resolved TAA frames -> %s\n" \
-                "$CP_MOTION_FRAMES" "$1" "$2" "${CP_MAX_FAR:-145000}" "$3" "$4" "${resolved:-0}" "$v"
+                "$CP_MOTION_FRAMES" "$1" "$2" "${CP_MAX_FAR:-115000}" "$3" "$4" "${resolved:-0}" "$v"
         fi
     fi
     if [ "$CP_STAGE" = freeze ]; then
