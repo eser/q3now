@@ -31,7 +31,7 @@ while [ $# -gt 0 ]; do
         *) echo "unknown arg: $1" >&2; exit 2;;
     esac
 done
-[ -n "$MODE" ]   || { echo "FAIL: --mode {gtao|fwdplus|viewport|shadow_atest|scene|chromatic|crowd|crowdpromo|entitylight|scenegolden|crowdwasm|gpucull|worldindirect|worldphase|worlddecal|exacthold|temporalfold|bootstrapaa|gunsmear|portalworld|aaportal|aacompare|aalatency|capturenoise|cullref|dlight-shadow|dlight-shadow-lifecycle|dlight-shadow-probe|selftest} required" >&2; exit 2; }
+[ -n "$MODE" ]   || { echo "FAIL: --mode {gtao|fwdplus|viewport|shadow_atest|scene|chromatic|crowd|crowdpromo|entitylight|scenegolden|crowdwasm|gpucull|worldindirect|worldphase|worlddecal|exacthold|temporalfold|bootstrapaa|gunsmear|competitive|portalworld|aaportal|aacompare|aalatency|capturenoise|cullref|dlight-shadow|dlight-shadow-lifecycle|dlight-shadow-probe|selftest} required" >&2; exit 2; }
 # selftest needs no engine (it exercises the assertion math on synthetic inputs).
 if [ "$MODE" != "selftest" ]; then
     [ -n "$ENGINE" ] || { echo "FAIL: --engine <wired.x64> required" >&2; exit 2; }
@@ -3011,6 +3011,151 @@ PYEOF
         else print "OK(no measurable mask effect: mask0 " d0 " mask1 " d1 " noise " nz ")" }')"
     [ "${v:0:2}" = "OK" ] || FAIL=1
     printf "  rocketghost: explosion %s px, old-only %s px, deviation from AA-off mask0=%s mask1=%s repeat-noise=%s -> %s\n" "$1" "$2" "$3" "$4" "$5" "$v"
+    ;;
+
+competitive)
+    # TASK-241 #6: one scene with what a competitive player sees at once - the first-person gun firing, a rocket in flight and its
+    # explosion, the light they throw on the walls - over consecutive frames, judged against the same frames with AA off and SMAA.
+    #
+    # Stages (CP_STAGE):
+    #   gate (default)  in motion, one process per arm; requires the AA-off frames to repeat bit-identically across processes
+    #                   (true with fixedtime 8 and r_hdrAutoExposure 0 on the launch line since particles and weather step on the
+    #                   world's time, 21113f50d / 9ea590dfd), then compares TAA, SMAA and a known-bad arm frame by frame.
+    #   motion          the same captures without a verdict (CP_MOTION_ARMS "tag:r_aa:effectMask[:cfg@line]"), for sweeps.
+    #   measure         one process, frozen with the cheat-only `pause` at two moments (rocket in flight, explosion): the first two
+    #                   frozen TAA frames, then AA off, SMAA and reconverged TAA in the same state; reports, no verdict.
+    #   freeze          qualifies `pause`: frames 90 apart while paused are identical, frames 30 apart unpaused are not.
+    # CP_MAP, CP_POS ("x y z yaw pitch"), CP_EXTRA_CFG (one cfg line run first, e.g. "set g_envWeather rain") pick the scene.
+    CP_MAP="${CP_MAP:-arena1}"; CP_POS="${CP_POS:-700 2096 80 180 10}"; CP_STAGE="${CP_STAGE:-gate}"
+    CP_FLIGHT="${CP_FLIGHT:-5}"; CP_BOOM="${CP_BOOM:-30}"; CP_CONVERGE="${CP_CONVERGE:-150}"
+    CP_LAUNCH="${CP_LAUNCH:-+set fixedtime 8 +set r_hdrAutoExposure 0}"
+    CP_DEC="${PNG2RAW:-$WIRED_SOURCE/tools/png2raw/png2raw}"
+    if [ "$CP_STAGE" = gate ]; then
+        # The gate (default). In motion, without a freeze, from two frames after the shot (the muzzle flash's size and roll
+        # come from rand() and differ between processes before that): CP_MOTION_FRAMES consecutive frames per process with AA
+        # off (twice), TAA, SMAA and the known-bad TAA arm (variance clipping off). Checks:
+        #   1. qualification: the two AA-off processes give identical frames (otherwise nothing below can be judged);
+        #   2. receipt: the TAA run resolved with history;
+        #   3. regression: TAA pixels further than 24/255 from the same frame with AA off, summed over the frames, stay under
+        #      CP_MAX_FAR (measured 126.0 k after eade72ac3, SMAA 0.9 k: the rest is texture-level on the moving weapon);
+        #   4. sensitivity: the known-bad arm is at least CP_BAD_RATIO times worse (measured 1.35), or the gate cannot fail.
+        CP_STAGE=motion; CP_FLIGHT="${CP_FLIGHT_GATE:-2}"; CP_MOTION_FRAMES="${CP_MOTION_FRAMES:-8}"
+        CP_MOTION_ARMS="cpm_off:0:1 cpm_off2:0:1 cpm_taa:1:1 cpm_bad:1:1:set@r_dbgTemporalQuality@6 cpm_smaa:2:1"
+        CP_VERDICT=1
+    fi
+    if [ "$CP_STAGE" = motion ]; then
+        # In motion, without a freeze: CP_MOTION_FRAMES consecutive frames from CP_FLIGHT frames after the shot, per arm
+        # (CP_MOTION_ARMS: "tag:r_aa" entries). Usable only if two AA-off processes give identical frames (check first).
+        CP_MOTION_FRAMES="${CP_MOTION_FRAMES:-6}"
+        for arm in ${CP_MOTION_ARMS:-cpm_off_a:0:1 cpm_off_b:0:1}; do
+            IFS=: read -r tag aa mask extra <<< "$arm"   # extra: one more cfg line, '@' for spaces
+            { printf '%s\n' "${CP_EXTRA_CFG:-}"
+              printf 'set cg_draw2D 0\nset cg_drawGun 1\nset r_pinFrameTime 0\nset r_pinShaderTime 0\nset r_dbgTemporalEffectMask %s\ncmd noclip\ncmd give all\nwait 40\nweapon 5\nwait 160\n' "${mask:-1}"
+              [ -n "${extra:-}" ] && printf '%s\n' "${extra//@/ }"
+              printf '+attack\nwait 1\n-attack\nwait %s\n' "$CP_FLIGHT"
+              for (( k = 0; k < CP_MOTION_FRAMES; k++ )); do printf 'screenshot vrf_%s_m%s\nwait 1\n' "$tag" "$k"; done
+              printf 'wait 4\n'; } > "$SMOKE_HOME/base/vrf_cp.cfg"
+            # shellcheck disable=SC2086
+            CAP_POST_CMD="exec vrf_cp.cfg" CAP_EXTRA_WAIT=$(( 260 + CP_FLIGHT + 2 * CP_MOTION_FRAMES )) \
+                capture_fixed_cam "$CP_MAP" "$CP_POS" "$tag" +set r_aa "$aa" $CP_LAUNCH >/dev/null || FAIL=1
+        done
+        if [ "${CP_VERDICT:-0}" = 1 ] && [ "$FAIL" = 0 ]; then
+            resolved="$(grep -c 'temporal-resolved-hdr schema=3' "$VRF_TMP/vrf-cpm_taa.log" || true)"
+            res="$(python3 - "$SHOTDIR" "$CP_DEC" "$CP_MOTION_FRAMES" <<'PYEOF2'
+import subprocess, sys
+d, dec, n = sys.argv[1], sys.argv[2], int(sys.argv[3])
+def load(name): return subprocess.check_output([dec, f"{d}/vrf_{name}.png"])
+def far(a, b, thr):
+    return sum(max(abs(a[i] - b[i]), abs(a[i+1] - b[i+1]), abs(a[i+2] - b[i+2])) > thr for i in range(0, len(a), 6))
+rep = taa = bad = smaa = 0
+for k in range(n):
+    off = load(f"cpm_off_m{k}")
+    rep += far(off, load(f"cpm_off2_m{k}"), 0)
+    taa += far(load(f"cpm_taa_m{k}"), off, 24); bad += far(load(f"cpm_bad_m{k}"), off, 24); smaa += far(load(f"cpm_smaa_m{k}"), off, 24)
+print(rep, taa, bad, smaa)
+PYEOF2
+)"
+            set -- $res
+            v="$(awk -v rep="$1" -v taa="$2" -v bad="$3" -v smaa="$4" -v res="${resolved:-0}" -v max="${CP_MAX_FAR:-145000}" -v ratio="${CP_BAD_RATIO:-1.2}" 'BEGIN{
+                if (rep > 0) print "FAIL(instrument: the two AA-off processes differ in " rep " px; the scene is not repeatable)";
+                else if (res < 100) print "FAIL(receipt: only " res " resolved TAA frames)";
+                else if (bad < taa * ratio) print "FAIL(sensitivity: the known-bad arm " bad " is not " ratio "x the TAA arm " taa ")";
+                else if (taa > max) print "FAIL(regression: TAA " taa " px further than 24/255 from AA off, limit " max ")";
+                else print "OK" }')"
+            [ "${v:0:2}" = "OK" ] || FAIL=1
+            printf "  competitive gate: %s frames, AA-off repeat %s px, px >24/255 from AA off: TAA %s (limit %s), known-bad %s, SMAA %s; %s resolved TAA frames -> %s\n" \
+                "$CP_MOTION_FRAMES" "$1" "$2" "${CP_MAX_FAR:-145000}" "$3" "$4" "${resolved:-0}" "$v"
+        fi
+    fi
+    if [ "$CP_STAGE" = freeze ]; then
+        # The screenshot that shares a frame with `pause 0` is rendered after the unpause, so the last one waits a frame.
+        { printf '%s\n' "${CP_EXTRA_CFG:-}"; printf 'set cg_draw2D 0\nset cg_drawGun 1\nset r_pinFrameTime 0\nwait 160\nscreenshot vrf_cpq_run0\nwait 30\nscreenshot vrf_cpq_run1\n'
+          printf 'pause 1\nwait 4\nscreenshot vrf_cpq_pz0\nwait 90\nscreenshot vrf_cpq_pz1\nwait 1\npause 0\nwait 4\n'; } > "$SMOKE_HOME/base/vrf_cp.cfg"
+        # shellcheck disable=SC2086
+        CAP_POST_CMD="exec vrf_cp.cfg" capture_fixed_cam "$CP_MAP" "$CP_POS" cpq +set r_aa 0 $CP_LAUNCH >/dev/null || FAIL=1
+        res="$(python3 - "$SHOTDIR" "$CP_DEC" <<'PYEOF2'
+import subprocess, sys
+d, dec = sys.argv[1:3]
+def load(n): return subprocess.check_output([dec, f"{d}/vrf_{n}.png"])
+def big(a, b):
+    A, B = load(a), load(b)
+    return sum(max(abs(A[i] - B[i]), abs(A[i+1] - B[i+1]), abs(A[i+2] - B[i+2])) > 8 for i in range(0, len(A), 6))
+print(big("cpq_run0", "cpq_run1"), big("cpq_pz0", "cpq_pz1"))
+PYEOF2
+)"
+        set -- $res
+        v="$(awk -v r="$1" -v p="$2" 'BEGIN{ if (r < 1000) print "FAIL(nothing moves while running: " r " px; the check says nothing)"; else if (p > 0) print "FAIL(frames differ while paused: " p " px)"; else print "OK" }')"
+        [ "${v:0:2}" = "OK" ] || FAIL=1
+        printf "  competitive freeze: running 30 frames apart %s px >8, paused 90 frames apart %s px >8 -> %s\n" "$1" "$2" "$v"
+    elif [ "$CP_STAGE" = measure ]; then
+        cp_set() {  # tag: freeze, capture the five frames of one moment, reconverge, unpause
+            printf 'pause 1\nscreenshot vrf_%s_t0\nwait 1\nscreenshot vrf_%s_t1\nset r_aa 0\nwait 3\nscreenshot vrf_%s_off\nwait 3\nscreenshot vrf_%s_off2\nset r_aa 2\nwait 3\nscreenshot vrf_%s_smaa\nset r_aa 1\nwait %s\nscreenshot vrf_%s_conv\nwait 1\npause 0\n' \
+                "$1" "$1" "$1" "$1" "$1" "$CP_CONVERGE" "$1"
+        }
+        cp_arm() {  # tag mask
+            local tag="$1" mask="$2"
+            { printf 'set cg_draw2D 0\nset cg_drawGun 1\nset r_pinFrameTime 0\nset r_pinShaderTime 0\nset r_dbgTemporalEffectMask %s\ncmd noclip\ncmd give all\nwait 40\nweapon 5\nwait 160\n' "$mask"
+              printf '+attack\nwait 1\n-attack\nwait %s\n' "$CP_FLIGHT"; cp_set "${tag}_fly"
+              printf 'wait %s\n' "$CP_BOOM"; cp_set "${tag}_boom"
+              printf 'wait 4\n'; } > "$SMOKE_HOME/base/vrf_cp.cfg"
+            # shellcheck disable=SC2086
+            CAP_POST_CMD="exec vrf_cp.cfg" CAP_EXTRA_WAIT=$(( 260 + CP_FLIGHT + CP_BOOM + 2 * ( CP_CONVERGE + 12 ) )) \
+                capture_fixed_cam "$CP_MAP" "$CP_POS" "$tag" +set r_aa 1 $CP_LAUNCH >/dev/null || return 1
+            # Temporal receipt: the TAA frames of this run took the history path.
+            local resolved; resolved="$(grep -c 'temporal-resolved-hdr schema=3' "$VRF_TMP/vrf-$tag.log" || true)"
+            printf "  competitive %s: %s resolved TAA frames in the run\n" "$tag" "$resolved"
+            [ "${resolved:-0}" -ge 100 ] || { echo "  competitive $tag: FAIL (TAA never resolved with history; the run proves nothing)"; return 1; }
+        }
+        cp_arm cp_good 1 || FAIL=1
+        cp_arm cp_bad 0 || FAIL=1
+        python3 - "$SHOTDIR" "$CP_DEC" > "$VRF_TMP/vrf-cp-metrics.txt" <<'PYEOF2'
+import subprocess, struct, sys
+d, dec = sys.argv[1:3]
+def load(n):
+    p = f"{d}/vrf_{n}.png"
+    w, h = struct.unpack(">II", open(p, "rb").read(24)[16:24])
+    return w, h, subprocess.check_output([dec, p])
+for arm in ("cp_good", "cp_bad"):
+    for moment in ("fly", "boom"):
+        t = f"{arm}_{moment}"
+        w, h, off = load(f"{t}_off"); _, _, sm = load(f"{t}_smaa"); _, _, t0 = load(f"{t}_t0"); _, _, t1 = load(f"{t}_t1"); _, _, cv = load(f"{t}_conv")
+        def far(a, b, i): return max(abs(a[i] - b[i]), abs(a[i+1] - b[i+1]), abs(a[i+2] - b[i+2])) > 24
+        n = smaa = conv = w0 = tr0 = tr1 = gun0 = gunsm = 0
+        for y in range(0, h, 2):
+            gy = y >= h // 2
+            for x in range(0, w, 2):
+                i = (y * w + x) * 3; n += 1
+                c = far(cv, off, i); s = far(sm, off, i)
+                smaa += s; conv += c
+                a = far(t0, off, i); w0 += a
+                if a and not c: tr0 += 1; gun0 += gy and x >= w * 55 // 100
+                if far(t1, off, i) and not c: tr1 += 1
+                if s and gy and x >= w * 55 // 100: gunsm += 1
+        print(arm, moment, n, smaa, conv, w0, tr0, tr1, gun0, gunsm)
+PYEOF2
+        printf "  competitive (px >24 from AA off, every 2nd pixel): arm moment total smaa conv taa-t0 transient-t0 transient-t1 gun-transient-t0 gun-smaa\n"
+        sed 's/^/    /' "$VRF_TMP/vrf-cp-metrics.txt"
+    fi
     ;;
 
 worldphase)
