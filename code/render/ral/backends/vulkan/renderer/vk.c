@@ -11556,6 +11556,8 @@ qboolean vk_temporal_iqm_prescan_primary_command(
 		// The ordinary GPU-skinned draw (vk_model_iqm.c) is shader-agnostic: it binds one fixed opaque pipeline and the ordinary
 		// image, keeps the full depth range and runs no fog or dynamic-light pass, so the exact draw reproduces every surface it
 		// draws. A surface without an ordinary image is drawn by neither path.
+		// The draw binds tess.shader, which RB_BeginSurface takes through the shader remap; resolve the same shader here.
+		if ( shader && shader->remappedShader ) shader = shader->remappedShader;
 		ordinaryImage = shader ? R_IqmOrdinaryImageForShader( shader ) : NULL;
 		admissionFacts.ordinaryDrawn = ordinaryImage ? qtrue : qfalse;
 		if ( R_TemporalIqmClassifyProductSurface( &admissionFacts )
