@@ -2061,7 +2061,8 @@ static qboolean FS_ResolveResourceDirect( const char *qpath,
 			char *netpath;
 			FILE *file;
 			int length;
-			uint64_t sourceId;
+			fileOffset_t statSize;
+			fileTime_t modifiedTime, changedTime;
 
 			if ( search->policy != DIR_STATIC && FS_BannedPakFile( qpath ) ) {
 				continue;
@@ -2074,11 +2075,16 @@ static qboolean FS_ResolveResourceDirect( const char *qpath,
 			}
 			length = FS_FileLength( file );
 			fclose( file );
-			sourceId = wired_fs_identity_path( WIRED_FS_IDENTITY_SEED, netpath );
+			/* The path alone kept the identity of an edited file, so a stale cooked product stayed accepted. A failed stat
+			 * leaves time 0, which matches no product cooked from the file's real time. */
+			if ( !Sys_GetFileStats( netpath, &statSize, &modifiedTime, &changedTime ) ) {
+				modifiedTime = 0;
+			}
 			memset( out, 0, sizeof( *out ) );
 			Q_strncpyz( out->canonicalPath, qpath,
 				sizeof( out->canonicalPath ) );
-			out->sourceId = sourceId;
+			out->sourceId = wired_fs_loose_identity( (uint64_t)length,
+				(int64_t)modifiedTime, netpath );
 			out->size = (uint64_t)length;
 			out->fsGeneration = generation;
 			out->sourceKind = FS_RESOURCE_SOURCE_LOOSE;

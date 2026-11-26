@@ -36,6 +36,20 @@ int main( void ) {
 	CHECK( wired_fs_identity_path( WIRED_FS_IDENTITY_SEED, "Textures\\Liquids/Pool3d_5.JPG" )
 		== wired_fs_identity_path( WIRED_FS_IDENTITY_SEED, path ) );
 
+	// 5. Loose files: size, modification time and OS path. An edit changes the size or the time, and
+	//    therefore the identity; the same file stays the same identity.
+	{
+		const char *osPath = "/home/player/wired/base/textures/liquids/pool3d_5.jpg";
+		const uint64_t loose = wired_fs_loose_identity( 46091u, INT64_C( 1795000000 ), osPath );
+		CHECK( loose == UINT64_C( 6100990703001722864 ) );   // independent FNV-1a 64: 0xFF tag, LE size64, LE mtime64, folded path
+		CHECK( wired_fs_loose_identity( 46091u, INT64_C( 1795000000 ), osPath ) == loose );
+		CHECK( wired_fs_loose_identity( 46091u, INT64_C( 1795000001 ), osPath ) != loose );   // rewritten
+		CHECK( wired_fs_loose_identity( 46092u, INT64_C( 1795000000 ), osPath ) != loose );   // resized
+		CHECK( wired_fs_loose_identity( 46091u, INT64_C( 1795000000 ), "/home/player/wired/base/textures/liquids/pool3d_6.jpg" ) != loose );
+		CHECK( wired_fs_loose_identity( 46091u, INT64_C( 1795000000 ), osPath )
+			!= wired_fs_identity_path( WIRED_FS_IDENTITY_SEED, osPath ) );   // no longer the path alone
+	}
+
 	puts( "fs resource identity contract: PASS" );
 	return 0;
 }

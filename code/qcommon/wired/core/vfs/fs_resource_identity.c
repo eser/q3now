@@ -47,3 +47,12 @@ uint64_t wired_fs_member_identity( uint8_t archiveKind, uint32_t contentCrc,
 	hash = wired_fs_identity_u64( hash, size );
 	return wired_fs_identity_path( hash, path );
 }
+
+uint64_t wired_fs_loose_identity( uint64_t size, int64_t modifiedTime,
+		const char *osPath ) {
+	static const unsigned char looseTag = 0xFFu;   /* never an archive kind */
+	uint64_t hash = wired_fs_identity_bytes( WIRED_FS_IDENTITY_SEED, &looseTag, 1 );
+	hash = wired_fs_identity_u64( hash, size );
+	hash = wired_fs_identity_u64( hash, (uint64_t)modifiedTime );
+	return wired_fs_identity_path( hash, osPath );
+}

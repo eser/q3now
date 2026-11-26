@@ -27,4 +27,12 @@ uint64_t wired_fs_identity_path( uint64_t hash, const char *path );
 uint64_t wired_fs_member_identity( uint8_t archiveKind, uint32_t contentCrc,
 	uint64_t size, const char *path );
 
+/* A loose file, from its size, its modification time (seconds since the epoch,
+ * as the OS reports it) and its OS path. Editing the file changes the size or
+ * the time, so a product cooked from the old bytes stops matching; touching it
+ * without a change also does, which costs one recook and is never stale. The
+ * leading domain tag keeps loose identities apart from archive members'. */
+uint64_t wired_fs_loose_identity( uint64_t size, int64_t modifiedTime,
+	const char *osPath );
+
 #endif
