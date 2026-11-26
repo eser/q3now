@@ -3540,7 +3540,9 @@ void Com_Frame( qboolean noDelay ) {
 			//   4. No cap               -> minUsec = 1000 (1ms)
 			if ( gw_minimized && com_maxfpsMinimized->integer > 0 )
 				targetUsec = 1000000 / com_maxfpsMinimized->integer;
-			else if ( !gw_active && com_maxfpsUnfocused->integer > 0 )
+			// An automated run is unfocused by design (its window opens in the background), so it is not throttled for it.
+			else if ( !gw_active && com_maxfpsUnfocused->integer > 0
+					&& !( com_automated && com_automated->integer ) )
 				targetUsec = 1000000 / com_maxfpsUnfocused->integer;
 			else if ( com_maxfps->integer > 0 )
 				targetUsec = 1000000 / com_maxfps->integer;

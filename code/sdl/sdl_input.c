@@ -1484,6 +1484,8 @@ IN_Frame
 */
 void IN_Frame( void )
 {
+	GLimp_KeepAutomatedInBackground();   // an automated run never keeps the focus (see sdl_glimp.c)
+
 #ifdef USE_JOYSTICK
 	IN_JoyMove();
 #endif

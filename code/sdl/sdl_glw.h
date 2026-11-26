@@ -41,6 +41,7 @@ extern glwstate_t glw_state;
 const wiredDisplayCatalog_t *GLimp_GetDisplayCatalog( void );
 SDL_DisplayID GLimp_ResolveConfiguredDisplay( void );
 void GLimp_DisplayCatalogMarkDirty( uint32_t flags );
+void GLimp_KeepAutomatedInBackground( void );
 void GLimp_DisplayCatalogReconcile( void );
 
 void IN_Init( void );

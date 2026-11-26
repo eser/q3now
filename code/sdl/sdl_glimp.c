@@ -28,6 +28,55 @@
 #include "../qcommon/wired/stalltrace.h"
 #include "sdl_glw.h"
 #include "sdl_icon.h"
+
+#if defined(__APPLE__)
+#include <objc/message.h>
+#include <objc/runtime.h>
+
+/* macOS makes the process the frontmost application once its event loop runs, the SDL hints and [NSApp deactivate] notwithstanding
+ * (measured: frontmost for the whole automated capture). An automated run therefore remembers the application that was frontmost
+ * when it started and, whenever it finds itself frontmost, yields activation to it and activates it again (the macOS 14 cooperative
+ * activation calls; older systems only take the activate). */
+static id glimp_macPreviousApp;
+
+static id GLimp_MacSend( id target, const char *selector )
+{
+	return target ? ( (id (*)( id, SEL ))objc_msgSend )( target, sel_registerName( selector ) ) : nil;
+}
+
+static void GLimp_MacRememberFrontmostApp( void )
+{
+	Class workspaceClass = objc_getClass( "NSWorkspace" );
+	id workspace = workspaceClass ? ( (id (*)( Class, SEL ))objc_msgSend )( workspaceClass, sel_registerName( "sharedWorkspace" ) ) : nil;
+	id front = GLimp_MacSend( workspace, "frontmostApplication" );
+	if ( front ) glimp_macPreviousApp = GLimp_MacSend( front, "retain" );
+}
+
+static void GLimp_MacReturnFocus( void )
+{
+	Class runningClass = objc_getClass( "NSRunningApplication" );
+	Class appClass = objc_getClass( "NSApplication" );
+	id self, app;
+	SEL yield = sel_registerName( "yieldActivationToApplication:" );
+	if ( !glimp_macPreviousApp || !runningClass || !appClass ) return;
+	self = ( (id (*)( Class, SEL ))objc_msgSend )( runningClass, sel_registerName( "currentApplication" ) );
+	if ( !self || !( (BOOL (*)( id, SEL ))objc_msgSend )( self, sel_registerName( "isActive" ) ) ) return;
+	app = ( (id (*)( Class, SEL ))objc_msgSend )( appClass, sel_registerName( "sharedApplication" ) );
+	if ( app && ( (BOOL (*)( id, SEL, SEL ))objc_msgSend )( app, sel_registerName( "respondsToSelector:" ), yield ) )
+		( (void (*)( id, SEL, id ))objc_msgSend )( app, yield, glimp_macPreviousApp );
+	(void)( (BOOL (*)( id, SEL, unsigned long ))objc_msgSend )( glimp_macPreviousApp,
+		sel_registerName( "activateWithOptions:" ), 0UL );
+}
+#endif
+
+void GLimp_KeepAutomatedInBackground( void )
+{
+#if defined(__APPLE__)
+	if ( com_automated && com_automated->integer && SDL_window )
+		GLimp_MacReturnFocus();
+#endif
+}
+
 LOG_DECLARE_CHANNEL( ch_client, "client" );
 
 typedef enum {
@@ -815,6 +864,12 @@ static rserr_t GLimp_StartDriverAndSetMode( int mode, const char *modeFS,
 	if ( !SDL_WasInit( SDL_INIT_VIDEO ) )
 	{
 		const char *driverName;
+
+#if defined(__APPLE__)
+		// An automated run hands the focus back to the application that had it (GLimp_KeepAutomatedInBackground).
+		if ( automated )
+			GLimp_MacRememberFrontmostApp();
+#endif
 
 #ifdef __linux__
 		// SDL3: prefer Wayland over X11 on Linux
