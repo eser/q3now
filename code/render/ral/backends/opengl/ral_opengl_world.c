@@ -892,9 +892,9 @@ cleanup:
 	return ok;
 }
 
-/* Records the pose of every model entity with a motion identity into this TAA frame's entity pose cache transaction (the view
- * weapon excepted: it moves with the camera and stays invalidated), keeping the committed previous pose where there is one. The
- * same rule set as Metal and WebGPU (render_temporal_entity_submission.h). */
+/* Records the pose of every model entity with a motion identity (the first-person weapon included) into this TAA frame's entity
+ * pose cache transaction, keeping the committed previous pose where there is one. The same rule set as Metal and WebGPU
+ * (render_temporal_entity_submission.h). */
 static void PrepareEntityMotion( const ralOpenGlWorldLowerInfo_t *info, const renderSubmissionState_t *frontend,
 		const renderEntityCommand_t *entities, uint32_t entityCount, entityMotionState_t *states,
 		ralOpenGlWorldReceipt_t *receipt ) {
@@ -905,7 +905,6 @@ static void PrepareEntityMotion( const ralOpenGlWorldLowerInfo_t *info, const re
 		temporalEntityPose_t pose;
 		temporalEntityPoseReceipt_t poseReceipt;
 		if ( !entities[i].hasTemporal || entity->reType != RT_MODEL || entity->hModel <= 0
-				|| ( entity->renderfx & ( RF_DEPTHHACK | RF_FIRST_PERSON ) )
 				|| !RalOpenGl_EntityInPrimaryView( entity )
 				|| !RenderSubmission_ModelSnapshot( frontend, entity->hModel, &model ) || !model.ready
 				|| !model.positions || !model.frameCount ) continue;
