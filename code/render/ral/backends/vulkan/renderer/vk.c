@@ -30392,8 +30392,11 @@ typedef struct {
 
 static vkTemporalEntMatRingReceipt_t vk_temporal_entmat_ring;
 
+// Callers reset the descriptor arena, so the descriptors this receipt recorded are gone and the
+// static bind-group sweep recreates them. The receipt is forgotten rather than only marked not
+// ready: a kept identity would read the recreated descriptors as drift on the next ensure.
 static void vk_temporal_entmat_ring_invalidate( void ) {
-	vk_temporal_entmat_ring.ready = qfalse;
+	memset( &vk_temporal_entmat_ring, 0, sizeof( vk_temporal_entmat_ring ) );
 }
 
 static VkDeviceSize vk_entmat_capacity_bytes( uint32_t requiredSlots ) {
