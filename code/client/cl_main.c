@@ -2290,6 +2290,35 @@ static void CL_Rcon_f( void ) {
 
 /*
 ==================
+CL_Pause_f
+
+`pause [0|1]`: the single-player pause the in-game menu sets, without the menu. Game time stops (the server runs no game
+frames, the cgame time holds) while frames keep rendering, so a test can capture one frozen moment with different render
+settings in the same process. Cheat-only: it exists for tests, and the server still refuses to pause with a second client.
+==================
+*/
+static void CL_Pause_f( void ) {
+	const char *value;
+	if ( !com_sv_running->integer || clientActiveApp->state != CA_ACTIVE ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_client), "pause: only in an active local game\n" );
+		return;
+	}
+	if ( !Cvar_VariableIntegerValue( "sv_cheats" ) ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_client), "pause: needs sv_cheats 1\n" );
+		return;
+	}
+	if ( Cmd_Argc() > 1 ) {
+		value = atoi( Cmd_Argv( 1 ) ) ? "1" : "0";
+	} else {
+		value = cl_paused->integer ? "0" : "1";
+	}
+	Cvar_Set( "cl_paused", value );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "pause: %s\n", value[0] == '1' ? "on" : "off" );
+}
+
+
+/*
+==================
 CL_Disconnect_f
 ==================
 */
@@ -5741,6 +5770,7 @@ void CL_Init( void ) {
 	Cmd_AddCommand ("snd_restart", CL_Snd_Restart_f);
 	Cmd_AddCommand ("vid_restart", CL_Vid_Restart_f);
 	Cmd_AddCommand ("disconnect", CL_Disconnect_f);
+	Cmd_AddCommand( "pause", CL_Pause_f );
 	Cmd_AddCommand ("record", CL_Record_f);
 	Cmd_SetCommandCompletionFunc( "record", CL_CompleteRecordName );
 	Cmd_AddCommand ("demo", CL_PlayDemo_f);
@@ -5845,6 +5875,7 @@ void CL_Shutdown( const char *finalmsg, qboolean quit ) {
 	Cmd_RemoveCommand ("snd_restart");
 	Cmd_RemoveCommand ("vid_restart");
 	Cmd_RemoveCommand ("disconnect");
+	Cmd_RemoveCommand( "pause" );
 	Cmd_RemoveCommand ("record");
 	Cmd_RemoveCommand ("demo");
 	Cmd_RemoveCommand ("demo_ui");
