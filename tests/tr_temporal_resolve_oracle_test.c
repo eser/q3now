@@ -133,6 +133,28 @@ int main( void ) {
 		CHECK( r.pixelClass == TEMPORAL_RESOLVE_ORACLE_CURRENT && Near( r.displayedLo[0], 1.0f ) );
 	}
 
+	// 9. Jittered reconstruction (3x3 quadratic Lagrange at pixel + jitter, clamped into the 3x3 range). Validity 0 and no
+	//    spatial fallback, so the displayed colour is the reconstruction itself. Half a texel to the right:
+	//    weights (-1/8, 3/4, 3/8) on x, (0, 1, 0) on y.
+	{
+		int x, y;
+		//    a) A ramp c(x) = x / 8 is interpolated exactly: (4 + 0.5) / 8.
+		Scene( 0.0f, 0.0f, 1.0f );
+		for ( y = 0; y < H; ++y ) for ( x = 0; x < W; ++x ) SetColor( s_current, x, y, x / 8.0f, x / 8.0f, x / 8.0f, 1.0f );
+		s_validity[4 * W + 4] = 0u;
+		Setup( &p, &k, 0u );
+		k.currentEffectiveJitterUv[0] = 0.5f / (float)W;
+		CHECK( R_TemporalResolveOraclePixel( &p, &k, 4, 4, &r ) );
+		CHECK( r.pixelClass == TEMPORAL_RESOLVE_ORACLE_CURRENT && Near( r.displayedLo[0], 4.5f / 8.0f )
+			&& Near( r.displayedHi[0], r.displayedLo[0] ) );
+		//    b) A lone bright texel left of the pixel overshoots the weights (-1/8 * 1 = -0.125); the clamp keeps the 3x3 range.
+		Scene( 0.0f, 0.0f, 1.0f );
+		for ( y = 0; y < H; ++y ) SetColor( s_current, 3, y, 1.0f, 1.0f, 1.0f, 1.0f );
+		s_validity[4 * W + 4] = 0u;
+		CHECK( R_TemporalResolveOraclePixel( &p, &k, 4, 4, &r ) );
+		CHECK( r.pixelClass == TEMPORAL_RESOLVE_ORACLE_CURRENT && Near( r.displayedLo[0], 0.0f ) && Near( r.displayedHi[0], 0.0f ) );
+	}
+
 	// 8. Half-precision comparison: inside the interval passes, a step outside fails.
 	{
 		uint16_t inside[4] = { FloatToHalf( 0.5f ), FloatToHalf( 0.5f ), FloatToHalf( 0.5f ), FloatToHalf( 1.0f ) };
