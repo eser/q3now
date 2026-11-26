@@ -493,10 +493,13 @@ static temporalResolveOracleClass_t Evaluate( oracleEval_t *e, int32_t px, int32
 				historyCount = fminf( priorCount * confidence + 1.0f, TEMPORAL_RESOLVE_ORACLE_COUNT_CAP );
 				if ( ( k->qualityFlags & 8u ) == 0u ) {
 					float blur[3];
+					/* temporal_resolve.comp movingSpeedScale: the sharpening falls with the speed like the moving count. */
+					const float speedScale = InvSqrtSq( 1.0f + TEMPORAL_RESOLVE_ORACLE_MOVING_SPEED_FALLOFF
+						* sqrtf( motionTexel[0] * motionTexel[0] + motionTexel[1] * motionTexel[1] ) );
 					SamplePreviousBlur( e, previousTexel, tapMin, tapMax, blur );
 					for ( c = 0; c < 3; ++c ) {
 						float detail = prior[c] - blur[c];
-						displayed[c] = Clampf( resolved[c] + TEMPORAL_RESOLVE_ORACLE_OUTPUT_SHARPEN * confidence * detail,
+						displayed[c] = Clampf( resolved[c] + TEMPORAL_RESOLVE_ORACLE_OUTPUT_SHARPEN * confidence * speedScale * detail,
 							fminf( resolved[c], tapMin[c] ), fmaxf( resolved[c], tapMax[c] ) );
 					}
 					displayed[3] = current[3];
