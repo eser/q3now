@@ -11503,27 +11503,6 @@ static qboolean vk_temporal_iqm_primary_poison( void ) {
 	return qfalse;
 }
 
-static qboolean vk_temporal_iqm_opaque_stage0_exact(
-		const shader_t *shader, const shaderStage_t *stage,
-		const trRefEntity_t *entity, int fogNum, int dlighted,
-		const image_t *ordinaryImage ) {
-	return shader && stage && entity && ordinaryImage
-		&& shader->sort == SS_OPAQUE && shader->numUnfoggedPasses == 1
-		&& shader->stages[0] == stage && !shader->stages[1]
-		&& stage->active == qtrue && stage->numTexBundles == 1u
-		&& stage->bundle[0].image[0] == ordinaryImage
-		&& ( stage->stateBits & GLS_DEPTHMASK_TRUE )
-		&& !( stage->stateBits & ( GLS_ATEST_BITS | GLS_BLEND_BITS ) )
-		&& shader->numDeforms == 0 && shader->polygonOffset == qfalse
-		&& shader->isSky == qfalse && shader->entityMergable == qfalse
-		// FinishShader assigns FP_EQUAL to every opaque shader. The actual
-		// zero-fog draw fact below is the authority that excludes a fog pass.
-		&& stage->depthFragment == qfalse
-		&& fogNum == 0 && dlighted == 0
-		&& !( entity->e.renderfx & ( RF_DEPTHHACK | RF_CROSSHAIR ) )
-		? qtrue : qfalse;
-}
-
 qboolean vk_temporal_iqm_prescan_primary_command(
 		const drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	const vkTemporalMotionRecordingAuthority_t *recording =
@@ -11549,7 +11528,6 @@ qboolean vk_temporal_iqm_prescan_primary_command(
 		vkBindlessOrdinaryReceipt_t bindless;
 		temporalIqmModelView_t modelView;
 		shader_t *shader = NULL;
-		shaderStage_t *stage = NULL;
 		trRefEntity_t *entity = NULL;
 		model_t *model = NULL;
 		srfIQModel_t *surface = NULL;
@@ -11575,12 +11553,15 @@ qboolean vk_temporal_iqm_prescan_primary_command(
 		admissionFacts.worldEntityIndex = REFENTITYNUM_WORLD;
 		admissionFacts.gpuDirect = data && data->vk_gpu_skinning
 			&& data->num_poses > 0 ? qtrue : qfalse;
+		// The ordinary GPU-skinned draw (vk_model_iqm.c) is shader-agnostic: it binds one fixed opaque pipeline and the ordinary
+		// image, keeps the full depth range and runs no fog or dynamic-light pass, so the exact draw reproduces every surface it
+		// draws. A surface without an ordinary image is drawn by neither path.
+		ordinaryImage = shader ? R_IqmOrdinaryImageForShader( shader ) : NULL;
+		admissionFacts.ordinaryDrawn = ordinaryImage ? qtrue : qfalse;
 		if ( R_TemporalIqmClassifyProductSurface( &admissionFacts )
 				== TEMPORAL_IQM_PRODUCT_NONE ) continue;
 		if ( entity && entity->e.reType == RT_MODEL )
 			model = R_GetModelByHandle( entity->e.hModel );
-		if ( shader ) stage = shader->stages[0];
-		ordinaryImage = R_IqmOrdinaryImageForShader( shader );
 
 		admissionFacts.ordinaryAvailable = vk.iqmGpu.available
 			&& !vk.geometry_buffer_size_new ? qtrue : qfalse;
@@ -11620,9 +11601,6 @@ qboolean vk_temporal_iqm_prescan_primary_command(
 				== data->temporalGeometryGeneration
 			&& geometry.key.contentDigest == data->temporalContentDigest
 			? qtrue : qfalse;
-		admissionFacts.opaqueStage0Exact =
-			vk_temporal_iqm_opaque_stage0_exact( shader, stage, entity,
-				fogNum, dlighted, ordinaryImage );
 		admissionFacts.bindlessExact = ordinaryImage
 			&& vk_ral_bindless_query_ordinary( ordinaryImage, &bindless )
 			&& VK_BindlessPublicationReceiptExact( &bindless, &bindless )

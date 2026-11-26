@@ -115,7 +115,7 @@ typedef struct {
 	qboolean entityExact;
 	qboolean modelExact;
 	qboolean geometryExact;
-	qboolean opaqueStage0Exact;
+	qboolean ordinaryDrawn;      // the ordinary GPU path draws this surface (it has an ordinary image)
 	qboolean bindlessExact;
 } temporalIqmProductAdmissionFacts_t;
 
@@ -125,8 +125,11 @@ typedef enum {
 	TEMPORAL_IQM_PRODUCT_POISON
 } temporalIqmProductAdmission_t;
 
-// Non-IQM and non-primary surfaces are outside this candidate. Every IQM
-// surface that the ordinary fixed GPU path can execute is all-or-poison: a
+// Non-IQM and non-primary surfaces are outside this candidate, and so is a surface the ordinary GPU path does not draw (no
+// ordinary image: nothing on screen, nothing to poison). The ordinary GPU-skinned draw is shader-agnostic: one fixed opaque
+// pipeline, the ordinary image, the full depth range, no fog or dynamic light pass. The exact draw reproduces it for every surface
+// it draws, whatever its shader stages, blend, fog, dynamic light or depth hack (TASK-267: those used to poison the whole frame).
+// What remains all-or-poison is the infrastructure: an entity, model, geometry or bindless fact that is not exact, since a
 // partially exact draw cannot be omitted from the auxiliary command stream.
 temporalIqmProductAdmission_t R_TemporalIqmClassifyProductSurface(
 	const temporalIqmProductAdmissionFacts_t *facts );

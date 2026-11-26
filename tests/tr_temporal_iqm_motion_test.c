@@ -536,7 +536,7 @@ static int TestProductAdmission( void ) {
 	facts.entityExact = qtrue;
 	facts.modelExact = qtrue;
 	facts.geometryExact = qtrue;
-	facts.opaqueStage0Exact = qtrue;
+	facts.ordinaryDrawn = qtrue;
 	facts.bindlessExact = qtrue;
 	CHECK( R_TemporalIqmClassifyProductSurface( &facts )
 		== TEMPORAL_IQM_PRODUCT_ADMIT );
@@ -573,8 +573,10 @@ static int TestProductAdmission( void ) {
 		mutation = facts;
 		( (qboolean *)&mutation.ordinaryAvailable )[i] = qfalse;
 		CHECK( fields[i] == qtrue );
+		/* A surface the ordinary path does not draw is not a candidate; any other missing fact poisons. */
 		CHECK( R_TemporalIqmClassifyProductSurface( &mutation )
-			== TEMPORAL_IQM_PRODUCT_POISON );
+			== ( &( (qboolean *)&mutation.ordinaryAvailable )[i] == &mutation.ordinaryDrawn
+				? TEMPORAL_IQM_PRODUCT_NONE : TEMPORAL_IQM_PRODUCT_POISON ) );
 	}
 	CHECK( R_TemporalIqmClassifyProductSurface( NULL )
 		== TEMPORAL_IQM_PRODUCT_NONE );

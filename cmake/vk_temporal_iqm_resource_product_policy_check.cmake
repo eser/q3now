@@ -178,7 +178,7 @@ foreach(api IN ITEMS R_TemporalIqmSequenceBuild
 	endif()
 endforeach()
 extract_span("${VK}" "static qboolean vk_temporal_iqm_primary_poison( void )"
-	"static qboolean vk_temporal_iqm_opaque_stage0_exact(" IQM_POISON)
+	"qboolean vk_temporal_iqm_prescan_primary_command(" IQM_POISON)
 foreach(api IN ITEMS VK_TemporalMotionRecordingPoison VK_TemporalMainActivationPoison)
 	string(REGEX MATCHALL "${api}[(]" poison_calls "${IQM_POISON}")
 	list(LENGTH poison_calls poison_count)
@@ -192,24 +192,17 @@ require_text("${IQM_POISON}"
 require_text("${IQM_POISON}"
 	"VK_TemporalMainActivationPoison( &vk_temporal_main_activation );"
 	"primary IQM activation poison")
-foreach(needle IN ITEMS
-	"shader->sort == SS_OPAQUE"
-	"shader->numUnfoggedPasses == 1"
-	"stage->numTexBundles == 1u"
-	"stage->stateBits & GLS_DEPTHMASK_TRUE"
-	"GLS_ATEST_BITS | GLS_BLEND_BITS"
-	"shader->numDeforms == 0"
-	"shader->polygonOffset == qfalse"
-	"FinishShader assigns FP_EQUAL to every opaque shader"
-	"fogNum == 0 && dlighted == 0"
-	"RF_DEPTHHACK | RF_CROSSHAIR")
-	require_text("${VK}" "${needle}" "opaque stage0 exact classification")
+# TASK-267: the ordinary GPU-skinned IQM draw is shader-agnostic (one fixed opaque pipeline, the ordinary image, the full depth
+# range, no fog or dynamic-light pass), so admission depends on whether it draws at all, not on the shader's stages, blend, fog,
+# dynamic light or depth hack; a surface it does not draw is not a candidate, and its draw site no longer rejects (poisons) it.
+require_text("${IQM_SCAN}" "admissionFacts.ordinaryDrawn = ordinaryImage ? qtrue : qfalse;"
+	"admission from the ordinary draw")
+foreach(retired IN ITEMS "vk_temporal_iqm_opaque_stage0_exact" "opaqueStage0Exact")
+	string(FIND "${VK}" "${retired}" retired_pos)
+	if(NOT retired_pos EQUAL -1)
+		message(FATAL_ERROR "retired IQM stage-0 admission rule returned: ${retired}")
+	endif()
 endforeach()
-extract_span("${VK}" "static qboolean vk_temporal_iqm_opaque_stage0_exact("
-	"qboolean vk_temporal_iqm_prescan_primary_command(" IQM_OPAQUE_EXACT)
-if(IQM_OPAQUE_EXACT MATCHES "shader->fogPass")
-	message(FATAL_ERROR "opaque IQM admission must use the actual fogNum draw fact, not shader fogPass")
-endif()
 foreach(forbidden IN ITEMS VK_TemporalMainActivationBindIqm
 	VK_TemporalMainActivationPlanIqmDraw VK_TemporalMainActivationCommitIqmDraw
 	VK_TemporalMainActivationFinishIqm Ral_Cmd vkCmd vkCmdDraw)

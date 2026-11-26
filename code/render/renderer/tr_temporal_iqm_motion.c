@@ -379,6 +379,7 @@ temporalIqmProductAdmission_t R_TemporalIqmClassifyProductSurface(
 		return TEMPORAL_IQM_PRODUCT_NONE;
 	if ( facts->iqmSurface != qtrue ) return TEMPORAL_IQM_PRODUCT_NONE;
 	if ( facts->gpuDirect != qtrue ) return TEMPORAL_IQM_PRODUCT_NONE;
+	if ( facts->ordinaryDrawn != qtrue ) return TEMPORAL_IQM_PRODUCT_NONE;
 	if ( facts->entityIndex < 0
 			|| facts->entityIndex == facts->worldEntityIndex
 			|| (uint32_t)facts->entityIndex >= TEMPORAL_IQM_ENTITY_INDEX_LIMIT )
@@ -386,7 +387,6 @@ temporalIqmProductAdmission_t R_TemporalIqmClassifyProductSurface(
 	if ( facts->ordinaryAvailable == qtrue
 			&& facts->h5Eligible == qtrue && facts->entityExact == qtrue
 			&& facts->modelExact == qtrue && facts->geometryExact == qtrue
-			&& facts->opaqueStage0Exact == qtrue
 			&& facts->bindlessExact == qtrue )
 		return TEMPORAL_IQM_PRODUCT_ADMIT;
 	return TEMPORAL_IQM_PRODUCT_POISON;

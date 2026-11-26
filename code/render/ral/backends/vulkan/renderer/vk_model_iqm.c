@@ -1794,7 +1794,7 @@ void RB_IQMSurfaceAnim( const surfaceType_t *surface ) {
 		// identity a single exact seam.
 		ordinaryImage = R_IqmOrdinaryImageForShader( tess.shader );
 		if ( !ordinaryImage ) {
-			vk_temporal_iqm_reject_current_draw();
+			// Drawn by neither path, and the temporal pre-scan did not take it as a candidate: nothing to reject.
 			return;
 		}
 

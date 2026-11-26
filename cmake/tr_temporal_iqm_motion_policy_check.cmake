@@ -60,8 +60,10 @@ require_text(CORE "if ( facts->gpuDirect != qtrue ) return TEMPORAL_IQM_PRODUCT_
 require_text(CORE "facts->entityIndex == facts->worldEntityIndex" "world entity rejection")
 require_text(CORE "(uint32_t)facts->entityIndex >= TEMPORAL_IQM_ENTITY_INDEX_LIMIT" "entity bound rejection")
 require_text(CORE "facts->ordinaryAvailable == qtrue" "GPU-direct ordinary availability gate")
+require_text(CORE "if ( facts->ordinaryDrawn != qtrue ) return TEMPORAL_IQM_PRODUCT_NONE;"
+	"a surface the ordinary path does not draw is not a candidate")
 foreach(field IN ITEMS h5Eligible entityExact modelExact geometryExact
-	opaqueStage0Exact bindlessExact)
+	bindlessExact)
 	require_text(CORE "facts->${field} == qtrue" "GPU-direct exact admission field")
 endforeach()
 require_text(TEST "CHECK( verifier.cursor == 0 )" "Peek does not consume")
