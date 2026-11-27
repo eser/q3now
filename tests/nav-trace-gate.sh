@@ -48,6 +48,8 @@
 #                     (e.g. "grunt visor"), for client-vs-client aim. Report only.
 #   NAV_SV_FPS        gameplay modes: server tick rate (bot frame = 1000/N ms).
 #   NAV_PLAY_SKILL    playthrough: skill (1-5) of every added bot (default 5).
+#   NAV_WARM_WAIT     frames the discarded warm pass waits for the cold bake
+#   NAV_WARM_TIMEOUT  and its wall-clock limit (raise both for e1m2/e1m3).
 #   NAV_PLAY_CMDS     playthrough: extra console lines appended to the run's
 #                     playthrough.cfg (';'-separated), e.g. a diagnostic such as
 #                     "nav_thresholdprobe 590 650 4 710 726 8 80". Report only.
@@ -365,6 +367,11 @@ else
   # threshold, or anything the gate measures.
   WARM_WAIT=4000
 fi
+# NAV_WARM_WAIT / NAV_WARM_TIMEOUT (any mode) give a map whose cold bake outlasts the
+# defaults (e1m2, e1m3) time to finish and cache during the discarded warm pass.
+# Unset leaves the budgets above unchanged.
+WARM_WAIT="${NAV_WARM_WAIT:-$WARM_WAIT}"
+WARM_TIMEOUT="${NAV_WARM_TIMEOUT:-$WARM_TIMEOUT}"
 
 # activation mode is playthrough with the map's monster gauntlet suppressed, so
 # the button-press / door-open interaction is isolated from combat. The extra
@@ -373,6 +380,11 @@ fi
 EXTRA_SET=""
 if [ "$NAV_MODE" = "activation" ]; then
   EXTRA_SET="+set g_suppressMonsters 1"
+fi
+# NAV_NO_MONSTERS=1 (gameplay modes) suppresses the monster set in a playthrough too,
+# so a route can be walked without combat (e.g. with a NAV_PLAY_CMDS bot_teleport).
+if [ "${NAV_NO_MONSTERS:-0}" = "1" ] && [ "$NAV_MODE" != "nav" ] && [ "$NAV_MODE" != "activation" ]; then
+  EXTRA_SET="$EXTRA_SET +set g_suppressMonsters 1"
 fi
 # NAV_INPUT_AUDIT=1 (gameplay modes) adds the per-frame [INAUDIT] usercmd audit
 # (ai_main.c BotInputAudit): report only, it changes no bot decision.
