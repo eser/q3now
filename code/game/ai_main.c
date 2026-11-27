@@ -810,15 +810,22 @@ void BotChangeViewAngles(bot_state_t *bs, float thinktime) {
 
 	if (bs->ideal_viewangles[PITCH] > 180) bs->ideal_viewangles[PITCH] -= 360;
 	//
-	// Lua bots roaming (no current enemy): sweep ideal_viewangles ±45° around the
-	// movement direction so the bot visually scans while detecting out-of-path targets.
+	// Lua bots roaming (no current enemy): sweep the view ±45° around the movement
+	// direction so the bot visually scans while detecting out-of-path targets.
 	// Triangle-wave period ~4 s, phase-shifted per client to avoid synchronised panning.
-	if ( bs->wiredIntelActive && bs->enemy < 0 ) {
+	//
+	// The offset is a TARGET for this frame's integration, never written back into
+	// ideal_viewangles. Adding it in place made it accumulate on every call — and
+	// this runs on every SV_BotFrame, including the zero-elapsed ones (3 per tick
+	// headless, display-rate/20 in a client) — so the yaw target drifted by several
+	// times 45° between thinks. It is also off while strafe-jumping: there the view
+	// IS the steering input, and a scan turns the forward press sideways.
+	float yawScan = 0.0f;
+	if ( bs->wiredIntelActive && bs->enemy < 0 && !bs->strafejump_active ) {
 		float sc = ( FloatTime() + bs->client * 1.3f ) * 0.25f;
 		sc -= (int)sc;  // fractional part [0, 1)
 		float scanOfs = ( sc < 0.5f ) ? ( sc * 4.0f - 1.0f ) : ( 3.0f - sc * 4.0f );
-		bs->ideal_viewangles[YAW] += scanOfs * 45.0f;
-		bs->ideal_viewangles[YAW] = AngleMod( bs->ideal_viewangles[YAW] );
+		yawScan = scanOfs * 45.0f;
 	}
 	if ( bs->wiredIntelActive && bs->enemy >= 0 && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 2 ) {
 		static int s_viewLogTick[MAX_CLIENTS];
@@ -902,17 +909,40 @@ void BotChangeViewAngles(bot_state_t *bs, float thinktime) {
 		return;
 	}
 
-	for (int i = 0; i < 2; i++) {
-		bs->viewangles[i]       = AngleMod(bs->viewangles[i]);
-		bs->ideal_viewangles[i] = AngleMod(bs->ideal_viewangles[i]);
-		diff = AngleDifference(bs->ideal_viewangles[i], bs->viewangles[i]);
-		float desired_speed = diff * aim_skill / thinktime;
-		float delta = desired_speed - bs->viewanglespeed[i];
-		bs->viewanglespeed[i] += delta * accel * thinktime;
-		if (bs->viewanglespeed[i] >  maxvel) bs->viewanglespeed[i] =  maxvel;
-		if (bs->viewanglespeed[i] < -maxvel) bs->viewanglespeed[i] = -maxvel;
-		bs->viewangles[i] += bs->viewanglespeed[i] * thinktime;
-		bs->viewangles[i] = AngleMod(bs->viewangles[i]);
+	/* FRAME-TIME INDEPENDENCE.  The gains were tuned at the 50 ms server frame
+	 * (sv_fps 20), where one step closes aim_skill of the error and, at
+	 * aim_skill 1, accel*step is exactly 1.  Stepping once per frame with the
+	 * frame's own length made the per-second behaviour a function of the
+	 * frame: the gain diff*aim_skill/thinktime doubles the turn rate per
+	 * second at 25 ms and halves it at 100 ms, and at >= 75 ms a tracking
+	 * skill of >= 0.75 overshoots into a limit cycle that only maxvel bounds
+	 * (measured: view pitch past 60 deg, staring 2.2-2.4 s after a fight at
+	 * 100 ms frames).  So the gain is fixed to the 50 ms reference and the
+	 * frame is integrated in sub-steps no longer than it: at 50 ms this is one
+	 * step with the old arithmetic, longer frames take several reference-sized
+	 * steps, shorter frames one shorter step with the same per-second gain. */
+	{
+		const float refStep = 0.05f;
+		int nsub = (int)( thinktime / refStep );   /* ceil, without libm in the VM */
+		if ( nsub * refStep < thinktime - 1e-4f ) nsub++;
+		if ( nsub < 1 ) nsub = 1;
+		const float h = thinktime / nsub;
+		for (int i = 0; i < 2; i++) {
+			bs->viewangles[i]       = AngleMod(bs->viewangles[i]);
+			bs->ideal_viewangles[i] = AngleMod(bs->ideal_viewangles[i]);
+			const float target = ( i == YAW ) ? AngleMod( bs->ideal_viewangles[i] + yawScan )
+			                                  : bs->ideal_viewangles[i];
+			for (int s = 0; s < nsub; s++) {
+				diff = AngleDifference(target, bs->viewangles[i]);
+				float desired_speed = diff * aim_skill / refStep;
+				float delta = desired_speed - bs->viewanglespeed[i];
+				bs->viewanglespeed[i] += delta * accel * h;
+				if (bs->viewanglespeed[i] >  maxvel) bs->viewanglespeed[i] =  maxvel;
+				if (bs->viewanglespeed[i] < -maxvel) bs->viewanglespeed[i] = -maxvel;
+				bs->viewangles[i] += bs->viewanglespeed[i] * h;
+				bs->viewangles[i] = AngleMod(bs->viewangles[i]);
+			}
+		}
 	}
 
 	//bs->viewangles[PITCH] = 0;
