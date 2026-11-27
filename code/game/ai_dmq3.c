@@ -5046,6 +5046,25 @@ and issues jump commands. The Q3 air acceleration physics handle
 the speed gain automatically.
 ==================
 */
+/* A strafe-jump presses forward only: the cmd's movement then follows the
+   bot's ACTUAL facing, not strafejump_angles.  The view is a rate-limited
+   controller that lags its target, so pressing forward while it still points
+   elsewhere drives the bot sideways or backward (measured on arena1: facing vs
+   route median 143 deg, backward >100 u/s on 18-28% of frames).  Only engage
+   when the real view (playerState, world angles) already points along the
+   strafe heading; otherwise the nav's EA_Move, which BotInputToUserCommand maps
+   relative to the real view, stays in charge.  0.85 is this function's own
+   route-straightness threshold. */
+static qboolean BotStrafeJumpViewAligned( const bot_state_t *bs, const vec3_t angles )
+{
+	vec3_t a, b, fa, fb;
+	VectorSet( a, 0.0f, bs->cur_ps.viewangles[YAW], 0.0f );
+	VectorSet( b, 0.0f, angles[YAW], 0.0f );
+	AngleVectors( a, fa, NULL, NULL );
+	AngleVectors( b, fb, NULL, NULL );
+	return DotProduct( fa, fb ) >= 0.85f;
+}
+
 void BotStrafeJumpCheck( bot_state_t *bs, bot_moveresult_t *moveresult )
 {
 	float skill, speed, angle;
@@ -5065,7 +5084,7 @@ void BotStrafeJumpCheck( bot_state_t *bs, bot_moveresult_t *moveresult )
 	// With air control, view angle IS the steering input. Just press
 	// forward with the strafejump angles — no direction vector needed.
 	if ( bs->cur_ps.groundEntityNum == ENTITYNUM_NONE ) {
-		if ( bs->strafejump_side != 0 ) {
+		if ( bs->strafejump_side != 0 && BotStrafeJumpViewAligned( bs, bs->strafejump_angles ) ) {
 			bs->strafejump_active = qtrue;
 			bs->strafejump_landed = qfalse;
 			VectorCopy( bs->strafejump_angles, bs->ideal_viewangles );
@@ -5089,7 +5108,7 @@ void BotStrafeJumpCheck( bot_state_t *bs, bot_moveresult_t *moveresult )
 	// if nav has no direction this frame (reachability transition),
 	// bridge the gap: keep pressing forward with last strafejump angles
 	if ( VectorLength( moveresult->movedir ) < 0.1f ) {
-		if ( bs->strafejump_side != 0 ) {
+		if ( bs->strafejump_side != 0 && BotStrafeJumpViewAligned( bs, bs->strafejump_angles ) ) {
 			bs->strafejump_active = qtrue;
 			VectorCopy( bs->strafejump_angles, bs->ideal_viewangles );
 			trap_EA_MoveForward( bs->client );
@@ -5129,6 +5148,11 @@ void BotStrafeJumpCheck( bot_state_t *bs, bot_moveresult_t *moveresult )
 	sjAngles[PITCH] = 0;
 
 	VectorCopy( sjAngles, bs->strafejump_angles );
+	if ( !BotStrafeJumpViewAligned( bs, sjAngles ) ) {
+		/* not facing the heading yet: the nav view target turns the bot toward
+		   the route (within a few degrees of sjAngles); its EA_Move stays. */
+		return;
+	}
 	VectorCopy( sjAngles, bs->ideal_viewangles );
 	bs->strafejump_active = qtrue;
 
