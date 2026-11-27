@@ -3051,6 +3051,14 @@ int BotFindEnemy(bot_state_t *bs, int curenemy) {
 				float vis = BotEntityVisible( bs->entitynum, bs->eye,
 				                              bs->viewangles, 360, hunt_target );
 				if ( vis > 0 ) {
+					/* Already engaged: keep it, and do NOT restart the sight
+					   clock. Re-stamping enemysight_time on every think kept
+					   BotCheckAttack's reaction gate shut for as long as the
+					   hunt target stayed visible — the bot aimed and never
+					   fired. Same guard as the obelisk branch below. */
+					if ( hunt_target == curenemy ) {
+						return qfalse;
+					}
 					bs->enemy             = hunt_target;
 					bs->enemysight_time   = FloatTime();
 					bs->enemysuicide      = qfalse;
@@ -3582,7 +3590,7 @@ void BotAimAtEnemy(bot_state_t *bs) {
 	if (aim_skill > 0.95) {
 		//don't aim too early
 		if ( bs->wiredIntelActive ) {
-			reactiontime = 0.5f * WiredIntel_ProfileFieldOr( bs, WI_PROFILE_REACTION_TIME, 0.5f );
+			reactiontime = 0.5f * Com_Clamp( 0.0f, 1.0f, WiredIntel_ProfileFieldOr( bs, WI_PROFILE_REACTION_TIME, 0.5f ) );
 		} else {
 			reactiontime = 0.5f * trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_REACTIONTIME, 0, 1);
 		}
@@ -3904,8 +3912,12 @@ void BotCheckAttack(bot_state_t *bs) {
 #endif
 	}
 	//
+	/* Bounded to [0, 1] s on both paths. The classic path reads the characteristic
+	   with BFloat(0, 1); the profile value is the raw lerp of the Lua range
+	   (visor {3.0, 1.0}: 1.5 s at skill 4, 2.0 s at skill 3), and this gate holds
+	   fire for the whole of it after every (re)acquisition of the enemy. */
 	if ( bs->wiredIntelActive ) {
-		reactiontime = WiredIntel_ProfileFieldOr( bs, WI_PROFILE_REACTION_TIME, 0.5f );
+		reactiontime = Com_Clamp( 0.0f, 1.0f, WiredIntel_ProfileFieldOr( bs, WI_PROFILE_REACTION_TIME, 0.5f ) );
 	} else {
 		reactiontime = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_REACTIONTIME, 0, 1);
 	}
