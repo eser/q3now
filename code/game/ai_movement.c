@@ -31,6 +31,10 @@ BotStrafeJumpCheck() call in ai_dmnet.c.
 #include "ai_main.h"
 #include "ai_movement.h"
 #include "ai_dmq3.h"
+#include "../qcommon/q_feats.h"
+#if FEAT_RECAST_NAVMESH
+qboolean BotNav_InOmcTransit( int clientNum );   /* g_bot_nav.c */
+#endif
 LOG_DECLARE_CHANNEL( ch_botai, "botlib.ai" );
 
 /*
@@ -208,6 +212,20 @@ void BotAirSteer( bot_state_t *bs )
 	/* Skip during active combat — don't fight aim system */
 	if ( bs->enemy >= 0 && bs->enemyvisible_time > bs->ltime - 1.0f )
 		return;
+
+#if FEAT_RECAST_NAVMESH
+	/* An off-mesh link in progress owns the move.  Its per-mode actuation
+	   (BotNav_MoveToGoal: WALK-rise jump, CLIMB, FALL, RIDE) steers toward the
+	   LINK'S destination; this routine steers toward the top of the goal stack —
+	   the long-term item/exit goal, which is usually somewhere else.  Measured on
+	   e1m1's northbound WALK link (342,491,57)->(342,658,75): the WALK-rise jump
+	   fired correctly (toLip 13, vh 320), then this routine faced the bot at the
+	   long-term item 221 at (688,480,95) and pressed forward for the whole flight;
+	   the bot drifted east from (336,511) to (448,585) and dropped into the pit at
+	   z 24 instead of landing on the link's dest. */
+	if ( BotNav_InOmcTransit( bs->client ) )
+		return;
+#endif
 
 	/* Where will we land with current velocity and no further input? */
 	coast = BotPredictTrajectory( bs->origin, bs->velocity,

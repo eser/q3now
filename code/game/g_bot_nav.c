@@ -1249,6 +1249,19 @@ void BotNav_Steer( botNavState_t *bn, const vec3_t origin, const vec3_t velocity
         /* Walk forward through waypoints that are already "behind" us. */
         while ( bn->pathIdx < bn->path.count - 1 ) {
             vec3_t toWp;
+            /* Never walk the cursor PAST an off-mesh source.  The transit-entry
+             * block below tests the waypoint the cursor rests on; consuming the
+             * source here left the cursor on the link's DESTINATION (flags 0x00),
+             * so the link was never entered and the bot walked flat at a dest it
+             * cannot walk to.  Measured on e1m1: a path whose wp0 and OMC source wp1
+             * lay 4u apart had both inside the advance radius in the same frame —
+             * "wp 1 reached (OMC)" 228 times, OMC_TRANSIT entered 0 times there, the
+             * bot pinned at the foot of a 30u rise for the rest of the run.  The
+             * source is consumed by the entry block (within OMC_APPROACH_DIST, which
+             * exceeds the advance radius), so stopping here costs no progress. */
+            if ( bn->path.flags[bn->pathIdx] & NAV_PATHFLAG_OFFMESH_CON ) {
+                break;
+            }
             VectorSubtract( bn->path.positions[bn->pathIdx], origin, toWp );
             if ( VectorLength( toWp ) <= advanceRadius ) {
                 if ( nav_botdebug.integer ) {
@@ -1772,10 +1785,10 @@ void BotNav_MoveToGoal( bot_state_t *bs, bot_goal_t *goal,
                                     bn->omcJumpFired = qtrue;   /* one-shot, same latch */
                                     if ( nav_botdebug.integer )
                                         BotAI_Print( PRT_MESSAGE,
-                                            "[BOTNAV] cl=%d WALK-rise climb at (%.0f %.0f %.0f) -> dest (%.0f %.0f %.0f) rise=%.0f toLip=%.0f vh=%.0f\n",
+                                            "[BOTNAV] cl=%d WALK-rise climb at (%.0f %.0f %.0f) -> dest (%.0f %.0f %.0f) rise=%.0f toLip=%.0f vh=%.0f dYaw=%.0f\n",
                                             bs->client, bs->origin[0], bs->origin[1], bs->origin[2],
                                             steer.omcDest[0], steer.omcDest[1], steer.omcDest[2],
-                                            steer.omcDest[2] - bs->origin[2], toLipDist, vh );
+                                            steer.omcDest[2] - bs->origin[2], toLipDist, vh, dYaw );
                                 }
                             }
                         }
@@ -1853,15 +1866,28 @@ void BotNav_MoveToGoal( bot_state_t *bs, bot_goal_t *goal,
                 qboolean atLip     = ( toLipDist <= 15.0f /* agent radius — the bot's center cannot reach the lip point itself */ );
                 qboolean noProgress= ( toLipDist >= bn->omcFallBestToLip + BOT_NAV_OMC_ARRIVE_EPS );
                 if ( atLip || noProgress ) {
-                    if ( nav_botdebug.integer ) {
+                    /* STILL GROUNDED: step OFF the edge, do not hand to gravity yet.
+                     * Gravity only carries a bot that has left the floor — a bot
+                     * standing at the lip with its move suppressed stays on the lip.
+                     * The old code latched phase B (suppress) here on the ground:
+                     * measured, 6 of 6 FALL transits (arena1 (636,252,48)->(643,328,17)
+                     * x4, e1m1 (368,505,56)->(364,564,27) x2) latched "atlip" at
+                     * toLip 3-15, then stood still until the not-closing release
+                     * ~1.8 s later, ABANDONED, minDist 52-73.  Phase B is latched by
+                     * clearance alone (the branch above); here the bot walks toward
+                     * the link's dest, which lies beyond the edge.  A no-progress
+                     * (mis-azimuthed) bot gets the same correction: the dest
+                     * direction, not a freeze. */
+                    if ( nav_botdebug.integer && !bn->omcJumpFired ) {
                         BotAI_Print( PRT_MESSAGE,
-                            "[BOTNAV] cl=%d FALL phaseB cause=%s at (%.0f %.0f %.0f) toLip=%.0f best=%.0f\n",
+                            "[BOTNAV] cl=%d FALL drive-off cause=%s at (%.0f %.0f %.0f) toLip=%.0f best=%.0f\n",
                             bs->client, atLip ? "atlip" : "noprogress",
                             bs->origin[0], bs->origin[1], bs->origin[2],
                             toLipDist, bn->omcFallBestToLip );
+                        bn->omcJumpFired = qtrue;   /* FALL never jumps: reuse the latch to log once */
                     }
-                    bn->omcFallPhaseB = qtrue;   /* lip reached, or not approaching it */
-                    applySuppress = qtrue;
+                    applySuppress = qfalse;
+                    if ( haveDir ) VectorCopy( toDest, applyDir );
                 } else {
                     applySuppress = qfalse;
                     /* drive toward the lip edge (drop off it), else the dest vector */
@@ -1994,6 +2020,12 @@ void BotNav_MoveToGoal( bot_state_t *bs, bot_goal_t *goal,
 BotNav_MovementViewTarget — Recast replacement for trap_BotMovementViewTarget
 =================
 */
+qboolean BotNav_InOmcTransit( int clientNum )
+{
+    if ( clientNum < 0 || clientNum >= MAX_CLIENTS ) return qfalse;
+    return ( botNavStates[clientNum].steeringState == NAV_STEER_OMC_TRANSIT ) ? qtrue : qfalse;
+}
+
 qboolean BotNav_MovementViewTarget( int clientNum, const bot_goal_t *goal,
                                     vec3_t targetOut )
 {

@@ -276,6 +276,14 @@ qboolean BotNav_MovementViewTarget( int clientNum, const bot_goal_t *goal,
                                     vec3_t targetOut );
 
 /*
+ * BotNav_InOmcTransit — qtrue while the client's follower is executing an
+ * off-mesh link (NAV_STEER_OMC_TRANSIT).  During a transit the per-mode
+ * actuation in BotNav_MoveToGoal owns the move; other movement layers ask this
+ * instead of steering on their own idea of the target.
+ */
+qboolean BotNav_InOmcTransit( int clientNum );
+
+/*
  * nav_botdebug — cvar declared in ai_main.c, readable throughout g_bot_nav.c.
  * Non-zero enables per-repath and OMC-transit log lines.
  */
