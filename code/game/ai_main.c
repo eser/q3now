@@ -694,6 +694,10 @@ void BotEntityInfo(int entnum, aas_entityinfo_t *info) {
 	gentity_t *gent;
 	memset(info, 0, sizeof(aas_entityinfo_t));
 	if (entnum < 0 || entnum >= MAX_GENTITIES) return;
+	/* number identifies the slot even when it is not valid: EntityIsDead and other
+	   per-entity tests branch on it, and a freed slot left at 0 was read as client 0
+	   (a freed monster corpse "alive" whenever client 0 was). valid stays qfalse. */
+	info->number = entnum;
 	gent = &g_entities[entnum];
 	if (!gent->inuse) return;
 

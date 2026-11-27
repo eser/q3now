@@ -4314,8 +4314,43 @@ void WiredIntel_DefensiveCombat( bot_state_t *bs ) {
        BotCheckAttack fires if range and conditions allow.
        None of these calls switch the AI node — the bot stays in Seek_LTG/NBG
        and continues moving toward its objective. */
-    if ( !BotFindEnemy( bs, -1 ) ) {
-        return;
+    /* KEEP THE ENEMY ALREADY HELD.  BotFindEnemy skips only the candidate passed as
+       curenemy; called with -1 it finds the enemy the bot is already fighting as if
+       it were new and stamps enemysight_time = now (ai_dmq3.c, the "found an enemy"
+       tail).  This routine runs every think on the directive-locked path, and that
+       path deliberately keeps bs->enemy across thinks — so the sight clock restarted
+       every 50 ms and BotCheckAttack's reaction gate never opened: the bot aimed at
+       the monster and did not fire.  Measured on e1m1: one monster held visible at
+       32-68u for the whole dwell, FOUND enemy=<same> logged ~330 times, kills=0.
+       Same defect class as the HUNT re-stamp in BotFindEnemy.
+       Now: a held enemy that is still alive and visible is kept, and BotFindEnemy is
+       asked only whether a better one should replace it (curenemy = held, which is
+       also id's switch semantics: a replacement gets sight_time - 2).  A held enemy
+       that died, despawned or went out of sight is dropped and the search is fresh. */
+    {
+        const int held = bs->enemy;
+        qboolean keep = qfalse;
+        if ( held >= 0 && held < level.num_entities && held != bs->entitynum ) {
+            if ( held >= MAX_CLIENTS ) {
+                const gentity_t *m = &g_entities[held];
+                keep = ( m->inuse && m->aiThink && m->takedamage && m->health > 0 );
+            } else {
+                aas_entityinfo_t info;
+                BotEntityInfo( held, &info );
+                keep = ( info.valid && !EntityIsDead( &info ) );
+            }
+            if ( keep ) {
+                keep = BotEntityVisible( bs->entitynum, bs->eye, bs->viewangles, 360, held ) > 0;
+            }
+        }
+        if ( keep ) {
+            BotFindEnemy( bs, held );   /* may switch to a better candidate; never re-stamps held */
+        } else {
+            bs->enemy = -1;
+            if ( !BotFindEnemy( bs, -1 ) ) {
+                return;
+            }
+        }
     }
 
     /* FIGHT-WHILE-ADVANCING NEEDS SOMETHING TO ADVANCE ALONG.  The whole premise of
@@ -4349,6 +4384,15 @@ void WiredIntel_DefensiveCombat( bot_state_t *bs ) {
         }
         if ( !held ) {
             BotAimAtEnemy( bs );
+            /* Claim the view for this think, the way every other view owner does
+               (shoot-button, sound cue).  AINode_Seek_LTG runs this BEFORE its
+               movement block, whose "no ideal view set" branch then wrote a flat
+               movement heading over the aim (dir[2] = 0): measured on e1m1, 838
+               dwell frames on a monster below the bot with aim pitch 44-90 deg and
+               ideal pitch 0 on every one.  The NBG twin calls this after its
+               movement block, so it was not affected.  A movement that needs the
+               view (MOVERESULT_MOVEMENTVIEW*: jumps, ladders) still takes it. */
+            bs->flags |= BFL_IDEALVIEWSET;
         }
     }
     BotCheckAttack( bs );

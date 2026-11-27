@@ -198,6 +198,18 @@ qboolean EntityIsDead(aas_entityinfo_t *entinfo) {
 
 		if (ps.pm_type != PM_NORMAL) return qtrue;
 	}
+	/* A behaviour monster is dead once Behavior_MonsterDie has run: it clears aiThink
+	 * and takedamage but leaves the entity in use for 2 s while the death animation
+	 * plays (g_behavior.c).  Only clients were tested here, so every node that asks
+	 * "is my enemy dead?" kept fighting the corpse for those 2 s — and once it was
+	 * freed, BotEntityInfo zeroed the info and the bot aimed/chased toward (0,0,0).
+	 * The obelisk and other damageable non-monsters never set aiThink, so the
+	 * health<=0 && !aiThink pairing cannot misread them as dead monsters. */
+	else if (entinfo->number >= MAX_CLIENTS && entinfo->number < MAX_GENTITIES) {
+		const gentity_t *e = &g_entities[entinfo->number];
+		if (!e->inuse) return qtrue;
+		if (!e->aiThink && !e->takedamage && e->health <= 0) return qtrue;
+	}
 	return qfalse;
 }
 
@@ -3560,6 +3572,37 @@ void BotAimAtEnemy(bot_state_t *bs) {
 	if (bs->enemy >= MAX_CLIENTS) {
 		//if the obelisk is visible
 		VectorCopy(entinfo.origin, target);
+		/* A behaviour monster is a body with a box, not a point: aim at a part of the
+		 * box the bot can actually hit.  The origin is the box's reference point and can
+		 * be inside world geometry while most of the box is exposed — measured on e1m1:
+		 * a monster riding its nav leg into a 19u lip sat with origin z 24 under a floor
+		 * at z 32 (box top z 56), the fire gate's eye->origin trace hit the world on
+		 * every frame and the bot never fired.  Same rule id's client branch applies
+		 * ("if the enemy is NOT hit ... bestorigin[2] += 16"), done on the box: try the
+		 * box centre, then the upper part, keep the first whose eye line is clear by the
+		 * fire gate's own test (BotCheckAttack traces MASK_OPAQUE to bs->aimtarget).
+		 * "The MASK_SHOT trace reports the monster" is not that test: from above, the
+		 * line enters the box top first and accepts a centre that is under the floor.
+		 * A clear MASK_OPAQUE line to a point inside the box means the shot enters the
+		 * box on the way there. */
+		if ( bs->enemy < MAX_GENTITIES && g_entities[bs->enemy].aiThink ) {
+			bsp_trace_t mtrace;
+			vec3_t      cand[2];
+			int         k;
+			VectorAdd( entinfo.mins, entinfo.maxs, cand[0] );
+			VectorScale( cand[0], 0.5f, cand[0] );
+			VectorAdd( entinfo.origin, cand[0], cand[0] );
+			VectorCopy( entinfo.origin, cand[1] );
+			cand[1][2] += entinfo.maxs[2] - 8.0f;
+			VectorCopy( cand[0], target );
+			for ( k = 0; k < 2; k++ ) {
+				BotAI_Trace( &mtrace, bs->eye, NULL, NULL, cand[k], bs->client, MASK_OPAQUE );
+				if ( mtrace.fraction >= 1.0f || mtrace.ent == bs->enemy ) {
+					VectorCopy( cand[k], target );
+					break;
+				}
+			}
+		}
 #if FEAT_OVERLOAD
 		// if attacking an obelisk
 		if ( bs->enemy == redobelisk.entitynum ||
