@@ -1985,6 +1985,83 @@ void BotNav_MoveToGoal( bot_state_t *bs, bot_goal_t *goal,
         }
     }
 
+    /* CORNER UNWEDGE.  The mesh is eroded by a 15u RADIUS with 5u voxels, so a path
+     * edge can sit 13-15u from a wall, while the player box is a 30u SQUARE (Q1
+     * hull-1: 32u).  Measured twice: e1m1 (593,718,104) heading east, the opening
+     * free for a standing box from y>=720 while the path ran at y 718; arena1
+     * (298,797,24) heading north, free for x<=294 while the path ran at x 298.  In
+     * both the box caught a face perpendicular to the move by 1-4u, Pmove had no
+     * tangential component to slide on, and the bot pushed into the corner for the
+     * rest of the run (moveresult.blocked is never produced under Recast, so
+     * BotAIBlocked never ran).
+     * Rule: grounded, not in a transit, commanded move with no horizontal speed,
+     * and a box trace RAISED BY STEPSIZE (so a stair riser is never read as a wall)
+     * meets a near-vertical WORLD face head-on -> step sideways along the face to
+     * the nearest offset (4..24u) where the box clears the face, the forward line
+     * from there is open, and there is floor within a step below (the ledge probes
+     * are not trusted).  Side preference: toward the next waypoint.  Entities
+     * (doors, plats, buttons) are never treated this way. */
+    if ( realClient && !applySuppress && !steer.omcTransit &&
+         bs->cur_ps.groundEntityNum != ENTITYNUM_NONE ) {
+        const float vh = sqrtf( bs->cur_ps.velocity[0] * bs->cur_ps.velocity[0] +
+                                bs->cur_ps.velocity[1] * bs->cur_ps.velocity[1] );
+        vec3_t d;
+        VectorSet( d, applyDir[0], applyDir[1], 0.0f );
+        if ( vh < 30.0f && VectorNormalize( d ) > 0.5f ) {
+            const gentity_t *self = &g_entities[bs->client];
+            const float      step = 18.0f;   /* STEPSIZE */
+            trace_t          tr;
+            vec3_t           start, end;
+            VectorCopy( bs->origin, start );
+            start[2] += step;
+            VectorMA( start, 4.0f, d, end );
+            trap_Trace( &tr, start, self->r.mins, self->r.maxs, end, bs->client, MASK_PLAYERSOLID );
+            if ( !tr.startsolid && tr.fraction < 1.0f && tr.entityNum == ENTITYNUM_WORLD &&
+                 fabsf( tr.plane.normal[2] ) < 0.3f && DotProduct( tr.plane.normal, d ) < -0.85f ) {
+                vec3_t t = { -d[1], d[0], 0.0f };
+                float  pref = 1.0f;
+                int    nextIdx = ( bn->pathIdx + 1 < bn->path.count ) ? bn->pathIdx + 1 : bn->pathIdx;
+                if ( nextIdx >= 0 && nextIdx < bn->path.count ) {
+                    vec3_t toNext;
+                    VectorSubtract( bn->path.positions[nextIdx], bs->origin, toNext );
+                    if ( DotProduct( toNext, t ) < 0.0f ) pref = -1.0f;
+                }
+                qboolean found = qfalse;
+                for ( int k = 4; k <= 24 && !found; k += 4 ) {
+                    for ( int si = 0; si < 2 && !found; si++ ) {
+                        const float side = ( si == 0 ) ? pref : -pref;
+                        vec3_t p, pf, pd;
+                        trace_t ls, fw, dn;
+                        VectorMA( start, side * (float)k, t, p );
+                        trap_Trace( &ls, start, self->r.mins, self->r.maxs, p, bs->client, MASK_PLAYERSOLID );
+                        if ( ls.startsolid || ls.fraction < 1.0f ) continue;
+                        VectorMA( p, 16.0f, d, pf );
+                        trap_Trace( &fw, p, self->r.mins, self->r.maxs, pf, bs->client, MASK_PLAYERSOLID );
+                        if ( fw.startsolid || fw.fraction < 1.0f ) continue;
+                        VectorCopy( p, pd );
+                        pd[2] -= 2.0f * step;   /* back to origin height, then one step lower */
+                        trap_Trace( &dn, p, self->r.mins, self->r.maxs, pd, bs->client, MASK_PLAYERSOLID );
+                        if ( dn.startsolid || dn.fraction >= 1.0f ) continue;   /* no floor: ledge */
+                        VectorScale( t, side, applyDir );
+                        VectorMA( applyDir, 0.2f, d, applyDir );
+                        VectorNormalize( applyDir );
+                        found = qtrue;
+                        if ( nav_botdebug.integer ) {
+                            static int s_unwedgeLog[MAX_CLIENTS];
+                            if ( level.time - s_unwedgeLog[bs->client] >= 1000 ) {
+                                s_unwedgeLog[bs->client] = level.time;
+                                BotAI_Print( PRT_MESSAGE,
+                                    "[BOTNAV] cl=%d UNWEDGE at (%.0f %.0f %.0f) face n=(%.2f %.2f) side=%+.0f offset=%d\n",
+                                    bs->client, bs->origin[0], bs->origin[1], bs->origin[2],
+                                    tr.plane.normal[0], tr.plane.normal[1], side, k );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /* Apply the (possibly mode-overridden) steer through the EA pipeline. */
     if ( !applySuppress ) {
         trap_EA_Move( bs->client, applyDir, 400 );
