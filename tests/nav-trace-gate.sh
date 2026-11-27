@@ -44,6 +44,13 @@
 #   NAV_MAP           map to run (default arena1; e1m1 for a playthrough).
 #   NAV_MODE          nav (default) | playthrough.
 #   NAV_MIN_KILLS     playthrough: minimum monster kills to pass (default 1).
+#   NAV_PLAY_BOTS     playthrough: extra bot names added after the measured bot
+#                     (e.g. "grunt visor"), for client-vs-client aim. Report only.
+#   NAV_SV_FPS        gameplay modes: server tick rate (bot frame = 1000/N ms).
+#   NAV_PLAY_SKILL    playthrough: skill (1-5) of every added bot (default 5).
+#   NAV_PLAY_CMDS     playthrough: extra console lines appended to the run's
+#                     playthrough.cfg (';'-separated), e.g. a diagnostic such as
+#                     "nav_thresholdprobe 590 650 4 710 726 8 80". Report only.
 #   NAV_GOLDEN_MODE   auto (default) | exact | semantic. auto is exact on
 #                     Windows and semantic elsewhere.
 #   NAV_KEEP_ARTIFACTS 1 = keep isolated home/stdout/fresh trace for diagnosis.
@@ -336,6 +343,13 @@ if [ "$NAV_MODE" = "playthrough" ] || [ "$NAV_MODE" = "activation" ]; then
   WARM_WAIT=4000      # a large Q1 map's cold async bake (tens of seconds) must
                       # FINISH and cache during the warm pass, so the measured run
                       # gets a cache HIT and nav is ready before the bot is added.
+  # Playthrough budget: 6000 frames at fixedtime 16 is ~96 s of game time, short
+  # of a full e1m1 clear. NAV_PLAY_WAIT / NAV_PLAY_TIMEOUT raise it for a
+  # completion measurement; the defaults keep the gate's historical budget.
+  if [ "$NAV_MODE" = "playthrough" ]; then
+    RUN_WAIT="${NAV_PLAY_WAIT:-$RUN_WAIT}"
+    RUN_TIMEOUT="${NAV_PLAY_TIMEOUT:-$RUN_TIMEOUT}"
+  fi
 else
   RUN_WAIT=2000
   RUN_TIMEOUT=120
@@ -359,6 +373,17 @@ fi
 EXTRA_SET=""
 if [ "$NAV_MODE" = "activation" ]; then
   EXTRA_SET="+set g_suppressMonsters 1"
+fi
+# NAV_INPUT_AUDIT=1 (gameplay modes) adds the per-frame [INAUDIT] usercmd audit
+# (ai_main.c BotInputAudit): report only, it changes no bot decision.
+if [ "${NAV_INPUT_AUDIT:-0}" = "1" ] && [ "$NAV_MODE" != "nav" ]; then
+  EXTRA_SET="$EXTRA_SET +set wi_inputaudit 1"
+fi
+# NAV_SV_FPS=N (gameplay modes) sets the server tick rate, so the bot frame time
+# (elapsed_time = 1000/N ms) can be measured away from the default 50 ms.
+# Unset (the default) passes nothing: the command line is unchanged.
+if [ -n "${NAV_SV_FPS:-}" ] && [ "$NAV_MODE" != "nav" ]; then
+  EXTRA_SET="$EXTRA_SET +set sv_fps $NAV_SV_FPS"
 fi
 
 # Graceful skip: same convention as smoke.sh — no paks means an asset-free
@@ -489,10 +514,36 @@ if [ "$NAV_MODE" = "playthrough" ] || [ "$NAV_MODE" = "activation" ]; then
   if [ "$NAV_MODE" = "playthrough" ] && [ "$NAV_MAP" = "e1m1" ]; then
     SPAWN_PLACE=$'bot_teleport visor 480 -296 72 90\nwait 100\n'
   fi
+  # NAV_PLAY_ORDER=0 (playthrough only) drops the human exit order, so the run
+  # measures the bot's own exit/activation choice — what an autopilot gets, since
+  # nobody orders it. The order is a locked directive from the first frame.
+  PLAY_ORDER=$'bot_order visor exit\n'
+  if [ "$NAV_MODE" = "playthrough" ] && [ "${NAV_PLAY_ORDER:-1}" = "0" ]; then
+    PLAY_ORDER=""
+  fi
+  # NAV_PLAY_BOTS="grunt visor" (playthrough only) adds more bots after the measured
+  # one, so client-vs-client aim runs. Report only: the measured bot stays the
+  # first one added. Unset (the default) leaves the cfg exactly as before.
+  # NAV_PLAY_SKILL=N (playthrough only, 1-5, default 5) is the skill every added
+  # bot gets, e.g. 4 to match "addbot visor 4". Default leaves the cfg unchanged.
+  PLAY_SKILL=5
+  if [ "$NAV_MODE" = "playthrough" ] && [ -n "${NAV_PLAY_SKILL:-}" ]; then
+    PLAY_SKILL="$NAV_PLAY_SKILL"
+  fi
+  PLAY_BOTS=""
+  if [ "$NAV_MODE" = "playthrough" ] && [ -n "${NAV_PLAY_BOTS:-}" ]; then
+    for b in $NAV_PLAY_BOTS; do PLAY_BOTS="${PLAY_BOTS}addbot $b $PLAY_SKILL"$'\n'; done
+  fi
+  # NAV_PLAY_CMDS="cmd a; cmd b" (playthrough only) appends console lines after the
+  # bots are placed, for diagnostics. Unset (the default) leaves the cfg unchanged.
+  PLAY_CMDS=""
+  if [ "$NAV_MODE" = "playthrough" ] && [ -n "${NAV_PLAY_CMDS:-}" ]; then
+    PLAY_CMDS="$(printf '%s\n' "$NAV_PLAY_CMDS" | tr ';' '\n')"$'\n'
+  fi
   cat > "$NAV_HOME/base/playthrough.cfg" <<EOF
-addbot visor 5
-wait 400
-${SPAWN_PLACE}bot_order visor exit
+addbot visor $PLAY_SKILL
+${PLAY_BOTS}wait 400
+${SPAWN_PLACE}${PLAY_ORDER}${PLAY_CMDS}
 EOF
   timeout "$RUN_TIMEOUT" "$DED" \
     +set fs_homepath "$NAV_HOME_NATIVE" \
@@ -506,7 +557,7 @@ EOF
     +set sv_maxclients 8 \
     +set g_warmup 0 +set g_doWarmup 0 \
     +set nav_botdebug 2 \
-    +set bot_debug 1 \
+    +set bot_debug "${NAV_BOT_DEBUG:-1}" \
     $EXTRA_SET \
     +map "$NAV_MAP" \
     +wait 400 \
@@ -833,6 +884,58 @@ if [ "$NAV_MODE" = "playthrough" ]; then
   echo "    kills=$kills  spawned=$spawned  min-kills-required=$NAV_MIN_KILLS"
   echo "    bot-client=${bot_cn:-?}  exit=(${exit_xyz:-?})  dist-to-exit: first=${dist_first:-?}  min=${dist_min:-?}"
   echo "    exit-reached-lines=$exit_reached  gameplay-frame-transitions=$map_changes"
+
+  # ── Report (never a verdict input) ────────────────────────────────────────
+  # The exit-goal line above exists only once the bot is ordered to the exit and
+  # heads straight for it; a bot that first chases a gate's button, or a run
+  # without an order (NAV_PLAY_ORDER=0), never prints it, and the gate then knew
+  # neither the bot nor where it stopped. Players are client numbers below
+  # MAX_CLIENTS (64), monsters are entity numbers above it, so the bot is the
+  # lowest client with position samples; the exit comes from the game's own
+  # once-per-level "level exit origin" line. Its absence on a map with an exit
+  # means the game module predates that line (a stale install).
+  rep_cn="$bot_cn"
+  if [ -z "$rep_cn" ]; then
+    rep_cn="$(grep -aoE 'client [0-9]+ pos \(' "$STDOUT" | grep -oE '[0-9]+' | awk '$1 < 64' | sort -n | head -1 || true)"
+  fi
+  rep_exit="$(grep -aE 'level exit origin \(' "$STDOUT" | tail -1 | grep -oE '\(-?[0-9]+ -?[0-9]+ -?[0-9]+\)' | tr -d '()' || true)"
+  rep_order=1; [ "${NAV_PLAY_ORDER:-1}" = "0" ] && rep_order=0
+  echo "REPORT run: order=$rep_order wait=$RUN_WAIT frames (fixedtime 16 => $(( RUN_WAIT * 16 / 1000 )) s) bot-client=${rep_cn:-none} exit=(${rep_exit:-none})"
+  [ -z "$rep_exit" ] && echo "REPORT exit: no 'level exit origin' line — stale game module, or the map has no changelevel trigger"
+  if [ -n "$rep_cn" ]; then
+    # One pass over the log: the bot's samples give first / final / nearest-to-exit;
+    # its longest dwell is the longest run of consecutive samples inside one 64u
+    # cell, and the bot's own cl=N lines inside that run are counted (timestamps
+    # stripped, numbers kept) so the report names what the bot kept doing there.
+    awk -v cn="$rep_cn" -v exo="${rep_exit:-}" '
+      function cellof(x, y, z) { return int(x / 64) "," int(y / 64) "," int(z / 64) }
+      BEGIN { haveExit = (split(exo, e, " ") == 3); pat = "client " cn " pos \\(" }
+      $0 ~ pat {
+        p = $0; sub(/.*pos \(/, "", p); sub(/\).*/, "", p); split(p, v, " ");
+        n++; if (n == 1) first = p; last = p;
+        if (haveExit) { dx = v[1]-e[1]; dy = v[2]-e[2]; dz = v[3]-e[3]; d = sqrt(dx*dx+dy*dy+dz*dz);
+          if (n == 1) dfirst = d; if (n == 1 || d < dmin) { dmin = d; nearest = p } }
+        c = cellof(v[1], v[2], v[3]);
+        if (c == runCell) runLen++; else { runCell = c; runLen = 1; runStart = NR; runPos = p; delete cur }
+        if (runLen > bestLen) { bestLen = runLen; bestPos = runPos; delete best; for (k in cur) best[k] = cur[k] }
+        next
+      }
+      runLen > 0 && $0 ~ ("cl=" cn " ") {
+        l = $0; sub(/^[0-9:.+-]+ +\[[A-Z ]+\] +/, "", l); sub(/^.*"msg":"/, "", l); sub(/\\n".*$/, "", l);
+        cur[l]++; if (runLen == bestLen) best[l] = cur[l]
+      }
+      END {
+        if (n == 0) { print "REPORT bot: no position samples"; exit }
+        printf "REPORT bot: samples=%d first=(%s) final=(%s)\n", n, first, last;
+        if (haveExit) printf "REPORT exit-approach: first=%.0f nearest=%.0f at (%s)\n", dfirst, dmin, nearest;
+        printf "REPORT longest-dwell: %d consecutive samples in the 64u cell at (%s)\n", bestLen, bestPos;
+        m = 0; for (k in best) { m++; key[m] = k }
+        for (i = 1; i <= 6 && i <= m; i++) {
+          top = 0; for (j = 1; j <= m; j++) if (key[j] != "" && (top == 0 || best[key[j]] > best[key[top]])) top = j;
+          printf "REPORT   dwell x%d: %s\n", best[key[top]], key[top]; key[top] = ""
+        }
+      }' "$STDOUT"
+  fi
 
   # ── Three separately-reported gates ───────────────────────────────────────
   # The playthrough measures three distinct things — nav progress, combat, and

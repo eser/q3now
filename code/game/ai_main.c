@@ -1051,14 +1051,157 @@ void BotInputToUserCommand(bot_input_t *bi, usercmd_t *ucmd, int delta_angles[3]
 BotUpdateInput
 ==============
 */
+/*
+==============
+BotInputAudit
+
+Report only (wi_inputaudit 1, default 0): what this frame's usercmd asks physics to
+do, beside what the brain wanted. One line per bot frame with time:
+  idealIn   the ideal view the think left; ideal = after this frame's view model
+  view      the view the cmd carries, in world angles (cmd angles + delta angles)
+  enemyAng  eye -> enemy origin, the aim a perfect shot would use
+  dir/spd   the brain's movement intent; cmdDir the world direction rebuilt from
+            forwardmove/rightmove on the cmd's yaw, as Pmove reads it
+  disp      the origin change since the previous audited frame (what physics did)
+  ground / solid  ground entity, and whether the player box starts in solid
+The autopilot player runs the same path, so its line is the same line. Nothing
+here writes bot state.
+==============
+*/
+static void BotInputAudit( bot_state_t *bs, const bot_input_t *bi, const vec3_t idealIn, int elapsed_time ) {
+	static vec3_t s_lastOrigin[MAX_CLIENTS];
+	static int s_haveLast[MAX_CLIENTS];
+	static int s_lastEnemy[MAX_CLIENTS];
+	gentity_t *ent = &g_entities[bs->client];
+	gclient_t *cl = ent->client;
+	const usercmd_t *uc = &bs->lastucmd;
+	vec3_t org, disp = { 0, 0, 0 }, view, flat, fwd, right, cmdDir, enemyAng = { 0, 0, 0 };
+	trace_t tr;
+	int j, enemyOk = 0;
+
+	if ( !cl || bs->client < 0 || bs->client >= MAX_CLIENTS ) {
+		return;
+	}
+	VectorCopy( cl->ps.origin, org );
+	if ( s_haveLast[bs->client] ) {
+		VectorSubtract( org, s_lastOrigin[bs->client], disp );
+	}
+	VectorCopy( org, s_lastOrigin[bs->client] );
+	s_haveLast[bs->client] = 1;
+
+	for ( j = 0; j < 3; j++ ) {
+		view[j] = SHORT2ANGLE( (short)( uc->angles[j] + bs->cur_ps.delta_angles[j] ) );
+	}
+	VectorSet( flat, 0.0f, view[YAW], 0.0f );
+	AngleVectors( flat, fwd, right, NULL );
+	VectorScale( fwd, uc->forwardmove, cmdDir );
+	VectorMA( cmdDir, uc->rightmove, right, cmdDir );
+
+	if ( bs->enemy >= 0 && bs->enemy < MAX_GENTITIES && g_entities[bs->enemy].inuse ) {
+		const gentity_t *en = &g_entities[bs->enemy];
+		vec3_t target, dir;
+		VectorCopy( bs->enemy < MAX_CLIENTS && en->client ? en->client->ps.origin : en->r.currentOrigin, target );
+		VectorSubtract( target, bs->eye, dir );
+		vectoangles( dir, enemyAng );
+		enemyOk = 1;
+		if ( bs->enemy != s_lastEnemy[bs->client] ) {
+			Com_Log( SEV_INFO, LOG_CH(ch_botai),
+				"[INAUDIT-ENEMY] cl=%d enemy=%d cls=%s org=(%.0f %.0f %.0f) mins=(%.0f %.0f %.0f) maxs=(%.0f %.0f %.0f)\n",
+				bs->client, bs->enemy, en->classname ? en->classname : "?", target[0], target[1], target[2],
+				en->r.mins[0], en->r.mins[1], en->r.mins[2], en->r.maxs[0], en->r.maxs[1], en->r.maxs[2] );
+		}
+	}
+	s_lastEnemy[bs->client] = bs->enemy;
+
+	trap_Trace( &tr, org, ent->r.mins, ent->r.maxs, org, bs->client, MASK_PLAYERSOLID );
+
+	/* What stops a bot that commands a move and does not move: one player-box trace
+	 * 16u along the commanded world direction, logged when the blocker changes or at
+	 * most every 2 s.  Names the entity (world, func_door, a monster, ...) so a stall
+	 * at a "walkable" path segment can be attributed without the map source. */
+	{
+		static int   s_blkEnt[MAX_CLIENTS];
+		static int   s_blkTime[MAX_CLIENTS];
+		vec3_t       cmdFlat, end;
+		float        horiz = sqrtf( disp[0] * disp[0] + disp[1] * disp[1] );
+		VectorCopy( cmdDir, cmdFlat );
+		cmdFlat[2] = 0.0f;
+		if ( s_haveLast[bs->client] && horiz < 1.0f && VectorNormalize( cmdFlat ) > 0.0f &&
+		     cl->ps.stats[STAT_HEALTH] > 0 ) {
+			trace_t btr;
+			VectorMA( org, 16.0f, cmdFlat, end );
+			trap_Trace( &btr, org, ent->r.mins, ent->r.maxs, end, bs->client, MASK_PLAYERSOLID );
+			if ( btr.fraction < 1.0f &&
+			     ( btr.entityNum != s_blkEnt[bs->client] || level.time - s_blkTime[bs->client] >= 2000 ) ) {
+				const gentity_t *be = ( btr.entityNum >= 0 && btr.entityNum < MAX_GENTITIES ) ? &g_entities[btr.entityNum] : NULL;
+				s_blkEnt[bs->client]  = btr.entityNum;
+				s_blkTime[bs->client] = level.time;
+				Com_Log( SEV_INFO, LOG_CH(ch_botai),
+					"[INAUDIT-BLOCK] cl=%d t=%d org=(%.0f %.0f %.0f) dir=(%.2f %.2f) frac=%.2f ent=%d cls=%s tname=%s normal=(%.2f %.2f %.2f) startsolid=%d spawnflags=%d takedamage=%d\n",
+					bs->client, level.time, org[0], org[1], org[2], cmdFlat[0], cmdFlat[1], btr.fraction,
+					btr.entityNum, ( be && be->classname ) ? be->classname : "?",
+					( be && be->targetname ) ? be->targetname : "-",
+					btr.plane.normal[0], btr.plane.normal[1], btr.plane.normal[2], btr.startsolid ? 1 : 0,
+					be ? be->spawnflags : -1, be ? (int)be->takedamage : -1 );
+				/* Who can open it: every entity whose target names this blocker. */
+				if ( be && be->targetname && be->targetname[0] && btr.entityNum != ENTITYNUM_WORLD ) {
+					int k;
+					for ( k = MAX_CLIENTS; k < level.num_entities; k++ ) {
+						const gentity_t *src = &g_entities[k];
+						if ( src->inuse && src->target && !Q_stricmp( src->target, be->targetname ) ) {
+							Com_Log( SEV_INFO, LOG_CH(ch_botai),
+								"[INAUDIT-BLOCK]   opener ent=%d cls=%s tname=%s at (%.0f %.0f %.0f) absmin=(%.0f %.0f %.0f) absmax=(%.0f %.0f %.0f)\n",
+								k, src->classname ? src->classname : "?", src->targetname ? src->targetname : "-",
+								src->r.currentOrigin[0], src->r.currentOrigin[1], src->r.currentOrigin[2],
+								src->r.absmin[0], src->r.absmin[1], src->r.absmin[2],
+								src->r.absmax[0], src->r.absmax[1], src->r.absmax[2] );
+						}
+					}
+				}
+			}
+		}
+	}
+
+	/* The enemy's own box: does it start in solid (embedded), and in what. */
+	{
+		trace_t etr;
+		vec3_t aimDir, aimAng;
+		memset( &etr, 0, sizeof( etr ) );
+		etr.entityNum = ENTITYNUM_NONE;
+		if ( enemyOk ) {
+			const gentity_t *en = &g_entities[bs->enemy];
+			trap_Trace( &etr, en->r.currentOrigin, en->r.mins, en->r.maxs, en->r.currentOrigin, bs->enemy, MASK_PLAYERSOLID );
+		}
+		VectorSubtract( bs->aimtarget, bs->eye, aimDir );
+		vectoangles( aimDir, aimAng );
+		Com_Log( SEV_INFO, LOG_CH(ch_botai),
+			"[INAUDIT] cl=%d t=%d el=%d sj=%d en=%d idealIn=(%.1f %.1f) ideal=(%.1f %.1f) view=(%.1f %.1f)"
+			" enemyAng=%s(%.1f %.1f) dir=(%.2f %.2f %.2f) spd=%.0f cmd=(%d %d %d) atk=%d cmdDir=(%.0f %.0f)"
+			" org=(%.1f %.1f %.1f) disp=(%.1f %.1f %.1f) ground=%d solid=%d%d solidEnt=%d hp=%d"
+			" aimAng=(%.1f %.1f) enSolid=%d%d enSolidEnt=%d\n",
+			bs->client, level.time, elapsed_time, bs->strafejump_active ? 1 : 0, bs->enemy,
+			idealIn[PITCH], idealIn[YAW], bs->ideal_viewangles[PITCH], bs->ideal_viewangles[YAW],
+			view[PITCH], view[YAW], enemyOk ? "" : "-", enemyAng[PITCH], enemyAng[YAW],
+			bi->dir[0], bi->dir[1], bi->dir[2], bi->speed, uc->forwardmove, uc->rightmove, uc->upmove,
+			( uc->buttons & BUTTON_ATTACK_PRI ) ? 1 : 0, cmdDir[0], cmdDir[1],
+			org[0], org[1], org[2], disp[0], disp[1], disp[2], cl->ps.groundEntityNum,
+			tr.startsolid ? 1 : 0, tr.allsolid ? 1 : 0, tr.startsolid ? tr.entityNum : -1,
+			cl->ps.stats[STAT_HEALTH], aimAng[PITCH], aimAng[YAW],
+			etr.startsolid ? 1 : 0, etr.allsolid ? 1 : 0, etr.startsolid ? etr.entityNum : -1 );
+	}
+}
+
 void BotUpdateInput(bot_state_t *bs, int time, int elapsed_time) {
 	bot_input_t bi;
+	vec3_t idealIn;
 	int j;
 
 	//add the delta angles to the bot's current view angles
 	for (j = 0; j < 3; j++) {
 		bs->viewangles[j] = AngleMod(bs->viewangles[j] + SHORT2ANGLE(bs->cur_ps.delta_angles[j]));
 	}
+	//the ideal view as the think left it, before this frame's view model touches it
+	VectorCopy(bs->ideal_viewangles, idealIn);
 	//change the bot view angles
 	BotChangeViewAngles(bs, (float) elapsed_time / 1000);
 	/* An actuation issued by a planning layer must survive to this frame's
@@ -1083,6 +1226,9 @@ void BotUpdateInput(bot_state_t *bs, int time, int elapsed_time) {
 	}
 	//convert the bot input to a usercmd
 	BotInputToUserCommand(&bi, &bs->lastucmd, bs->cur_ps.delta_angles, time);
+	if ( elapsed_time > 0 && trap_Cvar_VariableIntegerValue( "wi_inputaudit" ) ) {
+		BotInputAudit( bs, &bi, idealIn, elapsed_time );
+	}
 
 	//subtract the delta angles
 	for (j = 0; j < 3; j++) {

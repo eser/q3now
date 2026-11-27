@@ -762,6 +762,12 @@ static qboolean WiredIntel_FindExitOrigin( const vec3_t from, vec3_t out ) {
                 VectorCopy( center, s_exitOrigin );
             }
         }
+        /* Once per level, for the playthrough gate: the exit it measures progress
+           against, even on a run whose bot never enters the exit chain. */
+        if ( s_haveExit && trap_Cvar_VariableIntegerValue( "nav_botdebug" ) ) {
+            Com_Log( SEV_INFO, LOG_CH(ch_botai), "level exit origin (%.0f %.0f %.0f)\n",
+                s_exitOrigin[0], s_exitOrigin[1], s_exitOrigin[2] );
+        }
     }
 
     if ( !s_haveExit ) {
@@ -3643,9 +3649,19 @@ qboolean WiredIntel_TrySetActivationGoal( bot_state_t *bs, const vec3_t goalOrig
             return qfalse;
         }
         if ( trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
+            /* Which door, and in what state: a gate is only worth a button when it
+               is shut on the route, and the id alone cannot be checked against the map. */
+            const gentity_t *gd = ( ds->activateDoor >= 0 && ds->activateDoor < level.num_entities )
+                ? &g_entities[ds->activateDoor] : NULL;
+            vec3_t dcen = { 0.0f, 0.0f, 0.0f };
+            if ( gd ) { VectorAdd( gd->r.absmin, gd->r.absmax, dcen ); VectorScale( dcen, 0.5f, dcen ); }
             Com_Log( SEV_INFO, LOG_CH(ch_botai),
-                "cl=%d gate door=%d -> %d button(s) queued\n",
-                bs->client, ds->activateDoor, Belief_InteractableCount( bs ) );
+                "cl=%d gate door=%d -> %d button(s) queued (cls=%s tn=%s model=%s cen=(%.0f %.0f %.0f) moverState=%d)\n",
+                bs->client, ds->activateDoor, Belief_InteractableCount( bs ),
+                gd && gd->classname ? gd->classname : "?",
+                gd && gd->targetname ? gd->targetname : "(none)",
+                gd && gd->model ? gd->model : "(none)",
+                dcen[0], dcen[1], dcen[2], gd ? (int)gd->moverState : -1 );
         }
         /* If the gate was committed by ARMING A JUMP-TOUCH (a beyond-reach wall
            plate — its button is not walk-pressable, so FindBlockingGateButtons
