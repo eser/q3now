@@ -3717,11 +3717,15 @@ void BotAimAtEnemy(bot_state_t *bs) {
 					VectorSubtract(entinfo.origin, bs->origin, dir);
 					//distance towards the enemy
 					dist = VectorLength(dir);
-					//direction the enemy is moving in
-					VectorSubtract(entinfo.origin, entinfo.lastvisorigin, dir);
+					//direction the enemy is moving in, and its ground speed (units/s)
+					/* From the live velocity, not origin - lastvisorigin over update_time:
+					   BotEntityInfo (ai_main.c) fills lastvisorigin with the current origin
+					   and leaves update_time 0, so that quotient was 0/0 = NaN and made the
+					   aim point and ideal view NaN on every RL/PG frame that reached here. */
+					VectorCopy(entinfo.velocity, dir);
 					dir[2] = 0;
 					//
-					speed = VectorNormalize(dir) / entinfo.update_time;
+					speed = VectorNormalize(dir);
 					//botimport.Print(PRT_MESSAGE, "speed = %f, wi->speed = %f\n", speed, wi->speed);
 					//best spot to aim at (apply per-attack aim height after prediction overwrites Z)
 					VectorMA(entinfo.origin, (dist / wi.speed) * speed, dir, bestorigin);
