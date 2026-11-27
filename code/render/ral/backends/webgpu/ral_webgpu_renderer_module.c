@@ -2363,8 +2363,7 @@ static void RegisterAntiAliasing( void ) {
 	aa = ri.Cvar_Get( "r_aa", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	if ( !aa ) return;
 	ri.Cvar_CheckRange( aa, "0", "2", CV_INTEGER );
-	if ( ri.Cvar_SetDescription ) ri.Cvar_SetDescription( aa,
-		"Anti-aliasing: 0 off, 1 TAA (default), 2 SMAA (only if TAA ghosting bothers you)." );
+	if ( ri.Cvar_SetDescription ) ri.Cvar_SetDescription( aa, RENDER_AA_CVAR_DESCRIPTION );
 	if ( ri.Cvar_SetGroup ) ri.Cvar_SetGroup( aa, CVG_RENDERER );
 	noted = qtrue;
 }

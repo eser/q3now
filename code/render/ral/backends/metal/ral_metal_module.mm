@@ -1507,7 +1507,7 @@ static void BeginRegistration( glconfig_t *config ) {
 			if ( !s_module.bloomCvars[i] ) { MarkFailed( "bloom-cvars" ); return; }
 		}
 		s_module.aa = RegisterMetalRenderCvar( "r_aa", "1", "0", "2", qtrue,
-			"Anti-aliasing: 0 off, 1 TAA (default; rigid movers carry their own motion, other moving entities restart their history), 2 SMAA (only if TAA ghosting bothers you).",
+			RENDER_AA_CVAR_DESCRIPTION,
 			&s_module.aaFallback );
 		if ( !s_module.aa ) { MarkFailed( "aa-cvars" ); return; }
 		if ( ri.Cvar_Get && ri.Cvar_Set ) { ri.Cvar_Get( "r_aaSupported", "1", CVAR_TEMP ); ri.Cvar_Set( "r_aaSupported", "1" ); }

@@ -13,6 +13,10 @@
  * behave as off. A renderer with a temporal diagnostic (Vulkan's r_temporalInputTest) passes it as `temporalDiagnostic`: it forces
  * the temporal path on and never changes SMAA. Header-only and pure, so every renderer runs the code the host test covers. */
 
+/* What `help r_aa` tells a player, on every renderer: TAA is the recommendation, SMAA the fallback for TAA ghosting. */
+#define RENDER_AA_CVAR_DESCRIPTION \
+	"Anti-aliasing: 0 off, 1 TAA (the default and recommended), 2 SMAA (use it only if TAA ghosting bothers you)."
+
 #define RENDER_AA_OFF  0
 #define RENDER_AA_TAA  1
 #define RENDER_AA_SMAA 2

@@ -3058,12 +3058,7 @@ static void R_Register( void )
 	ri.Cvar_Get( "r_aaSupported", "1", CVAR_TEMP );
 	ri.Cvar_Set( "r_aaSupported", "1" );
 	ri.Cvar_CheckRange( r_aa, "0", "2", CV_INTEGER );
-	ri.Cvar_SetDescription( r_aa, "Anti-aliasing technique:\n"
-								  " 0 - off\n"
-								  " 1 - TAA (temporal), the default and recommended technique\n"
-								  " 2 - SMAA. Use it only if TAA ghosting bothers you; TAA is off while SMAA is active.\n"
-								  "Requires r_fbo 1. Live: takes effect on next frame via the\n"
-								  "renderer post-process pipeline group." );
+	ri.Cvar_SetDescription( r_aa, RENDER_AA_CVAR_DESCRIPTION );
 	ri.Cvar_SetGroup( r_aa, CVG_RENDERER );
 
 	r_lerpLightstyles = ri.Cvar_Get( "r_lerpLightstyles", "1", CVAR_ARCHIVE );
