@@ -788,6 +788,12 @@ void SaveRegisteredItems( void );
 void WiredIntel_ClearMapGoalDb( void );          // level init: start empty
 void WiredIntel_MapGoalOnSpawn( gentity_t *gent ); // item entered world as candidate
 void WiredIntel_MapGoalOnFree( gentity_t *gent );  // item entity freed (despawn)
+// Item availability shared by every bot consumer (selection, reached-goal, item timing).
+struct bot_goal_s;
+qboolean WiredIntel_ItemPresent( const gentity_t *gent );           // linked AND takeable (CONTENTS_TRIGGER)
+int      WiredIntel_ItemRespawnMs( const gentity_t *gent );         // ms to RespawnItem; -1 = no timer
+int      WiredIntel_ItemRespawnWindowMs( const gitem_t *item, const char *itemType );
+qboolean WiredIntel_ItemGoalGone( const struct bot_goal_s *goal );  // real item, absent, selection would score 0
 
 //
 // g_utils.c

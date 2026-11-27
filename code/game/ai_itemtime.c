@@ -143,8 +143,8 @@ void BotItemTimeUpdate( struct bot_state_s *bs )
 		// validate entity is still an item
 		if ( !ent->inuse || ent->s.eType != ET_ITEM ) continue;
 
-		if ( ent->r.linked && ent->r.contents ) {
-			// item is present (linked and has contents = available for pickup)
+		if ( WiredIntel_ItemPresent( ent ) ) {
+			// item is present (linked and takeable) — same predicate as item selection
 			ti->pickupTime = 0; // mark as available
 		} else if ( ti->pickupTime == 0 ) {
 			// item just disappeared — record pickup time

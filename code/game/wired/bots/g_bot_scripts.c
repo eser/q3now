@@ -858,18 +858,16 @@ static int WiredIntel_EvalItemGoal( bot_state_t *bs, const gitem_t *item, const 
 	// C.2/C.3: populate respawn time and apply per-item window (no navmesh dependency)
 	if ( goal->entitynum > 0 && goal->entitynum < MAX_GENTITIES ) {
 		const gentity_t *gent = &g_entities[goal->entitynum];
-		if ( !gent->r.linked ) {
-			int windowMs;
-			int respawnMs = gent->nextthink - level.time;
-			if      ( strcmp( ctx.itemType, "health_mega" ) == 0 ) windowMs = 15000;
-			else if ( strcmp( ctx.itemType, "armor_red"   ) == 0 ) windowMs = 10000;
-			else if ( item->giType == IT_POWERUP )                  windowMs = 20000;
-			else                                                     windowMs =  5000;
-			ctx.itemRespawn = ( respawnMs > 0 ) ? (float)respawnMs / 1000.0f : 0.0f;
-			if ( respawnMs > windowMs ) {
+		if ( !WiredIntel_ItemPresent( gent ) ) {
+			const int windowMs  = WiredIntel_ItemRespawnWindowMs( item, ctx.itemType );
+			const int respawnMs = WiredIntel_ItemRespawnMs( gent );
+			/* Never coming back on a timer (wait -1, team/targetname item waiting
+			   for a trigger) or not within the wait-for-it window: nothing to get. */
+			if ( respawnMs < 0 || respawnMs > windowMs ) {
 				return 0;
 			}
-			if ( respawnMs > 0 ) {
+			ctx.itemRespawn = (float)respawnMs / 1000.0f;
+			{
 				int rawScore = trap_BotLuaBotEvalItem( bs->client, &ctx );
 				return (int)( rawScore * (float)( windowMs - respawnMs ) / (float)windowMs );
 			}
@@ -877,6 +875,76 @@ static int WiredIntel_EvalItemGoal( bot_state_t *bs, const gitem_t *item, const 
 	}
 
 	return trap_BotLuaBotEvalItem( bs->client, &ctx );
+}
+
+/*
+ * Item availability, one predicate for every bot consumer.
+ *
+ * A picked-up item is NOT unlinked: Touch_Item (g_items.c) sets SVF_NOCLIENT,
+ * EF_NODRAW and contents = 0, schedules RespawnItem, and re-links the entity —
+ * "picked up items still stay around, they just don't draw anything".  So
+ * r.linked alone reads a taken item as present.  The item evaluator used to test
+ * exactly that, which left the respawn window unused after every ordinary pickup:
+ * the empty spawn kept its full score, and being the nearest candidate (travel
+ * discount ~1.0 against ~0.1 for an item 600u away) it was re-selected the think
+ * after BotReachedGoal fired on it.  RespawnItem and FinishSpawningItem are the
+ * only writers that make an item takeable again, and both set CONTENTS_TRIGGER,
+ * which is what Touch_Item needs to fire — so that is the presence test.
+ * ai_itemtime.c's pickup tracker reads this same helper.
+ */
+qboolean WiredIntel_ItemPresent( const gentity_t *gent ) {
+	return gent && gent->r.linked && ( gent->r.contents & CONTENTS_TRIGGER ) != 0;
+}
+
+/* Milliseconds until an absent item reappears on its own RespawnItem think;
+ * 0 when that think is due this frame; -1 when no timer will bring it back
+ * (wait -1, or a team-member/targetname item that only a trigger respawns:
+ * G_RunThink zeroes nextthink before running the think, so a consumed think
+ * reads nextthink == 0). */
+int WiredIntel_ItemRespawnMs( const gentity_t *gent ) {
+	if ( !gent || gent->think != RespawnItem || gent->nextthink <= 0 ) {
+		return -1;
+	}
+	return ( gent->nextthink > level.time ) ? gent->nextthink - level.time : 0;
+}
+
+/* How long ahead a bot is willing to go and wait for an absent item. */
+int WiredIntel_ItemRespawnWindowMs( const gitem_t *item, const char *itemType ) {
+	if ( strcmp( itemType, "health_mega" ) == 0 ) return 15000;
+	if ( strcmp( itemType, "armor_red"   ) == 0 ) return 10000;
+	if ( item->giType == IT_POWERUP )              return 20000;
+	return 5000;
+}
+
+/*
+ * The goal names a real map/dropped item that is absent and that item selection
+ * would score 0 (no timer brings it back within the window).  This is the
+ * Recast-side meaning of BotItemGoalInVisButNotVisible's "the goal isn't there":
+ * the AAS version decided it from a stale entity update; the game state says it
+ * directly.  Returns qfalse for anything that is not an ET_ITEM carrying an item
+ * — progression goals (doors, buttons, exits) also travel the GFL_ITEM path, and
+ * a door has no trigger contents, so it must never read as "gone" here.  An item
+ * that selection still wants (respawning inside its window) is not gone either:
+ * dropping it would only make the next selection pick it again.
+ */
+qboolean WiredIntel_ItemGoalGone( const struct bot_goal_s *goal ) {
+	const gentity_t *gent;
+	char itemType[64];
+	int respawnMs;
+
+	if ( !goal || goal->entitynum <= 0 || goal->entitynum >= MAX_GENTITIES ) {
+		return qfalse;
+	}
+	gent = &g_entities[goal->entitynum];
+	if ( !gent->inuse || gent->s.eType != ET_ITEM || !gent->item ) {
+		return qfalse;
+	}
+	if ( WiredIntel_ItemPresent( gent ) ) {
+		return qfalse;
+	}
+	WiredIntel_ItemTypeName( gent->item, itemType, sizeof( itemType ) );
+	respawnMs = WiredIntel_ItemRespawnMs( gent );
+	return ( respawnMs < 0 || respawnMs > WiredIntel_ItemRespawnWindowMs( gent->item, itemType ) ) ? qtrue : qfalse;
 }
 
 /*
@@ -1150,6 +1218,32 @@ static int WiredIntel_SelectBestItemGoal( bot_state_t *bs, int tfl, const bot_go
 			continue;
 		}
 
+		/* ── CANDIDATE GRABBABILITY ───────────────────────────────────────────
+		   A candidate the bot cannot pick up must not be selected.  The pickup
+		   rule is BG_CanItemBeGrabbed — the same predicate Touch_Item applies and
+		   the client predicts with — so selection asks it instead of keeping its
+		   own idea of "need".
+
+		   The need multiplier in the Lua item score (SV_Lua_ApplyNeedMultiplier)
+		   models a different rule: an owned weapon scores (max - held) / max of
+		   its ammo cap, while BG_CanItemBeGrabbed refuses an owned weapon once
+		   held ammo reaches minAmmunition.  Measured on arena1: a bot holding the
+		   rocket launcher with 10 rockets (min 10, max 50) scored it 0.8 of an
+		   unowned one (want ~51 at the spawn), ran onto it, could not take it,
+		   BotReachedGoal fired on the touch, and this loop — which has no
+		   avoid-goal list — chose the same node again on the next think.  The bot
+		   orbited the spawn: 96% of a 54 s single-bot run within 250u of it, in
+		   the build before any of the aim/move changes as well as after.
+
+		   The check runs for unlinked (respawning) items too: whether the bot
+		   could take it when it reappears is decided by the same inventory.
+
+		   It runs AFTER the corridor probe below on purpose: that probe is logged
+		   ([BOTNAV] FindPath engine) and the arena1 nav golden pins the probe
+		   sequence, so filtering before it changed the trace (golden 128 lines,
+		   fresh 106) without changing the decision (same goal, same waypoints).
+		   The filter itself is below, after the probe. */
+
 		/* ── CANDIDATE REACHABILITY ───────────────────────────────────────────
 		   CLASS RULE: a goal candidate that cannot be reached from the agent's
 		   current position must not be selected, regardless of its straight-line
@@ -1184,6 +1278,12 @@ static int WiredIntel_SelectBestItemGoal( bot_state_t *bs, int tfl, const bot_go
 				dbgSkipNoPath++;
 				continue;
 			}
+		}
+
+		/* CANDIDATE GRABBABILITY (see the block comment above the probe). */
+		if ( gent->s.modelindex < 1 || gent->s.modelindex >= bg_numItems ||
+		     !BG_CanItemBeGrabbed( g_gametype.integer, &gent->s, &level.clients[bs->client].ps ) ) {
+			continue;
 		}
 
 		/* want is a first-class field on the node: compute it for the querying

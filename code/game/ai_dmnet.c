@@ -57,7 +57,27 @@ static qboolean BotNavTouchingGoal( const vec3_t origin, const bot_goal_t *goal 
 	return qtrue;
 }
 #define trap_BotTouchingGoal(o, g)                        BotNavTouchingGoal(o, g)
-#define trap_BotItemGoalInVisButNotVisible(e, eye, va, g) qfalse
+/* "The goal isn't there": the AAS version traced eye -> goal and, when the line was
+ * clear, called the item gone if its entity had no recent update (an EF_NODRAW
+ * item is not sent, so it stops updating).  Under Recast the game state answers
+ * the same question directly — see WiredIntel_ItemGoalGone, which also refuses
+ * non-item goals and items still worth waiting for.  The line-of-sight half is
+ * kept so a bot does not "know" about a pickup behind a wall.  This was hardwired
+ * to qfalse, so an item another player took stayed the bot's goal until a touch
+ * or the 20 s ltg timeout. */
+static qboolean BotNavItemGoalGone( int viewer, const vec3_t eye, const bot_goal_t *goal ) {
+	bsp_trace_t trace;
+	vec3_t mid;
+	if ( !( goal->flags & GFL_ITEM ) || !WiredIntel_ItemGoalGone( goal ) ) {
+		return qfalse;
+	}
+	VectorAdd( goal->mins, goal->maxs, mid );
+	VectorScale( mid, 0.5f, mid );
+	VectorAdd( goal->origin, mid, mid );
+	BotAI_Trace( &trace, (float *)eye, NULL, NULL, mid, viewer, CONTENTS_SOLID );
+	return ( trace.fraction >= 1.0f ) ? qtrue : qfalse;
+}
+#define trap_BotItemGoalInVisButNotVisible(e, eye, va, g) BotNavItemGoalGone(e, eye, g)
 #endif
 //data file headers
 #include "../qcommon/wired/bot_characteristics.h"			//characteristics
