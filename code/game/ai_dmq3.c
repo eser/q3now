@@ -5139,6 +5139,28 @@ void BotStrafeJumpCheck( bot_state_t *bs, bot_moveresult_t *moveresult )
 	// With air control, view angle IS the steering input. Just press
 	// forward with the strafejump angles — no direction vector needed.
 	if ( bs->cur_ps.groundEntityNum == ENTITYNUM_NONE ) {
+		/* The in-air branch must still be a strafe-jump: running speed, and a heading
+		 * that agrees with the route.  The view-alignment test alone is circular here —
+		 * this branch writes strafejump_angles into the ideal view itself.  Measured on
+		 * arena1: a bot pinned against a wall bounced in place for 14 s (each landing
+		 * re-launched by the held jump before a think saw the ground, so the ground
+		 * branch's speed < 200 reset never ran) pressing forward at yaw 38 while the
+		 * route pointed the opposite way. */
+		if ( bs->strafejump_side != 0 ) {
+			vec3_t hv, rd, sf, sa;
+			float  hspeed;
+			VectorSet( hv, bs->cur_ps.velocity[0], bs->cur_ps.velocity[1], 0.0f );
+			hspeed = VectorLength( hv );
+			VectorSet( sa, 0.0f, bs->strafejump_angles[YAW], 0.0f );
+			AngleVectors( sa, sf, NULL, NULL );
+			VectorSet( rd, moveresult->movedir[0], moveresult->movedir[1], 0.0f );
+			if ( hspeed < 200.0f ||
+			     ( VectorNormalize( rd ) > 0.1f && DotProduct( rd, sf ) < 0.5f ) ) {
+				bs->strafejump_side   = 0;
+				bs->strafejump_active = qfalse;
+				return;
+			}
+		}
 		if ( bs->strafejump_side != 0 && BotStrafeJumpViewAligned( bs, bs->strafejump_angles ) ) {
 			bs->strafejump_active = qtrue;
 			bs->strafejump_landed = qfalse;
