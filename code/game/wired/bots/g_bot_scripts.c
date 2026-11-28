@@ -866,6 +866,12 @@ static int WiredIntel_EvalItemGoal( bot_state_t *bs, const gitem_t *item, const 
 			if ( respawnMs < 0 || respawnMs > windowMs ) {
 				return 0;
 			}
+			/* Owner rule (2026-11-28): wait for a respawn only when there is nothing
+			   else to do — not while fighting, and not while a directive (exit, an
+			   ordered goal) owns the bot. */
+			if ( bs->enemy >= 0 || bs->directives.directiveLocked ) {
+				return 0;
+			}
 			ctx.itemRespawn = (float)respawnMs / 1000.0f;
 			{
 				int rawScore = trap_BotLuaBotEvalItem( bs->client, &ctx );
@@ -1362,6 +1368,124 @@ static int WiredIntel_SelectBestItemGoal( bot_state_t *bs, int tfl, const bot_go
 	return ( bestScore > 0.0f ) ? qtrue : qfalse;
 }
 
+/*
+ * NOTHING TO TAKE: WAIT BY MOVING (owner rule 2026-11-28, "cevrede dolasarak
+ * beklesin").
+ *
+ * When item selection finds nothing and there is no exit to head for, the goal
+ * stack stays empty and AINode_Seek_LTG issues no move: the bot stands where it
+ * picked up its last item.  Measured on arena1 with one bot: idle 17-22 % of alive
+ * frames in stretches of up to 5.4 s, each starting on an LTG NONE whose survivors
+ * were 15 items refused by BG_CanItemBeGrabbed (the bot holds them all) and 3
+ * absent with no respawn inside the wait window.
+ *
+ * Instead, hold one of two goals, both without GFL_ITEM so BotReachedGoal checks
+ * the touch only and the absent-item test cannot pop them:
+ *   1. the absent item, still takeable on return, that the bot could have
+ *      soonest — max(respawn, straight-line travel at 300 ups) — while
+ *      BotNav_MoveToGoal moves around the empty spot until it reappears;
+ *   2. otherwise a reachable random walkable point, kept until touched or 15 s.
+ * Never while fighting or while a directive owns the bot.  The caller holds a
+ * WI_LTG_HOLD result for 2 s rather than the 20 s item hold, so an item that
+ * respawns elsewhere is seen at the next evaluation.
+ */
+static struct { vec3_t point; float until; qboolean valid; } s_roamGoal[MAX_CLIENTS];
+
+static qboolean WiredIntel_SetHoldGoal( bot_state_t *bs ) {
+	static navPath_t s_holdProbe;
+	const playerState_t *ps;
+	bot_goal_t hold;
+	int nodeIdx, best = -1, bestMs = 0;
+
+	if ( bs->client < 0 || bs->client >= MAX_CLIENTS ||
+	     bs->enemy >= 0 || bs->directives.directiveLocked ) {
+		return qfalse;
+	}
+	ps = &level.clients[bs->client].ps;
+
+	for ( nodeIdx = 0; nodeIdx < s_mapGoalCount; nodeIdx++ ) {
+		const mapGoal_t *node = &s_mapGoalDb[nodeIdx];
+		const gentity_t *gent = &g_entities[node->goal.entitynum];
+		vec3_t delta;
+		int respawnMs, travelMs, readyMs;
+
+		if ( !gent->inuse || gent->s.eType != ET_ITEM || WiredIntel_ItemPresent( gent ) ) {
+			continue;
+		}
+		respawnMs = WiredIntel_ItemRespawnMs( gent );
+		if ( respawnMs < 0 ) {
+			continue;
+		}
+		if ( gent->s.modelindex < 1 || gent->s.modelindex >= bg_numItems ||
+		     !BG_CanItemBeGrabbed( g_gametype.integer, &gent->s, ps ) ) {
+			continue;
+		}
+		VectorSubtract( gent->r.currentOrigin, bs->origin, delta );
+		travelMs = (int)( VectorLength( delta ) * 1000.0f / 300.0f );
+		readyMs  = ( respawnMs > travelMs ) ? respawnMs : travelMs;
+		if ( best < 0 || readyMs < bestMs ) {
+			best = nodeIdx;
+			bestMs = readyMs;
+		}
+	}
+
+	if ( best >= 0 ) {
+		const int n = trap_Nav_FindPath( bs->origin, s_mapGoalDb[best].goal.origin,
+		                                 NAV_AGENT_PLAYER, &s_holdProbe );
+		if ( NAV_FINDPATH_COUNT( n ) > 0 && !( n & NAV_FINDPATH_PARTIAL ) ) {
+			hold = s_mapGoalDb[best].goal;
+			VectorCopy( g_entities[hold.entitynum].r.currentOrigin, hold.origin );
+			hold.flags &= ~GFL_ITEM;
+			trap_BotPushGoal( bs->gs, &hold );
+			return qtrue;
+		}
+	}
+
+	/* Roam: keep the current point until it is reached or its time is up. */
+	{
+		int tries;
+		qboolean have = s_roamGoal[bs->client].valid && s_roamGoal[bs->client].until > FloatTime();
+		if ( have ) {
+			vec3_t d;
+			VectorSubtract( s_roamGoal[bs->client].point, bs->origin, d );
+			d[2] = 0.0f;
+			have = ( VectorLength( d ) > 64.0f ) ? qtrue : qfalse;
+		}
+		for ( tries = 0; !have && tries < 4; tries++ ) {
+			vec3_t p, d;
+			int n;
+			if ( !trap_Nav_GetRandomPoint( NAVPOLY_WALKABLE, p ) ) {
+				continue;
+			}
+			VectorSubtract( p, bs->origin, d );
+			if ( VectorLength( d ) < 256.0f ) {
+				continue;
+			}
+			n = trap_Nav_FindPath( bs->origin, p, NAV_AGENT_PLAYER, &s_holdProbe );
+			if ( NAV_FINDPATH_COUNT( n ) <= 0 || ( n & NAV_FINDPATH_PARTIAL ) ) {
+				continue;
+			}
+			VectorCopy( p, s_roamGoal[bs->client].point );
+			s_roamGoal[bs->client].until = FloatTime() + 15.0f;
+			s_roamGoal[bs->client].valid = qtrue;
+			have = qtrue;
+		}
+		if ( !have ) {
+			s_roamGoal[bs->client].valid = qfalse;
+			return qfalse;
+		}
+	}
+	memset( &hold, 0, sizeof( hold ) );
+	VectorCopy( s_roamGoal[bs->client].point, hold.origin );
+	hold.origin[2] += 24.0f;   /* standing origin above the mesh floor point */
+	VectorSet( hold.mins, -8.0f, -8.0f, -8.0f );
+	VectorSet( hold.maxs,  8.0f,  8.0f,  8.0f );
+	hold.entitynum = -1;
+	hold.flags     = GFL_ROAM;
+	trap_BotPushGoal( bs->gs, &hold );
+	return qtrue;
+}
+
 int WiredIntel_ChooseLTGItem( bot_state_t *bs, int tfl ) {
 	bot_goal_t goal;
 
@@ -1391,7 +1515,10 @@ int WiredIntel_ChooseLTGItem( bot_state_t *bs, int tfl ) {
 		 * Unconditional; only the [ACTSEL] print that reports it is gated. */
 		WiredIntel_LtgFailBranchCount();
 
-		WiredIntel_TrySetExitGoal( bs );
+		if ( !WiredIntel_TrySetExitGoal( bs ) && WiredIntel_SetHoldGoal( bs ) ) {
+			WiredIntel_ActSelReport( bs );
+			return WI_LTG_HOLD;
+		}
 		/* Emit AFTER both the fail counter and the branch counter have moved for this
 		 * evaluation, and after TrySetExitGoal has had its chance to increment the
 		 * spine counters — so [ACTSEL] and [EXITCHAIN] describe the same instant. */

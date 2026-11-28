@@ -1018,7 +1018,8 @@ int BotGetItemLongTermGoal(bot_state_t *bs, int tfl, bot_goal_t *goal) {
 		//BotAI_Print(PRT_MESSAGE, "%s: choosing new ltg\n", ClientName(bs->client, netname, sizeof(netname)));
 		//choose a new goal
 		//BotAI_Print(PRT_MESSAGE, "%6.1f client %d: BotChooseLTGItem\n", FloatTime(), bs->client);
-		if ( bs->wiredIntelActive ? WiredIntel_ChooseLTGItem( bs, tfl ) : trap_BotChooseLTGItem(bs->gs, bs->origin, bs->inventory, tfl) ) {
+		const int chosen = bs->wiredIntelActive ? WiredIntel_ChooseLTGItem( bs, tfl ) : trap_BotChooseLTGItem(bs->gs, bs->origin, bs->inventory, tfl);
+		if ( chosen ) {
 			/*
 			char buf[128];
 			//get the goal at the top of the stack
@@ -1026,7 +1027,8 @@ int BotGetItemLongTermGoal(bot_state_t *bs, int tfl, bot_goal_t *goal) {
 			trap_BotGoalName(goal->number, buf, sizeof(buf));
 			BotAI_Print(PRT_MESSAGE, "%1.1f: new long term goal %s\n", FloatTime(), buf);
             */
-			bs->ltg_time = FloatTime() + 20;
+			/* A wait/roam goal is held briefly so a respawned item is seen soon. */
+			bs->ltg_time = FloatTime() + ( chosen == WI_LTG_HOLD ? 2 : 20 );
 		}
 		else {//the bot gets sorta stuck with all the avoid timings, shouldn't happen though
 			//

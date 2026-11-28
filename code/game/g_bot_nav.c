@@ -1637,7 +1637,105 @@ void BotNav_MoveToGoal( bot_state_t *bs, bot_goal_t *goal,
         return;
     }
 
-    BotNav_Steer( bn, bs->origin, bs->velocity, goal->origin, cn, &steer );
+    /* WAIT AT A RESPAWN BY WALKING AROUND IT (owner rule 2026-11-28).  Item selection
+     * keeps an absent item as the goal while its respawn falls inside the wait window;
+     * the follower then stood on the empty spot (single-bot idle 11-22 % of frames,
+     * up to 5 s at a time).  Near such a goal, walk a circuit of four points 64u around
+     * it, so the bot keeps moving and still collects the item when it appears.
+     *
+     * The circuit advances when the bot arrives at its point, not on a clock.  The
+     * follower never declares its last waypoint reached, so with a 1.5 s clock the bot
+     * ran at the point at full speed and overshot it back and forth until the clock
+     * moved on: arena1 build #2523, single-bot direction reversals rose from 8-20 to
+     * 27-41 per run, and the jumps launched mid-hunt held their input against the new
+     * heading in the air (intent->cmd 98 % -> 95-96 %).  A point outside the walkable
+     * area is pulled in along a navmesh ray from the item (one lay ~30u behind a wall
+     * there), and a point that collapses onto the item or the previous point is skipped.
+     * The circuit is walked at half input speed: about 160 u/s, under the strafe-jump
+     * gate's 200 u/s, so no jump is launched toward a point a few dozen units away. */
+    static struct { int ent; int slot; int seen; int since; vec3_t prev; } s_orbit[MAX_CLIENTS];
+    const float *steerGoal = goal->origin;
+    vec3_t       orbitGoal;
+    qboolean     orbitWalk = qfalse;
+    if ( goal->entitynum > 0 && goal->entitynum < MAX_GENTITIES ) {
+        const gentity_t *ig = &g_entities[goal->entitynum];
+        if ( bs->enemy < 0 && ig->inuse && ig->s.eType == ET_ITEM && !WiredIntel_ItemPresent( ig ) ) {
+            const float dx = goal->origin[0] - bs->origin[0];
+            const float dy = goal->origin[1] - bs->origin[1];
+            const qboolean restart = s_orbit[cn].ent != goal->entitynum ||
+                                     level.time - s_orbit[cn].seen > 500;
+            /* Start a circuit on the ground only: a bot that arrives mid-jump keeps
+             * its run toward the item until it lands (build #2524: every mismatched
+             * circuit frame was airborne, the jump launched before the zone). */
+            if ( dx * dx + dy * dy < 128.0f * 128.0f &&
+                 !( restart && bs->cur_ps.groundEntityNum == ENTITYNUM_NONE ) ) {
+                static const float ox[4] = { 64.0f, 0.0f, -64.0f, 0.0f };
+                static const float oy[4] = { 0.0f, 64.0f, 0.0f, -64.0f };
+                const float vh = sqrtf( bs->cur_ps.velocity[0] * bs->cur_ps.velocity[0] +
+                                        bs->cur_ps.velocity[1] * bs->cur_ps.velocity[1] );
+                float arrive = nav_waypoint_tolerance.value > 0.0f
+                               ? nav_waypoint_tolerance.value : BOT_NAV_MIN_ADVANCE_RADIUS;
+                int   tries;
+                if ( vh * 0.15f > arrive ) arrive = vh * 0.15f;
+                /* A new goal, or a gap in use (death, respawn, another goal held in
+                 * between) restarts the circuit at the slot nearest to the bot. */
+                if ( restart ) {
+                    float best = -1.0f;
+                    int   k;
+                    s_orbit[cn].ent   = goal->entitynum;
+                    s_orbit[cn].slot  = 0;
+                    s_orbit[cn].since = level.time;
+                    VectorCopy( bs->origin, s_orbit[cn].prev );
+                    for ( k = 0; k < 4; k++ ) {
+                        const float ex = goal->origin[0] + ox[k] - bs->origin[0];
+                        const float ey = goal->origin[1] + oy[k] - bs->origin[1];
+                        if ( best < 0.0f || ex * ex + ey * ey < best ) {
+                            best = ex * ex + ey * ey;
+                            s_orbit[cn].slot = k;
+                        }
+                    }
+                }
+                s_orbit[cn].seen = level.time;
+                for ( tries = 0; tries < 4; tries++ ) {
+                    vec3_t want, hit, d;
+                    VectorCopy( goal->origin, want );
+                    want[0] += ox[s_orbit[cn].slot];
+                    want[1] += oy[s_orbit[cn].slot];
+                    if ( trap_Nav_Raycast( (float *)goal->origin, want, hit ) ) {
+                        /* Blocked: stop 8u short of the walkable edge. */
+                        VectorSubtract( hit, goal->origin, d );
+                        d[2] = 0.0f;
+                        {
+                            const float len = VectorNormalize( d );
+                            VectorMA( goal->origin, len > 8.0f ? len - 8.0f : 0.0f, d, want );
+                            want[2] = hit[2];
+                        }
+                    }
+                    {
+                        const float fx = want[0] - goal->origin[0], fy = want[1] - goal->origin[1];
+                        const float px = want[0] - s_orbit[cn].prev[0], py = want[1] - s_orbit[cn].prev[1];
+                        const float bx = want[0] - bs->origin[0], by = want[1] - bs->origin[1];
+                        const qboolean usable = fx * fx + fy * fy >= 24.0f * 24.0f &&
+                                                px * px + py * py >= arrive * arrive;
+                        const qboolean arrived = bx * bx + by * by <= arrive * arrive ||
+                                                 level.time - s_orbit[cn].since > 1500;
+                        if ( usable && !arrived ) {
+                            VectorCopy( want, orbitGoal );
+                            orbitWalk = qtrue;
+                            break;
+                        }
+                        if ( usable ) VectorCopy( want, s_orbit[cn].prev );
+                    }
+                    s_orbit[cn].slot  = ( s_orbit[cn].slot + 1 ) & 3;
+                    s_orbit[cn].since = level.time;
+                }
+                if ( orbitWalk ) {
+                    steerGoal = orbitGoal;
+                }
+            }
+        }
+    }
+    BotNav_Steer( bn, bs->origin, bs->velocity, steerGoal, cn, &steer );
 
     if ( steer.failure ) {
         result->failure = qtrue;
@@ -2107,7 +2205,11 @@ void BotNav_MoveToGoal( bot_state_t *bs, bot_goal_t *goal,
 
     /* Apply the (possibly mode-overridden) steer through the EA pipeline. */
     if ( !applySuppress ) {
-        trap_EA_Move( bs->client, applyDir, 400 );
+        /* Walk the respawn-wait circuit (above) only while nothing overrode the
+         * steer: no off-mesh transit, no unwedge or per-mode move vector. */
+        const qboolean walk = orbitWalk && !steer.omcTransit &&
+                              VectorCompare( applyDir, steer.movedir );
+        trap_EA_Move( bs->client, applyDir, walk ? 200 : 400 );
     }
 
     /* CLIMB one-shot launch (real-client-gated inside the switch above). */

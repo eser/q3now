@@ -14,6 +14,9 @@ float WiredIntel_Aggression( bot_state_t *bs );
 int WiredIntel_WantsToRetreat( bot_state_t *bs );
 int WiredIntel_WantsToChase( bot_state_t *bs );
 
+/* Returns qfalse (nothing pushed), qtrue (an item goal, held 20 s) or
+   WI_LTG_HOLD (a wait/roam goal while nothing is takeable, held briefly). */
+#define WI_LTG_HOLD 2
 int WiredIntel_ChooseLTGItem( bot_state_t *bs, int tfl );
 int WiredIntel_ChooseNBGItem( bot_state_t *bs, int tfl, bot_goal_t *ltg, float range );
 int WiredIntel_Chat( bot_state_t *bs, const char *eventName, const wbChatCtx_t *ctx );
