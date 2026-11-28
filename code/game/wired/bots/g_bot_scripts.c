@@ -1228,6 +1228,18 @@ static int WiredIntel_SelectBestItemGoal( bot_state_t *bs, int tfl, const bot_go
 			continue;
 		}
 
+		/* An item still in flight (a weapon dropped by a dying player, TR_GRAVITY
+		   until G_BounceItem settles it) is not a goal yet: the goal pushed on the
+		   stack is a copy, so its origin stays where the item was in the air.
+		   arena1: bots killed mid-hop dropped weapons that were selected 0.3-2 s
+		   later at z 53-167, 69-143u over the floor; the bot then ran on the spot
+		   under the frozen point for 6 s (it cannot touch it from the floor), and
+		   one kicked off a wall for 6.5 s trying to reach it.  It becomes a
+		   candidate once it lands. */
+		if ( gent->s.pos.trType == TR_GRAVITY ) {
+			continue;
+		}
+
 		/* ── CANDIDATE GRABBABILITY ───────────────────────────────────────────
 		   A candidate the bot cannot pick up must not be selected.  The pickup
 		   rule is BG_CanItemBeGrabbed — the same predicate Touch_Item applies and
