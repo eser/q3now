@@ -1171,6 +1171,10 @@ static int WiredIntel_SelectBestItemGoal( bot_state_t *bs, int tfl, const bot_go
 	int nodeIdx;
 	qboolean haveBest;
 	int dbgSkipNoPath = 0, dbgSkipTooFar = 0, dbgSkipDetour = 0;
+	/* Why the survivors of the distance and corridor filters scored nothing:
+	   refused by the pickup rule, present but unwanted, absent with no timer
+	   inside the wait window, absent inside it.  Counted only, logged below. */
+	int dbgGrab = 0, dbgWant0 = 0, dbgAbsOut = 0, dbgAbsIn = 0;
 
 	if ( !bs || !bestGoal ) {
 		return qfalse;
@@ -1289,6 +1293,7 @@ static int WiredIntel_SelectBestItemGoal( bot_state_t *bs, int tfl, const bot_go
 		/* CANDIDATE GRABBABILITY (see the block comment above the probe). */
 		if ( gent->s.modelindex < 1 || gent->s.modelindex >= bg_numItems ||
 		     !BG_CanItemBeGrabbed( g_gametype.integer, &gent->s, &level.clients[bs->client].ps ) ) {
+			dbgGrab++;
 			continue;
 		}
 
@@ -1297,6 +1302,21 @@ static int WiredIntel_SelectBestItemGoal( bot_state_t *bs, int tfl, const bot_go
 		node->want       = (float)WiredIntel_EvalItemGoal( bs, item, &node->goal );
 		node->wantClient = bs->client;
 		node->wantTime   = level.time;
+
+		if ( node->want <= 0.0f ) {
+			if ( WiredIntel_ItemPresent( gent ) ) {
+				dbgWant0++;
+			} else {
+				char itemType[64];
+				const int respawnMs = WiredIntel_ItemRespawnMs( gent );
+				WiredIntel_ItemTypeName( item, itemType, sizeof( itemType ) );
+				if ( respawnMs < 0 || respawnMs > WiredIntel_ItemRespawnWindowMs( item, itemType ) ) {
+					dbgAbsOut++;
+				} else {
+					dbgAbsIn++;
+				}
+			}
+		}
 
 		score = node->want;
 		score *= 1.0f / ( 1.0f + travelTime / 220.0f );
@@ -1318,9 +1338,10 @@ static int WiredIntel_SelectBestItemGoal( bot_state_t *bs, int tfl, const bot_go
 					bs->client, bestGoal->number, bestScore, bestGoal->areanum );
 			} else {
 				Com_Log( SEV_INFO, LOG_CH(ch_botai), "cl=%d NONE area=%d maxTT=%.0f skip:"
-					" nopath=%d toofar=%d detour=%d\n",
+					" nopath=%d toofar=%d detour=%d grab=%d want0=%d absOut=%d absIn=%d\n",
 					bs->client, bs->areanum, maxTravelTime,
-					dbgSkipNoPath, dbgSkipTooFar, dbgSkipDetour );
+					dbgSkipNoPath, dbgSkipTooFar, dbgSkipDetour,
+					dbgGrab, dbgWant0, dbgAbsOut, dbgAbsIn );
 			}
 		}
 	}

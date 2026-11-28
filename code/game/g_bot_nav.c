@@ -1657,6 +1657,19 @@ void BotNav_MoveToGoal( bot_state_t *bs, bot_goal_t *goal,
     const float *steerGoal = goal->origin;
     vec3_t       orbitGoal;
     qboolean     orbitWalk = qfalse;
+    if ( nav_botdebug.integer ) {
+        /* Goal identity for the batch analysis: one line per goal change. */
+        static struct { int ent; int flags; vec3_t org; } s_goalLog[MAX_CLIENTS];
+        if ( s_goalLog[cn].ent != goal->entitynum || s_goalLog[cn].flags != goal->flags ||
+             Distance( s_goalLog[cn].org, goal->origin ) > 32.0f ) {
+            s_goalLog[cn].ent   = goal->entitynum;
+            s_goalLog[cn].flags = goal->flags;
+            VectorCopy( goal->origin, s_goalLog[cn].org );
+            BotAI_Print( PRT_MESSAGE, "[BOTNAV] cl=%d t=%d GOAL ent=%d flags=0x%x at (%.0f %.0f %.0f)\n",
+                         cn, level.time, goal->entitynum, goal->flags,
+                         goal->origin[0], goal->origin[1], goal->origin[2] );
+        }
+    }
     if ( goal->entitynum > 0 && goal->entitynum < MAX_GENTITIES ) {
         const gentity_t *ig = &g_entities[goal->entitynum];
         if ( bs->enemy < 0 && ig->inuse && ig->s.eType == ET_ITEM && !WiredIntel_ItemPresent( ig ) ) {
@@ -2114,6 +2127,35 @@ void BotNav_MoveToGoal( bot_state_t *bs, bot_goal_t *goal,
             start[2] += step;
             VectorMA( start, 4.0f, d, end );
             trap_Trace( &tr, start, self->r.mins, self->r.maxs, end, bs->client, MASK_PLAYERSOLID );
+            /* STALL INSTRUMENT (measurement only).  A commanded, grounded bot whose
+             * origin has not moved for 10 ticks: log both the raised trace above and
+             * the same trace at origin height, so a stall the two branches below miss
+             * says which gate let it through. */
+            if ( nav_botdebug.integer ) {
+                static vec3_t s_stallOrg[MAX_CLIENTS];
+                static int    s_stallTicks[MAX_CLIENTS], s_stallLog[MAX_CLIENTS];
+                const int     c = bs->client;
+                if ( Distance( s_stallOrg[c], bs->origin ) < 0.5f ) {
+                    s_stallTicks[c]++;
+                } else {
+                    s_stallTicks[c] = 0;
+                    VectorCopy( bs->origin, s_stallOrg[c] );
+                }
+                if ( s_stallTicks[c] >= 10 && level.time - s_stallLog[c] >= 1000 ) {
+                    trace_t lo;
+                    vec3_t  loEnd;
+                    s_stallLog[c] = level.time;
+                    VectorMA( bs->origin, 4.0f, d, loEnd );
+                    trap_Trace( &lo, bs->origin, self->r.mins, self->r.maxs, loEnd, bs->client, MASK_PLAYERSOLID );
+                    BotAI_Print( PRT_MESSAGE,
+                        "[BOTNAV] cl=%d STALL at (%.1f %.1f %.1f) d=(%.2f %.2f) vh=%.0f ticks=%d"
+                        " raised frac=%.2f n=(%.3f %.3f %.2f) ent=%d ss=%d"
+                        " low frac=%.2f n=(%.3f %.3f %.2f) ent=%d ss=%d\n",
+                        c, bs->origin[0], bs->origin[1], bs->origin[2], d[0], d[1], vh, s_stallTicks[c],
+                        tr.fraction, tr.plane.normal[0], tr.plane.normal[1], tr.plane.normal[2], tr.entityNum, tr.startsolid,
+                        lo.fraction, lo.plane.normal[0], lo.plane.normal[1], lo.plane.normal[2], lo.entityNum, lo.startsolid );
+                }
+            }
             /* OBLIQUE variant: the face is not head-on (the move has a tangential part
              * Pmove would slide on), yet the bot does not move — measured on e1m1 at
              * (561,2416,-104): a 16u step up with a wall 2-4u inside the box's right edge
