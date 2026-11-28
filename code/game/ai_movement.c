@@ -380,17 +380,32 @@ qboolean BotFindWallJumpOpportunity( bot_state_t *bs )
 {
 	bot_goal_t goal;
 	trace_t    trace;
-	vec3_t     testEnd, dir;
+	vec3_t     testEnd, dir, toGoal;
 	float      heightNeeded;
 	int        i;
 
-	if ( !pm_walljumps )                                         return qfalse;
+	if ( !pm_walljumps )                                       return qfalse;
 	if ( bs->cur_ps.groundEntityNum != ENTITYNUM_NONE )          return qfalse;
 	if ( bs->cur_ps.stats[STAT_WALLJUMPS] >= MAX_WALLJUMPS )     return qfalse;
+
+	if ( bs->walljump.needGround )                               return qfalse;
 
 	if ( !trap_BotGetTopGoal( bs->gs, &goal ) )                  return qfalse;
 	heightNeeded = goal.origin[2] - bs->origin[2];
 	if ( heightNeeded < 50.0f )                                  return qfalse;
+
+	/* Out of reach: a jump with the wall kick added at takeoff rises at most
+	   (JUMP_VELOCITY + WALLJUMP_BOOST)^2 / 2g (100u at g 800), and only once per
+	   airtime (MAX_WALLJUMPS).  arena1: a goal 143u up (the frozen in-flight
+	   origin of a dropped weapon) kept a bot kicking off a wall for 6.5 s. */
+	{
+		const float g = bs->cur_ps.gravity > 0 ? (float)bs->cur_ps.gravity : 800.0f;
+		const float v = (float)( JUMP_VELOCITY + WALLJUMP_BOOST );
+		if ( heightNeeded > v * v / ( 2.0f * g ) )               return qfalse;
+	}
+	VectorSubtract( goal.origin, bs->origin, toGoal );
+	toGoal[2] = 0.0f;
+	if ( VectorNormalize( toGoal ) < 1.0f )                      return qfalse;
 
 	/* Don't wall-jump when falling too fast */
 	if ( bs->cur_ps.velocity[2] < WALLJUMP_BOOST * -2 )         return qfalse;
@@ -407,11 +422,20 @@ qboolean BotFindWallJumpOpportunity( bot_state_t *bs )
 
 		if ( trace.fraction < 1.0f &&
 		     ( trace.contents & (CONTENTS_SOLID | CONTENTS_PLAYERCLIP) ) &&
-		     !( trace.surfaceFlags & SURF_SKY ) )
+		     !( trace.surfaceFlags & SURF_SKY ) &&
+		     /* The wall must stand between the bot and its goal: the kick goes
+		        toward the facing (into the wall) and up, so a wall on the far
+		        side pushes the bot away from the goal.  The arena1 bot above
+		        faced yaw 180 with its goal at -45. */
+		     -( trace.plane.normal[0] * toGoal[0] + trace.plane.normal[1] * toGoal[1] ) >= 0.5f )
 		{
 			VectorCopy( trace.plane.normal, bs->walljump.wallNormal );
 			VectorCopy( trace.endpos,       bs->walljump.wallPoint  );
 			bs->walljump.wantWallJump = qtrue;
+			bs->walljump.latchTime    = level.time;
+			if ( trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 )
+				Com_Log( SEV_INFO, LOG_CH(ch_botai), "cl=%d WALLJUMP latch n=(%.2f %.2f) dz=%.0f\n",
+					bs->client, trace.plane.normal[0], trace.plane.normal[1], heightNeeded );
 			return qtrue;
 		}
 	}
@@ -441,6 +465,23 @@ void BotWallJumpThink( bot_state_t *bs )
 	if ( bs->cur_ps.groundEntityNum != ENTITYNUM_NONE ) {
 		/* Landed before wall jump executed */
 		bs->walljump.wantWallJump = qfalse;
+		return;
+	}
+
+	/* The attempt ends once the kick has happened or after 300 ms (half a flat
+	   hop), without waiting for a think to see the ground: this routine holds
+	   jump, and the held jump relaunches the bot on its landing tick, so with
+	   thinks 100 ms apart no think ever saw it grounded.  arena1 at sv_fps 10:
+	   one bot stayed airborne 6.5 s, kicking off the same wall every hop.  No
+	   new attempt until a grounded think (needGround). */
+	if ( bs->cur_ps.stats[STAT_WALLJUMPS] >= MAX_WALLJUMPS ||
+	     level.time - bs->walljump.latchTime > 300 ) {
+		if ( trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 )
+			Com_Log( SEV_INFO, LOG_CH(ch_botai), "cl=%d WALLJUMP clear %s after %d ms\n",
+				bs->client, bs->cur_ps.stats[STAT_WALLJUMPS] >= MAX_WALLJUMPS ? "kicked" : "timeout",
+				level.time - bs->walljump.latchTime );
+		bs->walljump.wantWallJump = qfalse;
+		bs->walljump.needGround   = qtrue;
 		return;
 	}
 
@@ -490,8 +531,10 @@ void BotMovementThink( bot_state_t *bs, bot_moveresult_t *moveresult )
 	qboolean airborne = ( bs->cur_ps.groundEntityNum == ENTITYNUM_NONE );
 
 	/* Reset wall-jump attempt on landing */
-	if ( !airborne )
+	if ( !airborne ) {
 		bs->walljump.wantWallJump = qfalse;
+		bs->walljump.needGround   = qfalse;
+	}
 
 	/* ── Edge-detection: grounded + moving toward void ──────────────── *
 	 * Phase A: if currently in a back-off window (set by a previous      *

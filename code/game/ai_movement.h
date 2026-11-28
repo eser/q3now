@@ -47,6 +47,8 @@ typedef struct {
 	qboolean wantWallJump;   /* currently attempting a wall jump      */
 	vec3_t   wallNormal;     /* outward normal of the detected wall   */
 	vec3_t   wallPoint;      /* trace endpos on the wall surface      */
+	int      latchTime;      /* level.time the attempt was latched    */
+	qboolean needGround;     /* an attempt ended: none until a grounded think */
 } bot_walljump_t;
 
 /* Forward declarations for function signatures — full definitions are  */
