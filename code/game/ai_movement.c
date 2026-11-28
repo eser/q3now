@@ -197,9 +197,22 @@ instead of air-control mode).
 
 Skipped when the bot has a recently visible enemy (combat aim takes
 priority) and when predicted landing is close enough (< 24 units error).
+
+Skipped as well when the nav gave a move direction this think: that move
+already steers along the route, and this routine aims at the goal in a
+straight line, through walls if need be.  Its forward press overrode the
+route's forwardmove (rightmove stayed the nav's), so the bot pushed toward
+the goal while the route turned elsewhere.  Measured on arena1 before this
+change: 36-148 airborne frames per 3-bot run had forwardmove forced to 127
+against the nav's command, and those frames were the whole of the
+intent->cmd gap (96.6-98.0 %, 99.0-99.9 % without them).  The prediction
+reads bs->velocity, which is never written, so the "landing point" is the
+bot's own position and the routine fired on every airborne think with a
+goal within 600u.  It still runs when the nav has no direction (a gap
+between path segments, a transition), its original case.
 ===================
 */
-void BotAirSteer( bot_state_t *bs )
+void BotAirSteer( bot_state_t *bs, const bot_moveresult_t *moveresult )
 {
 	bot_goal_t       goal;
 	bot_trajectory_t coast;
@@ -208,6 +221,11 @@ void BotAirSteer( bot_state_t *bs )
 
 	if ( bs->cur_ps.groundEntityNum != ENTITYNUM_NONE )
 		return; /* on ground */
+
+	if ( moveresult &&
+	     moveresult->movedir[0] * moveresult->movedir[0] +
+	     moveresult->movedir[1] * moveresult->movedir[1] > 0.01f )
+		return; /* the nav is steering along the route */
 
 	/* Skip during active combat — don't fight aim system */
 	if ( bs->enemy >= 0 && bs->enemyvisible_time > bs->ltime - 1.0f )
@@ -619,13 +637,13 @@ void BotMovementThink( bot_state_t *bs, bot_moveresult_t *moveresult )
 	if ( bs->doublejump.wantDoubleJump || BotShouldDoubleJump( bs ) ) {
 		BotDoubleJumpThink( bs );
 		if ( airborne )
-			BotAirSteer( bs );
+			BotAirSteer( bs, moveresult );
 		return;
 	}
 
 	/* Priority 5: generic air steering (no special movement active) */
 	if ( airborne )
-		BotAirSteer( bs );
+		BotAirSteer( bs, moveresult );
 
 	if ( bs->wiredIntelActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
 		static int s_moveExitTick[MAX_CLIENTS];

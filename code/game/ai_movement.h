@@ -64,7 +64,7 @@ bot_trajectory_t BotPredictTrajectory(
 	float        gravity );    /* typically 800                          */
 
 /* ── Component 2: air steering ──────────────────────────────────────── */
-void BotAirSteer( struct bot_state_s *bs );
+void BotAirSteer( struct bot_state_s *bs, const struct bot_moveresult_s *moveresult );
 
 /* ── Component 4: double jump ───────────────────────────────────────── */
 qboolean BotShouldDoubleJump( struct bot_state_s *bs );
