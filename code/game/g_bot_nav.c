@@ -2016,6 +2016,49 @@ void BotNav_MoveToGoal( bot_state_t *bs, bot_goal_t *goal,
             start[2] += step;
             VectorMA( start, 4.0f, d, end );
             trap_Trace( &tr, start, self->r.mins, self->r.maxs, end, bs->client, MASK_PLAYERSOLID );
+            /* OBLIQUE variant: the face is not head-on (the move has a tangential part
+             * Pmove would slide on), yet the bot does not move — measured on e1m1 at
+             * (561,2416,-104): a 16u step up with a wall 2-4u inside the box's right edge
+             * on the upper level, so the step-up clips the wall and fails every tick
+             * (face n=(-1,0,0), move (0.35,0.94)).  Step AWAY from the face along its
+             * normal to the nearest offset (4..16u) where the box clears, the line ahead
+             * is open and there is floor, then carry on. */
+            if ( !tr.startsolid && tr.fraction < 1.0f && tr.entityNum == ENTITYNUM_WORLD &&
+                 fabsf( tr.plane.normal[2] ) < 0.3f ) {
+                const float facing = DotProduct( tr.plane.normal, d );
+                if ( facing >= -0.85f && facing < -0.15f ) {
+                    vec3_t nflat = { tr.plane.normal[0], tr.plane.normal[1], 0.0f };
+                    VectorNormalize( nflat );
+                    for ( int k = 4; k <= 16; k += 4 ) {
+                        vec3_t p, pf, pd;
+                        trace_t ls, fw, dn;
+                        VectorMA( start, (float)k, nflat, p );
+                        trap_Trace( &ls, start, self->r.mins, self->r.maxs, p, bs->client, MASK_PLAYERSOLID );
+                        if ( ls.startsolid || ls.fraction < 1.0f ) continue;
+                        VectorMA( p, 16.0f, d, pf );
+                        trap_Trace( &fw, p, self->r.mins, self->r.maxs, pf, bs->client, MASK_PLAYERSOLID );
+                        if ( fw.startsolid || fw.fraction < 1.0f ) continue;
+                        VectorCopy( p, pd );
+                        pd[2] -= 2.0f * step;
+                        trap_Trace( &dn, p, self->r.mins, self->r.maxs, pd, bs->client, MASK_PLAYERSOLID );
+                        if ( dn.startsolid || dn.fraction >= 1.0f ) continue;
+                        VectorCopy( nflat, applyDir );
+                        VectorMA( applyDir, 0.3f, d, applyDir );
+                        VectorNormalize( applyDir );
+                        if ( nav_botdebug.integer ) {
+                            static int s_obliqueLog[MAX_CLIENTS];
+                            if ( level.time - s_obliqueLog[bs->client] >= 1000 ) {
+                                s_obliqueLog[bs->client] = level.time;
+                                BotAI_Print( PRT_MESSAGE,
+                                    "[BOTNAV] cl=%d UNWEDGE-OBLIQUE at (%.0f %.0f %.0f) face n=(%.2f %.2f) facing=%.2f offset=%d\n",
+                                    bs->client, bs->origin[0], bs->origin[1], bs->origin[2],
+                                    tr.plane.normal[0], tr.plane.normal[1], facing, k );
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
             if ( !tr.startsolid && tr.fraction < 1.0f && tr.entityNum == ENTITYNUM_WORLD &&
                  fabsf( tr.plane.normal[2] ) < 0.3f && DotProduct( tr.plane.normal, d ) < -0.85f ) {
                 vec3_t t = { -d[1], d[0], 0.0f };
