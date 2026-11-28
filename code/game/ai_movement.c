@@ -297,8 +297,24 @@ qboolean BotShouldDoubleJump( bot_state_t *bs )
 	diff[2] = 0.0f;
 	horizDist = VectorLength( diff );
 
-	/* Standard jump max height ~112 units; double jump ~213 units */
-	if ( heightNeeded < 100.0f || heightNeeded > 200.0f ) return qfalse;
+	/* The window comes from the pmove rules, not from Q3 figures.  A jump rises
+	   JUMP_VELOCITY^2 / 2g (45.6u at g 800); the double-jump bonus applies only to
+	   a jump made within pm_jumpTimer ms of the previous one, giving
+	   (JUMP_VELOCITY + pm_jumpDoubleJumpZ)^2 / 2g (85.6u).  The old 100-200u window
+	   (112/213u model) only picked goals no jump can reach (arena1: a goal 143u up
+	   -- a dropped weapon's in-flight origin -- started a 6.5 s wall-kick loop with
+	   a plain hop).  From flat ground the first hop
+	   lasts 2 JUMP_VELOCITY / g (675 ms), longer than pm_jumpTimer (400), so the
+	   second jump can never get the bonus there: no attempt then. */
+	{
+		const float g      = bs->cur_ps.gravity > 0 ? (float)bs->cur_ps.gravity : 800.0f;
+		const float vSingle = (float)JUMP_VELOCITY;
+		const float vDouble = (float)JUMP_VELOCITY + pm_jumpDoubleJumpZ;
+		const float hopMs   = 2.0f * vSingle / g * 1000.0f;
+		if ( hopMs > pm_jumpTimer ) return qfalse;
+		if ( heightNeeded <= vSingle * vSingle / ( 2.0f * g ) ||
+		     heightNeeded >  vDouble * vDouble / ( 2.0f * g ) ) return qfalse;
+	}
 	if ( horizDist > 400.0f ) return qfalse;
 
 	return qtrue;
